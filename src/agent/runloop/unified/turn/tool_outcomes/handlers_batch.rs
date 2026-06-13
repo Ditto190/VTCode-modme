@@ -243,7 +243,9 @@ async fn execute_parallel_group<'a, 'b>(
             ) {
                 let turn_result = match outcome {
                     TurnHandlerOutcome::Break(turn_result) => turn_result,
-                    TurnHandlerOutcome::Continue => unreachable!("matched break outcome"),
+                    TurnHandlerOutcome::Continue => {
+                        anyhow::bail!("Unexpected Continue outcome in break-matched handler")
+                    }
                 };
                 return Ok(Some(
                     interrupt_parallel_group(

@@ -507,10 +507,7 @@ impl IntoResponse for A2aErrorResponse {
 // ============================================================================
 
 /// Run the A2A server
-pub async fn run(
-    state: A2aServerState,
-    addr: SocketAddr,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run(state: A2aServerState, addr: SocketAddr) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("A2A server listening on {}", addr);
     axum::serve(listener, create_router(state))

@@ -130,24 +130,27 @@ pub async fn run_terminal_setup_wizard(
 
     // Generate terminal-specific configuration
     let new_config = match terminal_type {
-        TerminalType::Ghostty => unreachable!("native-support terminals return before config"),
-        TerminalType::Kitty => unreachable!("native-support terminals return before config"),
+        TerminalType::Ghostty
+        | TerminalType::Kitty
+        | TerminalType::WezTerm
+        | TerminalType::Warp
+        | TerminalType::ITerm2 => {
+            anyhow::bail!("native-support terminals should return before config generation")
+        }
         TerminalType::Alacritty => {
             crate::terminal_setup::terminals::alacritty::generate_config(&enabled_features)?
         }
-        TerminalType::WezTerm => unreachable!("native-support terminals return before config"),
-        TerminalType::TerminalApp => unreachable!("guidance-only terminals return before config"),
-        TerminalType::Xterm => unreachable!("guidance-only terminals return before config"),
         TerminalType::Zed => {
             crate::terminal_setup::terminals::zed::generate_config(&enabled_features)?
         }
-        TerminalType::Warp => unreachable!("native-support terminals return before config"),
-        TerminalType::WindowsTerminal => {
-            unreachable!("guidance-only terminals return before config")
+        TerminalType::TerminalApp
+        | TerminalType::Xterm
+        | TerminalType::WindowsTerminal
+        | TerminalType::Hyper
+        | TerminalType::Tabby
+        | TerminalType::Unknown => {
+            anyhow::bail!("guidance-only terminals should return before config generation")
         }
-        TerminalType::Hyper => unreachable!("guidance-only terminals return before config"),
-        TerminalType::Tabby => unreachable!("guidance-only terminals return before config"),
-        TerminalType::ITerm2 => unreachable!("native-support terminals return before config"),
         TerminalType::VSCode => {
             // VS Code requires manual setup - display instructions
             let instructions =
@@ -158,7 +161,6 @@ pub async fn run_terminal_setup_wizard(
             }
             return Ok(());
         }
-        TerminalType::Unknown => unreachable!("guidance-only terminals return before config"),
     };
 
     // Read existing config if it exists

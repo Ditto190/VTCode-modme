@@ -35,7 +35,7 @@ impl OutputStyleManager {
         }
     }
 
-    pub fn load_from_directory(_directory: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load_from_directory(_directory: &Path) -> anyhow::Result<Self> {
         Ok(Self::new())
     }
 

@@ -17,15 +17,17 @@ use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::llm::provider as uni;
 
 static RUSHING_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(wrapping up|running out of time|quick summary|to conclude|finishing up|just to be safe|that.?s it|time to stop)").unwrap()
+    Regex::new(r"(?i)(wrapping up|running out of time|quick summary|to conclude|finishing up|just to be safe|that.?s it|time to stop)").expect("valid regex pattern")
 });
 
 static UNCERTAIN_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(not sure|i.?m not certain|might be wrong|could be|sorry|apologies)").unwrap()
+    Regex::new(r"(?i)(not sure|i.?m not certain|might be wrong|could be|sorry|apologies)")
+        .expect("valid regex pattern")
 });
 
 static COMPLEXITY_AVOIDANCE_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(too complex|too many|let.?s skip|for now|we can worry about|later)").unwrap()
+    Regex::new(r"(?i)(too complex|too many|let.?s skip|for now|we can worry about|later)")
+        .expect("valid regex pattern")
 });
 
 /// Returns whether the active provider/model pair supports reasoning traces.

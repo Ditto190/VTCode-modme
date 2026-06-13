@@ -73,7 +73,7 @@ where
     pub fn build(self) -> Box<dyn LLMProvider> {
         match self.try_build() {
             Ok(provider) => provider,
-            Err(error) => unreachable!(
+            Err(error) => panic!(
                 "provider builder invariant violated for `{}`: {}",
                 T::PROVIDER_KEY,
                 error
@@ -116,7 +116,7 @@ pub trait ProviderConfig {
             Some(timeouts),
         ) {
             Ok(provider) => provider,
-            Err(error) => unreachable!(
+            Err(error) => panic!(
                 "provider config invariant violated for `{}`: {}",
                 Self::PROVIDER_KEY,
                 error

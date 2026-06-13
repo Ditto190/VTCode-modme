@@ -510,7 +510,10 @@ fn hash_json_value<H: Hasher>(hasher: &mut H, value: &Value) {
             keys.sort();
             for k in keys {
                 hasher.write(k.as_bytes());
-                hash_json_value(hasher, map.get(k).unwrap());
+                hash_json_value(
+                    hasher,
+                    map.get(k).expect("key from map.keys() must exist in map"),
+                );
             }
         }
     }

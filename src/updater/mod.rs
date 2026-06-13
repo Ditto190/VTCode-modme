@@ -75,18 +75,16 @@ impl Updater {
                     &self.config.channel,
                 )
                 .await?;
-                if latest
-                    .as_ref()
-                    .is_some_and(|info| info.version > *pinned_version)
-                {
-                    info!(
-                        "Auto-unpinning: newer version {} available (pinned: {})",
-                        latest.as_ref().unwrap().version,
-                        pinned_version
-                    );
-                    self.config.clear_pin();
-                    let _ = self.config.save();
-                    return Ok(latest);
+                if let Some(info) = latest.as_ref() {
+                    if info.version > *pinned_version {
+                        info!(
+                            "Auto-unpinning: newer version {} available (pinned: {})",
+                            info.version, pinned_version
+                        );
+                        self.config.clear_pin();
+                        let _ = self.config.save();
+                        return Ok(latest);
+                    }
                 }
                 debug!("Pinned version is still latest, keeping pin");
                 return Ok(None);

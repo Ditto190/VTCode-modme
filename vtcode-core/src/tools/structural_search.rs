@@ -1390,14 +1390,18 @@ pub async fn execute_structural_search(workspace_root: &Path, args: Value) -> Re
         StructuralWorkflow::Test => {
             execute_structural_test(workspace_root, &request, &ast_grep).await
         }
-        StructuralWorkflow::Inspect => unreachable!("handled above"),
+        StructuralWorkflow::Inspect => {
+            anyhow::bail!("Inspect workflow should be handled before this point")
+        }
         StructuralWorkflow::Rewrite => {
             execute_structural_rewrite(workspace_root, &request, &ast_grep).await
         }
         StructuralWorkflow::Count => {
             execute_structural_count(workspace_root, &request, &ast_grep).await
         }
-        StructuralWorkflow::Rules => unreachable!("handled above"),
+        StructuralWorkflow::Rules => {
+            anyhow::bail!("Rules workflow should be handled before this point")
+        }
         StructuralWorkflow::New => {
             execute_structural_new(workspace_root, &request, &ast_grep).await
         }
@@ -1571,7 +1575,12 @@ async fn execute_structural_scan(
         .arg("--color=never");
 
     if use_ci_format {
-        command.arg(format!("--format={}", request.effective_format().unwrap()));
+        command.arg(format!(
+            "--format={}",
+            request
+                .effective_format()
+                .expect("use_ci_format is true only when effective_format is Some")
+        ));
     } else {
         command.arg("--json=stream").arg("--include-metadata");
     }
@@ -4034,7 +4043,7 @@ fn looks_like_java_declaration_fragment(pattern: &str) -> bool {
         let parts: Vec<&str> = inner.split_whitespace().collect();
         if parts.len() >= 2 {
             // Last part should look like a metavariable or identifier
-            let last = parts.last().unwrap();
+            let last = parts.last().expect("parts.len() >= 2 guarantees non-empty");
             if last.starts_with('$') || last.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             {
                 return true;
@@ -4933,7 +4942,12 @@ fn extract_failure_snippet<'a>(lines: &mut std::iter::Peekable<std::str::Lines<'
         if trimmed.is_empty() || trimmed.starts_with('[') {
             break;
         }
-        snippet_lines.push(lines.next().unwrap().to_string());
+        snippet_lines.push(
+            lines
+                .next()
+                .expect("peek() guaranteed next() is Some")
+                .to_string(),
+        );
     }
     snippet_lines.join("\n")
 }

@@ -28,7 +28,7 @@ use tokio::task::spawn_blocking;
 use tracing::warn;
 
 /// Maximum number of search results to return - AGENTS.md requires max 5 results
-const MAX_SEARCH_RESULTS: NonZeroUsize = NonZeroUsize::new(5).unwrap();
+const MAX_SEARCH_RESULTS: NonZeroUsize = NonZeroUsize::new(5).expect("5 is non-zero");
 
 /// Optimal number of threads for searching, calculated based on CPU count
 static OPTIMAL_SEARCH_THREADS: OnceLock<NonZeroUsize> = OnceLock::new();
@@ -40,7 +40,7 @@ fn optimal_search_threads() -> NonZeroUsize {
         let cpu_count = num_cpus::get();
         // Use 75% of cores for better parallelism, min 2, max 8
         let threads = (cpu_count * 3 / 4).clamp(2, 8);
-        NonZeroUsize::new(threads).unwrap_or(NonZeroUsize::new(2).unwrap())
+        NonZeroUsize::new(threads).unwrap_or(NonZeroUsize::new(2).expect("2 is non-zero"))
     })
 }
 

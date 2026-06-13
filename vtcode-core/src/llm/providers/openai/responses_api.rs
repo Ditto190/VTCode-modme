@@ -260,7 +260,7 @@ fn append_tool_result_to_instructions(
         Some(h) => s.push_str(h),
         None => {
             s.push_str("Previous tool result (");
-            s.push_str(tool_call_id.unwrap());
+            s.push_str(tool_call_id.expect("heading_str is None only when tool_call_id is Some"));
             s.push_str("):");
         }
     }

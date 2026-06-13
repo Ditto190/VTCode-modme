@@ -267,7 +267,9 @@ where
         OverlayWaitOutcome::Cancelled => Ok(OverlayWaitOutcome::Cancelled),
         OverlayWaitOutcome::Interrupted => Ok(OverlayWaitOutcome::Interrupted),
         OverlayWaitOutcome::Exit => Ok(OverlayWaitOutcome::Exit),
-        OverlayWaitOutcome::Submitted(_) => unreachable!("handled list selections above"),
+        OverlayWaitOutcome::Submitted(_) => {
+            anyhow::bail!("Unexpected Submitted outcome after list selection handling")
+        }
     }
 }
 

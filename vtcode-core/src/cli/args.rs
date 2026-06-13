@@ -1684,7 +1684,7 @@ impl Cli {
     ///   verbose = true
     ///   log_level = "info"
     ///   workspace = "/path/to/workspace"
-    pub async fn load_config(&self) -> Result<ConfigFile, Box<dyn std::error::Error>> {
+    pub async fn load_config(&self) -> anyhow::Result<ConfigFile> {
         use std::path::Path;
         use tokio::fs;
 
