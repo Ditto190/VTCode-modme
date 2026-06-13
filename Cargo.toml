@@ -116,7 +116,6 @@ members = [
     "vtcode-vim",
     "vtcode-commons",
     "vtcode-config",
-    "vtcode-lmstudio",
     "vtcode-markdown-store",
     "vtcode-indexer",
     "vtcode-bash-runner",

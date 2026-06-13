@@ -7351,20 +7351,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vtcode-lmstudio"
-version = "0.128.4"
-dependencies = [
- "reqwest 0.12.28",
- "serde_json",
- "tokio",
- "tracing",
- "vtcode-commons",
- "vtcode-config",
- "which",
- "wiremock",
-]
-
-[[package]]
 name = "vtcode-macros"
 version = "0.128.4"
 dependencies = [

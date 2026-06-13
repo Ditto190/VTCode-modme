@@ -48,7 +48,6 @@ Cargo workspace, ~26 crates. Rust stable, MSRV 1.88, edition 2024. `default-memb
 | `vtcode-utility-tool-specs` | JSON schemas for utility, file, and collaboration/HITL tools |
 | `vtcode-file-search` | Parallel fuzzy file search |
 | `vtcode-vim` | Vim-style prompt editing engine |
-| `vtcode-lmstudio` | LM Studio integration (publish=false) |
 | `xtask` | Release packaging automation |
 
 New reusable logic: put it in an existing small crate or a new one. Keep it out of `vtcode-core` by default unless tightly coupled to the core runtime.

@@ -248,30 +248,33 @@ impl ContextManager {
             return Vec::new();
         }
 
-        let mut normalized_history = history.to_vec();
-        vtcode_core::core::agent::state::normalize_history(&mut normalized_history);
+        let mut normalized = history.to_vec();
+        vtcode_core::core::agent::state::normalize_history(&mut normalized);
 
-        let mut normalized = Vec::with_capacity(normalized_history.len());
-        for message in &normalized_history {
-            if is_empty_context_message(message) {
+        // Filter and merge in-place to avoid a second full clone.
+        let mut write = 0;
+        for read in 0..normalized.len() {
+            if is_empty_context_message(&normalized[read]) {
                 continue;
             }
 
-            if let Some(last) = normalized.last_mut()
-                && can_merge_consecutive_assistant_text(last, message)
+            if write > 0
+                && can_merge_consecutive_assistant_text(&normalized[write - 1], &normalized[read])
             {
-                append_assistant_text(last, message);
+                // Clone only the current message for merging (much cheaper than cloning all).
+                let current = normalized[read].clone();
+                append_assistant_text(&mut normalized[write - 1], &current);
                 continue;
             }
 
-            normalized.push(message.clone());
+            if write != read {
+                normalized.swap(write, read);
+            }
+            write += 1;
         }
 
-        if normalized.is_empty() {
-            normalized_history
-        } else {
-            normalized
-        }
+        normalized.truncate(write);
+        normalized
     }
 
     pub(crate) fn request_editor_context_message(&self) -> Option<uni::Message> {

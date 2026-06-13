@@ -363,7 +363,9 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
             }
             Ok(SlashCommandOutcome::StartTerminalSetup)
         }
-        _ => unreachable!("unknown built-in command skill: {}", spec.slash_name),
+        _ => {
+            anyhow::bail!("unknown built-in command skill: {}", spec.slash_name)
+        }
     }
 }
 

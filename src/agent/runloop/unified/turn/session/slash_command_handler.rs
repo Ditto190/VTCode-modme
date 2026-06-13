@@ -289,7 +289,10 @@ fn leading_path_token(input: &str) -> Option<String> {
     } else {
         let mut idx = start;
         while idx < input.len() {
-            let ch = input[idx..].chars().next().unwrap();
+            let ch = input[idx..]
+                .chars()
+                .next()
+                .expect("idx is at valid UTF-8 boundary");
             if ch.is_ascii_whitespace() {
                 end = idx;
                 break;

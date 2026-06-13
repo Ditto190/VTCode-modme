@@ -122,7 +122,7 @@ async fn route_ui_and_settings_outcome(
         SlashCommandOutcome::ShowMemoryConfig => handlers::handle_show_memory_config(ctx).await,
         SlashCommandOutcome::ShowPermissions => handlers::handle_show_permissions(ctx).await,
         SlashCommandOutcome::ShowMemory => handlers::handle_show_memory(ctx).await,
-        _ => unreachable!("unexpected ui/settings outcome"),
+        _ => anyhow::bail!("unexpected ui/settings outcome"),
     }
 }
 
@@ -167,7 +167,7 @@ async fn route_runtime_outcome(
         SlashCommandOutcome::ManageLocalServer { action } => {
             handlers::handle_manage_local_server(ctx, action).await
         }
-        _ => unreachable!("unexpected runtime outcome"),
+        _ => anyhow::bail!("unexpected runtime outcome"),
     }
 }
 
@@ -202,7 +202,7 @@ async fn route_navigation_outcome(
         }
         SlashCommandOutcome::ShareLog { format } => handlers::handle_share_log(ctx, format).await,
         SlashCommandOutcome::Exit => handlers::handle_exit(ctx).await,
-        _ => unreachable!("unexpected navigation outcome"),
+        _ => anyhow::bail!("unexpected navigation outcome"),
     }
 }
 
@@ -235,6 +235,6 @@ async fn route_mode_and_auth_outcome(
         SlashCommandOutcome::ShowAuthStatus { provider } => {
             handlers::handle_show_auth_status(ctx, provider).await
         }
-        _ => unreachable!("unexpected mode/auth outcome"),
+        _ => anyhow::bail!("unexpected mode/auth outcome"),
     }
 }

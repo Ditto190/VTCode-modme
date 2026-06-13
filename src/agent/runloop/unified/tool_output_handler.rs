@@ -40,17 +40,32 @@ fn collect_instruction_activity_paths(
     output: &serde_json::Value,
     modified_files: &[String],
 ) -> Vec<PathBuf> {
+    let canonical_workspace =
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     let mut paths = BTreeSet::new();
     for modified in modified_files {
-        push_activity_path(workspace_root, modified, &mut paths);
+        push_activity_path(workspace_root, &canonical_workspace, modified, &mut paths);
     }
-    collect_paths_from_value(workspace_root, Some("args"), args_val, &mut paths);
-    collect_paths_from_value(workspace_root, Some("output"), output, &mut paths);
+    collect_paths_from_value(
+        workspace_root,
+        &canonical_workspace,
+        Some("args"),
+        args_val,
+        &mut paths,
+    );
+    collect_paths_from_value(
+        workspace_root,
+        &canonical_workspace,
+        Some("output"),
+        output,
+        &mut paths,
+    );
     paths.into_iter().collect()
 }
 
 fn collect_paths_from_value(
     workspace_root: &Path,
+    canonical_workspace: &Path,
     key: Option<&str>,
     value: &serde_json::Value,
     paths: &mut BTreeSet<PathBuf>,
@@ -58,18 +73,19 @@ fn collect_paths_from_value(
     match value {
         serde_json::Value::String(text) => {
             if key.is_some_and(path_like_key) {
-                push_activity_path(workspace_root, text, paths);
+                push_activity_path(workspace_root, canonical_workspace, text, paths);
             }
         }
         serde_json::Value::Array(values) => {
             for value in values {
-                collect_paths_from_value(workspace_root, key, value, paths);
+                collect_paths_from_value(workspace_root, canonical_workspace, key, value, paths);
             }
         }
         serde_json::Value::Object(map) => {
             for (child_key, child_value) in map {
                 collect_paths_from_value(
                     workspace_root,
+                    canonical_workspace,
                     Some(child_key.as_str()),
                     child_value,
                     paths,
@@ -98,16 +114,19 @@ fn path_like_key(key: &str) -> bool {
     )
 }
 
-fn push_activity_path(workspace_root: &Path, raw: &str, paths: &mut BTreeSet<PathBuf>) {
+fn push_activity_path(
+    workspace_root: &Path,
+    canonical_workspace: &Path,
+    raw: &str,
+    paths: &mut BTreeSet<PathBuf>,
+) {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.contains("://") || trimmed.starts_with("untitled:") {
         return;
     }
 
     let normalized = normalize_workspace_path(workspace_root, Path::new(trimmed));
-    let canonical_workspace =
-        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-    if normalized.starts_with(&canonical_workspace) || normalized.starts_with(workspace_root) {
+    if normalized.starts_with(canonical_workspace) || normalized.starts_with(workspace_root) {
         paths.insert(normalized);
     }
 }

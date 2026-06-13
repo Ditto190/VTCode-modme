@@ -49,7 +49,7 @@ pub(super) async fn run_interaction_loop_impl(
     let mut last_input_activity_at = Instant::now();
     let mut last_durable_scheduler_poll = Instant::now()
         .checked_sub(DURABLE_SCHEDULER_POLL_INTERVAL)
-        .unwrap();
+        .unwrap_or_else(Instant::now);
     let mut durable_scheduler_daemon = None;
     let mut last_durable_scheduler_error = None::<String>;
     let mut durable_scheduler_run = None::<JoinHandle<Result<usize>>>;
@@ -58,7 +58,7 @@ pub(super) async fn run_interaction_loop_impl(
     live_reload_watcher.set_debounce_duration(200);
     let mut last_status_refresh = Instant::now()
         .checked_sub(Duration::from_millis(500))
-        .unwrap();
+        .unwrap_or_else(Instant::now);
     const STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(200);
 
     loop {
