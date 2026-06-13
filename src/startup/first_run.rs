@@ -410,7 +410,7 @@ mod tests {
         );
 
         assert!(config.permissions.allow.is_empty());
-        assert_eq!(config.default_primary_agent, "duck");
+        assert_eq!(config.default_primary_agent, "build");
     }
 
     #[test]
@@ -428,7 +428,7 @@ mod tests {
 
         assert!(config.permissions.allow.is_empty());
         assert!(config.permissions.deny.is_empty());
-        assert_eq!(config.default_primary_agent, "duck");
+        assert_eq!(config.default_primary_agent, "build");
     }
 
     #[test]
@@ -485,7 +485,7 @@ mod tests {
 
         assert!(rendered.contains("`--full-auto` is separate"));
         assert!(rendered.contains("Persistent repository memory"));
-        assert!(rendered.contains("Primary agent: duck"));
+        assert!(rendered.contains("Primary agent: build"));
         assert!(rendered.contains("Subagents"));
         assert!(rendered.contains("Skills"));
         assert!(rendered.contains("lightweight model route"));

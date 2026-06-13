@@ -754,11 +754,11 @@ mod tests {
     }
 
     #[test]
-    fn startup_primary_agent_defaults_to_duck_without_config() {
+    fn startup_primary_agent_defaults_to_build_without_config() {
         let active = active_primary_agent_from_specs(&[test_primary_agent_spec("builder")], None)
             .expect("default primary agent");
 
-        assert_eq!(active.active().identity.name, "duck");
+        assert_eq!(active.active().identity.name, "build");
         assert_eq!(active.active().identity.source, SubagentSource::Builtin);
     }
 
@@ -779,7 +779,7 @@ mod tests {
             active_primary_agent_from_specs(&[test_primary_agent_spec("builder")], Some(&cfg))
                 .expect("fallback primary agent");
 
-        assert_eq!(fallback.active().identity.name, "duck");
+        assert_eq!(fallback.active().identity.name, "build");
         assert_eq!(fallback.active().identity.source, SubagentSource::Builtin);
     }
 
@@ -813,17 +813,17 @@ mod tests {
     }
 
     #[test]
-    fn full_auto_honours_explicit_duck_primary_agent_config() {
+    fn full_auto_honours_explicit_build_primary_agent_config() {
         let cfg = VTCodeConfig {
-            default_primary_agent: "duck".to_string(),
+            default_primary_agent: "build".to_string(),
             ..VTCodeConfig::default()
         };
         let specs = [test_primary_agent_spec("auto")];
 
         let active = active_primary_agent_from_specs_for_mode(&specs, Some(&cfg), true, true)
-            .expect("explicit duck");
+            .expect("explicit build");
 
-        assert_eq!(active.active().identity.name, "duck");
+        assert_eq!(active.active().identity.name, "build");
         assert_eq!(active.active().identity.source, SubagentSource::Builtin);
     }
 

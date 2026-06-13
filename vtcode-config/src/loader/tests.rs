@@ -14,8 +14,8 @@ use tempfile::NamedTempFile;
 use vtcode_commons::reference::StaticWorkspacePaths;
 
 #[test]
-fn default_config_selects_duck_primary_agent() {
-    assert_eq!(VTCodeConfig::default().default_primary_agent, "duck");
+fn default_config_selects_build_primary_agent() {
+    assert_eq!(VTCodeConfig::default().default_primary_agent, "build");
 }
 
 #[test]

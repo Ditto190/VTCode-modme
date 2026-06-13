@@ -1,7 +1,11 @@
 use hashbrown::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -607,6 +611,8 @@ if output.len() > max_tokens * 4 {
         );
         let screen_state_clone = Arc::clone(&screen_state);
         let scrollback_clone = Arc::clone(&scrollback);
+        let reader_completed = Arc::new(AtomicBool::new(false));
+        let reader_completed_clone = Arc::clone(&reader_completed);
         let session_name = session_id.clone();
         // Start unicode monitoring for this session
         UNICODE_MONITOR.start_session();
@@ -666,6 +672,12 @@ Err(error) => {
                 debug!("PTY session '{}' reader thread finished (total: {} bytes, unicode detections: {})",
                        session_name, total_bytes, unicode_detection_hits);
 
+                // Signal that the reader thread has finished pushing all data.
+                // This must be set BEFORE any further scrollback lock acquisitions
+                // so that is_output_drained() sees both pending==false and completed==true
+                // atomically under the scrollback lock.
+                reader_completed_clone.store(true, Ordering::Release);
+
                 // End unicode monitoring for this session
                 UNICODE_MONITOR.end_session();
 
@@ -709,6 +721,7 @@ info!("PTY session '{}' processed {} unicode characters across {} sessions with 
             screen_state,
             scrollback,
             reader_thread: Mutex::new(Some(reader_thread)),
+            reader_completed,
             metadata: metadata.clone(),
             last_input: Mutex::new(None),
             _zsh_exec_bridge: zsh_exec_bridge,

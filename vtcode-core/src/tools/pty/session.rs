@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -162,6 +163,7 @@ pub(super) struct PtySessionHandle {
     pub(super) screen_state: Arc<Mutex<PtyScreenState>>,
     pub(super) scrollback: Arc<Mutex<PtyScrollback>>,
     pub(super) reader_thread: Mutex<Option<JoinHandle<()>>>,
+    pub(super) reader_completed: Arc<AtomicBool>,
     pub(super) metadata: VTCodePtySession,
     pub(super) last_input: Mutex<Option<CommandEchoState>>,
     pub(super) _zsh_exec_bridge: Option<crate::zsh_exec_bridge::ZshExecBridgeSession>,
@@ -327,10 +329,11 @@ impl PtySessionHandle {
     }
 
     /// Check if all output from this PTY session has been consumed.
-    /// Returns `true` when there is no pending output in the scrollback buffer.
+    /// Returns `true` when there is no pending output in the scrollback buffer
+    /// AND the reader thread has finished pushing data.
     pub(super) fn is_output_drained(&self) -> bool {
         let scrollback = self.scrollback.lock();
-        !scrollback.has_pending()
+        !scrollback.has_pending() && self.reader_completed.load(Ordering::Acquire)
     }
 
     fn strip_command_echo(&self, text: String) -> String {

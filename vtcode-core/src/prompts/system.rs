@@ -988,8 +988,8 @@ mod tests {
             "Default prompt should include anti-overengineering guidance"
         );
         assert!(
-            prompt.contains("Implement by default"),
-            "Default prompt should include action bias"
+            prompt.contains("use tools to implement directly"),
+            "Default prompt should include action bias for tool-using agents"
         );
     }
 

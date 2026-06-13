@@ -113,7 +113,7 @@ impl ActivePrimaryAgentState {
             requested_default.trim()
         };
         let active = resolve_primary_agent(specs, requested)
-            .unwrap_or_else(|_| ActivePrimaryAgent::from_spec(&builtin_primary_duck_agent()));
+            .unwrap_or_else(|_| ActivePrimaryAgent::from_spec(&builtin_primary_build_agent()));
         Self { active }
     }
 
@@ -535,11 +535,11 @@ mod tests {
     }
 
     #[test]
-    fn default_state_uses_builtin_duck_agent() {
+    fn default_state_uses_builtin_build_agent() {
         let mut state = ActivePrimaryAgentState::default();
 
         assert_eq!(state.active().identity.name, DEFAULT_PRIMARY_AGENT_NAME);
-        assert_eq!(state.active().identity.name, "duck");
+        assert_eq!(state.active().identity.name, "build");
         assert_eq!(state.active().identity.source, SubagentSource::Builtin);
 
         state
@@ -550,15 +550,15 @@ mod tests {
         state.reset_to_default_from_specs(&[]);
 
         assert_eq!(state.active().identity.name, DEFAULT_PRIMARY_AGENT_NAME);
-        assert_eq!(state.active().identity.name, "duck");
+        assert_eq!(state.active().identity.name, "build");
         assert_eq!(state.active().identity.source, SubagentSource::Builtin);
     }
 
     #[test]
-    fn from_specs_falls_back_to_builtin_duck_agent() {
+    fn from_specs_falls_back_to_builtin_build_agent() {
         let active = ActivePrimaryAgentState::from_specs(&[]);
 
-        assert_eq!(active.active().identity.name, "duck");
+        assert_eq!(active.active().identity.name, "build");
         assert_eq!(active.active().identity.source, SubagentSource::Builtin);
     }
 
@@ -571,26 +571,26 @@ mod tests {
     }
 
     #[test]
-    fn from_specs_with_default_falls_back_to_duck_for_missing_configured_agent() {
+    fn from_specs_with_default_falls_back_to_build_for_missing_configured_agent() {
         let active =
             ActivePrimaryAgentState::from_specs_with_default(&[test_spec("builder")], "missing");
 
-        assert_eq!(active.active().identity.name, "duck");
+        assert_eq!(active.active().identity.name, "build");
         assert_eq!(active.active().identity.source, SubagentSource::Builtin);
     }
 
     #[test]
-    fn discovery_precedence_overrides_builtin_duck_agent() {
+    fn discovery_precedence_overrides_builtin_build_agent() {
         let temp = TempDir::new().expect("tempdir");
         let discovered = discover_subagents(&SubagentDiscoveryInput {
             workspace_root: temp.path().to_path_buf(),
             cli_agents: Some(json!({
-                "duck": {
-                    "description": "CLI duck",
-                    "prompt": "cli duck instructions",
+                "build": {
+                    "description": "CLI build",
+                    "prompt": "cli build instructions",
                     "model": "gpt-cli",
                     "mode": "primary",
-                    "permissions": { "default": "deny" }
+                    "permissions": { "default": "ask" }
                 }
             })),
             plugin_agent_files: Vec::new(),
@@ -600,18 +600,21 @@ mod tests {
 
         let active = ActivePrimaryAgentState::from_discovery(&discovered);
 
-        assert_eq!(active.active().identity.name, "duck");
+        assert_eq!(active.active().identity.name, "build");
         assert_eq!(active.active().identity.source, SubagentSource::Cli);
-        assert_eq!(active.active().instructions, "cli duck instructions");
+        assert_eq!(active.active().instructions, "cli build instructions");
         assert_eq!(active.active().model.as_deref(), Some("gpt-cli"));
     }
 
     #[test]
-    fn default_duck_agent_allows_baseline_read_tools() {
+    fn default_build_agent_allows_baseline_read_and_exec_tools() {
         let active = ActivePrimaryAgentState::default();
 
         assert!(primary_agent_allows_tool(active.active(), "unified_search"));
         assert!(primary_agent_allows_tool(active.active(), "unified_file"));
+        assert!(primary_agent_allows_tool(active.active(), "unified_exec"));
+        assert!(primary_agent_allows_tool(active.active(), "run_pty_cmd"));
+        assert_eq!(active.active().permissions.default, PermissionDefault::Ask);
     }
 
     #[test]
@@ -794,7 +797,7 @@ mod tests {
         assert_eq!(state.active().identity.name, "auto");
         assert_eq!(state.active().permissions.default, PermissionDefault::Auto);
         assert_eq!(state.active().model, initial_model);
-        assert_ne!(state.active().tools, initial_tools);
+        assert_eq!(state.active().tools, initial_tools);
 
         state
             .select_from_specs(&builtins, "duck")
@@ -802,7 +805,7 @@ mod tests {
         assert_eq!(state.active().identity.name, "duck");
         assert_eq!(state.active().permissions.default, PermissionDefault::Deny);
         assert_eq!(state.active().model, initial_model);
-        assert_eq!(state.active().tools, initial_tools);
+        assert_ne!(state.active().tools, initial_tools);
     }
 
     #[test]

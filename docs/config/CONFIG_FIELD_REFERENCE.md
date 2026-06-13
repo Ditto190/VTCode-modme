@@ -219,7 +219,7 @@ python3 scripts/generate_config_field_reference.py
 | `debug.trace_level` | `string` | no | `"info"` | Trace level (error, warn, info, debug, trace) |
 | `debug.trace_targets` | `array` | no | `[]` | List of tracing targets to enable Examples: "vtcode_core::agent", "vtcode_core::tools", "vtcode::*" |
 | `debug.trace_targets[]` | `string` | no | `-` | - |
-| `default_primary_agent` | `string` | no | `"duck"` | Primary agent selected at startup when no session override is active. |
+| `default_primary_agent` | `string` | no | `"build"` | Primary agent selected at startup when no session override is active. |
 | `dotfile_protection.additional_protected_patterns` | `array` | no | `[]` | Additional dotfile patterns to protect (beyond defaults). |
 | `dotfile_protection.additional_protected_patterns[]` | `string` | no | `-` | - |
 | `dotfile_protection.audit_log_path` | `string` | no | `"~/.vtcode/dotfile_audit.log"` | Path to the audit log file. |
