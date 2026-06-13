@@ -8,11 +8,28 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use thiserror::Error;
 use vtcode_commons::utils::current_timestamp;
 
 pub use self::pressure::MemoryPressure;
 
 mod pressure;
+
+/// Errors that can occur during memory monitoring operations.
+#[derive(Debug, Error)]
+pub enum MemoryError {
+    /// Failed to read system memory information.
+    #[error("failed to read memory info: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Failed to parse memory value from system output.
+    #[error("failed to parse memory value: {0}")]
+    Parse(String),
+
+    /// Memory monitoring is not supported on this platform.
+    #[error("memory monitoring not supported on this platform")]
+    Unsupported,
+}
 
 /// Memory monitor for tracking system memory usage
 #[derive(Clone)]
@@ -73,59 +90,58 @@ impl MemoryMonitor {
 
     /// Get current RSS in bytes using platform-specific methods
     #[cfg(target_os = "linux")]
-    pub fn get_rss_bytes() -> Result<usize, String> {
+    pub fn get_rss_bytes() -> Result<usize, MemoryError> {
         use std::fs;
         use std::io::Read;
 
         let mut status = String::new();
-        fs::File::open("/proc/self/status")
-            .and_then(|mut f| f.read_to_string(&mut status))
-            .map_err(|e| format!("Failed to read /proc/self/status: {}", e))?;
+        fs::File::open("/proc/self/status").and_then(|mut f| f.read_to_string(&mut status))?;
 
         for line in status.lines() {
             if line.starts_with("VmRSS:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    let kb: usize = parts[1]
-                        .parse()
-                        .map_err(|_| "Failed to parse VmRSS value".to_string())?;
+                    let kb: usize = parts[1].parse().map_err(|_| {
+                        MemoryError::Parse(format!("invalid VmRSS value: {}", parts[1]))
+                    })?;
                     return Ok(kb * 1024); // Convert KB to bytes
                 }
             }
         }
 
-        Err("VmRSS not found in /proc/self/status".to_string())
+        Err(MemoryError::Parse(
+            "VmRSS not found in /proc/self/status".to_string(),
+        ))
     }
 
     /// Get current RSS in bytes on macOS using /proc/self/stat or sysctl
     #[cfg(target_os = "macos")]
-    pub fn get_rss_bytes() -> Result<usize, String> {
+    pub fn get_rss_bytes() -> Result<usize, MemoryError> {
         use std::process::Command;
 
         // Use `ps` command to get RSS in kilobytes
         let output = Command::new("ps")
             .args(["-o", "rss=", "-p"])
             .arg(std::process::id().to_string())
-            .output()
-            .map_err(|e| format!("Failed to run ps command: {}", e))?;
+            .output()?;
 
         let rss_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         let kb: usize = rss_str
             .parse()
-            .map_err(|_| format!("Failed to parse ps output: {}", rss_str))?;
+            .map_err(|_| MemoryError::Parse(format!("invalid ps output: {}", rss_str)))?;
 
         Ok(kb * 1024) // Convert KB to bytes
     }
 
     /// Get current RSS in bytes (fallback for unsupported platforms)
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    pub fn get_rss_bytes() -> Result<usize, String> {
-        Err("Memory monitoring not supported on this platform".to_string())
+    pub fn get_rss_bytes() -> Result<usize, MemoryError> {
+        Err(MemoryError::Unsupported)
     }
 
     /// Check current memory pressure
-    pub fn check_pressure(&self) -> Result<MemoryPressure, String> {
+    pub fn check_pressure(&self) -> Result<MemoryPressure, MemoryError> {
         let rss = Self::get_rss_bytes()?;
         let pressure = MemoryPressure::from_rss(rss);
 
@@ -139,7 +155,7 @@ impl MemoryMonitor {
     }
 
     /// Record a memory checkpoint for debugging
-    pub fn record_checkpoint(&self, label: String) -> Result<(), String> {
+    pub fn record_checkpoint(&self, label: String) -> Result<(), MemoryError> {
         let rss = Self::get_rss_bytes()?;
 
         // Only record if change is significant (> 1 MB)
@@ -171,7 +187,7 @@ impl MemoryMonitor {
     }
 
     /// Get memory report for user visibility
-    pub fn get_report(&self) -> Result<MemoryReport, String> {
+    pub fn get_report(&self) -> Result<MemoryReport, MemoryError> {
         let rss_bytes = Self::get_rss_bytes()?;
         let pressure = MemoryPressure::from_rss(rss_bytes);
 

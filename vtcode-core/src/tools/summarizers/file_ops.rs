@@ -293,8 +293,12 @@ mod tests {
         assert!(summary.contains("Line 1"));
 
         // Should be much shorter than full output
-        let (_llm, _ui, pct) = summarizer.estimate_savings(&full_output, &summary);
-        assert!(pct > 70.0, "Should save >70% (got {:.1}%)", pct);
+        let savings = summarizer.estimate_savings(&full_output, &summary);
+        assert!(
+            savings.savings_percent > 70.0,
+            "Should save >70% (got {:.1}%)",
+            savings.savings_percent
+        );
     }
 
     #[test]

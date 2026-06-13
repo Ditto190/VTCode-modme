@@ -68,14 +68,28 @@ pub fn compute_diff_chunks<'a>(old: &'a str, new: &'a str) -> Vec<Chunk<'a>> {
 
         let mut old_pos = 0;
         let mut new_pos = 0;
+        // Track the start of a consecutive Equal run so we can emit a single
+        // Chunk::Equal for the whole run (instead of one per character).
+        let mut equal_run_start: Option<usize> = None;
 
         for edit in edits {
             match edit {
                 Edit::Equal => {
+                    if equal_run_start.is_none() {
+                        equal_run_start = Some(old_pos);
+                    }
                     old_pos += 1;
                     new_pos += 1;
                 }
                 Edit::Delete => {
+                    // Flush any accumulated equal run before emitting a Delete
+                    if let Some(start) = equal_run_start.take() {
+                        let byte_start = old_byte_starts[start];
+                        let byte_end = old_byte_starts[old_pos];
+                        if byte_start < byte_end {
+                            result.push(Chunk::Equal(&old_middle[byte_start..byte_end]));
+                        }
+                    }
                     let Some(ch) = old_chars.get(old_pos).copied() else {
                         break;
                     };
@@ -87,6 +101,20 @@ pub fn compute_diff_chunks<'a>(old: &'a str, new: &'a str) -> Vec<Chunk<'a>> {
                     old_pos += 1;
                 }
                 Edit::Insert => {
+                    // Flush any accumulated equal run before emitting an Insert.
+                    // old_pos may equal old_byte_starts.len() when the equal run
+                    // reaches the end of old_middle, so use old_middle.len() as fallback.
+                    if let Some(start) = equal_run_start.take() {
+                        let byte_start = old_byte_starts[start];
+                        let byte_end = if old_pos < old_byte_starts.len() {
+                            old_byte_starts[old_pos]
+                        } else {
+                            old_middle.len()
+                        };
+                        if byte_start < byte_end {
+                            result.push(Chunk::Equal(&old_middle[byte_start..byte_end]));
+                        }
+                    }
                     let Some(ch) = new_chars.get(new_pos).copied() else {
                         break;
                     };
@@ -97,6 +125,14 @@ pub fn compute_diff_chunks<'a>(old: &'a str, new: &'a str) -> Vec<Chunk<'a>> {
                     result.push(Chunk::Insert(&new_middle[byte_start..byte_end]));
                     new_pos += 1;
                 }
+            }
+        }
+        // Flush any trailing equal run
+        if let Some(start) = equal_run_start.take() {
+            let byte_start = old_byte_starts[start];
+            let byte_end = old_middle.len();
+            if byte_start < byte_end {
+                result.push(Chunk::Equal(&old_middle[byte_start..byte_end]));
             }
         }
     }
@@ -562,11 +598,18 @@ fn compute_hunk_ranges(records: &[LineRecord<'_>], context: usize) -> Vec<(usize
             let end = min(idx + context, records.len().saturating_sub(1));
 
             if let Some(existing_start) = current_start {
-                if start < existing_start {
+                // Close the previous range if this change is beyond its context window
+                if idx > current_end {
+                    ranges.push((existing_start, current_end));
                     current_start = Some(start);
-                }
-                if end > current_end {
                     current_end = end;
+                } else {
+                    if start < existing_start {
+                        current_start = Some(start);
+                    }
+                    if end > current_end {
+                        current_end = end;
+                    }
                 }
             } else {
                 current_start = Some(start);
@@ -585,4 +628,498 @@ fn compute_hunk_ranges(records: &[LineRecord<'_>], context: usize) -> Vec<(usize
     }
 
     ranges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── compute_diff_chunks ──────────────────────────────────────────
+
+    #[test]
+    fn chunks_both_empty() {
+        let chunks = compute_diff_chunks("", "");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn chunks_old_empty() {
+        let chunks = compute_diff_chunks("", "hello");
+        assert_eq!(chunks, vec![Chunk::Insert("hello")]);
+    }
+
+    #[test]
+    fn chunks_new_empty() {
+        let chunks = compute_diff_chunks("hello", "");
+        assert_eq!(chunks, vec![Chunk::Delete("hello")]);
+    }
+
+    #[test]
+    fn chunks_identical() {
+        let chunks = compute_diff_chunks("abc", "abc");
+        assert_eq!(chunks.len(), 1);
+        assert!(matches!(chunks[0], Chunk::Equal("abc")));
+    }
+
+    #[test]
+    fn chunks_single_insertion() {
+        let chunks = compute_diff_chunks("ac", "abc");
+        // Common prefix "a", insert "b", common suffix "c"
+        assert_eq!(chunks.len(), 3);
+        assert!(matches!(chunks[0], Chunk::Equal("a")));
+        assert!(matches!(chunks[1], Chunk::Insert("b")));
+        assert!(matches!(chunks[2], Chunk::Equal("c")));
+    }
+
+    #[test]
+    fn chunks_single_deletion() {
+        let chunks = compute_diff_chunks("abc", "ac");
+        assert_eq!(chunks.len(), 3);
+        assert!(matches!(chunks[0], Chunk::Equal("a")));
+        assert!(matches!(chunks[1], Chunk::Delete("b")));
+        assert!(matches!(chunks[2], Chunk::Equal("c")));
+    }
+
+    #[test]
+    fn chunks_replacement() {
+        let chunks = compute_diff_chunks("abc", "axc");
+        // Equal("a"), Delete("b"), Insert("x"), Equal("c")
+        assert_eq!(chunks.len(), 4);
+        assert!(matches!(chunks[0], Chunk::Equal("a")));
+        assert!(matches!(chunks[1], Chunk::Delete("b")));
+        assert!(matches!(chunks[2], Chunk::Insert("x")));
+        assert!(matches!(chunks[3], Chunk::Equal("c")));
+    }
+
+    #[test]
+    fn chunks_completely_different() {
+        let chunks = compute_diff_chunks("aaa", "bbb");
+        // No common prefix or suffix
+        assert!(!chunks.is_empty());
+        // All old chars deleted, all new chars inserted
+        let deletes: usize = chunks
+            .iter()
+            .filter(|c| matches!(c, Chunk::Delete(_)))
+            .count();
+        let inserts: usize = chunks
+            .iter()
+            .filter(|c| matches!(c, Chunk::Insert(_)))
+            .count();
+        assert!(deletes > 0 || inserts > 0);
+    }
+
+    #[test]
+    fn chunks_multiline() {
+        let old = "line1\nline2\nline3\n";
+        let new = "line1\nline modified\nline3\n";
+        let chunks = compute_diff_chunks(old, new);
+
+        // Should have at least some Equal chunks for the unchanged lines
+        let has_equal = chunks.iter().any(|c| matches!(c, Chunk::Equal(_)));
+        assert!(has_equal);
+
+        // Should have a delete and insert for the changed line
+        let has_delete = chunks.iter().any(|c| matches!(c, Chunk::Delete(_)));
+        let has_insert = chunks.iter().any(|c| matches!(c, Chunk::Insert(_)));
+        assert!(has_delete || has_insert);
+    }
+
+    #[test]
+    fn chunks_unicode() {
+        let old = "hello \u{00e9}l\u{00e8}ve";
+        let new = "hello \u{00e9}l\u{00e8}ve you";
+        let chunks = compute_diff_chunks(old, new);
+
+        // Common prefix should include unicode chars
+        let prefix = match &chunks[0] {
+            Chunk::Equal(s) => s,
+            _ => panic!("expected Equal prefix"),
+        };
+        assert!(prefix.starts_with("hello "));
+    }
+
+    #[test]
+    fn chunks_append_only() {
+        let old = "a\nb\n";
+        let new = "a\nb\nc\nd\n";
+        let chunks = compute_diff_chunks(old, new);
+        let has_insert = chunks.iter().any(|c| matches!(c, Chunk::Insert(_)));
+        assert!(has_insert);
+    }
+
+    #[test]
+    fn chunks_remove_only() {
+        let old = "a\nb\nc\n";
+        let new = "a\n";
+        let chunks = compute_diff_chunks(old, new);
+        let has_delete = chunks.iter().any(|c| matches!(c, Chunk::Delete(_)));
+        assert!(has_delete);
+    }
+
+    // ── compute_diff ─────────────────────────────────────────────────
+
+    fn identity_formatter(hunks: &[DiffHunk], _opts: &DiffOptions<'_>) -> String {
+        hunks
+            .iter()
+            .flat_map(|h| h.lines.iter().map(|l| l.text.clone()))
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    #[test]
+    fn diff_identical_content() {
+        let result = compute_diff(
+            "hello\n",
+            "hello\n",
+            DiffOptions::default(),
+            identity_formatter,
+        );
+        assert!(result.is_empty);
+        assert!(result.hunks.is_empty());
+        assert!(result.formatted.is_empty());
+    }
+
+    #[test]
+    fn diff_empty_both() {
+        let result = compute_diff("", "", DiffOptions::default(), identity_formatter);
+        assert!(result.is_empty);
+        assert!(result.hunks.is_empty());
+    }
+
+    #[test]
+    fn diff_old_empty() {
+        let result = compute_diff(
+            "",
+            "line1\nline2\n",
+            DiffOptions::default(),
+            identity_formatter,
+        );
+        assert!(!result.is_empty);
+        assert!(!result.hunks.is_empty());
+        // All lines should be additions
+        for hunk in &result.hunks {
+            for line in &hunk.lines {
+                assert_eq!(line.kind, DiffLineKind::Addition);
+            }
+        }
+    }
+
+    #[test]
+    fn diff_new_empty() {
+        let result = compute_diff(
+            "line1\nline2\n",
+            "",
+            DiffOptions::default(),
+            identity_formatter,
+        );
+        assert!(!result.is_empty);
+        assert!(!result.hunks.is_empty());
+        for hunk in &result.hunks {
+            for line in &hunk.lines {
+                assert_eq!(line.kind, DiffLineKind::Deletion);
+            }
+        }
+    }
+
+    #[test]
+    fn diff_single_line_change() {
+        let old = "aaa\nbbb\nccc\n";
+        let new = "aaa\nxxx\nccc\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+
+        assert!(!result.is_empty);
+        assert_eq!(result.hunks.len(), 1);
+
+        let hunk = &result.hunks[0];
+        // Should have context lines for aaa and ccc, plus the change
+        let kinds: Vec<DiffLineKind> = hunk.lines.iter().map(|l| l.kind).collect();
+        assert!(kinds.contains(&DiffLineKind::Context));
+        assert!(kinds.contains(&DiffLineKind::Deletion));
+        assert!(kinds.contains(&DiffLineKind::Addition));
+    }
+
+    #[test]
+    fn diff_line_numbers() {
+        let old = "line1\nline2\nline3\n";
+        let new = "line1\nline2 modified\nline3\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+
+        let hunk = &result.hunks[0];
+        // Context lines should have both old_line and new_line
+        for line in &hunk.lines {
+            if line.kind == DiffLineKind::Context {
+                assert!(line.old_line.is_some());
+                assert!(line.new_line.is_some());
+            }
+        }
+        // Deletion should have old_line but no new_line
+        for line in &hunk.lines {
+            if line.kind == DiffLineKind::Deletion {
+                assert!(line.old_line.is_some());
+                assert!(line.new_line.is_none());
+            }
+        }
+        // Addition should have new_line but no old_line
+        for line in &hunk.lines {
+            if line.kind == DiffLineKind::Addition {
+                assert!(line.old_line.is_none());
+                assert!(line.new_line.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn diff_context_lines_zero() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nb\nX\nd\ne\n";
+        let opts = DiffOptions {
+            context_lines: 0,
+            ..DiffOptions::default()
+        };
+        let result = compute_diff(old, new, opts, identity_formatter);
+
+        assert!(!result.is_empty);
+        // With 0 context, only the changed line and its neighbors should appear
+        let hunk = &result.hunks[0];
+        // Should be minimal: just the deletion and addition
+        let context_count = hunk
+            .lines
+            .iter()
+            .filter(|l| l.kind == DiffLineKind::Context)
+            .count();
+        assert!(context_count <= 2); // At most one context line on each side
+    }
+
+    #[test]
+    fn diff_context_lines_large() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nb\nX\nd\ne\n";
+        let opts = DiffOptions {
+            context_lines: 10,
+            ..DiffOptions::default()
+        };
+        let result = compute_diff(old, new, opts, identity_formatter);
+
+        assert!(!result.is_empty);
+        // With 10 context lines and only 6 total lines (trailing newline creates 6th), all lines appear
+        let hunk = &result.hunks[0];
+        assert_eq!(hunk.lines.len(), 6);
+    }
+
+    #[test]
+    fn diff_hunk_metadata() {
+        let old = "aaa\nbbb\nccc\n";
+        let new = "aaa\nxxx\nccc\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+
+        let hunk = &result.hunks[0];
+        assert!(hunk.old_start >= 1);
+        assert!(hunk.new_start >= 1);
+        assert!(hunk.old_lines > 0);
+        assert!(hunk.new_lines > 0);
+        assert!(!hunk.lines.is_empty());
+    }
+
+    #[test]
+    fn diff_multiple_hunks() {
+        // Insert in first half and insert in second half with small context => two hunks
+        let old = "a\nb\nc\nd\ne\nf\ng\nh\n";
+        let new = "a\nINSERTED1\nb\nc\nd\ne\nf\ng\nINSERTED2\nh\n";
+        let opts = DiffOptions {
+            context_lines: 1,
+            ..DiffOptions::default()
+        };
+        let result = compute_diff(old, new, opts, identity_formatter);
+
+        assert!(!result.is_empty);
+        assert!(
+            result.hunks.len() >= 2,
+            "expected at least 2 hunks, got {}",
+            result.hunks.len()
+        );
+    }
+
+    #[test]
+    fn diff_formatter_called() {
+        let old = "aaa\n";
+        let new = "bbb\n";
+        let mut called = false;
+        let formatter = |hunks: &[DiffHunk], _opts: &DiffOptions<'_>| -> String {
+            called = true;
+            hunks
+                .iter()
+                .flat_map(|h| h.lines.iter().map(|l| l.text.clone()))
+                .collect::<Vec<_>>()
+                .join("")
+        };
+
+        let result = compute_diff(old, new, DiffOptions::default(), formatter);
+        assert!(called);
+        assert!(!result.formatted.is_empty());
+    }
+
+    #[test]
+    fn diff_formatter_not_called_when_empty() {
+        let mut called = false;
+        let formatter = |_hunks: &[DiffHunk], _opts: &DiffOptions<'_>| -> String {
+            called = true;
+            String::new()
+        };
+
+        let result = compute_diff("same\n", "same\n", DiffOptions::default(), formatter);
+        assert!(!called);
+        assert!(result.formatted.is_empty());
+    }
+
+    #[test]
+    fn diff_options_labels() {
+        let old = "aaa\n";
+        let new = "bbb\n";
+        let opts = DiffOptions {
+            old_label: Some("old.txt"),
+            new_label: Some("new.txt"),
+            ..DiffOptions::default()
+        };
+        let result = compute_diff(old, new, opts, identity_formatter);
+        assert!(!result.is_empty);
+        // Labels are passed to formatter but don't affect hunks
+        assert_eq!(result.hunks.len(), 1);
+    }
+
+    #[test]
+    fn diff_insertion_only() {
+        let old = "line1\nline3\n";
+        let new = "line1\nline2\nline3\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+
+        assert!(!result.is_empty);
+        let additions: Vec<&DiffLine> = result
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .filter(|l| l.kind == DiffLineKind::Addition)
+            .collect();
+        assert_eq!(additions.len(), 1);
+        assert_eq!(additions[0].text, "line2\n");
+    }
+
+    #[test]
+    fn diff_deletion_only() {
+        let old = "line1\nline2\nline3\n";
+        let new = "line1\nline3\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+
+        assert!(!result.is_empty);
+        let deletions: Vec<&DiffLine> = result
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .filter(|l| l.kind == DiffLineKind::Deletion)
+            .collect();
+        assert_eq!(deletions.len(), 1);
+        assert_eq!(deletions[0].text, "line2\n");
+    }
+
+    // ── DiffBundle serialization ─────────────────────────────────────
+
+    #[test]
+    fn diff_bundle_serializes() {
+        let old = "aaa\nbbb\n";
+        let new = "aaa\nxxx\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("hunks"));
+        assert!(json.contains("formatted"));
+        assert!(json.contains("is_empty"));
+    }
+
+    #[test]
+    fn diff_hunk_serializes() {
+        let hunk = DiffHunk {
+            old_start: 1,
+            old_lines: 2,
+            new_start: 1,
+            new_lines: 2,
+            lines: vec![DiffLine {
+                kind: DiffLineKind::Context,
+                old_line: Some(1),
+                new_line: Some(1),
+                text: "hello\n".to_string(),
+            }],
+        };
+        let json = serde_json::to_string(&hunk).unwrap();
+        assert!(json.contains("old_start"));
+        assert!(json.contains("context"));
+    }
+
+    #[test]
+    fn diff_line_kind_serializes() {
+        assert_eq!(
+            serde_json::to_string(&DiffLineKind::Context).unwrap(),
+            "\"context\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DiffLineKind::Addition).unwrap(),
+            "\"addition\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DiffLineKind::Deletion).unwrap(),
+            "\"deletion\""
+        );
+    }
+
+    // ── Edge cases ───────────────────────────────────────────────────
+
+    #[test]
+    fn chunks_very_long_identical() {
+        let text = "x".repeat(10_000);
+        let chunks = compute_diff_chunks(&text, &text);
+        assert_eq!(chunks.len(), 1);
+        assert!(matches!(chunks[0], Chunk::Equal(_)));
+    }
+
+    #[test]
+    fn chunks_single_char_diff() {
+        let chunks = compute_diff_chunks("a", "b");
+        assert!(!chunks.is_empty());
+        let has_delete = chunks.iter().any(|c| matches!(c, Chunk::Delete(_)));
+        let has_insert = chunks.iter().any(|c| matches!(c, Chunk::Insert(_)));
+        assert!(has_delete && has_insert);
+    }
+
+    #[test]
+    fn diff_no_trailing_newline() {
+        let old = "line1\nline2";
+        let new = "line1\nline2\n";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+        assert!(!result.is_empty);
+    }
+
+    #[test]
+    fn diff_only_newlines_differ() {
+        let old = "a\nb\n";
+        let new = "a\nb";
+        let result = compute_diff(old, new, DiffOptions::default(), identity_formatter);
+        assert!(!result.is_empty);
+    }
+
+    #[test]
+    fn chunks_prefix_suffix_optimization() {
+        // Verify that common prefix and suffix are preserved as Equal chunks.
+        // Myers works character-by-character, so the middle diff is char-level.
+        let old = "AAAA BBBB CCCC";
+        let new = "AAAA DDDD CCCC";
+        let chunks = compute_diff_chunks(old, new);
+
+        // First chunk should be Equal prefix "AAAA "
+        assert!(matches!(&chunks[0], Chunk::Equal(s) if *s == "AAAA "));
+        // Last chunk should be Equal suffix " CCCC"
+        assert!(matches!(chunks.last().unwrap(), Chunk::Equal(s) if *s == " CCCC"));
+        // Middle should contain deletes and inserts (character-level)
+        let has_delete = chunks.iter().any(|c| matches!(c, Chunk::Delete(_)));
+        let has_insert = chunks.iter().any(|c| matches!(c, Chunk::Insert(_)));
+        assert!(has_delete, "expected Delete chunks in middle");
+        assert!(has_insert, "expected Insert chunks in middle");
+    }
 }

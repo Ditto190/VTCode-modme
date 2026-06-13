@@ -259,15 +259,15 @@ src/main.rs:100:    grep.execute(\"test\")?;
         assert!(estimate_tokens(&summary) < 100);
 
         // Verify savings
-        let (llm, ui, pct) = summarizer.estimate_savings(full_output, &summary);
+        let savings = summarizer.estimate_savings(full_output, &summary);
         assert!(
-            pct > 20.0,
+            savings.savings_percent > 20.0,
             "Should save >20% (got {:.1}%, {} → {} tokens)",
-            pct,
-            ui,
-            llm
+            savings.savings_percent,
+            savings.ui_tokens,
+            savings.llm_tokens
         );
-        assert!(llm < ui);
+        assert!(savings.llm_tokens < savings.ui_tokens);
     }
 
     #[test]
@@ -347,7 +347,10 @@ src/tools/list.rs:23:    // comment
         assert!(summary.contains("Found 200 matches"));
 
         // Verify massive savings
-        let (_llm, _ui, pct) = summarizer.estimate_savings(&output, &summary);
-        assert!(pct > 95.0, "Should save >95% on large output");
+        let savings = summarizer.estimate_savings(&output, &summary);
+        assert!(
+            savings.savings_percent > 95.0,
+            "Should save >95% on large output"
+        );
     }
 }

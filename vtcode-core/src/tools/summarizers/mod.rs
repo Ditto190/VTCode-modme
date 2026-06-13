@@ -19,6 +19,17 @@ pub mod execution;
 pub mod file_ops;
 pub mod search;
 
+/// Token savings estimate from summarization.
+#[derive(Debug, Clone)]
+pub struct SavingsEstimate {
+    /// Token count of the summarized (LLM) output.
+    pub llm_tokens: usize,
+    /// Token count of the full (UI) output.
+    pub ui_tokens: usize,
+    /// Percentage of tokens saved (0.0 - 100.0).
+    pub savings_percent: f32,
+}
+
 use std::borrow::Cow;
 
 /// Truncate a line to max length with ellipsis (shared by execution + file_ops summarizers).
@@ -54,18 +65,20 @@ pub trait Summarizer {
     fn summarize(&self, full_output: &str, metadata: Option<&serde_json::Value>) -> Result<String>;
 
     /// Estimate token savings from summarization
-    ///
-    /// Returns (llm_tokens, ui_tokens, savings_percent)
-    fn estimate_savings(&self, full_output: &str, summary: &str) -> (usize, usize, f32) {
+    fn estimate_savings(&self, full_output: &str, summary: &str) -> SavingsEstimate {
         let ui_tokens = estimate_tokens(full_output);
         let llm_tokens = estimate_tokens(summary);
         let savings = ui_tokens.saturating_sub(llm_tokens);
-        let savings_pct = if ui_tokens > 0 {
+        let savings_percent = if ui_tokens > 0 {
             (savings as f32 / ui_tokens as f32) * 100.0
         } else {
             0.0
         };
-        (llm_tokens, ui_tokens, savings_pct)
+        SavingsEstimate {
+            llm_tokens,
+            ui_tokens,
+            savings_percent,
+        }
     }
 }
 

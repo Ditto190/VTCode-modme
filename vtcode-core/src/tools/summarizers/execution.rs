@@ -264,8 +264,12 @@ mod tests {
         assert!(summary.contains("total 100"));
 
         // Verify some savings (small test input has lower percentage)
-        let (_llm, _ui, pct) = summarizer.estimate_savings(full_output, &summary);
-        assert!(pct > 15.0, "Should save >15% (got {:.1}%)", pct);
+        let savings = summarizer.estimate_savings(full_output, &summary);
+        assert!(
+            savings.savings_percent > 15.0,
+            "Should save >15% (got {:.1}%)",
+            savings.savings_percent
+        );
     }
 
     #[test]
@@ -309,11 +313,11 @@ mod tests {
         assert!(summary.contains("more lines"));
 
         // Should show significant savings on large output
-        let (_llm, _ui, pct) = summarizer.estimate_savings(&full_output, &summary);
+        let savings = summarizer.estimate_savings(&full_output, &summary);
         assert!(
-            pct > 70.0,
+            savings.savings_percent > 70.0,
             "Should save >70% on large output (got {:.1}%)",
-            pct
+            savings.savings_percent
         );
     }
 

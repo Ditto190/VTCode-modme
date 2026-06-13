@@ -62,12 +62,14 @@ impl ToolRegistry {
                         let summarizer = GrepSummarizer::default();
                         match summarizer.summarize(&ui_content, None) {
                             Ok(llm_content) => {
+                                let savings =
+                                    summarizer.estimate_savings(&ui_content, &llm_content);
                                 debug!(
                                     tool = tools::UNIFIED_SEARCH,
                                     action = "grep",
-                                    ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                                    llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                                    savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                                    ui_tokens = %savings.ui_tokens,
+                                    llm_tokens = %savings.llm_tokens,
+                                    savings_pct = %savings.savings_percent,
                                     "Applied grep summarization"
                                 );
                                 Ok(SplitToolResult::new(
@@ -91,12 +93,14 @@ impl ToolRegistry {
                         let summarizer = ListSummarizer::default();
                         match summarizer.summarize(&ui_content, None) {
                             Ok(llm_content) => {
+                                let savings =
+                                    summarizer.estimate_savings(&ui_content, &llm_content);
                                 debug!(
                                     tool = tools::UNIFIED_SEARCH,
                                     action = "list",
-                                    ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                                    llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                                    savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                                    ui_tokens = %savings.ui_tokens,
+                                    llm_tokens = %savings.llm_tokens,
+                                    savings_pct = %savings.savings_percent,
                                     "Applied list summarization"
                                 );
                                 Ok(SplitToolResult::new(
@@ -141,12 +145,14 @@ impl ToolRegistry {
                         let summarizer = ReadSummarizer::default();
                         match summarizer.summarize(&ui_content, Some(&metadata)) {
                             Ok(llm_content) => {
+                                let savings =
+                                    summarizer.estimate_savings(&ui_content, &llm_content);
                                 debug!(
                                     tool = tools::UNIFIED_FILE,
                                     action = "read",
-                                    ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                                    llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                                    savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                                    ui_tokens = %savings.ui_tokens,
+                                    llm_tokens = %savings.llm_tokens,
+                                    savings_pct = %savings.savings_percent,
                                     "Applied unified_file read summarization"
                                 );
                                 Ok(SplitToolResult::new(
@@ -170,12 +176,14 @@ impl ToolRegistry {
                         let summarizer = EditSummarizer::default();
                         match summarizer.summarize(&ui_content, None) {
                             Ok(llm_content) => {
+                                let savings =
+                                    summarizer.estimate_savings(&ui_content, &llm_content);
                                 debug!(
                                     tool = tools::UNIFIED_FILE,
                                     action = "mutate",
-                                    ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                                    llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                                    savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                                    ui_tokens = %savings.ui_tokens,
+                                    llm_tokens = %savings.llm_tokens,
+                                    savings_pct = %savings.savings_percent,
                                     "Applied unified_file mutation summarization"
                                 );
                                 Ok(SplitToolResult::new(
@@ -204,12 +212,13 @@ impl ToolRegistry {
                     let metadata = args.as_object().map(|_| args.clone());
                     match summarizer.summarize(&ui_content, metadata.as_ref()) {
                         Ok(llm_content) => {
+                            let savings = summarizer.estimate_savings(&ui_content, &llm_content);
                             debug!(
                                 tool = tools::UNIFIED_EXEC,
                                 action = "run",
-                                ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                                llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                                savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                                ui_tokens = %savings.ui_tokens,
+                                llm_tokens = %savings.llm_tokens,
+                                savings_pct = %savings.savings_percent,
                                 "Applied unified_exec summarization"
                             );
                             Ok(SplitToolResult::new(
@@ -238,11 +247,12 @@ impl ToolRegistry {
                 let metadata = args.as_object().map(|_| args.clone());
                 match summarizer.summarize(&ui_content, metadata.as_ref()) {
                     Ok(llm_content) => {
+                        let savings = summarizer.estimate_savings(&ui_content, &llm_content);
                         debug!(
                             tool = tools::READ_FILE,
-                            ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                            llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                            savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                            ui_tokens = %savings.ui_tokens,
+                            llm_tokens = %savings.llm_tokens,
+                            savings_pct = %savings.savings_percent,
                             "Applied read file summarization"
                         );
                         Ok(SplitToolResult::new(
@@ -268,11 +278,12 @@ impl ToolRegistry {
                 let metadata = args.as_object().map(|_| args.clone());
                 match summarizer.summarize(&ui_content, metadata.as_ref()) {
                     Ok(llm_content) => {
+                        let savings = summarizer.estimate_savings(&ui_content, &llm_content);
                         debug!(
                             tool = tools::RUN_PTY_CMD,
-                            ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                            llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                            savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                            ui_tokens = %savings.ui_tokens,
+                            llm_tokens = %savings.llm_tokens,
+                            savings_pct = %savings.savings_percent,
                             "Applied bash summarization"
                         );
                         Ok(SplitToolResult::new(
@@ -296,11 +307,12 @@ impl ToolRegistry {
                 let summarizer = EditSummarizer::default();
                 match summarizer.summarize(&ui_content, None) {
                     Ok(llm_content) => {
+                        let savings = summarizer.estimate_savings(&ui_content, &llm_content);
                         debug!(
                             tool = tool_name.as_str(),
-                            ui_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).1,
-                            llm_tokens = %summarizer.estimate_savings(&ui_content, &llm_content).0,
-                            savings_pct = %summarizer.estimate_savings(&ui_content, &llm_content).2,
+                            ui_tokens = %savings.ui_tokens,
+                            llm_tokens = %savings.llm_tokens,
+                            savings_pct = %savings.savings_percent,
                             "Applied edit summarization"
                         );
                         Ok(SplitToolResult::new(

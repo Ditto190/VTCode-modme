@@ -15,6 +15,17 @@ use crate::config::constants::{defaults, tools};
 use crate::tools::continuation::read_chunk_progress_from_result;
 use crate::tools::tool_intent;
 
+/// Result of loop detection analysis.
+#[derive(Debug, Clone)]
+pub struct LoopDetectionResult {
+    /// Whether a loop was detected.
+    pub detected: bool,
+    /// Number of identical consecutive calls found.
+    pub repeat_count: usize,
+    /// Name of the tool being checked.
+    pub tool_name: String,
+}
+
 /// Snapshot of harness context for execution records.
 #[derive(Debug, Clone)]
 pub struct HarnessContextSnapshot {
@@ -556,11 +567,15 @@ impl ToolExecutionHistory {
 
     /// Detect if the agent is stuck in a loop.
     ///
-    /// Returns (is_loop, repeat_count, tool_name) if a loop is detected.
-    pub fn detect_loop(&self, tool_name: &str, args: &Value) -> (bool, usize, String) {
+    /// Returns a [`LoopDetectionResult`] indicating whether a loop was detected.
+    pub fn detect_loop(&self, tool_name: &str, args: &Value) -> LoopDetectionResult {
         let limit = self.effective_identical_limit_for_call(tool_name, args);
         if limit == 0 {
-            return (false, 0, String::new());
+            return LoopDetectionResult {
+                detected: false,
+                repeat_count: 0,
+                tool_name: tool_name.to_string(),
+            };
         }
 
         let detect_window = self
@@ -569,12 +584,20 @@ impl ToolExecutionHistory {
         let window = detect_window.max(limit.saturating_mul(2)).max(1);
 
         let Ok(records) = self.records.read() else {
-            return (false, 0, String::new());
+            return LoopDetectionResult {
+                detected: false,
+                repeat_count: 0,
+                tool_name: tool_name.to_string(),
+            };
         };
         let recent: Vec<&ToolExecutionRecord> = records.iter().rev().take(window).collect();
 
         if recent.is_empty() {
-            return (false, 0, String::new());
+            return LoopDetectionResult {
+                detected: false,
+                repeat_count: 0,
+                tool_name: tool_name.to_string(),
+            };
         }
 
         // Count how many of the recent calls match this exact tool + args combo
@@ -586,8 +609,12 @@ impl ToolExecutionHistory {
             }
         }
 
-        let is_loop = identical_count >= limit;
-        (is_loop, identical_count, tool_name.to_string())
+        let detected = identical_count >= limit;
+        LoopDetectionResult {
+            detected,
+            repeat_count: identical_count,
+            tool_name: tool_name.to_string(),
+        }
     }
 }
 
@@ -979,9 +1006,9 @@ mod tests {
             ));
         }
 
-        let (is_loop, repeat_count, tool_name) = history.detect_loop("unified_search", &args);
-        assert!(is_loop);
-        assert_eq!(repeat_count, 2);
-        assert_eq!(tool_name, "unified_search");
+        let loop_result = history.detect_loop("unified_search", &args);
+        assert!(loop_result.detected);
+        assert_eq!(loop_result.repeat_count, 2);
+        assert_eq!(loop_result.tool_name, "unified_search");
     }
 }

@@ -18,7 +18,7 @@ impl OutputStyleApplier {
         &self,
         _config: &VTCodeConfig,
         workspace: &Path,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> anyhow::Result<()> {
         let output_styles_dir = workspace.join(".vtcode").join("output-styles");
         let manager = OutputStyleManager::load_from_directory(&output_styles_dir)?;
 

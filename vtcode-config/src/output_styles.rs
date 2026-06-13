@@ -1,3 +1,4 @@
+use anyhow::Result;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -55,7 +56,7 @@ impl OutputStyleManager {
         }
     }
 
-    pub fn load_from_directory<P: AsRef<Path>>(dir: P) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load_from_directory<P: AsRef<Path>>(dir: P) -> Result<Self> {
         let mut manager = Self::new();
         let dir = dir.as_ref();
 
@@ -79,12 +80,12 @@ impl OutputStyleManager {
         Ok(manager)
     }
 
-    fn load_from_file<P: AsRef<Path>>(path: P) -> Result<OutputStyle, Box<dyn std::error::Error>> {
+    fn load_from_file<P: AsRef<Path>>(path: P) -> Result<OutputStyle> {
         let content = fs::read_to_string(path)?;
         Self::parse_output_style(&content)
     }
 
-    fn parse_output_style(content: &str) -> Result<OutputStyle, Box<dyn std::error::Error>> {
+    fn parse_output_style(content: &str) -> Result<OutputStyle> {
         // Look for frontmatter (between --- and ---)
         if let Some(frontmatter_body) = content.strip_prefix("---\n")
             && let Some(frontmatter_end) = frontmatter_body.find("\n---\n")

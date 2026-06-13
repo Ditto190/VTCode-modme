@@ -49,6 +49,7 @@ fn test_header_context_snapshot() {
         git: "clean".to_string(),
         mcp: "disabled".to_string(),
         primary_agent: None,
+        primary_agent_color: None,
         highlights: vec![],
         subagent_badges: vec![],
         version: "0.37.1".to_string(),
@@ -59,7 +60,7 @@ fn test_header_context_snapshot() {
     };
     assert_snapshot!(
         &format!("{:?}", context),
-        @"InlineHeaderContext { app_name: \"VT Code\", provider: \"openai\", model: \"gpt-oss-20b\", context_window_size: None, version: \"0.37.1\", search_tools: None, persistent_memory: None, pr_review: None, editor_context: None, git: \"clean\", reasoning: \"creative\", reasoning_stage: None, workspace_trust: \"trusted\", tools: \"enabled\", mcp: \"disabled\", primary_agent: None, highlights: [], subagent_badges: [] }"
+        @"InlineHeaderContext { app_name: \"VT Code\", provider: \"openai\", model: \"gpt-oss-20b\", context_window_size: None, version: \"0.37.1\", search_tools: None, persistent_memory: None, pr_review: None, editor_context: None, git: \"clean\", reasoning: \"creative\", reasoning_stage: None, workspace_trust: \"trusted\", tools: \"enabled\", mcp: \"disabled\", primary_agent: None, primary_agent_color: None, highlights: [], subagent_badges: [] }"
     );
 }
 

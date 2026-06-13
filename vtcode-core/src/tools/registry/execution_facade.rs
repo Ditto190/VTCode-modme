@@ -1003,26 +1003,30 @@ impl ToolRegistry {
         } else {
             self.execution_history.loop_limit_for(&tool_name, args)
         };
-        let (is_loop, repeat_count, _) = if skip_loop_detection {
-            (false, 0, String::new())
+        let loop_result = if skip_loop_detection {
+            crate::tools::registry::execution_history::LoopDetectionResult {
+                detected: false,
+                repeat_count: 0,
+                tool_name: tool_name.clone(),
+            }
         } else {
             self.execution_history.detect_loop(&tool_name, args)
         };
-        if is_loop && repeat_count > 1 {
-            let delay_ms =
-                (LOOP_THROTTLE_REGISTRY_BASE_MS * repeat_count as u64).min(LOOP_THROTTLE_MAX_MS);
+        if loop_result.detected && loop_result.repeat_count > 1 {
+            let delay_ms = (LOOP_THROTTLE_REGISTRY_BASE_MS * loop_result.repeat_count as u64)
+                .min(LOOP_THROTTLE_MAX_MS);
             if delay_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             }
         }
-        if loop_limit > 0 && is_loop {
+        if loop_limit > 0 && loop_result.detected {
             warn!(
                 tool = %tool_name,
-                repeats = repeat_count,
+                repeats = loop_result.repeat_count,
                 "Loop detected: agent calling same tool with identical parameters {} times",
-                repeat_count
+                loop_result.repeat_count
             );
-            if repeat_count >= loop_limit {
+            if loop_result.repeat_count >= loop_limit {
                 if readonly_classification {
                     let reuse_max_age = Duration::from_secs(120);
                     let reused = self
@@ -1039,7 +1043,7 @@ impl ToolRegistry {
                         if let Some(obj) = reused_value.as_object_mut() {
                             obj.insert("reused_recent_result".into(), json!(true));
                             obj.insert("loop_detected".into(), json!(true));
-                            obj.insert("repeat_count".into(), json!(repeat_count));
+                            obj.insert("repeat_count".into(), json!(loop_result.repeat_count));
                             obj.insert("limit".into(), json!(loop_limit));
                             obj.insert("tool".into(), json!(display_name));
                             let reused_spooled =
@@ -1055,7 +1059,7 @@ impl ToolRegistry {
                     }
                 }
 
-                let delay_ms = (LOOP_THROTTLE_REGISTRY_BASE_MS * repeat_count as u64)
+                let delay_ms = (LOOP_THROTTLE_REGISTRY_BASE_MS * loop_result.repeat_count as u64)
                     .min(LOOP_THROTTLE_MAX_MS);
                 if delay_ms > 0 {
                     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
@@ -1066,14 +1070,14 @@ impl ToolRegistry {
                     ToolErrorType::PolicyViolation,
                     agent_execution::loop_detection_block_message(
                         &display_name,
-                        repeat_count as u64,
+                        loop_result.repeat_count as u64,
                         None,
                     ),
                 );
                 let mut payload = error.to_json_value();
                 if let Some(obj) = payload.as_object_mut() {
                     obj.insert("loop_detected".into(), json!(true));
-                    obj.insert("repeat_count".into(), json!(repeat_count));
+                    obj.insert("repeat_count".into(), json!(loop_result.repeat_count));
                     obj.insert("limit".into(), json!(loop_limit));
                     obj.insert("tool".into(), json!(display_name));
                 }
