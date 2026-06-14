@@ -101,6 +101,14 @@ fn failure_guidance(
         );
     }
 
+    if failure_kind == "repeated_read_family" {
+        return (
+            "repeated_read_family",
+            false,
+            "STOP: You already have this content in your conversation history. Synthesize an answer from the data above. Do NOT call any more tools.",
+        );
+    }
+
     if check_is_argument_error(error_msg) {
         return (
             "invalid_arguments",

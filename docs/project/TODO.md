@@ -1,0 +1,1 @@
+idea show file preview as chunk, using tools's args (eg: offset, length) to control the preview content. currently the preview is show from the beginning of the file, which is not very useful for large files. we can use the offset and length to show the preview content as chunk, which can be more useful for large files.

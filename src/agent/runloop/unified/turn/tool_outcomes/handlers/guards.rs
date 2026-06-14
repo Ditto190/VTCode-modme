@@ -124,6 +124,21 @@ fn repeated_file_read_family_key(canonical_tool_name: &str, args: &Value) -> Opt
         tool_names::READ_FILE | tool_names::UNIFIED_FILE => {
             low_signal_family_key(canonical_tool_name, args)
         }
+        tool_names::UNIFIED_EXEC => {
+            // Track file-reading shell commands in the family guard to prevent
+            // bypass via unified_exec. Only commands on the is_readonly_unified_exec_command
+            // allowlist (tool_intent.rs) reach this point — cat, head, tail, bat.
+            // less/more are not on that allowlist so they get readonly_classification=false
+            // and are caught by enforce_repeated_shell_run_guard instead.
+            let parts = vtcode_core::tools::command_args::command_words(args).ok()??;
+            let command_name = parts.first()?.as_str();
+            if !matches!(command_name, "cat" | "head" | "tail" | "bat") {
+                return None;
+            }
+            // Use the full command as the family key so different files are tracked separately
+            let command_str = parts.join(" ");
+            Some(format!("{}::run::{}", canonical_tool_name, command_str))
+        }
         _ => None,
     }
 }
@@ -132,7 +147,7 @@ fn repeated_file_read_family_key(canonical_tool_name: &str, args: &Value) -> Opt
 fn build_repeated_file_read_family_error_content(target: &str) -> String {
     super::super::execution_result::build_error_content(
         format!(
-            "Repeated reads of '{}' with limited progress detected. Reuse the collected output, summarize findings, or narrow the range before reading again.",
+            "File '{}' already read. Content is in conversation history above. Synthesize your answer from existing data. Do NOT re-read.",
             target
         ),
         None,
@@ -397,5 +412,50 @@ mod tests {
             SPOOL_CHUNK_GREP_PATTERN
         );
         assert!(parsed.get("next_action").and_then(Value::as_str).is_some());
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_tracks_cat_via_unified_exec() {
+        let args = serde_json::json!({"command": "cat README.md"});
+        let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
+        assert_eq!(key, Some("unified_exec::run::cat README.md".to_string()));
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_tracks_head_via_unified_exec() {
+        let args = serde_json::json!({"command": "head -n 10 file.txt"});
+        let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
+        assert_eq!(
+            key,
+            Some("unified_exec::run::head -n 10 file.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_ignores_non_file_reading_commands() {
+        let args = serde_json::json!({"command": "ls -la"});
+        let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
+        assert_eq!(key, None);
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_ignores_git_status() {
+        let args = serde_json::json!({"command": "git status"});
+        let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
+        assert_eq!(key, None);
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_handles_cmd_alias() {
+        let args = serde_json::json!({"cmd": "cat Cargo.toml"});
+        let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
+        assert_eq!(key, Some("unified_exec::run::cat Cargo.toml".to_string()));
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_returns_none_for_missing_command() {
+        let args = serde_json::json!({});
+        let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
+        assert_eq!(key, None);
     }
 }
