@@ -406,12 +406,12 @@ trigger_docs_rs_rebuild() {
     fi
     print_distribution "Triggering docs.rs rebuild for version $version..."
     local crates=(
-        vtcode vtcode-core vtcode-config
-        vtcode-commons vtcode-markdown-store vtcode-indexer vtcode-bash-runner
-        vtcode-exec-events vtcode-file-search vtcode-acp vtcode-auth
-        vtcode-process-hardening
-        vtcode-macros vtcode-terminal-detection
-        vtcode-utility-tool-specs vtcode-collaboration-tool-specs vtcode-vim
+        vtcode-core vtcode-config
+        vtcode-commons vtcode-indexer vtcode-bash-runner
+        vtcode-exec-events vtcode-acp vtcode-auth
+        vtcode-macros
+        vtcode-utility-tool-specs vtcode-a2a vtcode-mcp
+        vtcode-ui vtcode-safety vtcode-llm vtcode-skills
     )
     for crate in "${crates[@]}"; do
         curl -s -o /dev/null "https://docs.rs/${crate}/${version}" || true
@@ -588,7 +588,7 @@ trigger_and_wait_ci() {
     fi
 
     print_info "Step 3.5: Triggering CI for Linux/Windows..."
-    git push origin --tags --no-verify
+    git push origin --tags --no-verify --force
 
     if ! gh workflow run build-linux-windows.yml --field tag="$released_version"; then
         print_warning "Failed to trigger CI workflow"

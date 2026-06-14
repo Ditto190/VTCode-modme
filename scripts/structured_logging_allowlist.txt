@@ -19,10 +19,3 @@ vtcode-core/src/tools/ripgrep_installer/platform.rs | Dependency installer fallb
 vtcode-core/src/ui/** | UI helpers intentionally print prompts and formatted terminal output.
 vtcode-core/src/utils/common.rs | Shared terminal formatting helpers intentionally write to stdout.
 vtcode-core/src/utils/safety.rs | Safety summaries are direct user-facing terminal output.
-vtcode-lmstudio/src/client.rs | Model download progress is intentional terminal feedback.
-vtcode-process-hardening/src/lib.rs | Pre-main hardening can only report fatal errors through stderr.
-vtcode-tools/src/executor.rs | Executor diagnostics intentionally print a human-readable report.
-vtcode-tui/src/core_tui/mod.rs | TUI startup failures are reported before tracing is initialized.
-vtcode-tui/src/core_tui/panic_hook.rs | Panic fallback must write directly to stderr.
-vtcode-tui/src/session_options.rs | TUI terminal checks fail before tracing is initialized.
-vtcode-tui/src/utils/transcript.rs | Transcript mirror fallback intentionally writes to stderr.

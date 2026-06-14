@@ -18,19 +18,15 @@ Options:
                      performing the real publish. This is the default when the
                      VT_RELEASE_DRY_RUN environment variable is set to `1`.
   --start-from CRATE Resume publishing from the provided crate name. Valid
-                     crates: vtcode-commons, vtcode-tool-types,
-                     vtcode-process-hardening,
+                     crates: vtcode-commons,
                      vtcode-auth, vtcode-exec-events,
-                     vtcode-markdown-store,
-                     vtcode-macros, vtcode-vim,
-                     vtcode-config, vtcode-file-search,
+                     vtcode-macros,
+                     vtcode-config,
                      vtcode-indexer, vtcode-bash-runner,
-                     vtcode-terminal-detection,
-                     vtcode-collaboration-tool-specs,
                      vtcode-utility-tool-specs,
-                     vtcode-safety, vtcode-pods, vtcode-a2a,
+                     vtcode-safety, vtcode-a2a,
                      vtcode-mcp,
-                     vtcode-ui, vtcode-core, vtcode-acp, vtcode.
+                     vtcode-ui, vtcode-core, vtcode-acp.
   --skip-tests       Skip running the workspace fmt/clippy/test checks. Use with
                      caution; the release plan expects the validation suite to
                      pass before publishing.
@@ -102,28 +98,19 @@ done
 
 CRATES=(
     vtcode-commons
-    vtcode-tool-types
-    vtcode-process-hardening
     vtcode-auth
     vtcode-exec-events
-    vtcode-markdown-store
     vtcode-macros
-    vtcode-vim
     vtcode-config
-    vtcode-file-search
     vtcode-indexer
     vtcode-bash-runner
-    vtcode-terminal-detection
-    vtcode-collaboration-tool-specs
     vtcode-utility-tool-specs
     vtcode-safety
-    vtcode-pods
     vtcode-a2a
     vtcode-mcp
     vtcode-ui
     vtcode-core
     vtcode-acp
-    vtcode
 )
 
 # Validate that all workspace path dependencies of crates in the publish list
@@ -232,7 +219,7 @@ generate_docs() {
         echo "Skipping doc generation for ${crate}."
         return
     fi
-    run_cmd "cargo doc --no-deps --all-features -p ${crate}"
+    run_cmd "cargo doc --no-deps -p ${crate}"
 }
 
 maybe_tag() {
