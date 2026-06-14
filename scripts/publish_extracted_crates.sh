@@ -23,10 +23,7 @@ Options:
                      vtcode-macros,
                      vtcode-config,
                      vtcode-indexer, vtcode-bash-runner,
-                     vtcode-utility-tool-specs,
-                     vtcode-safety, vtcode-a2a,
-                     vtcode-mcp,
-                     vtcode-ui, vtcode-core, vtcode-acp.
+                     vtcode-utility-tool-specs.
   --skip-tests       Skip running the workspace fmt/clippy/test checks. Use with
                      caution; the release plan expects the validation suite to
                      pass before publishing.
@@ -105,12 +102,6 @@ CRATES=(
     vtcode-indexer
     vtcode-bash-runner
     vtcode-utility-tool-specs
-    vtcode-safety
-    vtcode-a2a
-    vtcode-mcp
-    vtcode-ui
-    vtcode-core
-    vtcode-acp
 )
 
 # Validate that all workspace path dependencies of crates in the publish list
