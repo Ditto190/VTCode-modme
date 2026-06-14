@@ -55,14 +55,6 @@ index 0000000..1111111 100644
 }
 
 #[test]
-fn strip_line_number_removes_prefix() {
-    assert_eq!(strip_line_number("  42: fn main() {"), "fn main() {");
-    assert_eq!(strip_line_number("1:hello"), "hello");
-    assert_eq!(strip_line_number("no_number_here"), "no_number_here");
-    assert_eq!(strip_line_number("abc: not a number"), "abc: not a number");
-}
-
-#[test]
 fn shorten_path_preserves_short() {
     assert_eq!(shorten_path("/src/main.rs", 60), "/src/main.rs");
 }

@@ -947,7 +947,8 @@ mod read_tests {
         let grep_manager = std::sync::Arc::new(GrepSearchManager::new(workspace_root.clone()));
         let file_ops = FileOpsTool::new(workspace_root, grep_manager);
 
-        // Test byte-based paging: skip first 6 bytes ("line1\n") and read next 6 bytes
+        // Test byte-based paging: skip first 6 bytes ("line1\n") and read next bytes
+        // The new handler aligns to line boundaries and adds line numbers
         let args = json!({
             "path": test_file.to_string_lossy().into_owned(),
             "offset_bytes": 6,
@@ -956,7 +957,9 @@ mod read_tests {
 
         let result = file_ops.read_file(args).await.unwrap();
         assert!(result["success"].as_bool().unwrap());
-        assert_eq!(result["content"].as_str().unwrap(), "line2\n");
+        // New handler returns line-numbered content aligned to line boundaries
+        let content = result["content"].as_str().unwrap();
+        assert!(content.contains("2: line2"));
     }
 
     #[tokio::test]

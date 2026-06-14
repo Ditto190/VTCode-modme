@@ -917,9 +917,8 @@ mod tests {
         .expect("read_file preview payload should render");
 
         let inline_output = collect_inline_output(&mut receiver);
-        assert!(inline_output.contains("line 1"));
-        assert!(inline_output.contains("line 12"));
-        assert!(inline_output.contains("88 more lines"));
+        // read_file now shows a summary line instead of code preview
+        assert!(inline_output.contains("Read 100 lines"));
     }
 
     #[tokio::test]

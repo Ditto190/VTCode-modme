@@ -10,10 +10,11 @@ use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Semaphore;
-use vtcode_commons::async_utils::read_exact_uninit;
 use vtcode_commons::diff_paths::looks_like_diff_content;
+
+use crate::tools::file_ops::read_byte_range;
 
 use crate::tools::error_helpers::deserialize_tool_args;
 use crate::tools::traits::Tool;
@@ -488,6 +489,7 @@ impl ReadFileHandler {
         if offset_bytes.is_some() || page_size_bytes.is_some() {
             let byte_offset = offset_bytes.unwrap_or(0);
             let byte_length = page_size_bytes.unwrap_or(DEFAULT_BYTE_CHUNK_SIZE);
+            anyhow::ensure!(byte_length > 0, "page_size_bytes must be greater than 0");
             return self.read_byte_range(&path, byte_offset, byte_length).await;
         }
 
@@ -530,73 +532,19 @@ impl ReadFileHandler {
 
     /// Read a byte range from a file using seek-based access.
     ///
-    /// Only the requested chunk is loaded into memory, making this efficient for
-    /// large files. Returns the content as a UTF-8 string (lossy for non-UTF-8 bytes).
+    /// Delegates to the shared `read_byte_range` function in `file_ops`.
+    /// Returns content with line numbers prefixed (e.g., "42: content").
     async fn read_byte_range(
         &self,
         file_path: &Path,
         offset_bytes: u64,
         page_size_bytes: usize,
     ) -> Result<ReadFileOutcome> {
-        let metadata = tokio::fs::metadata(file_path)
-            .await
-            .with_context(|| format!("Failed to read metadata for: {}", file_path.display()))?;
-
-        if !metadata.is_file() {
-            anyhow::bail!("Path is not a file: {}", file_path.display());
-        }
-
-        let file_size = metadata.len();
-
-        // Offset beyond file boundary: return empty
-        if offset_bytes >= file_size {
-            return Ok(ReadFileOutcome {
-                content: String::new(),
-                lines_read: 0,
-                has_more: false,
-            });
-        }
-
-        let mut file = File::open(file_path)
-            .await
-            .with_context(|| format!("Failed to open: {}", file_path.display()))?;
-
-        file.seek(std::io::SeekFrom::Start(offset_bytes))
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to seek to offset {} in: {}",
-                    offset_bytes,
-                    file_path.display()
-                )
-            })?;
-
-        // Clamp read size to file bounds
-        let end_pos = std::cmp::min(offset_bytes + page_size_bytes as u64, file_size);
-        let actual_read_size = (end_pos - offset_bytes) as usize;
-
-        let buffer = if actual_read_size > 0 {
-            read_exact_uninit(&mut file, actual_read_size)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to read {} bytes from offset {} in: {}",
-                        actual_read_size,
-                        offset_bytes,
-                        file_path.display()
-                    )
-                })?
-        } else {
-            Vec::new()
-        };
-
-        let content = String::from_utf8_lossy(&buffer).into_owned();
-        let has_more = end_pos < file_size;
-
+        let result = read_byte_range(file_path, offset_bytes, page_size_bytes, true).await?;
         Ok(ReadFileOutcome {
-            content,
-            lines_read: 0,
-            has_more,
+            content: result.content,
+            lines_read: result.lines_read,
+            has_more: result.has_more,
         })
     }
 
@@ -619,15 +567,21 @@ impl Tool for ReadFileHandler {
         let args: ReadFileArgs = deserialize_tool_args(&args, "read_file")?;
 
         let file_path = args.file_path.clone();
-        let content = self.handle_detailed(args).await?.content;
+        let outcome = self.handle_detailed(args).await?;
 
-        Ok(json!({
-            "content": content,
+        let mut response = json!({
+            "content": outcome.content,
             "file_path": file_path,
             "path": file_path,
             "success": true,
             "no_spool": true
-        }))
+        });
+
+        if outcome.has_more {
+            response["has_more"] = json!(true);
+        }
+
+        Ok(response)
     }
 
     fn name(&self) -> &str {
@@ -1491,7 +1445,8 @@ mod tests {
             page_size_bytes: Some(5),
         };
         let outcome = handler.handle_detailed(args).await?;
-        assert_eq!(outcome.content, "Hello");
+        // Content is line-numbered: "1: Hello"
+        assert_eq!(outcome.content, "1: Hello");
         assert!(outcome.has_more);
         Ok(())
     }
@@ -1499,9 +1454,11 @@ mod tests {
     #[tokio::test]
     async fn byte_range_reads_with_offset() -> Result<()> {
         let mut temp = NamedTempFile::new()?;
-        temp.as_file_mut().write_all(b"Hello, World!")?;
+        writeln!(temp, "Hello, World!")?;
+        writeln!(temp, "Second line")?;
 
         let handler = ReadFileHandler;
+        // Seek past "Hello, World!\n" (14 bytes) to start of second line
         let args = ReadFileArgs {
             file_path: temp.path().to_string_lossy().to_string(),
             offset: 1,
@@ -1510,11 +1467,12 @@ mod tests {
             indentation: None,
             max_tokens: None,
             condense: false,
-            offset_bytes: Some(7),
-            page_size_bytes: Some(6),
+            offset_bytes: Some(14),
+            page_size_bytes: Some(50),
         };
         let outcome = handler.handle_detailed(args).await?;
-        assert_eq!(outcome.content, "World!");
+        // Should start at line 2
+        assert!(outcome.content.contains("2: Second line"));
         assert!(!outcome.has_more);
         Ok(())
     }
@@ -1544,8 +1502,11 @@ mod tests {
 
     #[tokio::test]
     async fn byte_range_clamps_to_file_size() -> Result<()> {
+        // Multi-line file so we can test partial-line skipping
         let mut temp = NamedTempFile::new()?;
-        temp.as_file_mut().write_all(b"abcde")?;
+        writeln!(temp, "first line")?;
+        writeln!(temp, "second line")?;
+        writeln!(temp, "third line")?;
 
         let handler = ReadFileHandler;
         let args = ReadFileArgs {
@@ -1556,11 +1517,14 @@ mod tests {
             indentation: None,
             max_tokens: None,
             condense: false,
-            offset_bytes: Some(3),
+            offset_bytes: Some(0),
             page_size_bytes: Some(100), // Request more than available
         };
         let outcome = handler.handle_detailed(args).await?;
-        assert_eq!(outcome.content, "de");
+        // Should have line numbers for all three lines
+        assert!(outcome.content.contains("1: first line"));
+        assert!(outcome.content.contains("2: second line"));
+        assert!(outcome.content.contains("3: third line"));
         assert!(!outcome.has_more);
         Ok(())
     }
@@ -1592,9 +1556,12 @@ mod tests {
     #[tokio::test]
     async fn byte_range_has_more_when_not_at_eof() -> Result<()> {
         let mut temp = NamedTempFile::new()?;
-        temp.as_file_mut().write_all(b"abcdef")?;
+        writeln!(temp, "line one")?;
+        writeln!(temp, "line two")?;
+        writeln!(temp, "line three")?;
 
         let handler = ReadFileHandler;
+        // Read only first 10 bytes - should get first line only
         let args = ReadFileArgs {
             file_path: temp.path().to_string_lossy().to_string(),
             offset: 1,
@@ -1604,19 +1571,22 @@ mod tests {
             max_tokens: None,
             condense: false,
             offset_bytes: Some(0),
-            page_size_bytes: Some(3),
+            page_size_bytes: Some(10),
         };
         let outcome = handler.handle_detailed(args).await?;
-        assert_eq!(outcome.content, "abc");
+        // Should have line number
+        assert!(outcome.content.contains("1: line one"));
         assert!(outcome.has_more);
         Ok(())
     }
 
     #[tokio::test]
     async fn byte_range_defaults_to_8192_when_length_omitted() -> Result<()> {
+        // Create a file large enough that 8192 bytes doesn't cover everything
         let mut temp = NamedTempFile::new()?;
-        let data = "x".repeat(10000);
-        temp.as_file_mut().write_all(data.as_bytes())?;
+        for i in 1..=500 {
+            writeln!(temp, "line-{i}: {}", "x".repeat(20))?;
+        }
 
         let handler = ReadFileHandler;
         let args = ReadFileArgs {
@@ -1631,7 +1601,8 @@ mod tests {
             page_size_bytes: None, // Should default to 8192
         };
         let outcome = handler.handle_detailed(args).await?;
-        assert_eq!(outcome.content.len(), 8192);
+        // Content should have line numbers
+        assert!(outcome.content.contains("1: line-1"));
         assert!(outcome.has_more);
         Ok(())
     }

@@ -1,13 +1,12 @@
+use super::super::read_byte_range;
 use super::FileOpsTool;
 use crate::config::constants::tools;
 use crate::tools::builder::ToolResponseBuilder;
 use crate::tools::types::Input;
-use crate::utils::async_utils::read_exact_uninit;
 use crate::utils::file_utils::read_file_with_context;
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 use std::path::Path;
-use tokio::io::AsyncSeekExt;
 
 impl FileOpsTool {
     pub(super) async fn read_file_paged(
@@ -127,70 +126,17 @@ impl FileOpsTool {
         &self,
         file_path: &Path,
         input: &Input,
-        file_size: u64,
+        _file_size: u64,
     ) -> Result<(String, bool)> {
-        // Validate and extract parameters
         let offset_bytes = input.offset_bytes.unwrap_or(0);
-        let page_size_bytes = input.page_size_bytes.unwrap_or(8192); // Reasonable default: 8KB
+        let page_size_bytes = input.page_size_bytes.unwrap_or(8192);
 
-        // Validate offset and page size
-        if offset_bytes >= file_size {
-            return Ok((String::new(), false));
-        }
         if page_size_bytes == 0 {
             return Err(anyhow!("Page size must be greater than 0"));
         }
 
-        // Check for overflow before adding (safe cast since page_size_bytes < file_size)
-        let page_size_u64 = page_size_bytes as u64;
-        if offset_bytes > u64::MAX - page_size_u64 {
-            return Err(anyhow!(
-                "Offset_bytes + page_size_bytes would overflow: {} + {}",
-                offset_bytes,
-                page_size_bytes
-            ));
-        }
-
-        // Open the file and seek to the offset
-        let mut file = tokio::fs::File::open(file_path)
-            .await
-            .with_context(|| format!("Failed to open file: {}", file_path.display()))?;
-
-        // Calculate the end position (don't exceed file boundaries)
-        let end_pos = std::cmp::min(offset_bytes + page_size_u64, file_size);
-        let actual_read_size = (end_pos - offset_bytes) as usize;
-
-        // Seek to the offset position
-        file.seek(std::io::SeekFrom::Start(offset_bytes))
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to seek to offset {} in file: {}",
-                    offset_bytes,
-                    file_path.display()
-                )
-            })?;
-
-        // Read the specified number of bytes without zero-initializing first
-        let buffer = if actual_read_size > 0 {
-            read_exact_uninit(&mut file, actual_read_size)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to read {} bytes from offset {} in file: {}",
-                        actual_read_size,
-                        offset_bytes,
-                        file_path.display()
-                    )
-                })?
-        } else {
-            Vec::new()
-        };
-
-        // Convert to string, handling potential UTF-8 errors gracefully
-        let final_content = String::from_utf8_lossy(&buffer).into_owned();
-        let is_truncated = end_pos < file_size;
-
-        Ok((final_content, is_truncated))
+        // Legacy path: raw bytes without line numbers
+        let result = read_byte_range(file_path, offset_bytes, page_size_bytes, false).await?;
+        Ok((result.content, result.has_more))
     }
 }

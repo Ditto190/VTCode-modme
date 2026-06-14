@@ -122,30 +122,16 @@ impl ReadChunkContinuationArgs {
     }
 
     pub fn to_value(&self) -> Value {
-        if self.offset_bytes.is_some() || self.page_size_bytes.is_some() {
-            let mut map = json!({
-                PATH_KEY: self.path,
-            });
-            if let Some(ob) = self.offset_bytes {
-                map[OFFSET_BYTES_KEY] = json!(ob);
-            }
-            if let Some(ps) = self.page_size_bytes {
-                map[PAGE_SIZE_BYTES_KEY] = json!(ps);
-            }
-            return map;
-        }
-        json!({
-            PATH_KEY: self.path,
-            OFFSET_KEY: self.offset,
-            LIMIT_KEY: self.limit
-        })
+        self.serialize_inner(PATH_KEY, OFFSET_KEY, LIMIT_KEY)
     }
 
     pub fn to_compact_value(&self) -> Value {
+        self.serialize_inner(COMPACT_PATH_KEY, COMPACT_OFFSET_KEY, COMPACT_LIMIT_KEY)
+    }
+
+    fn serialize_inner(&self, path_key: &str, offset_key: &str, limit_key: &str) -> Value {
         if self.offset_bytes.is_some() || self.page_size_bytes.is_some() {
-            let mut map = json!({
-                COMPACT_PATH_KEY: self.path,
-            });
+            let mut map = json!({ path_key: self.path });
             if let Some(ob) = self.offset_bytes {
                 map[OFFSET_BYTES_KEY] = json!(ob);
             }
@@ -155,9 +141,9 @@ impl ReadChunkContinuationArgs {
             return map;
         }
         json!({
-            COMPACT_PATH_KEY: self.path,
-            COMPACT_OFFSET_KEY: self.offset,
-            COMPACT_LIMIT_KEY: self.limit
+            path_key: self.path,
+            offset_key: self.offset,
+            limit_key: self.limit
         })
     }
 }

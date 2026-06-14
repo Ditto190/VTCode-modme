@@ -428,14 +428,19 @@ fn line_number_style(theme_styles: &ThemeStyles, base_style: Style) -> Style {
     } else {
         base_style
     };
-    let dimmed_fg = source
+    // Blend the foreground with background at 35% for a visible but subdued gutter color.
+    // No DIMMED effect — keep line numbers readable without squinting.
+    let blended_fg = source
         .get_fg_color()
-        .and_then(|fg| vtcode_commons::colors::blend_colors(&fg, &theme_styles.background, 0.55));
-    let mut style = Style::new().effects(source.get_effects() | Effects::DIMMED);
-    if let Some(color) = dimmed_fg {
+        .and_then(|fg| vtcode_commons::colors::blend_colors(&fg, &theme_styles.background, 0.35));
+    let mut style = Style::new();
+    if let Some(color) = blended_fg {
         style = style.fg_color(Some(color));
     } else if let Some(fg) = source.get_fg_color() {
         style = style.fg_color(Some(fg));
+    } else {
+        // Last resort: use the theme foreground color
+        style = style.fg_color(Some(theme_styles.foreground));
     }
     style
 }
@@ -567,6 +572,9 @@ fn code_block_style(theme_styles: &ThemeStyles, base_style: Style) -> Style {
     let mut style = base_style;
     if let Some(color) = fg {
         style = style.fg_color(Some(color));
+    } else {
+        // Ensure code text always has a visible foreground color
+        style = style.fg_color(Some(theme_styles.foreground));
     }
     style
 }

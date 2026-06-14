@@ -1,12 +1,11 @@
 use anyhow::Result;
 use serde_json::Value;
-use vtcode_commons::diff_paths::{language_hint_from_path, looks_like_diff_content};
 use vtcode_commons::preview;
 use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
-use super::streams::{build_markdown_code_block, render_diff_content_block};
+use super::streams::render_diff_content_block;
 use super::styles::{GitStyles, LsStyles};
 pub(crate) use vtcode_commons::diff_preview::format_numbered_unified_diff as format_diff_content_lines_with_numbers;
 
@@ -302,35 +301,36 @@ pub(crate) fn render_read_file_output(renderer: &mut AnsiRenderer, val: &Value) 
         return Ok(());
     }
 
-    // Single file read: show line range and content preview
-    if let Some(start) = get_u64(val, "start_line")
-        && let Some(end) = get_u64(val, "end_line")
-    {
-        let count = end.saturating_sub(start) + 1;
-        renderer.line(
-            MessageStyle::ToolDetail,
-            &format!("lines {}-{} ({} lines)", start, end, count),
-        )?;
-    }
+    // Single file read: show summary line
+    let lines_read = get_u64(val, "lines_read");
+    let start_line = get_u64(val, "start_line");
+    let end_line = get_u64(val, "end_line");
+    let has_more = val
+        .get("has_more")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
-    if let Some(content) = get_string(val, "content") {
-        if looks_like_diff_content(content) {
-            let git_styles = GitStyles::new();
-            let ls_styles = LsStyles::from_env();
-            renderer.line(MessageStyle::ToolDetail, "")?;
-            render_diff_content(renderer, content, &git_styles, &ls_styles)?;
+    let summary = if let Some(n) = lines_read {
+        if has_more {
+            format!("Read {} lines (more available)", n)
         } else {
-            let file_path = get_string(val, "file_path").or_else(|| get_string(val, "path"));
-            render_content_preview(renderer, content, file_path)?;
+            format!("Read {} lines", n)
         }
-    }
+    } else if let (Some(start), Some(end)) = (start_line, end_line) {
+        let count = end.saturating_sub(start) + 1;
+        format!("Read lines {}-{} ({} lines)", start, end, count)
+    } else if let Some(content) = get_string(val, "content") {
+        let count = content.lines().count();
+        format!("Read {} lines", count)
+    } else {
+        return Ok(());
+    };
+    renderer.line(MessageStyle::ToolDetail, &summary)?;
 
     Ok(())
 }
 
 const MAX_BATCH_DISPLAY_FILES: usize = 10;
-const MAX_PREVIEW_LINES: usize = 12;
-const MAX_FULL_RENDER_LINES: usize = 80;
 
 fn shorten_path(path: &str, max_len: usize) -> String {
     if preview::display_width(path) <= max_len {
@@ -350,50 +350,6 @@ fn shorten_path(path: &str, max_len: usize) -> String {
         return name_str.to_string();
     }
     preview::truncate_to_display_width(path, max_len).to_string()
-}
-
-fn strip_line_number(line: &str) -> &str {
-    let trimmed = line.trim_start();
-    if let Some(pos) = trimmed.find(':') {
-        let prefix = &trimmed[..pos];
-        if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
-            let rest = &trimmed[pos + 1..];
-            return rest.strip_prefix(' ').unwrap_or(rest);
-        }
-    }
-    line
-}
-
-fn render_content_preview(
-    renderer: &mut AnsiRenderer,
-    content: &str,
-    file_path: Option<&str>,
-) -> Result<()> {
-    let all_lines: Vec<&str> = content.lines().map(strip_line_number).collect();
-    if all_lines.is_empty() || all_lines.iter().all(|line| line.trim().is_empty()) {
-        return Ok(());
-    }
-    let show_all = all_lines.len() <= MAX_FULL_RENDER_LINES;
-    let display_lines: &[&str] = if show_all {
-        &all_lines
-    } else {
-        &all_lines[..MAX_PREVIEW_LINES.min(all_lines.len())]
-    };
-
-    renderer.line(MessageStyle::ToolDetail, "")?;
-
-    let language = file_path.and_then(language_hint_from_path);
-    let markdown = build_markdown_code_block(display_lines, language.as_deref(), false);
-    renderer.render_markdown_output(MessageStyle::ToolOutput, &markdown)?;
-    if !show_all {
-        renderer.line_with_override_style(
-            MessageStyle::ToolDetail,
-            MessageStyle::ToolDetail.style().dimmed(),
-            &format!("… +{} more lines", all_lines.len() - display_lines.len()),
-        )?;
-    }
-
-    Ok(())
 }
 
 /// Render diff content lines with proper truncation and styling (compact format)
