@@ -287,6 +287,7 @@ impl LLMProvider for PoolsideProvider {
             model,
             &[],
             super::shared::OpenAiDeltaOrder::ContentFirst,
+            true,
         ))
     }
 

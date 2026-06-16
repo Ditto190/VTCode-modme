@@ -635,12 +635,16 @@ fn emit_reasoning_delta(
     delta: &Value,
     reasoning_fields: &[&'static str],
 ) {
-    // Pick the first present reasoning field, allowing providers to declare a
+    // Pick the first non-empty reasoning field, allowing providers to declare a
     // fallback order (e.g. `["reasoning", "reasoning_content"]`).
-    let Some(reasoning) = reasoning_fields
-        .iter()
-        .find_map(|field| delta.get(*field).and_then(Value::as_str))
-    else {
+    // Empty strings are skipped so that a present-but-empty primary field
+    // does not block fallback to the next candidate.
+    let Some(reasoning) = reasoning_fields.iter().find_map(|field| {
+        delta
+            .get(*field)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    }) else {
         return;
     };
     let Some(delta) = aggregator.handle_reasoning(reasoning) else {
@@ -668,6 +672,7 @@ pub fn handle_openai_compatible_chunk(
     tx: &tokio::sync::mpsc::UnboundedSender<Result<LLMStreamEvent, LLMError>>,
     reasoning_fields: &[&'static str],
     delta_order: OpenAiDeltaOrder,
+    include_cache_metrics: bool,
 ) {
     if let Some(choices) = value.get("choices").and_then(Value::as_array)
         && let Some(choice) = choices.first()
@@ -695,7 +700,8 @@ pub fn handle_openai_compatible_chunk(
     }
 
     if let Some(_usage_value) = value.get("usage")
-        && let Some(usage) = crate::llm::providers::common::parse_usage_openai_format(value, true)
+        && let Some(usage) =
+            crate::llm::providers::common::parse_usage_openai_format(value, include_cache_metrics)
     {
         aggregator.set_usage(usage);
     }
@@ -1440,5 +1446,167 @@ mod tests {
         let response = aggregator.finalize();
         assert_eq!(response.reasoning.as_deref(), Some("step one"));
         assert!(response.reasoning_details.is_some());
+    }
+
+    #[test]
+    fn handle_chunk_extracts_content_delta() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut aggregator = StreamAggregator::new("test-model".to_string());
+        let chunk = json!({
+            "choices": [{"delta": {"content": "hello"}}]
+        });
+
+        handle_openai_compatible_chunk(
+            &chunk,
+            &mut aggregator,
+            &tx,
+            &[],
+            OpenAiDeltaOrder::ContentFirst,
+            false,
+        );
+
+        let event = rx.try_recv().expect("event expected");
+        match event.unwrap() {
+            LLMStreamEvent::Token { delta } => {
+                assert_eq!(delta, "hello");
+            }
+            other => panic!("expected Token event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_chunk_extracts_reasoning_delta() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut aggregator = StreamAggregator::new("test-model".to_string());
+        let chunk = json!({
+            "choices": [{"delta": {"reasoning_content": "thinking..."}}]
+        });
+
+        handle_openai_compatible_chunk(
+            &chunk,
+            &mut aggregator,
+            &tx,
+            &["reasoning_content"],
+            OpenAiDeltaOrder::ReasoningFirst,
+            false,
+        );
+
+        let event = rx.try_recv().expect("event expected");
+        match event.unwrap() {
+            LLMStreamEvent::Reasoning { delta } => {
+                assert_eq!(delta, "thinking...");
+            }
+            other => panic!("expected Reasoning event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_chunk_aggregates_tool_calls() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut aggregator = StreamAggregator::new("test-model".to_string());
+        let chunk = json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_1",
+                        "function": {"name": "search", "arguments": "{\"q\":\"test\"}"}
+                    }]
+                }
+            }]
+        });
+
+        handle_openai_compatible_chunk(
+            &chunk,
+            &mut aggregator,
+            &tx,
+            &[],
+            OpenAiDeltaOrder::ContentFirst,
+            false,
+        );
+
+        let response = aggregator.finalize();
+        let calls = response.tool_calls.expect("tool calls expected");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        let func = calls[0].function.as_ref().expect("function expected");
+        assert_eq!(func.name, "search");
+        assert_eq!(func.arguments, "{\"q\":\"test\"}");
+    }
+
+    #[test]
+    fn handle_chunk_skips_empty_reasoning_and_falls_back() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut aggregator = StreamAggregator::new("test-model".to_string());
+        // Evolink-style: reasoning is empty string, reasoning_content has actual content
+        let chunk = json!({
+            "choices": [{"delta": {"reasoning": "", "reasoning_content": "actual reasoning"}}]
+        });
+
+        handle_openai_compatible_chunk(
+            &chunk,
+            &mut aggregator,
+            &tx,
+            &["reasoning", "reasoning_content"],
+            OpenAiDeltaOrder::ReasoningFirst,
+            false,
+        );
+
+        let event = rx.try_recv().expect("event expected");
+        match event.unwrap() {
+            LLMStreamEvent::Reasoning { delta } => {
+                assert_eq!(delta, "actual reasoning");
+            }
+            other => panic!("expected Reasoning event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_chunk_passes_include_cache_metrics_to_usage() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut aggregator = StreamAggregator::new("test-model".to_string());
+        let chunk = json!({
+            "choices": [{"delta": {}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "prompt_cache_hit_tokens": 30,
+                "prompt_cache_miss_tokens": 70
+            }
+        });
+
+        // With include_cache_metrics = false (Evolink/Moonshot/StepFun/ZAI behavior)
+        handle_openai_compatible_chunk(
+            &chunk,
+            &mut aggregator,
+            &tx,
+            &[],
+            OpenAiDeltaOrder::ContentFirst,
+            false,
+        );
+
+        let response = aggregator.finalize();
+        let usage = response.usage.expect("usage expected");
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.cached_prompt_tokens, None);
+        assert_eq!(usage.cache_creation_tokens, None);
+
+        // With include_cache_metrics = true (DeepSeek behavior)
+        let mut aggregator2 = StreamAggregator::new("test-model".to_string());
+        handle_openai_compatible_chunk(
+            &chunk,
+            &mut aggregator2,
+            &tx,
+            &[],
+            OpenAiDeltaOrder::ContentFirst,
+            true,
+        );
+
+        let response2 = aggregator2.finalize();
+        let usage2 = response2.usage.expect("usage expected");
+        assert_eq!(usage2.prompt_tokens, 100);
+        assert_eq!(usage2.cached_prompt_tokens, Some(30));
+        assert_eq!(usage2.cache_creation_tokens, Some(70));
     }
 }

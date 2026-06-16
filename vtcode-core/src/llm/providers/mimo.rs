@@ -351,6 +351,7 @@ impl LLMProvider for MiMoProvider {
             model,
             &["reasoning_content"],
             super::shared::OpenAiDeltaOrder::ReasoningFirst,
+            true,
         ))
     }
 

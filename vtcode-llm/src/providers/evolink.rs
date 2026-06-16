@@ -546,10 +546,13 @@ impl LLMProvider for EvolinkProvider {
                         && let Some(choice) = choices.first()
                     {
                         if let Some(delta) = choice.get("delta") {
-                            if let Some(reasoning) = delta
-                                .get("reasoning")
-                                .or_else(|| delta.get("reasoning_content"))
-                                .and_then(|v| v.as_str())
+                            if let Some(reasoning) =
+                                ["reasoning", "reasoning_content"].iter().find_map(|field| {
+                                    delta
+                                        .get(*field)
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| !s.is_empty())
+                                })
                                 && let Some(delta) = aggregator.handle_reasoning(reasoning)
                             {
                                 let _ = tx.send(Ok(LLMStreamEvent::Reasoning { delta }));

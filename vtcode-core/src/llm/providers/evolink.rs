@@ -512,6 +512,7 @@ impl LLMProvider for EvolinkProvider {
             model,
             &["reasoning", "reasoning_content"],
             super::shared::OpenAiDeltaOrder::ReasoningFirst,
+            false,
         ))
     }
 

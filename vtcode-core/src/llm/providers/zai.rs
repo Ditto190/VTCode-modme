@@ -319,6 +319,7 @@ impl LLMProvider for ZAIProvider {
             model,
             &["reasoning_content"],
             super::shared::OpenAiDeltaOrder::ContentFirst,
+            false,
         ))
     }
 

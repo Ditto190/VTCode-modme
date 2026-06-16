@@ -337,6 +337,7 @@ impl LLMProvider for QwenProvider {
             model,
             Some("reasoning_content"),
             super::shared::OpenAiDeltaOrder::ReasoningFirst,
+            true,
         ))
     }
 

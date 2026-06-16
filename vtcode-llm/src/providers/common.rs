@@ -444,6 +444,7 @@ pub fn spawn_openai_compatible_stream(
     model: String,
     reasoning_field: Option<&'static str>,
     delta_order: crate::providers::shared::OpenAiDeltaOrder,
+    include_cache_metrics: bool,
 ) -> LLMStream {
     use async_stream::try_stream;
 
@@ -467,6 +468,7 @@ pub fn spawn_openai_compatible_stream(
                     &tx,
                     reasoning_field,
                     delta_order,
+                    include_cache_metrics,
                 );
                 Ok(())
             },

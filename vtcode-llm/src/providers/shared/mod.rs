@@ -666,6 +666,7 @@ pub fn handle_openai_compatible_chunk(
     tx: &tokio::sync::mpsc::UnboundedSender<Result<LLMStreamEvent, LLMError>>,
     reasoning_field: Option<&'static str>,
     delta_order: OpenAiDeltaOrder,
+    include_cache_metrics: bool,
 ) {
     if let Some(choices) = value.get("choices").and_then(Value::as_array)
         && let Some(choice) = choices.first()
@@ -693,7 +694,8 @@ pub fn handle_openai_compatible_chunk(
     }
 
     if let Some(_usage_value) = value.get("usage")
-        && let Some(usage) = crate::providers::common::parse_usage_openai_format(value, true)
+        && let Some(usage) =
+            crate::providers::common::parse_usage_openai_format(value, include_cache_metrics)
     {
         aggregator.set_usage(usage);
     }

@@ -328,6 +328,7 @@ impl LLMProvider for DeepSeekProvider {
             model,
             &["reasoning_content"],
             super::shared::OpenAiDeltaOrder::ReasoningFirst,
+            true,
         ))
     }
 

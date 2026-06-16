@@ -304,6 +304,7 @@ impl LLMProvider for MistralProvider {
             model,
             Some("reasoning_content"),
             super::shared::OpenAiDeltaOrder::ContentFirst,
+            true,
         ))
     }
 

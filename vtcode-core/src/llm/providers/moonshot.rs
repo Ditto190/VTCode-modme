@@ -230,6 +230,7 @@ impl LLMProvider for MoonshotProvider {
             model,
             &["reasoning_content"],
             super::shared::OpenAiDeltaOrder::ReasoningFirst,
+            false,
         ))
     }
 

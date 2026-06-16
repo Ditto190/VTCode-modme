@@ -470,6 +470,7 @@ pub fn spawn_openai_compatible_stream(
     model: String,
     reasoning_fields: &'static [&'static str],
     delta_order: crate::llm::providers::shared::OpenAiDeltaOrder,
+    include_cache_metrics: bool,
 ) -> LLMStream {
     use async_stream::try_stream;
 
@@ -493,6 +494,7 @@ pub fn spawn_openai_compatible_stream(
                     &tx,
                     reasoning_fields,
                     delta_order,
+                    include_cache_metrics,
                 );
                 Ok(())
             },
@@ -1419,7 +1421,7 @@ mod tests {
         assistant_interleaved_history_text, extract_reasoning_text_from_detail_values,
         extract_reasoning_text_from_serialized_details, is_interleaved_thinking_model,
         is_minimax_m2_model, normalize_reasoning_detail_object, parse_chat_request_openai_format,
-        parse_response_openai_format,
+        parse_response_openai_format, parse_usage_openai_format,
     };
     use crate::llm::provider::{AssistantPhase, Message};
     use serde_json::{Value, json};
@@ -1598,5 +1600,64 @@ mod tests {
         assert_eq!(request.messages[0].phase, Some(AssistantPhase::Commentary));
         assert_eq!(request.messages[1].phase, Some(AssistantPhase::FinalAnswer));
         assert_eq!(request.messages[2].phase, None);
+    }
+
+    #[test]
+    fn parse_usage_openai_format_extracts_basic_fields() {
+        let response = json!({
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150
+            }
+        });
+        let usage = parse_usage_openai_format(&response, false).expect("usage expected");
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 50);
+        assert_eq!(usage.total_tokens, 150);
+        assert_eq!(usage.cached_prompt_tokens, None);
+        assert_eq!(usage.cache_creation_tokens, None);
+    }
+
+    #[test]
+    fn parse_usage_openai_format_includes_cache_metrics_when_enabled() {
+        let response = json!({
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "prompt_cache_hit_tokens": 30,
+                "prompt_cache_miss_tokens": 70
+            }
+        });
+        let usage = parse_usage_openai_format(&response, true).expect("usage expected");
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 50);
+        assert_eq!(usage.total_tokens, 150);
+        assert_eq!(usage.cached_prompt_tokens, Some(30));
+        assert_eq!(usage.cache_creation_tokens, Some(70));
+    }
+
+    #[test]
+    fn parse_usage_openai_format_excludes_cache_metrics_when_disabled() {
+        let response = json!({
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "prompt_cache_hit_tokens": 30,
+                "prompt_cache_miss_tokens": 70
+            }
+        });
+        let usage = parse_usage_openai_format(&response, false).expect("usage expected");
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.cached_prompt_tokens, None);
+        assert_eq!(usage.cache_creation_tokens, None);
+    }
+
+    #[test]
+    fn parse_usage_openai_format_handles_missing_usage() {
+        let response = json!({"choices": []});
+        assert!(parse_usage_openai_format(&response, true).is_none());
     }
 }

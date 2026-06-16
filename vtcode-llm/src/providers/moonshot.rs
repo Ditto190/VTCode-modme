@@ -277,6 +277,13 @@ impl LLMProvider for MoonshotProvider {
                                     let _ = tx.send(Ok(event));
                                 }
                             }
+
+                            // Handle tool calls
+                            if let Some(tool_calls) =
+                                delta.get("tool_calls").and_then(|tc| tc.as_array())
+                            {
+                                aggregator.handle_tool_calls(tool_calls);
+                            }
                         }
 
                         if let Some(reason) = choice.get("finish_reason").and_then(|r| r.as_str()) {

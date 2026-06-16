@@ -316,6 +316,7 @@ impl LLMProvider for StepFunProvider {
             model,
             &["reasoning"],
             super::shared::OpenAiDeltaOrder::ReasoningFirst,
+            false,
         ))
     }
 

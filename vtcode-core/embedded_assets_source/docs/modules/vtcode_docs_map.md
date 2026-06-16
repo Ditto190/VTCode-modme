@@ -604,11 +604,6 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: 1. Humans Steer, Agents Execute, 2. Repository as System of Record, 3. Progressive Disclosure, 4. Agent Legibility Over Human Aesthetics, 5. Enforce Invariants, Not Implementations
   - **User Questions**: "What can you tell me about Core Beliefs?", "How does 1. Humans Steer, Agents Execute work?", "How does 2. Repository as System of Record work?"
 
-- **File**: `docs/project/crate-consolidation-plan.md`
-  - **Content**: Crate Consolidation Plan
-  - **Topics**: Current State, Phase 1: Merge Spec Crates (Low Risk), Phase 2: Consolidate Duplicate Types (Medium Risk), Phase 3: Evaluate Facade Crates, Validation Checklist
-  - **User Questions**: "What can you tell me about Crate Consolidation Plan?", "How does Current State work?", "How does Phase 1: Merge Spec Crates (Low Risk) work?"
-
 - **File**: `docs/analysis/DRY_DUPLICATION_AUDIT.md`
   - **Content**: DRY/KISS Duplication Audit
   - **Topics**: Scope, Implemented Refactors, Duplication Intentionally Left Alone, Expected Benefits, Verification
