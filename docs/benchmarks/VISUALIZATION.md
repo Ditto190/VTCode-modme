@@ -101,8 +101,6 @@ The script generates:
 
 ### Model Comparison Chart
 
-![Comparison Chart](../../docs/benchmarks/reports/comparison_gemini-3-flash-preview_vs_gpt-5-nano.png)
-
 **Key Observations:**
 
 1. **Pass Rate**: gpt-5-nano achieves 94.5% (frontier-tier), gemini achieves 61.6% (mid-range)
@@ -112,8 +110,6 @@ The script generates:
 5. **Strategic Choice**: Use gpt-5-nano for accuracy, gemini for speed
 
 ### Individual Model Chart
-
-![Gemini Chart](../../docs/benchmarks/reports/HE_20251022-135834_gemini-3-flash-preview_tools-0_N164_chart.png)
 
 **gemini-3-flash-preview Observations:**
 

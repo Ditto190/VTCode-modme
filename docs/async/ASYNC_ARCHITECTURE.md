@@ -430,7 +430,6 @@ async fn operation() -> Result<T> {
 
 -   [Tokio Documentation](https://tokio.rs/)
 -   [Async Book](https://rust-lang.github.io/async-book/)
--   [VT Code Async Migration Docs](./ASYNC_MIGRATION_COMPLETE.md)
 
 ---
 

@@ -6,19 +6,19 @@ Welcome to the VT Code downloads center! VT Code is available across multiple pl
 
 Choose your favorite code editor to download VT Code:
 
-### [Visual Studio Code](./ide-downloads.md#visual-studio-code)
+### Visual Studio Code
 
 [![VSCode Marketplace](https://img.shields.io/visual-studio-marketplace/v/nguyenxuanvinh.vtcode-companion?style=for-the-badge&logo=visual-studio-code&logoColor=white&label=VSCode%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=nguyenxuanvinh.vtcode-companion)
 
 The original VT Code extension for Visual Studio Code with LLM-native code understanding and AI assistance.
 
-### [Winsurf](./ide-downloads.md#winsurf)
+### Windsurf
 
 [![Open VSX Registry](https://img.shields.io/badge/Available-Open%20VSX-4CAF50?style=for-the-badge&logo=opensearch&logoColor=white)](https://open-vsx.org/extension/nguyenxuanvinh/vtcode-companion)
 
 VT Code is available for Windsurf through the Open VSX Registry. Install directly from the extensions marketplace or via VSIX file download.
 
-### [Cursor](./ide-downloads.md#cursor)
+### Cursor
 
 [![Open VSX Registry](https://img.shields.io/badge/Available-Open%20VSX-2196F3?style=for-the-badge&logo=opensearch&logoColor=white)](https://open-vsx.org/extension/nguyenxuanvinh/vtcode-companion)
 

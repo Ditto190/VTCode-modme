@@ -2,7 +2,7 @@
 
 ## Current Chart
 
-![HumanEval Benchmark - gemini-2.5-flash-lite](../../docs/benchmarks/reports/HE_20251022-135834_gemini-2.5-flash-lite_tools-0_N164_chart.png)
+HumanEval benchmark results for gemini-2.5-flash-lite model.
 
 ## Chart Breakdown
 

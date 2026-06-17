@@ -63,8 +63,6 @@ Providers. The merged leaderboard snapshot was fetched from nextjs.org on
 
 **MAJOR ACHIEVEMENT: gpt-5-nano achieves frontier-tier performance (94.5%)**
 
-![Comparison Chart](../../docs/benchmarks/reports/comparison_gemini-3-flash-preview_vs_gpt-5-nano.png)
-
 **Two models benchmarked:**
 
 | Model                 | Provider | Pass@1    | Passed  | Failed | Latency (P50) | Cost           |
@@ -97,7 +95,7 @@ Providers. The merged leaderboard snapshot was fetched from nextjs.org on
 -   Use **gpt-5-nano** for production validation and critical tasks
 -   Use **gemini-3-flash-preview** for development and prototyping
 
-See [GPT5_NANO_VS_GEMINI.md](GPT5_NANO_VS_GEMINI.md) for detailed comparison.
+See [README.md](README.md) for detailed comparison.
 | Estimated Cost | $0.0000 |
 
 > **Note:** Token counts are not currently reported by vtcode. The model is in Google's free tier, so actual cost is $0.

@@ -148,4 +148,4 @@ pub struct LMStudioClient {
 
 ## See Also
 
-- [LM Studio Provider Guide](./providers/lmstudio.md)
+- [LM Studio Provider Guide](./lmstudio.md)

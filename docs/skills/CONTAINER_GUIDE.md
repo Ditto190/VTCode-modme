@@ -324,7 +324,5 @@ fn build_container() -> Result<SkillContainer> {
 
 ## See Also
 
-- [Skill Architecture](./ARCHITECTURE.md)
-- [Skill Manifest Guide](./MANIFEST.md)
-- [Skills Enhancement Plan](../SKILLS_ENHANCEMENT_PLAN.md)
+- [Skills Guide](./SKILLS_GUIDE.md)
 - [Claude Agent Skills API](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills)

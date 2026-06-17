@@ -515,7 +515,7 @@ cargo check
 - [libloading Documentation](https://docs.rs/libloading)
 - [Rust FFI Guide](https://doc.rust-lang.org/nomicon/ffi.html)
 - [Agent Skills Standard](http://agentskills.io/)
-- [VT Code Skills Guide](./docs/skills/SKILLS_GUIDE.md)
+- [VT Code Skills Guide](./SKILLS_GUIDE.md)
 
 ## Conclusion
 

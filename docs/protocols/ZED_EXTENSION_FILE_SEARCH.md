@@ -391,8 +391,6 @@ let files = parse_response(response);
 
 ## References
 
-- [Command Builder Pattern](../zed-extension/src/command_builder.rs)
-
 ## Status
 
 **Phase 3a**: v Complete

@@ -4,17 +4,17 @@ This index collects provider-specific guides for configuring VT Code with differ
 
 ## Google Gemini
 
--   Configuration details are covered in the main [Getting Started guide](./user-guide/getting-started.md#configure-your-llm-provider).
--   Models and constants are defined in [`vtcode-core/src/config/constants.rs`](../vtcode-core/src/config/constants.rs).
+-   Configuration details are covered in the main [Getting Started guide](../user-guide/getting-started.md#configure-your-llm-provider).
+-   Models and constants are defined in [`vtcode-core/src/config/constants.rs`](../../vtcode-core/src/config/constants.rs).
 
 ## OpenAI GPT
 
 -   **Official docs:**
     -   [API reference index](https://developers.openai.com/api/reference/llms.txt)
     -   [Models catalog](https://developers.openai.com/api/docs/models)
--   Follow the [Getting Started guide](./user-guide/getting-started.md#configure-your-llm-provider) for API key setup.
--   See [`vtcode-core/src/config/constants.rs`](../vtcode-core/src/config/constants.rs) for the latest supported models.
--   GPT-5.2 reference: [Using GPT-5.2](./guides/gpt-5-2.md)
+-   Follow the [Getting Started guide](../user-guide/getting-started.md#configure-your-llm-provider) for API key setup.
+-   See [`vtcode-core/src/config/constants.rs`](../../vtcode-core/src/config/constants.rs) for the latest supported models.
+-   GPT-5.2 reference: See OpenAI documentation for latest models
 -   VT Code's default OpenAI profile is `gpt-5.4` with `reasoning_effort = "none"` and `verbosity = "medium"`; raise reasoning only when the task shape justifies the extra latency.
 -   VT Code applies a compact GPT-5.4 prompt contract rather than a verbatim cookbook prompt: compact outputs, low-risk follow-through, dependency-aware tool use, completeness checks, verification, and conditional grounding/citation rules.
 -   File inputs are supported for native OpenAI Responses API requests through `input_file` parts.
@@ -34,8 +34,8 @@ This index collects provider-specific guides for configuring VT Code with differ
 
 ## Anthropic Claude
 
--   Key management and defaults mirror the Gemini/OpenAI flow in [Getting Started](./user-guide/getting-started.md#configure-your-llm-provider).
--   Supported model IDs live in [`vtcode-core/src/config/constants.rs`](../vtcode-core/src/config/constants.rs).
+-   Key management and defaults mirror the Gemini/OpenAI flow in [Getting Started](../user-guide/getting-started.md#configure-your-llm-provider).
+-   Supported model IDs live in [`vtcode-core/src/config/constants.rs`](../../vtcode-core/src/config/constants.rs).
 
 ## GitHub Copilot
 
@@ -46,7 +46,7 @@ This index collects provider-specific guides for configuring VT Code with differ
 
 ## OpenRouter Marketplace
 
--   **Guide:** [OpenRouter Integration](./providers/openrouter.md)
+-   **Guide:** [OpenRouter Integration](./openrouter.md)
 -   **Official docs:**
     -   [API overview](https://openrouter.ai/docs/api-reference/overview/llms)
     -   [Streaming](https://openrouter.ai/docs/api-reference/streaming/llms)
@@ -58,7 +58,7 @@ This index collects provider-specific guides for configuring VT Code with differ
 
 ## Atlas Cloud
 
--   **Guide:** [Atlas Cloud Integration](./providers/atlascloud.md)
+-   **Guide:** [Atlas Cloud Integration](./atlascloud.md)
 -   **Official docs:**
     -   [LLM / Chat](https://www.atlascloud.ai/docs/models/llm)
     -   [FAQ](https://www.atlascloud.ai/docs/en/faq)
@@ -89,7 +89,7 @@ This index collects provider-specific guides for configuring VT Code with differ
 
 ## LM Studio Local Server
 
--   **Guide:** [LM Studio Provider Guide](./providers/lmstudio.md)
+-   **Guide:** [LM Studio Provider Guide](./lmstudio.md)
 -   **Server:** Enable the OpenAI-compatible Developer server in LM Studio (defaults to `http://localhost:1234/v1`)
 -   **Environment:** Optional `LMSTUDIO_API_KEY` when auth is enabled; override host/port via `LMSTUDIO_BASE_URL`
 -   **Default model:** `lmstudio-community/meta-llama-3.1-8b-instruct` (local inference)

@@ -873,8 +873,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/security/SECURITY_DOCUMENTATION_INDEX.md`
   - **Content**: Security Documentation Index
-  - **Topics**: Core Documentation, Recent Security Work, Security Features by Layer, Testing & Verification, Configuration
-  - **User Questions**: "What can you tell me about Security Documentation Index?", "How does Core Documentation work?", "How does Recent Security Work work?"
+  - **Topics**: Core Documentation, Security Features by Layer, Configuration, Reporting Security Issues
+  - **User Questions**: "What can you tell me about Security Documentation Index?", "How does Core Documentation work?", "How does Security Features by Layer work?"
 
 - **File**: `docs/security/SECURITY_MODEL.md`
   - **Content**: VT Code Security Model

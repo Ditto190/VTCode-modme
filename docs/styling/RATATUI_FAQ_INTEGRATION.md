@@ -179,8 +179,5 @@ This integration improves VT Code by:
 
 ## Related Documentation
 
-- [docs/FAQ.md](./FAQ.md) - VT Code FAQ
-- [docs/guides/tui-event-handling.md](./guides/tui-event-handling.md) - Event handling guide
-- [docs/guides/async-architecture.md](./guides/async-architecture.md) - Async architecture guide
-- [docs/guides/terminal-rendering-best-practices.md](./guides/terminal-rendering-best-practices.md) - Rendering guide
-- [docs/ARCHITECTURE.md](./ARCHITECTURE.md) - VT Code system architecture
+- [docs/FAQ.md](../FAQ.md) - VT Code FAQ
+- [docs/ARCHITECTURE.md](../ARCHITECTURE.md) - VT Code system architecture

@@ -195,5 +195,4 @@ Check `src/main.rs:228` for TTY detection.
 ## See Also
 
 - [Ratatui FAQ](https://ratatui.rs/faq/) - Terminal UI best practices
-- [src/tui.rs](../../src/tui.rs) - Terminal event handler implementation
 - [docs/ARCHITECTURE.md](./ARCHITECTURE.md) - VT Code system architecture

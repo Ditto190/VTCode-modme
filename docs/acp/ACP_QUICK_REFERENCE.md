@@ -387,6 +387,5 @@ Error: Failed to parse response
 ## Documentation Links
 
 - [Full ACP Integration Guide](./ACP_INTEGRATION.md)
-- [Client Library README](../vtcode-acp/README.md)
+- [Client Library README](../../vtcode-acp/README.md)
 - [ACP Specification](https://agentcommunicationprotocol.dev/)
-- [Example Code](../examples/acp_distributed_workflow.rs)

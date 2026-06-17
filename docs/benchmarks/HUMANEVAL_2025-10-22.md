@@ -30,8 +30,6 @@ Strategic choice based on budget and accuracy needs.
 
 ### Visual Overview
 
-![Model Comparison](../../docs/benchmarks/reports/comparison_gemini-3-flash-preview_vs_gpt-5-nano.png)
-
 **Comparison Chart:** Shows side-by-side performance of both models including pass rates, latency distributions, and detailed metrics.
 
 ### Performance Metrics
@@ -241,7 +239,6 @@ export GEMINI_API_KEY="your_api_key_here"
 
 ## References
 
--   **Full Report:** [reports/HE_20251022-135834_gemini-3-flash-preview_tools-0_N164.json](../../docs/benchmarks/reports/HE_20251022-135834_gemini-3-flash-preview_tools-0_N164.json)
 -   **Benchmark Script:** [scripts/bench_humaneval.py](../../scripts/bench_humaneval.py)
 -   **HumanEval Paper:** [Evaluating Large Language Models Trained on Code](https://arxiv.org/abs/2107.03374)
 -   **Dataset:** [openai/human-eval](https://github.com/openai/human-eval)

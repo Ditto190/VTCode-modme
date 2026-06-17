@@ -184,9 +184,8 @@ If you see temperature-related errors:
 
 ## Related Documentation
 
--   [Anthropic Provider Documentation](./anthropic-provider.md)
--   [Model Configuration](../config/models.md)
--   [Tool Calling Guide](./tool-calling.md)
+-   [Provider Guides](../providers/PROVIDER_GUIDES.md)
+-   [Configuration Guide](../config/config.md)
 
 ## Additional Resources
 

@@ -135,4 +135,4 @@ anthropic-beta: advanced-tool-use-2025-11-20
 
 - [Anthropic Tool Search Documentation](https://docs.anthropic.com/claude/reference/tool-search)
 - [OpenAI Tool Search Guide](https://developers.openai.com/api/docs/guides/tools-tool-search)
-- [Configuration Reference](config/CONFIGURATION_PRECEDENCE.md)
+- [Configuration Reference](../config/CONFIGURATION_PRECEDENCE.md)

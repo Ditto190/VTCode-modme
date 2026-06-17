@@ -18,7 +18,7 @@ VT Code uses a configuration file named `vtcode.toml` that can be placed at the 
 - [Participant system](#participant-system)
 - [Profiles and overrides](#profiles-and-overrides)
 - [Reference table](#config-reference)
-- [Generated field reference](./config/CONFIG_FIELD_REFERENCE.md)
+- [Generated field reference](./CONFIG_FIELD_REFERENCE.md)
 
 VT Code supports several mechanisms for setting config values:
 
@@ -874,7 +874,7 @@ If VT Code is not behaving as expected with your configuration:
 ## Config reference
 
 For complete field coverage generated from the live `vtcode-config` schema, use
-[`docs/config/CONFIG_FIELD_REFERENCE.md`](./config/CONFIG_FIELD_REFERENCE.md).
+[`docs/config/CONFIG_FIELD_REFERENCE.md`](./CONFIG_FIELD_REFERENCE.md).
 
 For harness behavior, read `agent.harness`, `automation.full_auto`, and `context.dynamic` together: they jointly define continuation,
 turn limits, and context reuse for long-running exec sessions.

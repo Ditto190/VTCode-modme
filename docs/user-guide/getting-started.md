@@ -437,7 +437,7 @@ VT Code is designed with security as a first-class concern:
 ### Learn More
 
 - **[Security Guide](../guides/security.md)** - Complete security documentation
-- **[Security Model](../SECURITY_MODEL.md)** - Architecture and threat model
+- **[Security Model](../security/SECURITY_MODEL.md)** - Architecture and threat model
 - **[Tool Policies](../modules/vtcode_tools_policy.md)** - Command execution policies
 
 ## Next Steps
@@ -456,8 +456,7 @@ Now that you have VT Code running, explore:
 Interested in contributing? Check out:
 
 -   **[Development Guide](../development/README.md)** - Development setup
--   **[Contributing Guide](../../CONTRIBUTING.md)** - Contribution guidelines
--   **[Code Standards](../development/code-style.md)** - Coding conventions
+-   **[Contributing Guide](../../docs/CONTRIBUTING.md)** - Contribution guidelines
 
 ---
 

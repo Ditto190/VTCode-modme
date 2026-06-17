@@ -184,16 +184,13 @@ ASSET_MAPPINGS = {
 
 ## **Related Documentation**
 
-- **[Building from Source](./building.md)** - How the sync integrates with the build process
-- **[Testing Strategies](./testing-strategies.md)** - Testing the synchronized assets
-- **[Code Standards](./code-style.md)** - Style guidelines for documentation and prompts
+- **[Development Guide](./README.md)** - Development overview
 
 ---
 
 ## **Navigation**
 
 - **[Back to Development Guide](./README.md)**
-- **[Next: Adding New Tools](./adding-tools.md)**
 
 ## **Quick Reference**
 

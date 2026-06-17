@@ -275,7 +275,6 @@ If you've tried all solutions and Alt keys still don't work:
 
 - [TUI Event Handling Guide](./tui-event-handling.md) - Technical details on how VT Code handles keyboard input
 - [Terminal Rendering Best Practices](./terminal-rendering-best-practices.md) - Terminal emulator compatibility details
-- [Keyboard Protocol Testing](../testing/KEYBOARD_PROTOCOL_TESTING.md) - Advanced keyboard protocol testing
 - [ANSI Escape Sequences Reference](../reference/ansi-escape-sequences.md) - Terminal control sequences including Alt key codes
 
 ## Quick Checklist

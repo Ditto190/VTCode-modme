@@ -410,5 +410,5 @@ todos = [m['data']['lines']['text'] for m in results['matches']]
 
 ## See Also
 
--   [AGENTS.md](../AGENTS.md) for system prompt integration
--   [Tool Registry](modules/vtcode_docs_map.md) for tool execution
+-   [AGENTS.md](../../AGENTS.md) for system prompt integration
+-   [Tool Registry](../modules/vtcode_docs_map.md) for tool execution

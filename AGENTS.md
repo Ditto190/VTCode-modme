@@ -39,20 +39,13 @@ Cargo workspace, ~30 crates. Rust stable, MSRV 1.88, edition 2024. `default-memb
 | `vtcode-acp` | Agent Client Protocol (Zed) |
 | `vtcode-auth` | OAuth and credential storage |
 | `vtcode-indexer` | Code indexing and search |
-| `vtcode-process-hardening` | OS sandboxing (Seatbelt, Landlock) |
 | `vtcode-exec-events` | `ThreadEvent` contract and ATIF export |
 | `vtcode-commons` | Shared utilities |
 | `vtcode-macros` | Procedural macros |
-| `vtcode-markdown-store` | Markdown storage and rendering |
-| `vtcode-terminal-detection` | Terminal detection primitives |
 | `vtcode-utility-tool-specs` | JSON schemas for utility, file, and collaboration/HITL tools |
-| `vtcode-file-search` | Parallel fuzzy file search |
-| `vtcode-vim` | Vim-style prompt editing engine |
-| `vtcode-tool-types` | Shared tool runtime types (breaks circular deps between tools and llm) |
 | `vtcode-llm` | LLM provider abstraction, client implementations, streaming (partial extraction) |
 | `vtcode-skills` | Skill types, discovery, loading, and validation (partial extraction) |
 | `vtcode-safety` | Command safety detection, execution policies, sandboxing |
-| `vtcode-pods` | GPU pod management |
 | `vtcode-a2a` | Agent2Agent (A2A) protocol client and server |
 | `vtcode-mcp` | Model Context Protocol client, connection pooling, tool discovery |
 | `xtask` | Release packaging automation |
@@ -75,18 +68,11 @@ Every crate has its own AGENTS.md with crate-specific conventions:
 | `vtcode-indexer` | [vtcode-indexer/AGENTS.md](vtcode-indexer/AGENTS.md) |
 | `vtcode-exec-events` | [vtcode-exec-events/AGENTS.md](vtcode-exec-events/AGENTS.md) |
 | `vtcode-commons` | [vtcode-commons/AGENTS.md](vtcode-commons/AGENTS.md) |
-| `vtcode-process-hardening` | [vtcode-process-hardening/AGENTS.md](vtcode-process-hardening/AGENTS.md) |
 | `vtcode-macros` | [vtcode-macros/AGENTS.md](vtcode-macros/AGENTS.md) |
-| `vtcode-markdown-store` | [vtcode-markdown-store/AGENTS.md](vtcode-markdown-store/AGENTS.md) |
-| `vtcode-terminal-detection` | [vtcode-terminal-detection/AGENTS.md](vtcode-terminal-detection/AGENTS.md) |
 | `vtcode-utility-tool-specs` | [vtcode-utility-tool-specs/AGENTS.md](vtcode-utility-tool-specs/AGENTS.md) |
-| `vtcode-file-search` | [vtcode-file-search/AGENTS.md](vtcode-file-search/AGENTS.md) |
-| `vtcode-vim` | [vtcode-vim/AGENTS.md](vtcode-vim/AGENTS.md) |
-| `vtcode-tool-types` | [vtcode-tool-types/AGENTS.md](vtcode-tool-types/AGENTS.md) |
 | `vtcode-llm` | [vtcode-llm/AGENTS.md](vtcode-llm/AGENTS.md) |
 | `vtcode-skills` | [vtcode-skills/AGENTS.md](vtcode-skills/AGENTS.md) |
 | `vtcode-safety` | [vtcode-safety/AGENTS.md](vtcode-safety/AGENTS.md) |
-| `vtcode-pods` | [vtcode-pods/AGENTS.md](vtcode-pods/AGENTS.md) |
 | `vtcode-a2a` | [vtcode-a2a/AGENTS.md](vtcode-a2a/AGENTS.md) |
 | `vtcode-mcp` | [vtcode-mcp/AGENTS.md](vtcode-mcp/AGENTS.md) |
 | `xtask` | [xtask/AGENTS.md](xtask/AGENTS.md) |

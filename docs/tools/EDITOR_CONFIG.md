@@ -233,4 +233,4 @@ The `/edit` command works with:
 
 -   [editor-command crate documentation](https://docs.rs/editor-command/latest/editor_command/)
 -   [VT Code configuration guide](../config/CONFIGURATION_PRECEDENCE.md)
--   [Tools overview](./TOOLS_OVERVIEW.md)
+-   [Tools overview](./TOOL_SPECS.md)

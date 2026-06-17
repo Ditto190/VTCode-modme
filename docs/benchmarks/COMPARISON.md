@@ -11,7 +11,7 @@ This document compares VT Code's performance across different models and configu
 
 **Major Achievement:** gpt-5-nano achieves frontier-tier performance (94.5%), ranking in TOP 5 globally at very affordable pricing.
 
-See [GPT5_NANO_VS_GEMINI.md](GPT5_NANO_VS_GEMINI.md) for detailed comparison.
+See [README.md](README.md) for benchmark details.
 
 ## Planned Comparisons
 

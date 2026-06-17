@@ -230,8 +230,7 @@ Stay informed about security updates:
 
 ## Additional Resources
 
-- [Security Model](../SECURITY_MODEL.md) - Complete security architecture
-- [Security Audit](../SECURITY_AUDIT.md) - Vulnerability analysis
+- [Security Model](../security/SECURITY_MODEL.md) - Complete security architecture
 - [Tool Policies](../modules/vtcode_tools_policy.md) - Command execution policies
 - [CWE-88: Argument Injection](https://cwe.mitre.org/data/definitions/88.html)
 - [OWASP Command Injection](https://owasp.org/www-community/attacks/Command_Injection)

@@ -11,8 +11,6 @@
 
 ### gpt-5-nano (2025-10-22) - FRONTIER-TIER PERFORMANCE
 
-![Comparison Chart](../../docs/benchmarks/reports/comparison_gemini-3-flash-preview_vs_gpt-5-nano.png)
-
 **Performance:**
 
 -   155/164 tests passed (94.5%)
@@ -27,11 +25,9 @@
 -   Comparable to o1, Claude 3.7 Sonnet, GPT-4.5 Turbo
 -   10-50x cheaper than premium competitors
 
-**Full Report:** [GPT5_NANO_VS_GEMINI.md](GPT5_NANO_VS_GEMINI.md)
+**Full Report:** [README.md](README.md)
 
 ### gemini-3-flash-preview (2025-10-22) - SPEED CHAMPION
-
-![Benchmark Chart](../../docs/benchmarks/reports/HE_20251022-135834_gemini-3-flash-preview_tools-0_N164_chart.png)
 
 **Performance:**
 
@@ -84,7 +80,6 @@ Output:
 
 ## Files
 
--   **Detailed Analysis:** [HUMANEVAL_2025-10-22.md](HUMANEVAL_2025-10-22.md)
+-   **Detailed Analysis:** [README.md](README.md)
 -   **Methodology:** [README.md](README.md)
--   **Raw Data:** `../../docs/benchmarks/reports/HE_20251022-135834_gemini-3-flash-preview_tools-0_N164.json`
 -   **Scripts:** `../../scripts/bench_humaneval.py`, `../../scripts/generate_benchmark_chart.py`

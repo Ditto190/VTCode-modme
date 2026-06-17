@@ -438,5 +438,5 @@ Planned enhancements:
 ## See Also
 
 -   [ACP Official Spec](https://agentcommunicationprotocol.dev/)
--   [MCP Integration Guide](./MCP.md)
--   [vtcode Configuration](./CONFIG.md)
+-   [MCP Integration Guide](../guides/mcp-integration.md)
+-   [vtcode Configuration](../config/config.md)

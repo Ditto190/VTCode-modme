@@ -10,7 +10,7 @@ server/client expectations, consult the upstream MCP reference index at
 authorisation, logging, and resource specification documents maintained by the MCP community.
 
 > **Developer Note:** If you're implementing MCP module features or integrating with the core MCP
-> APIs, see the [MCP Module Documentation](../mcp/README.md) for API reference, code patterns, and
+> APIs, see the [MCP Integration Guide](../mcp/MCP_INTEGRATION_GUIDE.md) for API reference, code patterns, and
 > implementation status.
 
 ## MCP Specification Map

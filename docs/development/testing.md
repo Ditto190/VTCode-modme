@@ -488,8 +488,7 @@ fn test_with_debug_output() {
 
 -   **[Back to Documentation Index](./../README.md)**
 -   **[User Guide](../user-guide/)**
--   **[API Reference](../api/)**
--   **[Contributing Guide](./contributing.md)**
+-   **[Contributing Guide](../CONTRIBUTING.md)**
 
 ---
 

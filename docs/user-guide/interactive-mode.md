@@ -227,4 +227,3 @@ Bash mode streams the command and its output into the chat, supports backgroundi
 
 - [User guide overview](../README.md)
 - [Getting started walkthrough](../user-guide/getting-started.md)
-- [Advanced features](../ADVANCED_FEATURES_IMPLEMENTATION.md)

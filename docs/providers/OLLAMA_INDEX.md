@@ -7,7 +7,7 @@ Comprehensive guide to the OpenAI Codex Ollama integration in VT Code.
 | Document                                                 | Purpose                        | Audience   |
 | -------------------------------------------------------- | ------------------------------ | ---------- |
 | [ollama-quick-reference.md](./ollama-quick-reference.md) | API reference and lookup       | Developers |
-| [providers/ollama.md](./providers/ollama.md)             | User-facing Ollama setup guide | End Users  |
+| [providers/ollama.md](./ollama.md)             | User-facing Ollama setup guide | End Users  |
 
 ## Modules Overview
 
