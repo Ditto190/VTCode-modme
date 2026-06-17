@@ -6,7 +6,7 @@ Welcome to VT Code! This guide will help you get up and running with this Rust-b
 
 VT Code represents a modern approach to AI-powered software development, featuring:
 
--   **Multi-Provider LLM Support** - Gemini, OpenAI, Anthropic integration
+-   **Multi-Provider LLM Support** - Gemini, OpenAI, Anthropic, DeepSeek, OpenRouter, Z.AI, Moonshot, StepFun, MiniMax, and more
 -   **Enhanced Terminal Interface** - Modern TUI with mouse support and text selection
 -   **Advanced Code Intelligence** - Tree-sitter parsers for 6+ programming languages
 -   **Enterprise-Grade Safety** - Comprehensive security controls and path validation
@@ -18,7 +18,7 @@ VT Code represents a modern approach to AI-powered software development, featuri
 
 ### System Requirements
 
--   **Rust**: 1.75+ (stable recommended)
+-   **Rust**: 1.88+ (stable recommended)
     -   Install from [rustup.rs](https://rustup.rs/)
     -   Includes Cargo package manager
 -   **Git**: For version control and cloning the repository
@@ -40,6 +40,24 @@ Choose one of the supported LLM providers:
 
 -   **Anthropic**: `export ANTHROPIC_API_KEY=your_key_here`
     -   Get from [Anthropic Console](https://console.anthropic.com/)
+
+-   **Z.AI**: `export ZAI_API_KEY=your_key_here`
+    -   Get from [Z.AI Platform](https://z.ai/docs)
+    -   Models: GLM-5.2, GLM-5.1, GLM-4.7
+
+-   **Moonshot (Kimi)**: `export MOONSHOT_API_KEY=your_key_here`
+    -   Get from [Moonshot Platform](https://platform.moonshot.ai/docs)
+    -   Models: Kimi K2.7 Code, K2.6, K2.5
+
+-   **StepFun**: `export STEPFUN_API_KEY=your_key_here`
+    -   Get from [StepFun Platform](https://platform.stepfun.ai/docs)
+    -   Models: Step-3.7-Flash
+
+-   **MiniMax**: `export MINIMAX_API_KEY=your_key_here`
+    -   Get from [MiniMax Platform](https://platform.minimax.io/docs)
+    -   Models: MiniMax-M3, M2.7, M2.5
+
+For more providers, see the [Provider Guides](../providers/PROVIDER_GUIDES.md).
 
 ## Installation
 

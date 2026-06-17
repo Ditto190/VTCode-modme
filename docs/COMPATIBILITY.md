@@ -13,7 +13,7 @@ Inspired by [caniuse.rs](https://caniuse.rs), this document tracks feature avail
 | ACP Client | Yes | Yes | Yes | Partial | Agent Client Protocol |
 | File Watching | Yes | Yes | Yes | No | notify crate |
 | Desktop Notifications | Yes | Yes | Yes | No | Optional feature |
-| Bash Runner | Yes | Yes | Partial | No | Windows uses PowerShell |
+| Bash Runner | Yes | Yes | Improved | No | Windows uses PowerShell with cross-platform process groups |
 | PTY Sessions | Yes | Yes | Partial | No | Limited on Windows |
 
 **Legend:** Yes = Fully Supported | Partial = Partial Support | No = Not Supported
@@ -30,24 +30,24 @@ All VT Code crates require Rust 1.88 or later due to dependencies (ratatui 0.30,
 
 | Crate | Version | MSRV | Edition | Published | Notes |
 |-------|---------|------|---------|-----------|-------|
-| vtcode | 0.123.4 | 1.88 | 2024 | Yes | Binary crate |
-| vtcode-core | 0.123.4 | 1.88 | 2024 | Yes | Main runtime |
-| vtcode-config | 0.123.4 | 1.88 | 2024 | Yes | Configuration |
-| vtcode-commons | 0.123.4 | 1.88 | 2024 | Yes | Shared primitives |
-| vtcode-indexer | 0.123.4 | 1.88 | 2024 | Yes | File indexing + markdown storage |
-| vtcode-bash-runner | 0.123.4 | 1.88 | 2024 | Yes | Shell execution |
-| vtcode-exec-events | 0.123.4 | 1.88 | 2024 | Yes | Event schemas |
-| vtcode-acp | 0.123.4 | 1.88 | 2024 | Yes | Agent Communication Protocol |
-| vtcode-auth | 0.123.4 | 1.88 | 2024 | Yes | OAuth/PKCE |
-| vtcode-macros | 0.123.4 | 1.88 | 2024 | Yes | Proc macros |
-| vtcode-ui | 0.123.10 | 1.88 | 2024 | Yes | TUI framework |
-| vtcode-utility-tool-specs | 0.123.4 | 1.88 | 2024 | Yes | Tool schemas |
-| vtcode-safety | 0.128.4 | 1.88 | 2024 | No | Internal (publish=false) |
-| vtcode-a2a | 0.128.4 | 1.88 | 2024 | No | Internal (publish=false) |
-| vtcode-mcp | 0.128.4 | 1.88 | 2024 | No | Internal (publish=false) |
-| vtcode-llm | 0.128.4 | 1.88 | 2024 | No | Internal (publish=false) |
-| vtcode-skills | 0.128.4 | 1.88 | 2024 | No | Internal (publish=false) |
-| xtask | 0.8.4 | 1.88 | 2024 | No | Internal build tasks |
+| vtcode | 0.132.0 | 1.88 | 2024 | Yes | Binary crate |
+| vtcode-core | 0.132.0 | 1.88 | 2024 | Yes | Main runtime |
+| vtcode-config | 0.132.0 | 1.88 | 2024 | Yes | Configuration |
+| vtcode-commons | 0.132.0 | 1.88 | 2024 | Yes | Shared primitives |
+| vtcode-indexer | 0.132.0 | 1.88 | 2024 | Yes | File indexing + markdown storage |
+| vtcode-bash-runner | 0.132.0 | 1.88 | 2024 | Yes | Shell execution |
+| vtcode-exec-events | 0.132.0 | 1.88 | 2024 | Yes | Event schemas |
+| vtcode-acp | 0.132.0 | 1.88 | 2024 | Yes | Agent Communication Protocol |
+| vtcode-auth | 0.132.0 | 1.88 | 2024 | Yes | OAuth/PKCE |
+| vtcode-macros | 0.132.0 | 1.88 | 2024 | Yes | Proc macros |
+| vtcode-ui | 0.132.0 | 1.88 | 2024 | Yes | TUI framework |
+| vtcode-utility-tool-specs | 0.132.0 | 1.88 | 2024 | Yes | Tool schemas |
+| vtcode-safety | 0.132.0 | 1.88 | 2024 | No | Internal (publish=false) |
+| vtcode-a2a | 0.132.0 | 1.88 | 2024 | No | Internal (publish=false) |
+| vtcode-mcp | 0.132.0 | 1.88 | 2024 | No | Internal (publish=false) |
+| vtcode-llm | 0.132.0 | 1.88 | 2024 | No | Internal (publish=false) |
+| vtcode-skills | 0.132.0 | 1.88 | 2024 | No | Internal (publish=false) |
+| xtask | 0.132.0 | 1.88 | 2024 | No | Internal build tasks |
 
 ---
 
@@ -110,7 +110,16 @@ All VT Code crates require Rust 1.88 or later due to dependencies (ratatui 0.30,
 | LM Studio | Yes | `lmstudio` | Local inference |
 | DeepSeek | Yes | `deepseek` | Full support |
 | Moonshot | Yes | `moonshot` | Full support |
-| Z.AI | Yes | `zai` | Full support |
+| Z.AI | Yes | `zai` | GLM-5.2 support |
+| Xiaomi MiMo | Yes | `mimo` | Full support |
+| Evolink | Yes | `evolink` | Full support |
+| StepFun | Yes | `stepfun` | Full support |
+| MiniMax | Yes | `minimax` | Full support |
+| Poolside | Yes | `poolside` | Full support |
+| Qwen | Yes | `qwen` | Alibaba Cloud |
+| HuggingFace | Yes | `huggingface` | Inference Providers |
+| OpenCode Zen | Yes | `opencode-zen` | Full support |
+| OpenCode Go | Yes | `opencode-go` | Full support |
 
 ---
 
@@ -243,5 +252,5 @@ When adding new features, please:
 
 ---
 
-*Last updated: 2026-06-14*
-*VT Code Version: 0.128.4*
+*Last updated: 2026-06-17*
+*VT Code Version: 0.132.0*

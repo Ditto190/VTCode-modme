@@ -2,7 +2,7 @@
 
 Repository-wide entrypoint for VT Code documentation.
 
-Last reviewed: 2026-03-28
+Last reviewed: 2026-06-17
 
 ## Start Here
 
@@ -30,9 +30,24 @@ Last reviewed: 2026-03-28
 - [C++ Core Guidelines Adoption](development/CPP_CORE_GUIDELINES_ADOPTION.md) - Rules for C/C++ code paths and cross-language safety intent.
 - [Extension Boundaries](development/EXTENSION_BOUNDARIES.md) - When to use internal Rust traits vs external protocol or manifest seams.
 - [Language Support Matrix](protocols/LANGUAGE_SUPPORT.md) - Tree-sitter and language support status.
+- [Signal Handling](signal_handling.md) - Ctrl+C / SIGINT priority guarantees and emergency exit.
 - [Indexer Notes](modules/vtcode_indexer.md) - Indexer behavior and usage.
 - [Development Guide](development/README.md) - Local dev workflows.
 - [Roadmap](project/ROADMAP.md) - Planned work.
+
+## Module Documentation
+
+- [vtcode-ui](modules/vtcode_ui.md) - UI framework, design system, theme registry.
+- [vtcode-llm](modules/vtcode_llm.md) - LLM provider abstraction and streaming.
+- [vtcode-skills](modules/vtcode_skills.md) - Skill discovery, loading, and validation.
+- [vtcode-safety](modules/vtcode_safety.md) - Command safety, execution policies, sandboxing.
+- [vtcode-a2a](modules/vtcode_a2a.md) - Agent2Agent protocol support.
+- [vtcode-mcp](modules/vtcode_mcp.md) - Model Context Protocol integration.
+- [vtcode-bash-runner](modules/vtcode_bash_runner.md) - Shell execution sandbox.
+- [vtcode-config](modules/vtcode_config_migration.md) - Configuration loading and schema.
+- [vtcode-commons](modules/vtcode_commons_reference.md) - Shared utilities.
+- [vtcode-exec-events](modules/vtcode_exec_events.md) - ThreadEvent contract and ATIF export.
+- [vtcode-indexer](modules/vtcode_indexer.md) - Code indexing and search.
 
 ## Historical and Archive Paths
 

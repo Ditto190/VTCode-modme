@@ -206,7 +206,7 @@ anstyle-crossterm = "4.0"
 
 # TUI rendering
 crossterm = "0.29"
-ratatui = { version = "0.29", features = ["crossterm"] }
+ratatui = { version = "0.30", features = ["crossterm"] }
 ```
 
 ## Performance Considerations

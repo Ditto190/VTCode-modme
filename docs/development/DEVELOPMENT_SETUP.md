@@ -6,7 +6,7 @@ Canonical local setup for contributing to VT Code.
 
 - Rust toolchain (stable) via [rustup](https://rustup.rs/)
 - Git
-- One LLM provider API key for local interactive runs (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`)
+- One LLM provider API key for local interactive runs (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `ZAI_API_KEY`, `MOONSHOT_API_KEY`, `STEPFUN_API_KEY`, or `MINIMAX_API_KEY`)
 
 ## One-Time Setup
 

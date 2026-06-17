@@ -139,4 +139,68 @@ VT Code provides compatibility with the Anthropic Messages API to help connect e
   - `ANTHROPIC_API_KEY=ollama` (required but ignored)
 - **Features:** Streaming, tool calling, vision support, multi-turn conversations
 
+## Z.AI (ZAI)
+
+-   **Provider key:** `zai`
+-   **Official docs:** [Z.AI Platform](https://z.ai/docs)
+-   **Auth:** `ZAI_API_KEY` environment variable
+-   **Setup:** Set `ZAI_API_KEY` from Z.AI platform, then configure `provider = "zai"` in `vtcode.toml`
+-   **Models:**
+    -   `glm-5.2` — flagship model for long-horizon tasks, 1M context, reasoning + tool calls
+    -   `glm-5.1` — next-gen foundation model, reasoning + tool calls
+    -   `glm-4.7` — efficient model for general tasks
+-   **Default:** `glm-5.1`
+-   **Features:** Streaming, tool calling, reasoning effort support
+
+## Moonshot (Kimi)
+
+-   **Provider key:** `moonshot`
+-   **Official docs:** [Moonshot Platform](https://platform.moonshot.ai/docs)
+-   **Auth:** `MOONSHOT_API_KEY` environment variable
+-   **Setup:** Set `MOONSHOT_API_KEY` from Moonshot platform, then configure `provider = "moonshot"` in `vtcode.toml`
+-   **Models:**
+    -   `kimi-k2.7-code` — most capable coding model with long-horizon coding breakthrough, 256K context
+    -   `kimi-k2.6` — multimodal model for coding and UI/UX generation, 1M context
+    -   `kimi-k2.5` — enhanced reasoning model
+-   **Default:** `kimi-k2.7-code`
+-   **Features:** Streaming, tool calling, reasoning support (K2.7 Code), multimodal input (K2.6)
+
+## StepFun
+
+-   **Provider key:** `stepfun`
+-   **Official docs:** [StepFun Platform](https://platform.stepfun.ai/docs)
+-   **Auth:** `STEPFUN_API_KEY` environment variable
+-   **Setup:** Set `STEPFUN_API_KEY` from StepFun platform, then configure `provider = "stepfun"` in `vtcode.toml`
+-   **Models:**
+    -   `step-3.7-flash` — efficient reasoning model based on sparse MoE architecture
+-   **Default:** `step-3.7-flash`
+-   **Features:** Streaming, tool calling, reasoning support
+
+## MiniMax
+
+-   **Provider key:** `minimax`
+-   **Official docs:** [MiniMax Platform](https://platform.minimax.io/docs)
+-   **Auth:** `MINIMAX_API_KEY` environment variable
+-   **Setup:** Set `MINIMAX_API_KEY` from MiniMax platform, then configure `provider = "minimax"` in `vtcode.toml`
+-   **Models:**
+    -   `MiniMax-M3` — frontier multimodal coding model, 1M context
+    -   `MiniMax-M2.7` — recursive self-improvement with enhanced reasoning
+    -   `MiniMax-M2.5` — efficient model for general tasks
+-   **Default:** `MiniMax-M3`
+-   **Features:** Streaming, tool calling
+
+## HuggingFace
+
+-   **Provider key:** `huggingface`
+-   **Official docs:** [HuggingFace Inference API](https://huggingface.co/docs/api-inference)
+-   **Auth:** `HUGGINGFACE_API_KEY` environment variable
+-   **Setup:** Set `HUGGINGFACE_API_KEY` from HuggingFace settings, then configure `provider = "huggingface"` in `vtcode.toml`
+-   **Features:** Access to various models through HuggingFace's inference API, including models from Z.AI, DeepSeek, and other providers
+
+## Poolside
+
+-   **Provider key:** `poolside`
+-   **Auth:** `POOLSIDE_API_KEY` environment variable
+-   **Setup:** Set `POOLSIDE_API_KEY` from Poolside platform, then configure `provider = "poolside"` in `vtcode.toml`
+
 > ℹ Additional provider-specific guides will be added as new integrations land in VT Code.

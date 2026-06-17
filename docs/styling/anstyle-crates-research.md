@@ -70,7 +70,7 @@ let style = anstyle_ls::parse("34;03").unwrap();
 1. **anstyle** (v1.0) - Already integrated for ANSI style representation
 2. **anstyle-parse** (v0.2) - Parses ANSI escape sequences from terminal output
 3. **anstyle-crossterm** (v4.0) - Bridge to crossterm TUI library
-4. **ratatui** (v0.29) - TUI rendering
+4. **ratatui** (v0.30) - TUI rendering
 5. **catppuccin** (v2.5) - Theme color palettes
 
 **Styling Pipeline**:

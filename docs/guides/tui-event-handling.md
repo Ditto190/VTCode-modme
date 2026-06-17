@@ -387,5 +387,5 @@ async fn test_key_event_handling() {
 
 - [Ratatui FAQ: Async & Tokio](https://ratatui.rs/faq/#when-should-i-use-tokio-and-async--await-)
 - [Ratatui Recipe: External Apps](https://ratatui.rs/recipes/apps/spawn-vim/)
-- [crossterm Event Docs](https://docs.rs/crossterm/0.27.0/crossterm/event/)
+- [crossterm Event Docs](https://docs.rs/crossterm/0.29.0/crossterm/event/)
 - [Tokio Select Documentation](https://tokio.rs/tokio/tutorial/select)

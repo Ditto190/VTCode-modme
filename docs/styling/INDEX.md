@@ -98,7 +98,7 @@ let style = ThemeConfigParser::parse_flexible("green")?;
 | `anstyle-ls`    | 1.0     | LS_COLORS parsing                   |
 | `anstyle-parse` | 0.2     | ANSI escape sequence parsing        |
 | `anstyle-query` | 1.0     | Terminal color capability detection |
-| `ratatui`       | 0.29    | TUI rendering                       |
+| `ratatui`       | 0.30    | TUI rendering                       |
 | `catppuccin`    | 2.5     | Theme color palettes                |
 
 All crates are in `vtcode-core/Cargo.toml`

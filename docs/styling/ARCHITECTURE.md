@@ -160,7 +160,7 @@ External Crates (Cargo.toml):
  anstyle-ls = "1.0"      (NEW in Phase 1)
  anstyle-parse = "0.2"   (existing)
  anstyle-crossterm = "4.0" (existing)
- ratatui = "0.29"        (existing)
+ ratatui = "0.30"        (existing)
  catppuccin = "2.5"      (existing)
 ```
 

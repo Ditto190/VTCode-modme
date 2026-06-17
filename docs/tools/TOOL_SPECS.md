@@ -45,6 +45,58 @@ This document describes the canonical public tool surface exposed to VT Code mod
 - `apply_patch`
   Purpose: First-class patch application for models that support the freeform patch surface.
 
+## `unified_file`
+
+### `read`
+
+Read file content with optional line or byte-range pagination.
+
+- Required: `path`
+- Optional:
+  - `max_bytes` — maximum bytes to return (default: full file)
+  - `offset_lines` — line offset for line-based reads (1-indexed)
+  - `page_size_lines` — number of lines to read per page
+  - `offset_bytes` — byte offset for byte-range reads (0-indexed)
+  - `page_size_bytes` — number of bytes to read per page (default: 8192)
+
+**Line-range reads** are useful for paginating through large text files:
+
+```json
+{
+  "tool": "unified_file",
+  "action": "read",
+  "path": "src/main.rs",
+  "offset_lines": 100,
+  "page_size_lines": 50
+}
+```
+
+**Byte-range reads** enable chunked preview of large or binary files:
+
+```json
+{
+  "tool": "unified_file",
+  "action": "read",
+  "path": "large_file.bin",
+  "offset_bytes": 0,
+  "page_size_bytes": 8192
+}
+```
+
+When byte-range parameters are provided, VT Code uses seek-based access for efficient partial reads without loading the entire file into memory.
+
+### `write`
+
+### `edit`
+
+### `patch`
+
+### `delete`
+
+### `move`
+
+### `copy`
+
 ## `unified_search`
 
 ### `grep`

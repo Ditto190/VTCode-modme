@@ -492,10 +492,40 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Storage building blocks, Feature flags, Usage examples, Concurrency guarantees
   - **User Questions**: "What can you tell me about `vtcode-markdown-store`?", "How does Storage building blocks work?", "How does Feature flags work?"
 
+- **File**: `docs/modules/vtcode_a2a.md`
+  - **Content**: vtcode-a2a
+  - **Topics**: Overview, Module Groups, Key Concepts, Feature Flags, Rules
+  - **User Questions**: "What can you tell me about vtcode-a2a?", "How does Overview work?", "How does Module Groups work?"
+
+- **File**: `docs/modules/vtcode_llm.md`
+  - **Content**: vtcode-llm
+  - **Topics**: Overview, Key Modules, Supported Providers, Architecture Notes, Dependencies
+  - **User Questions**: "What can you tell me about vtcode-llm?", "How does Overview work?", "How does Key Modules work?"
+
+- **File**: `docs/modules/vtcode_mcp.md`
+  - **Content**: vtcode-mcp
+  - **Topics**: Overview, Module Groups, Key Components, Architecture Notes, Configuration
+  - **User Questions**: "What can you tell me about vtcode-mcp?", "How does Overview work?", "How does Module Groups work?"
+
+- **File**: `docs/modules/vtcode_safety.md`
+  - **Content**: vtcode-safety
+  - **Topics**: Overview, Module Groups, Command Safety, Execution Policy, Sandboxing
+  - **User Questions**: "What can you tell me about vtcode-safety?", "How does Overview work?", "How does Module Groups work?"
+
+- **File**: `docs/modules/vtcode_skills.md`
+  - **Content**: vtcode-skills
+  - **Topics**: Overview, Key Modules, Skill Lifecycle, Architecture Notes, Dependencies
+  - **User Questions**: "What can you tell me about vtcode-skills?", "How does Overview work?", "How does Key Modules work?"
+
 - **File**: `docs/modules/vtcode_tools_policy.md`
   - **Content**: vtcode-tools Policy Customization Guide (Historical)
   - **Topics**: Custom storage location, Construct a `ToolPolicyManager` with your path
   - **User Questions**: "What can you tell me about vtcode-tools Policy Customization Guide (Historical)?", "How does Custom storage location work?", "How does Construct a `ToolPolicyManager` with your path work?"
+
+- **File**: `docs/modules/vtcode_ui.md`
+  - **Content**: vtcode-ui
+  - **Topics**: Overview, Architecture, Key Components, Usage, Notes
+  - **User Questions**: "What can you tell me about vtcode-ui?", "How does Overview work?", "How does Architecture work?"
 
 - **File**: `docs/modules/vtcode_indexer.md`
   - **Content**: vtcode_indexer.md
@@ -925,8 +955,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/tools/TOOL_SPECS.md`
   - **Content**: VT Code Tool Specifications
-  - **Topics**: Canonical Public Tools, `unified_search`, Guidance, Common Recovery Patterns
-  - **User Questions**: "What can you tell me about VT Code Tool Specifications?", "How does Canonical Public Tools work?", "How does `unified_search` work?"
+  - **Topics**: Canonical Public Tools, `unified_file`, `unified_search`, Guidance, Common Recovery Patterns
+  - **User Questions**: "What can you tell me about VT Code Tool Specifications?", "How does Canonical Public Tools work?", "How does `unified_file` work?"
 
 - **File**: `docs/tools/web_fetch_security.md`
   - **Content**: Web Fetch Tool Security Configuration
@@ -937,8 +967,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/user-guide/commands.md`
   - **Content**: Command Reference
-  - **Topics**: grep_file (ripgrep-like), File operations, Session resume and forks, Quick Actions in Chat Input, Scheduled tasks
-  - **User Questions**: "What can you tell me about Command Reference?", "How does grep_file (ripgrep-like) work?", "How does File operations work?"
+  - **Topics**: unified_search (ripgrep-like), File operations, Session resume and forks, Quick Actions in Chat Input, Scheduled tasks
+  - **User Questions**: "What can you tell me about Command Reference?", "How does unified_search (ripgrep-like) work?", "How does File operations work?"
 
 - **File**: `docs/user-guide/interactive-mode.md`
   - **Content**: Interactive Mode Reference

@@ -2,7 +2,7 @@
 
 This document outlines how VT Code implements Model Context Protocol (MCP) based on Claude's official MCP specifications and best practices.
 
-> Status: this file is a high-level architecture reference. For accurate, current configuration and behavior, use `docs/guides/mcp-integration.md`.
+> **Note:** This file is a high-level architecture reference. For accurate, current configuration and behavior, use [`docs/guides/mcp-integration.md`](../guides/mcp-integration.md).
 
 ## Overview
 
@@ -18,13 +18,13 @@ VT Code integrates MCP to connect with external tools, databases, and APIs throu
 mcp/
 ├── mod.rs                    # Main MCP client and provider management
 ├── cli.rs                    # MCP CLI commands and user interaction
-├── connection_pool.rs        # Connection management (disabled - needs updates)
+├── connection_pool.rs        # Connection management
 ├── enhanced_config.rs        # Enhanced configuration handling
 ├── errors.rs                 # Error types and handling
 ├── rmcp_transport.rs         # Transport layer (stdio, HTTP, child process)
 ├── schema.rs                 # JSON schema validation
 ├── tool_discovery.rs         # Tool discovery and caching
-└── tool_discovery_cache.rs   # Advanced caching (disabled - needs updates)
+└── tool_discovery_cache.rs   # Advanced caching
 ```
 
 ### Key Abstractions
@@ -345,7 +345,7 @@ fn get_status(&self) -> McpClientStatus
 
 ### Connection Pooling
 
-**Design Pattern** (`connection_pool.rs` - disabled):
+**Design Pattern** (connection pooling via semaphore):
 - Reuse connections across tool calls
 - Semaphore-based concurrency control (per provider)
 - Automatic cleanup and timeout handling

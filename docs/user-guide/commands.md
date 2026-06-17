@@ -2,10 +2,10 @@
 
 This guide summarizes common actions and how to invoke them with vtcode. The agent exposes a suite of tools to the LLM; you interact with them via chat. When you ask to search, read, or edit files, the agent chooses an appropriate tool.
 
-## grep_file (ripgrep-like)
+## unified_search (ripgrep-like)
 
 High-speed code search with glob filters, context lines, and optional literal/regex matching.
-VT Code routes searches through the custom `grep_file` tool backed by the system `rg` (ripgrep) binary. Prefer `grep_file` instead of invoking shell `rg`/`grep` yourself.
+VT Code routes searches through the `unified_search` tool (with `grep_file` as a legacy alias) backed by the system `rg` (ripgrep) binary. Prefer `unified_search` instead of invoking shell `rg`/`grep` yourself.
 
 -   Input fields:
 

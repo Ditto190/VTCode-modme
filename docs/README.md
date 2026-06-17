@@ -38,7 +38,7 @@ VT Code represents a modern approach to AI-powered software development, featuri
 - **Decision Ledger** - Structured, compact record of key decisions injected each turn for consistency
 - **Error Recovery & Resilience** - Intelligent error handling with pattern detection and context preservation
 - **Conversation Summarization** - Automatic compression when exceeding thresholds with quality assessment
-- **Multi-Provider LLM Support** - 21 providers including Gemini, OpenAI, Anthropic, DeepSeek, OpenRouter, Evolink, Qwen, StepFun, Poolside, Ollama, LM Studio
+- **Multi-Provider LLM Support** - 20+ providers including Gemini, OpenAI, Anthropic, DeepSeek, OpenRouter, Evolink, Qwen, StepFun, Poolside, Ollama, LM Studio, Xiaomi MiMo, Z.AI, Moonshot, MiniMax, HuggingFace
 - **LLM-Native Code Understanding** - Precise semantic analysis across all modern languages
 - **Bash Safety Parsing** - Accurate shell command validation via tree-sitter-bash
 - **Enterprise-Grade Safety** - Comprehensive security controls and path validation
@@ -51,16 +51,18 @@ This documentation is organized to support different user personas and use cases
 
 ### Recent Major Enhancements
 
-VT Code has undergone significant improvements inspired by Anthropic's agent architecture:
+VT Code has undergone significant improvements:
 
-- **Codex App-Server Integration** - `provider=codex` now routes through the local Codex sidecar with `/config codex` for setup, `/model` guidance, and fallback behavior when the sidecar is unavailable
-- **Experimental Codex Toggle** - Collaboration-mode discovery and native review routing can be enabled or disabled per config or CLI run
-- **Debug Startup Stability** - Terminal OSC color probing now drains late responses so `run-debug.sh` starts cleanly without leaking raw escape sequences into the prompt
+- **GLM-5.2 Model Support** - Zhipu AI's latest model with cache metrics in stream handling
+- **Byte-Range File Reading** - Large file reading with offset and page size parameters for efficient partial reads
+- **Kimi K2.7 Code Model** - Moonshot's latest code-focused model across all configurations
+- **GPT-5-Codex Integration** - OpenAI's Codex model with Responses API support
+- **Cross-Platform Process Groups** - Proper process group management on Windows via platform-specific APIs
+- **Signal Handling Architecture** - Comprehensive Ctrl+C / SIGINT priority guarantees with double-Ctrl+C emergency exit
+- **Compile-Time Tool Validation** - Pre-main validation of tool name constants for early error detection
+- **Provider Stream Refactoring** - Simplified stream handling across DeepSeek, StepFun, and ZAI providers
 - **Decision Transparency System** - Complete audit trail with reasoning and confidence scores
 - **Error Recovery & Resilience** - Intelligent error handling with pattern detection and multiple recovery strategies
-- **Conversation Summarization** - Automatic compression for extended sessions with quality metrics
-- **Enhanced Tool Design** - Comprehensive specifications with error-proofing and clear usage guidelines
-- **Configuration Synchronization** - Two-way sync between generated configs and existing settings
 
 See [CHANGELOG](../CHANGELOG.md) for complete details on these improvements.
 
@@ -330,18 +332,21 @@ VT Code builds upon key developments in AI agent technology:
 
 ---
 
-**Documentation Version:** 2.1.0
-**Last Updated:** September 2025
-**VT Code Version:** 0.15.9
+**Documentation Version:** 3.0.0
+**Last Updated:** June 2026
+**VT Code Version:** 0.132.0
 
 **Ready to get started?** **[Installation Guide](../README.md#quick-start)**
 
 ## Documentation Version
 
-This documentation reflects version 0.15.9 of VT Code, which includes significant enhancements including:
+This documentation reflects version 0.132.0 of VT Code, which includes significant enhancements including:
 
+- GLM-5.2, Kimi K2.7, and GPT-5-Codex model support
+- Byte-range file reading for large files
+- Cross-platform process group management
+- Signal handling architecture with emergency exit
 - Decision Ledger system for transparent decision tracking
 - Error recovery and resilience with intelligent pattern detection
 - Conversation summarization for long-running sessions
 - Enhanced Terminal User Interface (TUI) with improved mouse support and text selection
-- Two-way configuration synchronization

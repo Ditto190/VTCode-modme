@@ -125,6 +125,30 @@ hooks = [
 -   Runs after VT Code drafts the assistant reply but before the turn is finalized
 -   Can block stop and feed a reason back into the same turn so the agent keeps going
 
+### PreCompact
+
+-   Runs before VT Code compresses/summarizes the conversation context
+-   Can influence compression behavior or save important context before it's compressed
+-   Receives current conversation state and compression parameters
+
+### Notification
+
+-   Runs when VT Code sends a notification (desktop, terminal, or hybrid)
+-   Receives notification type, title, and message
+-   Can filter, modify, or suppress notifications
+
+### SubagentStart
+
+-   Runs when a subagent is spawned as a child thread
+-   Receives subagent name, configuration, and parent context
+-   Can modify subagent setup or block spawning
+
+### SubagentStop
+
+-   Runs when a subagent completes or is terminated
+-   Receives subagent results and exit status
+-   Can post-process subagent output or trigger follow-up actions
+
 ### Deprecated aliases
 
 -   `task_completion` and `task_completed` still parse, but VT Code normalizes them into `stop`
