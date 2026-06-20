@@ -547,6 +547,19 @@ pub(crate) fn serialize_output(output: &serde_json::Value) -> String {
     }
 }
 
+/// Extract the JSON output from a successful `ToolPipelineOutcome`.
+///
+/// Returns `Some(&Value)` for successful executions, `None` for failures,
+/// timeouts, and cancellations.
+pub(crate) fn tool_output_from_outcome(
+    outcome: &ToolPipelineOutcome,
+) -> Option<&serde_json::Value> {
+    match &outcome.status {
+        ToolExecutionStatus::Success { output, .. } => Some(output),
+        _ => None,
+    }
+}
+
 pub(crate) fn check_is_argument_error(error_str: &str) -> bool {
     error_str.contains("Missing required")
         || error_str.contains("Invalid arguments")

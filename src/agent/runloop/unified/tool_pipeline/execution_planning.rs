@@ -216,7 +216,26 @@ pub(super) async fn handle_finish_planning(
                     },
                 ));
             }
-            FinishPlanningDisposition::Passthrough => {}
+            FinishPlanningDisposition::Passthrough => {
+                // When the plan is not ready but the user explicitly requested
+                // finish_planning, show the plan confirmation dialog with
+                // draft_incomplete so the user can decide to edit or proceed.
+                if status == Some("not_ready") && require_confirmation {
+                    let mut incomplete_output = output.clone();
+                    if let Some(obj) = incomplete_output.as_object_mut() {
+                        obj.insert("draft_incomplete".to_string(), Value::Bool(true));
+                    }
+                    return Some(
+                        handle_pending_confirmation(
+                            ctx,
+                            &incomplete_output,
+                            ctrl_c_state,
+                            ctrl_c_notify,
+                        )
+                        .await,
+                    );
+                }
+            }
         }
     }
 

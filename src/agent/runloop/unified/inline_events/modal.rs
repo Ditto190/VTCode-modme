@@ -222,6 +222,14 @@ impl<'a> InlineModalProcessor<'a> {
             return Ok(InlineLoopAction::Continue);
         }
 
+        // Update header in real-time when the plan approval selection changes
+        // so the user sees which mode they're about to enter.
+        update_header_for_plan_selection(
+            &selection,
+            self.model_picker.header_context,
+            self.model_picker.handle,
+        );
+
         self.palette.handle_preview(renderer, selection)
     }
 
@@ -744,6 +752,33 @@ impl<'a> ModelPickerCoordinator<'a> {
 
         Ok(false)
     }
+}
+
+/// Update the header to reflect the pending plan approval selection.
+///
+/// When the user navigates the plan confirmation overlay (Up/Down arrows),
+/// the header agent badge updates in real-time to show which mode the
+/// current selection implies:
+/// - Execute / AutoAccept → "build" (execution mode)
+/// - EditPlan → "plan" (planning mode)
+fn update_header_for_plan_selection(
+    selection: &InlineListSelection,
+    header_context: &mut InlineHeaderContext,
+    handle: &InlineHandle,
+) {
+    let (name, color) = match selection {
+        InlineListSelection::PlanApprovalExecute | InlineListSelection::PlanApprovalAutoAccept => {
+            (Some("build".to_string()), Some("green".to_string()))
+        }
+        InlineListSelection::PlanApprovalEditPlan => {
+            (Some("plan".to_string()), Some("blue".to_string()))
+        }
+        _ => return,
+    };
+
+    header_context.primary_agent = name.clone();
+    header_context.primary_agent_color = color.clone();
+    handle.set_primary_agent(name, color);
 }
 
 enum ModelPickerOutcome {

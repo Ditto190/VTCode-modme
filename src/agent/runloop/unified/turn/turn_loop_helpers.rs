@@ -1,10 +1,11 @@
 use anyhow::Result;
 use serde_json::json;
 
-use crate::agent::runloop::unified::planning_workflow_state::{
-    planning_still_active_hint_with_fallback, short_confirmation_hint_with_fallback,
-};
+use crate::agent::runloop::unified::planning_workflow_state::short_confirmation_hint_with_fallback;
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
+use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
+    push_tool_response, tool_output_from_outcome,
+};
 use crate::agent::runloop::unified::turn::turn_helpers::{display_error, display_status};
 use crate::agent::runloop::unified::turn::turn_loop::TurnLoopContext;
 use vtcode_core::config::constants::defaults::{
@@ -336,9 +337,9 @@ async fn handle_pause_signal(
 
 pub(super) async fn maybe_handle_planning_exit_trigger(
     ctx: &mut TurnLoopContext<'_>,
-    working_history: &mut [uni::Message],
+    working_history: &mut Vec<uni::Message>,
     step_count: usize,
-    result: &mut TurnLoopResult,
+    _result: &mut TurnLoopResult,
 ) -> Result<bool> {
     if !ctx.is_planning_active() {
         return Ok(false);
@@ -400,11 +401,21 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
     .await;
 
     match outcome {
-        Ok(_pipe_outcome) => {
+        Ok(pipe_outcome) => {
+            // Add tool output to history so the model can see the result
+            // (validation blockers, confirmation outcome, etc.) and respond.
+            if let Some(output) = tool_output_from_outcome(&pipe_outcome) {
+                push_tool_response(
+                    working_history,
+                    build_step_finish_planning_call_id(step_count),
+                    serde_json::to_string(output).unwrap_or_else(|_| "{}".to_string()),
+                );
+            }
+
             if !planning_fully_disabled(ctx) {
-                display_status(ctx.renderer, &planning_still_active_hint_with_fallback())?;
-                *result = TurnLoopResult::Completed;
-                return Ok(true);
+                // Planning still active — continue the turn so the model can
+                // explain blockers or respond to the user's edit/revision decision.
+                return Ok(false);
             }
 
             display_status(

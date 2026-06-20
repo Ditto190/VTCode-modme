@@ -88,19 +88,11 @@ pub(crate) const PLANNING_WORKFLOW_KEEP_PLANNING_HINT: &str =
     "To keep planning, say `keep planning` and describe what to revise.";
 pub(crate) const PLANNING_WORKFLOW_MANUAL_SWITCH_FALLBACK_HINT: &str =
     "If automatic planning handoff fails, call `finish_planning` to present the plan again.";
-pub(crate) const PLANNING_WORKFLOW_STILL_ACTIVE_PREFIX: &str = "Planning workflow is still active. Call `finish_planning` to review/refine the plan before retrying.";
 
 pub(crate) fn short_confirmation_hint_with_fallback() -> String {
     format!(
         "{} {}",
         PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT, PLANNING_WORKFLOW_MANUAL_SWITCH_FALLBACK_HINT
-    )
-}
-
-pub(crate) fn planning_still_active_hint_with_fallback() -> String {
-    format!(
-        "{} {}",
-        PLANNING_WORKFLOW_STILL_ACTIVE_PREFIX, PLANNING_WORKFLOW_MANUAL_SWITCH_FALLBACK_HINT
     )
 }
 

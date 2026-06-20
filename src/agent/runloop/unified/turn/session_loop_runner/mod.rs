@@ -648,6 +648,15 @@ pub(super) async fn run_single_agent_loop_unified_impl(
                             true,
                         )
                         .await;
+                            // Switch from plan agent to build agent for execution.
+                            active_primary_agent.reset_to_default_from_specs(&[]);
+                            let build_display = active_primary_agent.active().display_name.clone();
+                            let build_color = active_primary_agent
+                                .active()
+                                .color
+                                .clone()
+                                .filter(|c| !c.trim().is_empty());
+                            handle.set_primary_agent(Some(build_display), build_color);
                             handle.set_skip_confirmations(auto_accept);
                             renderer.line(MessageStyle::Info, "Executing approved plan...")?;
 
