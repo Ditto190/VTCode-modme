@@ -65,47 +65,20 @@ vtcode update                  # self-update
 
 ## Providers
 
-VT Code supports 21 LLM providers out of the box, plus any OpenAI-compatible API via `[[custom_providers]]`.
+VT Code ships with **MiMo V2.5 (Xiaomi)** as the default model (1M-token context, `mimo-v2.5-pro`) and supports 21+ LLM providers out of the box, plus any OpenAI-compatible API via `[[custom_providers]]`.
 
-### All providers
+<p align="center"><a href="https://platform.xiaomimimo.com?ref=K5BCAP"><img src="./resources/screenshots/xiaomi_mi_promo.png" alt="Xiaomi MiMo" width="380" style="border-radius: 8px" /></a></p>
 
-- **Cloud LLMs** - [Anthropic](./docs/providers/PROVIDER_GUIDES.md#anthropic-claude) · [OpenAI](./docs/providers/PROVIDER_GUIDES.md#openai-gpt) · [Gemini](./docs/providers/PROVIDER_GUIDES.md#google-gemini) · [Z.AI](./docs/providers/PROVIDER_GUIDES.md#zai-zai) · [Moonshot (Kimi)](./docs/providers/PROVIDER_GUIDES.md#moonshot-kimi) · [StepFun](./docs/providers/PROVIDER_GUIDES.md#stepfun) · [MiniMax](./docs/providers/PROVIDER_GUIDES.md#minimax) · [Mistral](./docs/providers/PROVIDER_GUIDES.md#mistral) · [Qwen](./docs/providers/PROVIDER_GUIDES.md#qwen)
-- **Gateways** - [OpenRouter](./docs/providers/PROVIDER_GUIDES.md#openrouter-marketplace) · [Atlas Cloud](./docs/providers/PROVIDER_GUIDES.md#atlas-cloud) · [Evolink](./docs/providers/PROVIDER_GUIDES.md#evolink-multi-model-gateway) · [HuggingFace](./docs/providers/PROVIDER_GUIDES.md#huggingface)
-- **Local inference** - [Ollama](./docs/providers/PROVIDER_GUIDES.md#ollama-local--cloud-models) · [LM Studio](./docs/providers/PROVIDER_GUIDES.md#lm-studio-local-server) · [llama.cpp](./docs/providers/PROVIDER_GUIDES.md#llamacpp-local-server)
-- **Other** - [GitHub Copilot](./docs/providers/PROVIDER_GUIDES.md#github-copilot) · [Anthropic API Compat](./docs/providers/PROVIDER_GUIDES.md#anthropic-api-compatibility-server) · [Poolside](./docs/providers/PROVIDER_GUIDES.md#poolside)
+| Category            | Providers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cloud LLMs**      | [Anthropic](./docs/providers/PROVIDER_GUIDES.md#anthropic-claude) · [OpenAI](./docs/providers/PROVIDER_GUIDES.md#openai-gpt) · [Gemini](./docs/providers/PROVIDER_GUIDES.md#google-gemini) · [Z.AI](./docs/providers/PROVIDER_GUIDES.md#zai-zai) · [Moonshot (Kimi)](./docs/providers/PROVIDER_GUIDES.md#moonshot-kimi) · [StepFun](./docs/providers/PROVIDER_GUIDES.md#stepfun) · [MiniMax](./docs/providers/PROVIDER_GUIDES.md#minimax) · [Mistral](./docs/providers/PROVIDER_GUIDES.md#mistral) · [Qwen](./docs/providers/PROVIDER_GUIDES.md#qwen) |
+| **Gateways**        | [OpenRouter](./docs/providers/PROVIDER_GUIDES.md#openrouter-marketplace) · [Evolink](./docs/providers/PROVIDER_GUIDES.md#evolink-multi-model-gateway) · [HuggingFace](./docs/providers/PROVIDER_GUIDES.md#huggingface) · [Atlas Cloud](./docs/providers/PROVIDER_GUIDES.md#atlas-cloud)                                                                                                                                                                                                                                                               |
+| **Local inference** | [Ollama](./docs/providers/PROVIDER_GUIDES.md#ollama-local--cloud-models) · [LM Studio](./docs/providers/PROVIDER_GUIDES.md#lm-studio-local-server) · [llama.cpp](./docs/providers/PROVIDER_GUIDES.md#llamacpp-local-server)                                                                                                                                                                                                                                                                                                                           |
+| **Other**           | [GitHub Copilot](./docs/providers/PROVIDER_GUIDES.md#github-copilot) · [Anthropic API Compat](./docs/providers/PROVIDER_GUIDES.md#anthropic-api-compatibility-server) · [Poolside](./docs/providers/PROVIDER_GUIDES.md#poolside)                                                                                                                                                                                                                                                                                                                      |
 
 Read: [Provider Guides](./docs/providers/PROVIDER_GUIDES.md).
 
-### Xiaomi MiMo V2.5 Series
-
-<p align="center">
-  <a href="https://platform.xiaomimimo.com"><img src="./resources/screenshots/xiaomi_mi_promo.png" alt="Xiaomi MiMo V2.5" width="300" style="border-radius: 10px" /></a>
-</p>
-
-<p align="center">
-  <a href="https://openrouter.ai/xiaomi/mimo-v2.5-pro">
-    <img src="./resources/screenshots/xiaomi-mimo.png" alt="Xiaomi MiMo V2.5 Pro on OpenRouter" style="border-radius: 10px" />
-  </a>
-</p>
-
-<p align="center"><em>Proud partner of the <a href="https://platform.xiaomimimo.com">Xiaomi MiMo Orbit Program</a></em></p>
-
-Xiaomi MiMo V2.5 Pro ships as the default model in VT Code, available both natively and through OpenRouter. It brings a 1M-token context window, deep reasoning, and strong agentic performance to every session.
-
-- **Xiaomi MiMo** - `mimo-v2.5-pro` · `mimo-v2.5` · _1M context_
-- **OpenRouter** - `xiaomi/mimo-v2.5-pro` · `xiaomi/mimo-v2.5` · _1M context_
-
-Pricing: [Pay-as-you-go](https://platform.xiaomimimo.com/docs/en-US/price/pay-as-you-go) · [Subscription](https://platform.xiaomimimo.com/docs/en-US/price/tokenplan/subscription) · [Quick Access](https://platform.xiaomimimo.com/docs/en-US/price/tokenplan/quick-access) · [Docs](https://platform.xiaomimimo.com/docs/en-US/welcome) · [OpenRouter](https://openrouter.ai/xiaomi/mimo-v2.5-pro)
-
-> **Get started with MiMo Open Platform** — Xiaomi's most powerful AI. [Sign up with invite code **K5BCAP**](https://platform.xiaomimimo.com?ref=K5BCAP): both get **$2 API credits + 10% off** your first plan. _(Auto-filled on sign-up · Credits valid for 40 days)_
-
-### Z.ai GLM Coding Plan
-
-> **Z.ai GLM** — full support for Claude Code, Cline, and 20+ top coding tools, starting at $18/month. [Join now with invite code **KPHRHRAVLL**](https://z.ai/subscribe?ic=KPHRHRAVLL). _(Limited-time pricing)_
-
-### Atlas Cloud
-
-> **Atlas Cloud** — a powerful OpenAI-compatible gateway to 300+ models spanning LLM, image, video, audio, and 3D. Configure as a `[[custom_providers]]` endpoint in `vtcode.toml` with `base_url = "https://api.atlascloud.ai/v1"`. See the [integration guide](./docs/providers/atlascloud.md) for setup and validated model pool.
+<sup>Atlas Cloud referral: [atlascloud.ai?ref=C59AAV](https://www.atlascloud.ai?ref=C59AAV)</sup>
 
 ## Development
 

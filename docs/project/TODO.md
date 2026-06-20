@@ -2,9 +2,7 @@ Perform a detailed audit of the vtcode modes and subagents, focusing specificall
 
 ==
 
-check and improve, the system forcing the agent to continue, although " Turn budget nearly exhausted; forcing a final tool-free synthesis pass." is triggered. The agent tried to summarize the response and stop -> it should allowed to stop.
-
-This may lead to suboptimal results as the agent is forced to continue without the necessary resources. Consider implementing a more adaptive approach that allows the agent to pause and reassess its strategy when the budget is nearly exhausted, rather than forcing it to continue with a final tool-free synthesis pass. This could involve allowing the agent to request additional resources or adjust its plan to better fit within the remaining budget. Maybe asking to /compact.
+Analyze and improve the agent's budget management logic to address the issue where the system forces a "final tool-free synthesis pass" even when the agent attempts to summarize and terminate. This current behavior leads to suboptimal results because the agent is compelled to continue without sufficient resources. Propose an adaptive mechanism that grants the agent the autonomy to decide its next action when the budget is nearly exhausted, such as concluding the task, requesting additional resources, adjusting its plan, or using a /compact command to optimize its remaining capacity.
 
 ```
 
@@ -87,4 +85,8 @@ filter_tool_definitions_for_mode 3. Tests in both files
 
 ===
 
-check repeately control+c can't quit/exit the program. this seems to be a regression. The agent should be able to exit gracefully when the user sends an repeated interrupt signal (Ctrl+C). This is important for user experience and to prevent the program from becoming unresponsive. Consider implementing a signal handler that listens for interrupt signals and allows the agent to perform any necessary cleanup before exiting gracefully. This could involve setting a flag that indicates the agent should stop processing and exit, rather than forcing it to continue running indefinitely.
+Investigate and resolve a regression where the program fails to exit upon receiving repeated Ctrl+C (SIGINT) signals. Implement a robust signal handler that intercepts these interrupts to facilitate a graceful shutdown. The solution should include setting a termination flag to halt ongoing processes and executing all necessary cleanup routines before the program exits, ensuring the agent remains responsive to user interrupt requests and does not become stuck in an indefinite running state.
+
+===
+
+Develop a technical architecture and implementation plan to transform the current provider-specific `/compact` command into a unified, provider-agnostic feature. Currently, compaction is only available for the native OpenAI provider on api.openai.com. The goal is to abstract the compaction logic so that the command functions consistently across all LLM models and backends, including all providers. Your response should include an architectural design for the abstraction layer, strategies for integrating various provider APIs, and a method for ensuring manual user triggers work universally across all environments.
