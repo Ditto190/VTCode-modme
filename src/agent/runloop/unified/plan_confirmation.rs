@@ -7,6 +7,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
+use tokio::task;
 
 use vtcode_ui::tui::app::{
     InlineHandle, InlineListItem, InlineListSelection, InlineMessageKind, InlineSession,
@@ -150,11 +151,13 @@ pub(crate) async fn execute_plan_confirmation(
     ctrl_c_state: &Arc<CtrlCState>,
     ctrl_c_notify: &Arc<Notify>,
 ) -> Result<PlanConfirmationOutcome> {
+    render_confirmation_prompt(handle, &plan_content);
     handle.show_transient(build_plan_confirmation_request(
         &plan_content,
         draft_incomplete,
     ));
-    render_confirmation_prompt(handle, &plan_content);
+    handle.force_redraw();
+    task::yield_now().await;
     let outcome =
         wait_for_overlay_submission(handle, session, ctrl_c_state, ctrl_c_notify, |submission| {
             match submission {

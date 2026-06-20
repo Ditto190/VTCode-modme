@@ -405,6 +405,14 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
             // Add tool output to history so the model can see the result
             // (validation blockers, confirmation outcome, etc.) and respond.
             if let Some(output) = tool_output_from_outcome(&pipe_outcome) {
+                // Inject a synthetic assistant tool_use so the history is well-formed:
+                //   user(intent) → assistant(tool_use: finish_planning) → user(tool_result)
+                // Without this the tool_result is orphaned and the LLM generates
+                // confused repeated output when called on the next turn.
+                working_history.push(uni::Message::assistant_with_tools(
+                    String::new(),
+                    vec![call.clone()],
+                ));
                 push_tool_response(
                     working_history,
                     build_step_finish_planning_call_id(step_count),
