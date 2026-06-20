@@ -390,6 +390,14 @@ impl HarnessTurnState {
         self.recovery_mode = Some(mode);
     }
 
+    /// Switch to tool-free synthesis mode and reset an in-flight/just-finished
+    /// recovery pass back to Pending so the next loop iteration can consume it.
+    /// Returns `true` when the phase was actually reset.
+    pub(crate) fn switch_to_tool_free_recovery(&mut self) -> bool {
+        self.recovery_mode = Some(RecoveryMode::ToolFreeSynthesis);
+        self.reset_recovery_phase_to_pending()
+    }
+
     pub(crate) fn increment_adaptive_recovery_decisions(&mut self) -> u8 {
         self.adaptive_recovery_decisions = self.adaptive_recovery_decisions.saturating_add(1);
         self.adaptive_recovery_decisions

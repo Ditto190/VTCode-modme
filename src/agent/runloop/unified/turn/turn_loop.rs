@@ -487,15 +487,12 @@ pub(crate) async fn run_turn_loop(
                     "Remaining budget critically low; synthesizing final answer now.",
                 );
                 // Switch the recovery mode to a tool-free synthesis pass.
-                // NOTE: use set_recovery_mode (unconditional), NOT
+                // NOTE: use the unconditional switch helper, not
                 // activate_recovery_with_mode — the latter is a guarded no-op
                 // when a recovery pass is already in flight (phase == InPass),
                 // which would leave the mode as AdaptiveBudgetDecision and spin
                 // the loop forever.
-                turn_processing_ctx
-                    .harness_state
-                    .set_recovery_mode(RecoveryMode::ToolFreeSynthesis);
-                turn_processing_ctx.reset_recovery_phase_to_pending();
+                turn_processing_ctx.switch_to_tool_free_recovery();
                 continue;
             }
             match adaptive_budget_recovery::decide_recovery_action(
@@ -530,13 +527,10 @@ pub(crate) async fn run_turn_loop(
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "Adaptive recovery decision failed; falling back to synthesis");
-                    // See note above: set_recovery_mode is unconditional;
+                    // See note above: switch_to_tool_free_recovery is unconditional;
                     // activate_recovery_with_mode is a no-op mid-pass and would
                     // loop forever re-calling decide_recovery_action.
-                    turn_processing_ctx
-                        .harness_state
-                        .set_recovery_mode(RecoveryMode::ToolFreeSynthesis);
-                    turn_processing_ctx.reset_recovery_phase_to_pending();
+                    turn_processing_ctx.switch_to_tool_free_recovery();
                     continue;
                 }
             }
@@ -579,10 +573,12 @@ pub(crate) async fn run_turn_loop(
                 )? {
                     PostToolFailureRecovery::NotApplicable => {}
                     PostToolFailureRecovery::RetryToolFree => {
-                        turn_processing_ctx.activate_recovery_with_mode(
-                            POST_TOOL_RECOVERY_REASON.to_string(),
-                            RecoveryMode::ToolFreeSynthesis,
-                        );
+                        // Switch the recovery mode to a tool-free synthesis pass.
+                        // NOTE: use the unconditional switch helper, not
+                        // activate_recovery_with_mode — the latter is a guarded no-op
+                        // when a recovery pass is already in flight (phase == InPass),
+                        // which would leave the mode unchanged and spin the loop forever.
+                        turn_processing_ctx.switch_to_tool_free_recovery();
                         continue;
                     }
                     PostToolFailureRecovery::StopAfterDirective => {
@@ -760,10 +756,12 @@ pub(crate) async fn run_turn_loop(
                 )? {
                     PostToolFailureRecovery::NotApplicable => {}
                     PostToolFailureRecovery::RetryToolFree => {
-                        turn_processing_ctx.activate_recovery_with_mode(
-                            POST_TOOL_RECOVERY_REASON.to_string(),
-                            RecoveryMode::ToolFreeSynthesis,
-                        );
+                        // Switch the recovery mode to a tool-free synthesis pass.
+                        // NOTE: use the unconditional switch helper, not
+                        // activate_recovery_with_mode — the latter is a guarded no-op
+                        // when a recovery pass is already in flight (phase == InPass),
+                        // which would leave the mode unchanged and spin the loop forever.
+                        turn_processing_ctx.switch_to_tool_free_recovery();
                         continue;
                     }
                     PostToolFailureRecovery::StopAfterDirective => {
@@ -885,10 +883,12 @@ pub(crate) async fn run_turn_loop(
                 )? {
                     PostToolFailureRecovery::NotApplicable => {}
                     PostToolFailureRecovery::RetryToolFree => {
-                        ctx.harness_state.activate_recovery_with_mode(
-                            POST_TOOL_RECOVERY_REASON.to_string(),
-                            RecoveryMode::ToolFreeSynthesis,
-                        );
+                        // Switch the recovery mode to a tool-free synthesis pass.
+                        // NOTE: use the unconditional switch helper, not
+                        // activate_recovery_with_mode — the latter is a guarded no-op
+                        // when a recovery pass is already in flight (phase == InPass),
+                        // which would leave the mode unchanged and spin the loop forever.
+                        ctx.harness_state.switch_to_tool_free_recovery();
                         continue;
                     }
                     PostToolFailureRecovery::StopAfterDirective => {

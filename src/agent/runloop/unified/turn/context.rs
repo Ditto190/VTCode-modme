@@ -225,8 +225,8 @@ impl<'a> TurnProcessingContext<'a> {
         self.harness_state.recovery_mode()
     }
 
-    pub(crate) fn reset_recovery_phase_to_pending(&mut self) -> bool {
-        self.harness_state.reset_recovery_phase_to_pending()
+    pub(crate) fn switch_to_tool_free_recovery(&mut self) -> bool {
+        self.harness_state.switch_to_tool_free_recovery()
     }
 
     pub(crate) fn consume_recovery_pass(&mut self) -> bool {

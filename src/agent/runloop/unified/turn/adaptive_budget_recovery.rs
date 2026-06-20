@@ -228,9 +228,7 @@ pub(crate) async fn apply_recovery_decision(
             ctx.push_system_message(
                 "Adaptive recovery: synthesize a final answer from the evidence already collected.",
             );
-            ctx.harness_state
-                .set_recovery_mode(RecoveryMode::ToolFreeSynthesis);
-            ctx.harness_state.reset_recovery_phase_to_pending();
+            ctx.harness_state.switch_to_tool_free_recovery();
             Ok(AdaptiveRecoveryOutcome::Continue)
         }
 
@@ -314,9 +312,7 @@ pub(crate) async fn apply_recovery_decision(
                 )
             };
             ctx.push_system_message(system_msg);
-            ctx.harness_state
-                .set_recovery_mode(RecoveryMode::ToolFreeSynthesis);
-            ctx.harness_state.reset_recovery_phase_to_pending();
+            ctx.harness_state.switch_to_tool_free_recovery();
             Ok(AdaptiveRecoveryOutcome::Continue)
         }
     }
