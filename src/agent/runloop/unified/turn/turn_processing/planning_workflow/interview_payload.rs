@@ -461,7 +461,7 @@ fn append_context_hint(question: &str, context: &InterviewResearchContext) -> St
 
 fn truncate_hint(value: &str, max_len: usize) -> String {
     let trimmed = value.trim();
-    if trimmed.len() <= max_len {
+    if trimmed.chars().count() <= max_len {
         return trimmed.to_string();
     }
     let mut out = trimmed

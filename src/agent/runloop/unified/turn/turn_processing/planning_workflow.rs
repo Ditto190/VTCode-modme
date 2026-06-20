@@ -183,7 +183,7 @@ Return JSON only.",
         model: active_model.to_string(),
         temperature: Some(0.2),
         stream: false,
-        max_tokens: Some(700),
+        max_tokens: Some(1024),
         ..Default::default()
     };
 
@@ -192,6 +192,13 @@ Return JSON only.",
         provider_client.generate(request),
     )
     .await;
+
+    if response.is_err() {
+        tracing::warn!(
+            timeout_secs = INTERVIEW_SYNTHESIS_TIMEOUT_SECS,
+            "Interview synthesis LLM call timed out; falling back to adaptive interview"
+        );
+    }
 
     let generated = response
         .ok()

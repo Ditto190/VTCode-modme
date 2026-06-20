@@ -694,6 +694,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Semantic Understanding, Tree-sitter Security Parsing (Bash), Syntax Highlighting
   - **User Questions**: "What can you tell me about Language Support in VT Code?", "How does Semantic Understanding work?", "How does Tree-sitter Security Parsing (Bash) work?"
 
+- **File**: `docs/project/modes-audit-bug-report.md`
+  - **Content**: Modes Audit: Bug Report and Fix Summary
+  - **Topics**: Ranked Bug Report, False Positives Eliminated, Files Changed, Validation
+  - **User Questions**: "What can you tell me about Modes Audit: Bug Report and Fix Summary?", "How does Ranked Bug Report work?", "How does False Positives Eliminated work?"
+
 - **File**: `docs/installation/NATIVE_INSTALLERS.md`
   - **Content**: Native Installers
   - **Topics**: macOS & Linux (Shell), Windows (PowerShell)
@@ -817,6 +822,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: VT Code Styling System - Complete Documentation Index
   - **Topics**: Quick Navigation, Implementation Status, Document Guide, Quick Reference, Key Crates
   - **User Questions**: "What can you tell me about VT Code Styling System - Complete Documentation Index?", "How does Quick Navigation work?", "How does Implementation Status work?"
+
+- **File**: `docs/project/vtcode-modes-subagents-audit.md`
+  - **Content**: VTCode Modes and Subagents: Comprehensive Audit Report
+  - **Topics**: Executive Summary, 1. Architecture Overview, 2. Identified Issues, 3. Per-Mode Analysis, 4. Proposed Optimized Architecture
+  - **User Questions**: "What can you tell me about VTCode Modes and Subagents: Comprehensive Audit Report?", "How does Executive Summary work?", "How does 1. Architecture Overview work?"
 
 - **File**: `docs/styling/README.md`
   - **Content**: Vtcode Styling System Documentation

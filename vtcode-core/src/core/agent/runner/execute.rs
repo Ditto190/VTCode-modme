@@ -683,7 +683,7 @@ impl AgentRunner {
         ) = runtime_setup;
         let mut cost_warning_emitted = false;
         let max_budget_usd = self.config().agent.harness.max_budget_usd;
-        let max_revision_rounds = self.config().agent.harness.max_revision_rounds.max(1);
+        let max_revision_rounds = self.config().agent.harness.max_revision_rounds;
         let mut revision_rounds_used = 0usize;
         let mut should_write_blocked_handoff = false;
 

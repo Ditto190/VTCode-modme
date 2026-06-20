@@ -447,6 +447,11 @@ pub(crate) fn should_enforce_safe_mode_prompts(
     workspace_trust_level: Option<WorkspaceTrustLevel>,
 ) -> bool {
     if full_auto || auto_permission_review_active {
+        tracing::warn!(
+            full_auto,
+            auto_permission_review_active,
+            "Safe-mode prompts bypassed: auto mode or permission review is active"
+        );
         return false;
     }
 

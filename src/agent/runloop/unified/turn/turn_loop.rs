@@ -405,9 +405,7 @@ pub(crate) async fn run_turn_loop(
             break;
         }
 
-        if maybe_handle_planning_exit_trigger(&mut ctx, working_history, step_count, &mut result)
-            .await?
-        {
+        if maybe_handle_planning_exit_trigger(&mut ctx, working_history, step_count).await? {
             break;
         }
 

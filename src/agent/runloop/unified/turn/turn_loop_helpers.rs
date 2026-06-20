@@ -339,7 +339,6 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
     ctx: &mut TurnLoopContext<'_>,
     working_history: &mut Vec<uni::Message>,
     step_count: usize,
-    _result: &mut TurnLoopResult,
 ) -> Result<bool> {
     if !ctx.is_planning_active() {
         return Ok(false);
