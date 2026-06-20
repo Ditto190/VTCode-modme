@@ -323,6 +323,22 @@ fn merge_active_primary_hooks(config: &mut HooksConfig, hooks: Option<&HooksConf
 
     config.lifecycle.quiet_success_output |= hooks.lifecycle.quiet_success_output;
     append_hook_groups(
+        &mut config.lifecycle.session_start,
+        &hooks.lifecycle.session_start,
+    );
+    append_hook_groups(
+        &mut config.lifecycle.session_end,
+        &hooks.lifecycle.session_end,
+    );
+    append_hook_groups(
+        &mut config.lifecycle.subagent_start,
+        &hooks.lifecycle.subagent_start,
+    );
+    append_hook_groups(
+        &mut config.lifecycle.subagent_stop,
+        &hooks.lifecycle.subagent_stop,
+    );
+    append_hook_groups(
         &mut config.lifecycle.user_prompt_submit,
         &hooks.lifecycle.user_prompt_submit,
     );
@@ -855,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_hook_config_excludes_global_and_subagent_lifecycle_events() {
+    fn primary_hook_config_merges_session_and_subagent_lifecycle_events() {
         let global = HooksConfig::default();
         let mut primary_hooks = HooksConfig::default();
         primary_hooks.lifecycle.session_start = vec![hook_group("primary-session-start")];
@@ -871,10 +887,22 @@ mod tests {
 
         let merged = build_primary_agent_hook_config(&global, &active);
 
-        assert!(merged.lifecycle.session_start.is_empty());
-        assert!(merged.lifecycle.session_end.is_empty());
-        assert!(merged.lifecycle.subagent_start.is_empty());
-        assert!(merged.lifecycle.subagent_stop.is_empty());
+        assert_hook_commands(
+            &merged.lifecycle.session_start,
+            &["primary-session-start"],
+        );
+        assert_hook_commands(
+            &merged.lifecycle.session_end,
+            &["primary-session-end"],
+        );
+        assert_hook_commands(
+            &merged.lifecycle.subagent_start,
+            &["primary-subagent-start"],
+        );
+        assert_hook_commands(
+            &merged.lifecycle.subagent_stop,
+            &["primary-subagent-stop"],
+        );
         assert!(merged.lifecycle.task_completion.is_empty());
         assert!(merged.lifecycle.task_completed.is_empty());
         assert!(merged.lifecycle.stop.is_empty());
