@@ -1,3 +1,4 @@
+use crate::core::loop_detector::MAX_TOTAL_READONLY_CALLS;
 use crate::prompts::sections::{SectionBoundaryMode, find_prompt_section_bounds};
 use std::fmt::Write as _;
 
@@ -30,14 +31,20 @@ pub fn upsert_harness_limits_section(
     if prompt.is_empty() {
         let _ = writeln!(
             prompt,
-            "[Harness Limits]\n- max_tool_calls_per_turn: {}\n- max_tool_wall_clock_secs: {}\n- max_tool_retries: {}",
-            max_tool_calls_label, max_tool_wall_clock_secs, max_tool_retries
+            "[Harness Limits]\n- max_tool_calls_per_turn: {}\n- max_tool_wall_clock_secs: {}\n- max_tool_retries: {}\n- max_readonly_tool_calls: {} (global budget across all read-only tools; produce output before exhausting)",
+            max_tool_calls_label,
+            max_tool_wall_clock_secs,
+            max_tool_retries,
+            MAX_TOTAL_READONLY_CALLS
         );
     } else {
         let _ = writeln!(
             prompt,
-            "\n[Harness Limits]\n- max_tool_calls_per_turn: {}\n- max_tool_wall_clock_secs: {}\n- max_tool_retries: {}",
-            max_tool_calls_label, max_tool_wall_clock_secs, max_tool_retries
+            "\n[Harness Limits]\n- max_tool_calls_per_turn: {}\n- max_tool_wall_clock_secs: {}\n- max_tool_retries: {}\n- max_readonly_tool_calls: {} (global budget across all read-only tools; produce output before exhausting)",
+            max_tool_calls_label,
+            max_tool_wall_clock_secs,
+            max_tool_retries,
+            MAX_TOTAL_READONLY_CALLS
         );
     }
 }
@@ -56,6 +63,7 @@ mod tests {
         assert!(prompt.contains("- max_tool_calls_per_turn: 12"));
         assert!(prompt.contains("- max_tool_wall_clock_secs: 180"));
         assert!(prompt.contains("- max_tool_retries: 2"));
+        assert!(prompt.contains("- max_readonly_tool_calls: 30"));
     }
 
     #[test]
@@ -79,7 +87,8 @@ mod tests {
 
         assert_eq!(prompt.matches("[Harness Limits]").count(), 1);
         assert!(prompt.contains("[Additional Context]\nKeep this section"));
-        assert!(prompt.ends_with("- max_tool_retries: 3\n"));
+        assert!(prompt.contains("- max_tool_retries: 3"));
+        assert!(prompt.contains("- max_readonly_tool_calls: 30"));
     }
 
     #[test]
@@ -113,5 +122,6 @@ mod tests {
         assert!(prompt.contains("- max_tool_calls_per_turn: unlimited"));
         assert!(prompt.contains("- max_tool_wall_clock_secs: 600"));
         assert!(prompt.contains("- max_tool_retries: 2"));
+        assert!(prompt.contains("- max_readonly_tool_calls: 30"));
     }
 }

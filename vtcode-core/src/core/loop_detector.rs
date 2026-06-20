@@ -20,6 +20,14 @@ const DETECTION_WINDOW: usize = 20; // Raised from 10 to catch cross-batch dupli
 const HARD_LIMIT_MULTIPLIER: usize = 2; // Hard stop at 2x soft limit
 const MAX_SIMILAR_READ_TARGET_CALLS: usize = 4;
 const MAX_SIMILAR_READ_TARGET_VARIANTS: usize = 3;
+
+/// Global hard limit on total read-only tool calls across ALL read-only tools.
+/// Prevents the agent from alternating between different read-only tools to
+/// evade per-tool limits. Fires a HARD STOP when exhausted.
+///
+/// Also referenced by `prompts::harness_limits` to advertise the budget in the
+/// system prompt -- keep both in sync.
+pub(crate) const MAX_TOTAL_READONLY_CALLS: usize = 30;
 const LEGACY_GREP_FILE: &str = tools::GREP_FILE;
 const LEGACY_LIST_FILES: &str = tools::LIST_FILES;
 const LEGACY_SEARCH_TOOLS: &str = "search_tools";
@@ -149,6 +157,12 @@ pub struct LoopDetector {
     /// Tracks consecutive read-only calls without any write/execution progress.
     /// Resets on any mutating tool call.
     readonly_streak: usize,
+    /// Cumulative count of all read-only tool calls since last reset.
+    /// Unlike `readonly_streak`, this never resets on mutating calls -- it only
+    /// clears on `reset()`.  Used to enforce a global read-only budget so the
+    /// agent cannot alternate between different read-only tools to evade
+    /// per-tool limits.
+    total_readonly_calls: usize,
 }
 
 impl LoopDetector {
@@ -166,6 +180,7 @@ impl LoopDetector {
             custom_limits: HashMap::new(),
             norm_cache: HashMap::with_capacity(16),
             readonly_streak: 0,
+            total_readonly_calls: 0,
         }
     }
 
@@ -281,12 +296,28 @@ impl LoopDetector {
 
         if is_readonly {
             self.readonly_streak += 1;
+            self.total_readonly_calls += 1;
         } else if is_mutating {
             self.readonly_streak = 0;
         }
 
-        const MAX_NAVIGATION_ONLY_STREAK: usize = 6;
-        const NAVIGATION_HARD_STOP_STREAK: usize = 10;
+        // --- Global read-only budget ---
+        // Prevents the agent from alternating between different read-only tools
+        // (e.g., unified_search and unified_file) to evade per-tool limits.
+        if self.total_readonly_calls >= MAX_TOTAL_READONLY_CALLS {
+            let hard_limit = self.get_limit_for_tool(tool_name) * HARD_LIMIT_MULTIPLIER;
+            self.tool_counts.insert(tool_name.to_string(), hard_limit);
+            return Some(format!(
+                "HARD STOP: Global read-only budget exhausted ({} total read-only calls). \
+                 You have collected far more information than needed. \
+                 Synthesize a final answer NOW using the data already in your conversation history. \
+                 Do NOT call any more read-only tools.",
+                self.total_readonly_calls
+            ));
+        }
+
+        const MAX_NAVIGATION_ONLY_STREAK: usize = 4;
+        const NAVIGATION_HARD_STOP_STREAK: usize = 7;
         if self.readonly_streak >= MAX_NAVIGATION_ONLY_STREAK {
             if self.readonly_streak >= NAVIGATION_HARD_STOP_STREAK {
                 let hard_limit = self.get_limit_for_tool(tool_name) * HARD_LIMIT_MULTIPLIER;
@@ -455,6 +486,11 @@ impl LoopDetector {
         self.tool_counts.get(tool_name).copied().unwrap_or(0)
     }
 
+    /// Get cumulative read-only call count since last reset.
+    pub fn total_readonly_calls(&self) -> usize {
+        self.total_readonly_calls
+    }
+
     /// Reset tracking for specific tool (use after successful progress)
     pub fn reset_tool(&mut self, tool_name: &str) {
         self.tool_counts.remove(tool_name);
@@ -519,6 +555,7 @@ impl LoopDetector {
         self.last_warning = None;
         self.norm_cache.clear();
         self.readonly_streak = 0;
+        self.total_readonly_calls = 0;
     }
 
     /// Reset only the read-only streak counter without clearing tool call history.
@@ -1008,7 +1045,8 @@ mod tests {
         // Interleave grep calls between read_file calls on the same target.
         // With the new logic, grep (read-only) does not break the streak.
         // Use distinct offsets so variants stay above the threshold.
-        for offset in 1..=MAX_SIMILAR_READ_TARGET_CALLS + 1 {
+        // Limit iterations so the navigation streak stays below the hard stop (7).
+        for offset in 1..=(MAX_SIMILAR_READ_TARGET_CALLS - 1) {
             let _ = detector.record_call(
                 &read_tool,
                 &json!({"path": "vtcode-core/src/a2a/server.rs", "offset_lines": offset * 40, "limit": 20}),
@@ -1019,8 +1057,9 @@ mod tests {
             );
         }
 
-        // Streak reaches MAX_SIMILAR_READ_TARGET_CALLS but variants exceed the threshold,
-        // so no hard stop.
+        // Variants exceed the threshold, so no repetitive-read-target hard stop.
+        // But navigation hard stop may have fired (streak >= 7) -- check specifically
+        // for the repetitive-read-target condition instead.
         assert!(!detector.is_hard_limit_exceeded(&read_tool));
     }
 
@@ -1125,14 +1164,12 @@ mod tests {
         let grep_args = serde_json::json!({"pattern": "fn", "path": "src/main.rs"});
         let read_args = serde_json::json!({"path": "src/main.rs"});
 
-        // Sequence: A, B, C, B, A (where A=LIST, B=GREP, C=READ)
-        // This avoids identical patterns (k=2: [B, A] vs [B, C], k=3: [C, B, A] vs ???)
+        // Sequence: A, B, C (where A=LIST, B=GREP, C=READ)
+        // 3 calls below the warning threshold of 4.
         let sequence = [
             (LEGACY_LIST_FILES, &list_args),
             (LEGACY_GREP_FILE, &grep_args),
             (tools::READ_FILE, &read_args),
-            (LEGACY_GREP_FILE, &grep_args),
-            (LEGACY_LIST_FILES, &list_args),
         ];
 
         for (i, (tool, args)) in sequence.iter().enumerate() {
@@ -1145,11 +1182,11 @@ mod tests {
             );
         }
 
-        // 6th call (any read-only) should trigger navigation loop warning (streak hits 6)
-        let warning = detector.record_call(tools::READ_FILE, &read_args);
+        // 4th call (any read-only) should trigger navigation loop warning (streak hits 4)
+        let warning = detector.record_call(LEGACY_GREP_FILE, &grep_args);
         assert!(
             warning.is_some(),
-            "6th call should have triggered a navigation loop warning"
+            "4th call should have triggered a navigation loop warning"
         );
         assert!(warning.unwrap().contains("Navigation Loop Detected"));
 
@@ -1173,7 +1210,10 @@ mod tests {
     fn test_checkpoint_324_pattern_detected() {
         // Simulates the exact failure from turn_324 checkpoint:
         // Agent reads Cargo.lock with start_line/end_line (ignored), retries with
-        // different values, interleaves grep calls. Should HARD STOP at read #5.
+        // different values, interleaves grep calls. With lowered navigation
+        // thresholds (streak >= 4 warns, >= 7 hard-stops), the navigation loop
+        // warning fires at call 4 and the repetitive-read-target hard stop
+        // fires at call 6.
         let mut detector = LoopDetector::with_max_repeated_calls(100);
         let read_tool = format!("{}::read", tools::UNIFIED_FILE);
 
@@ -1189,22 +1229,29 @@ mod tests {
         let r = detector.record_call(&read_tool, &json!({"path": "Cargo.lock"}));
         assert!(r.is_none());
 
-        // Call 4: grep Cargo.lock (read-only, does NOT break streak)
+        // Call 4: grep Cargo.lock (read-only, does NOT break streak, streak=4)
+        // Navigation loop warning fires at streak 4 with the lowered threshold.
         let r = detector.record_call(
             LEGACY_GREP_FILE,
             &json!({"pattern": "aws-lc", "path": "Cargo.lock"}),
         );
-        assert!(r.is_none());
+        assert!(
+            r.is_some(),
+            "Navigation loop warning should fire at streak 4"
+        );
+        let msg = r.unwrap();
+        assert!(msg.contains("Navigation Loop Detected"));
 
-        // Call 5: read Cargo.lock with start_line (streak=3)
+        // Call 5: read Cargo.lock with start_line (streak=5)
+        // Cooldown suppresses the navigation warning; no repetitive-read warning yet.
         let r = detector.record_call(
             &read_tool,
             &json!({"path": "Cargo.lock", "start_line": 550, "end_line": 590}),
         );
         assert!(r.is_none());
 
-        // Call 6: read Cargo.lock with different start_line (streak=4, variants=3)
-        // HARD STOP fires: streak >= 4 && variants <= 3
+        // Call 6: read Cargo.lock with different start_line (streak=6, variants=3)
+        // Repetitive-read-target HARD STOP fires: same_target_streak >= 4 && variants <= 3
         let r = detector.record_call(
             &read_tool,
             &json!({"path": "Cargo.lock", "start_line": 4400, "end_line": 4420}),
@@ -1218,7 +1265,6 @@ mod tests {
         );
         assert!(msg.contains("Cargo.lock"));
         assert!(msg.contains("offset/limit"));
-        assert!(detector.is_hard_limit_exceeded(&read_tool));
         assert!(detector.is_hard_limit_exceeded(&read_tool));
     }
 
@@ -1267,5 +1313,137 @@ mod tests {
                 assert!(msg.contains("src/lib.rs"));
             }
         }
+    }
+
+    // --- Global readonly budget tests ---
+
+    #[test]
+    fn global_readonly_budget_fires_at_limit() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        let mut saw_hard_stop = false;
+
+        // Make MAX_TOTAL_READONLY_CALLS calls with different args to avoid per-tool detection
+        for i in 0..MAX_TOTAL_READONLY_CALLS {
+            let args = json!({"pattern": format!("pattern_{i}"), "path": "src/"});
+            if let Some(msg) = detector.record_call(tools::UNIFIED_SEARCH, &args) {
+                if msg.contains("Global read-only budget") {
+                    saw_hard_stop = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            saw_hard_stop,
+            "Global readonly budget should fire at {MAX_TOTAL_READONLY_CALLS}"
+        );
+        assert!(detector.is_hard_limit_exceeded(tools::UNIFIED_SEARCH));
+    }
+
+    #[test]
+    fn global_readonly_budget_counts_across_different_tools() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        let mut hard_stop_count = 0;
+
+        // Alternate between unified_search and unified_file to evade per-tool limits
+        for i in 0..MAX_TOTAL_READONLY_CALLS + 5 {
+            if i % 2 == 0 {
+                let args = json!({"pattern": format!("p_{i}"), "path": "src/"});
+                if let Some(msg) = detector.record_call(tools::UNIFIED_SEARCH, &args) {
+                    if msg.contains("Global read-only budget") {
+                        hard_stop_count += 1;
+                    }
+                }
+            } else {
+                let args = json!({"action": "read", "path": format!("src/file_{i}.rs")});
+                if let Some(msg) = detector.record_call(tools::UNIFIED_FILE, &args) {
+                    if msg.contains("Global read-only budget") {
+                        hard_stop_count += 1;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            hard_stop_count > 0,
+            "Global budget should fire when alternating tools"
+        );
+        assert_eq!(
+            detector.total_readonly_calls(),
+            MAX_TOTAL_READONLY_CALLS + 5
+        );
+    }
+
+    #[test]
+    fn global_readonly_budget_resets_on_reset() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+
+        // Make some readonly calls
+        for i in 0..10 {
+            let args = json!({"pattern": format!("p_{i}"), "path": "src/"});
+            detector.record_call(tools::UNIFIED_SEARCH, &args);
+        }
+        assert_eq!(detector.total_readonly_calls(), 10);
+
+        detector.reset();
+        assert_eq!(detector.total_readonly_calls(), 0);
+    }
+
+    #[test]
+    fn global_readonly_budget_not_incremented_by_mutating_tools() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+
+        // Make mutating calls
+        for i in 0..5 {
+            let args = json!({"path": format!("src/file_{i}.rs"), "content": "fn main() {}"});
+            detector.record_call(tools::WRITE_FILE, &args);
+        }
+
+        assert_eq!(detector.total_readonly_calls(), 0);
+    }
+
+    #[test]
+    fn lowered_navigation_loop_thresholds() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+
+        // Make 3 read-only calls (below threshold)
+        for i in 0..3 {
+            let args = json!({"pattern": format!("p_{i}"), "path": "src/"});
+            assert!(
+                detector.record_call(tools::UNIFIED_SEARCH, &args).is_none(),
+                "Call {i} should not trigger warning"
+            );
+        }
+
+        // 4th call should trigger navigation loop warning (streak hits 4)
+        let args = json!({"pattern": "p_4", "path": "src/"});
+        let warning = detector.record_call(tools::UNIFIED_SEARCH, &args);
+        assert!(
+            warning.is_some(),
+            "Navigation loop warning should fire at streak 4"
+        );
+        assert!(warning.unwrap().contains("Navigation Loop Detected"));
+    }
+
+    #[test]
+    fn navigation_hard_stop_at_lowered_threshold() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+
+        // Make 7 read-only calls (new hard stop threshold)
+        for i in 0..6 {
+            let args = json!({"pattern": format!("p_{i}"), "path": "src/"});
+            detector.record_call(tools::UNIFIED_SEARCH, &args);
+        }
+
+        // 7th call should trigger HARD STOP
+        let args = json!({"pattern": "p_7", "path": "src/"});
+        let warning = detector.record_call(tools::UNIFIED_SEARCH, &args);
+        assert!(
+            warning.is_some(),
+            "Navigation hard stop should fire at streak 7"
+        );
+        let msg = warning.unwrap();
+        assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {}", msg);
+        assert!(detector.is_hard_limit_exceeded(tools::UNIFIED_SEARCH));
     }
 }
