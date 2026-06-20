@@ -55,6 +55,7 @@ use crate::agent::runloop::unified::tool_routing::{
     HitlDecision, ToolPermissionFlow, ToolPermissionsContext, ensure_tool_permission_with_call_id,
     prompt_external_tool_permission,
 };
+use crate::agent::runloop::unified::turn::tool_outcomes::error_handling::tool_denial_diagnostic;
 use crate::agent::runloop::unified::ui_interaction::PlaceholderSpinner;
 use crate::agent::runloop::unified::ui_interaction_stream::CopilotRuntimeRequestHandler;
 
@@ -445,9 +446,19 @@ impl<'a> CopilotRuntimeHost<'a> {
         {
             ToolPermissionFlow::Approved { .. } => {}
             ToolPermissionFlow::Denied => {
-                return Ok(Some(denied_tool_response(
-                    tool_name,
-                    "denied by user or policy",
+                let diagnostic = tool_denial_diagnostic(tool_name);
+                let text = if let Some(diag) = diagnostic.as_ref() {
+                    let impact = diag["impact"].as_str().unwrap_or("");
+                    let fix = diag["fix"]["action"].as_str().unwrap_or("");
+                    format!("VT Code denied the tool `{tool_name}`. {impact} {fix}")
+                } else {
+                    format!("VT Code denied the tool `{tool_name}`.")
+                };
+                return Ok(Some(CopilotToolCallResponse::Failure(
+                    CopilotToolCallFailure {
+                        text_result_for_llm: text,
+                        error: format!("tool '{tool_name}' denied by user or policy"),
+                    },
                 )));
             }
             ToolPermissionFlow::Blocked { reason } => {
@@ -1734,7 +1745,9 @@ fn map_builtin_permission_prompt_decision(
     feedback: Option<String>,
 ) -> (CopilotPermissionDecision, bool) {
     match decision {
-        HitlDecision::Approved => (CopilotPermissionDecision::Approved, false),
+        HitlDecision::Approved | HitlDecision::Enable => {
+            (CopilotPermissionDecision::Approved, false)
+        }
         HitlDecision::ApprovedSession | HitlDecision::ApprovedPermanent => {
             (CopilotPermissionDecision::ApprovedAlways, true)
         }

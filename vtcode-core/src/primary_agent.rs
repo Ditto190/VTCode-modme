@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
@@ -5,6 +6,7 @@ use std::sync::Arc;
 
 use vtcode_config::constants::{defaults::DEFAULT_PRIMARY_AGENT_NAME, tools};
 use vtcode_config::core::permissions::AgentPermissionsConfig;
+use vtcode_config::core::tools::ToolPolicy;
 use vtcode_config::{
     DiscoveredSubagents, HookGroupConfig, HooksConfig, McpProviderConfig, SubagentMcpServer,
     SubagentMemoryScope, SubagentSource, SubagentSpec, builtin_primary_build_agent,
@@ -42,6 +44,7 @@ pub struct ActivePrimaryAgent {
     pub skills: Vec<String>,
     pub mcp_servers: Vec<SubagentMcpServer>,
     pub memory: Option<SubagentMemoryScope>,
+    pub tool_policy_overrides: BTreeMap<String, ToolPolicy>,
 }
 
 impl ActivePrimaryAgent {
@@ -72,6 +75,7 @@ impl ActivePrimaryAgent {
             skills: runtime.skills.clone(),
             mcp_servers: runtime.mcp_servers.clone(),
             memory: runtime.memory,
+            tool_policy_overrides: runtime.tool_policy_overrides.clone(),
         }
     }
 }

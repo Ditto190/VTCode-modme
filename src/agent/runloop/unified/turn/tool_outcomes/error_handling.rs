@@ -29,6 +29,27 @@ pub(super) fn is_blocked_or_denied_failure(error: &str) -> bool {
     .any(|marker| lowered.contains(marker))
 }
 
+/// Returns tool-specific diagnostic information when a critical tool is denied
+/// by policy. This helps the LLM agent explain the issue to the user and
+/// suggest concrete fixes instead of just reporting a generic denial.
+pub(crate) fn tool_denial_diagnostic(tool_name: &str) -> Option<serde_json::Value> {
+    match tool_name {
+        "unified_exec" => Some(serde_json::json!({
+            "cause": "The 'unified_exec' tool (shell command execution) is denied by tool policy configuration.",
+            "impact": "No shell commands can be executed, including: cargo build, cargo check, cargo test, cargo clippy, cargo fmt, and any other command-line tools.",
+            "fix": {
+                "action": "Change the tool policy from 'deny' to 'allow' (or 'prompt') in the configuration files.",
+                "files": [
+                    "vtcode.toml: [tools.policies] section - change: unified_exec = \"deny\" to: unified_exec = \"allow\"",
+                    ".vtcode/tool-policy.json: policies object - change: \"unified_exec\": \"deny\" to: \"unified_exec\": \"allow\""
+                ],
+                "note": "After changing the files, restart the session for the policy to take effect."
+            }
+        })),
+        _ => None,
+    }
+}
+
 pub(super) fn truncate_text_for_model(value: &str, max_chars: usize) -> (String, bool) {
     const MARKER: &str = " ... [truncated] ... ";
     vtcode_commons::formatting::head_tail_truncate(value, max_chars, MARKER)

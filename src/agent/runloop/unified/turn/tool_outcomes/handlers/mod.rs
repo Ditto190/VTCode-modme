@@ -19,6 +19,7 @@ use crate::agent::runloop::unified::turn::context::{
     PreparedAssistantToolCall, TurnHandlerOutcome, TurnLoopResult, TurnProcessingContext,
 };
 
+use super::error_handling::tool_denial_diagnostic;
 use crate::agent::runloop::unified::tool_routing::ToolPermissionFlow;
 mod budget;
 mod fallbacks;
@@ -526,14 +527,20 @@ pub(crate) async fn validate_tool_call<'a>(
                     "next_action": "Choose a safer tool or narrower action that stays within the user's explicit request."
                 })
             } else {
-                ToolExecutionError::policy_violation(
-                    canonical_tool_name,
+                let mut error_json = ToolExecutionError::policy_violation(
+                    canonical_tool_name.as_str(),
                     format!(
                         "Tool '{}' execution denied by policy",
                         prepared.canonical_name
                     ),
                 )
-                .to_json_value()
+                .to_json_value();
+                if let Some(diagnostic) = tool_denial_diagnostic(&canonical_tool_name) {
+                    if let Some(obj) = error_json.as_object_mut() {
+                        obj.insert("diagnostic".to_string(), diagnostic);
+                    }
+                }
+                error_json
             };
             ctx.push_tool_response(
                 tool_call_id,

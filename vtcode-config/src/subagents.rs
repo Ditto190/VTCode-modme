@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::constants::tools;
 use crate::constants::ui;
 use crate::core::permissions::{AgentPermissionsConfig, PermissionDefault};
+use crate::core::tools::ToolPolicy;
 use crate::hooks::{HookCommandConfig, HookCommandKind, HookGroupConfig, HooksConfig};
 
 const BUILTIN_DEFAULT_AGENT: &str = r#"You are the default VT Code execution subagent.
@@ -205,6 +206,11 @@ pub struct SubagentSpec {
     pub file_path: Option<PathBuf>,
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Per-tool policy overrides applied when this agent becomes active.
+    /// Keys are tool names, values are the policy to enforce.
+    /// Applied on top of (and overriding) the global `[tools.policies]` from vtcode.toml.
+    #[serde(default)]
+    pub tool_policy_overrides: BTreeMap<String, ToolPolicy>,
 }
 
 impl SubagentSpec {
@@ -488,6 +494,7 @@ pub fn builtin_subagents() -> Vec<SubagentSpec> {
             source: SubagentSource::Builtin,
             file_path: None,
             warnings: Vec::new(),
+            tool_policy_overrides: BTreeMap::new(),
         },
         SubagentSpec {
             name: "explorer".to_string(),
@@ -513,6 +520,7 @@ pub fn builtin_subagents() -> Vec<SubagentSpec> {
             source: SubagentSource::Builtin,
             file_path: None,
             warnings: Vec::new(),
+            tool_policy_overrides: BTreeMap::new(),
         },
         SubagentSpec {
             name: "worker".to_string(),
@@ -538,6 +546,7 @@ pub fn builtin_subagents() -> Vec<SubagentSpec> {
             source: SubagentSource::Builtin,
             file_path: None,
             warnings: Vec::new(),
+            tool_policy_overrides: BTreeMap::new(),
         },
     ]
 }
@@ -567,6 +576,11 @@ pub fn builtin_primary_build_agent() -> SubagentSpec {
         source: SubagentSource::Builtin,
         file_path: None,
         warnings: Vec::new(),
+        tool_policy_overrides: {
+            let mut m = BTreeMap::new();
+            m.insert("unified_exec".to_string(), ToolPolicy::Allow);
+            m
+        },
     }
 }
 
@@ -595,6 +609,11 @@ pub fn builtin_primary_auto_agent() -> SubagentSpec {
         source: SubagentSource::Builtin,
         file_path: None,
         warnings: Vec::new(),
+        tool_policy_overrides: {
+            let mut m = BTreeMap::new();
+            m.insert("unified_exec".to_string(), ToolPolicy::Allow);
+            m
+        },
     }
 }
 
@@ -623,6 +642,7 @@ pub fn builtin_plan_agent() -> SubagentSpec {
         source: SubagentSource::Builtin,
         file_path: None,
         warnings: Vec::new(),
+        tool_policy_overrides: BTreeMap::new(),
     }
 }
 
@@ -651,6 +671,7 @@ pub fn builtin_primary_duck_agent() -> SubagentSpec {
         source: SubagentSource::Builtin,
         file_path: None,
         warnings: Vec::new(),
+        tool_policy_overrides: BTreeMap::new(),
     }
 }
 
@@ -841,6 +862,7 @@ fn load_cli_agents(value: &JsonValue) -> Result<Vec<SubagentSpec>> {
             source: SubagentSource::Cli,
             file_path: None,
             warnings,
+            tool_policy_overrides: BTreeMap::new(),
         });
     }
 
@@ -1008,6 +1030,7 @@ fn subagent_spec_from_json_map(
         source,
         file_path: None,
         warnings,
+        tool_policy_overrides: BTreeMap::new(),
     })
 }
 

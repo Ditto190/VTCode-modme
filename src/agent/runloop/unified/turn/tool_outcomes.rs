@@ -7,7 +7,7 @@
 
 mod apply;
 mod dispatch;
-mod error_handling;
+pub(crate) mod error_handling;
 mod execution_result;
 pub(crate) mod handlers;
 pub(crate) mod helpers;

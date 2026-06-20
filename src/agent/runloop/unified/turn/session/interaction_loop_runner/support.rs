@@ -920,7 +920,22 @@ async fn handle_select_primary_agent(
             }
             let display_name = active.display_name.clone();
             let is_plan_agent = active.identity.name.eq_ignore_ascii_case("plan");
+            let policy_overrides = active.tool_policy_overrides.clone();
             sync_primary_agent_hook_runtime(ctx).await?;
+            // Apply per-agent tool policy overrides before refreshing the tool snapshot
+            for (tool_name, policy) in &policy_overrides {
+                if let Err(err) = ctx
+                    .tool_registry
+                    .set_tool_policy(tool_name, policy.clone())
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to apply tool policy override for '{}' on agent switch: {}",
+                        tool_name,
+                        err
+                    );
+                }
+            }
             sync_primary_agent_mcp_runtime(ctx, state).await?;
             set_primary_agent_display(ctx, display_name);
             // Activating the plan agent also enters the planning workflow so

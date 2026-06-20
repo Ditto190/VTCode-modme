@@ -1,7 +1,9 @@
 use anyhow::Result;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 use vtcode_config::core::permissions::AgentPermissionsConfig;
+use vtcode_config::core::tools::ToolPolicy;
 use vtcode_config::{
     HooksConfig, McpProviderConfig, SubagentMcpServer, SubagentMemoryScope, SubagentSource,
     SubagentSpec,
@@ -40,6 +42,7 @@ pub struct ResolvedAgentRuntimeView {
     pub read_only: bool,
     pub source: SubagentSource,
     pub file_path: Option<PathBuf>,
+    pub tool_policy_overrides: BTreeMap<String, ToolPolicy>,
 }
 
 impl ResolvedAgentRuntimeView {
@@ -64,6 +67,7 @@ impl ResolvedAgentRuntimeView {
             read_only: spec.is_read_only(),
             source: spec.source.clone(),
             file_path: spec.file_path.clone(),
+            tool_policy_overrides: spec.tool_policy_overrides.clone(),
         }
     }
 }

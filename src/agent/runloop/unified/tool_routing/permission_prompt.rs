@@ -701,6 +701,114 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     }
 }
 
+/// Show a HITL prompt for a tool that was denied by policy config.
+/// Offers an "Enable tool" option that updates the tool policy to Allow,
+/// and a "Deny Once" option to skip this invocation.
+pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
+    tool_name: &str,
+    diagnostic: Option<Value>,
+    _renderer: &mut AnsiRenderer,
+    handle: &InlineHandle,
+    ctrl_c_state: &Arc<CtrlCState>,
+    ctrl_c_notify: &Arc<Notify>,
+    session: &mut S,
+) -> Result<HitlDecision> {
+    use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
+
+    let mut description_lines = vec![
+        format!("Tool: {}", tool_name),
+        String::new(),
+        format!("This tool is currently DENIED by tool policy configuration."),
+    ];
+
+    if let Some(diag) = &diagnostic {
+        if let Some(impact) = diag["impact"].as_str() {
+            description_lines.push(format!("Impact: {}", impact));
+        }
+        if let Some(fix_action) = diag["fix"]["action"].as_str() {
+            description_lines.push(String::new());
+            description_lines.push(format!("Fix: {}", fix_action));
+        }
+        if let Some(files) = diag["fix"]["files"].as_array() {
+            for file in files {
+                if let Some(f) = file.as_str() {
+                    description_lines.push(format!("  - {}", f));
+                }
+            }
+        }
+    }
+
+    description_lines.push(String::new());
+    description_lines.push("Choose how to handle this tool:".to_string());
+
+    let options = vec![
+        InlineListItem {
+            title: "Enable tool".to_string(),
+            subtitle: Some("Update tool policy to 'allow' and continue execution".to_string()),
+            badge: Some("Fix Policy".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::ToolApprovalEnable),
+            search_value: Some("enable allow fix policy continue yes 1".to_string()),
+        },
+        InlineListItem {
+            title: "".to_string(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: None,
+            search_value: None,
+        },
+        InlineListItem {
+            title: "Deny Once".to_string(),
+            subtitle: Some("Skip this tool call (ask again next time)".to_string()),
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::ToolApprovalDenyOnce),
+            search_value: Some("deny no reject skip once 2".to_string()),
+        },
+    ];
+
+    let navigation_hint = "Use ↑↓ or Tab to navigate • Enter to select • Esc to deny".to_string();
+
+    let request = ListOverlayRequest {
+        title: format!("Tool Policy: {}", tool_name),
+        lines: description_lines,
+        footer_hint: Some(navigation_hint),
+        items: options,
+        selected: None,
+        search: None,
+        hotkeys: Vec::new(),
+    };
+
+    let overlay = TransientRequest::List(request);
+
+    let result = show_overlay_and_wait(
+        handle,
+        session,
+        overlay,
+        ctrl_c_state,
+        ctrl_c_notify,
+        |submission| match submission {
+            TransientSubmission::Selection(InlineListSelection::ToolApprovalEnable) => {
+                Some(HitlDecision::Enable)
+            }
+            TransientSubmission::Selection(InlineListSelection::ToolApprovalDenyOnce) => {
+                Some(HitlDecision::DeniedOnce)
+            }
+            TransientSubmission::Selection(_) => Some(HitlDecision::DeniedOnce),
+            _ => None,
+        },
+    )
+    .await?;
+
+    match result {
+        OverlayWaitOutcome::Submitted(decision) => Ok(decision),
+        OverlayWaitOutcome::Cancelled => Ok(HitlDecision::DeniedOnce),
+        OverlayWaitOutcome::Interrupted => Ok(HitlDecision::Interrupt),
+        OverlayWaitOutcome::Exit => Ok(HitlDecision::Exit),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

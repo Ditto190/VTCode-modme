@@ -39,6 +39,7 @@ use crate::agent::runloop::unified::auto_permission::{
 };
 use crate::agent::runloop::unified::run_loop_context::AutoPermissionRuntimeContext;
 use crate::agent::runloop::unified::state::SessionStats;
+use crate::agent::runloop::unified::turn::tool_outcomes::error_handling::tool_denial_diagnostic;
 
 use super::state::CtrlCState;
 use approval_cache::{cache_key, record_approval_blocking};
@@ -47,7 +48,7 @@ use approval_policy::{approval_policy_rejects_prompt, build_tool_risk_context};
 use hook_messages::render_hook_messages;
 use permission_prompt::{
     extract_shell_approval_command_words, extract_shell_permission_scope_signature,
-    prompt_tool_permission, split_command_words_on_operators,
+    prompt_policy_denied_tool, prompt_tool_permission, split_command_words_on_operators,
 };
 use shell_approval::{
     approval_learning_target, exact_shell_approval_target, persistent_approval_target,
@@ -68,6 +69,7 @@ pub(crate) enum HitlDecision {
     ApprovedPermanent,
     Denied,
     DeniedOnce,
+    Enable,
     Exit,
     Interrupt,
 }
@@ -672,6 +674,8 @@ async fn finalize_permission_decision(
         }
         HitlDecision::Exit => Ok(ToolPermissionFlow::Exit),
         HitlDecision::Interrupt => Ok(ToolPermissionFlow::Interrupted),
+        // Enable is handled inline in the policy denial check, never reaches here
+        HitlDecision::Enable => Ok(ToolPermissionFlow::Denied),
     }
 }
 
@@ -1004,7 +1008,40 @@ pub(crate) async fn ensure_tool_permission_with_call_id<S: UiSession + ?Sized>(
 
     let policy_decision = tool_registry.evaluate_tool_policy(tool_name).await?;
     if policy_decision == ToolPermissionDecision::Deny {
-        return Ok(ToolPermissionFlow::Denied);
+        // Show HITL prompt with "Enable" option so the user can fix the policy at runtime
+        if !skip_confirmations {
+            let diagnostic = tool_denial_diagnostic(tool_name);
+            let decision = prompt_policy_denied_tool(
+                tool_name,
+                diagnostic,
+                renderer,
+                handle,
+                ctrl_c_state,
+                ctrl_c_notify,
+                session,
+            )
+            .await?;
+
+            match decision {
+                HitlDecision::Enable => {
+                    // Update tool policy to Allow and clear cached denials
+                    if let Err(err) = tool_registry
+                        .set_tool_policy(tool_name, ToolPolicy::Allow)
+                        .await
+                    {
+                        tracing::warn!("Failed to update tool policy for '{}': {}", tool_name, err);
+                    }
+                    if let Some(cache) = tool_permission_cache {
+                        let mut perm_cache = cache.write().await;
+                        perm_cache.invalidate(tool_name);
+                    }
+                    // Fall through to continue normal permission flow
+                }
+                _ => return Ok(ToolPermissionFlow::Denied),
+            }
+        } else {
+            return Ok(ToolPermissionFlow::Denied);
+        }
     }
 
     let current_dir =

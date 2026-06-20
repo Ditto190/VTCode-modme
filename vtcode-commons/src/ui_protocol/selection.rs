@@ -44,6 +44,7 @@ pub enum InlineListSelection {
     ToolApprovalDenyOnce,
     ToolApprovalSession,
     ToolApprovalPermanent,
+    ToolApprovalEnable,
     FileConflictReload,
     FileConflictViewDiff,
     FileConflictAbort,
