@@ -65,7 +65,20 @@ pub(crate) async fn run_preflight_check() {
         }
     };
 
-    let latest_is_newer = latest.version > *updater.current_version();
+    let current = updater.current_version();
+    let latest_is_newer = latest.version > *current;
+    let versions_match = latest.version == *current;
+
+    if versions_match {
+        debug!(
+            "Preflight update check: versions match ({current}), no update available",
+        );
+    } else if latest_is_newer {
+        debug!(
+            "Preflight update check: new version {latest} > current {current}",
+            latest = latest.version,
+        );
+    }
 
     // Keep the on-disk cache in sync so the session init code can also
     // read the result when it loads the cache later.
