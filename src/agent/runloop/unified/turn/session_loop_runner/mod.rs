@@ -7,7 +7,7 @@ mod support;
 use super::*;
 use crate::agent::runloop::git::{compute_session_code_change_delta, normalize_workspace_path};
 use crate::agent::runloop::unified::planning_workflow_state::render_planning_workflow_next_step_hint;
-use crate::agent::runloop::unified::postamble::{ExitSummaryData, print_exit_summary};
+use crate::agent::runloop::unified::postamble::{ExitData, print_exit_summary};
 use crate::agent::runloop::unified::run_loop_context::RecoveryMode;
 use crate::agent::runloop::unified::turn::turn_loop::TurnLoopOutcome;
 use crate::agent::runloop::unified::turn::turn_loop::{
@@ -36,12 +36,11 @@ use metrics::{
 };
 use plan_seed::load_active_plan_seed;
 use support::{
-    ExitHeaderDisplay, PendingTimeoutRecovery, TurnHistoryCheckpoint, append_transient_turn_notes,
-    build_exit_header_context_fast, checkpoint_session_archive_start,
-    force_reload_workspace_config_for_execution, latest_assistant_result_text,
-    live_reload_preserves_session_config, prepare_resume_bootstrap_without_archive,
-    prompt_startup_planning_workflow, remove_transient_system_notes,
-    take_pending_resumed_user_prompt,
+    PendingTimeoutRecovery, TurnHistoryCheckpoint, append_transient_turn_notes,
+    checkpoint_session_archive_start, force_reload_workspace_config_for_execution,
+    latest_assistant_result_text, live_reload_preserves_session_config,
+    prepare_resume_bootstrap_without_archive, prompt_startup_planning_workflow,
+    remove_transient_system_notes, take_pending_resumed_user_prompt,
 };
 use tokio::sync::{Notify, mpsc};
 use vtcode_core::llm::provider::MessageRole;
@@ -1259,16 +1258,8 @@ pub(super) async fn run_single_agent_loop_unified_impl(
             start_code_changes.as_ref(),
             end_code_changes.as_ref(),
         );
-        let telemetry_snapshot = match telemetry.get_snapshot() {
-            Ok(snapshot) => snapshot,
-            Err(err) => {
-                tracing::warn!(
-                    "Failed to capture telemetry snapshot for postamble: {}",
-                    err
-                );
-                vtcode_core::core::telemetry::TelemetryStats::default()
-            }
-        };
+        let (prompt_tokens, completion_tokens, cache_read_tokens, cache_creation_tokens) =
+            telemetry.get_aggregate_token_usage();
         let finalization_succeeded = finalization_output.is_some();
         let resume_identifier = finalization_output
             .and_then(|output| output.archive_path)
@@ -1277,41 +1268,51 @@ pub(super) async fn run_single_agent_loop_unified_impl(
                     .and_then(|stem| stem.to_str())
                     .map(|stem| stem.to_string())
             });
-        let provider_name = provider_client.name().to_string();
-        let reasoning_label = vt_cfg
-            .as_ref()
-            .map(|cfg| cfg.agent.reasoning_effort.as_str().to_string())
-            .unwrap_or_else(|| config.reasoning_effort.as_str().to_string());
+        let trust_label = match session_bootstrap.acp_workspace_trust {
+            Some(vtcode_core::config::AgentClientProtocolZedWorkspaceTrustMode::FullAuto) => {
+                "full auto"
+            }
+            Some(vtcode_core::config::AgentClientProtocolZedWorkspaceTrustMode::ToolsPolicy) => {
+                "tools policy"
+            }
+            None if full_auto => "full auto",
+            None => "tools policy",
+        };
         let provider_label = {
             let label = crate::agent::runloop::unified::session_setup::resolve_provider_label(
                 &config,
                 vt_cfg.as_ref(),
             );
             if label.is_empty() {
-                provider_name.clone()
+                provider_client.name().to_string()
             } else {
                 label
             }
         };
-        let header_context = Some(build_exit_header_context_fast(
-            &config,
-            &session_bootstrap,
-            ExitHeaderDisplay {
-                provider_label,
-                reasoning_label,
-                context_window_size: provider_client.effective_context_size(&config.model),
-                full_auto,
-                primary_agent: Some(active_primary_agent.active().display_name.clone()),
-            },
-        ));
+        let reasoning_label = vt_cfg
+            .as_ref()
+            .map(|cfg| cfg.agent.reasoning_effort.as_str().to_string())
+            .unwrap_or_else(|| config.reasoning_effort.as_str().to_string());
+        let (code_additions, code_deletions) = code_change_delta
+            .map(|d| (d.additions, d.deletions))
+            .unwrap_or((0, 0));
         if !finalization_succeeded {
             let _ = vtcode_ui::tui::panic_hook::restore_tui();
         }
-        print_exit_summary(ExitSummaryData {
-            total_session_time: session_started_at.elapsed(),
-            code_changes: code_change_delta,
-            telemetry: telemetry_snapshot,
-            header_context,
+        print_exit_summary(ExitData {
+            app_name: "VT Code".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            model: config.model.clone(),
+            provider: provider_label,
+            trust_label: trust_label.to_string(),
+            reasoning: reasoning_label,
+            session_duration: session_started_at.elapsed(),
+            prompt_tokens,
+            completion_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            code_additions,
+            code_deletions,
             resume_identifier,
             budget_limit: session_stats.budget_limit(),
         });

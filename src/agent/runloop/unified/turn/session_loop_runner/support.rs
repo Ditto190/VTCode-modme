@@ -4,7 +4,6 @@ use crate::agent::runloop::git::{
     DirtyWorktreeStatus, git_dirty_worktree_entries, workspace_relative_display,
 };
 use crate::agent::runloop::unified::overlay_prompt::{OverlayWaitOutcome, show_overlay_and_wait};
-use crate::agent::runloop::welcome::SessionBootstrap;
 use std::sync::Arc;
 use vtcode_core::llm::provider::MessageRole;
 use vtcode_core::utils::session_archive;
@@ -321,61 +320,6 @@ pub(super) async fn force_reload_workspace_config_for_execution(
     }
 
     Ok(())
-}
-
-pub(super) struct ExitHeaderDisplay {
-    pub(super) provider_label: String,
-    pub(super) reasoning_label: String,
-    pub(super) context_window_size: usize,
-    pub(super) full_auto: bool,
-    pub(super) primary_agent: Option<String>,
-}
-
-pub(super) fn build_exit_header_context_fast(
-    config: &CoreAgentConfig,
-    session_bootstrap: &SessionBootstrap,
-    display: ExitHeaderDisplay,
-) -> vtcode_ui::tui::app::InlineHeaderContext {
-    use vtcode_core::config::constants::ui;
-
-    let trust_label = match session_bootstrap.acp_workspace_trust {
-        Some(vtcode_core::config::AgentClientProtocolZedWorkspaceTrustMode::FullAuto) => {
-            "full_auto"
-        }
-        Some(vtcode_core::config::AgentClientProtocolZedWorkspaceTrustMode::ToolsPolicy) => {
-            "tools_policy"
-        }
-        None if display.full_auto => "full auto",
-        None => "tools policy",
-    };
-
-    vtcode_ui::tui::app::InlineHeaderContext {
-        app_name: vtcode_core::config::constants::app::DISPLAY_NAME.to_string(),
-        provider: format!("{}{}", ui::HEADER_PROVIDER_PREFIX, display.provider_label),
-        model: format!("{}{}", ui::HEADER_MODEL_PREFIX, config.model),
-        context_window_size: Some(display.context_window_size),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        search_tools: Some(crate::agent::runloop::ui::build_search_tools_badge(
-            &config.workspace,
-        )),
-        persistent_memory: None,
-        pr_review: None,
-        editor_context: None,
-        git: String::new(),
-        reasoning: format!("{}{}", ui::HEADER_REASONING_PREFIX, display.reasoning_label),
-        reasoning_stage: None,
-        workspace_trust: format!("{}{}", ui::HEADER_TRUST_PREFIX, trust_label),
-        tools: String::new(),
-        mcp: format!(
-            "{}{}",
-            ui::HEADER_MCP_PREFIX,
-            ui::HEADER_UNKNOWN_PLACEHOLDER
-        ),
-        primary_agent: display.primary_agent,
-        primary_agent_color: None,
-        highlights: Vec::new(),
-        subagent_badges: Vec::new(),
-    }
 }
 
 pub(super) async fn prompt_startup_planning_workflow(

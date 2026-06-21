@@ -158,7 +158,7 @@ impl McpCircuitBreaker {
                 let now = Instant::now();
                 let elapsed = Duration::from_secs(epoch);
                 // Approximate - we can't perfectly restore Instant, but this is close enough
-                state.last_failure_time = Some(now - elapsed);
+                state.last_failure_time = Some(now.checked_sub(elapsed).unwrap_or(now));
             }
         }
         breaker

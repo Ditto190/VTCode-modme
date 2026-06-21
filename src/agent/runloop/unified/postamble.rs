@@ -1,34 +1,34 @@
-use crate::agent::runloop::git::CodeChangeDelta;
 use std::time::Duration;
 use vtcode_commons::ansi_codes::{BOLD, DIM, RESET, fg_256};
 use vtcode_commons::color256_theme::rgb_to_ansi256_for_theme;
-use vtcode_core::config::constants::ui;
-use vtcode_core::core::telemetry::TelemetryStats;
-use vtcode_ui::tui::app::InlineHeaderContext;
 use vtcode_ui::tui::ui::theme;
 
-pub(crate) struct ExitSummaryData {
-    pub total_session_time: Duration,
-    pub code_changes: Option<CodeChangeDelta>,
-    pub telemetry: TelemetryStats,
-    pub header_context: Option<InlineHeaderContext>,
+/// Lightweight exit data — all aggregate, no heavy clones, no baked-in prefixes.
+/// If a value is 0, it won't appear in the postamble.
+pub(crate) struct ExitData {
+    pub app_name: String,
+    pub version: String,
+    pub model: String,
+    pub provider: String,
+    pub trust_label: String,
+    pub reasoning: String,
+    pub session_duration: Duration,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub code_additions: u64,
+    pub code_deletions: u64,
     pub resume_identifier: Option<String>,
     pub budget_limit: Option<(f64, f64)>,
 }
 
-pub(crate) fn print_exit_summary(data: ExitSummaryData) {
-    let (prompt, completion, cache_read, cache_creation) =
-        aggregate_tokens(&data.telemetry.model_usage);
-    let diff = data.code_changes.unwrap_or_default();
-    let models = sorted_models(&data.telemetry.model_usage);
+pub(crate) fn print_exit_summary(data: ExitData) {
+    let is_light = theme::is_light_theme(&theme::active_theme_id());
 
-    let current_theme = theme::active_theme_id();
-    let is_light = theme::is_light_theme(&current_theme);
-
-    // Ciapre theme colors (RGB)
-    const TITLE_RGB: (u8, u8, u8) = (0xAE, 0xA4, 0x7F); // primary_accent
-    const MODEL_RGB: (u8, u8, u8) = (0xCC, 0x8A, 0x3E); // secondary_accent (yellow/gold)
-    const RESUME_RGB: (u8, u8, u8) = (0x98, 0xBB, 0x74); // green variant
+    const TITLE_RGB: (u8, u8, u8) = (0xAE, 0xA4, 0x7F);
+    const MODEL_RGB: (u8, u8, u8) = (0xCC, 0x8A, 0x3E);
+    const RESUME_RGB: (u8, u8, u8) = (0x98, 0xBB, 0x74);
 
     let title_color = rgb_to_ansi256_for_theme(TITLE_RGB.0, TITLE_RGB.1, TITLE_RGB.2, is_light);
     let model_color = rgb_to_ansi256_for_theme(MODEL_RGB.0, MODEL_RGB.1, MODEL_RGB.2, is_light);
@@ -37,145 +37,105 @@ pub(crate) fn print_exit_summary(data: ExitSummaryData) {
     let model_style = fg_256(model_color);
     let resume_style = fg_256(resume_color);
 
-    let title = build_title(&data.header_context);
     println!();
-    println!("{BOLD}{title_style}{title}{RESET}");
+    println!(
+        "{BOLD}{title_style}> {} ({}){RESET}",
+        data.app_name, data.version
+    );
 
-    if let Some(ctx) = &data.header_context {
-        println!("{DIM}{}{RESET}", build_trust_line(ctx));
-        print_model_provider_line(ctx, &model_style);
-        print_reasoning_line(ctx);
+    let trust = build_trust_line(&data.trust_label);
+    if !trust.is_empty() {
+        println!("{DIM}{trust}{RESET}");
     }
 
-    if models.len() == 1 {
-        let (_model, stats) = models[0];
-        println!(
-            "{DIM}Session {} | {} | {} in / {} out{}{} | Code +{} / -{}{RESET}",
-            format_duration(data.total_session_time),
-            format_duration(stats.api_time),
-            format_number(stats.prompt_tokens),
-            format_number(stats.completion_tokens),
-            format_cache_fragment(stats.cache_read_tokens, stats.cache_creation_tokens),
-            format_cache_hit_ratio(stats.cache_read_tokens, stats.cache_creation_tokens),
-            diff.additions,
-            diff.deletions
-        );
+    print_model_line(&data, &model_style);
+
+    let mut stats = Vec::new();
+    stats.push(format!(
+        "Session {}",
+        format_duration(data.session_duration)
+    ));
+
+    if data.prompt_tokens > 0 || data.completion_tokens > 0 {
+        stats.push(format!(
+            "{} in / {} out",
+            format_number(data.prompt_tokens),
+            format_number(data.completion_tokens),
+        ));
+    }
+
+    if data.cache_read_tokens > 0 || data.cache_creation_tokens > 0 {
+        stats.push(format!(
+            "Cache {} read / {} write",
+            format_number(data.cache_read_tokens),
+            format_number(data.cache_creation_tokens),
+        ));
+    }
+
+    if data.code_additions > 0 || data.code_deletions > 0 {
+        stats.push(format!(
+            "Code +{} / -{}",
+            data.code_additions, data.code_deletions,
+        ));
+    }
+
+    if stats.len() > 1 {
+        println!("{DIM}{}{RESET}", stats.join(" | "));
     } else {
-        // Multi-model: aggregate line + per-model breakdown
-        println!(
-            "{DIM}Session {} | API {} | Tokens {} in / {} out{} | Code +{} / -{}{RESET}",
-            format_duration(data.total_session_time),
-            format_duration(data.telemetry.api_time_spent),
-            format_number(prompt),
-            format_number(completion),
-            format_cache_fragment(cache_read, cache_creation),
-            diff.additions,
-            diff.deletions
-        );
-        for (model, stats) in models {
-            println!(
-                "{DIM}  {BOLD}{model_style}{model}{RESET}{DIM} | {} | {} in / {} out{}{}{RESET}",
-                format_duration(stats.api_time),
-                format_number(stats.prompt_tokens),
-                format_number(stats.completion_tokens),
-                format_cache_fragment(stats.cache_read_tokens, stats.cache_creation_tokens),
-                format_cache_hit_ratio(stats.cache_read_tokens, stats.cache_creation_tokens),
-            );
-        }
+        println!("{DIM}{}{RESET}", stats[0]);
     }
 
     if let Some((max_budget_usd, actual_cost_usd)) = data.budget_limit {
-        println!(
-            "{DIM}{}{RESET}",
-            format_budget_limit_line(max_budget_usd, actual_cost_usd)
-        );
+        println!("{DIM}Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}{RESET}",);
     }
+
     if let Some(session_id) = data.resume_identifier {
         println!("{DIM}Resume: {resume_style}vtcode --resume {session_id}{RESET}");
     }
+
     println!();
 }
 
-fn aggregate_tokens(
-    usage: &hashbrown::HashMap<String, vtcode_core::core::telemetry::ModelUsageStats>,
-) -> (u64, u64, u64, u64) {
-    usage.values().fold((0, 0, 0, 0), |(p, c, r, w), s| {
-        (
-            p + s.prompt_tokens,
-            c + s.completion_tokens,
-            r + s.cache_read_tokens,
-            w + s.cache_creation_tokens,
-        )
-    })
-}
+fn print_model_line(data: &ExitData, model_style: &str) {
+    let model = data.model.trim();
+    let provider = data.provider.trim();
+    let reasoning = data.reasoning.trim();
 
-fn sorted_models(
-    usage: &hashbrown::HashMap<String, vtcode_core::core::telemetry::ModelUsageStats>,
-) -> Vec<(&String, &vtcode_core::core::telemetry::ModelUsageStats)> {
-    let mut models: Vec<_> = usage.iter().collect();
-    models.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.api_time));
-    models
-}
+    let show_model = !model.is_empty();
+    let show_provider = !provider.is_empty();
+    let show_reasoning = !reasoning.is_empty();
 
-fn print_model_provider_line(ctx: &InlineHeaderContext, model_style: &str) {
-    let model = ctx.model.trim();
-    let provider = ctx.provider.trim();
-    if !model.is_empty() && !provider.is_empty() {
-        println!("{DIM}Model: {BOLD}{model_style}{model}{RESET}{DIM} via {provider}{RESET}");
-    } else if !model.is_empty() {
-        println!("{DIM}Model: {BOLD}{model_style}{model}{RESET}");
-    } else if !provider.is_empty() {
-        println!("{DIM}Provider: {provider}{RESET}");
+    let mut line = match (show_model, show_provider) {
+        (true, true) => format!("Model: {BOLD}{model_style}{model}{RESET}{DIM} via {provider}"),
+        (true, false) => format!("Model: {BOLD}{model_style}{model}{RESET}"),
+        (false, true) => format!("Provider: {provider}"),
+        (false, false) => String::new(),
+    };
+
+    if show_reasoning {
+        let suffix = format!(" · {reasoning}");
+        if line.is_empty() {
+            line = format!("Reasoning:{suffix}");
+        } else {
+            line.push_str(&suffix);
+        }
+    }
+
+    if !line.is_empty() {
+        println!("{DIM}{line}{RESET}");
     }
 }
 
-fn print_reasoning_line(ctx: &InlineHeaderContext) {
-    let reasoning = ctx.reasoning.trim();
-    if reasoning.is_empty() {
-        return;
-    }
-    let stage = ctx
-        .reasoning_stage
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let Some(stage) = stage {
-        println!("{DIM}Reasoning: {reasoning} ({stage}){RESET}");
-    } else {
-        println!("{DIM}Reasoning: {reasoning}{RESET}");
-    }
-}
-
-fn build_title(ctx: &Option<InlineHeaderContext>) -> String {
-    let app = ctx
-        .as_ref()
-        .map(|c| c.app_name.trim())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(ui::HEADER_VERSION_PREFIX);
-    let ver = ctx
-        .as_ref()
-        .map(|c| c.version.trim())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(env!("CARGO_PKG_VERSION"));
-    format!("> {app} ({ver})")
-}
-
-fn build_trust_line(ctx: &InlineHeaderContext) -> String {
-    let trust = ctx
-        .workspace_trust
-        .trim()
-        .strip_prefix(ui::HEADER_TRUST_PREFIX)
-        .unwrap_or(&ctx.workspace_trust)
-        .trim();
-    let trust = trust.to_ascii_lowercase();
-    if trust.contains("full auto") {
+fn build_trust_line(trust_label: &str) -> String {
+    let t = trust_label.trim().to_ascii_lowercase().replace('_', " ");
+    if t.contains("full auto") {
         "Full-auto trust".into()
-    } else if trust.contains("tools policy") {
+    } else if t.contains("tools policy") {
         "Safe tools".into()
-    } else if trust.is_empty() || trust == "unknown" {
-        "Trust: n/a".into()
+    } else if t.is_empty() || t == "unknown" {
+        String::new()
     } else {
-        format!("Trust: {}", trust.replace('_', " "))
+        format!("Trust: {t}")
     }
 }
 
@@ -203,48 +163,31 @@ fn format_number(n: u64) -> String {
     }
 }
 
-fn format_cache_fragment(cache_read: u64, cache_creation: u64) -> String {
-    if cache_read == 0 && cache_creation == 0 {
-        String::new()
-    } else {
-        format!(
-            " | Cache {} read / {} write",
-            format_number(cache_read),
-            format_number(cache_creation)
-        )
-    }
-}
-
-fn format_cache_hit_ratio(cache_read: u64, cache_creation: u64) -> String {
-    let total = cache_read + cache_creation;
-    if total == 0 {
-        String::new()
-    } else {
-        format!(
-            " | Hit {:>5.1}%",
-            (cache_read as f64 / total as f64) * 100.0
-        )
-    }
-}
-
-fn format_budget_limit_line(max_budget_usd: f64, actual_cost_usd: f64) -> String {
-    format!(
-        "Budget limit reached at ${actual_cost_usd:.2} / ${max_budget_usd:.2}. Resume will offer summary, full-history, or fresh-start options."
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn build_trust_line_labels_full_auto_as_trust_not_auto_accept() {
-        let ctx = InlineHeaderContext {
-            workspace_trust: format!("{}full auto", ui::HEADER_TRUST_PREFIX),
-            ..InlineHeaderContext::default()
-        };
+    fn trust_line_full_auto() {
+        assert_eq!(build_trust_line("full auto"), "Full-auto trust");
+        assert_eq!(build_trust_line("full_auto"), "Full-auto trust");
+    }
 
-        assert_eq!(build_trust_line(&ctx), "Full-auto trust");
+    #[test]
+    fn trust_line_safe_tools() {
+        assert_eq!(build_trust_line("tools policy"), "Safe tools");
+        assert_eq!(build_trust_line("tools_policy"), "Safe tools");
+    }
+
+    #[test]
+    fn trust_line_empty_or_unknown() {
+        assert_eq!(build_trust_line(""), "");
+        assert_eq!(build_trust_line("unknown"), "");
+    }
+
+    #[test]
+    fn trust_line_fallback() {
+        assert_eq!(build_trust_line("some_other"), "Trust: some other");
     }
 
     #[test]
@@ -259,24 +202,5 @@ mod tests {
         assert_eq!(format_number(999), "999");
         assert_eq!(format_number(12_345), "12.3k");
         assert_eq!(format_number(8_900_000), "8.9m");
-    }
-
-    #[test]
-    fn formats_cache_metrics() {
-        assert_eq!(format_cache_fragment(0, 0), "");
-        assert_eq!(
-            format_cache_fragment(12_000, 3_000),
-            " | Cache 12.0k read / 3.0k write"
-        );
-        assert_eq!(format_cache_hit_ratio(0, 0), "");
-        assert_eq!(format_cache_hit_ratio(9, 1), " | Hit  90.0%");
-    }
-
-    #[test]
-    fn formats_budget_limit_resume_guidance() {
-        assert_eq!(
-            format_budget_limit_line(5.0, 5.24),
-            "Budget limit reached at $5.24 / $5.00. Resume will offer summary, full-history, or fresh-start options."
-        );
     }
 }

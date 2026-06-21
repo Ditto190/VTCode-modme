@@ -18,7 +18,7 @@ use crate::tools::registry::ToolRegistry;
 #[cfg(feature = "policies")]
 use anyhow::{Context, Error, Result};
 #[cfg(feature = "policies")]
-use vtcode_commons::{ErrorFormatter, ErrorReporter, TelemetrySink, WorkspacePaths};
+use vtcode_commons::{ErrorFormatter, ErrorReporter, PathResolver, TelemetrySink, WorkspacePaths};
 
 /// Telemetry events emitted by the registry builder when it resolves policy
 /// storage or encounters recoverable failures.

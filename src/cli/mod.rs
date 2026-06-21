@@ -119,7 +119,8 @@ pub async fn dispatch(
     let is_update_subcommand = matches!(args.command, Some(Commands::Update { .. }));
     let is_interactive_chat = args.command.is_none()
         || matches!(args.command, Some(Commands::Chat | Commands::ChatVerbose));
-    if !is_update_subcommand && !is_interactive_chat
+    if !is_update_subcommand
+        && !is_interactive_chat
         && let Some(notice) = crate::updater::get_preflight_notice()
     {
         eprintln!(

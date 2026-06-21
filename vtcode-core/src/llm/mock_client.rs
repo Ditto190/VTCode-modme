@@ -9,21 +9,19 @@ use std::collections::VecDeque;
 
 use crate::llm::client::LLMClient;
 use async_trait::async_trait;
-use vtcode_commons::llm::{BackendKind, LLMError, LLMResponse};
+use vtcode_commons::llm::{LLMError, LLMResponse};
 
 /// Deterministic `LLMClient` that yields queued responses.
 #[derive(Debug)]
 pub struct StaticResponseClient {
-    backend: BackendKind,
     model: String,
     queue: VecDeque<Result<LLMResponse, LLMError>>,
 }
 
 impl StaticResponseClient {
-    /// Create a mock client for the provided model/backend combination.
-    pub fn new(model: impl Into<String>, backend: BackendKind) -> Self {
+    /// Create a mock client for the provided model.
+    pub fn new(model: impl Into<String>) -> Self {
         Self {
-            backend,
             model: model.into(),
             queue: VecDeque::new(),
         }
@@ -68,10 +66,6 @@ impl LLMClient for StaticResponseClient {
         })
     }
 
-    fn backend_kind(&self) -> BackendKind {
-        self.backend
-    }
-
     fn model_id(&self) -> &str {
         &self.model
     }
@@ -81,7 +75,7 @@ impl LLMClient for StaticResponseClient {
 mod tests {
     use super::StaticResponseClient;
     use crate::llm::client::LLMClient;
-    use vtcode_commons::llm::{BackendKind, FinishReason, LLMError, LLMResponse};
+    use vtcode_commons::llm::{FinishReason, LLMError, LLMResponse};
 
     #[test]
     fn returns_responses_in_fifo_order() {
@@ -112,7 +106,7 @@ mod tests {
             compaction: None,
         };
 
-        let mut client = StaticResponseClient::new("test", BackendKind::OpenAI);
+        let mut client = StaticResponseClient::new("test");
         client.enqueue_response(response_one.clone());
         client.enqueue_response(response_two.clone());
 
@@ -125,7 +119,7 @@ mod tests {
 
     #[test]
     fn errors_when_queue_is_empty() {
-        let mut client = StaticResponseClient::new("test", BackendKind::Gemini);
+        let mut client = StaticResponseClient::new("test");
         let error = futures::executor::block_on(client.generate("prompt"))
             .expect_err("expected error when queue is empty");
 
