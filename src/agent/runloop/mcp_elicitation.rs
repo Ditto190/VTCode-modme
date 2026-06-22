@@ -91,6 +91,18 @@ impl McpElicitationHandler for InteractiveMcpElicitationHandler {
             tracing::debug!("Expected response schema:\n{}", schema_display);
         }
 
+        // In TUI mode crossterm owns the terminal; raw print!/stdin would
+        // corrupt the display and block the event loop.  Auto-decline so
+        // the MCP server gets a clear response instead of hanging.
+        if vtcode_core::ui::is_tui_mode() {
+            tracing::info!("MCP elicitation auto-declined in TUI mode");
+            return Ok(McpElicitationResponse {
+                action: ElicitationAction::Decline,
+                content: None,
+                meta: None,
+            });
+        }
+
         tracing::info!(
             "Enter JSON to accept, press Enter to decline, or type 'cancel' to cancel the operation."
         );

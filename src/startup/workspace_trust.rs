@@ -69,21 +69,21 @@ pub(crate) async fn ensure_full_auto_workspace_trust(workspace: &Path) -> Result
         TrustOutcome::Granted => Ok(true),
         TrustOutcome::UserDeclined => {
             let msg = "Workspace not trusted. Exiting benchmark command.";
-            println!("{}", render_styled(msg, palette.warning, None));
+            tui_safe_println(&render_styled(msg, palette.warning, None));
             Ok(false)
         }
         TrustOutcome::EnvDenied => {
             let msg = format!(
                 "Workspace trust denied via {TRUST_OVERRIDE_ENV}=deny. Exiting benchmark command."
             );
-            println!("{}", render_styled(&msg, palette.warning, None));
+            tui_safe_println(&render_styled(&msg, palette.warning, None));
             Ok(false)
         }
         TrustOutcome::NonInteractive => {
             let msg = format!(
                 "Workspace is not trusted and stdin is not a TTY. Re-run benchmark interactively or set {TRUST_OVERRIDE_ENV}=full-auto."
             );
-            println!("{}", render_styled(&msg, palette.warning, None));
+            tui_safe_println(&render_styled(&msg, palette.warning, None));
             Ok(false)
         }
     }
@@ -177,6 +177,17 @@ fn prompt_capable() -> bool {
         return false;
     }
     io::stdin().is_tty_ext() && io::stdout().is_tty_ext()
+}
+
+/// Print a line only when not in TUI mode.  In TUI mode crossterm owns the
+/// terminal and raw println! would corrupt the display; the message is
+/// logged via tracing instead.
+fn tui_safe_println(msg: &str) {
+    if vtcode_core::ui::is_tui_mode() {
+        tracing::info!(target: "workspace_trust", "{msg}");
+    } else {
+        println!("{msg}");
+    }
 }
 
 fn quiet_env_overrides() -> bool {
