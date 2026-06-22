@@ -141,7 +141,7 @@ enum EventStreamAction {
 }
 
 fn handle_inline_command<S: TuiSessionDriver>(
-    terminal: &mut Terminal<impl Backend>,
+    _terminal: &mut Terminal<impl Backend>,
     session: &mut S,
     inputs: &mut EventListener,
     event_channels: &EventChannels,
@@ -166,9 +166,6 @@ fn handle_inline_command<S: TuiSessionDriver>(
         return Ok(EventStreamAction::Start);
     }
     if command.is_force_redraw() {
-        if let Err(err) = terminal.clear() {
-            tracing::warn!(%err, "ForceRedraw: terminal clear failed, continuing");
-        }
         session.handle_command(command);
         return Ok(EventStreamAction::None);
     }

@@ -39,7 +39,7 @@ use vtcode_core::core::agent::config::{
 use vtcode_core::core::interfaces::session::PlanningEntrySource;
 use vtcode_core::{initialize_dot_folder, update_model_preference, update_theme_preference};
 pub(crate) use workspace_trust::{
-    ensure_full_auto_workspace_trust, require_full_auto_workspace_trust,
+    ensure_full_auto_workspace_trust, is_workspace_trusted, require_full_auto_workspace_trust,
 };
 
 /// Aggregated data required for CLI command execution after startup.

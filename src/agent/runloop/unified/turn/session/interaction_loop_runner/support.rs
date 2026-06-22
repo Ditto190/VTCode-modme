@@ -36,7 +36,7 @@ use crate::agent::runloop::unified::session_setup::{
 };
 use crate::agent::runloop::unified::status_line::InputStatusState;
 use crate::agent::runloop::unified::turn::session::slash_commands::run_with_event_loop_suspended;
-use crate::startup::ensure_full_auto_workspace_trust;
+use crate::startup::{ensure_full_auto_workspace_trust, is_workspace_trusted};
 
 use crate::agent::runloop::unified::planning_workflow_state::transition_to_planning_workflow;
 use vtcode_core::core::interfaces::session::PlanningEntrySource;
@@ -842,7 +842,24 @@ async fn handle_cycle_primary_agent(
         return Ok(());
     };
     match next_primary_agent_name(ctx.active_primary_agent.active(), &specs) {
-        Some(name) => handle_select_primary_agent(ctx, state, Some(name)).await,
+        Some(name) => {
+            // Skip auto-permission agents when workspace trust is not
+            // already granted.  In TUI mode we cannot prompt interactively,
+            // so switching to an auto agent would silently fail and revert,
+            // causing display flickering.
+            if agent_needs_trust(&specs, &name)
+                && !is_workspace_trusted(&ctx.config.workspace).await
+            {
+                ctx.renderer.line(
+                    MessageStyle::Warning,
+                    &format!(
+                        "Agent '{name}' requires workspace trust. Set VTCODE_TRUST_WORKSPACE=full-auto or trust via the CLI first."
+                    ),
+                )?;
+                return Ok(());
+            }
+            handle_select_primary_agent(ctx, state, Some(name)).await
+        }
         None => {
             ctx.renderer
                 .line(MessageStyle::Error, "No primary agents are available.")?;
@@ -859,7 +876,20 @@ async fn handle_cycle_primary_agent_previous(
         return Ok(());
     };
     match previous_primary_agent_name(ctx.active_primary_agent.active(), &specs) {
-        Some(name) => handle_select_primary_agent(ctx, state, Some(name)).await,
+        Some(name) => {
+            if agent_needs_trust(&specs, &name)
+                && !is_workspace_trusted(&ctx.config.workspace).await
+            {
+                ctx.renderer.line(
+                    MessageStyle::Warning,
+                    &format!(
+                        "Agent '{name}' requires workspace trust. Set VTCODE_TRUST_WORKSPACE=full-auto or trust via the CLI first."
+                    ),
+                )?;
+                return Ok(());
+            }
+            handle_select_primary_agent(ctx, state, Some(name)).await
+        }
         None => {
             ctx.renderer
                 .line(MessageStyle::Error, "No primary agents are available.")?;
@@ -891,33 +921,23 @@ pub(crate) async fn handle_select_primary_agent(
     let Some(specs) = load_primary_agent_specs_or_report(ctx).await? else {
         return Ok(());
     };
-    // Save the current agent name so we can revert if trust is denied.
-    let previous_name = ctx.active_primary_agent.active().identity.name.clone();
+
+    // Check workspace trust BEFORE switching to avoid the switch-then-revert
+    // flicker that corrupts the TUI display.  Auto-permission agents need
+    // full-auto trust; if it is not already granted we block the switch
+    // cleanly instead of mutating state and rolling back.
+    if agent_needs_trust(&specs, &name)
+        && !ensure_full_auto_workspace_trust(&ctx.config.workspace).await?
+    {
+        ctx.renderer.line(
+            MessageStyle::Warning,
+            "Workspace trust required for auto agent. Keeping previous agent.",
+        )?;
+        return Ok(());
+    }
+
     match ctx.active_primary_agent.select_from_specs(&specs, &name) {
         Ok(active) => {
-            // Auto-permission agents require workspace trust.
-            if active.permissions.default
-                == vtcode_config::core::permissions::PermissionDefault::Auto
-                && !ensure_full_auto_workspace_trust(&ctx.config.workspace).await?
-            {
-                // Revert to previous agent. If revert fails, block the switch
-                // entirely — leaving auto active without trust is unsafe.
-                if ctx
-                    .active_primary_agent
-                    .select_from_specs(&specs, &previous_name)
-                    .is_err()
-                {
-                    anyhow::bail!(
-                        "Workspace trust required for auto agent and could not revert to previous agent '{previous_name}'. Switch blocked."
-                    );
-                } else {
-                    ctx.renderer.line(
-                        MessageStyle::Warning,
-                        "Workspace trust required for auto agent. Keeping previous agent.",
-                    )?;
-                }
-                return Ok(());
-            }
             let display_name = active.display_name.clone();
             let is_plan_agent = active.identity.name.eq_ignore_ascii_case("plan");
             let policy_overrides = active.tool_policy_overrides.clone();
@@ -1164,6 +1184,15 @@ fn primary_agent_cycle_rank(name: &str) -> u8 {
         "auto" => 3,
         _ => 4,
     }
+}
+
+/// Returns `true` when the named agent requires workspace trust (i.e. it has
+/// `PermissionDefault::Auto`).
+fn agent_needs_trust(specs: &[vtcode_config::SubagentSpec], name: &str) -> bool {
+    specs.iter().any(|s| {
+        s.name.eq_ignore_ascii_case(name)
+            && s.permissions.default == vtcode_config::core::permissions::PermissionDefault::Auto
+    })
 }
 
 #[cfg(test)]

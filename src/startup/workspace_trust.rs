@@ -47,6 +47,18 @@ enum TrustOutcome {
     NonInteractive,
 }
 
+/// Non-interactive check: does this workspace already have full-auto trust
+/// (either persisted or via env-var override)?  Never prompts.
+pub(crate) async fn is_workspace_trusted(workspace: &Path) -> bool {
+    if let Ok(Some(WorkspaceTrustLevel::FullAuto)) = load_workspace_trust_level(workspace).await {
+        return true;
+    }
+    matches!(
+        parse_env_trust_override().ok().flatten(),
+        Some(EnvTrustOverride::FullAuto)
+    )
+}
+
 /// Best-effort path used by `vtcode benchmark`: prompt the user interactively,
 /// fall back to env-var overrides, otherwise return `Ok(false)` so the caller
 /// can exit gracefully without a hard error.
