@@ -114,6 +114,9 @@ pub struct SpoolResult {
     pub content: String,
 }
 
+/// How often (in number of spool operations) to run age-based cleanup.
+const CLEANUP_EVERY_N_SPOOLS: u64 = 50;
+
 /// Tool Output Spooler for writing large outputs to files
 pub struct ToolOutputSpooler {
     /// Workspace root directory
@@ -124,6 +127,8 @@ pub struct ToolOutputSpooler {
     config: SpoolerConfig,
     /// Track spooled files for cleanup
     spooled_files: Arc<RwLock<Vec<PathBuf>>>,
+    /// Counter for throttling periodic cleanup
+    spool_count: std::sync::atomic::AtomicU64,
 }
 
 impl ToolOutputSpooler {
@@ -144,6 +149,7 @@ impl ToolOutputSpooler {
             output_dir,
             config,
             spooled_files: Arc::new(RwLock::new(Vec::new())),
+            spool_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -342,6 +348,7 @@ impl ToolOutputSpooler {
     ///
     /// Returns the original value if below threshold, or a condensed
     /// head+tail payload with a `spool_path` reference if spooled.
+    /// Triggers periodic age-based cleanup of old spooled files.
     pub async fn process_output(
         &self,
         tool_name: &str,
@@ -378,6 +385,17 @@ impl ToolOutputSpooler {
         }
 
         let spool_result = self.spool_output(tool_name, &value, is_mcp).await?;
+
+        // Periodic age-based cleanup: run every CLEANUP_EVERY_N_SPOOLS spool operations.
+        // This ensures stale files are removed without adding overhead on every call.
+        let count = self
+            .spool_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count % CLEANUP_EVERY_N_SPOOLS == 0 {
+            if let Err(e) = self.cleanup_old_files().await {
+                debug!(error = %e, "Periodic spool cleanup failed");
+            }
+        }
         let condensed = if is_command_session_tool_name(tool_name) {
             tail_preview_content(
                 &spool_result.content,
@@ -439,7 +457,7 @@ impl ToolOutputSpooler {
         Ok(response)
     }
 
-    /// Clean up old spooled files
+    /// Clean up old spooled files and sync the in-memory tracking list.
     pub async fn cleanup_old_files(&self) -> Result<usize> {
         if !self.output_dir.exists() {
             return Ok(0);
@@ -448,6 +466,9 @@ impl ToolOutputSpooler {
         let now = std::time::SystemTime::now();
         let mut removed = 0;
 
+        // Collect paths to remove (can't modify vec during filesystem iteration)
+        let mut paths_to_remove = Vec::new();
+
         let mut entries = fs::read_dir(&self.output_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
@@ -455,11 +476,23 @@ impl ToolOutputSpooler {
                 && let Ok(modified) = metadata.modified()
                 && let Ok(age) = now.duration_since(modified)
                 && age.as_secs() > self.config.max_age_secs
-                && fs::remove_file(&path).await.is_ok()
             {
+                paths_to_remove.push(path);
+            }
+        }
+
+        // Remove files from disk
+        for path in &paths_to_remove {
+            if fs::remove_file(path).await.is_ok() {
                 removed += 1;
                 debug!(path = %path.display(), "Removed old spooled file");
             }
+        }
+
+        // Sync in-memory tracking: remove entries pointing to deleted files
+        if removed > 0 {
+            let mut files = self.spooled_files.write().await;
+            files.retain(|p| !paths_to_remove.contains(p));
         }
 
         if removed > 0 {

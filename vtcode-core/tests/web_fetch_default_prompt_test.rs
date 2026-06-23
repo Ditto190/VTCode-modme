@@ -36,7 +36,7 @@ async fn web_fetch_infers_default_prompt_when_missing() {
     // - The built-in tool handled the call.
     // - No external MCP tool indirection was required.
     assert!(
-        value.get("error").is_some() || value.get("content").is_some(),
-        "expected either a structured error or a successful content payload from web_fetch"
+        value.get("error").is_some() || value.get("temp_file").is_some(),
+        "expected either a structured error or a temp_file reference from web_fetch"
     );
 }
