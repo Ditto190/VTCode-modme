@@ -969,21 +969,24 @@ mod tests {
     }
 
     #[test]
-    fn unknown_documented_events_are_ignored() {
+    fn documented_non_runtime_events_are_ignored() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
         let events = processor
             .handle_payload(json!({
                 "type": "response.file_search_call.searching",
                 "query": "needle"
             }))
-            .expect("unknown documented event should be ignored");
+            .expect("documented status event should be ignored");
         assert!(events.is_empty());
         processor
             .handle_payload(json!({
-                "type": "response.code_interpreter_call.code.delta",
+                "type": "response.code_interpreter_call_code.delta",
+                "item_id": "ci_1",
+                "output_index": 0,
+                "sequence_number": 2,
                 "delta": "print(1)"
             }))
-            .expect("code interpreter event should be ignored");
+            .expect("documented code interpreter value-bearing event should be ignored downstream");
 
         let finished = processor.finish().expect("finish should succeed");
         assert!(matches!(
