@@ -824,6 +824,12 @@ async fn chatgpt_responses_stream_accepts_empty_final_output_after_text_delta() 
     let captured = Arc::new(Mutex::new(None::<Value>));
     let captured_for_mock = Arc::clone(&captured);
     let stream_body = concat!(
+        "data: {\"type\":\"response.queued\",\"response\":{\"id\":\"resp_chatgpt_stream\",\"status\":\"queued\"}}\n\n",
+        "data: {\"type\":\"response.file_search_call.searching\",\"item_id\":\"fs_1\",\"output_index\":0}\n\n",
+        "data: {\"type\":\"response.code_interpreter_call_code.delta\",\"item_id\":\"ci_1\",\"output_index\":1,\"sequence_number\":1,\"delta\":\"print(1)\"}\n\n",
+        "data: {\"type\":\"response.mcp_call_arguments.delta\",\"item_id\":\"mcp_1\",\"call_id\":\"call_mcp\",\"output_index\":2,\"sequence_number\":2,\"delta\":\"{\\\"query\\\":\\\"vtcode\\\"}\"}\n\n",
+        "data: {\"type\":\"response.image_generation_call.partial_image\",\"item_id\":\"img_1\",\"output_index\":3,\"sequence_number\":3,\"partial_image_b64\":\"ZmFrZQ==\"}\n\n",
+        "data: {\"type\":\"response.custom_tool_call_input.done\",\"item_id\":\"custom_1\",\"call_id\":\"call_custom\",\"output_index\":4,\"sequence_number\":4,\"input\":\"{\\\"cmd\\\":\\\"test\\\"}\"}\n\n",
         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello from stream\"}\n\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_chatgpt_stream\",\"output\":[],\"usage\":{\"input_tokens\":13,\"output_tokens\":4,\"total_tokens\":17}}}\n\n",
     );

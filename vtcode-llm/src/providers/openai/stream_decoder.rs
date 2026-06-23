@@ -12,7 +12,10 @@ use crate::error_display;
 use crate::provider;
 use crate::providers::shared::StreamTelemetry;
 use crate::providers::shared::parse_cached_prompt_tokens_from_usage;
-use crate::providers::shared::{StreamAssemblyError, extract_data_payload, find_sse_boundary};
+use crate::providers::shared::{
+    ResponsesStreamEventPolicy, StreamAssemblyError, extract_data_payload, find_sse_boundary,
+    response_stream_event_policy,
+};
 use async_stream::try_stream;
 use futures::StreamExt;
 use hashbrown::HashMap;
@@ -375,8 +378,34 @@ pub(crate) fn create_responses_stream(
                             .into_llm_error("OpenAI")
                     })?;
 
-                    if let Some(event_type) = payload.get("type").and_then(|value| value.as_str()) {
-                        match event_type {
+                    let event_policy = response_stream_event_policy(&payload)
+                        .map_err(|message| {
+                            StreamAssemblyError::InvalidPayload(message.to_string())
+                                .into_llm_error("OpenAI")
+                        })?;
+                    let event_type = payload
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            StreamAssemblyError::MissingField("type").into_llm_error("OpenAI")
+                        })?;
+
+                    match event_policy {
+                        ResponsesStreamEventPolicy::DocumentedStatusMarkerNoop
+                        | ResponsesStreamEventPolicy::DocumentedValueBearingRigGap => {
+                            // Legacy `LLMStreamEvent` has no representation for
+                            // provider-hosted code, provider-side MCP, partial
+                            // images, streamed custom-tool input, or annotation
+                            // metadata. Complete custom-tool input remains
+                            // preserved by final `response.completed` replay.
+                        }
+                        ResponsesStreamEventPolicy::Unsupported => {
+                            Err(StreamAssemblyError::InvalidPayload(format!(
+                                "unsupported Responses stream event type `{event_type}`"
+                            ))
+                            .into_llm_error("OpenAI"))?;
+                        }
+                        ResponsesStreamEventPolicy::MeaningfulConversion => match event_type {
                             "response.output_text.delta" => {
                                 let delta = payload
                                     .get("delta")
@@ -412,6 +441,30 @@ pub(crate) fn create_responses_stream(
                                     })?;
                                 if retain_reasoning_summaries
                                     && let Some(delta) = aggregator.handle_reasoning(delta) {
+                                    telemetry.on_reasoning_delta(&delta);
+                                    yield provider::LLMStreamEvent::Reasoning { delta };
+                                }
+                            }
+                            "response.reasoning_content.delta" => {
+                                let delta = payload
+                                    .get("delta")
+                                    .and_then(|value| value.as_str())
+                                    .ok_or_else(|| {
+                                        StreamAssemblyError::MissingField("delta")
+                                            .into_llm_error("OpenAI")
+                                    })?;
+                                if retain_reasoning_summaries
+                                    && let Some(delta) = aggregator.handle_reasoning(delta) {
+                                    telemetry.on_reasoning_delta(&delta);
+                                    yield provider::LLMStreamEvent::Reasoning { delta };
+                                }
+                            }
+                            "response.reasoning_text.done" => {
+                                let text = optional_string_field(&payload, "text")?;
+                                let delta = optional_string_field(&payload, "delta")?;
+                                if retain_reasoning_summaries
+                                    && let Some(text) = text.or(delta)
+                                    && let Some(delta) = aggregator.handle_reasoning(&text) {
                                     telemetry.on_reasoning_delta(&delta);
                                     yield provider::LLMStreamEvent::Reasoning { delta };
                                 }
@@ -454,8 +507,25 @@ pub(crate) fn create_responses_stream(
                                     metadata: None,
                                 })?;
                             }
-                            _ => {}
-                        }
+                            "error" => {
+                                let error_message = payload
+                                    .get("error")
+                                    .and_then(|error| error.get("message"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("Unknown error from Responses API");
+                                let formatted_error = error_display::format_llm_error("OpenAI", error_message);
+                                Err(provider::LLMError::Provider {
+                                    message: formatted_error,
+                                    metadata: None,
+                                })?;
+                            }
+                            _ => {
+                                Err(StreamAssemblyError::InvalidPayload(format!(
+                                    "unhandled Responses stream event type `{event_type}`"
+                                ))
+                                .into_llm_error("OpenAI"))?;
+                            }
+                        },
                     }
                 }
 
@@ -514,6 +584,24 @@ pub(crate) fn create_responses_stream(
     };
 
     Box::pin(stream)
+}
+
+fn optional_string_field(
+    payload: &Value,
+    field: &'static str,
+) -> Result<Option<String>, provider::LLMError> {
+    match payload.get(field) {
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_string()))
+            .ok_or_else(|| {
+                StreamAssemblyError::InvalidPayload(format!(
+                    "field `{field}` in stream payload must be a string"
+                ))
+                .into_llm_error("OpenAI")
+            }),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]
