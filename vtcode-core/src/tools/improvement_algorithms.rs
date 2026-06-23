@@ -187,7 +187,21 @@ pub enum PatternState {
     Degradation,
 }
 
-/// Detect a pattern in a history of `(tool, args_hash, quality)` triples.
+/// A single tool-call record for pattern detection.
+///
+/// Shape: `(tool, args_hash, quality)` — named fields replace a bare tuple so
+/// the dimensional structure of the data is explicit in the type system.
+#[derive(Debug, Clone)]
+pub struct ToolCallRecord {
+    /// Tool name (e.g. `"grep"`, `"file_read"`).
+    pub tool: String,
+    /// Hash of the tool's arguments for fuzzy dedup.
+    pub args_hash: String,
+    /// Result quality in `[0, 1]`.
+    pub quality: f32,
+}
+
+/// Detect a pattern in a history of tool-call records.
 ///
 /// Only the last `window_size` entries are examined.
 /// Returns [`PatternState::Single`] for an empty or single-entry history.
@@ -196,7 +210,7 @@ pub enum PatternState {
 /// The logic is stateless — `window_size` is the only parameter. A wrapper
 /// struct added no encapsulation and hurt discoverability (KISS).
 pub fn detect_pattern(
-    history: &[(String, String, f32)], // (tool, args_hash, quality)
+    history: &[ToolCallRecord],
     window_size: usize,
 ) -> PatternState {
     if history.is_empty() {
@@ -215,7 +229,7 @@ pub fn detect_pattern(
     let first = &recent[0];
 
     // --- Exact duplicates ---
-    if recent.iter().all(|r| r.0 == first.0 && r.1 == first.1) {
+    if recent.iter().all(|r| r.tool == first.tool && r.args_hash == first.args_hash) {
         return if recent.len() >= 3 {
             PatternState::Loop
         } else {
@@ -230,8 +244,8 @@ pub fn detect_pattern(
     let mut multi_tool = false;
 
     for r in recent {
-        qualities.push(r.2);
-        if r.0 != first.0 {
+        qualities.push(r.quality);
+        if r.tool != first.tool {
             same_tool = false;
             multi_tool = true;
         }
@@ -253,7 +267,7 @@ pub fn detect_pattern(
         && recent.len() >= 3
         && recent
             .windows(2)
-            .all(|w| jaro_winkler_similarity(&w[0].1, &w[1].1) > 0.85)
+            .all(|w| jaro_winkler_similarity(&w[0].args_hash, &w[1].args_hash) > 0.85)
     {
         return PatternState::NearLoop;
     }
@@ -312,6 +326,18 @@ impl MLScoreComponents {
     }
 
     /// Return a 7-element feature vector, normalised for ML consumption.
+    ///
+    /// # Dimension key
+    ///
+    /// | Index | Name              | Meaning                          | Normalisation      |
+    /// |-------|-------------------|----------------------------------|--------------------|
+    /// | 0     | `success_rate`    | Fraction of successful calls     | `[0, 1]`           |
+    /// | 1     | `avg_exec_time`   | Mean execution time (ms)         | `/ 10_000`         |
+    /// | 2     | `result_quality`  | Mean quality of results          | `[0, 1]`           |
+    /// | 3     | `failure_count`   | Distinct failure modes observed  | `min(10) / 10`     |
+    /// | 4     | `age_hours`       | Time since last use (hours)      | `/ 168` (1 week)   |
+    /// | 5     | `frequency`       | Calls per hour                   | `[0, ∞)`           |
+    /// | 6     | `confidence`      | Measurement confidence           | `[0, 1]`           |
     pub fn to_feature_vector(&self) -> [f32; 7] {
         [
             self.success_rate,
@@ -360,9 +386,9 @@ mod tests {
     #[test]
     fn test_detect_pattern_loop() {
         let history = vec![
-            ("grep".to_string(), "pattern1".to_string(), 0.5),
-            ("grep".to_string(), "pattern1".to_string(), 0.5),
-            ("grep".to_string(), "pattern1".to_string(), 0.5),
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern1".into(), quality: 0.5 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern1".into(), quality: 0.5 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern1".into(), quality: 0.5 },
         ];
         assert_eq!(detect_pattern(&history, 10), PatternState::Loop);
     }
@@ -370,9 +396,9 @@ mod tests {
     #[test]
     fn test_detect_pattern_refinement() {
         let history = vec![
-            ("grep".to_string(), "pat1".to_string(), 0.3),
-            ("grep".to_string(), "pat2".to_string(), 0.5),
-            ("grep".to_string(), "pat3".to_string(), 0.8),
+            ToolCallRecord { tool: "grep".into(), args_hash: "pat1".into(), quality: 0.3 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pat2".into(), quality: 0.5 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pat3".into(), quality: 0.8 },
         ];
         assert_eq!(detect_pattern(&history, 10), PatternState::RefinementChain);
     }
@@ -380,15 +406,15 @@ mod tests {
     #[test]
     fn test_detect_pattern_near_loop_requires_three_entries() {
         let two_entries = vec![
-            ("grep".to_string(), "pattern-one".to_string(), 0.4),
-            ("grep".to_string(), "pattern-two".to_string(), 0.45),
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern-one".into(), quality: 0.4 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern-two".into(), quality: 0.45 },
         ];
         assert_eq!(detect_pattern(&two_entries, 10), PatternState::Single);
 
         let three_entries = vec![
-            ("grep".to_string(), "pattern-one".to_string(), 0.4),
-            ("grep".to_string(), "pattern-two".to_string(), 0.45),
-            ("grep".to_string(), "pattern-three".to_string(), 0.5),
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern-one".into(), quality: 0.4 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern-two".into(), quality: 0.45 },
+            ToolCallRecord { tool: "grep".into(), args_hash: "pattern-three".into(), quality: 0.5 },
         ];
         assert_eq!(detect_pattern(&three_entries, 10), PatternState::NearLoop);
     }

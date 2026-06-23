@@ -358,7 +358,8 @@ pub use handlers::{
     new_shared_tracker,
 };
 pub use improvement_algorithms::{
-    MLScoreComponents, PatternState, TimeDecayedScore, detect_pattern, jaro_winkler_similarity,
+    MLScoreComponents, PatternState, TimeDecayedScore, ToolCallRecord, detect_pattern,
+    jaro_winkler_similarity,
 };
 pub use improvements_config::{
     CacheConfig, ContextConfig, FallbackConfig, ImprovementsConfig, PatternConfig,

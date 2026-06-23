@@ -11,6 +11,7 @@ Keep this file concise and under 150 lines. Root guidance belongs here; detailed
 - `vtcode-exec-events::ThreadEvent` is the authoritative runtime event contract — do not invent parallel types.
 - Harness config is split across `agent.harness`, `automation.full_auto`, `context.dynamic` — do not add a new top-level harness subsystem.
 - Prefer `compact_str::CompactString` (aliased as `CompactStr` in `vtcode_core::types`) over `String` for small string fields. Use `Cow<'static, str>` for mostly-static return strings.
+- **Shape-suffix naming**: encode the dimensional structure of data in variable/type names. For feature vectors, document a **dimension key** (table of index → name → meaning). For bare tuples holding structured data, promote to named structs so the shape is explicit in the type system (inspired by Noam Shazeer's shape-suffix convention).
 - `clippy.toml` allows `unwrap`/`panic`/indexing in tests only.
 - Dev profile has `incremental = false` (sccache). Set `CARGO_INCREMENTAL=1` to override.
 

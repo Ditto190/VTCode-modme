@@ -137,6 +137,20 @@ impl PatternDetector {
     }
 
     /// Extract normalized feature vector for ML.
+    ///
+    /// # Dimension key
+    ///
+    /// | Index | Name            | Meaning                              | Post-clamp range |
+    /// |-------|-----------------|--------------------------------------|------------------|
+    /// | 0     | `event_count`   | Number of recorded events            | `[0, ∞)`         |
+    /// | 1     | `success_rate`  | Fraction of successful events        | `[0, 1]`         |
+    /// | 2     | `avg_duration`  | Average execution duration (ms)      | `[0, 1]` (clamped) |
+    /// | 3     | `tool_diversity`| Number of unique tools used          | `[0, 1]` (clamped) |
+    /// | 4     | `pattern_density`| Ratio of detected patterns to events| `[0, 1]`         |
+    ///
+    /// **Note:** The values returned by this function have been clamped to `[0, 1]` (except
+    /// `event_count`). True min–max normalisation is not applied — callers that need
+    /// dynamic range scaling should wrap this function.
     pub fn feature_vector(&self) -> Vec<f64> {
         let mut features = Vec::with_capacity(5);
 
@@ -166,8 +180,8 @@ impl PatternDetector {
         let pattern_density = self.patterns.len() as f64 / self.events.len().max(1) as f64;
         features.push(pattern_density);
 
-        // Normalize to [0, 1] range.
-        normalize_features(&features)
+        // Clamp features to [0, 1] (feature 0 stays raw).
+        clamp_features(&features)
     }
 
     /// Clear all data.
@@ -198,8 +212,11 @@ impl PatternDetector {
     }
 }
 
-/// Normalize features to [0, 1] range (except feature 0 which stays as-is).
-fn normalize_features(features: &[f64]) -> Vec<f64> {
+/// Clamp features to `[0, 1]` (feature 0 / event_count stays raw).
+///
+/// This is *not* true normalisation — values above 1 are silently capped.
+/// Callers that need min–max scaling should apply it after this function.
+fn clamp_features(features: &[f64]) -> Vec<f64> {
     features
         .iter()
         .enumerate()
@@ -207,7 +224,7 @@ fn normalize_features(features: &[f64]) -> Vec<f64> {
             if i == 0 {
                 f // Keep event count as-is
             } else {
-                f.clamp(0.0, 1.0) // Clamp to [0, 1]
+                f.clamp(0.0, 1.0)
             }
         })
         .collect()
