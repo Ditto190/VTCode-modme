@@ -424,6 +424,11 @@ impl<'a> InlineModalProcessor<'a> {
                 Ok(false)
             }
             (ActivePalette::UrlGuard { .. }, _) => Ok(true),
+            (ActivePalette::Mode, InlineListSelection::ConfigAction(action))
+                if action.starts_with(MODE_ACTION_PREFIX) =>
+            {
+                Ok(false)
+            }
             _ => Ok(false),
         }
     }
