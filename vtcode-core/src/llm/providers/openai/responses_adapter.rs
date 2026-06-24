@@ -216,9 +216,11 @@ impl ResponsesStreamAdapter {
                     RigResponsesItemChunkKind::ReasoningSummaryTextDelta(delta) => {
                         Ok(ResponsesStreamEvent::ReasoningDelta { delta: delta.delta })
                     }
-                    RigResponsesItemChunkKind::OutputItemAdded(output)
-                    | RigResponsesItemChunkKind::OutputItemDone(output) => {
-                        adapt_output_item(provider_name, output.item, output_index)
+                    RigResponsesItemChunkKind::OutputItemAdded(output) => {
+                        adapt_output_item(provider_name, output.item, output_index, true)
+                    }
+                    RigResponsesItemChunkKind::OutputItemDone(output) => {
+                        adapt_output_item(provider_name, output.item, output_index, false)
                     }
                     RigResponsesItemChunkKind::FunctionCallArgsDelta(delta) => {
                         let item_id = item_id.or_else(|| {
@@ -405,6 +407,7 @@ fn adapt_output_item(
     provider_name: &str,
     item: RigResponsesOutput,
     output_index: Option<usize>,
+    emit_completed_arguments: bool,
 ) -> Result<ResponsesStreamEvent, LLMError> {
     match item {
         RigResponsesOutput::FunctionCall(function_call) => {
@@ -415,6 +418,12 @@ fn adapt_output_item(
             let call_id = function_call.call_id;
             if function_call.status == rig::providers::openai::responses_api::ToolStatus::Completed
             {
+                let arguments = if emit_completed_arguments {
+                    arguments
+                } else {
+                    String::new()
+                };
+
                 Ok(ResponsesStreamEvent::CompletedToolCall {
                     call_id,
                     item_id,
@@ -1551,7 +1560,7 @@ mod tests {
                 call_id: "call_1".to_string(),
                 item_id: Some("fc_1".to_string()),
                 name: "search_workspace".to_string(),
-                arguments: "{\"query\":\"vtcode\"}".to_string(),
+                arguments: String::new(),
                 output_index: Some(0)
             }
         );
