@@ -18,9 +18,11 @@ use crate::llm::providers::shared::{
 use crate::models_manager::model_family::find_family_for_model;
 use async_stream::try_stream;
 use futures::StreamExt;
-use serde_json::Value;
+use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::time::Instant;
 
+use super::responses_adapter::{ResponsesStreamAdapter, ResponsesStreamEvent};
 use super::responses_api::parse_responses_payload;
 use super::streaming::OpenAIStreamTelemetry;
 
@@ -206,6 +208,7 @@ pub(crate) fn create_responses_stream(
         let mut decoder = Utf8StreamDecoder::new();
         let mut aggregator = crate::llm::providers::shared::StreamAggregator::new(model.clone());
         let retain_reasoning_summaries = find_family_for_model(&model).supports_reasoning_summaries;
+        let mut tool_call_ids_by_item_id: HashMap<String, String> = HashMap::new();
         let mut final_response: Option<Value> = None;
         let mut done = false;
         #[cfg(debug_assertions)]
@@ -242,77 +245,89 @@ pub(crate) fn create_responses_stream(
                         break;
                     }
 
-                    let payload: Value = serde_json::from_str(trimmed_payload).map_err(|err| {
-                        StreamAssemblyError::InvalidPayload(err.to_string())
-                            .into_llm_error("OpenAI")
-                    })?;
+                    match ResponsesStreamAdapter::parse_sse_data(trimmed_payload)? {
+                        ResponsesStreamEvent::TextDelta { delta } => {
+                            telemetry.on_content_delta(&delta);
 
-                    if let Some(event_type) = payload.get("type").and_then(|value| value.as_str()) {
-                        match event_type {
-                            "response.output_text.delta" => {
-                                let delta = payload
-                                    .get("delta")
-                                    .and_then(|value| value.as_str())
-                                    .ok_or_else(|| {
-                                        StreamAssemblyError::MissingField("delta")
-                                            .into_llm_error("OpenAI")
-                                    })?;
-                                telemetry.on_content_delta(delta);
-
-                                for event in aggregator.handle_content(delta) {
-                                    yield event;
-                                }
+                            for event in aggregator.handle_content(&delta) {
+                                yield event;
                             }
-                            "response.refusal.delta" => {
-                                let delta = payload
-                                    .get("delta")
-                                    .and_then(|value| value.as_str())
-                                    .ok_or_else(|| {
-                                        StreamAssemblyError::MissingField("delta")
-                                            .into_llm_error("OpenAI")
-                                    })?;
-                                telemetry.on_content_delta(delta);
-                                aggregator.content.push_str(delta);
-                            }
-                            "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
-                                let delta = payload
-                                    .get("delta")
-                                    .and_then(|value| value.as_str())
-                                    .ok_or_else(|| {
-                                        StreamAssemblyError::MissingField("delta")
-                                            .into_llm_error("OpenAI")
-                                    })?;
-                                if retain_reasoning_summaries
-                                    && let Some(delta) = aggregator.handle_reasoning(delta) {
-                                    telemetry.on_reasoning_delta(&delta);
-                                    yield provider::LLMStreamEvent::Reasoning { delta };
-                                }
-                            }
-                            "response.function_call_arguments.delta" => {}
-                            "response.completed" => {
-                                if let Some(response_value) = payload.get("response") {
-                                    final_response = Some(response_value.clone());
-                                }
-                                done = true;
-                            }
-                            "response.failed" | "response.incomplete" => {
-                                let error_message = if let Some(err) = payload.get("response")
-                                    .and_then(|r| r.get("error"))
-                                {
-                                    err.get("message")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("Unknown error")
-                                } else {
-                                    "Unknown error from Responses API"
-                                };
-                                let formatted_error = error_display::format_llm_error("OpenAI", error_message);
-                                Err(provider::LLMError::Provider {
-                                    message: formatted_error,
-                                    metadata: None,
-                                })?;
-                            }
-                            _ => {}
                         }
+                        ResponsesStreamEvent::RefusalDelta { delta } => {
+                            telemetry.on_content_delta(&delta);
+                            aggregator.content.push_str(&delta);
+                        }
+                        ResponsesStreamEvent::ReasoningDelta { delta } => {
+                            if retain_reasoning_summaries
+                                && let Some(delta) = aggregator.handle_reasoning(&delta) {
+                                telemetry.on_reasoning_delta(&delta);
+                                yield provider::LLMStreamEvent::Reasoning { delta };
+                            }
+                        }
+                        ResponsesStreamEvent::FunctionCallNameDelta {
+                            call_id,
+                            item_id,
+                            name,
+                            output_index,
+                        } => {
+                            record_tool_call_item_id(&mut tool_call_ids_by_item_id, item_id.as_deref(), &call_id);
+                            aggregator.handle_tool_calls(&[json!({
+                                "index": output_index.unwrap_or(0),
+                                "id": call_id,
+                                "function": {
+                                    "name": name,
+                                }
+                            })]);
+                            telemetry.on_tool_call_delta();
+                        }
+                        ResponsesStreamEvent::FunctionCallArgumentsDelta {
+                            call_id,
+                            item_id,
+                            delta,
+                            output_index,
+                        } => {
+                            let call_id = provider_tool_call_id(&tool_call_ids_by_item_id, item_id.as_deref(), call_id);
+                            aggregator.handle_tool_calls(&[json!({
+                                "index": output_index.unwrap_or(0),
+                                "id": call_id,
+                                "function": {
+                                    "arguments": delta,
+                                }
+                            })]);
+                            telemetry.on_tool_call_delta();
+                        }
+                        ResponsesStreamEvent::CompletedToolCall {
+                            call_id,
+                            item_id,
+                            name,
+                            arguments,
+                            output_index,
+                        } => {
+                            record_tool_call_item_id(&mut tool_call_ids_by_item_id, item_id.as_deref(), &call_id);
+                            aggregator.handle_tool_calls(&[json!({
+                                "index": output_index.unwrap_or(0),
+                                "id": call_id,
+                                "function": {
+                                    "name": name,
+                                    "arguments": arguments,
+                                }
+                            })]);
+                            telemetry.on_tool_call_delta();
+                        }
+                        ResponsesStreamEvent::CompletedResponse { response } => {
+                            final_response = Some(response);
+                            done = true;
+                        }
+                        ResponsesStreamEvent::Error { message } => {
+                            let formatted_error = error_display::format_llm_error("OpenAI", &message);
+                            Err(provider::LLMError::Provider {
+                                message: formatted_error,
+                                metadata: None,
+                            })?;
+                        }
+                        ResponsesStreamEvent::Lifecycle { .. }
+                        | ResponsesStreamEvent::ProviderValueBearingRigGap { .. }
+                        | ResponsesStreamEvent::Unknown => {}
                     }
                 }
 
@@ -367,6 +382,32 @@ pub(crate) fn create_responses_stream(
     };
 
     Box::pin(stream)
+}
+
+fn record_tool_call_item_id(
+    tool_call_ids_by_item_id: &mut HashMap<String, String>,
+    item_id: Option<&str>,
+    call_id: &str,
+) {
+    let Some(item_id) = item_id.filter(|item_id| !item_id.is_empty()) else {
+        return;
+    };
+
+    tool_call_ids_by_item_id
+        .entry(item_id.to_string())
+        .or_insert_with(|| call_id.to_string());
+}
+
+fn provider_tool_call_id(
+    tool_call_ids_by_item_id: &HashMap<String, String>,
+    item_id: Option<&str>,
+    call_id: String,
+) -> String {
+    item_id
+        .and_then(|item_id| tool_call_ids_by_item_id.get(item_id))
+        .or_else(|| tool_call_ids_by_item_id.get(call_id.as_str()))
+        .cloned()
+        .unwrap_or(call_id)
 }
 
 #[cfg(test)]

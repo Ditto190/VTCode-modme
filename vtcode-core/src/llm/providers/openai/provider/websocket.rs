@@ -19,7 +19,7 @@ const PREVIOUS_RESPONSE_NOT_FOUND_CODE: &str = "previous_response_not_found";
 const WEBSOCKET_AUTH_RETRY_STATUSES: [&str; 2] = ["401", "403"];
 
 // Retained custom WebSocket transport.
-// Rig 0.38.2 depends on websocket crates, but this project has not enabled or
+// Rig 0.39 depends on websocket crates, but this project has not enabled or
 // proven a Rig WebSocket path with VTCode's `responses=v2` header, warm-up
 // `generate=false` request, continuation cache, active-response reconnect,
 // auth refresh retry, and connection-limit retry semantics. Protected by the

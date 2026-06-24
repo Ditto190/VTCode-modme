@@ -11,6 +11,7 @@ mod responses_stream;
 mod tag_sanitizer;
 use crate::providers::split_reasoning_from_text;
 pub use responses_stream::{ResponsesNormalizedStreamOptions, create_responses_normalized_stream};
+pub(crate) use responses_stream::{ResponsesStreamEventPolicy, response_stream_event_policy};
 use serde_json::{Map, Value};
 pub use tag_sanitizer::TagStreamSanitizer;
 

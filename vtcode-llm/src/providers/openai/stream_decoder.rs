@@ -12,10 +12,14 @@ use crate::error_display;
 use crate::provider;
 use crate::providers::shared::StreamTelemetry;
 use crate::providers::shared::parse_cached_prompt_tokens_from_usage;
-use crate::providers::shared::{StreamAssemblyError, extract_data_payload, find_sse_boundary};
+use crate::providers::shared::{
+    ResponsesStreamEventPolicy, StreamAssemblyError, extract_data_payload, find_sse_boundary,
+    response_stream_event_policy,
+};
 use async_stream::try_stream;
 use futures::StreamExt;
-use serde_json::Value;
+use hashbrown::HashMap;
+use serde_json::{Value, json};
 use std::time::Instant;
 use vtcode_commons::model_family::find_family_for_model;
 
@@ -100,6 +104,136 @@ fn merge_final_response_metadata(
         .or_else(|| final_response.get("request_id").and_then(Value::as_str))
     {
         response.request_id = Some(request_id.to_string());
+    }
+}
+
+#[derive(Default)]
+struct ResponsesToolCallState {
+    item_id_to_call_id: HashMap<String, String>,
+    tool_call_indexes: HashMap<String, usize>,
+    next_tool_call_index: usize,
+}
+
+impl ResponsesToolCallState {
+    fn capture_metadata(
+        &mut self,
+        aggregator: &mut crate::providers::shared::StreamAggregator,
+        item: &Value,
+        output_index: Option<usize>,
+    ) {
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+            return;
+        }
+
+        let item_id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let provider_call_id = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let Some(call_id) = provider_call_id.or(item_id) else {
+            return;
+        };
+        let Some(name) = item.get("name").and_then(Value::as_str).or_else(|| {
+            item.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        }) else {
+            return;
+        };
+
+        self.capture_item_call_id_mapping(item_id, provider_call_id);
+
+        let output_index = output_index
+            .or_else(|| item_id.and_then(|item_id| self.tool_call_indexes.get(item_id).copied()));
+        let index = self.resolve_tool_call_index(call_id, output_index);
+        aggregator.handle_tool_calls(&[json!({
+            "index": index,
+            "id": call_id,
+            "function": {
+                "name": name,
+            }
+        })]);
+    }
+
+    fn handle_arguments_delta(
+        &mut self,
+        aggregator: &mut crate::providers::shared::StreamAggregator,
+        payload: &Value,
+    ) -> Result<(), provider::LLMError> {
+        let delta = payload
+            .get("delta")
+            .and_then(Value::as_str)
+            .ok_or_else(|| StreamAssemblyError::MissingField("delta").into_llm_error("OpenAI"))?;
+        let item_id = payload.get("item_id").and_then(Value::as_str);
+        let payload_call_id = payload.get("call_id").and_then(Value::as_str);
+        self.capture_item_call_id_mapping(item_id, payload_call_id);
+        let call_id = self
+            .resolve_provider_call_id(item_id, payload_call_id)
+            .unwrap_or_else(|| format!("tool_call_{}", self.next_tool_call_index));
+        let index = self.resolve_tool_call_index(
+            &call_id,
+            payload
+                .get("output_index")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize),
+        );
+
+        if !delta.is_empty() {
+            aggregator.handle_tool_calls(&[json!({
+                "index": index,
+                "id": call_id,
+                "function": {
+                    "arguments": delta,
+                }
+            })]);
+        }
+
+        Ok(())
+    }
+
+    fn capture_item_call_id_mapping(&mut self, item_id: Option<&str>, call_id: Option<&str>) {
+        let Some(item_id) = item_id.filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let Some(call_id) = call_id.filter(|value| !value.is_empty()) else {
+            return;
+        };
+        self.item_id_to_call_id
+            .insert(item_id.to_string(), call_id.to_string());
+    }
+
+    fn resolve_provider_call_id(
+        &self,
+        item_id: Option<&str>,
+        call_id: Option<&str>,
+    ) -> Option<String> {
+        call_id
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                item_id.and_then(|value| self.item_id_to_call_id.get(value).map(String::as_str))
+            })
+            .or_else(|| item_id.filter(|value| !value.is_empty()))
+            .map(ToOwned::to_owned)
+    }
+
+    fn resolve_tool_call_index(&mut self, call_id: &str, output_index: Option<usize>) -> usize {
+        if let Some(index) = output_index {
+            self.tool_call_indexes.insert(call_id.to_string(), index);
+            self.next_tool_call_index = self.next_tool_call_index.max(index + 1);
+            return index;
+        }
+
+        if let Some(index) = self.tool_call_indexes.get(call_id).copied() {
+            return index;
+        }
+
+        let index = self.next_tool_call_index;
+        self.tool_call_indexes.insert(call_id.to_string(), index);
+        self.next_tool_call_index += 1;
+        index
     }
 }
 
@@ -204,6 +338,7 @@ pub(crate) fn create_responses_stream(
         let retain_reasoning_summaries = find_family_for_model(&model).supports_reasoning_summaries;
         let mut final_response: Option<Value> = None;
         let mut done = false;
+        let mut tool_call_state = ResponsesToolCallState::default();
         #[cfg(debug_assertions)]
         let mut streamed_events_counter: usize = 0;
         let telemetry = OpenAIStreamTelemetry;
@@ -243,8 +378,34 @@ pub(crate) fn create_responses_stream(
                             .into_llm_error("OpenAI")
                     })?;
 
-                    if let Some(event_type) = payload.get("type").and_then(|value| value.as_str()) {
-                        match event_type {
+                    let event_policy = response_stream_event_policy(&payload)
+                        .map_err(|message| {
+                            StreamAssemblyError::InvalidPayload(message.to_string())
+                                .into_llm_error("OpenAI")
+                        })?;
+                    let event_type = payload
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            StreamAssemblyError::MissingField("type").into_llm_error("OpenAI")
+                        })?;
+
+                    match event_policy {
+                        ResponsesStreamEventPolicy::DocumentedStatusMarkerNoop
+                        | ResponsesStreamEventPolicy::DocumentedValueBearingRigGap => {
+                            // Legacy `LLMStreamEvent` has no representation for
+                            // provider-hosted code, provider-side MCP, partial
+                            // images, streamed custom-tool input, or annotation
+                            // metadata. Complete custom-tool input remains
+                            // preserved by final `response.completed` replay.
+                        }
+                        ResponsesStreamEventPolicy::Unsupported => {
+                            Err(StreamAssemblyError::InvalidPayload(format!(
+                                "unsupported Responses stream event type `{event_type}`"
+                            ))
+                            .into_llm_error("OpenAI"))?;
+                        }
+                        ResponsesStreamEventPolicy::MeaningfulConversion => match event_type {
                             "response.output_text.delta" => {
                                 let delta = payload
                                     .get("delta")
@@ -284,7 +445,46 @@ pub(crate) fn create_responses_stream(
                                     yield provider::LLMStreamEvent::Reasoning { delta };
                                 }
                             }
-                            "response.function_call_arguments.delta" => {}
+                            "response.reasoning_content.delta" => {
+                                let delta = payload
+                                    .get("delta")
+                                    .and_then(|value| value.as_str())
+                                    .ok_or_else(|| {
+                                        StreamAssemblyError::MissingField("delta")
+                                            .into_llm_error("OpenAI")
+                                    })?;
+                                if retain_reasoning_summaries
+                                    && let Some(delta) = aggregator.handle_reasoning(delta) {
+                                    telemetry.on_reasoning_delta(&delta);
+                                    yield provider::LLMStreamEvent::Reasoning { delta };
+                                }
+                            }
+                            "response.reasoning_text.done" => {
+                                let text = optional_string_field(&payload, "text")?;
+                                let delta = optional_string_field(&payload, "delta")?;
+                                if retain_reasoning_summaries
+                                    && let Some(text) = text.or(delta)
+                                    && let Some(delta) = aggregator.handle_reasoning(&text) {
+                                    telemetry.on_reasoning_delta(&delta);
+                                    yield provider::LLMStreamEvent::Reasoning { delta };
+                                }
+                            }
+                            "response.output_item.added" | "response.output_item.done" => {
+                                if let Some(item) = payload.get("item") {
+                                    tool_call_state.capture_metadata(
+                                        &mut aggregator,
+                                        item,
+                                        payload
+                                            .get("output_index")
+                                            .and_then(Value::as_u64)
+                                            .map(|value| value as usize),
+                                    );
+                                }
+                            }
+                            "response.function_call_arguments.delta" => {
+                                tool_call_state.handle_arguments_delta(&mut aggregator, &payload)?;
+                                telemetry.on_tool_call_delta();
+                            }
                             "response.completed" => {
                                 if let Some(response_value) = payload.get("response") {
                                     final_response = Some(response_value.clone());
@@ -307,8 +507,25 @@ pub(crate) fn create_responses_stream(
                                     metadata: None,
                                 })?;
                             }
-                            _ => {}
-                        }
+                            "error" => {
+                                let error_message = payload
+                                    .get("error")
+                                    .and_then(|error| error.get("message"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("Unknown error from Responses API");
+                                let formatted_error = error_display::format_llm_error("OpenAI", error_message);
+                                Err(provider::LLMError::Provider {
+                                    message: formatted_error,
+                                    metadata: None,
+                                })?;
+                            }
+                            _ => {
+                                Err(StreamAssemblyError::InvalidPayload(format!(
+                                    "unhandled Responses stream event type `{event_type}`"
+                                ))
+                                .into_llm_error("OpenAI"))?;
+                            }
+                        },
                     }
                 }
 
@@ -358,6 +575,10 @@ pub(crate) fn create_responses_stream(
             response.reasoning = final_aggregator_response.reasoning;
         }
 
+        if response.tool_calls.is_none() {
+            response.tool_calls = final_aggregator_response.tool_calls;
+        }
+
         let response = strip_reasoning_for_model(&model, response);
         yield provider::LLMStreamEvent::Completed { response: Box::new(response) };
     };
@@ -365,12 +586,32 @@ pub(crate) fn create_responses_stream(
     Box::pin(stream)
 }
 
+fn optional_string_field(
+    payload: &Value,
+    field: &'static str,
+) -> Result<Option<String>, provider::LLMError> {
+    match payload.get(field) {
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_string()))
+            .ok_or_else(|| {
+                StreamAssemblyError::InvalidPayload(format!(
+                    "field `{field}` in stream payload must be a string"
+                ))
+                .into_llm_error("OpenAI")
+            }),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        final_response_output_is_empty, merge_final_response_metadata, streamed_response_is_usable,
+        ResponsesToolCallState, final_response_output_is_empty, merge_final_response_metadata,
+        streamed_response_is_usable,
     };
     use crate::provider::{LLMResponse, ToolCall};
+    use crate::providers::shared::StreamAggregator;
     use serde_json::json;
 
     #[test]
@@ -413,5 +654,42 @@ mod tests {
 
         assert!(final_response_output_is_empty(&json!({"output": []})));
         assert!(streamed_response_is_usable(&response));
+    }
+
+    #[test]
+    fn responses_tool_call_state_uses_provider_call_id_when_item_id_differs() {
+        let mut aggregator = StreamAggregator::new("gpt-5".to_string());
+        let mut tool_call_state = ResponsesToolCallState::default();
+
+        tool_call_state.capture_metadata(
+            &mut aggregator,
+            &json!({
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "search_workspace"
+            }),
+            Some(0),
+        );
+        tool_call_state
+            .handle_arguments_delta(
+                &mut aggregator,
+                &json!({
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": "{\"query\":\"vtcode\"}"
+                }),
+            )
+            .expect("tool delta should parse");
+
+        let response = aggregator.finalize();
+        assert_eq!(
+            response.tool_calls.as_ref(),
+            Some(&vec![ToolCall::function(
+                "call_1".to_string(),
+                "search_workspace".to_string(),
+                "{\"query\":\"vtcode\"}".to_string(),
+            )])
+        );
     }
 }

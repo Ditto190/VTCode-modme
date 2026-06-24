@@ -795,6 +795,11 @@ impl OpenAIProvider {
             preserve_structured_history_on_replay: backend_defaults
                 .preserve_structured_history_on_replay,
             preserve_assistant_phase_on_replay: false,
+            request_construction: if is_chatgpt_backend {
+                request_builder::ResponsesRequestConstruction::RigChatGptPrivateDefaultsCompatibility
+            } else {
+                request_builder::ResponsesRequestConstruction::OpenAiJsonWithRigTypedParameters
+            },
         };
 
         request_builder::build_responses_request(request, &ctx)

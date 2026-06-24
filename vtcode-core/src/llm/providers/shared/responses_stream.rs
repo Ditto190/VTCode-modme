@@ -1,5 +1,8 @@
 use crate::llm::error_display;
 use crate::llm::provider::{LLMError, LLMNormalizedStream, LLMResponse, NormalizedStreamEvent};
+use crate::llm::providers::openai::responses_adapter::{
+    ResponsesStreamAdapter, ResponsesStreamEvent,
+};
 use crate::llm::providers::shared::{Utf8StreamDecoder, extract_data_payload, find_sse_boundary};
 use async_stream::try_stream;
 use futures::StreamExt;
@@ -9,7 +12,7 @@ use serde_json::{Value, json};
 use super::{StreamAggregator, parse_cached_prompt_tokens_from_usage};
 
 // Retained shared Responses stream processor.
-// Rig 0.38.2 can consume SSE, but VTCode needs a provider-agnostic
+// Rig 0.39 can consume SSE, but VTCode needs a provider-agnostic
 // NormalizedStreamEvent contract: text/refusal/reasoning deltas, tool-call
 // start and argument deltas, tolerant empty-final-response recovery, and
 // backend error text. Protected by this module's `responses_stream` tests.
@@ -29,6 +32,7 @@ struct ResponsesNormalizedStreamProcessor<P> {
     seen_tool_calls: HashSet<String>,
     tool_call_indexes: HashMap<String, usize>,
     tool_call_names: HashMap<String, String>,
+    tool_call_ids_by_item_id: HashMap<String, String>,
     next_tool_call_index: usize,
     final_response: Option<Value>,
     done: bool,
@@ -46,6 +50,7 @@ where
             seen_tool_calls: HashSet::new(),
             tool_call_indexes: HashMap::new(),
             tool_call_names: HashMap::new(),
+            tool_call_ids_by_item_id: HashMap::new(),
             next_tool_call_index: 0,
             final_response: None,
             done: false,
@@ -57,22 +62,22 @@ where
     }
 
     fn handle_payload(&mut self, payload: Value) -> Result<Vec<NormalizedStreamEvent>, LLMError> {
+        let event = ResponsesStreamAdapter::parse_payload_for_provider(
+            self.options.provider_name,
+            payload,
+        )?;
+        self.handle_event(event)
+    }
+
+    fn handle_event(
+        &mut self,
+        event: ResponsesStreamEvent,
+    ) -> Result<Vec<NormalizedStreamEvent>, LLMError> {
         let mut events = Vec::new();
 
-        if let Some(usage) = payload.get("usage").cloned()
-            && let Ok(usage) = serde_json::from_value(usage)
-        {
-            self.aggregator.set_usage(usage);
-        }
-
-        let event_type = payload.get("type").and_then(Value::as_str).unwrap_or("");
-        match event_type {
-            "response.output_text.delta" => {
-                let delta = payload
-                    .get("delta")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| provider_error(self.options.provider_name, "missing delta"))?;
-                for event in self.aggregator.handle_content(delta) {
+        match event {
+            ResponsesStreamEvent::TextDelta { delta } => {
+                for event in self.aggregator.handle_content(&delta) {
                     match event {
                         crate::llm::provider::LLMStreamEvent::Token { delta } => {
                             events.push(NormalizedStreamEvent::TextDelta { delta });
@@ -86,61 +91,42 @@ where
                     }
                 }
             }
-            "response.refusal.delta" => {
-                let delta = payload
-                    .get("delta")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| provider_error(self.options.provider_name, "missing delta"))?;
+            ResponsesStreamEvent::RefusalDelta { delta } => {
                 if !delta.is_empty() {
-                    self.aggregator.content.push_str(delta);
-                    events.push(NormalizedStreamEvent::TextDelta {
-                        delta: delta.to_string(),
-                    });
+                    self.aggregator.content.push_str(&delta);
+                    events.push(NormalizedStreamEvent::TextDelta { delta });
                 }
             }
-            "response.reasoning_text.delta"
-            | "response.reasoning_summary_text.delta"
-            | "response.reasoning_content.delta" => {
+            ResponsesStreamEvent::ReasoningDelta { delta } => {
                 if self.options.emit_reasoning
-                    && let Some(delta) = payload.get("delta").and_then(Value::as_str)
-                    && let Some(delta) = self.aggregator.handle_reasoning(delta)
+                    && let Some(delta) = self.aggregator.handle_reasoning(&delta)
                 {
                     events.push(NormalizedStreamEvent::ReasoningDelta { delta });
                 }
             }
-            "response.output_item.added" | "response.output_item.done" => {
-                if let Some(item) = payload.get("item") {
-                    let tool_call = self.capture_tool_call_metadata(
-                        item,
-                        payload
-                            .get("output_index")
-                            .and_then(Value::as_u64)
-                            .map(|value| value as usize),
-                    );
-                    if let Some((call_id, name)) = tool_call {
-                        self.push_tool_call_start(&mut events, call_id, Some(name));
-                    }
-                }
+            ResponsesStreamEvent::FunctionCallNameDelta {
+                call_id,
+                item_id,
+                name,
+                output_index,
+            } => {
+                self.record_tool_call_item_id(item_id.as_deref(), &call_id);
+                self.record_tool_call_name(&call_id, &name, output_index);
+                self.push_tool_call_start(&mut events, call_id, Some(name));
             }
-            "response.function_call_arguments.delta" => {
-                let delta = payload
-                    .get("delta")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| provider_error(self.options.provider_name, "missing delta"))?;
-                let call_id = payload
-                    .get("item_id")
-                    .and_then(Value::as_str)
-                    .or_else(|| payload.get("call_id").and_then(Value::as_str))
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_else(|| format!("tool_call_{}", self.next_tool_call_index));
-                let index = self.resolve_tool_call_index(
-                    &call_id,
-                    payload
-                        .get("output_index")
-                        .and_then(Value::as_u64)
-                        .map(|value| value as usize),
-                );
+            ResponsesStreamEvent::FunctionCallArgumentsDelta {
+                call_id,
+                item_id,
+                delta,
+                output_index,
+            } => {
+                let call_id = self.provider_tool_call_id(item_id.as_deref(), call_id);
+                let call_id = if call_id.is_empty() {
+                    format!("tool_call_{}", self.next_tool_call_index)
+                } else {
+                    call_id
+                };
+                let index = self.resolve_tool_call_index(&call_id, output_index);
 
                 let name = self.tool_call_names.get(&call_id).cloned();
                 self.push_tool_call_start(&mut events, call_id.clone(), name);
@@ -153,27 +139,60 @@ where
                             "arguments": delta,
                         }
                     })]);
-                    events.push(NormalizedStreamEvent::ToolCallDelta {
-                        call_id,
-                        delta: delta.to_string(),
-                    });
+                    events.push(NormalizedStreamEvent::ToolCallDelta { call_id, delta });
                 }
             }
-            "response.completed" => {
-                if let Some(response) = payload.get("response") {
-                    self.final_response = Some(response.clone());
-                }
+            ResponsesStreamEvent::CompletedToolCall {
+                call_id,
+                item_id,
+                name,
+                arguments,
+                output_index,
+            } => {
+                self.record_tool_call_item_id(item_id.as_deref(), &call_id);
+                let index = self.record_tool_call_name(&call_id, &name, output_index);
+                self.push_tool_call_start(&mut events, call_id.clone(), Some(name));
+                self.aggregator.handle_tool_calls(&[json!({
+                    "index": index,
+                    "id": call_id,
+                    "function": {
+                        "arguments": arguments,
+                    }
+                })]);
+            }
+            ResponsesStreamEvent::CompletedResponse { response } => {
+                self.final_response = Some(response);
                 self.done = true;
             }
-            "response.failed" | "response.incomplete" | "error" => {
-                let message = extract_error_message(&payload)
-                    .unwrap_or_else(|| "unknown error from responses stream".to_string());
+            ResponsesStreamEvent::Error { message } => {
                 return Err(provider_error(self.options.provider_name, message));
             }
-            _ => {}
+            ResponsesStreamEvent::Lifecycle { .. }
+            | ResponsesStreamEvent::ProviderValueBearingRigGap { .. }
+            | ResponsesStreamEvent::Unknown => {}
         }
 
         Ok(events)
+    }
+
+    fn record_tool_call_name(
+        &mut self,
+        call_id: &str,
+        name: &str,
+        output_index: Option<usize>,
+    ) -> usize {
+        self.tool_call_names
+            .entry(call_id.to_string())
+            .or_insert_with(|| name.to_string());
+        let index = self.resolve_tool_call_index(call_id, output_index);
+        self.aggregator.handle_tool_calls(&[json!({
+            "index": index,
+            "id": call_id,
+            "function": {
+                "name": name,
+            }
+        })]);
+        index
     }
 
     fn finish(self) -> Result<Vec<NormalizedStreamEvent>, LLMError> {
@@ -211,42 +230,22 @@ where
         Ok(events)
     }
 
-    fn capture_tool_call_metadata(
-        &mut self,
-        item: &Value,
-        output_index: Option<usize>,
-    ) -> Option<(String, String)> {
-        let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
-        if item_type != "function_call" {
-            return None;
-        }
+    fn record_tool_call_item_id(&mut self, item_id: Option<&str>, call_id: &str) {
+        let Some(item_id) = item_id.filter(|item_id| !item_id.is_empty()) else {
+            return;
+        };
 
-        let call_id = item
-            .get("id")
-            .and_then(Value::as_str)
-            .or_else(|| item.get("call_id").and_then(Value::as_str))
-            .filter(|value| !value.is_empty());
-        let name = item.get("name").and_then(Value::as_str).or_else(|| {
-            item.get("function")
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-        });
-        if let (Some(call_id), Some(name)) = (call_id, name) {
-            self.tool_call_names
-                .entry(call_id.to_string())
-                .or_insert_with(|| name.to_string());
-            let index = self.resolve_tool_call_index(call_id, output_index);
-            self.aggregator.handle_tool_calls(&[json!({
-                "index": index,
-                "id": call_id,
-                "function": {
-                    "name": name,
-                }
-            })]);
-            return Some((call_id.to_string(), name.to_string()));
-        }
+        self.tool_call_ids_by_item_id
+            .entry(item_id.to_string())
+            .or_insert_with(|| call_id.to_string());
+    }
 
-        None
+    fn provider_tool_call_id(&self, item_id: Option<&str>, call_id: String) -> String {
+        item_id
+            .and_then(|item_id| self.tool_call_ids_by_item_id.get(item_id))
+            .or_else(|| self.tool_call_ids_by_item_id.get(call_id.as_str()))
+            .cloned()
+            .unwrap_or(call_id)
     }
 
     fn push_tool_call_start(
@@ -453,22 +452,6 @@ fn parse_responses_usage(
     })
 }
 
-fn extract_error_message(payload: &Value) -> Option<String> {
-    payload
-        .get("error")
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .or_else(|| {
-            payload
-                .get("response")
-                .and_then(|response| response.get("error"))
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-}
-
 fn provider_error(provider_name: &str, message: impl Into<String>) -> LLMError {
     let message = error_display::format_llm_error(provider_name, &message.into());
     LLMError::Provider {
@@ -514,15 +497,55 @@ mod tests {
         })
     }
 
+    fn response_fixture(status: &str, output: Value, usage: Value) -> Value {
+        json!({
+            "id": "resp_test",
+            "object": "response",
+            "created_at": 1,
+            "status": status,
+            "error": null,
+            "incomplete_details": null,
+            "instructions": null,
+            "max_output_tokens": null,
+            "model": "gpt-5",
+            "usage": usage,
+            "output": output,
+            "tools": []
+        })
+    }
+
+    fn completed_response_fixture(output: Value) -> Value {
+        response_fixture("completed", output, Value::Null)
+    }
+
+    fn text_delta_fixture(delta: &str) -> Value {
+        json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1,
+            "delta": delta
+        })
+    }
+
+    fn refusal_delta_fixture(delta: &str) -> Value {
+        json!({
+            "type": "response.refusal.delta",
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1,
+            "delta": delta
+        })
+    }
+
     #[test]
     fn text_delta_and_completed_yield_text_then_done() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
 
         let events = processor
-            .handle_payload(json!({
-                "type": "response.output_text.delta",
-                "delta": "hello"
-            }))
+            .handle_payload(text_delta_fixture("hello"))
             .expect("text delta should parse");
         assert!(matches!(
             events.as_slice(),
@@ -532,12 +555,14 @@ mod tests {
         let completed_events = processor
             .handle_payload(json!({
                 "type": "response.completed",
-                "response": {
-                    "output": [{
+                "sequence_number": 2,
+                "response": completed_response_fixture(json!([{
                         "type": "message",
+                        "id": "msg_1",
+                        "status": "completed",
+                        "role": "assistant",
                         "content": [{"type": "output_text", "text": "hello"}]
-                    }]
-                }
+                    }]))
             }))
             .expect("completed event should parse");
         assert!(completed_events.is_empty());
@@ -566,17 +591,22 @@ mod tests {
         });
 
         processor
-            .handle_payload(json!({
-                "type": "response.output_text.delta",
-                "delta": "streamed answer"
-            }))
+            .handle_payload(text_delta_fixture("streamed answer"))
             .expect("text delta should parse");
         processor
             .handle_payload(json!({
                 "type": "response.completed",
+                "sequence_number": 2,
                 "response": {
                     "id": "resp_streamed",
-                    "output": [],
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "completed",
+                    "error": null,
+                    "incomplete_details": null,
+                    "instructions": null,
+                    "max_output_tokens": null,
+                    "model": "gpt-5",
                     "usage": {
                         "input_tokens": 11,
                         "output_tokens": 7,
@@ -584,7 +614,9 @@ mod tests {
                         "input_tokens_details": {
                             "cached_tokens": 5
                         }
-                    }
+                    },
+                    "output": [],
+                    "tools": []
                 }
             }))
             .expect("completed event should parse");
@@ -617,11 +649,16 @@ mod tests {
         let started = processor
             .handle_payload(json!({
                 "type": "response.output_item.added",
+                "item_id": "call_1",
                 "output_index": 0,
+                "sequence_number": 1,
                 "item": {
                     "type": "function_call",
                     "id": "call_1",
-                    "name": "search_workspace"
+                    "call_id": "call_1",
+                    "name": "search_workspace",
+                    "arguments": "",
+                    "status": "in_progress"
                 }
             }))
             .expect("output item metadata should parse");
@@ -635,6 +672,9 @@ mod tests {
             .handle_payload(json!({
                 "type": "response.function_call_arguments.delta",
                 "item_id": "call_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 2,
                 "delta": "{\"query\":\"vt"
             }))
             .expect("first tool delta should parse");
@@ -649,6 +689,9 @@ mod tests {
             .handle_payload(json!({
                 "type": "response.function_call_arguments.delta",
                 "item_id": "call_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 3,
                 "delta": "code\"}"
             }))
             .expect("second tool delta should parse");
@@ -678,14 +721,185 @@ mod tests {
     }
 
     #[test]
+    fn tool_call_deltas_use_provider_call_id_when_item_id_differs() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), |_| {
+            Ok(LLMResponse {
+                model: "gpt-5".to_string(),
+                ..Default::default()
+            })
+        });
+
+        let started = processor
+            .handle_payload(json!({
+                "type": "response.output_item.added",
+                "item_id": "fc_1",
+                "output_index": 0,
+                "sequence_number": 1,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "search_workspace",
+                    "arguments": "",
+                    "status": "in_progress"
+                }
+            }))
+            .expect("output item metadata should parse");
+        assert!(matches!(
+            started.as_slice(),
+            [NormalizedStreamEvent::ToolCallStart { call_id, name }]
+                if call_id == "call_1" && name.as_deref() == Some("search_workspace")
+        ));
+
+        let first = processor
+            .handle_payload(json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 2,
+                "delta": "{\"query\":\"vt"
+            }))
+            .expect("first tool delta should parse");
+        assert!(matches!(
+            first.as_slice(),
+            [NormalizedStreamEvent::ToolCallDelta { call_id, delta }]
+                if call_id == "call_1" && delta == "{\"query\":\"vt"
+        ));
+
+        processor
+            .handle_payload(json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 3,
+                "delta": "code\"}"
+            }))
+            .expect("second tool delta should parse");
+
+        let finished = processor.finish().expect("finish should succeed");
+        let response = match finished.as_slice() {
+            [NormalizedStreamEvent::Done { response }] => response,
+            _ => panic!("expected done event"),
+        };
+        let tool_calls = response
+            .tool_calls
+            .as_ref()
+            .expect("tool call should be assembled");
+        assert_eq!(
+            tool_calls,
+            &vec![ToolCall::function(
+                "call_1".to_string(),
+                "search_workspace".to_string(),
+                "{\"query\":\"vtcode\"}".to_string(),
+            )]
+        );
+    }
+
+    #[test]
+    fn custom_tool_input_stream_events_wait_for_completed_response_replay() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), |value| {
+            let custom_call = value
+                .get("output")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .expect("custom tool output should exist");
+
+            Ok(LLMResponse {
+                model: "gpt-5".to_string(),
+                finish_reason: FinishReason::ToolCalls,
+                tool_calls: Some(vec![ToolCall::custom(
+                    custom_call
+                        .get("call_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    custom_call
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    custom_call
+                        .get("input")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                )]),
+                ..Default::default()
+            })
+        });
+
+        let delta_events = processor
+            .handle_payload(json!({
+                "type": "response.custom_tool_call_input.delta",
+                "sequence_number": 1,
+                "item_id": "ct_1",
+                "call_id": "call_patch_1",
+                "output_index": 0,
+                "delta": "*** Begin"
+            }))
+            .expect("custom tool input delta should parse");
+        assert!(
+            delta_events.is_empty(),
+            "custom input deltas are preserved internally but are not runtime dispatch events"
+        );
+
+        let done_events = processor
+            .handle_payload(json!({
+                "type": "response.custom_tool_call_input.done",
+                "sequence_number": 2,
+                "item_id": "ct_1",
+                "call_id": "call_patch_1",
+                "output_index": 0,
+                "input": "*** Begin Patch\n*** End Patch\n"
+            }))
+            .expect("custom tool input done should parse");
+        assert!(
+            done_events.is_empty(),
+            "custom tool dispatch remains owned by response.completed replay"
+        );
+
+        let completed_events = processor
+            .handle_payload(json!({
+                "type": "response.completed",
+                "sequence_number": 3,
+                "response": completed_response_fixture(json!([{
+                    "type": "custom_tool_call",
+                    "id": "ct_1",
+                    "call_id": "call_patch_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch\n"
+                }]))
+            }))
+            .expect("completed event should parse");
+        assert!(completed_events.is_empty());
+
+        let finished = processor.finish().expect("finish should succeed");
+        let response = match finished.as_slice() {
+            [NormalizedStreamEvent::Done { response }] => response,
+            _ => panic!("expected final done event"),
+        };
+        let tool_calls = response
+            .tool_calls
+            .as_ref()
+            .expect("custom tool call should be replayed from final response");
+        assert_eq!(tool_calls.len(), 1);
+        assert!(tool_calls[0].is_custom());
+        assert_eq!(tool_calls[0].id, "call_patch_1");
+        assert_eq!(tool_calls[0].tool_name(), Some("apply_patch"));
+        assert_eq!(
+            tool_calls[0].raw_input(),
+            Some("*** Begin Patch\n*** End Patch\n")
+        );
+    }
+
+    #[test]
     fn refusal_delta_streams_visible_output() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
 
         let events = processor
-            .handle_payload(json!({
-                "type": "response.refusal.delta",
-                "delta": "I can't help with that"
-            }))
+            .handle_payload(refusal_delta_fixture("I can't help with that"))
             .expect("refusal delta should parse");
         assert!(matches!(
             events.as_slice(),
@@ -704,8 +918,42 @@ mod tests {
     #[test]
     fn failed_incomplete_and_error_events_surface_backend_message() {
         for payload in [
-            json!({"type": "response.failed", "response": {"error": {"message": "failed"}}}),
-            json!({"type": "response.incomplete", "response": {"error": {"message": "incomplete"}}}),
+            json!({
+                "type": "response.failed",
+                "sequence_number": 1,
+                "response": {
+                    "id": "resp_failed",
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "failed",
+                    "error": {"code": "failed", "message": "failed"},
+                    "incomplete_details": null,
+                    "instructions": null,
+                    "max_output_tokens": null,
+                    "model": "gpt-5",
+                    "usage": null,
+                    "output": [],
+                    "tools": []
+                }
+            }),
+            json!({
+                "type": "response.incomplete",
+                "sequence_number": 1,
+                "response": {
+                    "id": "resp_incomplete",
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "incomplete",
+                    "error": {"code": "incomplete", "message": "incomplete"},
+                    "incomplete_details": {"reason": "incomplete"},
+                    "instructions": null,
+                    "max_output_tokens": null,
+                    "model": "gpt-5",
+                    "usage": null,
+                    "output": [],
+                    "tools": []
+                }
+            }),
             json!({"type": "error", "error": {"message": "errored"}}),
         ] {
             let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
@@ -721,21 +969,24 @@ mod tests {
     }
 
     #[test]
-    fn unknown_documented_events_are_ignored() {
+    fn documented_non_runtime_events_are_ignored() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
         let events = processor
             .handle_payload(json!({
                 "type": "response.file_search_call.searching",
                 "query": "needle"
             }))
-            .expect("unknown documented event should be ignored");
+            .expect("documented status event should be ignored");
         assert!(events.is_empty());
         processor
             .handle_payload(json!({
-                "type": "response.code_interpreter_call.code.delta",
+                "type": "response.code_interpreter_call_code.delta",
+                "item_id": "ci_1",
+                "output_index": 0,
+                "sequence_number": 2,
                 "delta": "print(1)"
             }))
-            .expect("code interpreter event should be ignored");
+            .expect("documented code interpreter value-bearing event should be ignored downstream");
 
         let finished = processor.finish().expect("finish should succeed");
         assert!(matches!(
@@ -748,11 +999,15 @@ mod tests {
     fn missing_delta_reports_provider_error() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
         let error = processor
-            .handle_payload(json!({"type": "response.output_text.delta"}))
+            .handle_payload(json!({
+                "type": "response.output_text.delta",
+                "item_id": "msg_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 1
+            }))
             .expect_err("missing delta should fail");
-        assert_eq!(
-            error.to_string(),
-            provider_error("TestProvider", "missing delta").to_string()
-        );
+        assert!(error.to_string().contains("TestProvider"));
+        assert!(error.to_string().contains("invalid stream payload"));
     }
 }

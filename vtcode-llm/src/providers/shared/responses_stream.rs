@@ -22,6 +22,14 @@ pub struct ResponsesNormalizedStreamOptions {
     pub include_cached_prompt_metrics: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResponsesStreamEventPolicy {
+    MeaningfulConversion,
+    DocumentedStatusMarkerNoop,
+    DocumentedValueBearingRigGap,
+    Unsupported,
+}
+
 struct ResponsesNormalizedStreamProcessor<P> {
     options: ResponsesNormalizedStreamOptions,
     parse_final_response: P,
@@ -29,6 +37,7 @@ struct ResponsesNormalizedStreamProcessor<P> {
     seen_tool_calls: HashSet<String>,
     tool_call_indexes: HashMap<String, usize>,
     tool_call_names: HashMap<String, String>,
+    item_id_to_call_id: HashMap<String, String>,
     next_tool_call_index: usize,
     final_response: Option<Value>,
     done: bool,
@@ -46,6 +55,7 @@ where
             seen_tool_calls: HashSet::new(),
             tool_call_indexes: HashMap::new(),
             tool_call_names: HashMap::new(),
+            item_id_to_call_id: HashMap::new(),
             next_tool_call_index: 0,
             final_response: None,
             done: false,
@@ -65,7 +75,32 @@ where
             self.aggregator.set_usage(usage);
         }
 
-        let event_type = payload.get("type").and_then(Value::as_str).unwrap_or("");
+        let policy = response_stream_event_policy(&payload)
+            .map_err(|message| provider_error(self.options.provider_name, message))?;
+        let event_type = payload
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| provider_error(self.options.provider_name, "missing event type"))?;
+
+        match policy {
+            ResponsesStreamEventPolicy::DocumentedStatusMarkerNoop
+            | ResponsesStreamEventPolicy::DocumentedValueBearingRigGap => {
+                // vtcode-llm has no normalised runtime surface for provider-hosted
+                // code, provider-side MCP, partial images, streamed custom-tool
+                // input, or annotation metadata. Custom-tool execution remains
+                // owned by final `response.completed` replay, which preserves
+                // the complete custom input without changing dispatch authority.
+                return Ok(events);
+            }
+            ResponsesStreamEventPolicy::Unsupported => {
+                return Err(provider_error(
+                    self.options.provider_name,
+                    format!("unsupported Responses stream event type `{event_type}`"),
+                ));
+            }
+            ResponsesStreamEventPolicy::MeaningfulConversion => {}
+        }
+
         match event_type {
             "response.output_text.delta" => {
                 let delta = payload
@@ -101,9 +136,22 @@ where
             "response.reasoning_text.delta"
             | "response.reasoning_summary_text.delta"
             | "response.reasoning_content.delta" => {
+                let delta = payload
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| provider_error(self.options.provider_name, "missing delta"))?;
                 if self.options.emit_reasoning
-                    && let Some(delta) = payload.get("delta").and_then(Value::as_str)
                     && let Some(delta) = self.aggregator.handle_reasoning(delta)
+                {
+                    events.push(NormalizedStreamEvent::ReasoningDelta { delta });
+                }
+            }
+            "response.reasoning_text.done" => {
+                let text = optional_string_field(self.options.provider_name, &payload, "text")?;
+                let delta = optional_string_field(self.options.provider_name, &payload, "delta")?;
+                if self.options.emit_reasoning
+                    && let Some(text) = text.or(delta)
+                    && let Some(delta) = self.aggregator.handle_reasoning(&text)
                 {
                     events.push(NormalizedStreamEvent::ReasoningDelta { delta });
                 }
@@ -127,12 +175,11 @@ where
                     .get("delta")
                     .and_then(Value::as_str)
                     .ok_or_else(|| provider_error(self.options.provider_name, "missing delta"))?;
-                let call_id = payload
-                    .get("item_id")
-                    .and_then(Value::as_str)
-                    .or_else(|| payload.get("call_id").and_then(Value::as_str))
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned)
+                let item_id = payload.get("item_id").and_then(Value::as_str);
+                let payload_call_id = payload.get("call_id").and_then(Value::as_str);
+                self.capture_item_call_id_mapping(item_id, payload_call_id);
+                let call_id = self
+                    .resolve_provider_call_id(item_id, payload_call_id)
                     .unwrap_or_else(|| format!("tool_call_{}", self.next_tool_call_index));
                 let index = self.resolve_tool_call_index(
                     &call_id,
@@ -170,7 +217,12 @@ where
                     .unwrap_or_else(|| "unknown error from responses stream".to_string());
                 return Err(provider_error(self.options.provider_name, message));
             }
-            _ => {}
+            _ => {
+                return Err(provider_error(
+                    self.options.provider_name,
+                    format!("unhandled Responses stream event type `{event_type}`"),
+                ));
+            }
         }
 
         Ok(events)
@@ -221,20 +273,28 @@ where
             return None;
         }
 
-        let call_id = item
+        let item_id = item
             .get("id")
             .and_then(Value::as_str)
-            .or_else(|| item.get("call_id").and_then(Value::as_str))
             .filter(|value| !value.is_empty());
+        let provider_call_id = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let call_id = provider_call_id.or(item_id);
         let name = item.get("name").and_then(Value::as_str).or_else(|| {
             item.get("function")
                 .and_then(|function| function.get("name"))
                 .and_then(Value::as_str)
         });
         if let (Some(call_id), Some(name)) = (call_id, name) {
+            self.capture_item_call_id_mapping(item_id, provider_call_id);
             self.tool_call_names
                 .entry(call_id.to_string())
                 .or_insert_with(|| name.to_string());
+            let output_index = output_index.or_else(|| {
+                item_id.and_then(|item_id| self.tool_call_indexes.get(item_id).copied())
+            });
             let index = self.resolve_tool_call_index(call_id, output_index);
             self.aggregator.handle_tool_calls(&[json!({
                 "index": index,
@@ -247,6 +307,31 @@ where
         }
 
         None
+    }
+
+    fn capture_item_call_id_mapping(&mut self, item_id: Option<&str>, call_id: Option<&str>) {
+        let Some(item_id) = item_id.filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let Some(call_id) = call_id.filter(|value| !value.is_empty()) else {
+            return;
+        };
+        self.item_id_to_call_id
+            .insert(item_id.to_string(), call_id.to_string());
+    }
+
+    fn resolve_provider_call_id(
+        &self,
+        item_id: Option<&str>,
+        call_id: Option<&str>,
+    ) -> Option<String> {
+        call_id
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                item_id.and_then(|value| self.item_id_to_call_id.get(value).map(String::as_str))
+            })
+            .or_else(|| item_id.filter(|value| !value.is_empty()))
+            .map(ToOwned::to_owned)
     }
 
     fn push_tool_call_start(
@@ -275,6 +360,77 @@ where
         self.tool_call_indexes.insert(call_id.to_string(), index);
         self.next_tool_call_index += 1;
         index
+    }
+}
+
+pub(crate) fn response_stream_event_policy(
+    payload: &Value,
+) -> Result<ResponsesStreamEventPolicy, &'static str> {
+    let Some(event_type) = payload.get("type") else {
+        return Err("missing Responses stream event type");
+    };
+    let Some(event_type) = event_type.as_str() else {
+        return Err("Responses stream event type must be a string");
+    };
+
+    Ok(response_stream_event_policy_for_type(event_type))
+}
+
+fn response_stream_event_policy_for_type(event_type: &str) -> ResponsesStreamEventPolicy {
+    match event_type {
+        "response.output_text.delta"
+        | "response.refusal.delta"
+        | "response.reasoning_text.delta"
+        | "response.reasoning_summary_text.delta"
+        | "response.reasoning_content.delta"
+        | "response.reasoning_text.done"
+        | "response.output_item.added"
+        | "response.output_item.done"
+        | "response.function_call_arguments.delta"
+        | "response.completed"
+        | "response.failed"
+        | "response.incomplete"
+        | "error" => ResponsesStreamEventPolicy::MeaningfulConversion,
+        "response.created"
+        | "response.in_progress"
+        | "response.queued"
+        | "response.content_part.added"
+        | "response.content_part.done"
+        | "response.output_text.done"
+        | "response.refusal.done"
+        | "response.function_call_arguments.done"
+        | "response.reasoning_summary_part.added"
+        | "response.reasoning_summary_part.done"
+        | "response.reasoning_summary_text.done"
+        | "response.file_search_call.in_progress"
+        | "response.file_search_call.searching"
+        | "response.file_search_call.completed"
+        | "response.web_search_call.in_progress"
+        | "response.web_search_call.searching"
+        | "response.web_search_call.completed"
+        | "response.image_generation_call.in_progress"
+        | "response.image_generation_call.generating"
+        | "response.image_generation_call.completed"
+        | "response.mcp_call.in_progress"
+        | "response.mcp_call.completed"
+        | "response.mcp_list_tools.in_progress"
+        | "response.mcp_list_tools.completed"
+        | "response.code_interpreter_call.in_progress"
+        | "response.code_interpreter_call.interpreting"
+        | "response.code_interpreter_call.completed" => {
+            ResponsesStreamEventPolicy::DocumentedStatusMarkerNoop
+        }
+        "response.code_interpreter_call_code.delta"
+        | "response.code_interpreter_call_code.done"
+        | "response.mcp_call_arguments.delta"
+        | "response.mcp_call_arguments.done"
+        | "response.image_generation_call.partial_image"
+        | "response.custom_tool_call_input.delta"
+        | "response.custom_tool_call_input.done"
+        | "response.output_text.annotation.added" => {
+            ResponsesStreamEventPolicy::DocumentedValueBearingRigGap
+        }
+        _ => ResponsesStreamEventPolicy::Unsupported,
     }
 }
 
@@ -476,10 +632,30 @@ fn provider_error(provider_name: &str, message: impl Into<String>) -> LLMError {
     }
 }
 
+fn optional_string_field(
+    provider_name: &str,
+    payload: &Value,
+    field: &'static str,
+) -> Result<Option<String>, LLMError> {
+    match payload.get(field) {
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_string()))
+            .ok_or_else(|| {
+                provider_error(
+                    provider_name,
+                    format!("field `{field}` in stream payload must be a string"),
+                )
+            }),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ResponsesNormalizedStreamOptions, ResponsesNormalizedStreamProcessor, provider_error,
+        ResponsesNormalizedStreamOptions, ResponsesNormalizedStreamProcessor,
+        ResponsesStreamEventPolicy, provider_error,
     };
     use crate::provider::{FinishReason, LLMResponse, NormalizedStreamEvent, ToolCall};
     use serde_json::{Value, json};
@@ -677,6 +853,65 @@ mod tests {
     }
 
     #[test]
+    fn tool_call_deltas_use_provider_call_id_when_item_id_differs() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), |_| {
+            Ok(LLMResponse {
+                model: "gpt-5".to_string(),
+                ..Default::default()
+            })
+        });
+
+        let started = processor
+            .handle_payload(json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "search_workspace"
+                }
+            }))
+            .expect("output item metadata should parse");
+        assert!(matches!(
+            started.as_slice(),
+            [NormalizedStreamEvent::ToolCallStart { call_id, name }]
+                if call_id == "call_1" && name.as_deref() == Some("search_workspace")
+        ));
+
+        let delta = processor
+            .handle_payload(json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": "fc_1",
+                "delta": "{\"query\":\"vtcode\"}"
+            }))
+            .expect("tool delta should parse");
+        assert!(matches!(
+            delta.as_slice(),
+            [NormalizedStreamEvent::ToolCallDelta { call_id, delta }]
+                if call_id == "call_1" && delta == "{\"query\":\"vtcode\"}"
+        ));
+
+        let finished = processor.finish().expect("finish should succeed");
+        let response = match finished.as_slice() {
+            [NormalizedStreamEvent::Done { response }] => response,
+            _ => panic!("expected done event"),
+        };
+        let tool_calls = response
+            .tool_calls
+            .as_ref()
+            .expect("tool call should be assembled");
+        assert_eq!(
+            tool_calls,
+            &vec![ToolCall::function(
+                "call_1".to_string(),
+                "search_workspace".to_string(),
+                "{\"query\":\"vtcode\"}".to_string(),
+            )]
+        );
+    }
+
+    #[test]
     fn refusal_delta_streams_visible_output() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
 
@@ -720,27 +955,235 @@ mod tests {
     }
 
     #[test]
-    fn unknown_documented_events_are_ignored() {
+    fn stream_event_policy_classifies_documented_families() {
+        assert_eq!(
+            super::response_stream_event_policy_for_type("response.output_text.delta"),
+            ResponsesStreamEventPolicy::MeaningfulConversion
+        );
+        assert_eq!(
+            super::response_stream_event_policy_for_type("response.queued"),
+            ResponsesStreamEventPolicy::DocumentedStatusMarkerNoop
+        );
+
+        for event_type in [
+            "response.code_interpreter_call_code.delta",
+            "response.code_interpreter_call_code.done",
+            "response.mcp_call_arguments.delta",
+            "response.mcp_call_arguments.done",
+            "response.image_generation_call.partial_image",
+            "response.custom_tool_call_input.delta",
+            "response.custom_tool_call_input.done",
+            "response.output_text.annotation.added",
+            "response.reasoning_text.done",
+        ] {
+            assert_ne!(
+                super::response_stream_event_policy_for_type(event_type),
+                ResponsesStreamEventPolicy::DocumentedStatusMarkerNoop,
+                "{event_type} must not be treated as a status-only no-op"
+            );
+        }
+
+        assert_eq!(
+            super::response_stream_event_policy_for_type(
+                "response.code_interpreter_call_code.delta"
+            ),
+            ResponsesStreamEventPolicy::DocumentedValueBearingRigGap
+        );
+        assert_eq!(
+            super::response_stream_event_policy_for_type("response.not_a_real_event"),
+            ResponsesStreamEventPolicy::Unsupported
+        );
+    }
+
+    #[test]
+    fn documented_status_marker_events_are_explicit_noops() {
         let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
-        let events = processor
-            .handle_payload(json!({
-                "type": "response.file_search_call.searching",
-                "query": "needle"
-            }))
-            .expect("unknown documented event should be ignored");
-        assert!(events.is_empty());
-        processor
-            .handle_payload(json!({
-                "type": "response.code_interpreter_call.code.delta",
+
+        for payload in [
+            json!({"type": "response.created", "response": {"id": "resp_1"}}),
+            json!({"type": "response.in_progress", "response": {"id": "resp_1"}}),
+            json!({"type": "response.queued", "response": {"id": "resp_1"}}),
+            json!({"type": "response.file_search_call.searching", "item_id": "fs_1", "output_index": 0}),
+            json!({"type": "response.web_search_call.completed", "item_id": "ws_1", "output_index": 1}),
+            json!({"type": "response.image_generation_call.generating", "item_id": "ig_1", "output_index": 2}),
+            json!({"type": "response.mcp_call.completed", "item_id": "mcp_1", "output_index": 3}),
+            json!({"type": "response.mcp_list_tools.completed", "item_id": "mcp_tools_1", "output_index": 4}),
+            json!({"type": "response.code_interpreter_call.interpreting", "item_id": "ci_1", "output_index": 5}),
+            json!({"type": "response.content_part.done", "item_id": "msg_1", "output_index": 6}),
+            json!({"type": "response.function_call_arguments.done", "item_id": "fc_1", "output_index": 7}),
+        ] {
+            let events = processor
+                .handle_payload(payload)
+                .expect("documented status marker should be accepted");
+            assert!(events.is_empty());
+        }
+    }
+
+    #[test]
+    fn documented_value_bearing_rig_gaps_are_explicit_non_runtime_events() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
+
+        for payload in [
+            json!({
+                "type": "response.code_interpreter_call_code.delta",
+                "item_id": "ci_1",
+                "output_index": 0,
+                "sequence_number": 1,
                 "delta": "print(1)"
-            }))
-            .expect("code interpreter event should be ignored");
+            }),
+            json!({
+                "type": "response.code_interpreter_call_code.done",
+                "item_id": "ci_1",
+                "output_index": 0,
+                "sequence_number": 2,
+                "code": "print(1)"
+            }),
+            json!({
+                "type": "response.mcp_call_arguments.delta",
+                "item_id": "mcp_1",
+                "call_id": "call_mcp",
+                "output_index": 1,
+                "sequence_number": 3,
+                "delta": "{\"query\":\"vtcode\"}"
+            }),
+            json!({
+                "type": "response.mcp_call_arguments.done",
+                "item_id": "mcp_1",
+                "call_id": "call_mcp",
+                "output_index": 1,
+                "sequence_number": 4,
+                "arguments": "{\"query\":\"vtcode\"}"
+            }),
+            json!({
+                "type": "response.image_generation_call.partial_image",
+                "item_id": "img_1",
+                "output_index": 2,
+                "sequence_number": 5,
+                "partial_image_b64": "ZmFrZQ=="
+            }),
+            json!({
+                "type": "response.custom_tool_call_input.delta",
+                "item_id": "custom_1",
+                "call_id": "call_custom",
+                "output_index": 3,
+                "sequence_number": 6,
+                "delta": "partial"
+            }),
+            json!({
+                "type": "response.custom_tool_call_input.done",
+                "item_id": "custom_1",
+                "call_id": "call_custom",
+                "output_index": 3,
+                "sequence_number": 7,
+                "input": "partial input"
+            }),
+            json!({
+                "type": "response.output_text.annotation.added",
+                "item_id": "msg_1",
+                "output_index": 4,
+                "sequence_number": 8,
+                "annotation": {"type": "url_citation", "url": "https://example.test"}
+            }),
+        ] {
+            let events = processor
+                .handle_payload(payload)
+                .expect("documented value-bearing gap should be accepted");
+            assert!(events.is_empty());
+        }
+    }
+
+    #[test]
+    fn custom_tool_stream_input_is_preserved_by_final_response_replay() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), |value| {
+            crate::providers::openai::responses_api::parse_responses_payload(
+                value,
+                "gpt-5".to_string(),
+                false,
+            )
+        });
+
+        for payload in [
+            json!({
+                "type": "response.custom_tool_call_input.delta",
+                "item_id": "custom_1",
+                "call_id": "call_custom",
+                "output_index": 0,
+                "delta": "{\"cmd\":"
+            }),
+            json!({
+                "type": "response.custom_tool_call_input.done",
+                "item_id": "custom_1",
+                "call_id": "call_custom",
+                "output_index": 0,
+                "input": "{\"cmd\":\"test\"}"
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_custom",
+                    "output": [{
+                        "type": "custom_tool_call",
+                        "id": "custom_1",
+                        "call_id": "call_custom",
+                        "name": "hosted_shell",
+                        "input": "{\"cmd\":\"test\"}"
+                    }]
+                }
+            }),
+        ] {
+            let events = processor
+                .handle_payload(payload)
+                .expect("custom tool stream event should parse");
+            assert!(events.is_empty());
+        }
 
         let finished = processor.finish().expect("finish should succeed");
+        let response = match finished.as_slice() {
+            [NormalizedStreamEvent::Done { response }] => response,
+            _ => panic!("expected done event"),
+        };
+        let tool_calls = response
+            .tool_calls
+            .as_ref()
+            .expect("custom tool call should be replayed from final response");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "call_custom");
+        assert!(tool_calls[0].is_custom());
+        assert_eq!(tool_calls[0].text.as_deref(), Some("{\"cmd\":\"test\"}"));
+    }
+
+    #[test]
+    fn reasoning_text_done_is_marker_or_final_reasoning_text() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
+        let marker = processor
+            .handle_payload(json!({"type": "response.reasoning_text.done"}))
+            .expect("marker done should parse");
+        assert!(marker.is_empty());
+
+        let final_text = processor
+            .handle_payload(json!({
+                "type": "response.reasoning_text.done",
+                "text": "final reasoning"
+            }))
+            .expect("final reasoning text should parse");
         assert!(matches!(
-            finished.as_slice(),
-            [NormalizedStreamEvent::Done { .. }]
+            final_text.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta }]
+                if delta == "final reasoning"
         ));
+    }
+
+    #[test]
+    fn unsupported_responses_event_reports_provider_error() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
+        let error = processor
+            .handle_payload(json!({"type": "response.not_a_real_event"}))
+            .expect_err("unsupported event should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported Responses stream event type")
+        );
     }
 
     #[test]

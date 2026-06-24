@@ -8,6 +8,7 @@ use crate::providers::common::serialize_message_content_openai_for_model;
 use crate::rig_adapter::RigProviderCapabilities;
 use crate::system_prompt::{default_system_prompt, openai_gpt55_contract_addendum};
 use hashbrown::HashSet;
+use rig::providers::chatgpt::ResponsesCompletionModel as RigChatGptResponsesCompletionModel;
 use rig::providers::openai::responses_api::{
     AdditionalParameters as RigResponsesAdditionalParameters, Include as RigResponsesInclude,
 };
@@ -95,6 +96,13 @@ pub(crate) struct ResponsesRequestContext<'a> {
     pub include_structured_history_in_input: bool,
     pub preserve_structured_history_on_replay: bool,
     pub preserve_assistant_phase_on_replay: bool,
+    pub request_construction: ResponsesRequestConstruction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResponsesRequestConstruction {
+    OpenAiJsonWithRigTypedParameters,
+    RigChatGptPrivateDefaultsCompatibility,
 }
 
 fn strip_non_native_assistant_phase(input: &mut [Value]) {
@@ -191,6 +199,16 @@ fn merge_typed_responses_parameters(
     };
 
     request.extend(fields);
+}
+
+fn invalid_responses_request_error(
+    provider_name: &str,
+    message: impl Into<String>,
+) -> provider::LLMError {
+    provider::LLMError::InvalidRequest {
+        message: error_display::format_llm_error(provider_name, &message.into()),
+        metadata: None,
+    }
 }
 
 fn apply_prompt_cache_overlay(openai_request: &mut Value, ctx: &ResponsesRequestContext<'_>) {
@@ -510,6 +528,12 @@ fn build_responses_request_from_history(
     ctx: &ResponsesRequestContext<'_>,
     responses_payload: OpenAIResponsesPayload,
 ) -> Result<Value, provider::LLMError> {
+    if ctx.request_construction
+        == ResponsesRequestConstruction::RigChatGptPrivateDefaultsCompatibility
+    {
+        return build_chatgpt_responses_request_from_history(request, ctx, responses_payload);
+    }
+
     let input = responses_payload.input;
     let instructions = responses_payload.instructions;
     if input.is_empty() {
@@ -759,9 +783,189 @@ fn build_responses_request_from_history(
     Ok(openai_request)
 }
 
+/// ChatGPT Responses construction boundary.
+///
+/// Rig 0.39's real ChatGPT provider request constructor is
+/// `rig::providers::chatgpt::ResponsesCompletionModel::create_request`, but
+/// that method is private and the public `completion`/`stream` methods also
+/// take over auth refresh, request sending, SSE ownership, and session ID
+/// generation. VT Code must keep those responsibilities locally for the
+/// ChatGPT subscription path. Rig's public OpenAI Responses serde boundary also
+/// cannot round-trip VT Code's retained Responses history because Rig builds
+/// message `InputItem`s through `CompletionRequest::try_from`, not through a
+/// public ChatGPT request-shaping API. This explicit fallback mirrors only the
+/// private ChatGPT default-clearing step, then applies VT Code overlays for
+/// fields Rig does not expose. Remove this boundary once Rig exposes a public
+/// ChatGPT request construction API that returns the typed request without
+/// taking transport ownership. Protected by
+/// `chatgpt_request_construction_documents_non_exposed_rig_boundary`.
+fn build_chatgpt_responses_request_from_history(
+    request: &provider::LLMRequest,
+    ctx: &ResponsesRequestContext<'_>,
+    responses_payload: OpenAIResponsesPayload,
+) -> Result<Value, provider::LLMError> {
+    let input = responses_payload.input;
+    let instructions = responses_payload.instructions;
+    if input.is_empty() {
+        return Err(invalid_responses_request_error(
+            "ChatGPT",
+            "No messages provided for ChatGPT Responses API",
+        ));
+    }
+
+    let mut openai_request = json!({
+        "model": request.model,
+        "input": input,
+        "stream": request.stream,
+    });
+    if let Some(instructions) = instructions
+        && !instructions.trim().is_empty()
+    {
+        openai_request["instructions"] = json!(instructions);
+    }
+    if let Some(max_tokens) = request.max_tokens {
+        openai_request["max_output_tokens"] = json!(max_tokens);
+    }
+    let effective_reasoning_effort = request
+        .reasoning_effort
+        .or_else(|| default_reasoning_effort_for_model(&request.model));
+    if let Some(temperature) = request.temperature
+        && ctx.supports_temperature
+        && allows_sampling_parameters(&request.model, effective_reasoning_effort)
+    {
+        openai_request["temperature"] = json!(temperature);
+    }
+
+    apply_rig_chatgpt_private_defaults(&mut openai_request);
+    apply_chatgpt_vtcode_overlays(&mut openai_request, request, ctx);
+    apply_responses_reasoning_overlay(&mut openai_request, request, ctx);
+    Ok(openai_request)
+}
+
+fn apply_rig_chatgpt_private_defaults(request: &mut Value) {
+    let mut typed_parameters = RigResponsesAdditionalParameters::default();
+    typed_parameters.store = Some(false);
+    let include = typed_parameters.include.get_or_insert_with(Vec::new);
+    if !include
+        .iter()
+        .any(|item| matches!(item, RigResponsesInclude::ReasoningEncryptedContent))
+    {
+        include.push(RigResponsesInclude::ReasoningEncryptedContent);
+    }
+
+    merge_typed_responses_parameters(request, typed_parameters);
+
+    if let Some(map) = request.as_object_mut() {
+        for field in [
+            "background",
+            "max_output_tokens",
+            "metadata",
+            "parallel_tool_calls",
+            "service_tier",
+            "temperature",
+            "text",
+            "top_p",
+            "user",
+        ] {
+            map.remove(field);
+        }
+    }
+}
+
+fn apply_chatgpt_vtcode_overlays(
+    openai_request: &mut Value,
+    request: &provider::LLMRequest,
+    ctx: &ResponsesRequestContext<'_>,
+) {
+    let mut include_values = Vec::new();
+    if let Some(include_fields) = request
+        .responses_include
+        .as_deref()
+        .or(ctx.default_responses_include)
+    {
+        for field in include_fields {
+            push_unique_include(&mut include_values, field);
+        }
+    }
+    if ctx.include_encrypted_reasoning {
+        push_unique_include(&mut include_values, "reasoning.encrypted_content");
+    }
+    if !include_values.is_empty() {
+        openai_request["include"] = Value::Array(
+            include_values
+                .iter()
+                .map(|field| responses_include_value(field))
+                .collect(),
+        );
+    }
+
+    if let Some(context_management) = &request.context_management {
+        openai_request["context_management"] = context_management.clone();
+    }
+
+    if ctx.supports_tools
+        && let Some(tools) = &request.tools
+        && let Some(serialized) =
+            tool_serialization::serialize_tools_for_responses(tools, ctx.hosted_shell)
+    {
+        openai_request["tools"] = serialized;
+
+        if let Some(tool_choice) = &request.tool_choice {
+            openai_request["tool_choice"] = if ctx.supports_allowed_tools {
+                openai_responses_allowed_tools_choice(tool_choice, tools)
+                    .unwrap_or_else(|| tool_choice.to_provider_format("openai"))
+            } else {
+                tool_choice.to_provider_format("openai")
+            };
+        }
+    }
+}
+
+fn apply_responses_reasoning_overlay(
+    openai_request: &mut Value,
+    request: &provider::LLMRequest,
+    ctx: &ResponsesRequestContext<'_>,
+) {
+    if ctx.supports_reasoning_effort {
+        if let Some(effort) = request.reasoning_effort {
+            if let Some(payload) =
+                RigProviderCapabilities::new(ModelProvider::OpenAI, &request.model)
+                    .reasoning_parameters(effort)
+            {
+                openai_request["reasoning"] = payload;
+            } else {
+                openai_request["reasoning"] = json!({ "effort": effort.as_str() });
+            }
+        } else if openai_request.get("reasoning").is_none()
+            && let Some(default_effort) = default_reasoning_effort_for_model(&request.model)
+        {
+            openai_request["reasoning"] = json!({ "effort": default_effort.as_str() });
+        }
+    }
+
+    if ctx.supports_reasoning
+        && let Some(map) = openai_request.as_object_mut()
+    {
+        let reasoning_value = map.entry("reasoning").or_insert(json!({}));
+        if let Some(reasoning_obj) = reasoning_value.as_object_mut() {
+            reasoning_obj
+                .entry("summary".to_string())
+                .or_insert_with(|| json!("auto"));
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn rig_chatgpt_private_request_constructor_type() -> &'static str {
+    std::any::type_name::<RigChatGptResponsesCompletionModel>()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ResponsesRequestContext, apply_prompt_cache_overlay, build_responses_request};
+    use super::{
+        ResponsesRequestConstruction, ResponsesRequestContext, apply_prompt_cache_overlay,
+        build_responses_request, rig_chatgpt_private_request_constructor_type,
+    };
     use crate::provider;
     use serde_json::{Value, json};
     use vtcode_config::constants::models;
@@ -794,6 +998,7 @@ mod tests {
             include_structured_history_in_input: true,
             preserve_structured_history_on_replay: false,
             preserve_assistant_phase_on_replay: false,
+            request_construction: ResponsesRequestConstruction::OpenAiJsonWithRigTypedParameters,
         }
     }
 
@@ -885,5 +1090,69 @@ mod tests {
                 .and_then(Value::as_str),
             Some("in_memory")
         );
+    }
+
+    #[test]
+    fn chatgpt_request_construction_documents_non_exposed_rig_boundary() {
+        let mut request = request();
+        request.stream = false;
+        request.max_tokens = Some(512);
+        request.temperature = Some(0.7);
+        request.top_p = Some(0.8);
+        request.parallel_tool_calls = Some(true);
+        request.previous_response_id = Some("resp_previous".to_owned());
+        request.responses_include = Some(vec!["output_text.annotations".to_owned()]);
+
+        let mut ctx = base_context(None);
+        ctx.include_previous_response_id = false;
+        ctx.include_output_types = false;
+        ctx.include_sampling_parameters = false;
+        ctx.force_response_store_false = true;
+        ctx.include_encrypted_reasoning = true;
+        ctx.request_construction =
+            ResponsesRequestConstruction::RigChatGptPrivateDefaultsCompatibility;
+
+        let payload = build_responses_request(&request, &ctx)
+            .expect("chatgpt responses request should build");
+
+        assert!(
+            rig_chatgpt_private_request_constructor_type()
+                .contains("chatgpt::ResponsesCompletionModel"),
+            "the compatibility boundary documents the private Rig ChatGPT request constructor"
+        );
+        assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(false));
+        assert_eq!(payload.get("store").and_then(Value::as_bool), Some(false));
+        assert!(payload.get("max_output_tokens").is_none());
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+        assert!(payload.get("parallel_tool_calls").is_none());
+        assert!(payload.get("previous_response_id").is_none());
+        assert_eq!(
+            payload.get("include").and_then(Value::as_array),
+            Some(&vec![
+                json!("output_text.annotations"),
+                json!("reasoning.encrypted_content"),
+            ])
+        );
+    }
+
+    #[test]
+    fn chatgpt_request_construction_preserves_requested_stream_mode() {
+        for requested_stream in [false, true] {
+            let mut request = request();
+            request.stream = requested_stream;
+
+            let mut ctx = base_context(None);
+            ctx.request_construction =
+                ResponsesRequestConstruction::RigChatGptPrivateDefaultsCompatibility;
+
+            let payload = build_responses_request(&request, &ctx)
+                .expect("chatgpt responses request should build");
+
+            assert_eq!(
+                payload.get("stream").and_then(Value::as_bool),
+                Some(requested_stream)
+            );
+        }
     }
 }

@@ -1,9 +1,9 @@
 //! Backend/auth setup boundary for OpenAI-compatible request construction.
 //!
-//! Rig 0.38 exposes a ChatGPT subscription provider with access-token auth,
+//! Rig 0.39 exposes a ChatGPT subscription provider with access-token auth,
 //! account headers, and the Codex backend URL. VT Code still owns stored
-//! session refresh and the Responses request/stream pipeline in this slice, so
-//! the default ChatGPT setup uses Rig's public auth primitive while retaining
+//! session refresh, transport gating, and retry/fallback control, so the
+//! default ChatGPT setup uses Rig's public auth primitive while retaining
 //! VT Code's session snapshot/refresh boundary here.
 
 use crate::config::constants::{env_vars, urls};

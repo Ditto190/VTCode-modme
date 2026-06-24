@@ -1175,6 +1175,65 @@ mod tests {
     }
 
     #[test]
+    fn parse_responses_payload_ignores_provider_hosted_value_items_without_runtime_surface() {
+        let response = json!({
+            "output": [
+                {
+                    "type": "code_interpreter_call",
+                    "id": "ci_1",
+                    "call_id": "call_ci_1",
+                    "status": "completed",
+                    "code": "print('hello')\n",
+                    "outputs": [
+                        {"type": "logs", "logs": "hello\n"}
+                    ]
+                },
+                {
+                    "type": "mcp_call",
+                    "id": "mcp_1",
+                    "call_id": "call_mcp_1",
+                    "name": "provider_tool",
+                    "arguments": "{\"path\":\"src/main.rs\"}",
+                    "status": "completed"
+                },
+                {
+                    "type": "image_generation_call",
+                    "id": "ig_1",
+                    "call_id": "call_img_1",
+                    "status": "completed",
+                    "result": "iVBORw0KGgo="
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Done.",
+                            "annotations": [
+                                {
+                                    "type": "text_annotation",
+                                    "text": "see docs",
+                                    "start": 0,
+                                    "end": 4
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let parsed =
+            parse_responses_payload(response, "gpt-5".to_string(), false).expect("should parse");
+
+        assert_eq!(parsed.content.as_deref(), Some("Done."));
+        assert!(parsed.tool_calls.unwrap_or_default().is_empty());
+        assert!(parsed.reasoning_details.is_none());
+        assert!(parsed.tool_references.is_empty());
+    }
+
+    #[test]
     fn parse_responses_payload_extracts_cached_prompt_tokens_from_input_details() {
         let response = json!({
             "output": [

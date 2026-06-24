@@ -5,13 +5,14 @@ use anyhow::Result;
 use super::{ToolRegistration, ToolRegistry};
 
 impl ToolRegistry {
-    /// Register a new tool with the registry.
+    /// Register or replace a tool with the registry.
     ///
     /// # Arguments
     /// * `registration` - The tool registration to add
     ///
     /// # Returns
-    /// `Result<()>` indicating success or an error if the tool is already registered
+    /// `Result<()>` indicating success. A duplicate canonical tool name replaces
+    /// the previous registration in place; alias conflicts remain errors.
     pub async fn register_tool(&self, registration: ToolRegistration) -> Result<()> {
         let registration = if let Some(mode) = self.current_cgp_mode() {
             if registration.is_cgp_wrapped() {
