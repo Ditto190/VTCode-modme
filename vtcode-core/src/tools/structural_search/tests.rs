@@ -531,6 +531,103 @@ fn structural_request_infers_lang_from_unambiguous_globs() {
 }
 
 #[test]
+fn structural_request_exclude_array_converts_to_negative_globs() {
+    let request = StructuralSearchRequest::from_args(&json!({
+        "action": "structural",
+        "pattern": "fn $NAME() {}",
+        "lang": "rust",
+        "exclude": ["*.md", "tests/**"]
+    }))
+    .expect("exclude array should be accepted");
+
+    let globs = request.normalized_globs();
+    assert!(
+        globs.contains(&"!*.md".to_string()),
+        "expected negative glob for *.md, got {globs:?}"
+    );
+    assert!(
+        globs.contains(&"!tests/**".to_string()),
+        "expected negative glob for tests/**, got {globs:?}"
+    );
+}
+
+#[test]
+fn structural_request_exclude_single_string_converts_to_negative_glob() {
+    let request = StructuralSearchRequest::from_args(&json!({
+        "action": "structural",
+        "pattern": "fn $NAME() {}",
+        "lang": "rust",
+        "exclude": "target/**"
+    }))
+    .expect("exclude single string should be accepted");
+
+    let globs = request.normalized_globs();
+    assert!(
+        globs.contains(&"!target/**".to_string()),
+        "expected negative glob for target/**, got {globs:?}"
+    );
+}
+
+#[test]
+fn structural_request_exclude_with_leading_bang_deduplicates() {
+    let request = StructuralSearchRequest::from_args(&json!({
+        "action": "structural",
+        "pattern": "fn $NAME() {}",
+        "lang": "rust",
+        "exclude": ["!*.md"]
+    }))
+    .expect("exclude with leading bang should be accepted");
+
+    let globs = request.normalized_globs();
+    // Should produce exactly one `!*.md`, not `!!*.md`.
+    let neg_count = globs.iter().filter(|g| g.as_str() == "!*.md").count();
+    assert_eq!(neg_count, 1, "expected exactly one !*.md, got {globs:?}");
+}
+
+#[test]
+fn structural_request_exclude_merges_with_positive_globs() {
+    let request = StructuralSearchRequest::from_args(&json!({
+        "action": "structural",
+        "pattern": "fn $NAME() {}",
+        "lang": "rust",
+        "globs": ["**/*.rs"],
+        "exclude": ["*.md"]
+    }))
+    .expect("exclude and globs should merge");
+
+    let globs = request.normalized_globs();
+    assert!(
+        globs.contains(&"**/*.rs".to_string()),
+        "expected positive glob, got {globs:?}"
+    );
+    assert!(
+        globs.contains(&"!*.md".to_string()),
+        "expected negative glob, got {globs:?}"
+    );
+}
+
+#[test]
+fn structural_request_exclude_skips_empty_entries() {
+    let request = StructuralSearchRequest::from_args(&json!({
+        "action": "structural",
+        "pattern": "fn $NAME() {}",
+        "lang": "rust",
+        "exclude": ["", "  ", "*.md"]
+    }))
+    .expect("empty exclude entries should be skipped");
+
+    let globs = request.normalized_globs();
+    assert!(
+        !globs.iter().any(|g| g.trim().is_empty()),
+        "expected no empty globs, got {globs:?}"
+    );
+    assert!(
+        globs.contains(&"!*.md".to_string()),
+        "expected !*.md, got {globs:?}"
+    );
+}
+
+#[test]
 fn structural_request_accepts_rewrite_field_for_rewrite_workflow() {
     let request = StructuralSearchRequest::from_args(&json!({
         "action": "structural",
