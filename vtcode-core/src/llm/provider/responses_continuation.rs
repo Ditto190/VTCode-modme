@@ -99,7 +99,7 @@ pub fn prepare_openai_responses_request<'a>(
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedResponsesRequest, ResponsesContinuationState, prepare_openai_responses_request,
+        ResponsesContinuationState, prepare_openai_responses_request,
         prepare_responses_continuation_request, responses_continuation_key,
     };
     use crate::llm::provider::Message;
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_openai_request_uses_incremental_suffix_for_matching_prefix() {
+    fn prepare_openai_request_keeps_full_history_without_previous_response_id() {
         let messages = vec![
             Message::user("hello".to_string()),
             Message::user("continue".to_string()),
@@ -129,16 +129,14 @@ mod tests {
             }),
         );
 
-        assert_eq!(prepared.previous_response_id.as_deref(), Some("resp_123"));
-        assert_eq!(
-            prepared.messages,
-            Cow::<[Message]>::Owned(vec![Message::user("continue".to_string())])
-        );
+        assert_eq!(prepared.previous_response_id, None);
+        assert!(matches!(prepared.messages, Cow::Borrowed(_)));
+        assert_eq!(prepared.messages.as_ref(), messages.as_slice());
         assert!(!prepared.clear_stale_chain);
     }
 
     #[test]
-    fn prepare_openai_request_replays_full_history_for_stale_prefix() {
+    fn prepare_openai_request_ignores_stale_chain_without_retry_recovery() {
         let messages = vec![Message::user("continue".to_string())];
         let prepared = prepare_openai_responses_request(
             &messages,
@@ -148,18 +146,14 @@ mod tests {
             }),
         );
 
-        assert!(matches!(
-            prepared,
-            PreparedResponsesRequest {
-                previous_response_id: None,
-                clear_stale_chain: true,
-                ..
-            }
-        ));
+        assert_eq!(prepared.previous_response_id, None);
+        assert!(matches!(prepared.messages, Cow::Borrowed(_)));
+        assert_eq!(prepared.messages.as_ref(), messages.as_slice());
+        assert!(!prepared.clear_stale_chain);
     }
 
     #[test]
-    fn prepare_responses_continuation_request_uses_incremental_suffix_for_openai() {
+    fn prepare_responses_continuation_request_keeps_openai_stateless() {
         let messages = vec![
             Message::user("hello".to_string()),
             Message::user("continue".to_string()),
@@ -174,11 +168,9 @@ mod tests {
             }),
         );
 
-        assert_eq!(prepared.previous_response_id.as_deref(), Some("resp_123"));
-        assert_eq!(
-            prepared.messages,
-            Cow::<[Message]>::Owned(vec![Message::user("continue".to_string())])
-        );
+        assert_eq!(prepared.previous_response_id, None);
+        assert!(matches!(prepared.messages, Cow::Borrowed(_)));
+        assert_eq!(prepared.messages.as_ref(), messages.as_slice());
         assert!(!prepared.clear_stale_chain);
     }
 
@@ -248,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_responses_continuation_request_clears_stale_incremental_chain() {
+    fn prepare_responses_continuation_request_ignores_openai_stale_chain_without_retry_recovery() {
         let messages = vec![Message::user("continue".to_string())];
         let prepared = prepare_responses_continuation_request(
             "openai",
@@ -260,13 +252,9 @@ mod tests {
             }),
         );
 
-        assert!(matches!(
-            prepared,
-            PreparedResponsesRequest {
-                previous_response_id: None,
-                clear_stale_chain: true,
-                ..
-            }
-        ));
+        assert_eq!(prepared.previous_response_id, None);
+        assert!(matches!(prepared.messages, Cow::Borrowed(_)));
+        assert_eq!(prepared.messages.as_ref(), messages.as_slice());
+        assert!(!prepared.clear_stale_chain);
     }
 }

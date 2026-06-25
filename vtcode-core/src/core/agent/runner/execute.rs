@@ -1408,7 +1408,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_prepare_responses_request_messages_uses_incremental_suffix() {
+    fn openai_prepare_responses_request_messages_keeps_full_history_without_previous_response_id() {
         let mut state = AgentSessionState::new("session".to_string(), 4, 4, 16_000);
         let prior_messages = vec![Message::user("hello".to_string())];
         let current_messages = vec![
@@ -1425,11 +1425,8 @@ mod tests {
             &current_messages,
         );
 
-        assert_eq!(previous_response_id.as_deref(), Some("resp_123"));
-        assert_eq!(
-            request_messages.as_ref(),
-            [Message::user("continue".to_string())].as_slice()
-        );
+        assert_eq!(previous_response_id, None);
+        assert_eq!(request_messages.as_ref(), current_messages.as_slice());
     }
 
     #[test]

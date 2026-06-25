@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 struct ScriptedProvider {
+    provider_name: &'static str,
+    supports_responses_compaction: bool,
     recorded_previous_response_ids: Arc<Mutex<Vec<Option<String>>>>,
     outcomes: Mutex<VecDeque<ScriptedProviderOutcome>>,
 }
@@ -19,10 +21,14 @@ enum ScriptedProviderOutcome {
 
 impl ScriptedProvider {
     fn new(
+        provider_name: &'static str,
+        supports_responses_compaction: bool,
         recorded_previous_response_ids: Arc<Mutex<Vec<Option<String>>>>,
         outcomes: Vec<ScriptedProviderOutcome>,
     ) -> Self {
         Self {
+            provider_name,
+            supports_responses_compaction,
             recorded_previous_response_ids,
             outcomes: Mutex::new(VecDeque::from(outcomes)),
         }
@@ -32,11 +38,15 @@ impl ScriptedProvider {
 #[async_trait::async_trait]
 impl uni::LLMProvider for ScriptedProvider {
     fn name(&self) -> &str {
-        "openai"
+        self.provider_name
     }
 
     fn supports_streaming(&self) -> bool {
         false
+    }
+
+    fn supports_responses_compaction(&self, _model: &str) -> bool {
+        self.supports_responses_compaction
     }
 
     async fn generate(
@@ -100,17 +110,19 @@ fn retryable_llm_error_excludes_non_transient_messages() {
 }
 
 #[tokio::test]
-async fn previous_response_chain_retry_keeps_real_retry_backoff() {
+async fn compatible_previous_response_chain_retry_keeps_real_retry_backoff() {
     use vtcode_core::utils::transcript;
 
     transcript::clear();
 
     let recorded_previous_response_ids = Arc::new(Mutex::new(Vec::new()));
     let provider = ScriptedProvider::new(
+        "mycorp",
+        true,
         Arc::clone(&recorded_previous_response_ids),
         vec![
             ScriptedProviderOutcome::Error(uni::LLMError::Provider {
-                message: "OpenAI error: previous_response_not_found: previous response missing"
+                message: "Provider error: previous_response_not_found: previous response missing"
                     .to_string(),
                 metadata: None,
             }),
@@ -133,7 +145,7 @@ async fn previous_response_chain_retry_keeps_real_retry_backoff() {
     ctx.working_history
         .push(uni::Message::user("continue".to_string()));
     ctx.session_stats.set_previous_response_chain(
-        "openai",
+        "mycorp",
         "noop-model",
         Some("resp_123"),
         &prior_messages,
@@ -172,6 +184,65 @@ async fn previous_response_chain_retry_keeps_real_retry_backoff() {
                 "LLM request failed ({}), retrying in 0.5s... (attempt 2/3)",
                 retry_label
             ))
+            .count(),
+        0
+    );
+
+    transcript::clear();
+}
+
+#[tokio::test]
+async fn openai_stale_previous_response_retry_is_disabled() {
+    use vtcode_core::utils::transcript;
+
+    transcript::clear();
+
+    let recorded_previous_response_ids = Arc::new(Mutex::new(Vec::new()));
+    let provider = ScriptedProvider::new(
+        "openai",
+        false,
+        Arc::clone(&recorded_previous_response_ids),
+        vec![
+            ScriptedProviderOutcome::Error(uni::LLMError::Provider {
+                message: "OpenAI error: previous_response_not_found: previous response missing"
+                    .to_string(),
+                metadata: None,
+            }),
+            ScriptedProviderOutcome::Success {
+                content: Some("unexpected retry"),
+                request_id: Some("resp_456"),
+            },
+        ],
+    );
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let prior_messages = vec![uni::Message::user("hello".to_string())];
+    let mut ctx = backing.turn_processing_context();
+    *ctx.provider_client = Box::new(provider);
+    ctx.working_history.extend(prior_messages.clone());
+    ctx.working_history
+        .push(uni::Message::user("continue".to_string()));
+    ctx.session_stats.set_previous_response_chain(
+        "openai",
+        "noop-model",
+        Some("resp_123"),
+        &prior_messages,
+    );
+
+    let result = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None).await;
+
+    assert!(result.is_err(), "stale OpenAI chain should not be retried");
+    assert_eq!(
+        recorded_previous_response_ids
+            .lock()
+            .expect("recorded previous_response_ids")
+            .as_slice(),
+        &[None]
+    );
+    assert_eq!(
+        transcript::snapshot()
+            .join("\n")
+            .matches("Previous response chain expired; retrying with a fresh provider chain.")
             .count(),
         0
     );
