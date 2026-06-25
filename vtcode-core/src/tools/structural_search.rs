@@ -566,41 +566,6 @@ impl StructuralSearchRequest {
             }
         }
 
-        // Validate format value.
-        if let Some(fmt) = self.effective_format()
-            && !VALID_FORMAT_VALUES.contains(&fmt)
-        {
-            bail!(
-                "invalid `format` value `{}`; expected one of: {}",
-                fmt,
-                VALID_FORMAT_VALUES.join(", ")
-            );
-        }
-
-        // Validate report_style value.
-        if let Some(style) = self.effective_report_style()
-            && !VALID_REPORT_STYLE_VALUES.contains(&style)
-        {
-            bail!(
-                "invalid `report_style` value `{}`; expected one of: {}",
-                style,
-                VALID_REPORT_STYLE_VALUES.join(", ")
-            );
-        }
-
-        // Validate builtin_rules values.
-        if let Some(rules) = self.effective_builtin_rules() {
-            for rule in rules {
-                let rule_name = rule.split(':').next().unwrap_or(rule);
-                if !VALID_BUILTIN_RULES.contains(&rule_name) {
-                    bail!(
-                        "invalid builtin rule `{rule_name}`; expected one of: {}",
-                        VALID_BUILTIN_RULES.join(", ")
-                    );
-                }
-            }
-        }
-
         // Validate mutual exclusivity of context_lines vs before_lines/after_lines.
         if self.context_lines.is_some()
             && (self.before_lines.is_some() || self.after_lines.is_some())
@@ -725,6 +690,42 @@ impl StructuralSearchRequest {
         self.reject_range()?;
         self.reject_composite_rules()?;
         self.reject_transform()?;
+
+        // Validate format value — only scan workflow uses this parameter.
+        if let Some(fmt) = self.effective_format()
+            && !VALID_FORMAT_VALUES.contains(&fmt)
+        {
+            bail!(
+                "invalid `format` value `{}`; expected one of: {}",
+                fmt,
+                VALID_FORMAT_VALUES.join(", ")
+            );
+        }
+
+        // Validate report_style value — only scan workflow uses this parameter.
+        if let Some(style) = self.effective_report_style()
+            && !VALID_REPORT_STYLE_VALUES.contains(&style)
+        {
+            bail!(
+                "invalid `report_style` value `{}`; expected one of: {}",
+                style,
+                VALID_REPORT_STYLE_VALUES.join(", ")
+            );
+        }
+
+        // Validate builtin_rules values — only scan workflow uses this parameter.
+        if let Some(rules) = self.effective_builtin_rules() {
+            for rule in rules {
+                let rule_name = rule.split(':').next().unwrap_or(rule);
+                if !VALID_BUILTIN_RULES.contains(&rule_name) {
+                    bail!(
+                        "invalid builtin rule `{rule_name}`; expected one of: {}",
+                        VALID_BUILTIN_RULES.join(", ")
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
