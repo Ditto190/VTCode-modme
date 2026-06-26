@@ -22,8 +22,8 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-vtcode-commons = { path = "../vtcode-commons", version = "0.133.13" }
-vtcode-config = { path = "../vtcode-config", version = "0.133.13" }
+vtcode-commons = { path = "../vtcode-commons", version = "0.133.14-dev" }
+vtcode-config = { path = "../vtcode-config", version = "0.133.14-dev" }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
