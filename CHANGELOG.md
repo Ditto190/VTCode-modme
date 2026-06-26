@@ -2,6 +2,27 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.133.13 - 2026-06-26
+
+### Highlights
+
+*No highlighted changes*
+
+### Other Changes
+
+#### Refactors
+
+- move inject_latest_memory_envelope to test configuration (991fc083f) (@vinhnx)
+
+#### Other
+
+- Update TODO (87a03136f) (@vinhnx)
+- Update TODO (873af9c63) (@vinhnx)
+
+### Contributors
+
+@vinhnx
+
 ## 0.133.12 - 2026-06-25
 
 ### Highlights
