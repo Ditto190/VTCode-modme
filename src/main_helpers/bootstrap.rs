@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
+use anstyle::{AnsiColor, Effects};
 use clap::builder::Styles;
-use clap::builder::styling::{AnsiColor, Effects};
+use clap::builder::styling::{AnsiColor as ClapAnsiColor, Effects as ClapEffects};
 use clap::{ColorChoice as CliColorChoice, CommandFactory};
 use vtcode_commons::color_policy::{self, ColorOutputPolicy, ColorOutputPolicySource};
 use vtcode_core::cli::args::Cli;
@@ -74,10 +75,10 @@ pub(crate) fn build_augmented_cli_command() -> clap::Command {
 
 fn clap_help_styles() -> Styles {
     Styles::styled()
-        .header(AnsiColor::BrightBlue.on_default().effects(Effects::BOLD))
-        .usage(AnsiColor::BrightBlue.on_default().effects(Effects::BOLD))
-        .literal(AnsiColor::BrightGreen.on_default().effects(Effects::BOLD))
-        .placeholder(AnsiColor::BrightCyan.on_default())
+        .header(ClapAnsiColor::BrightBlue.on_default().effects(ClapEffects::BOLD))
+        .usage(ClapAnsiColor::BrightBlue.on_default().effects(ClapEffects::BOLD))
+        .literal(ClapAnsiColor::BrightGreen.on_default().effects(ClapEffects::BOLD))
+        .placeholder(ClapAnsiColor::BrightCyan.on_default())
 }
 
 fn requested_help_color_choice() -> Option<CliColorChoice> {
@@ -256,6 +257,42 @@ fn build_candidate_list() -> Vec<String> {
     candidates
 }
 
+/// Apply ANSI styling to text if the terminal supports color output.
+///
+/// Uses `colorchoice::ColorChoice::global()` to respect `--color`, `--no-color`,
+/// and `NO_COLOR` env var. Falls back to raw text when colors are disabled.
+fn styled(text: &str, style: anstyle::Style) -> String {
+    if colorchoice::ColorChoice::global() == colorchoice::ColorChoice::Never {
+        return text.to_string();
+    }
+    format!("{style}{text}\x1b[0m")
+}
+
+fn style_header(text: &str) -> String {
+    styled(
+        text,
+        anstyle::Style::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlue)))
+            .effects(Effects::BOLD),
+    )
+}
+
+fn style_literal(text: &str) -> String {
+    styled(
+        text,
+        anstyle::Style::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
+            .effects(Effects::BOLD),
+    )
+}
+
+fn style_placeholder(text: &str) -> String {
+    styled(
+        text,
+        anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightCyan))),
+    )
+}
+
 /// Score how similar `candidate` is to `input` (0.0 ..= 1.0, exclusive).
 ///
 /// Uses prefix matching, substring containment, and character bigram overlap.
@@ -356,15 +393,17 @@ pub(crate) fn try_enhance_clap_error(err_text: &str) -> Option<String> {
 
     let suggestion_lines = suggestions
         .iter()
-        .map(|s| format!("    {s}"))
+        .map(|s| format!("    {}", style_literal(s)))
         .collect::<Vec<_>>()
         .join("\n");
 
     Some(format!(
         "{err_text}\n\n\
-         help: `{value}` is not a workspace path. Did you mean one of these?\n\
+         {} `{}` is not a workspace path. Did you mean one of these?\n\
          {suggestion_lines}\n\n\
-         For more information, try `vtcode --help`."
+         For more information, try `vtcode --help`.",
+        style_header("help"),
+        style_placeholder(&value),
     ))
 }
 
