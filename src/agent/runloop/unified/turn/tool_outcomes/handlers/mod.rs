@@ -67,30 +67,50 @@ pub(super) fn apply_reused_read_only_loop_metadata(
     obj.insert("result_ref_only".to_string(), serde_json::Value::Bool(true));
     obj.insert("loop_detected".to_string(), serde_json::Value::Bool(true));
 
-    let has_content =
-        obj.contains_key("output") || obj.contains_key("content") || obj.contains_key("stdout");
+    // Check for *actual* non-empty content, not just key presence.  An empty
+    // string in `output` means the command produced no captured stdout.
+    // Claiming "content is in the result above" when it is empty causes the
+    // model to hallucinate or spin.
+    let has_meaningful_content = has_non_empty_text_content(obj);
+    let has_spool_path = obj
+        .get("spool_path")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|p| !p.trim().is_empty());
+
+    let (note, next_action) = if has_meaningful_content {
+        (
+            "Loop detected: same result returned. The content is in the result above -- use it directly.",
+            "The tool result content is already in this response. Synthesize your answer from the available data.",
+        )
+    } else if has_spool_path {
+        (
+            "Loop detected: same result returned. The full output was previously spooled to disk. Read the spool_path file if you need the content, or use data from your conversation history. Do NOT retry the same tool call.",
+            "Read the spool_path file for the full output, or use data from conversation history. Do not make more tool calls.",
+        )
+    } else {
+        (
+            "Loop detected: same result returned. The previous execution produced no output. Use the data already in your conversation. Do NOT retry.",
+            "Use data from conversation history. Do not make more tool calls.",
+        )
+    };
+
     obj.insert(
         "loop_detected_note".to_string(),
-        serde_json::Value::String(
-            if has_content {
-                "Loop detected: same result returned. The content is in the result above — use it directly."
-            } else {
-                "Loop detected: same result returned. Use the data already in your conversation. Do NOT retry."
-            }
-            .to_string(),
-        ),
+        serde_json::Value::String(note.to_string()),
     );
     obj.insert(
         "next_action".to_string(),
-        serde_json::Value::String(
-            if has_content {
-                "The tool result content is already in this response. Synthesize your answer from the available data."
-            } else {
-                "Use data from conversation history. Do not make more tool calls."
-            }
-            .to_string(),
-        ),
+        serde_json::Value::String(next_action.to_string()),
     );
+}
+
+fn has_non_empty_text_content(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
+    let check = |key: &str| {
+        obj.get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+    check("output") || check("content") || check("stdout")
 }
 
 pub(super) enum ValidationTransition {

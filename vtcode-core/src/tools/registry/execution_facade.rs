@@ -36,6 +36,10 @@ use super::{
 use vtcode_config::constants::execution::{LOOP_THROTTLE_MAX_MS, LOOP_THROTTLE_REGISTRY_BASE_MS};
 
 const REENTRANCY_STACK_DEPTH_LIMIT: usize = 64;
+/// When a read-only tool call has been repeated this many times, stop returning
+/// cached results and return a hard error instead.  Must be greater than
+/// MIN_READONLY_IDENTICAL_LIMIT (currently 2).
+const LOOP_HARD_BLOCK_REPEAT_COUNT: usize = 5;
 // Tools should never recursively re-enter themselves in a single task.
 // Keeping this at 1 blocks the first re-entry (A -> ... -> A) to fail fast
 // on alias/self-recursion bugs with minimal extra work.
@@ -1097,7 +1101,13 @@ impl ToolRegistry {
                 loop_result.repeat_count
             );
             if loop_result.repeat_count >= loop_limit {
-                if readonly_classification {
+                // Hard block: when the model has been repeating the same call far
+                // beyond the limit, stop returning cached results and return an
+                // error.  Returning a cached result at high repeat counts causes
+                // the model to see "success" and keep retrying.
+                let hard_block = loop_result.repeat_count >= LOOP_HARD_BLOCK_REPEAT_COUNT;
+
+                if readonly_classification && !hard_block {
                     let reuse_max_age = Duration::from_secs(120);
                     let reused = self
                         .execution_history
@@ -1119,9 +1129,9 @@ impl ToolRegistry {
                             let reused_spooled =
                                 obj.get("spool_path").and_then(|v| v.as_str()).is_some();
                             let note = if reused_spooled {
-                                "Loop detected; reusing a recent spooled output for this identical read-only call. Continue from the spool file instead of re-running the tool."
+                                "Loop detected: this identical read-only call has been repeated. The full output is in the spool file. STOP making this same tool call -- use the spool file or conversation history. Calling this tool again will be blocked."
                             } else {
-                                "Loop detected; reusing a recent successful output for this identical read-only call. Change approach before calling the same tool again."
+                                "Loop detected: this identical read-only call has been repeated with no new information. STOP -- the result is already available in your conversation history. Do NOT call this tool again with the same arguments."
                             };
                             obj.insert("loop_detected_note".into(), json!(note));
                         }
@@ -1150,6 +1160,10 @@ impl ToolRegistry {
                     obj.insert("repeat_count".into(), json!(loop_result.repeat_count));
                     obj.insert("limit".into(), json!(loop_limit));
                     obj.insert("tool".into(), json!(display_name));
+                    obj.insert(
+                        "next_action".into(),
+                        json!("STOP calling this tool. Use the data already in your conversation history. If you need different information, use a DIFFERENT tool or approach."),
+                    );
                 }
 
                 record_failure(

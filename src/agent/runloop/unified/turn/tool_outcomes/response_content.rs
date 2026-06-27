@@ -60,7 +60,8 @@ pub(crate) fn compact_model_tool_payload(output: serde_json::Value) -> serde_jso
     let keep_exec_success_critical_note = should_keep_exec_success_critical_note(obj, is_exec_like);
     let keep_next_action = should_keep_exec_success_next_action(obj, is_exec_like)
         || should_keep_recoverable_failure_next_action(obj)
-        || should_keep_search_recovery_success_next_action(obj);
+        || should_keep_search_recovery_success_next_action(obj)
+        || loop_detected;
     let has_stderr = obj
         .get("stderr")
         .and_then(serde_json::Value::as_str)
