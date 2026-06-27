@@ -51,7 +51,6 @@ mod message;
 mod provider_trait;
 mod request;
 mod response;
-mod responses_continuation;
 #[cfg(test)]
 mod tests;
 mod tool;
@@ -71,11 +70,12 @@ pub use response::{
     BorrowedLLMStream, FinishReason, LLMNormalizedStream, LLMResponse, LLMStream, LLMStreamEvent,
     NormalizedStreamEvent, Usage,
 };
-pub use responses_continuation::{
-    PreparedResponsesRequest, ResponsesContinuationState, prepare_openai_responses_request,
-    prepare_responses_continuation_request, responses_continuation_key,
-    supports_responses_chaining, uses_incremental_responses_history,
-};
+pub type PreparedResponsesRequest<'a> = vtcode_llm::provider::PreparedResponsesRequest<'a, Message>;
+pub type ResponsesContinuationState = vtcode_llm::provider::ResponsesContinuationState<Message>;
 pub use tool::{
     FunctionDefinition, GrammarDefinition, ShellToolDefinition, ToolDefinition, ToolSearchAlgorithm,
+};
+pub use vtcode_llm::provider::{
+    prepare_openai_responses_request, prepare_responses_continuation_request,
+    responses_continuation_key, supports_responses_chaining, uses_incremental_responses_history,
 };

@@ -2,13 +2,13 @@ use super::Message;
 use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResponsesContinuationState {
+pub struct ResponsesContinuationState<M = Message> {
     pub response_id: String,
-    pub messages: Vec<Message>,
+    pub messages: Vec<M>,
 }
 
-pub struct PreparedResponsesRequest<'a> {
-    pub messages: Cow<'a, [Message]>,
+pub struct PreparedResponsesRequest<'a, M: Clone = Message> {
+    pub messages: Cow<'a, [M]>,
     pub previous_response_id: Option<String>,
     pub clear_stale_chain: bool,
 }
@@ -43,12 +43,15 @@ pub fn uses_incremental_responses_history(
             && !provider_name.eq_ignore_ascii_case("gemini"))
 }
 
-pub fn prepare_responses_continuation_request<'a>(
+pub fn prepare_responses_continuation_request<'a, M>(
     provider_name: &str,
     provider_supports_responses_compaction: bool,
-    messages: &'a [Message],
-    continuation: Option<&ResponsesContinuationState>,
-) -> PreparedResponsesRequest<'a> {
+    messages: &'a [M],
+    continuation: Option<&ResponsesContinuationState<M>>,
+) -> PreparedResponsesRequest<'a, M>
+where
+    M: Clone + PartialEq,
+{
     if provider_name.eq_ignore_ascii_case("openai") {
         return prepare_openai_responses_request(messages, continuation);
     }
@@ -72,10 +75,13 @@ pub fn prepare_responses_continuation_request<'a>(
     prepare_incremental_responses_request(messages, continuation)
 }
 
-pub fn prepare_openai_responses_request<'a>(
-    messages: &'a [Message],
-    _continuation: Option<&ResponsesContinuationState>,
-) -> PreparedResponsesRequest<'a> {
+pub fn prepare_openai_responses_request<'a, M>(
+    messages: &'a [M],
+    _continuation: Option<&ResponsesContinuationState<M>>,
+) -> PreparedResponsesRequest<'a, M>
+where
+    M: Clone,
+{
     PreparedResponsesRequest {
         messages: Cow::Borrowed(messages),
         previous_response_id: None,
@@ -83,10 +89,13 @@ pub fn prepare_openai_responses_request<'a>(
     }
 }
 
-fn prepare_incremental_responses_request<'a>(
-    messages: &'a [Message],
-    continuation: Option<&ResponsesContinuationState>,
-) -> PreparedResponsesRequest<'a> {
+fn prepare_incremental_responses_request<'a, M>(
+    messages: &'a [M],
+    continuation: Option<&ResponsesContinuationState<M>>,
+) -> PreparedResponsesRequest<'a, M>
+where
+    M: Clone + PartialEq,
+{
     let Some(continuation) = continuation else {
         return PreparedResponsesRequest {
             messages: Cow::Borrowed(messages),
