@@ -219,8 +219,8 @@ pub use tracing_support::PublicTracingEmitter as TracingEmitter;
 
 #[cfg(feature = "telemetry-otel")]
 mod otel_support {
-    use opentelemetry::trace::{Span, Status, Tracer};
     use opentelemetry::KeyValue;
+    use opentelemetry::trace::{Span, Status, Tracer};
 
     use super::{EventEmitter, ThreadEvent, ThreadItemDetails};
 
@@ -273,12 +273,12 @@ mod otel_support {
                 }
                 ThreadEvent::ThreadCompleted(e) => {
                     if let Some(ref cost) = e.total_cost_usd {
-                        span.set_attribute(KeyValue::new("total_cost_usd", cost.as_f64().unwrap_or(0.0)));
+                        span.set_attribute(KeyValue::new(
+                            "total_cost_usd",
+                            cost.as_f64().unwrap_or(0.0),
+                        ));
                     }
-                    span.set_attribute(KeyValue::new(
-                        "input_tokens",
-                        e.usage.input_tokens as i64,
-                    ));
+                    span.set_attribute(KeyValue::new("input_tokens", e.usage.input_tokens as i64));
                     span.set_attribute(KeyValue::new(
                         "output_tokens",
                         e.usage.output_tokens as i64,
@@ -313,10 +313,8 @@ mod otel_support {
                         if let Some(dur) = harness.duration_ms {
                             span.set_attribute(KeyValue::new("duration_ms", dur as i64));
                         }
-                        let mut event_attrs = vec![KeyValue::new(
-                            "event_kind",
-                            format!("{:?}", harness.event),
-                        )];
+                        let mut event_attrs =
+                            vec![KeyValue::new("event_kind", format!("{:?}", harness.event))];
                         if let Some(ref msg) = harness.message {
                             event_attrs.push(KeyValue::new("message", msg.clone()));
                         }

@@ -420,13 +420,7 @@ impl AgentRunner {
                 "Attempting fallback step"
             );
 
-            match self
-                .admit_tool_call(
-                    &step.tool_name,
-                    step.args.clone(),
-                    &mut runtime.state,
-                )
-            {
+            match self.admit_tool_call(&step.tool_name, step.args.clone(), &mut runtime.state) {
                 Ok(fallback_prepared) => {
                     match self
                         .execute_prepared_tool_internal(&fallback_prepared)
@@ -787,10 +781,10 @@ impl AgentRunner {
         let _tool_start = std::time::Instant::now();
         match self.execute_prepared_tool_internal(&call.prepared).await {
             Ok((result, attempts)) => {
-                runtime.state.turn_tool_latencies.push((
-                    name.clone(),
-                    _tool_start.elapsed().as_millis() as u64,
-                ));
+                runtime
+                    .state
+                    .turn_tool_latencies
+                    .push((name.clone(), _tool_start.elapsed().as_millis() as u64));
                 if attempts > 1 {
                     event_recorder.error_recovered(&name, attempts, "transient");
                 }
@@ -816,10 +810,10 @@ impl AgentRunner {
                 Ok(false)
             }
             Err(e) => {
-                runtime.state.turn_tool_latencies.push((
-                    name.clone(),
-                    _tool_start.elapsed().as_millis() as u64,
-                ));
+                runtime
+                    .state
+                    .turn_tool_latencies
+                    .push((name.clone(), _tool_start.elapsed().as_millis() as u64));
                 // Emit retry observability if retries occurred
                 if let Some(attempt) = e.attempts_made()
                     && attempt > 1

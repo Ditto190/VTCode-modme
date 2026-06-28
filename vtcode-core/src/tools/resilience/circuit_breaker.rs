@@ -209,9 +209,7 @@ impl CircuitBreaker {
 
         match state.status {
             CircuitState::Closed => true,
-            CircuitState::HalfOpen => {
-                state.half_open_successes < self.config.half_open_probe_count
-            }
+            CircuitState::HalfOpen => state.half_open_successes < self.config.half_open_probe_count,
             CircuitState::Open => {
                 if let Some(last_failure) = state.last_failure_time {
                     let backoff = if state.current_backoff == Duration::ZERO {

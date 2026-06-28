@@ -38,13 +38,14 @@ pub enum EscalationDecision {
     /// Proceed with the tool call as normal.
     Proceed,
     /// Escalate — halt the loop and write a blocked handoff.
-    #[allow(dead_code)]
     Escalate {
         /// Human-readable reason for the escalation.
         reason: String,
         /// The tool name that triggered escalation.
+        #[allow(dead_code)]
         tool_name: String,
         /// Serialized arguments for the blocked-handoff report.
+        #[allow(dead_code)]
         args: serde_json::Value,
     },
 }

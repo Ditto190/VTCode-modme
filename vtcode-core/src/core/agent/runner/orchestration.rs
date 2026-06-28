@@ -65,12 +65,8 @@ pub(super) struct EvaluationArtifacts {
 #[derive(Debug, Clone)]
 pub(super) enum EvaluatorGateOutcome {
     Accept,
-    Continue {
-        prompt: String,
-    },
-    Exhausted {
-        reason: String,
-    },
+    Continue { prompt: String },
+    Exhausted { reason: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -551,9 +547,7 @@ impl AgentRunner {
                 evaluation.evaluation_path.display(),
             );
 
-            Ok(EvaluatorGateOutcome::Continue {
-                prompt,
-            })
+            Ok(EvaluatorGateOutcome::Continue { prompt })
         } else {
             Ok(EvaluatorGateOutcome::Continue {
                 prompt: self.evaluation_retry_prompt(&evaluation, *revision_rounds_used),

@@ -439,17 +439,14 @@ pub(crate) async fn validate_tool_call<'a>(
         &canonical_tool_name,
         &prepared.effective_args,
     );
-    let fallback_recommendation = recovery_fallback_for_tool(
-        &canonical_tool_name,
-        &prepared.effective_args,
-    )
-    .map(|(tool_name, args)| {
-        vtcode_core::core::agent::harness_kernel::FallbackRecommendation {
-            tool_name,
-            args,
-            chain: Vec::new(),
-        }
-    });
+    let fallback_recommendation =
+        recovery_fallback_for_tool(&canonical_tool_name, &prepared.effective_args).map(
+            |(tool_name, args)| vtcode_core::core::agent::harness_kernel::FallbackRecommendation {
+                tool_name,
+                args,
+                chain: Vec::new(),
+            },
+        );
     prepared = prepared.with_fallback_recommendation(fallback_recommendation);
     let effective_args = &prepared.effective_args;
 

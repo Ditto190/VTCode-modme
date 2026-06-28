@@ -4,6 +4,7 @@
 //! similar to OpenAI Codex's approach.
 
 use crate::model::{SkillMetadata, SkillScope};
+use crate::render::{SKILL_OVERFLOW_SUFFIX, SKILL_OVERFLOW_SUFFIX_XML};
 use std::fmt::Write;
 
 // Re-export PromptFormat from config for consistency
@@ -96,7 +97,7 @@ fn render_skills_lean(skills: &[SkillMetadata]) -> String {
     if overflow > 0 {
         let _ = write!(
             prompt,
-            "\n(+{overflow} more skills available — call `list_skills` to see the full catalog)"
+            "\n(+{overflow} more skills available{SKILL_OVERFLOW_SUFFIX})"
         );
     }
 
@@ -166,7 +167,7 @@ pub fn generate_skills_prompt_xml(skills: &[SkillMetadata]) -> String {
     if overflow > 0 {
         let _ = writeln!(
             xml,
-            "  <!-- +{overflow} more skills available; call list_skills to see the full catalog -->"
+            "  <!-- +{overflow} more skills available{SKILL_OVERFLOW_SUFFIX_XML} -->"
         );
     }
 

@@ -28,6 +28,8 @@ use crate::tools::output_envelope::{
     ToolPipelineStatus, ValidationReport,
 };
 use crate::tools::output_limits::ToolOutputLimits;
+#[cfg(test)]
+use crate::tools::output_limits::TruncationReport;
 
 /// Configuration knobs for the pipeline. Each field has a sensible default
 /// in [`ToolOutputPolicy::default`].

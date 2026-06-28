@@ -1,6 +1,13 @@
 use crate::command_skills::is_model_catalog_eligible;
 use crate::model::SkillMetadata;
 
+/// Suffix for skill overflow count messages — kept as shared constant so
+/// all rendering paths stay in sync.
+pub(crate) const SKILL_OVERFLOW_SUFFIX: &str = " — call `list_skills` to see the full catalog";
+
+/// XML comment variant of [`SKILL_OVERFLOW_SUFFIX`] (semicolon, no backticks).
+pub(crate) const SKILL_OVERFLOW_SUFFIX_XML: &str = "; call list_skills to see the full catalog";
+
 pub fn render_skills_section(skills: &[SkillMetadata]) -> Option<String> {
     if skills.is_empty() {
         return None;
@@ -13,7 +20,7 @@ pub fn render_skills_section(skills: &[SkillMetadata]) -> Option<String> {
 
     if overflow > 0 {
         lines.push(format!(
-            "(+{overflow} more skills available — call `list_skills` to see the full catalog)"
+            "(+{overflow} more skills available{SKILL_OVERFLOW_SUFFIX})"
         ));
     }
 
@@ -51,7 +58,7 @@ pub fn render_prompt_skills_section(skills: &[SkillMetadata]) -> Option<String> 
 
     if overflow > 0 {
         lines.push(format!(
-            "(+{overflow} more skills available — call `list_skills` to see the full catalog)"
+            "(+{overflow} more skills available{SKILL_OVERFLOW_SUFFIX})"
         ));
     }
 
