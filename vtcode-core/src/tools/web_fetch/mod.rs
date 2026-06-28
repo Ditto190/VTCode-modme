@@ -34,7 +34,7 @@ const TEMP_SUBDIR: &str = "web_fetch";
 /// Max age in seconds before temp files are cleaned up (1 hour).
 const TEMP_MAX_AGE_SECS: u64 = 3600;
 
-pub(crate) const WEB_FETCH_DESCRIPTION: &str = "Fetches content from a specified URL and returns an analyzed summary. Accepts: { url: string, prompt?: string, max_bytes?: number, timeout_secs?: number }. If 'prompt' is omitted, VT Code uses a safe default summary prompt so that simple 'fetch https://…' requests are handled by this built-in tool instead of delegating to external MCP tools. For documentation domains, try the site's LLM-oriented /llms.txt index first when appropriate: for input like 'abc.com', fetch https://abc.com/llms.txt before the homepage, then traverse the linked URL map for the most relevant Markdown sources. Budget guidance: the default max_bytes is 500KB which fits most pages including llms.txt files (typically under 50KB). Do NOT set max_bytes unless you have a specific reason — the default is generous. If a page exceeds max_bytes, the tool truncates the response and returns truncation metadata (truncated_by_max_bytes, source_size_bytes) so you can decide whether to retry with a larger budget. Note that llms-full.txt files can be multi-megabyte; prefer the compact llms.txt index first. Returns a `temp_file` path to an ephemeral temp file containing the full fetched content. Read the temp_file to analyze the content. Temp files are auto-cleaned and must not be copied or persisted elsewhere.";
+pub(crate) const WEB_FETCH_DESCRIPTION: &str = "Fetches content from a URL and returns an analyzed summary. Accepts: { url: string, prompt?: string, max_bytes?: number, timeout_secs?: number }. Omit prompt for a default summary. For docs domains, try /llms.txt first: for 'abc.com', fetch https://abc.com/llms.txt before the homepage, then traverse linked URLs for relevant Markdown sources. Default max_bytes is 500KB (fits most pages). Do NOT set max_bytes without reason — the default is generous. Truncated responses include truncation metadata so you can retry with a higher budget. Prefer llms.txt over llms-full.txt (can be multi-megabyte). Returns a `temp_file` path to ephemeral fetched content. Read it to analyze. Temp files are auto-cleaned; do not persist elsewhere.";
 
 #[derive(Debug, Deserialize)]
 struct WebFetchArgs {
@@ -490,7 +490,7 @@ impl WebFetchTool {
 
     async fn run(&self, raw_args: Value) -> Result<Value> {
         let args: WebFetchArgs = serde_json::from_value(raw_args)
-            .context("Invalid arguments for web_fetch tool. Provide 'url' and 'prompt'.")?;
+            .context("Invalid arguments for web_fetch tool. Provide 'url' (and optionally 'prompt').")?;
 
         let max_bytes = args
             .max_bytes

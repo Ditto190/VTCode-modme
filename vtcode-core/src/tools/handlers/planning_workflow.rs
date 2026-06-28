@@ -1146,7 +1146,7 @@ impl Tool for StartPlanningTool {
     }
 
     fn description(&self) -> &str {
-        "Enter Planning workflow for read-safe exploration. In Planning workflow, you can only read files, search code, and write canonical plan artifacts. Use this when you need to understand requirements before making changes."
+        "Enter Planning workflow for read-safe exploration. In Planning workflow, you can only read files, search code, and write canonical plan artifacts. Use this when you need to understand requirements before making changes. Do NOT call this if you already have a clear plan — proceed with unified_search, unified_file, and unified_exec instead."
     }
 
     fn parameter_schema(&self) -> Option<Value> {

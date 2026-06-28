@@ -112,7 +112,7 @@ fn register_memory(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistrat
         ToolRegistry::memory_executor,
     )
     .with_description(
-        "Access VT Code persistent memory files under /memories. Use view before reading or updating notes; writes are limited to preferences.md, repository-facts.md, and notes/**.",
+        "Access VT Code persistent memory files under /memories. Use action=view to list available notes before reading or updating; writes are limited to preferences.md, repository-facts.md, and notes/**. Returns file listing or file content.",
     )
     .with_parameter_schema(native_memory::parameter_schema())
     .with_permission(ToolPolicy::Allow)
@@ -127,7 +127,7 @@ fn register_cron_create(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
         ToolRegistry::cron_create_executor,
     )
     .with_description(
-        "Create a session-scoped scheduled prompt using a cron expression, fixed interval, or one-shot fire time. Use cron_create to defer work, schedule recurring checks, or fire a one-shot reminder. Do NOT schedule per-minute jobs — they exhaust the per-turn tool budget and will be rate-limited. Scheduled prompts are session-scoped; jobs die when the vtcode process exits.",
+        "Create a session-scoped scheduled prompt using a cron expression, fixed interval, or one-shot fire time. Use cron_create to defer work, schedule recurring checks, or fire a one-shot reminder. Do NOT schedule per-minute jobs — they exhaust the per-turn tool budget and will be rate-limited. Scheduled prompts are session-scoped; jobs die when the vtcode process exits. Returns the created scheduled prompt id.",
     )
     .with_parameter_schema(cron_create_parameters())
     .with_aliases(["schedule_task", "loop_create"])
@@ -141,7 +141,7 @@ fn register_cron_list(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
         false,
         ToolRegistry::cron_list_executor,
     )
-    .with_description("List session-scoped scheduled prompts for the current VT Code process.")
+    .with_description("List session-scoped scheduled prompts for the current VT Code process. Returns scheduled prompts with their ids, expressions, and status.")
     .with_parameter_schema(cron_list_parameters())
     .with_aliases(["scheduled_tasks"])
 }
@@ -154,7 +154,7 @@ fn register_cron_delete(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
         false,
         ToolRegistry::cron_delete_executor,
     )
-    .with_description("Delete a session-scoped scheduled prompt by id.")
+    .with_description("Delete a session-scoped scheduled prompt by id. Use cron_list to find the id of the prompt to delete.")
     .with_parameter_schema(cron_delete_parameters())
     .with_aliases(["cancel_scheduled_task"])
 }
@@ -334,7 +334,7 @@ fn register_unified_search(_plan_state: Option<&PlanningWorkflowState>) -> ToolR
         ToolRegistry::unified_search_executor,
     )
     .with_description(
-        "Search and discovery: grep text, list files, structural (ast-grep), list available tools, list errors, web search/fetch, list skills. Use action=list to enumerate files; action=grep to search for a regex pattern across files; action=structural for AST-shaped code queries; action=web with a 'query' for web search; action=web with a 'url' to fetch a page. Do NOT use action=list to read file contents — use action=read via unified_file or read_file instead. Result lists are capped by the tool's max_results parameter; pass a higher limit only when you genuinely need more hits.",
+        "Search and discover: grep text, list files, structural-search (ast-grep), list tools, list errors, web search, web fetch, and list skills. Use action=grep for regex across files; action=structural for AST-shaped queries; action=list to enumerate files; action=web with query for search or url to fetch. Do NOT use action=list to read file contents — use unified_file action=read instead. Results are capped by max_results; increase only when genuinely needed.",
     )
     .with_parameter_schema(unified_search_parameters())
     .with_permission(ToolPolicy::Allow)
@@ -481,7 +481,7 @@ fn register_mcp_search_tools(_plan_state: Option<&PlanningWorkflowState>) -> Too
         ToolRegistry::mcp_search_tools_executor,
     )
     .with_description(
-        "Search only MCP tool catalogs with progressive detail levels. Use this to discover MCP capabilities without loading full schemas for every tool.",
+        "Search only MCP tool catalogs with progressive detail levels (name, name_description, full). Use this to discover MCP capabilities without loading full schemas for every tool. Pass detail_level=full to get complete input schema excerpts.",
     )
     .with_parameter_schema(mcp_search_tools_parameters())
     .with_permission(ToolPolicy::Allow)
@@ -512,7 +512,7 @@ fn register_mcp_list_servers(_plan_state: Option<&PlanningWorkflowState>) -> Too
         false,
         ToolRegistry::mcp_list_servers_executor,
     )
-    .with_description("List configured MCP servers and their current connection state.")
+    .with_description("List configured MCP servers and their current connection state. Returns server names, protocols, and connection status.")
     .with_parameter_schema(mcp_list_servers_parameters())
     .with_permission(ToolPolicy::Allow)
 }
@@ -560,7 +560,7 @@ fn register_unified_exec(_plan_state: Option<&PlanningWorkflowState>) -> ToolReg
         ToolRegistry::unified_exec_executor,
     )
     .with_description(
-        "Shell & code execution. Actions: run, write, poll, continue, inspect, list, close, code. Use action=run for one-shot commands; action=write + action=poll for interactive shells that outlive a single call. Do NOT use action=write without a follow-up poll/close — the session leaks. Default timeout is 180s; pass timeout explicitly for long-running commands (max 1800s). All shell calls run through the active sandbox policy; requires ToolPolicy::Prompt confirmation.",
+        "Execute shell commands and code: actions run, write, poll, continue, inspect, list, close, code. Use action=run for one-shot commands; action=write + action=poll for interactive shells. Do NOT use action=write without a follow-up poll/close — the session leaks. Default timeout 180s (max 1800s). All shell calls run through the active sandbox policy. Requires Prompt confirmation.",
     )
     .with_parameter_schema(unified_exec_parameters())
     .with_aliases([
@@ -587,7 +587,7 @@ fn register_unified_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolReg
         ToolRegistry::unified_file_executor,
     )
     .with_description(
-        "Read, write, edit, patch, delete, move, or copy a single file. Use action=read to load file contents (with optional range); action=edit for surgical replacements (exact old_str, max 800 chars/40 lines per side); action=patch for larger or multi-hunk changes; action=write for new files or full replacement; action=delete to remove a file. Do NOT mix action=edit with action=patch in the same call. Requires ToolPolicy::Prompt confirmation for write/edit/patch/delete/move/copy actions.",
+        "Read, write, edit, patch, delete, move, or copy a single file. Use action=read to load file contents (with optional range); action=edit for surgical text replacements (exact old_str, max 800 chars/40 lines per side); action=patch for larger or multi-hunk changes; action=write for new files or full replacement; action=delete to remove a file; action=move to rename; action=copy to duplicate. Do NOT mix action=edit with action=patch in the same call. Requires Prompt confirmation for write/edit/patch/delete/move/copy.",
     )
     .with_parameter_schema(unified_file_parameters())
     .with_aliases([
@@ -645,6 +645,7 @@ fn register_write_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegis
         false,
         ToolRegistry::write_file_executor,
     )
+    .with_description("Write or overwrite a file with new content. Internal — use unified_file action=write instead.")
     .with_llm_visibility(false)
 }
 
@@ -656,6 +657,7 @@ fn register_edit_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
         false,
         ToolRegistry::edit_file_executor,
     )
+    .with_description("Apply a surgical text replacement in a file. Internal — use unified_file action=edit instead.")
     .with_llm_visibility(false)
 }
 
@@ -667,6 +669,7 @@ fn register_run_pty_cmd(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
         false,
         ToolRegistry::run_pty_cmd_executor,
     )
+    .with_description("Run a one-shot PTY command. Internal — use unified_exec action=run instead.")
     .with_llm_visibility(false)
 }
 
@@ -678,6 +681,7 @@ fn register_send_pty_input(_plan_state: Option<&PlanningWorkflowState>) -> ToolR
         false,
         ToolRegistry::send_pty_input_executor,
     )
+    .with_description("Send stdin to an active PTY session. Internal — use unified_exec action=write instead.")
     .with_llm_visibility(false)
 }
 
@@ -689,6 +693,7 @@ fn register_read_pty_session(_plan_state: Option<&PlanningWorkflowState>) -> Too
         false,
         ToolRegistry::read_pty_session_executor,
     )
+    .with_description("Read buffered output from a PTY session. Internal — use unified_exec action=poll instead.")
     .with_llm_visibility(false)
 }
 
@@ -700,6 +705,7 @@ fn register_create_pty_session(_plan_state: Option<&PlanningWorkflowState>) -> T
         false,
         ToolRegistry::create_pty_session_executor,
     )
+    .with_description("Create an interactive PTY session. Internal — managed by unified_exec.")
     .with_llm_visibility(false)
 }
 
@@ -711,6 +717,7 @@ fn register_list_pty_sessions(_plan_state: Option<&PlanningWorkflowState>) -> To
         false,
         ToolRegistry::list_pty_sessions_executor,
     )
+    .with_description("List all active PTY sessions. Internal — managed by unified_exec.")
     .with_llm_visibility(false)
 }
 
@@ -722,6 +729,7 @@ fn register_close_pty_session(_plan_state: Option<&PlanningWorkflowState>) -> To
         false,
         ToolRegistry::close_pty_session_executor,
     )
+    .with_description("Close a PTY session by ID. Internal — managed by unified_exec.")
     .with_llm_visibility(false)
 }
 
@@ -733,6 +741,7 @@ fn register_get_errors(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegis
         false,
         ToolRegistry::get_errors_executor,
     )
+    .with_description("Retrieve compilation/lint errors from the most recent run. Internal — used by the harness surface.")
     .with_llm_visibility(false)
 }
 

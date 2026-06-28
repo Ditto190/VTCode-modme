@@ -1056,7 +1056,7 @@ impl Tool for TaskTrackerTool {
     }
 
     fn description(&self) -> &str {
-        "Task tracker for standard sessions and the Planning workflow. Uses one checklist API (`create|update|list|add`) and mirrors tracker state between `.vtcode/tasks/current_task.md` and active plan sidecar files when available."
+        "Track task progress through a single checklist API (action: create | update | list | add). Use with action=create at the start of a multi-step plan; action=update as work progresses; action=list to review current state. Do NOT call action=create twice — subsequent calls update the existing checklist. Tracker state mirrors between .vtcode/tasks/current_task.md and active plan sidecar files when available."
     }
 
     fn parameter_schema(&self) -> Option<Value> {

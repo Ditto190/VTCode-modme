@@ -183,7 +183,7 @@ pub fn create_shell_tool() -> super::tool_handler::ToolSpec {
 
     ToolSpec::Function(ResponsesApiTool {
         name: tools::SHELL.to_string(),
-        description: "Execute a shell command and return its output.".to_string(),
+        description: "Execute a shell command and return its output. Default timeout 30s (max 300s). All commands run through the active sandbox policy. Do NOT use for interactive/long-running processes (e.g., dev servers, watchers) — use spawn_background_subprocess instead.".to_string(),
         parameters: json!({
             "type": "object",
             "properties": {

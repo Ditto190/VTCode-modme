@@ -119,7 +119,7 @@ pub fn close_agent_parameters() -> Value {
 
 #[must_use]
 pub fn request_user_input_description() -> &'static str {
-    "Request user input for one to three short questions and wait for the response. Canonical HITL tool for the Planning workflow when this tool is available."
+    "Request user input for one to three short questions. Blocks the agent loop until the user responds. Returns the user's answers mapped by question id. Canonical HITL tool for the Planning workflow."
 }
 
 #[must_use]

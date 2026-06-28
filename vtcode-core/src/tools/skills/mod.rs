@@ -540,7 +540,7 @@ impl Tool for LoadSkillTool {
     }
 
     fn description(&self) -> &str {
-        "Load detailed instructions for a specific traditional skill and activate its associated tool into your environment."
+        "Load detailed instructions for a specific traditional skill and activate its associated tool into your environment. Use list_skills first to see what is available. Do NOT call load_skill for skills already listed as active — they are already loaded. Returns the skill instructions and activation status."
     }
 
     fn parameter_schema(&self) -> Option<Value> {
@@ -655,7 +655,7 @@ impl Tool for ListSkillsTool {
     }
 
     fn description(&self) -> &str {
-        "List all available skills and system utilities. Use 'query' to filter by name, description, or routing hints, or 'variety' to filter by type ('agent_skill' or 'system_utility'). Traditional skills stay inactive until activated via 'load_skill'."
+        "List all available skills and system utilities. Use 'query' to filter by name, description, or routing hints, or 'variety' to filter by type ('agent_skill' or 'system_utility'). Traditional skills stay inactive until activated via 'load_skill'. Returns matching skills with names, descriptions, and types."
     }
 
     fn parameter_schema(&self) -> Option<Value> {
@@ -829,7 +829,7 @@ impl Tool for LoadSkillResourceTool {
     }
 
     fn description(&self) -> &str {
-        "Access skill resources (scripts, templates, docs) from skill directories."
+        "Read a resource file (script, template, or doc) from a loaded skill's directory. Use after loading a skill via load_skill. Provide skill_name and resource_path relative to the skill root. Do NOT use this to load skill instructions — use load_skill for that. Returns the raw file content."
     }
 
     fn parameter_schema(&self) -> Option<Value> {

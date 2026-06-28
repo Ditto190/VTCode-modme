@@ -6,7 +6,7 @@ use vtcode_core::config::constants::tools;
 use vtcode_core::llm::provider::ToolDefinition;
 
 pub const TOOL_READ_FILE_DESCRIPTION: &str =
-    "Read the contents of a text file accessible to the IDE workspace";
+    "Read the contents of a text or source file accessible to the IDE workspace. Returns file content with line numbers. For binary files or very large files, consider shell-based inspection via unified_exec instead.";
 pub const TOOL_READ_FILE_URI_ARG: &str = "uri";
 pub const TOOL_READ_FILE_PATH_ARG: &str = "path";
 pub const TOOL_READ_FILE_LINE_ARG: &str = "line";
