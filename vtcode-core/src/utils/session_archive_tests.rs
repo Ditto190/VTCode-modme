@@ -991,6 +991,7 @@ fn snapshot_compaction_shrinks_large_single_message_payloads() -> Result<()> {
             tool_call_id: None,
             phase: None,
             origin_tool: Some(Box::new("unified_exec".repeat(50))),
+            metadata: None,
         }],
         progress: Some(Box::new(SessionProgress {
             turn_number: 1,

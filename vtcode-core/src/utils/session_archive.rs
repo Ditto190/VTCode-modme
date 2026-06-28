@@ -383,6 +383,12 @@ pub struct SessionMessage {
         deserialize_with = "deserialize_boxed_non_empty_string_opt"
     )]
     pub origin_tool: Option<Box<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_boxed_metadata_opt"
+    )]
+    pub metadata: Option<Box<crate::core::message_metadata::MessageMetadata>>,
 }
 
 impl Eq for SessionMessage {}
@@ -404,6 +410,17 @@ fn clone_non_empty_boxed_string(value: &Option<Box<String>>) -> Option<String> {
     value
         .as_deref()
         .and_then(|value| (!value.is_empty()).then_some(value.to_owned()))
+}
+
+#[expect(clippy::box_collection)]
+fn deserialize_boxed_metadata_opt<'de, D>(
+    deserializer: D,
+) -> Result<Option<Box<crate::core::message_metadata::MessageMetadata>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    crate::core::message_metadata::MessageMetadata::deserialize(deserializer)
+        .map(|m| Some(Box::new(m)))
 }
 
 #[expect(clippy::box_collection)]
@@ -445,6 +462,7 @@ impl SessionMessage {
             tool_call_id: None,
             phase: None,
             origin_tool: None,
+            metadata: None,
         }
     }
 
@@ -486,6 +504,7 @@ impl From<&Message> for SessionMessage {
             tool_call_id: boxed_non_empty_string(message.tool_call_id.clone()),
             phase: message.phase,
             origin_tool: boxed_non_empty_string(message.origin_tool.clone()),
+            metadata: message.metadata.clone().map(Box::new),
         }
     }
 }
@@ -501,6 +520,7 @@ impl From<&SessionMessage> for Message {
             tool_call_id: clone_non_empty_boxed_string(&message.tool_call_id),
             phase: message.phase,
             origin_tool: clone_non_empty_boxed_string(&message.origin_tool),
+            metadata: message.metadata.as_deref().cloned(),
         }
     }
 }

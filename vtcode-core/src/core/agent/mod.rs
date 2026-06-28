@@ -1,5 +1,6 @@
 //! Agent system for intelligent conversation management
 
+pub mod beliefs;
 pub mod blocked_handoff;
 pub mod bootstrap;
 pub mod completion;
@@ -22,6 +23,7 @@ pub mod snapshots;
 pub mod state;
 pub mod steering;
 pub mod task;
+pub mod task_history;
 pub mod types;
 
 // Re-export main types for convenience

@@ -2,13 +2,15 @@
 
 use crate::core::agent::error_recovery::ErrorRecoveryState;
 use crate::core::agent::task::{TaskOutcome, TaskResults};
+use crate::core::pending_actions::{ExpectedOutcome, PendingAction, PendingActions};
+use crate::core::state_schema::SchemaVersion;
 use crate::exec::events::Usage;
 use crate::llm::provider::{Message, ResponsesContinuationState, responses_continuation_key};
 use crate::llm::providers::gemini::wire::{Content, FunctionResponse, Part};
 use hashbrown::HashMap;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use vtcode_exec_events::ThreadEvent;
 
 /// Manages the state of an active agent session, including conversation history,
@@ -22,6 +24,9 @@ pub struct AgentSessionState {
 
     /// Standardized conversation messages (OpenAI/Anthropic style).
     pub messages: Vec<Message>,
+
+    /// Schema version for durable state persistence.
+    pub schema_version: SchemaVersion,
 
     /// Statistics for the current session.
     pub stats: SessionStats,
@@ -58,6 +63,8 @@ pub struct AgentSessionState {
     pub previous_response_chains: HashMap<(String, String), ResponsesContinuationState>,
     /// Agent-local recent error diagnostics for interrupted or repeated tool failures.
     pub error_recovery: Arc<Mutex<ErrorRecoveryState>>,
+    /// Pending tool actions that have been issued but not yet returned.
+    pub pending_actions: PendingActions,
 
     // Legacy / Stats fields for compatibility
     pub consecutive_idle_turns: usize,
@@ -121,6 +128,7 @@ impl AgentSessionState {
     ) -> Self {
         Self {
             session_id,
+            schema_version: SchemaVersion::CURRENT,
             conversation: Vec::new(),
             messages: Vec::new(),
             stats: SessionStats::default(),
@@ -145,6 +153,7 @@ impl AgentSessionState {
             last_processed_message_idx: 0,
             previous_response_chains: HashMap::new(),
             error_recovery: Arc::new(Mutex::new(ErrorRecoveryState::default())),
+            pending_actions: PendingActions::new(100),
             consecutive_idle_turns: 0,
             max_tool_loop_streak: 0,
             turn_count: 0,
@@ -261,10 +270,49 @@ impl AgentSessionState {
         );
     }
 
-    /// Add a user message to the history.
+    /// Add a user message to the history with metadata.
     pub fn add_user_message(&mut self, text: String) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let tokens = text.len().saturating_div(4); // rough estimate: ~4 chars per token
+        let metadata = crate::core::message_metadata::MessageMetadata::user_input(now, tokens);
         self.conversation.push(Content::user_text(text.as_str()));
-        self.messages.push(Message::user(text));
+        self.messages
+            .push(Message::user(text).with_metadata(metadata));
+    }
+
+    /// Attach metadata to the most recent message. Used by the execution loop
+    /// to annotate LLM responses and tool results after they are pushed.
+    pub fn attach_metadata_to_last(&mut self, source: &str, estimated_tokens: usize) {
+        if let Some(last) = self.messages.last_mut() {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let metadata = match source {
+                "llm_response" => crate::core::message_metadata::MessageMetadata::llm_response(
+                    now,
+                    estimated_tokens,
+                ),
+                "tool_result" => crate::core::message_metadata::MessageMetadata::tool_result(
+                    now,
+                    estimated_tokens,
+                ),
+                "system" => {
+                    crate::core::message_metadata::MessageMetadata::system(now, estimated_tokens)
+                }
+                "synthetic" => {
+                    crate::core::message_metadata::MessageMetadata::synthetic(now, estimated_tokens)
+                }
+                _ => crate::core::message_metadata::MessageMetadata::user_input(
+                    now,
+                    estimated_tokens,
+                ),
+            };
+            last.metadata = Some(metadata);
+        }
     }
 
     /// Check if context limits are approaching.

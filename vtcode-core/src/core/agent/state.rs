@@ -81,6 +81,17 @@ impl HistoryValidationReport {
             )
         }
     }
+
+    /// Filter out missing outputs that correspond to pending actions.
+    ///
+    /// A "missing output" is expected when the corresponding tool call is still
+    /// in flight (pending action). Removing these from the report prevents
+    /// false positives during crash recovery that would insert synthetic
+    /// outputs for tools that are legitimately still running.
+    pub fn exclude_pending(&mut self, is_pending: impl Fn(&str) -> bool) {
+        self.missing_outputs
+            .retain(|m| !is_pending(m.call_id.as_str()));
+    }
 }
 
 #[cfg(test)]

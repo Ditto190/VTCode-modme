@@ -1119,6 +1119,7 @@ fn thought_signature_roundtrip_in_request() {
                 tool_call_id: None,
                 phase: None,
                 origin_tool: None,
+                metadata: None,
             },
         ],
         model: models::google::GEMINI_3_1_PRO_PREVIEW.to_string(),
