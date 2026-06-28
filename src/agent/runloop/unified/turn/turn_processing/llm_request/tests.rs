@@ -110,7 +110,7 @@ fn retryable_llm_error_excludes_non_transient_messages() {
 }
 
 #[tokio::test]
-async fn compatible_previous_response_chain_retry_keeps_real_retry_backoff() {
+async fn compatible_previous_response_not_found_without_sent_chain_is_not_recovered() {
     use vtcode_core::utils::transcript;
 
     transcript::clear();
@@ -120,21 +120,11 @@ async fn compatible_previous_response_chain_retry_keeps_real_retry_backoff() {
         "mycorp",
         true,
         Arc::clone(&recorded_previous_response_ids),
-        vec![
-            ScriptedProviderOutcome::Error(uni::LLMError::Provider {
-                message: "Provider error: previous_response_not_found: previous response missing"
-                    .to_string(),
-                metadata: None,
-            }),
-            ScriptedProviderOutcome::Error(uni::LLMError::Provider {
-                message: "Provider error: 503 Service Unavailable".to_string(),
-                metadata: None,
-            }),
-            ScriptedProviderOutcome::Success {
-                content: Some("done"),
-                request_id: Some("resp_456"),
-            },
-        ],
+        vec![ScriptedProviderOutcome::Error(uni::LLMError::Provider {
+            message: "Provider error: previous_response_not_found: previous response missing"
+                .to_string(),
+            metadata: None,
+        })],
     );
 
     let mut backing = TestTurnProcessingBacking::new(4).await;
@@ -151,39 +141,25 @@ async fn compatible_previous_response_chain_retry_keeps_real_retry_backoff() {
         &prior_messages,
     );
 
-    let (response, streamed) =
-        execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None)
-            .await
-            .expect("request should recover from stale response chain");
+    let result = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None).await;
 
-    assert!(!streamed);
-    assert_eq!(response.content.as_deref(), Some("done"));
+    assert!(
+        result.is_err(),
+        "compatible provider should not recover a stale chain when no previous_response_id was sent"
+    );
     assert_eq!(
         recorded_previous_response_ids
             .lock()
             .expect("recorded previous_response_ids")
             .as_slice(),
-        &[Some("resp_123".to_string()), None, None]
+        &[None]
     );
 
-    let retry_label =
-        vtcode_commons::classify_error_message("Provider error: 503 Service Unavailable")
-            .user_label()
-            .to_string();
     let transcript_text = transcript::snapshot().join("\n");
 
     assert_eq!(
         transcript_text
             .matches("Previous response chain expired; retrying with a fresh provider chain.")
-            .count(),
-        1
-    );
-    assert_eq!(
-        transcript_text
-            .matches(&format!(
-                "LLM request failed ({}), retrying in 0.5s... (attempt 2/3)",
-                retry_label
-            ))
             .count(),
         0
     );
