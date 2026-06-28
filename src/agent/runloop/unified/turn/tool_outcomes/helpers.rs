@@ -108,8 +108,8 @@ impl LoopTracker {
 }
 
 /// Check if an identical tool call (same name + same args) was already executed
-/// recently in the working history. Returns the call_id and output of the most
-/// recent matching tool response if found.
+/// recently in the working history. Returns the output of the most recent
+/// matching tool response if found.
 ///
 /// This catches cross-turn duplicates that the per-turn `LoopTracker` misses
 /// because it is reset at the start of each turn. Scans the last
@@ -118,54 +118,64 @@ impl LoopTracker {
 /// For read-only tools, signatures are normalized so that re-reading the same
 /// file with a different `offset`/`limit` is recognized as the same logical
 /// read — avoiding wasted tokens on duplicate output.
+///
+/// Uses a two-pass approach: first builds a map of call_id → normalized_signature
+/// from Assistant messages, then scans Tool responses backward to find the most
+/// recent match. This correctly handles cross-turn duplicates where the Tool
+/// response appears before its matching Assistant message in backward scan order.
 pub(crate) fn find_duplicate_in_history(
     history: &[uni::Message],
     tool_name: &str,
     args: &serde_json::Value,
 ) -> Option<String> {
-    // Wider window (120, up from 60): with long agentic runs accumulating
-    // hundreds of messages, 60 entries can expire before the model retries
-    // the same read, especially across "continue" turns.
     const MAX_HISTORY_SCAN: usize = 120;
     let target_signature = read_normalized_signature_key(tool_name, args);
 
-    // Walk backwards through history looking for an assistant tool_call with
-    // matching signature, then find its corresponding tool response.
-    let mut pending_match_call_id: Option<String> = None;
-    for (scanned, msg) in history.iter().rev().enumerate() {
-        if scanned >= MAX_HISTORY_SCAN {
-            break;
-        }
-
-        match msg.role {
-            uni::MessageRole::Tool => {
-                // If we already found a matching tool_call, this tool response
-                // is its output.
-                if let Some(ref call_id) = pending_match_call_id
-                    && msg.tool_call_id.as_deref() == Some(call_id.as_str())
-                {
-                    return Some(msg.content.as_text().to_string());
-                }
-            }
-            uni::MessageRole::Assistant => {
-                if let Some(ref tool_calls) = msg.tool_calls {
-                    for tc in tool_calls {
-                        if let Some(ref func) = tc.function {
-                            let tc_args: serde_json::Value = serde_json::from_str(&func.arguments)
-                                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-                            let tc_signature = read_normalized_signature_key(&func.name, &tc_args);
-                            if tc_signature == target_signature
-                                && read_extent_covers_query(&tc_args, args)
-                            {
-                                pending_match_call_id = Some(tc.id.clone());
-                                // Don't break — the next Tool message in reverse
-                                // order should be the matching response.
-                            }
+    // Pass 1: Build call_id → (args, assistant_msg_index) map from Assistant
+    // messages in the scan window.  Storing the assistant message index is
+    // critical because call IDs (tool_call_0, tool_call_1, …) restart per
+    // assistant message — they are NOT globally unique.  Without the index a
+    // Tool response from an *earlier* assistant message can be mis-matched to a
+    // *later* assistant message that reused the same call ID for a completely
+    // different tool, producing a stale or wrong cached result.
+    let scan_start = history.len().saturating_sub(MAX_HISTORY_SCAN);
+    let mut call_id_map: FxHashMap<String, (serde_json::Value, usize)> = FxHashMap::default();
+    for (offset, msg) in history[scan_start..].iter().enumerate() {
+        let abs_idx = scan_start + offset;
+        if let uni::MessageRole::Assistant = msg.role {
+            if let Some(ref tool_calls) = msg.tool_calls {
+                for tc in tool_calls {
+                    if let Some(ref func) = tc.function {
+                        let tc_args: serde_json::Value = serde_json::from_str(&func.arguments)
+                            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                        let tc_signature = read_normalized_signature_key(&func.name, &tc_args);
+                        if tc_signature == target_signature {
+                            call_id_map.insert(tc.id.clone(), (tc_args, abs_idx));
                         }
                     }
                 }
             }
-            _ => {}
+        }
+    }
+
+    if call_id_map.is_empty() {
+        return None;
+    }
+
+    // Pass 2: Scan Tool responses backward to find the most recent match.
+    // Only match a Tool response when its absolute index is *after* the
+    // assistant message that registered the call ID — this prevents
+    // cross-message call-ID collisions from returning the wrong response.
+    for (offset, msg) in history[scan_start..].iter().rev().enumerate() {
+        let abs_idx = history.len().saturating_sub(1).saturating_sub(offset);
+        if let uni::MessageRole::Tool = msg.role {
+            if let Some(ref call_id) = msg.tool_call_id {
+                if let Some((tc_args, assistant_idx)) = call_id_map.get(call_id.as_str()) {
+                    if abs_idx > *assistant_idx && read_extent_covers_query(tc_args, args) {
+                        return Some(msg.content.as_text().to_string());
+                    }
+                }
+            }
         }
     }
     None

@@ -11,7 +11,7 @@ use crate::tui::core_tui::session::{
 };
 use crate::tui::core_tui::style::ratatui_color_from_ansi;
 use crate::tui::core_tui::types::LocalAgentEntry;
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Fill, Paragraph, Wrap};
 use tui_shimmer::shimmer_spans_with_style_at_phase;
 
 struct LocalAgentsPanelModel {
@@ -196,10 +196,7 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, area: R
         .unwrap_or([Rect::ZERO; 4]);
 
     let divider_style = local_agents_divider_style(session, selected_index, &entries);
-    frame.render_widget(
-        Paragraph::new(Line::from("─".repeat(area.width as usize))).style(divider_style),
-        divider_area,
-    );
+    frame.render_widget(Fill::new("─").style(divider_style), divider_area);
 
     frame.render_widget(
         Paragraph::new(header_rows.header)

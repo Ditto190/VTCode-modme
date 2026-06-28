@@ -10,8 +10,8 @@ use tokio::fs as afs;
 use tokio::process::Command;
 
 use crate::tools::ast_grep_binary::AST_GREP_INSTALL_COMMAND;
+use crate::tools::ast_grep_installer::AstGrepStatus;
 use crate::tools::ast_grep_language::AstGrepLanguage;
-use crate::tools::editing::patch::resolve_ast_grep_binary_path;
 use crate::tools::error_helpers::deserialize_tool_args;
 use crate::tools::tree_sitter_runtime::parse_source;
 use crate::utils::path::{canonicalize_allow_missing, normalize_path, resolve_workspace_path};
@@ -1383,12 +1383,8 @@ pub async fn execute_structural_search(workspace_root: &Path, args: Value) -> Re
     if request.workflow == StructuralWorkflow::Rules {
         return execute_structural_rules(workspace_root, &request).await;
     }
-    let ast_grep = resolve_ast_grep_binary_path().map_err(|reason| {
-        let base = format!(
-            "Structural search requires ast-grep (`sg`). {reason}. Install it with `{AST_GREP_INSTALL_COMMAND}`."
-        );
-        // For search-like workflows, hint that text search is available as a
-        // fallback. For AST-dependent workflows, the user must install ast-grep.
+    let ast_grep = AstGrepStatus::resolve_or_install().await.map_err(|reason| {
+        let base = format!("Structural search requires ast-grep (`sg`). {reason}");
         match request.workflow {
             StructuralWorkflow::Query | StructuralWorkflow::Count => {
                 anyhow!(
@@ -3907,7 +3903,7 @@ fn truncate_auxiliary_output(text: &str) -> String {
     )
 }
 
-fn stderr_or_stdout(stderr: &[u8], stdout: &[u8]) -> String {
+pub(crate) fn stderr_or_stdout(stderr: &[u8], stdout: &[u8]) -> String {
     let stderr_text = String::from_utf8_lossy(stderr).trim().to_string();
     if !stderr_text.is_empty() {
         return stderr_text;

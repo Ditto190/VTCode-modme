@@ -9,7 +9,8 @@ This document describes the canonical public tool surface exposed to VT Code mod
   Actions:
   - `grep`: broad text search
   - `list`: file discovery
-  - `structural`: syntax-aware code search via local ast-grep (`sg`)
+  - `structural`: syntax-aware code search via local ast-grep (`sg`); requires a pattern/kind
+  - `outline`: token-efficient symbol map of a file/directory via `ast-grep outline` (>= 0.44.0); no pattern needed, default `view=digest`. Use for "what's in this file?" before reading full source. See `docs/development/grep-tool-guide.md` "Outline mode".
   - `tools`: tool discovery
   - `errors`: archived/current error lookup
   - `agent`: agent/runtime info
@@ -159,7 +160,7 @@ When byte-range parameters are provided, VT Code uses seek-based access for effi
   - `fix_config` is only valid for `workflow="rewrite"`
   - `workflow="inspect"` does not require the ast-grep binary and rejects `pattern`, `kind`, `lang`, `selector`, `strictness`, `debug_query`, `filter`, `skip_snapshot_tests`, `globs`, `context_lines`, and `max_results`
   - Default `config_path` is workspace `sgconfig.yml`; raw ast-grep also supports upward discovery of `sgconfig.yml`, but VT Code’s public structural surface pins scan/test to an explicit config path for determinism
-  - Requires a local `sg` / `ast-grep` binary; if missing, VT Code returns an actionable error, points to the bundled `ast-grep` skill, and recommends `vtcode dependencies install search-tools` or `vtcode dependencies install ast-grep`
+  - Requires a local `sg` / `ast-grep` binary; if missing, VT Code auto-installs it on first use (download into `~/.vtcode/bin` with checksum + 24h cooldown). Set `VTCODE_AST_GREP_NO_INSTALL=1` to opt out, in which case VT Code returns an actionable error pointing to `vtcode dependencies install ast-grep`
   - VT Code-managed installs live in `~/.vtcode/bin`
   - On Linux, prefer the canonical `ast-grep` binary name instead of `sg`
   - Raw ast-grep CLI flags such as `--stdin`, `--json`, `--color`, `--heading`, `--threads`, `--inspect`, `--follow`, `--no-ignore`, `--before`, `--after`, `--interactive`, `--update-all`, `--rule`, `--inline-rules`, `--format`, `--report-style`, `--error`, `--warning`, `--info`, `--hint`, and `--off` are not part of the public structural surface and should go through the bundled `ast-grep` skill plus `unified_exec` when needed. The `rewrite` field is accepted only for `workflow="rewrite"` (dry-run preview); passing `rewrite` with other workflows is silently ignored.
@@ -176,6 +177,22 @@ When byte-range parameters are provided, VT Code uses seek-based access for effi
   - Use the bundled `ast-grep` skill for `sg new`, rewrite/apply flows, interactive flags, `transform`, `replace`, `substring`, `convert`, `toCase`, `separatedBy`, `rewrite`, `joinBy`, `rewriters`, custom parser compilation, or non-trivial `sgconfig.yml` authoring/debugging
 - Use when: you need syntax-aware search, read-only project rule scans, read-only ast-grep rule tests, ast-grep config inspection, or dry-run rewrite previews
 - Avoid when: plain text grep is simpler, the search target is not syntax-sensitive, or the task depends on semantic/static-analysis facts
+
+### `outline`
+
+- Required: `action="outline"`
+- Optional: `path` (default `"."`), `lang`, `type` (string or array of symbol types, comma-joined for `--type`), `match` (regex over item names/signatures/first lines), `items` (`"auto" | "structure" | "exports" | "imports" | "all"`, default `"auto"` — `structure` for file input, `exports` for directory input), `pub_members` (bool, default `false`), `follow` (bool, default `false`), `view` (`"digest" | "names" | "full"`, default `"digest"`)
+- Internal mapping: `ast-grep outline --json=stream [--lang ...] [--type ...] [--match ...] [--items ...] [--pub-members] [--follow] <path>`. The CLI's own `--view` flag is text-only and is never passed; `view` is applied in Rust to shape the parsed NDJSON.
+- Requires ast-grep >= 0.44.0 (the `outline` subcommand and `--json` stream output shipped there)
+- No pattern or kind is required; outline extracts the symbol table via ast-grep's bundled rule catalog
+- No grep fallback when the binary is missing (outline has no text equivalent); auto-installs ast-grep on first use (download into `~/.vtcode/bin` with checksum + 24h cooldown). Set `VTCODE_AST_GREP_NO_INSTALL=1` to opt out; the error then includes the manual install command (`vtcode dependencies install ast-grep`)
+- Tolerant deserialization: unknown JSON keys from future ast-grep versions are ignored (`#[serde(default)]`, no `deny_unknown_fields`)
+- Result shape by `view`:
+  - `digest` (default): `{view:"digest", files:[{path, lang, groups:[{kind, names, members}]}]}` — symbols grouped by `symbolType`; `names` are top-level item names of that kind; `members` is the flat list of all member names across items of that kind
+  - `names`: same as `digest` but without `members`
+  - `full`: `{view:"full", files:[{path, lang, items:[{role, kind, name, signature, astKind, isImport, isExported, members:[{role, kind, name, signature, isPublic}]}]}]}` — passthrough of per-symbol records with ranges/signatures and nested members
+- Use when: you want a cheap "what's in this file/directory?" symbol map before reading full source; a 200-line file is ~100-300 bytes in `digest` vs ~10-40 KB of structural match JSON
+- Avoid when: you need pattern-based matches (use `structural`), text/regex matches (use `grep`), or semantic type resolution (use an LSP)
 
 ### `tools`
 

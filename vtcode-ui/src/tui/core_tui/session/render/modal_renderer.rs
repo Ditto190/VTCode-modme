@@ -10,7 +10,7 @@ use crate::tui::ui::tui::session::modal::{
 };
 use crate::tui::ui::tui::types::InlineListSelection;
 use anstyle::{Ansi256Color, Color as AnsiColorEnum};
-use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, Fill, Paragraph, Wrap};
 
 const MAX_INLINE_MODAL_HEIGHT: u16 = 20;
 const MAX_INLINE_MODAL_HEIGHT_MULTILINE: u16 = 32;
@@ -92,14 +92,7 @@ fn render_modal_divider(frame: &mut Frame<'_>, area: Rect, style: Style) {
         return;
     }
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            ui::INLINE_BLOCK_HORIZONTAL.repeat(area.width as usize),
-            style,
-        )))
-        .wrap(Wrap { trim: false }),
-        area,
-    );
+    frame.render_widget(Fill::new(ui::INLINE_BLOCK_HORIZONTAL).style(style), area);
 }
 
 fn wizard_step_has_inline_custom_editor(

@@ -172,10 +172,11 @@ pub(super) fn split_input_and_bottom_panel_area(
     }
 
     let input_height = area.height.saturating_sub(resolved_panel);
-    let chunks = Layout::vertical([
-        Constraint::Length(input_height.max(1)),
-        Constraint::Length(resolved_panel),
-    ])
-    .split(area);
-    (chunks[0], Some(chunks[1]))
+    let [input_area, panel_area] = area
+        .try_layout(&Layout::vertical([
+            Constraint::Length(input_height.max(1)),
+            Constraint::Length(resolved_panel),
+        ]))
+        .unwrap_or([Rect::ZERO; 2]);
+    (input_area, Some(panel_area))
 }

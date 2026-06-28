@@ -11,9 +11,9 @@ mod semantic;
 
 pub use error::PatchError;
 #[doc(hidden)]
-pub(crate) use semantic::resolve_ast_grep_binary_path;
-#[doc(hidden)]
 pub use semantic::{AstGrepBinaryOverrideGuard, set_ast_grep_binary_override_for_tests};
+#[doc(hidden)]
+pub(crate) use semantic::{is_binary_override_missing, resolve_ast_grep_binary_path};
 
 /// Represents a single diff line inside a patch hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -79,6 +79,13 @@ const RECOVERY_SYNTHESIS_MAX_TOKENS: u32 = 1024;
 /// forces the user to nudge "continue". The extra pass only fires when the
 /// model keeps emitting tool calls during a tool-free recovery window.
 const MAX_RECOVERY_RETRIES: u8 = 3;
+/// Maximum number of times the post-tool follow-up failure path may schedule
+/// a tool-free recovery pass within a single turn. This is a defense-in-depth
+/// backstop: the recovery pass itself is terminal (a text response ends the
+/// turn), so under normal operation this cap never trips. It only fires if a
+/// future regression re-enables tools after recovery or otherwise re-triggers
+/// the post-tool failure path cyclically.
+const MAX_POST_TOOL_RECOVERY_CYCLES: u8 = 2;
 pub(crate) const POST_TOOL_RECOVERY_REASON: &str = "Tool follow-up failed. Tools disabled; respond with text using context and recent tool outputs.";
 pub(crate) const POST_TOOL_TIMEOUT_RECOVERY_REASON: &str = "Tool follow-up timed out. Tools disabled; respond with text using context and recent tool outputs.";
 const RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER: &str = "Recovery synthesis failed; no tool call applied. Reuse recent tool outputs or re-state your request.";
@@ -90,6 +97,33 @@ pub(super) const RECOVERY_CONTRACT_VIOLATION_REASON: &str = "Recovery mode reque
 /// produced tool calls (which are discarded) instead of text.
 const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE: &str =
     "Recovery: tools disabled. Summarize findings from tool outputs in history.";
+
+/// Shared logic for the `PostToolFailureRecovery::RetryToolFree` arm.
+///
+/// Checks the post-tool recovery cycle cap. If the cap is reached, completes
+/// the turn with a deterministic fallback answer and returns `Some(result)`.
+/// Otherwise returns `None` — the caller should increment the cycle counter,
+/// switch to tool-free recovery, and `continue` the turn loop.
+fn check_recovery_cycle_cap(
+    cycles: u8,
+    working_history: &mut Vec<uni::Message>,
+    stage: &'static str,
+    err: &anyhow::Error,
+) -> Option<TurnLoopResult> {
+    if cycles >= MAX_POST_TOOL_RECOVERY_CYCLES {
+        tracing::warn!(
+            cycles,
+            "Post-tool recovery cycle cap reached; concluding turn \
+             with deterministic fallback answer"
+        );
+        return Some(complete_turn_after_failed_tool_free_recovery(
+            working_history,
+            stage,
+            Some(err),
+        ));
+    }
+    None
+}
 
 pub(crate) struct TurnLoopOutcome {
     pub result: TurnLoopResult,
@@ -572,11 +606,16 @@ pub(crate) async fn run_turn_loop(
                 )? {
                     PostToolFailureRecovery::NotApplicable => {}
                     PostToolFailureRecovery::RetryToolFree => {
-                        // Switch the recovery mode to a tool-free synthesis pass.
-                        // NOTE: use the unconditional switch helper, not
-                        // activate_recovery_with_mode — the latter is a guarded no-op
-                        // when a recovery pass is already in flight (phase == InPass),
-                        // which would leave the mode unchanged and spin the loop forever.
+                        if let Some(r) = check_recovery_cycle_cap(
+                            turn_processing_ctx.post_tool_recovery_cycles(),
+                            turn_processing_ctx.working_history,
+                            "execute_llm_request.recovery_cycle_cap",
+                            &err,
+                        ) {
+                            result = r;
+                            break;
+                        }
+                        turn_processing_ctx.increment_post_tool_recovery_cycle();
                         turn_processing_ctx.switch_to_tool_free_recovery();
                         continue;
                     }
@@ -755,11 +794,16 @@ pub(crate) async fn run_turn_loop(
                 )? {
                     PostToolFailureRecovery::NotApplicable => {}
                     PostToolFailureRecovery::RetryToolFree => {
-                        // Switch the recovery mode to a tool-free synthesis pass.
-                        // NOTE: use the unconditional switch helper, not
-                        // activate_recovery_with_mode — the latter is a guarded no-op
-                        // when a recovery pass is already in flight (phase == InPass),
-                        // which would leave the mode unchanged and spin the loop forever.
+                        if let Some(r) = check_recovery_cycle_cap(
+                            turn_processing_ctx.post_tool_recovery_cycles(),
+                            turn_processing_ctx.working_history,
+                            "process_llm_response.recovery_cycle_cap",
+                            &err,
+                        ) {
+                            result = r;
+                            break;
+                        }
+                        turn_processing_ctx.increment_post_tool_recovery_cycle();
                         turn_processing_ctx.switch_to_tool_free_recovery();
                         continue;
                     }
@@ -882,11 +926,16 @@ pub(crate) async fn run_turn_loop(
                 )? {
                     PostToolFailureRecovery::NotApplicable => {}
                     PostToolFailureRecovery::RetryToolFree => {
-                        // Switch the recovery mode to a tool-free synthesis pass.
-                        // NOTE: use the unconditional switch helper, not
-                        // activate_recovery_with_mode — the latter is a guarded no-op
-                        // when a recovery pass is already in flight (phase == InPass),
-                        // which would leave the mode unchanged and spin the loop forever.
+                        if let Some(r) = check_recovery_cycle_cap(
+                            ctx.harness_state.post_tool_recovery_cycles(),
+                            working_history,
+                            "handle_turn_processing_result.recovery_cycle_cap",
+                            &err,
+                        ) {
+                            result = r;
+                            break;
+                        }
+                        ctx.harness_state.increment_post_tool_recovery_cycle();
                         ctx.harness_state.switch_to_tool_free_recovery();
                         continue;
                     }

@@ -25,17 +25,15 @@ pub struct AstGrepBinaryOverrideGuard {
 
 impl Drop for AstGrepBinaryOverrideGuard {
     fn drop(&mut self) {
-        *AST_GREP_OVERRIDE
-            .lock()
-            .expect("ast-grep override mutex must not be poisoned") = self.previous.clone();
+        if let Ok(mut guard) = AST_GREP_OVERRIDE.lock() {
+            *guard = self.previous.clone();
+        }
     }
 }
 
 #[doc(hidden)]
 pub fn set_ast_grep_binary_override_for_tests(path: Option<PathBuf>) -> AstGrepBinaryOverrideGuard {
-    let mut state = AST_GREP_OVERRIDE
-        .lock()
-        .expect("ast-grep override mutex must not be poisoned");
+    let mut state = AST_GREP_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner());
     let previous = state.clone();
     *state = match path {
         Some(path) => AstGrepBinaryOverride::Path(path),
@@ -69,7 +67,7 @@ pub fn managed_ast_grep_candidates() -> Vec<PathBuf> {
 pub fn resolve_ast_grep_binary_from_env_and_fs() -> Option<PathBuf> {
     match AST_GREP_OVERRIDE
         .lock()
-        .expect("ast-grep override mutex must not be poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .clone()
     {
         AstGrepBinaryOverride::System => {}
@@ -123,6 +121,23 @@ pub fn missing_ast_grep_message(suffix: &str) -> String {
         "ast-grep is not available; run `{AST_GREP_INSTALL_COMMAND}` or install `ast-grep` manually.{extra}"
     )
 }
+
+/// Returns `true` when the test override is forced to `Missing`, meaning
+/// tests want the "binary not available" error and auto-install should be
+/// skipped.
+pub(crate) fn is_binary_override_missing() -> bool {
+    matches!(
+        AST_GREP_OVERRIDE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+        AstGrepBinaryOverride::Missing
+    )
+}
+
+/// Env var opt-out for auto-install on first use. When set, missing-binary
+/// errors surface immediately without attempting a download.
+pub const AST_GREP_NO_INSTALL_ENV: &str = "VTCODE_AST_GREP_NO_INSTALL";
 
 fn managed_ast_grep_bin_dir_from_home(home: &Path) -> PathBuf {
     home.join(".vtcode").join("bin")

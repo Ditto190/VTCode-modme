@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -38,21 +38,20 @@ pub(super) fn draw_selection_ui(
             let instruction_lines = instructions.lines().count().max(1) as u16;
             let instruction_height = instruction_lines.saturating_add(2);
             let footer_height: u16 = 4;
-            let layout = Layout::vertical([
-                Constraint::Length(
-                    instruction_height.min(area.height.saturating_sub(footer_height + 5)),
-                ),
-                Constraint::Min(5),
-                Constraint::Length(footer_height),
-            ])
-            .spacing(-1)
-            .margin(1)
-            .vertical_margin(1)
-            .split(area);
-
-            if layout.len() < 3 {
-                return;
-            }
+            let [instructions_area, list_area, footer_area] = area
+                .try_layout(
+                    &Layout::vertical([
+                        Constraint::Length(
+                            instruction_height.min(area.height.saturating_sub(footer_height + 5)),
+                        ),
+                        Constraint::Min(5),
+                        Constraint::Length(footer_height),
+                    ])
+                    .spacing(-1)
+                    .margin(1)
+                    .vertical_margin(1),
+                )
+                .unwrap_or([Rect::ZERO; 3]);
 
             let instructions_widget = Paragraph::new(instructions)
                 .block(
@@ -61,7 +60,7 @@ pub(super) fn draw_selection_ui(
                         .border_type(BorderType::Rounded),
                 )
                 .wrap(Wrap { trim: true });
-            frame.render_widget(instructions_widget, layout[0]);
+            frame.render_widget(instructions_widget, instructions_area);
 
             let items: Vec<ListItem> = entries
                 .iter()
@@ -95,7 +94,7 @@ pub(super) fn draw_selection_ui(
                 .highlight_symbol("→ ")
                 .direction(ListDirection::TopToBottom)
                 .scroll_padding(1);
-            frame.render_stateful_widget(list, layout[1], list_state);
+            frame.render_stateful_widget(list, list_area, list_state);
 
             let current = match entries.get(selected_index) {
                 Some(entry) => entry,
@@ -134,7 +133,7 @@ pub(super) fn draw_selection_ui(
                         .border_type(BorderType::Rounded),
                 )
                 .wrap(Wrap { trim: true });
-            frame.render_widget(footer, layout[2]);
+            frame.render_widget(footer, footer_area);
         })
         .with_context(|| format!("Failed to draw {title} selector UI"))?;
 

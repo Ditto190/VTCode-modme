@@ -242,7 +242,8 @@ pub(crate) async fn initialize_session_ui(
                     vtcode_core::config::TuiAlternateScreen::Always => {
                         vtcode_ui::tui::app::SessionSurface::Alternate
                     }
-                    vtcode_core::config::TuiAlternateScreen::Never => {
+                    vtcode_core::config::TuiAlternateScreen::Never
+                    | vtcode_core::config::TuiAlternateScreen::Unknown => {
                         vtcode_ui::tui::app::SessionSurface::Inline
                     }
                 })
@@ -484,6 +485,15 @@ pub(crate) async fn initialize_session_ui(
                 }
             }
         })));
+    } else if session_state.startup_update_check.cached_notice.is_none() {
+        // The preflight check may have completed after load_startup_update_check()
+        // read the cache.  Re-check the static notice and, if an update arrived
+        // in the meantime, deliver it through a channel so the TUI can display it.
+        if let Some(notice) = crate::updater::get_preflight_notice() {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let _ = tx.send(notice);
+            startup_update_notice_rx = Some(rx);
+        }
     }
 
     let next_checkpoint_turn = checkpoint_manager

@@ -47,6 +47,8 @@ open-responses-*.jsonl
 *.temp
 .cache/
 .tmp/
+_tmp_*
+.tmp_*
 
 # Documentation Build
 docs/build/

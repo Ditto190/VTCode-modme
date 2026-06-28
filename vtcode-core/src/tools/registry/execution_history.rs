@@ -180,9 +180,9 @@ const DEFAULT_LOOP_DETECT_WINDOW: usize = 8;
 /// Read/search calls are cheap to reuse but can become stale across unrelated
 /// turns. The threshold must be high enough to allow one legitimate retry
 /// (e.g. after an ast-grep parse error or a transient network failure) before
-/// the loop detector fires.  A limit of 3 means the same identical call must
-/// appear 3 times in the detection window before it is flagged.
-const MIN_READONLY_IDENTICAL_LIMIT: usize = 3;
+/// the loop detector fires.  A limit of 2 means the same identical call must
+/// appear 2 times in the detection window before it is flagged.
+const MIN_READONLY_IDENTICAL_LIMIT: usize = 2;
 
 fn spool_path_exists(result: &Value) -> bool {
     let Some(spool_path) = result.get("spool_path").and_then(|v| v.as_str()) else {
@@ -1118,14 +1118,12 @@ mod tests {
         });
 
         // The effective limit is max(base_limit, MIN_READONLY_IDENTICAL_LIMIT).
-        // Even when the configured base limit is 2, the readonly minimum (3)
-        // takes precedence so that one legitimate retry is allowed before the
-        // loop detector fires.
-        assert_eq!(history.loop_limit_for("unified_file", &args), 3);
+        // With MIN_READONLY_IDENTICAL_LIMIT=2, the limit matches the base.
+        assert_eq!(history.loop_limit_for("unified_file", &args), 2);
     }
 
     #[test]
-    fn unified_search_exact_repeat_is_detected_after_three_successes() {
+    fn unified_search_exact_repeat_is_detected_after_two_successes() {
         let history = ToolExecutionHistory::new(10);
         history.set_loop_detection_limits(5, 2);
 
@@ -1135,9 +1133,8 @@ mod tests {
             "path": "vtcode-core/src/core/agent/runner/tests.rs"
         });
 
-        // With MIN_READONLY_IDENTICAL_LIMIT=3, three identical successful calls
-        // are required before the loop detector fires.  Two calls (the old
-        // threshold) should NOT be detected — the model is allowed one retry.
+        // With MIN_READONLY_IDENTICAL_LIMIT=2, two identical successful calls
+        // are enough to trigger loop detection.
         for _ in 0..2 {
             history.add_record(ToolExecutionRecord::success(
                 "unified_search".to_string(),
@@ -1157,8 +1154,8 @@ mod tests {
 
         let loop_result = history.detect_loop("unified_search", &args);
         assert!(
-            !loop_result.detected,
-            "two identical calls should not trigger loop detection with MIN_READONLY_IDENTICAL_LIMIT=3"
+            loop_result.detected,
+            "two identical calls should trigger loop detection with MIN_READONLY_IDENTICAL_LIMIT=2"
         );
 
         // A third identical call crosses the threshold.

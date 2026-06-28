@@ -196,7 +196,8 @@ impl Updater {
                 .bin_name("vtcode")
                 .target(target)
                 .identifier(&identifier)
-                .show_download_progress(true)
+                .show_download_progress(false)
+                .show_output(false)
                 .no_confirm(true);
 
             if force {

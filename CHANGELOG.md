@@ -2,6 +2,37 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.133.21 - 2026-06-28
+
+### Highlights
+### Other Changes
+#### Other
+
+- Update run (a2f82005) 
+## 0.133.20 - 2026-06-28
+
+### Highlights
+#### Bug Fixes
+
+- Deserialize StatusLineMode case-insensitively (2badec48) (@RobertBorg)
+- Prevent loop detection from returning empty results and strengthen blocking (db5d7d5d) 
+#### Features
+
+- Enhance Miri checks and add safety limits for Copilot payloads (352d610f) 
+- Add web_search, defuddle_fetch, and TOML-driven network allowlist (1fb4b50d) 
+- Add outline mode for unified_search to generate symbol maps (c12d2c53) 
+- Update TUI fixes, ast-grep auto-install, and review fixes (f0f0c066) 
+- Add binary override checks for ast-grep installation and testing (f5d2f650) 
+- Implement post-tool recovery cycle tracking and handling to prevent infinite loops (745e9488) 
+- Implement post-tool recovery cycle cap check and cleanup temporary files (1e36699e) 
+### Other Changes
+#### Other
+
+- Update README (fa0180f3) (@vinhnx)
+- Enhance compatibility and error handling across various modules (d5249d00) 
+#### Refactors
+
+- Reduce default output limits and enhance loop detection for command tools (47eab8f4) 
 ## 0.133.19 - 2026-06-27
 
 ### Highlights

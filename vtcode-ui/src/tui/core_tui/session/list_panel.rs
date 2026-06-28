@@ -1,6 +1,6 @@
 use ratatui::{
     prelude::*,
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Fill, Paragraph, Wrap},
 };
 use ratatui_cheese::input::{Input, InputState, InputStyles};
 use ratatui_cheese::theme::Palette;
@@ -282,12 +282,8 @@ pub(crate) fn render_shared_list_panel<M: SharedListWidgetModel>(
     if show_divider && idx < chunks.len() {
         let divider_style = styles.divider_style.expect("divider style");
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                crate::tui::config::constants::ui::INLINE_BLOCK_HORIZONTAL
-                    .repeat(chunks[idx].width as usize),
-                divider_style,
-            )))
-            .wrap(Wrap { trim: false }),
+            Fill::new(crate::tui::config::constants::ui::INLINE_BLOCK_HORIZONTAL)
+                .style(divider_style),
             chunks[idx],
         );
         idx += 1;

@@ -203,11 +203,14 @@ impl Widget for &mut SessionWidget<'_> {
                 let has_logs =
                     self.session.show_logs && self.session.has_logs() && mode.show_logs_panel();
                 if has_logs {
-                    let chunks =
-                        Layout::vertical([Constraint::Percentage(70), Constraint::Percentage(30)])
-                            .split(transcript_area);
-                    TranscriptWidget::new(self.session).render(chunks[0], buf);
-                    self.render_logs(chunks[1], buf, mode);
+                    let [transcript, logs] = transcript_area
+                        .try_layout(&Layout::vertical([
+                            Constraint::Percentage(70),
+                            Constraint::Percentage(30),
+                        ]))
+                        .unwrap_or([transcript_area, Rect::ZERO]);
+                    TranscriptWidget::new(self.session).render(transcript, buf);
+                    self.render_logs(logs, buf, mode);
                 } else {
                     TranscriptWidget::new(self.session).render(transcript_area, buf);
                 }
@@ -258,10 +261,15 @@ impl Widget for &mut SessionWidget<'_> {
         let has_logs = self.session.show_logs && self.session.has_logs() && mode.show_logs_panel();
 
         if has_logs {
-            let chunks = Layout::vertical([Constraint::Percentage(70), Constraint::Percentage(30)])
-                .split(layout.main);
-            TranscriptWidget::new(self.session).render(chunks[0], buf);
-            self.render_logs(chunks[1], buf, mode);
+            let [transcript, logs] = layout
+                .main
+                .try_layout(&Layout::vertical([
+                    Constraint::Percentage(70),
+                    Constraint::Percentage(30),
+                ]))
+                .unwrap_or([layout.main, Rect::ZERO]);
+            TranscriptWidget::new(self.session).render(transcript, buf);
+            self.render_logs(logs, buf, mode);
         } else {
             TranscriptWidget::new(self.session).render(layout.main, buf);
         }

@@ -40,23 +40,24 @@ pub fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area: Rect)
     );
     let counts = count_diff_changes(&diff_bundle.hunks);
 
-    let chunks = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(5),
-        Constraint::Length(4),
-    ])
-    .split(area);
+    let [header, content, controls] = area
+        .try_layout(&Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Min(5),
+            Constraint::Length(4),
+        ]))
+        .unwrap_or([Rect::ZERO; 3]);
 
     render_file_header(
         frame,
-        chunks[0],
+        header,
         preview,
         &palette,
         counts.additions,
         counts.deletions,
     );
-    render_diff_content(frame, chunks[1], preview, &diff_bundle);
-    render_controls(frame, chunks[2], preview);
+    render_diff_content(frame, content, preview, &diff_bundle);
+    render_controls(frame, controls, preview);
 }
 
 fn render_file_header(

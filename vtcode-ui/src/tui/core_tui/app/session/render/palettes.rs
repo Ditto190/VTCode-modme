@@ -6,7 +6,7 @@ use crate::tui::core_tui::session::list_panel::{
     StaticRowsListPanelModel, fixed_section_rows, fixed_section_rows_with_divider,
     input_styles_from_theme, render_shared_list_panel, render_shared_search_field, rows_to_u16,
 };
-use ratatui::widgets::{Clear, Paragraph, StatefulWidget, Wrap};
+use ratatui::widgets::{Clear, Fill, Paragraph, StatefulWidget, Wrap};
 use ratatui_cheese::tree::{Mode, Tree, TreeStyles};
 
 #[derive(Clone)]
@@ -283,11 +283,7 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
     // Divider
     if show_divider {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                ui::INLINE_BLOCK_HORIZONTAL.repeat(layout[idx].width as usize),
-                border_style,
-            )))
-            .wrap(Wrap { trim: false }),
+            Fill::new(ui::INLINE_BLOCK_HORIZONTAL).style(border_style),
             layout[idx],
         );
         idx += 1;

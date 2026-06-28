@@ -69,6 +69,13 @@ pub(crate) async fn handle_update(
         Ok(None) => {
             ctx.renderer
                 .line(MessageStyle::Info, "Already on the latest version.")?;
+            // Clear any stale "Update" highlight from the header so the UI
+            // does not appear stuck on "Checking for updates...".
+            ctx.header_context
+                .highlights
+                .retain(|h| h.title != "Update");
+            ctx.handle.set_header_context(ctx.header_context.clone());
+
             if install && force {
                 ctx.renderer.line(
                     MessageStyle::Info,
@@ -92,6 +99,10 @@ pub(crate) async fn handle_update(
                 MessageStyle::Error,
                 &format!("Failed to check updates: {}", err),
             )?;
+            ctx.header_context
+                .highlights
+                .retain(|h| h.title != "Update");
+            ctx.handle.set_header_context(ctx.header_context.clone());
             Ok(SlashCommandControl::Continue)
         }
     }

@@ -12,6 +12,7 @@ use crate::agent::runloop::unified::turn::context::{
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
     find_duplicate_in_history, signature_key_for,
 };
+use crate::agent::runloop::unified::turn::tool_outcomes::response_content::maybe_inline_spooled;
 
 use super::looping::{
     low_signal_family_key, shell_run_signature, spool_chunk_read_path,
@@ -314,14 +315,15 @@ pub(super) fn enforce_repeated_read_only_call_guard(
             if let Some(obj) = reused_value.as_object_mut() {
                 super::apply_reused_read_only_loop_metadata(obj);
             }
-            ctx.push_tool_response(tool_call_id, reused_value.to_string());
+            ctx.push_tool_response(
+                tool_call_id,
+                maybe_inline_spooled(canonical_tool_name, &reused_value),
+            );
             return Some(ValidationResult::Handled);
         }
     }
 
     // Planning-mode-specific guard: repeated plan-file reads across turns.
-    // Plan files tend to be re-read with slightly different pagination while
-    // the agent drafts a plan; path-based dedup keeps the agent from churning.
     if ctx.tool_registry.is_planning_active() {
         if let Some(plan_path) = is_plan_artifact_read(canonical_tool_name, effective_args) {
             if let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
@@ -330,6 +332,10 @@ pub(super) fn enforce_repeated_read_only_call_guard(
                 ctx.harness_state.max_tool_wall_clock,
             ) {
                 if let Some(obj) = reused_value.as_object_mut() {
+                    super::apply_reused_read_only_loop_metadata(obj);
+                    // Overwrite with planning-specific guidance AFTER the generic
+                    // metadata is applied, since apply_reused_read_only_loop_metadata
+                    // sets its own loop_detected_note.
                     obj.insert(
                         "loop_detected_note".to_string(),
                         json!(format!(
@@ -337,9 +343,11 @@ pub(super) fn enforce_repeated_read_only_call_guard(
                             plan_path
                         )),
                     );
-                    super::apply_reused_read_only_loop_metadata(obj);
                 }
-                ctx.push_tool_response(tool_call_id, reused_value.to_string());
+                ctx.push_tool_response(
+                    tool_call_id,
+                    maybe_inline_spooled(canonical_tool_name, &reused_value),
+                );
                 ctx.harness_state
                     .record_successful_readonly_signature(signature);
                 return Some(ValidationResult::Handled);
@@ -347,18 +355,7 @@ pub(super) fn enforce_repeated_read_only_call_guard(
         }
     }
 
-    // Cross-turn TTL-bounded cache: consult the registry's execution history
-    // even when the per-turn signature set is empty (e.g. after a "continue"
-    // turn that creates a fresh HarnessTurnState).  The TTL is bounded by
-    // `max_tool_wall_clock` (600s by default), so stale results naturally
-    // expire.  This prevents 5× re-reads of the same file across turns when
-    // the model varies pagination arguments slightly.
-    //
-    // Uses path-based matching (`find_recent_successful_by_read_target`) with
-    // read-shape compatibility. The exact-arg cache
-    // (`find_recent_successful_output`) won't match when irrelevant argument
-    // spelling differs, so the path-based lookup is the primary cross-turn
-    // dedup mechanism.
+    // Cross-turn TTL-bounded cache.
     if let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
         canonical_tool_name,
         effective_args,
@@ -367,17 +364,16 @@ pub(super) fn enforce_repeated_read_only_call_guard(
         if let Some(obj) = reused_value.as_object_mut() {
             super::apply_reused_read_only_loop_metadata(obj);
         }
-        ctx.push_tool_response(tool_call_id, reused_value.to_string());
-        // Also register in the per-turn set so subsequent in-turn calls
-        // short-circuit at the top of this function.
+        ctx.push_tool_response(
+            tool_call_id,
+            maybe_inline_spooled(canonical_tool_name, &reused_value),
+        );
         ctx.harness_state
             .record_successful_readonly_signature(signature);
         return Some(ValidationResult::Handled);
     }
 
-    // Cross-turn duplicate: scan working history for an identical readonly call
-    // from a previous turn. Produces the same structured reused_recent_result
-    // payload so the model recognizes the signal to stop retrying.
+    // Cross-turn duplicate: scan working history.
     if let Some(raw_output) =
         find_duplicate_in_history(ctx.working_history, canonical_tool_name, effective_args)
     {
@@ -385,7 +381,10 @@ pub(super) fn enforce_repeated_read_only_call_guard(
             if let Some(obj) = parsed.as_object_mut() {
                 super::apply_reused_read_only_loop_metadata(obj);
             }
-            ctx.push_tool_response(tool_call_id, parsed.to_string());
+            ctx.push_tool_response(
+                tool_call_id,
+                maybe_inline_spooled(canonical_tool_name, &parsed),
+            );
         } else {
             ctx.push_tool_response(tool_call_id, raw_output);
         }

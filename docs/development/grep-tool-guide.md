@@ -350,6 +350,46 @@ Returns: List of all files importing the old module.
 -   Imports: `^import|^from`
 -   Comments: `#|//|/*`
 
+## Outline mode (`action=outline`)
+
+`unified_search` also exposes `action=outline`, which wraps `ast-grep outline`
+(ast-grep >= 0.44.0) to produce a cheap, token-efficient symbol map of a file
+or directory **without requiring a structural pattern**. Use it for the
+"what's in this file/directory?" question before reading full source.
+
+**When to use which search action:**
+
+| Action | Question it answers |
+| --- | --- |
+| `grep` | "Which lines match this text/regex?" |
+| `outline` | "What symbols are defined in this file/directory?" (no pattern) |
+| `structural` | "Which nodes match this AST pattern?" (pattern/kind required) |
+
+```json
+{"action":"outline","path":"vtcode-core/src/tools/registry/builder.rs","lang":"rust","view":"digest"}
+{"action":"outline","path":"vtcode-core/src/tools/registry","lang":"rust","type":"function","view":"names","items":"exports"}
+```
+
+Sub-fields: `path` (default `.`), `lang`, `type` (string or array of symbol
+types), `match` (name regex), `items` (`auto` | `structure` | `exports` |
+`imports` | `all`; default `auto`), `pub_members` (bool), `follow` (bool),
+`view` (`digest` | `names` | `full`; default `digest`).
+
+- `digest` (default): symbols grouped by kind per file, with flat member
+  names. ~100-300 bytes for a typical file.
+- `names`: grouped names only, no members.
+- `full`: per-symbol records with ranges, signatures, `astKind`, and nested
+  members (passthrough of the ast-grep JSON).
+
+`outline` and `structural` shell out to the same resolved `ast-grep` binary.
+On a missing binary, both actions **auto-install ast-grep on first use** by
+downloading the matching platform release from GitHub into `~/.vtcode/bin`
+(with checksum verification and a 24h failure cooldown). Set
+`VTCODE_AST_GREP_NO_INSTALL=1` to opt out of auto-install; the error then
+surfaces immediately with the manual install command
+(`vtcode dependencies install ast-grep`). Unlike `structural`, `outline` has
+no grep fallback (outline has no text equivalent).
+
 ## Troubleshooting
 
 ### No results found

@@ -58,47 +58,30 @@ if [[ ! -f "Cargo.toml" ]]; then
     exit 1
 fi
 
-# Build and run in debug mode (much faster)
-echo "Building VT Code in debug mode..."
+# --- Fast iteration tuning -------------------------------------------------
+# For a local edit->run loop, incremental compilation rebuilds only changed
+# crates and is dramatically faster than a from-scratch cache lookup. sccache
+# requires incremental=false (see Cargo.toml [profile.dev]) and rejects any
+# build with CARGO_INCREMENTAL=1, so we disable sccache here and let rust's
+# incremental cache drive fast rebuilds instead. Use ./scripts/rrf.sh for
+# release builds where sccache's cross-build cache wins.
 
-# Try building with sccache first, fall back to regular cargo if sccache fails
-# Show build progress with cargo's default terminal output
-echo ""
-if ! cargo build 2>&1 | tee /tmp/vtcode_build.log; then
-    BUILD_ERROR=$(cat /tmp/vtcode_build.log)
-    if [[ "$BUILD_ERROR" == *"sccache: error: Operation not permitted"* ]]; then
-        echo "sccache permission error detected. Retrying without sccache..."
-        export RUSTC_WRAPPER=""
-        cargo build 2>&1 | tee /tmp/vtcode_build.log
-        RESULT=$?
-        if [ $RESULT -ne 0 ]; then
-            echo "Build failed even without sccache. Check errors above."
-            exit $RESULT
-        fi
-    else
-        echo "Build failed with non-sccache error:"
-        echo "$BUILD_ERROR"
-        exit 1
-    fi
-else
-    echo "Build completed successfully."
+# `unset` actually clears a wrapper that may be set in the parent shell;
+# `${VAR:-}` only defaults on unset vars, so `export RUSTC_WRAPPER=""`
+# would not drop a pre-existing value.
+unset RUSTC_WRAPPER
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
+
+# On Apple Silicon, rustc is heavy enough per-thread that pinning cargo
+# jobs to the P-core count (vs. all logical CPUs) usually wins for the
+# small incremental rebuilds that drive an edit->run loop: cargo's
+# default counts E-cores too, and rustc threads thrashing the E-cores
+# end up slower than fewer-but-faster P-core threads. No-op on non-Darwin
+# hosts. Override via `CARGO_BUILD_JOBS=N ./scripts/run-debug.sh`.
+if [[ -z "${CARGO_BUILD_JOBS}" && "$(uname -s)" == "Darwin" ]] \
+   && sysctl -n hw.perflevel0.physicalcpu >/dev/null 2>&1; then
+  export CARGO_BUILD_JOBS="$(sysctl -n hw.perflevel0.physicalcpu)"
 fi
-
-echo ""
-echo "Debug build complete!"
-echo ""
-
-echo "Starting vtcode chat with advanced features..."
-echo "  - Async file operations enabled for better performance"
-echo "  - Real-time file diffs enabled in chat"
-echo "  - Type your coding questions and requests"
-echo "  - Press Ctrl+C to exit"
-echo "  - The agent has access to file operations and coding tools"
-echo ""
-echo "Tip: Use './scripts/rrf.sh' for fast optimized runs (release-fast profile)"
-echo "      Or add 'alias rrf=\"$(pwd)/scripts/rrf.sh\"' to your shell config for convenience"
-echo "      Or add '$(pwd)/bin' to your PATH and use 'rrf' from anywhere in the project"
-echo ""
 
 # Build optional args from environment
 EXTRA_ARGS=()
@@ -112,16 +95,10 @@ if [[ -n "$WORKSPACE" ]]; then
   EXTRA_ARGS+=(--workspace "$WORKSPACE")
 fi
 
-# Run with advanced features enabled by default
-# Note: Interactive chat is launched via the TUI without a subcommand
-# Increase stack floor for spawned threads in debug runs to reduce overflow risk
+# Run with advanced features enabled by default.
+# A single `cargo run` builds (incrementally) and launches in one pass; the
+# previous `cargo build` + `cargo run` duplicated dependency-graph resolution.
+# Note: Interactive chat is launched via the TUI without a subcommand.
+# Increase stack floor for spawned threads in debug runs to reduce overflow risk.
 export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
-if [[ "${RUSTC_WRAPPER:-}" == "" ]]; then
-    # If RUSTC_WRAPPER was set to empty string, run with it still empty
-    RUSTC_WRAPPER="" cargo run -- "${EXTRA_ARGS[@]}" --show-file-diffs --debug
-    # Clean up the environment variable after running
-    unset RUSTC_WRAPPER
-else
-    # Otherwise run normally
-    cargo run -- "${EXTRA_ARGS[@]}" --show-file-diffs --debug
-fi
+cargo run -- "${EXTRA_ARGS[@]}" --show-file-diffs --debug
