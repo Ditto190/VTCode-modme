@@ -10,59 +10,66 @@ The project uses several GitHub Actions workflows to ensure code quality and aut
 
 **Triggers:**
 
-- Push to `main`/`master` branches
-- Pull requests to `main`/`master` branches
+- Push to `main` (filtered by `.rs`, `.toml`, `.lock`, `.yml`, `.json`, `.md`, `scripts/`)
+- Pull requests to `main` (same path filters)
+- Weekly schedule (Monday 5 AM UTC)
+- Manual `workflow_dispatch`
 
 **Jobs:**
 
 - **Format Check (rustfmt)**: Ensures code is properly formatted
-- **Lint Check (clippy)**: Runs comprehensive linting
-- **Test**: Runs tests on Ubuntu, macOS, and Windows
+- **Lint Check (clippy)**: Runs comprehensive linting with `-D warnings`
+- **Test**: Runs `cargo nextest run` on Ubuntu (plus macOS and Windows for PRs)
 - **Benchmarks**: Performance regression testing
-- **Security Audit**: Checks for vulnerable dependencies
-- **Documentation**: Builds and tests documentation
+- **Security Audit**: `cargo audit` for vulnerable dependencies
+- **Documentation**: Builds and tests documentation (`cargo doc`)
 
-### 2. Code Quality Workflow (`code-quality.yml`)
-
-**Triggers:**
-
-- Push to `main`/`master` branches
-- Pull requests to `main`/`master` branches
-
-**Jobs:**
-
-- **Format Check**: Comprehensive rustfmt checking
-- **Lint Check**: Research-preview clippy linting with all targets and features
-- **Unused Dependencies**: Checks for unused dependencies
-- **Outdated Dependencies**: Identifies outdated dependencies
-- **MSRV**: Minimum Supported Rust Version verification
-- **License Check**: Dependency license compliance
-
-### 3. Development Workflow (`development.yml`)
+### 2. Tool Eval Workflow (`tool-eval.yml`)
 
 **Triggers:**
 
-- Push to `develop`/`dev` branches and feature branches
-- Pull requests to `develop`/`dev` branches
+- Push and PR to `main` on `.rs`, `.toml`, `.lock`, `scripts/`, `.github/workflows/`
 
 **Jobs:**
 
-- **Development Check**: Full development workflow
-- **Performance Check**: Benchmark comparisons for PRs
-- **Code Coverage**: Test coverage reporting
+- **Tool Evaluation**: Validates built-in tool behavior and safety gateways
+- **Integration tests**: End-to-end tool execution checks
 
-### 4. Nightly Build Workflow (`nightly.yml`)
+### 3. Build Linux & Windows (`build-linux-windows.yml`)
 
 **Triggers:**
 
-- Scheduled nightly at 3 AM UTC
-- Manual trigger with reason
+- Manual `workflow_dispatch` with release tag input
+- Called from `release.yml` on publish
 
 **Jobs:**
 
-- **Nightly Test**: Tests against latest Rust nightly
-- **MSRV Test**: Minimum supported version testing
-- **Feature Matrix**: Tests different feature combinations
+- **Build Linux**: Compiles x86_64-unknown-linux-gnu binary
+- **Build Windows**: Compiles x86_64-pc-windows-msvc binary
+- **Upload Artifacts**: Stores compiled binaries for release
+
+### 4. Coverage (`coverage.yml`)
+
+**Triggers:**
+
+- Push and PR to `main` on `.rs`, `Cargo.toml`, `Cargo.lock`, `coverage.yml`
+
+**Jobs:**
+
+- **Code Coverage**: `cargo tarpaulin` with XML output
+- **Coverage Report**: Uploads to code coverage service
+
+### 5. Release (`release.yml`)
+
+**Triggers:**
+
+- Manual `workflow_dispatch` with version tag
+
+**Jobs:**
+
+- **Build Binaries**: Triggers `build-linux-windows.yml`
+- **Create Release**: Drafts GitHub Release with changelog
+- **Publish**: Publishes to crates.io and Homebrew
 
 ## Code Quality Tools
 
