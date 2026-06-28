@@ -108,7 +108,7 @@ impl PermissionAuditLog {
 
         // Use today's date in filename
         let date = Local::now().format("%Y-%m-%d");
-        let log_path = audit_dir.join(format!("permissions-{}.log", date));
+        let log_path = audit_dir.join(format!("permissions-{date}.log"));
 
         info!(?log_path, "Audit log initialized");
 
@@ -126,7 +126,7 @@ impl PermissionAuditLog {
         let json = serde_json::to_string(&event).context("Failed to serialize permission event")?;
 
         let writer = self.writer_mut()?;
-        writeln!(writer, "{}", json).context("Failed to write to audit log")?;
+        writeln!(writer, "{json}").context("Failed to write to audit log")?;
 
         writer.flush().context("Failed to flush audit log")?;
 

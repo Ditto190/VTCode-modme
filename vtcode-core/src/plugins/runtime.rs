@@ -99,10 +99,10 @@ impl PluginRuntime {
 
         let manifest_content = read_file_with_context(&manifest_path, "plugin manifest")
             .await
-            .map_err(|e| PluginError::LoadingError(format!("Failed to read manifest: {}", e)))?;
+            .map_err(|e| PluginError::LoadingError(format!("Failed to read manifest: {e}")))?;
 
         let manifest: PluginManifest = serde_json::from_str(&manifest_content).map_err(|e| {
-            PluginError::ManifestValidationError(format!("Invalid manifest JSON: {}", e))
+            PluginError::ManifestValidationError(format!("Invalid manifest JSON: {e}"))
         })?;
 
         Ok(manifest)

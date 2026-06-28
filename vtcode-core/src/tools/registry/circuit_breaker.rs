@@ -613,8 +613,7 @@ mod tests {
         let final_state = breaker.state();
         assert!(
             final_state == CircuitState::HalfOpen || final_state == CircuitState::Closed,
-            "Circuit should be in HalfOpen or Closed state, got {:?}",
-            final_state
+            "Circuit should be in HalfOpen or Closed state, got {final_state:?}"
         );
 
         // All threads that called allow_request should have gotten a consistent answer

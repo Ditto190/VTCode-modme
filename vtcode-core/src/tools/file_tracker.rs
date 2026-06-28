@@ -128,8 +128,7 @@ size = os.path.getsize(file_path) if exists else 0
 
 print(f"FILE_VERIFICATION: {{file_path}} {{exists}} {{is_file}} {{size}}")
 sys.exit(0 if exists and is_file else 1)
-"#,
-            filename = filename
+"#
         )
     }
 

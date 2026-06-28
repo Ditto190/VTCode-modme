@@ -86,14 +86,14 @@ fn extract_archive(archive_name: &str, archive_bytes: &[u8], destination: &Path)
         let mut archive = Archive::new(decoder);
         archive
             .unpack(destination)
-            .with_context(|| format!("Failed to unpack {}", archive_name))?;
+            .with_context(|| format!("Failed to unpack {archive_name}"))?;
         return Ok(());
     }
 
     if archive_name.ends_with(".zip") {
         let cursor = Cursor::new(archive_bytes);
         let mut archive =
-            ZipArchive::new(cursor).with_context(|| format!("Failed to open {}", archive_name))?;
+            ZipArchive::new(cursor).with_context(|| format!("Failed to open {archive_name}"))?;
         for index in 0..archive.len() {
             let mut file = archive
                 .by_index(index)
@@ -119,7 +119,7 @@ fn extract_archive(archive_name: &str, archive_bytes: &[u8], destination: &Path)
         return Ok(());
     }
 
-    bail!("Unsupported ast-grep archive format: {}", archive_name);
+    bail!("Unsupported ast-grep archive format: {archive_name}");
 }
 
 fn find_extracted_binary(root: &Path) -> Result<PathBuf> {

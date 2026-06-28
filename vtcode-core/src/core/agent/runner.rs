@@ -214,7 +214,7 @@ impl AgentRunner {
             if configured.is_empty() {
                 infer_provider_from_model(&model.as_str())
                     .map(|provider| provider.to_string())
-                    .ok_or_else(|| anyhow!("Failed to determine provider for model {}", model))?
+                    .ok_or_else(|| anyhow!("Failed to determine provider for model {model}"))?
             } else {
                 configured.to_lowercase()
             }

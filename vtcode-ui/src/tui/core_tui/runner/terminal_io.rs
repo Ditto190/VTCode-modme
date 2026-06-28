@@ -48,10 +48,10 @@ pub(crate) fn reset_mouse_pointer_shape() {
 pub(super) fn prepare_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
     terminal
         .hide_cursor()
-        .map_err(|e| anyhow::anyhow!("failed to hide inline cursor: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to hide inline cursor: {e}"))?;
     terminal
         .clear()
-        .map_err(|e| anyhow::anyhow!("failed to clear inline terminal: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to clear inline terminal: {e}"))?;
     Ok(())
 }
 
@@ -61,13 +61,13 @@ pub(super) fn finalize_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Resul
     reset_mouse_pointer_shape();
     terminal
         .show_cursor()
-        .map_err(|e| anyhow::anyhow!("failed to show cursor after inline session: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to show cursor after inline session: {e}"))?;
     terminal
         .clear()
-        .map_err(|e| anyhow::anyhow!("failed to clear inline terminal after session: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to clear inline terminal after session: {e}"))?;
     terminal
         .flush()
-        .map_err(|e| anyhow::anyhow!("failed to flush inline terminal after session: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to flush inline terminal after session: {e}"))?;
     Ok(())
 }
 

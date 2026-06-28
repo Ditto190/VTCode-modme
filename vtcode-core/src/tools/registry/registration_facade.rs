@@ -27,9 +27,7 @@ impl ToolRegistry {
         };
         self.inventory.register_tool(registration)?;
         // Invalidate cache
-        if let Ok(mut cache) = self.cached_available_tools.write() {
-            *cache = None;
-        }
+        *self.cached_available_tools.write() = None;
         self.rebuild_tool_assembly().await;
         self.tool_catalog_state
             .note_explicit_refresh("tool_registration");
@@ -41,9 +39,7 @@ impl ToolRegistry {
     pub async fn unregister_tool(&self, name: &str) -> Result<bool> {
         let removed = self.inventory.remove_tool(name)?.is_some();
         if removed {
-            if let Ok(mut cache) = self.cached_available_tools.write() {
-                *cache = None;
-            }
+            *self.cached_available_tools.write() = None;
             self.rebuild_tool_assembly().await;
             self.tool_catalog_state
                 .note_explicit_refresh("tool_unregistration");

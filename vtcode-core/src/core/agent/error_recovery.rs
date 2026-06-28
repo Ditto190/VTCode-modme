@@ -278,7 +278,7 @@ mod tests {
         for i in 0..15 {
             state.record_error(
                 &format!("tool_{}", i % 3),
-                format!("error {}", i),
+                format!("error {i}"),
                 ErrorType::ToolExecution,
             );
         }

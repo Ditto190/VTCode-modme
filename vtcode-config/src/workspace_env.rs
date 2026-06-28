@@ -57,12 +57,12 @@ pub fn write_workspace_env_value(workspace: &Path, key: &str, value: &str) -> Re
         }
         writer
             .flush()
-            .with_context(|| format!("Failed to flush temporary .env for {}", key))?;
+            .with_context(|| format!("Failed to flush temporary .env for {key}"))?;
     }
 
     temp.as_file()
         .sync_all()
-        .with_context(|| format!("Failed to sync temporary .env for {}", key))?;
+        .with_context(|| format!("Failed to sync temporary .env for {key}"))?;
 
     let _persisted = temp
         .persist(&env_path)

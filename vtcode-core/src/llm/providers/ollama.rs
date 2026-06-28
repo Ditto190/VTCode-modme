@@ -200,7 +200,7 @@ pub async fn fetch_ollama_models(base_url: Option<String>) -> Result<Vec<String>
     );
 
     // Construct the tags endpoint URL
-    let tags_url = format!("{}/api/tags", resolved_base_url);
+    let tags_url = format!("{resolved_base_url}/api/tags");
 
     // Create HTTP client with connection timeout
     let client = http_client::create_client_with_timeout(std::time::Duration::from_secs(5));
@@ -232,7 +232,7 @@ pub async fn fetch_ollama_models(base_url: Option<String>) -> Result<Vec<String>
     let tags_response: OllamaTagsResponse = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse Ollama models response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse Ollama models response: {e}"))?;
 
     // Extract model names
     let model_names: Vec<String> = tags_response

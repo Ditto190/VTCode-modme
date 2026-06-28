@@ -188,10 +188,10 @@ impl SandboxManager {
             let expanded = sp.expand_path();
             let path_str = expanded.display();
             if sp.block_read {
-                profile.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", path_str));
+                profile.push_str(&format!("(deny file-read* (subpath \"{path_str}\"))\n"));
             }
             if sp.block_write {
-                profile.push_str(&format!("(deny file-write* (subpath \"{}\"))\n", path_str));
+                profile.push_str(&format!("(deny file-write* (subpath \"{path_str}\"))\n"));
             }
         }
 
@@ -214,7 +214,7 @@ impl SandboxManager {
             } => {
                 for root in policy.get_writable_roots_with_cwd(sandbox_cwd) {
                     let path = root.root.display();
-                    profile.push_str(&format!("(allow file-write* (subpath \"{}\"))\n", path));
+                    profile.push_str(&format!("(allow file-write* (subpath \"{path}\"))\n"));
                 }
                 append_network_rules(&mut profile, *network_access, network_allowlist);
             }
@@ -242,8 +242,7 @@ impl SandboxManager {
         // Serialize the policy for the sandbox helper (includes Landlock rules)
         let policy_json = serde_json::to_string(policy).map_err(|e| {
             SandboxTransformError::CreationFailed(format!(
-                "failed to serialize sandbox policy: {}",
-                e
+                "failed to serialize sandbox policy: {e}"
             ))
         })?;
 
@@ -251,8 +250,7 @@ impl SandboxManager {
         let seccomp_profile = policy.seccomp_profile();
         let seccomp_json = seccomp_profile.to_json().map_err(|e| {
             SandboxTransformError::CreationFailed(format!(
-                "failed to serialize seccomp profile: {}",
-                e
+                "failed to serialize seccomp profile: {e}"
             ))
         })?;
 
@@ -260,8 +258,7 @@ impl SandboxManager {
         let resource_limits = policy.resource_limits();
         let limits_json = serde_json::to_string(&resource_limits).map_err(|e| {
             SandboxTransformError::CreationFailed(format!(
-                "failed to serialize resource limits: {}",
-                e
+                "failed to serialize resource limits: {e}"
             ))
         })?;
 

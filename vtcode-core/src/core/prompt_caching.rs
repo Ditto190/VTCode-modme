@@ -386,20 +386,18 @@ impl PromptOptimizer {
         context: Option<&str>,
     ) -> Result<String, PromptOptimizationError> {
         let system_prompt = format!(
-            "You are an expert prompt engineer. Your task is to optimize prompts for {} \
+            "You are an expert prompt engineer. Your task is to optimize prompts for {target_model} \
              to make them more effective, clearer, and more likely to produce high-quality responses. \
              Focus on improving clarity, specificity, structure, and effectiveness while preserving \
-             the original intent and requirements.",
-            target_model
+             the original intent and requirements."
         );
 
         let mut user_prompt = format!(
-            "Please optimize the following prompt for {}:\n\nORIGINAL PROMPT:\n{}\n\n",
-            target_model, original_prompt
+            "Please optimize the following prompt for {target_model}:\n\nORIGINAL PROMPT:\n{original_prompt}\n\n"
         );
 
         if let Some(ctx) = context {
-            let _ = write!(user_prompt, "CONTEXT:\n{}\n\n", ctx);
+            let _ = write!(user_prompt, "CONTEXT:\n{ctx}\n\n");
         }
 
         user_prompt.push_str(

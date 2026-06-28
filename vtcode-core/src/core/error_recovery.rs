@@ -156,7 +156,7 @@ impl ErrorRecoveryManager {
         // Use a more efficient ID generation with minimal formatting
         let error_count = self.errors.len();
         let timestamp_short = current_timestamp() % 10000;
-        let error_id = format!("e{}_{}", error_count, timestamp_short);
+        let error_id = format!("e{error_count}_{timestamp_short}");
 
         let error = ExecutionError {
             id: error_id.clone(),

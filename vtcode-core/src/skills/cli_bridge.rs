@@ -144,7 +144,7 @@ impl CliToolBridge {
 
         Ok(CliToolConfig {
             name: name.clone(),
-            description: format!("CLI tool: {}", name),
+            description: format!("CLI tool: {name}"),
             executable_path,
             readme_path,
             schema_path: None,
@@ -318,10 +318,10 @@ impl CliToolBridge {
                 // Named arguments - convert to command-line flags
                 for (key, value) in map {
                     if let Some(s) = value.as_str() {
-                        cmd.arg(format!("--{}", key));
+                        cmd.arg(format!("--{key}"));
                         cmd.arg(s);
                     } else if value.as_bool().is_some_and(|flag| flag) {
-                        cmd.arg(format!("--{}", key));
+                        cmd.arg(format!("--{key}"));
                     }
                 }
             }
@@ -344,7 +344,7 @@ impl CliToolBridge {
         if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
             for field in required {
                 if let Some(field_name) = field.as_str().filter(|f| args.get(*f).is_none()) {
-                    return Err(anyhow!("Missing required field: {}", field_name));
+                    return Err(anyhow!("Missing required field: {field_name}"));
                 }
             }
         }

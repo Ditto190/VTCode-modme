@@ -247,7 +247,7 @@ impl ProactiveGatherer {
         // Read file
         let content = read_file_with_context(file, "context file snippet")
             .await
-            .with_context(|| format!("Failed to read file {:?}", file))?;
+            .with_context(|| format!("Failed to read file {file:?}"))?;
 
         let lines: Vec<&str> = content.lines().collect();
 

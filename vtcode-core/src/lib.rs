@@ -1,12 +1,4 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        clippy::map_err_ignore,
-        clippy::cast_sign_loss,
-        clippy::collapsible_if,
-        clippy::large_futures,
-    )
-)]
+#![cfg_attr(not(test), allow(clippy::large_futures,))]
 // Suppress unreachable in test code (assert macros trigger false positives).
 #![cfg_attr(test, allow(clippy::unreachable))]
 #![recursion_limit = "256"]

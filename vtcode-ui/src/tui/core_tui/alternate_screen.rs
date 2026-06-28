@@ -165,7 +165,7 @@ impl AlternateScreenSession {
         // 1. Leave alternate screen FIRST
         if let Err(e) = execute!(stdout, LeaveAlternateScreen) {
             tracing::warn!(%e, "failed to leave alternate screen");
-            errors.push(format!("leave alternate screen: {}", e));
+            errors.push(format!("leave alternate screen: {e}"));
         }
 
         // 2. Disable focus change (if enabled and TTY)
@@ -173,7 +173,7 @@ impl AlternateScreenSession {
             && let Err(e) = execute!(stdout, DisableFocusChange)
         {
             tracing::warn!(%e, "failed to disable focus change");
-            errors.push(format!("disable focus change: {}", e));
+            errors.push(format!("disable focus change: {e}"));
         }
 
         // 3. Disable bracketed paste (if enabled and TTY)
@@ -181,7 +181,7 @@ impl AlternateScreenSession {
             && let Err(e) = execute!(stdout, DisableBracketedPaste)
         {
             tracing::warn!(%e, "failed to disable bracketed paste");
-            errors.push(format!("disable bracketed paste: {}", e));
+            errors.push(format!("disable bracketed paste: {e}"));
         }
 
         // Drain any terminal responses from the restore sequences above
@@ -193,13 +193,13 @@ impl AlternateScreenSession {
             && let Err(e) = disable_raw_mode()
         {
             tracing::warn!(%e, "failed to disable raw mode");
-            errors.push(format!("disable raw mode: {}", e));
+            errors.push(format!("disable raw mode: {e}"));
         }
 
         // Flush to ensure all changes are applied
         if let Err(e) = stdout.flush() {
             tracing::warn!(%e, "failed to flush stdout");
-            errors.push(format!("flush stdout: {}", e));
+            errors.push(format!("flush stdout: {e}"));
         }
 
         if errors.is_empty() {

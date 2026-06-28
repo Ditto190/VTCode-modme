@@ -460,8 +460,7 @@ mod tests {
             for sub_cmd in sub_commands {
                 assert!(
                     command_might_be_dangerous(&sub_cmd),
-                    "sub-command should be dangerous: {:?}",
-                    sub_cmd
+                    "sub-command should be dangerous: {sub_cmd:?}"
                 );
             }
         }
@@ -503,8 +502,7 @@ mod tests {
             for sub_cmd in sub_commands {
                 assert!(
                     command_might_be_dangerous(&sub_cmd),
-                    "sub-command should be dangerous: {:?}",
-                    sub_cmd
+                    "sub-command should be dangerous: {sub_cmd:?}"
                 );
             }
         }
@@ -575,8 +573,7 @@ mod tests {
             for sub_cmd in sub_commands {
                 assert!(
                     command_might_be_dangerous(&sub_cmd),
-                    "sub-command should be dangerous: {:?}",
-                    sub_cmd
+                    "sub-command should be dangerous: {sub_cmd:?}"
                 );
             }
         }

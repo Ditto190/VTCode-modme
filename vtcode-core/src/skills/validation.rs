@@ -287,7 +287,7 @@ impl SkillValidator {
         // Validate resources
         let resources_result = self.validate_resources(skill_path).await;
         for (name, result) in resources_result {
-            checks.insert(format!("resource_{}", name), result);
+            checks.insert(format!("resource_{name}"), result);
         }
 
         // Security assessment
@@ -424,7 +424,7 @@ impl SkillValidator {
                     return CheckResult {
                         name: "skill_file_valid".to_string(),
                         status: CheckStatus::Failed,
-                        message: format!("SKILL.md validation failed: {}", err),
+                        message: format!("SKILL.md validation failed: {err}"),
                         details: Some(Value::Object(details)),
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
                     };
@@ -483,7 +483,7 @@ impl SkillValidator {
             Err(e) => CheckResult {
                 name: "skill_file_valid".to_string(),
                 status: CheckStatus::Failed,
-                message: format!("Failed to parse SKILL.md: {:#}", e),
+                message: format!("Failed to parse SKILL.md: {e:#}"),
                 details: None,
                 execution_time_ms: start_time.elapsed().as_millis() as u64,
             },
@@ -519,7 +519,7 @@ impl SkillValidator {
                     return CheckResult {
                         name: "scripts_valid".to_string(),
                         status: CheckStatus::Failed,
-                        message: format!("Failed to read scripts directory entry: {}", e),
+                        message: format!("Failed to read scripts directory entry: {e}"),
                         details: None,
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
                     };
@@ -548,7 +548,7 @@ impl SkillValidator {
                         .allowed_script_extensions
                         .contains(&e.to_string())
                 }) {
-                    issues.push(format!("Unsupported script type: {}", ext));
+                    issues.push(format!("Unsupported script type: {ext}"));
                 }
 
                 // Security check
@@ -558,7 +558,7 @@ impl SkillValidator {
                     for blocked in &self.config.blocked_commands {
                         if content.contains(blocked) {
                             issues
-                                .push(format!("Potentially dangerous content found: {}", blocked));
+                                .push(format!("Potentially dangerous content found: {blocked}"));
                         }
                     }
                 }
@@ -618,7 +618,7 @@ impl SkillValidator {
             Ok(entries) => entries,
             Err(error) => {
                 return CheckResult {
-                    name: format!("resource_{}", resource_type),
+                    name: format!("resource_{resource_type}"),
                     status: CheckStatus::Failed,
                     message: format!(
                         "Failed to read resource directory {}: {}",
@@ -636,9 +636,9 @@ impl SkillValidator {
                 Ok(None) => break,
                 Err(e) => {
                     return CheckResult {
-                        name: format!("resource_{}", resource_type),
+                        name: format!("resource_{resource_type}"),
                         status: CheckStatus::Failed,
-                        message: format!("Failed to read resource directory entry: {}", e),
+                        message: format!("Failed to read resource directory entry: {e}"),
                         details: None,
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
                     };
@@ -670,7 +670,7 @@ impl SkillValidator {
         };
 
         let message = if status == CheckStatus::Passed {
-            format!("{} directory is valid", resource_type)
+            format!("{resource_type} directory is valid")
         } else {
             format!(
                 "{} directory has issues: {}",
@@ -680,7 +680,7 @@ impl SkillValidator {
         };
 
         CheckResult {
-            name: format!("resource_{}", resource_type),
+            name: format!("resource_{resource_type}"),
             status,
             message,
             details: Some(serde_json::to_value(&issues).unwrap_or_else(|_| Value::Array(vec![]))),
@@ -794,7 +794,7 @@ impl SkillValidator {
             Err(e) => CheckResult {
                 name: "readme_valid".to_string(),
                 status: CheckStatus::Failed,
-                message: format!("Failed to read README: {}", e),
+                message: format!("Failed to read README: {e}"),
                 details: None,
                 execution_time_ms: start_time.elapsed().as_millis() as u64,
             },
@@ -845,7 +845,7 @@ impl SkillValidator {
                             Err(e) => CheckResult {
                                 name: "schema_valid".to_string(),
                                 status: CheckStatus::Failed,
-                                message: format!("Invalid JSON Schema: {}", e),
+                                message: format!("Invalid JSON Schema: {e}"),
                                 details: Some(
                                     serde_json::json!({"error": format!("Schema compilation failed: {}", e)}),
                                 ),
@@ -856,7 +856,7 @@ impl SkillValidator {
                     Err(e) => CheckResult {
                         name: "schema_valid".to_string(),
                         status: CheckStatus::Failed,
-                        message: format!("Invalid JSON in schema file: {}", e),
+                        message: format!("Invalid JSON in schema file: {e}"),
                         details: None,
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
                     },
@@ -865,7 +865,7 @@ impl SkillValidator {
             Err(e) => CheckResult {
                 name: "schema_valid".to_string(),
                 status: CheckStatus::Failed,
-                message: format!("Failed to read schema file: {}", e),
+                message: format!("Failed to read schema file: {e}"),
                 details: None,
                 execution_time_ms: start_time.elapsed().as_millis() as u64,
             },
@@ -931,7 +931,7 @@ impl SkillValidator {
                         Err(e) => CheckResult {
                             name: "tool_executable".to_string(),
                             status: CheckStatus::Failed,
-                            message: format!("Failed to execute tool: {}", e),
+                            message: format!("Failed to execute tool: {e}"),
                             details: None,
                             execution_time_ms: start_time.elapsed().as_millis() as u64,
                         },
@@ -941,7 +941,7 @@ impl SkillValidator {
             Err(e) => CheckResult {
                 name: "tool_executable".to_string(),
                 status: CheckStatus::Failed,
-                message: format!("Failed to execute tool: {}", e),
+                message: format!("Failed to execute tool: {e}"),
                 details: None,
                 execution_time_ms: start_time.elapsed().as_millis() as u64,
             },

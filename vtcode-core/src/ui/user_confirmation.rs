@@ -161,7 +161,7 @@ impl UserConfirmation {
     #[cold]
     pub fn show_warning(message: &str) -> Result<()> {
         println!("{}", style(" Warning").red().bold());
-        println!("{}", message);
+        println!("{message}");
         println!();
 
         Confirm::new()

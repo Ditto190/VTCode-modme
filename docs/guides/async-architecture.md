@@ -368,7 +368,7 @@ Event::Key(key) if key.code == KeyCode::Enter => {
 
 VT Code uses `#[tokio::test]` for async tests:
 
-**File:** `src/hooks/lifecycle.rs:54`
+**File:** `vtcode-core/src/hooks/lifecycle/tests.rs`
 
 ```rust
 #[tokio::test]

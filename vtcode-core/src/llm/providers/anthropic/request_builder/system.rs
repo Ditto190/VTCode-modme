@@ -76,9 +76,9 @@ pub(crate) fn build_system_prompt(
     if let Some(settings) = &request.coding_agent_settings {
         if let Some(role) = &settings.role_specialization {
             if final_system_prompt.is_empty() {
-                final_system_prompt = format!("You are {}.", role);
+                final_system_prompt = format!("You are {role}.");
             } else {
-                final_system_prompt = format!("You are {}.\n{}", role, final_system_prompt);
+                final_system_prompt = format!("You are {role}.\n{final_system_prompt}");
             }
         }
         if settings.force_xml_tags {

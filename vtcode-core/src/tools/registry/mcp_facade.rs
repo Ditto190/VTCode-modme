@@ -18,14 +18,10 @@ use super::mcp_helpers::normalize_mcp_tool_identifier;
 impl ToolRegistry {
     /// Set the MCP client for this registry.
     pub async fn with_mcp_client(self, mcp_client: Arc<McpClient>) -> Self {
-        if let Ok(mut guard) = self.mcp_client.write() {
-            *guard = Some(mcp_client);
-        }
+        *self.mcp_client.write() = Some(mcp_client);
         self.mcp_tool_index.write().await.clear();
         self.mcp_reverse_index.write().await.clear();
-        if let Ok(mut cache) = self.cached_available_tools.write() {
-            *cache = None;
-        }
+        *self.cached_available_tools.write() = None;
         self.initialized
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self
@@ -33,35 +29,27 @@ impl ToolRegistry {
 
     /// Attach an MCP client without consuming the registry.
     pub async fn set_mcp_client(&self, mcp_client: Arc<McpClient>) {
-        if let Ok(mut guard) = self.mcp_client.write() {
-            *guard = Some(mcp_client);
-        }
+        *self.mcp_client.write() = Some(mcp_client);
         self.mcp_tool_index.write().await.clear();
         self.mcp_reverse_index.write().await.clear();
-        if let Ok(mut cache) = self.cached_available_tools.write() {
-            *cache = None;
-        }
+        *self.cached_available_tools.write() = None;
         self.initialized
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Detach the current MCP client and clear MCP tool indexes.
     pub async fn clear_mcp_client(&self) {
-        if let Ok(mut guard) = self.mcp_client.write() {
-            *guard = None;
-        }
+        *self.mcp_client.write() = None;
         self.mcp_tool_index.write().await.clear();
         self.mcp_reverse_index.write().await.clear();
-        if let Ok(mut cache) = self.cached_available_tools.write() {
-            *cache = None;
-        }
+        *self.cached_available_tools.write() = None;
         self.initialized
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Get the MCP client if available.
     pub fn mcp_client(&self) -> Option<Arc<McpClient>> {
-        self.mcp_client.read().ok().and_then(|g| g.clone())
+        self.mcp_client.read().clone()
     }
 
     /// List all MCP tools.
@@ -74,7 +62,7 @@ impl ToolRegistry {
         let mut mcp_tools = Vec::new();
         for (provider, tools) in index.iter() {
             for tool_name in tools {
-                let canonical_name = format!("mcp::{}::{}", provider, tool_name);
+                let canonical_name = format!("mcp::{provider}::{tool_name}");
                 if let Some(registration) = self.inventory.get_registration(&canonical_name) {
                     mcp_tools.push(McpToolInfo {
                         name: tool_name.clone(),
@@ -103,7 +91,7 @@ impl ToolRegistry {
 
     /// Execute an MCP tool.
     pub async fn execute_mcp_tool(&self, tool_name: &str, args: Value) -> Result<Value> {
-        let client_opt = { self.mcp_client.read().ok().and_then(|g| g.clone()) };
+        let client_opt = self.mcp_client.read().clone();
         if let Some(mcp_client) = client_opt {
             mcp_client.execute_mcp_tool(tool_name, &args).await
         } else {
@@ -131,7 +119,7 @@ impl ToolRegistry {
 
     /// Refresh MCP tools (reconnect to providers and update tool lists).
     pub async fn refresh_mcp_tools(&self) -> Result<()> {
-        let mcp_client_opt = { self.mcp_client.read().ok().and_then(|g| g.clone()) };
+        let mcp_client_opt = self.mcp_client.read().clone();
         if let Some(mcp_client) = mcp_client_opt {
             debug!(
                 "Refreshing MCP tools for {} providers",
@@ -188,7 +176,7 @@ impl ToolRegistry {
                     .flat_map(|(provider, names)| {
                         names
                             .iter()
-                            .map(move |name| format!("mcp::{}::{}", provider, name))
+                            .map(move |name| format!("mcp::{provider}::{name}"))
                     })
                     .collect()
             };
@@ -262,9 +250,7 @@ impl ToolRegistry {
                 mcp_client.update_allowlist(allowlist);
             }
 
-            if let Ok(mut cache) = self.cached_available_tools.write() {
-                *cache = None;
-            }
+            *self.cached_available_tools.write() = None;
             self.rebuild_tool_assembly().await;
             self.tool_catalog_state
                 .note_explicit_refresh("mcp_tool_refresh");

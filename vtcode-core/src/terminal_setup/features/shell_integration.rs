@@ -287,7 +287,7 @@ end
         }
 
         _ => {
-            anyhow::bail!("Unsupported shell type: {}", shell);
+            anyhow::bail!("Unsupported shell type: {shell}");
         }
     };
 

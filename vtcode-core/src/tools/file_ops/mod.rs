@@ -143,7 +143,7 @@ pub(crate) async fn read_byte_range(
 
         let trimmed = line.trim_end_matches('\r');
         if !trimmed.is_empty() || i < lines.len() - 1 {
-            formatted_lines.push(format!("{}: {}", current_line, trimmed));
+            formatted_lines.push(format!("{current_line}: {trimmed}"));
             current_line += 1;
         }
     }

@@ -140,8 +140,8 @@ fn display_json_stats(config: &AgentConfig, metrics: &PerformanceMetrics, tool_n
     });
 
     let rendered = serde_json::to_string_pretty(&stats)
-        .unwrap_or_else(|error| format!(r#"{{"error":"failed to format stats: {}"}}"#, error));
-    println!("{}", rendered);
+        .unwrap_or_else(|error| format!(r#"{{"error":"failed to format stats: {error}"}}"#));
+    println!("{rendered}");
 }
 
 fn display_html_stats(config: &AgentConfig, metrics: &PerformanceMetrics, tool_names: &[String]) {
@@ -173,7 +173,7 @@ fn display_html_stats(config: &AgentConfig, metrics: &PerformanceMetrics, tool_n
     );
     println!("<ul>");
     for tool_name in tool_names {
-        println!("<li>{}</li>", tool_name);
+        println!("<li>{tool_name}</li>");
     }
     println!("</ul>");
 
@@ -197,7 +197,7 @@ fn display_html_stats(config: &AgentConfig, metrics: &PerformanceMetrics, tool_n
         metrics.recovery_success_rate * 100.0
     );
     if let Some(tokens) = metrics.total_tokens_used {
-        println!("<li><strong>Total Tokens:</strong> {}</li>", tokens);
+        println!("<li><strong>Total Tokens:</strong> {tokens}</li>");
     }
     println!(
         "<li><strong>Avg Response Time:</strong> {:.0}ms</li>",

@@ -70,13 +70,8 @@ fn enforce_decoded_size_limit(
         return Ok(());
     }
     anyhow::bail!(
-        "apply_patch payload too large after decoding: decoded={} bytes (source={} bytes, base64={}). \
-         The per-patch cap is {} bytes; split the change into smaller patches or raise {}.",
-        decoded_bytes,
-        source_bytes,
-        was_base64,
-        cap,
-        UNIFIED_FILE_MAX_PAYLOAD_BYTES_ENV
+        "apply_patch payload too large after decoding: decoded={decoded_bytes} bytes (source={source_bytes} bytes, base64={was_base64}). \
+         The per-patch cap is {cap} bytes; split the change into smaller patches or raise {UNIFIED_FILE_MAX_PAYLOAD_BYTES_ENV}."
     )
 }
 

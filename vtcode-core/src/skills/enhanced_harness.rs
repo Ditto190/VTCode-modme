@@ -51,7 +51,7 @@ impl EnhancedSkillHarness {
 
         // Create result message
         let message = if verification_messages.is_empty() {
-            format!("✓ Skill '{}' executed successfully", skill_name)
+            format!("✓ Skill '{skill_name}' executed successfully")
         } else {
             format!(
                 "✓ Skill '{}' executed successfully\n\n{}",
@@ -80,14 +80,13 @@ impl EnhancedSkillHarness {
         let verification = self.helper.verify_and_report(filename).await?;
 
         let details_section = if let Some(details) = generation_details {
-            format!("\n\n{}", details)
+            format!("\n\n{details}")
         } else {
             String::new()
         };
 
         Ok(format!(
-            "✓ Generated {}: {}\n\n{}{}",
-            file_type, filename, verification, details_section
+            "✓ Generated {file_type}: {filename}\n\n{verification}{details_section}"
         ))
     }
 
@@ -127,9 +126,9 @@ pub async fn execute_file_generation_skill(
     let verification = harness.helper.verify_and_report(filename).await?;
 
     let message = if let Some(custom_msg) = success_message {
-        format!("{}\n\n{}", custom_msg, verification)
+        format!("{custom_msg}\n\n{verification}")
     } else {
-        format!("✓ Skill '{}' completed.\n\n{}", skill_name, verification)
+        format!("✓ Skill '{skill_name}' completed.\n\n{verification}")
     };
 
     Ok(message)

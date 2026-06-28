@@ -17,11 +17,7 @@ impl ToolRegistry {
     }
 
     pub(super) fn effective_timeout(&self, category: ToolTimeoutCategory) -> Option<Duration> {
-        let base = self
-            .timeout_policy
-            .read()
-            .ok()
-            .and_then(|p| p.ceiling_for(category));
+        let base = self.timeout_policy.read().ceiling_for(category);
         let adaptive = self
             .resiliency
             .lock()
@@ -46,12 +42,7 @@ impl ToolRegistry {
                 return;
             }
             let before = *adaptive;
-            if let Some(base) = self
-                .timeout_policy
-                .read()
-                .ok()
-                .and_then(|p| p.ceiling_for(category))
-            {
+            if let Some(base) = self.timeout_policy.read().ceiling_for(category) {
                 if *adaptive < base {
                     #[allow(clippy::cast_sign_loss)]
                     let relaxed_ms = (((*adaptive).as_millis() as f64 * (1.0 / tuning.decay_ratio))
@@ -112,12 +103,7 @@ impl ToolRegistry {
         stats.record(duration);
 
         if let Some(p95) = stats.percentile(0.95) {
-            if let Some(ceiling) = self
-                .timeout_policy
-                .read()
-                .ok()
-                .and_then(|p| p.ceiling_for(category))
-            {
+            if let Some(ceiling) = self.timeout_policy.read().ceiling_for(category) {
                 if p95 > ceiling {
                     tracing::warn!(
                         category = %category.label(),

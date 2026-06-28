@@ -11,7 +11,7 @@ pub(super) enum AcpError {
     SerializationError(String),
 
     /// Remote agent returned an error.
-    #[error("Remote error from {agent_id}: {message}{code}", code = if let Some(code) = code { format!(" (code: {})", code) } else { String::new() })]
+    #[error("Remote error from {agent_id}: {message}{code}", code = if let Some(code) = code { format!(" (code: {code})") } else { String::new() })]
     RemoteError {
         agent_id: String,
         message: String,

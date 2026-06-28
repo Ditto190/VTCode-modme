@@ -575,8 +575,7 @@ mod tests {
         let final_state = breaker.state_for_tool("tool_a");
         assert!(
             final_state == CircuitState::HalfOpen || final_state == CircuitState::Closed,
-            "Circuit should be in HalfOpen or Closed state, got {:?}",
-            final_state
+            "Circuit should be in HalfOpen or Closed state, got {final_state:?}"
         );
 
         // At least one thread should have succeeded
@@ -616,14 +615,13 @@ mod tests {
         // Actually, with 3 threads doing 2 failures each = 6 failures total per tool
         // which exceeds threshold of 3, so they should be open
         for i in 0..3 {
-            let tool_name = format!("tool_{}", i);
+            let tool_name = format!("tool_{i}");
             let state = breaker.state_for_tool(&tool_name);
             // With 6 failures per tool (exceeds threshold of 3), circuit should be open
             assert_eq!(
                 state,
                 CircuitState::Open,
-                "Tool {} should be Open after 6 failures",
-                tool_name
+                "Tool {tool_name} should be Open after 6 failures"
             );
         }
     }
@@ -669,8 +667,7 @@ mod tests {
         let final_state = breaker.state_for_tool("tool_x");
         assert!(
             final_state == CircuitState::Closed || final_state == CircuitState::Open,
-            "Circuit should be in a valid state, got {:?}",
-            final_state
+            "Circuit should be in a valid state, got {final_state:?}"
         );
 
         // Verify all operations were counted

@@ -680,8 +680,7 @@ impl OpenAIProvider {
                     let formatted = error_display::format_llm_error(
                         "OpenAI",
                         &format!(
-                            "{INLINE_FILE_LIMIT_ERROR_PREFIX}: '{file_label}' is {} bytes",
-                            inline_file_bytes
+                            "{INLINE_FILE_LIMIT_ERROR_PREFIX}: '{file_label}' is {inline_file_bytes} bytes"
                         ),
                     );
                     return Err(provider::LLMError::InvalidRequest {
@@ -706,8 +705,7 @@ impl OpenAIProvider {
             let formatted = error_display::format_llm_error(
                 "OpenAI",
                 &format!(
-                    "{INLINE_FILE_LIMIT_ERROR_PREFIX}: total inline file bytes = {}",
-                    total_inline_file_bytes
+                    "{INLINE_FILE_LIMIT_ERROR_PREFIX}: total inline file bytes = {total_inline_file_bytes}"
                 ),
             );
             return Err(provider::LLMError::InvalidRequest {

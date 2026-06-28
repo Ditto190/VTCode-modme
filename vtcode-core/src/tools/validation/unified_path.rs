@@ -23,8 +23,7 @@ pub async fn validate_and_resolve_path(workspace_root: &Path, path_str: &str) ->
 
     if !normalized.starts_with(&normalized_root) {
         bail!(
-            "Path '{}' resolves outside the workspace boundary",
-            path_str
+            "Path '{path_str}' resolves outside the workspace boundary"
         );
     }
 
@@ -40,8 +39,7 @@ pub async fn validate_and_resolve_path(workspace_root: &Path, path_str: &str) ->
 
     if !canonical.starts_with(&canonical_root) {
         bail!(
-            "Path '{}' resolves outside the workspace boundary (after symlink resolution)",
-            path_str
+            "Path '{path_str}' resolves outside the workspace boundary (after symlink resolution)"
         );
     }
 

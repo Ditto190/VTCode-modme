@@ -31,20 +31,12 @@ pub fn upsert_harness_limits_section(
     if prompt.is_empty() {
         let _ = writeln!(
             prompt,
-            "[Harness Limits]\n- max_tool_calls_per_turn: {}\n- max_tool_wall_clock_secs: {}\n- max_tool_retries: {}\n- max_readonly_tool_calls: {} (global budget across all read-only tools; produce output before exhausting)",
-            max_tool_calls_label,
-            max_tool_wall_clock_secs,
-            max_tool_retries,
-            MAX_TOTAL_READONLY_CALLS
+            "[Harness Limits]\n- max_tool_calls_per_turn: {max_tool_calls_label}\n- max_tool_wall_clock_secs: {max_tool_wall_clock_secs}\n- max_tool_retries: {max_tool_retries}\n- max_readonly_tool_calls: {MAX_TOTAL_READONLY_CALLS} (global budget across all read-only tools; produce output before exhausting)"
         );
     } else {
         let _ = writeln!(
             prompt,
-            "\n[Harness Limits]\n- max_tool_calls_per_turn: {}\n- max_tool_wall_clock_secs: {}\n- max_tool_retries: {}\n- max_readonly_tool_calls: {} (global budget across all read-only tools; produce output before exhausting)",
-            max_tool_calls_label,
-            max_tool_wall_clock_secs,
-            max_tool_retries,
-            MAX_TOTAL_READONLY_CALLS
+            "\n[Harness Limits]\n- max_tool_calls_per_turn: {max_tool_calls_label}\n- max_tool_wall_clock_secs: {max_tool_wall_clock_secs}\n- max_tool_retries: {max_tool_retries}\n- max_readonly_tool_calls: {MAX_TOTAL_READONLY_CALLS} (global budget across all read-only tools; produce output before exhausting)"
         );
     }
 }

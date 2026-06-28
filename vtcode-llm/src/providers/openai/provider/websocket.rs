@@ -272,7 +272,7 @@ impl OpenAIProvider {
 
                 ws_request.headers_mut().insert(
                     "Authorization",
-                    HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|err| {
+                    HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|err| {
                         format_provider_error(format!("Invalid OpenAI authorization header: {err}"))
                     })?,
                 );

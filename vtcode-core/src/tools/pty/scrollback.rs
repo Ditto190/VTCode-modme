@@ -635,7 +635,7 @@ mod tests {
 
         // Fill with 2KB of data (100 lines x 22 bytes each = 2.2KB)
         for i in 0..100 {
-            scrollback.push_text(&format!("line-{:04}-data-here\n", i)); // ~22 bytes per line
+            scrollback.push_text(&format!("line-{i:04}-data-here\n")); // ~22 bytes per line
         }
 
         // Should have stopped accepting data after hitting limit
@@ -697,7 +697,7 @@ mod tests {
 
         // Push 5KB of data
         for i in 0..100 {
-            scrollback.push_text(&format!("line-{:04}-xxxxxxxxxx\n", i)); // ~50 bytes each
+            scrollback.push_text(&format!("line-{i:04}-xxxxxxxxxx\n")); // ~50 bytes each
         }
 
         assert!(!scrollback.has_overflow());
@@ -750,7 +750,7 @@ mod tests {
 
         // Push 1KB of data (should drop half)
         for i in 0..50 {
-            scrollback.push_text(&format!("line-{:04}-data\n", i)); // ~16 bytes each
+            scrollback.push_text(&format!("line-{i:04}-data\n")); // ~16 bytes each
         }
 
         let metrics = scrollback.metrics();

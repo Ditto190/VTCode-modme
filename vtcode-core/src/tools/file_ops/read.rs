@@ -391,11 +391,10 @@ impl FileOpsTool {
             let received = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
             anyhow!(
                 "Error: Invalid 'read_file' arguments. Missing required path parameter.\n\
-                Received: {}\n\
+                Received: {received}\n\
                 Expected: {{\"path\": \"file/path\"}} or {{\"file_path\": \"file/path\"}}\n\
                 Accepted path parameters: path, file_path, filepath, target_path, file, p\n\
-                Optional params: offset_lines, limit, max_bytes, max_tokens",
-                received
+                Optional params: offset_lines, limit, max_bytes, max_tokens"
             )
         })?;
 
@@ -492,7 +491,7 @@ impl FileOpsTool {
 
                         let mut builder = ToolResponseBuilder::new(tools::READ_FILE)
                             .success()
-                            .message(format!("Successfully read file {}", requested_path))
+                            .message(format!("Successfully read file {requested_path}"))
                             .content(&response_content)
                             .field("path", json!(requested_path.clone()))
                             .field("no_spool", json!(true))
@@ -543,9 +542,7 @@ impl FileOpsTool {
                     Err(e) => {
                         if is_new_request {
                             return Err(anyhow!(
-                                "Failed to parse arguments for read_file handler: {}. Args: {:?}",
-                                e,
-                                args
+                                "Failed to parse arguments for read_file handler: {e}. Args: {args:?}"
                             ));
                         }
                     }
@@ -659,9 +656,7 @@ impl FileOpsTool {
         if let Some(directory_path) = directory_candidate {
             let display_path = self.workspace_relative_display(&directory_path);
             return Err(anyhow!(
-                "Error: Path '{}' is a directory, not a file. Use unified_search with action=\"list\" and path=\"{}\" to inspect it, or set mode=\"recursive\" for nested discovery.",
-                display_path,
-                display_path,
+                "Error: Path '{display_path}' is a directory, not a file. Use unified_search with action=\"list\" and path=\"{display_path}\" to inspect it, or set mode=\"recursive\" for nested discovery.",
             ));
         }
 
@@ -1063,7 +1058,7 @@ mod read_tests {
 
         // Create test content with 50 lines
         let test_content = (1..=50)
-            .map(|i| format!("line-{}", i))
+            .map(|i| format!("line-{i}"))
             .collect::<Vec<_>>()
             .join("\n")
             + "\n";

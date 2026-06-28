@@ -57,7 +57,7 @@ impl AutoSkillVerifier {
         let final_output = if enhanced.len() > original_output.len() {
             // Files were detected and verification added
             let verification = enhanced
-                .strip_prefix(&format!("{}\n\n", original_output))
+                .strip_prefix(&format!("{original_output}\n\n"))
                 .unwrap_or(&enhanced);
 
             format!(
@@ -65,7 +65,7 @@ impl AutoSkillVerifier {
                 skill_name,
                 original_output,
                 if !verification.is_empty() {
-                    format!("\n\n{}", verification)
+                    format!("\n\n{verification}")
                 } else {
                     String::new()
                 }
@@ -138,8 +138,7 @@ impl AutoSkillVerifier {
         output_hint: Option<&str>,
     ) -> Result<String> {
         let mut response = format!(
-            "✓ Skill '{}' executed successfully\n\n{}",
-            skill_name, details
+            "✓ Skill '{skill_name}' executed successfully\n\n{details}"
         );
 
         if let Some(hint) = output_hint {
@@ -158,8 +157,7 @@ impl AutoSkillVerifier {
     /// Create error response with helpful suggestions
     pub fn create_error_response(skill_name: &str, error: &str) -> String {
         format!(
-            "❌ Skill '{}' failed\n\nError: {}\n\n💡 Try:\n   • Verify the skill is properly installed\n   • Check that all dependencies are available\n   • Ensure you have the required permissions",
-            skill_name, error
+            "❌ Skill '{skill_name}' failed\n\nError: {error}\n\n💡 Try:\n   • Verify the skill is properly installed\n   • Check that all dependencies are available\n   • Ensure you have the required permissions"
         )
     }
 }

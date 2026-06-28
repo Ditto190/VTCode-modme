@@ -154,7 +154,7 @@ pub fn normalize_permission_rule(raw: &str) -> String {
     // Has path specifier - normalize the tool name part
     if let Some((tool_part, specifier)) = parse_tool_specifier_parts(trimmed) {
         let normalized_tool = normalize_tool_name_to_semantic(tool_part);
-        return format!("{}({})", normalized_tool, specifier);
+        return format!("{normalized_tool}({specifier})");
     }
 
     // Raw tool name - normalize to semantic

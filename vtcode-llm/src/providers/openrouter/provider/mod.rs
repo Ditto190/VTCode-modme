@@ -241,8 +241,7 @@ impl OpenRouterProvider {
         }
 
         let combined_error = format!(
-            "HTTP {}: {} | {} fallback failed with HTTP {}: {}",
-            original_status, original_error, label, fallback_status, fallback_text
+            "HTTP {original_status}: {original_error} | {label} fallback failed with HTTP {fallback_status}: {fallback_text}"
         );
         let formatted_error = error_display::format_llm_error("OpenRouter", &combined_error);
         Err(LLMError::Provider {
@@ -307,7 +306,7 @@ impl OpenRouterProvider {
             .await
             .map_err(|e| {
                 let formatted_error =
-                    error_display::format_llm_error("OpenRouter", &format!("Network error: {}", e));
+                    error_display::format_llm_error("OpenRouter", &format!("Network error: {e}"));
                 LLMError::Network {
                     message: formatted_error,
                     metadata: None,

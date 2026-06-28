@@ -62,7 +62,7 @@ impl TraceStore {
             .with_context(|| "Failed to serialize trace record")?;
 
         write_file_with_context_sync(&path, &json, "trace record")
-            .with_context(|| format!("Failed to write trace to {:?}", path))?;
+            .with_context(|| format!("Failed to write trace to {path:?}"))?;
 
         Ok(path)
     }
@@ -76,10 +76,10 @@ impl TraceStore {
     /// Read a trace record from a specific path.
     pub fn read_trace_from_path(&self, path: &Path) -> Result<TraceRecord> {
         let content = read_file_with_context_sync(path, "trace record")
-            .with_context(|| format!("Failed to read trace: {:?}", path))?;
+            .with_context(|| format!("Failed to read trace: {path:?}"))?;
 
         let trace: TraceRecord = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse trace: {:?}", path))?;
+            .with_context(|| format!("Failed to parse trace: {path:?}"))?;
 
         Ok(trace)
     }
@@ -87,14 +87,14 @@ impl TraceStore {
     /// Read a trace by git revision.
     pub fn read_by_revision(&self, revision: &str) -> Result<Option<TraceRecord>> {
         let short_rev = &revision[..revision.len().min(12)];
-        let filename = format!("{}.json", short_rev);
+        let filename = format!("{short_rev}.json");
         let path = self.base_dir.join(&filename);
 
         if path.exists() {
             Ok(Some(self.read_trace_from_path(&path)?))
         } else {
             // Try full revision
-            let filename = format!("{}.json", revision);
+            let filename = format!("{revision}.json");
             let path = self.base_dir.join(&filename);
             if path.exists() {
                 Ok(Some(self.read_trace_from_path(&path)?))
@@ -136,7 +136,7 @@ impl TraceStore {
         let path = self.base_dir.join(filename);
         if path.exists() {
             fs::remove_file(&path)
-                .with_context(|| format!("Failed to delete trace: {:?}", path))?;
+                .with_context(|| format!("Failed to delete trace: {path:?}"))?;
         }
         Ok(())
     }
@@ -163,7 +163,7 @@ impl TraceStore {
         // Prefer git revision for filename (first 12 chars)
         if let Some(vcs) = &trace.vcs {
             let short_rev = &vcs.revision[..vcs.revision.len().min(12)];
-            format!("{}.json", short_rev)
+            format!("{short_rev}.json")
         } else {
             // Fall back to trace ID
             format!("{}.json", trace.id)
@@ -194,7 +194,7 @@ impl TraceStore {
 
         write_file_with_context(&path, &json, "trace record")
             .await
-            .with_context(|| format!("Failed to write trace to {:?}", path))?;
+            .with_context(|| format!("Failed to write trace to {path:?}"))?;
 
         Ok(path)
     }
@@ -203,10 +203,10 @@ impl TraceStore {
     pub async fn read_trace_from_path_async(&self, path: &Path) -> Result<TraceRecord> {
         let content = read_file_with_context(path, "trace record")
             .await
-            .with_context(|| format!("Failed to read trace: {:?}", path))?;
+            .with_context(|| format!("Failed to read trace: {path:?}"))?;
 
         let trace: TraceRecord = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse trace: {:?}", path))?;
+            .with_context(|| format!("Failed to parse trace: {path:?}"))?;
 
         Ok(trace)
     }
@@ -214,14 +214,14 @@ impl TraceStore {
     /// Read a trace by git revision (async).
     pub async fn read_by_revision_async(&self, revision: &str) -> Result<Option<TraceRecord>> {
         let short_rev = &revision[..revision.len().min(12)];
-        let filename = format!("{}.json", short_rev);
+        let filename = format!("{short_rev}.json");
         let path = self.base_dir.join(&filename);
 
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             Ok(Some(self.read_trace_from_path_async(&path).await?))
         } else {
             // Try full revision
-            let filename = format!("{}.json", revision);
+            let filename = format!("{revision}.json");
             let path = self.base_dir.join(&filename);
             if tokio::fs::try_exists(&path).await.unwrap_or(false) {
                 Ok(Some(self.read_trace_from_path_async(&path).await?))

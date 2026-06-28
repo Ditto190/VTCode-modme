@@ -264,8 +264,7 @@ impl DecisionTracker {
                         }
                     };
                     format!(
-                        "- [turn {}] tool:{} args={} (t={})",
-                        turn, name, arg_preview, ts
+                        "- [turn {turn}] tool:{name} args={arg_preview} (t={ts})"
                     )
                 }
                 Action::Response {
@@ -275,8 +274,7 @@ impl DecisionTracker {
                     let preview =
                         vtcode_commons::formatting::truncate_byte_budget(content, 120, "…");
                     format!(
-                        "- [turn {}] response:{:?} {} (t={})",
-                        turn, response_type, preview, ts
+                        "- [turn {turn}] response:{response_type:?} {preview} (t={ts})"
                     )
                 }
                 Action::ErrorRecovery {
@@ -284,8 +282,7 @@ impl DecisionTracker {
                     recovery_strategy,
                 } => {
                     format!(
-                        "- [turn {}] recovery {} via {} (t={})",
-                        turn, error_type, recovery_strategy, ts
+                        "- [turn {turn}] recovery {error_type} via {recovery_strategy} (t={ts})"
                     )
                 }
             };

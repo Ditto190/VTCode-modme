@@ -224,7 +224,7 @@ impl CodeExecutor {
             Language::Python3 => "py",
             Language::JavaScript => "js",
         };
-        let code_file = code_temp_dir.join(format!("exec_{}.{}", timestamp, ext));
+        let code_file = code_temp_dir.join(format!("exec_{timestamp}.{ext}"));
 
         write_file_with_context(&code_file, &complete_code, "temporary code file").await?;
 
@@ -278,7 +278,7 @@ impl CodeExecutor {
                         id: request.id,
                         success: false,
                         result: None,
-                        error: Some(format!("PII processing error: {}", e)),
+                        error: Some(format!("PII processing error: {e}")),
                         duration_ms: None,
                         cache_hit: None,
                     };
@@ -411,16 +411,14 @@ impl CodeExecutor {
     /// Prepare Python code with SDK and user code.
     fn prepare_python_code(&self, sdk: &str, user_code: &str) -> Result<String> {
         Ok(format!(
-            "{}\n\n# User code\n{}\n\n# Capture result\nimport json\nif 'result' in dir():\n    print('__JSON_RESULT__')\n    print(json.dumps(result, default=str))\n    print('__END_JSON__')",
-            sdk, user_code
+            "{sdk}\n\n# User code\n{user_code}\n\n# Capture result\nimport json\nif 'result' in dir():\n    print('__JSON_RESULT__')\n    print(json.dumps(result, default=str))\n    print('__END_JSON__')"
         ))
     }
 
     /// Prepare JavaScript code with SDK and user code.
     fn prepare_javascript_code(&self, sdk: &str, user_code: &str) -> Result<String> {
         Ok(format!(
-            "{}\n\n// User code\n(async () => {{\n{}\n\n// Capture result\nif (typeof result !== 'undefined') {{\n  console.log('__JSON_RESULT__');\n  console.log(JSON.stringify(result, null, 2));\n  console.log('__END_JSON__');\n}}\n}})();\n",
-            sdk, user_code
+            "{sdk}\n\n// User code\n(async () => {{\n{user_code}\n\n// Capture result\nif (typeof result !== 'undefined') {{\n  console.log('__JSON_RESULT__');\n  console.log(JSON.stringify(result, null, 2));\n  console.log('__END_JSON__');\n}}\n}})();\n"
         ))
     }
 

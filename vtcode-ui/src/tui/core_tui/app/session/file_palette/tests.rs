@@ -144,7 +144,7 @@ fn test_no_false_positive_with_a() {
 #[test]
 fn test_tree_structure() {
     let mut palette = FilePalette::new(PathBuf::from("/workspace"));
-    let files: Vec<String> = (0..50).map(|i| format!("file{}.rs", i)).collect();
+    let files: Vec<String> = (0..50).map(|i| format!("file{i}.rs")).collect();
     palette.load_files(files);
 
     // Tree has no pagination — all items in one page

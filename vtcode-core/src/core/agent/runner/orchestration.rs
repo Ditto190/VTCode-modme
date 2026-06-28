@@ -654,7 +654,7 @@ impl AgentRunner {
             markdown.push_str("\n## Scorecard\n");
             for (label, score) in scorecard.entries() {
                 if let Some(score) = score {
-                    let _ = writeln!(markdown, "- {}: {}/5", label, score);
+                    let _ = writeln!(markdown, "- {label}: {score}/5");
                 }
             }
         }
@@ -737,7 +737,7 @@ impl AgentRunner {
                 let verify = json_string_list(item, "verify");
 
                 let _ = writeln!(markdown, "- Step {}: {}", index + 1, description);
-                let _ = writeln!(markdown, "- Outcome: {}", outcome);
+                let _ = writeln!(markdown, "- Outcome: {outcome}");
                 if !files.is_empty() {
                     let _ = writeln!(markdown, "- Files: {}", files.join(", "));
                 }

@@ -358,8 +358,7 @@ async fn capture_shell_snapshot(shell_path: &str) -> Result<ShellSnapshot> {
     let shell_kind = ShellKind::from_path(shell_path);
 
     let capture_script = format!(
-        "printf '{}\\n'; env -0; printf '\\n{}\\n'",
-        ENV_BEGIN_MARKER, ENV_END_MARKER
+        "printf '{ENV_BEGIN_MARKER}\\n'; env -0; printf '\\n{ENV_END_MARKER}\\n'"
     );
 
     let output = Command::new(shell_path)
@@ -488,8 +487,7 @@ mod tests {
     #[test]
     fn test_parse_env_output() {
         let output = format!(
-            "some noise\n{}\nHOME=/home/user\0PATH=/usr/bin\0EXCLUDED=yes\0\n{}\nmore noise",
-            ENV_BEGIN_MARKER, ENV_END_MARKER
+            "some noise\n{ENV_BEGIN_MARKER}\nHOME=/home/user\0PATH=/usr/bin\0EXCLUDED=yes\0\n{ENV_END_MARKER}\nmore noise"
         );
         let env = parse_env_output(&output).unwrap();
         assert_eq!(env.get("HOME"), Some(&"/home/user".to_string()));

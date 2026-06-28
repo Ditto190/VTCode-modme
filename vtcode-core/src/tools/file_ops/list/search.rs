@@ -41,7 +41,7 @@ impl FileOpsTool {
             .max_depth(Some(10))
             .build()
         {
-            let entry = entry.map_err(|e| anyhow!("Walk error: {}", e))?;
+            let entry = entry.map_err(|e| anyhow!("Walk error: {e}"))?;
             let path = entry.path();
 
             if self.should_exclude(path).await {
@@ -109,7 +109,7 @@ impl FileOpsTool {
             .max_depth(Some(10))
             .build()
         {
-            let entry = entry.map_err(|e| anyhow!("Walk error: {}", e))?;
+            let entry = entry.map_err(|e| anyhow!("Walk error: {e}"))?;
             let path = entry.path();
 
             if self.should_exclude(path).await {

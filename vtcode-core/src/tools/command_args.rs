@@ -15,7 +15,7 @@ fn collect_indexed_command_parts(
 ) -> Result<Vec<String>, &'static str> {
     let mut parts = Vec::new();
     let mut index = start_index;
-    while let Some(value) = payload.get(&format!("command.{}", index)) {
+    while let Some(value) = payload.get(&format!("command.{index}")) {
         let Some(part) = value.as_str() else {
             return Err(INDEXED_COMMAND_TYPE_ERROR);
         };
@@ -706,8 +706,7 @@ mod tests {
         ] {
             assert!(
                 is_readonly_command_string(&json!({"command": cmd})),
-                "expected '{}' to be read-only",
-                cmd
+                "expected '{cmd}' to be read-only"
             );
         }
     }
@@ -737,8 +736,7 @@ mod tests {
         ] {
             assert!(
                 !is_readonly_command_string(&json!({"command": cmd})),
-                "expected '{}' to be rejected",
-                cmd
+                "expected '{cmd}' to be rejected"
             );
         }
     }
@@ -754,8 +752,7 @@ mod tests {
         ] {
             assert!(
                 !is_readonly_command_string(&json!({"command": cmd})),
-                "expected '{}' to be rejected",
-                cmd
+                "expected '{cmd}' to be rejected"
             );
         }
     }

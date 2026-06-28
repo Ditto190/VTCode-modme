@@ -45,7 +45,7 @@ impl PluginCache {
 
         // Create cache directory if it doesn't exist
         fs::create_dir_all(&self.cache_dir).await.map_err(|e| {
-            PluginError::LoadingError(format!("Failed to create cache directory: {}", e))
+            PluginError::LoadingError(format!("Failed to create cache directory: {e}"))
         })?;
 
         // Create plugin-specific cache directory
@@ -54,7 +54,7 @@ impl PluginCache {
         // Remove existing cache if it exists
         if cache_path.exists() {
             fs::remove_dir_all(&cache_path).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to remove existing cache: {}", e))
+                PluginError::LoadingError(format!("Failed to remove existing cache: {e}"))
             })?;
         }
 
@@ -72,15 +72,15 @@ impl PluginCache {
     async fn copy_plugin_to_cache(&self, source: &Path, destination: &Path) -> PluginResult<()> {
         Box::pin(async {
             fs::create_dir_all(destination).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to create destination directory: {}", e))
+                PluginError::LoadingError(format!("Failed to create destination directory: {e}"))
             })?;
 
             let mut entries = fs::read_dir(source).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to read source directory: {}", e))
+                PluginError::LoadingError(format!("Failed to read source directory: {e}"))
             })?;
 
             while let Some(entry) = entries.next_entry().await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to read directory entry: {}", e))
+                PluginError::LoadingError(format!("Failed to read directory entry: {e}"))
             })? {
                 let src_path = entry.path();
                 let dst_path = destination.join(entry.file_name());
@@ -93,7 +93,7 @@ impl PluginCache {
                 } else {
                     // Copy file to cache
                     fs::copy(&src_path, &dst_path).await.map_err(|e| {
-                        PluginError::LoadingError(format!("Failed to copy file: {}", e))
+                        PluginError::LoadingError(format!("Failed to copy file: {e}"))
                     })?;
                 }
             }
@@ -120,7 +120,7 @@ impl PluginCache {
         if let Some(cache_path) = self.cached_plugins.get(plugin_id) {
             if cache_path.exists() {
                 fs::remove_dir_all(cache_path).await.map_err(|e| {
-                    PluginError::LoadingError(format!("Failed to remove cached plugin: {}", e))
+                    PluginError::LoadingError(format!("Failed to remove cached plugin: {e}"))
                 })?;
             }
             self.cached_plugins.remove(plugin_id);
@@ -133,7 +133,7 @@ impl PluginCache {
         if self.cache_dir.exists() {
             fs::remove_dir_all(&self.cache_dir)
                 .await
-                .map_err(|e| PluginError::LoadingError(format!("Failed to clear cache: {}", e)))?;
+                .map_err(|e| PluginError::LoadingError(format!("Failed to clear cache: {e}")))?;
         }
 
         self.cached_plugins.clear();

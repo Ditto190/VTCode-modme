@@ -321,8 +321,7 @@ mod tests {
     fn mutating_tool_in_planning_workflow_prompt_detected() {
         let err = validate_prompt_catalog_alignment(
             &format!(
-                "{}\nyou may call apply_patch to write files",
-                PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE
+                "{PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE}\nyou may call apply_patch to write files"
             ),
             &snapshot(true),
             true,

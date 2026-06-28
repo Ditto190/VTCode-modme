@@ -694,17 +694,10 @@ fn archive_file_name_for_label(
     let pid = process::id();
     let attempt_suffix = match attempt.unwrap_or_default() {
         0 => String::new(),
-        value => format!("-{:02}", value),
+        value => format!("-{value:02}"),
     };
     format!(
-        "{}-{}-{}_{:06}-{:05}{}.{}",
-        SESSION_FILE_PREFIX,
-        sanitized_label,
-        timestamp,
-        micros,
-        pid,
-        attempt_suffix,
-        SESSION_FILE_EXTENSION
+        "{SESSION_FILE_PREFIX}-{sanitized_label}-{timestamp}_{micros:06}-{pid:05}{attempt_suffix}.{SESSION_FILE_EXTENSION}"
     )
 }
 
@@ -752,8 +745,7 @@ fn validate_session_identifier(session_identifier: &str) -> Result<()> {
     }
 
     Err(anyhow::anyhow!(
-        "Invalid session identifier '{}': only ASCII letters, digits, '-' and '_' are allowed",
-        session_identifier
+        "Invalid session identifier '{session_identifier}': only ASCII letters, digits, '-' and '_' are allowed"
     ))
 }
 
@@ -762,7 +754,7 @@ fn session_archive_path_for_identifier(
     session_identifier: &str,
 ) -> Result<PathBuf> {
     validate_session_identifier(session_identifier)?;
-    Ok(sessions_dir.join(format!("{}.{}", session_identifier, SESSION_FILE_EXTENSION)))
+    Ok(sessions_dir.join(format!("{session_identifier}.{SESSION_FILE_EXTENSION}")))
 }
 
 fn reserve_new_session_archive_path(
@@ -772,8 +764,7 @@ fn reserve_new_session_archive_path(
     let path = session_archive_path_for_identifier(sessions_dir, session_identifier)?;
     if path.exists() {
         return Err(anyhow::anyhow!(
-            "Session archive identifier '{}' already exists",
-            session_identifier
+            "Session archive identifier '{session_identifier}' already exists"
         ));
     }
 

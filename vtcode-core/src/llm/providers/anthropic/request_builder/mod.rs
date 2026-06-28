@@ -288,7 +288,7 @@ pub fn convert_to_anthropic_format(
     };
 
     serde_json::to_value(anthropic_request).map_err(|e| LLMError::Provider {
-        message: format!("Serialization error: {}", e),
+        message: format!("Serialization error: {e}"),
         metadata: None,
     })
 }

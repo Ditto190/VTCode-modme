@@ -207,8 +207,8 @@ impl ModelsManager {
                 if let Some(name) = m.get("name").and_then(|s| s.as_str()) {
                     models.push(ModelInfo {
                         slug: name.to_string(),
-                        display_name: format!("{} (Ollama)", name),
-                        description: format!("Ollama model: {}", name),
+                        display_name: format!("{name} (Ollama)"),
+                        description: format!("Ollama model: {name}"),
                         provider: Provider::Ollama,
                         default_reasoning_level: crate::config::types::ReasoningEffortLevel::Medium,
                         supported_reasoning_levels: vec![],

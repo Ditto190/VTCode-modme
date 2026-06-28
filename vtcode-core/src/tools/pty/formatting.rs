@@ -26,7 +26,7 @@ pub(super) fn format_terminal_file(session: &VTCodePtySession, output: &str) -> 
         content.push_str(&format!("args: {}\n", session.args.join(" ")));
     }
     if let Some(cwd) = &session.working_dir {
-        content.push_str(&format!("cwd: {}\n", cwd));
+        content.push_str(&format!("cwd: {cwd}\n"));
     }
     content.push_str(&format!("size: {}x{}\n", session.cols, session.rows));
     content.push_str("---\n\n");

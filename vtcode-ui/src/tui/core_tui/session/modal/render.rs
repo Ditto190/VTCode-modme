@@ -1088,7 +1088,7 @@ pub fn modal_list_item_lines(
     }
 
     if let Some(badge) = &item.badge {
-        let badge_label = format!("[{}]", badge);
+        let badge_label = format!("[{badge}]");
         primary_spans.push(Span::styled(
             badge_label,
             modal_badge_style(badge.as_str(), styles),

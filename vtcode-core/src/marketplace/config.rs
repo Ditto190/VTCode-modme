@@ -235,7 +235,7 @@ impl MarketplaceSettings {
                 plugin.enabled = true;
                 Ok(())
             }
-            None => bail!("Plugin '{}' not found in installed plugins", plugin_id),
+            None => bail!("Plugin '{plugin_id}' not found in installed plugins"),
         }
     }
 
@@ -250,7 +250,7 @@ impl MarketplaceSettings {
                 plugin.enabled = false;
                 Ok(())
             }
-            None => bail!("Plugin '{}' not found in installed plugins", plugin_id),
+            None => bail!("Plugin '{plugin_id}' not found in installed plugins"),
         }
     }
 }

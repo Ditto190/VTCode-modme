@@ -164,7 +164,7 @@ impl PluginRuntime {
         if plugins.remove(plugin_id).is_some() {
             Ok(())
         } else {
-            bail!("plugin {} not found in runtime", plugin_id)
+            bail!("plugin {plugin_id} not found in runtime")
         }
     }
 

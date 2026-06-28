@@ -60,7 +60,7 @@ fn agent_identity_label(agent_name: &str) -> String {
         "plan" => "VT Code (Plan mode)".to_string(),
         "explorer" => "VT Code (Explorer mode)".to_string(),
         "worker" => "VT Code (Worker mode)".to_string(),
-        other => format!("VT Code ({})", other),
+        other => format!("VT Code ({other})"),
     }
 }
 
@@ -750,8 +750,7 @@ mod tests {
         let approx_tokens = minimal_system_prompt().len() / 4;
         assert!(
             approx_tokens < 220,
-            "Minimal prompt should stay compact, got ~{}",
-            approx_tokens
+            "Minimal prompt should stay compact, got ~{approx_tokens}"
         );
     }
 
@@ -760,8 +759,7 @@ mod tests {
         let approx_tokens = default_system_prompt().len() / 4;
         assert!(
             approx_tokens < 420,
-            "Default prompt should stay compact, got ~{}",
-            approx_tokens
+            "Default prompt should stay compact, got ~{approx_tokens}"
         );
     }
 
@@ -799,7 +797,7 @@ mod tests {
 
         assert!(prompt.contains("### Instruction map"));
         assert!(prompt.contains("### On-demand loading"));
-        assert!(approx_tokens <= 1100, "got ~{} tokens", approx_tokens);
+        assert!(approx_tokens <= 1100, "got ~{approx_tokens} tokens");
     }
 
     #[tokio::test]

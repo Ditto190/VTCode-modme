@@ -75,8 +75,7 @@ where
             Err(e) => {
                 // Log the lock poisoning error instead of silently dropping the write
                 eprintln!(
-                    "WARNING: LrMap::insert failed due to poisoned mutex: {}. Write dropped.",
-                    e
+                    "WARNING: LrMap::insert failed due to poisoned mutex: {e}. Write dropped."
                 );
             }
         }
@@ -91,8 +90,7 @@ where
             Err(e) => {
                 // Log the lock poisoning error instead of silently dropping the write
                 eprintln!(
-                    "WARNING: LrMap::clear failed due to poisoned mutex: {}. Operation dropped.",
-                    e
+                    "WARNING: LrMap::clear failed due to poisoned mutex: {e}. Operation dropped."
                 );
             }
         }

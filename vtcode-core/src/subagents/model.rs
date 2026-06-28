@@ -49,8 +49,7 @@ fn resolve_inherit_model(
     let normalized = normalize_subagent_model_alias(parent_model);
     normalized.parse::<ModelId>().with_context(|| {
         format!(
-            "Failed to resolve model '{}' for subagent {}",
-            normalized, agent_name
+            "Failed to resolve model '{normalized}' for subagent {agent_name}"
         )
     })
 }
@@ -76,8 +75,7 @@ fn resolve_explicit_model(
     let normalized = normalize_subagent_model_alias(resolved.as_str());
     normalized.parse::<ModelId>().with_context(|| {
         format!(
-            "Failed to resolve model '{}' for subagent {}",
-            normalized, agent_name
+            "Failed to resolve model '{normalized}' for subagent {agent_name}"
         )
     })
 }

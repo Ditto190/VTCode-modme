@@ -186,8 +186,7 @@ impl<'a, Hooks: AdapterHooksProvider> AdapterHooks<'a, Hooks> {
 
         if !is_abs {
             let error = Error::msg(format!(
-                "Prompt cache directory `{}` could not be resolved to an absolute path",
-                resolved_display
+                "Prompt cache directory `{resolved_display}` could not be resolved to an absolute path"
             ));
             self.report_error(error);
         }

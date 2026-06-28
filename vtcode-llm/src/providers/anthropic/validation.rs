@@ -73,8 +73,7 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
             &format!(
-                "{} does not support disabled thinking on the Anthropic provider. Leave provider.anthropic.extended_thinking_enabled=true or choose another model.",
-                resolved_model
+                "{resolved_model} does not support disabled thinking on the Anthropic provider. Leave provider.anthropic.extended_thinking_enabled=true or choose another model."
             ),
         );
         return Err(LLMError::InvalidRequest {
@@ -108,8 +107,7 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
             &format!(
-                "{} does not support thinking_budget/budget_tokens. Use adaptive thinking plus effort instead.",
-                resolved_model
+                "{resolved_model} does not support thinking_budget/budget_tokens. Use adaptive thinking plus effort instead."
             ),
         );
         return Err(LLMError::InvalidRequest {
@@ -129,8 +127,7 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
             &format!(
-                "{} does not support thinking_budget/budget_tokens. Use adaptive thinking plus effort instead.",
-                resolved_model
+                "{resolved_model} does not support thinking_budget/budget_tokens. Use adaptive thinking plus effort instead."
             ),
         );
         return Err(LLMError::InvalidRequest {
@@ -144,7 +141,7 @@ pub fn validate_request(
     {
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
-            &format!("thinking_budget ({}) must be at least 1024 tokens.", budget),
+            &format!("thinking_budget ({budget}) must be at least 1024 tokens."),
         );
         return Err(LLMError::InvalidRequest {
             message: formatted_error,
@@ -163,8 +160,7 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
             &format!(
-                "{} does not support assistant-message prefills. Use system instructions or structured outputs instead.",
-                resolved_model
+                "{resolved_model} does not support assistant-message prefills. Use system instructions or structured outputs instead."
             ),
         );
         return Err(LLMError::InvalidRequest {
@@ -180,8 +176,7 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
             &format!(
-                "task_budget_tokens ({}) must be at least 20000 for Claude Opus 4.7/4.8.",
-                task_budget
+                "task_budget_tokens ({task_budget}) must be at least 20000 for Claude Opus 4.7/4.8."
             ),
         );
         return Err(LLMError::InvalidRequest {
@@ -462,8 +457,7 @@ fn validate_anthropic_tool_name(name: &str) -> Result<(), LLMError> {
     let formatted_error = error_display::format_llm_error(
         "Anthropic",
         &format!(
-            "tool name '{}' must match ^[a-zA-Z0-9_-]{{1,64}}$ for Anthropic tool use",
-            name
+            "tool name '{name}' must match ^[a-zA-Z0-9_-]{{1,64}}$ for Anthropic tool use"
         ),
     );
     Err(LLMError::InvalidRequest {
@@ -540,8 +534,7 @@ fn validate_reasoning_constraints(
             let formatted_error = error_display::format_llm_error(
                 "Anthropic",
                 &format!(
-                    "The value of max_tokens ({}) must be strictly greater than budget_tokens ({}) when extended thinking is enabled without interleaved-thinking support.",
-                    max_tokens, budget
+                    "The value of max_tokens ({max_tokens}) must be strictly greater than budget_tokens ({budget}) when extended thinking is enabled without interleaved-thinking support."
                 ),
             );
             return Err(LLMError::InvalidRequest {
@@ -568,8 +561,7 @@ fn validate_reasoning_constraints(
         let formatted_error = error_display::format_llm_error(
             "Anthropic",
             &format!(
-                "top_p must be between 0.95 and 1.0 (got {}) when extended thinking is enabled.",
-                top_p
+                "top_p must be between 0.95 and 1.0 (got {top_p}) when extended thinking is enabled."
             ),
         );
         return Err(LLMError::InvalidRequest {
@@ -631,7 +623,7 @@ fn validate_schema_object(
                         _ => {
                             let formatted_error = error_display::format_llm_error(
                                 "Anthropic",
-                                &format!("Unsupported schema type '{}', path: {}", type_str, path),
+                                &format!("Unsupported schema type '{type_str}', path: {path}"),
                             );
                             return Err(LLMError::InvalidRequest {
                                 message: formatted_error,
@@ -645,8 +637,7 @@ fn validate_schema_object(
                 let formatted_error = error_display::format_llm_error(
                     "Anthropic",
                     &format!(
-                        "Numeric constraints like '{}' are not supported by Anthropic structured output. Path: {}",
-                        key, path
+                        "Numeric constraints like '{key}' are not supported by Anthropic structured output. Path: {path}"
                     ),
                 );
                 return Err(LLMError::InvalidRequest {
@@ -658,8 +649,7 @@ fn validate_schema_object(
                 let formatted_error = error_display::format_llm_error(
                     "Anthropic",
                     &format!(
-                        "String constraints like '{}' are not supported by Anthropic structured output. Path: {}",
-                        key, path
+                        "String constraints like '{key}' are not supported by Anthropic structured output. Path: {path}"
                     ),
                 );
                 return Err(LLMError::InvalidRequest {
@@ -675,8 +665,7 @@ fn validate_schema_object(
                         let formatted_error = error_display::format_llm_error(
                             "Anthropic",
                             &format!(
-                                "Array minItems only supports values 0 or 1, got {}, path: {}",
-                                min_items, path
+                                "Array minItems only supports values 0 or 1, got {min_items}, path: {path}"
                             ),
                         );
                         return Err(LLMError::InvalidRequest {
@@ -688,8 +677,7 @@ fn validate_schema_object(
                     let formatted_error = error_display::format_llm_error(
                         "Anthropic",
                         &format!(
-                            "Array constraints like '{}' are not supported by Anthropic structured output. Path: {}",
-                            key, path
+                            "Array constraints like '{key}' are not supported by Anthropic structured output. Path: {path}"
                         ),
                     );
                     return Err(LLMError::InvalidRequest {
@@ -705,8 +693,7 @@ fn validate_schema_object(
                     let formatted_error = error_display::format_llm_error(
                         "Anthropic",
                         &format!(
-                            "additionalProperties must be set to false, got {}, path: {}",
-                            additional_props, path
+                            "additionalProperties must be set to false, got {additional_props}, path: {path}"
                         ),
                     );
                     return Err(LLMError::InvalidRequest {
@@ -718,7 +705,7 @@ fn validate_schema_object(
             "properties" => {
                 if let Value::Object(props) = value {
                     for (prop_name, prop_value) in props {
-                        let prop_path = format!("{}.properties.{}", path, prop_name);
+                        let prop_path = format!("{path}.properties.{prop_name}");
                         if let Value::Object(prop_obj) = prop_value {
                             validate_schema_object(prop_obj, &prop_path)?;
                         }
@@ -727,7 +714,7 @@ fn validate_schema_object(
             }
             "items" => {
                 if let Value::Object(items_obj) = value {
-                    let items_path = format!("{}.items", path);
+                    let items_path = format!("{path}.items");
                     validate_schema_object(items_obj, &items_path)?;
                 }
             }
@@ -735,7 +722,7 @@ fn validate_schema_object(
                 if let Value::Array(options) = value {
                     for (i, option) in options.iter().enumerate() {
                         if let Value::Object(option_obj) = option {
-                            let option_path = format!("{}.{}[{}]", path, key, i);
+                            let option_path = format!("{path}.{key}[{i}]");
                             validate_schema_object(option_obj, &option_path)?;
                         }
                     }

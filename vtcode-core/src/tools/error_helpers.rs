@@ -92,5 +92,5 @@ pub fn deserialize_tool_args<T: serde::de::DeserializeOwned>(
     tool_name: &str,
 ) -> Result<T> {
     serde_json::from_value(args.clone())
-        .map_err(|e| anyhow::anyhow!("Error: Invalid '{}' arguments: {}", tool_name, e))
+        .map_err(|e| anyhow::anyhow!("Error: Invalid '{tool_name}' arguments: {e}"))
 }

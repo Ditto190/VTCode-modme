@@ -113,7 +113,7 @@ impl SafetyValidator {
     ) {
         println!("{}", style(" Safety Configuration Summary").cyan().bold());
         println!("Model: {}", style(model).green());
-        println!("Agent Mode: {}", style(format!("{:?}", agent_mode)).green());
+        println!("Agent Mode: {}", style(format!("{agent_mode:?}")).green());
 
         if let Some(task) = task_description {
             println!("Task: {}", style(task).cyan());
@@ -180,7 +180,7 @@ impl SafetyValidator {
         if !warnings.is_empty() {
             println!("{}", style(" Resource Usage Warning").red().bold());
             for warning in &warnings {
-                println!("• {}", warning);
+                println!("• {warning}");
             }
             println!();
 

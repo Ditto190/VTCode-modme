@@ -36,8 +36,7 @@ impl SandboxDebugResult {
             exit_code: None,
             stdout: String::new(),
             stderr: format!(
-                "Sandbox type {:?} is not available on this platform",
-                sandbox_type
+                "Sandbox type {sandbox_type:?} is not available on this platform"
             ),
             sandbox_type,
             sandbox_active: false,
@@ -171,7 +170,7 @@ pub fn sandbox_capabilities_summary() -> String {
         } else {
             "✗"
         };
-        summary.push_str(&format!("  {} {:?}\n", available, sandbox_type));
+        summary.push_str(&format!("  {available} {sandbox_type:?}\n"));
     }
 
     summary.push_str("\nSandbox policies:\n");

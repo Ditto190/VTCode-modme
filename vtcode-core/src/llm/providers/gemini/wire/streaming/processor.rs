@@ -154,7 +154,7 @@ impl StreamingProcessor {
             Ok(Some(Err(e))) => {
                 self.metrics.error_count += 1;
                 return Err(StreamingError::NetworkError {
-                    message: format!("Failed to read first chunk: {}", e),
+                    message: format!("Failed to read first chunk: {e}"),
                     is_retryable: true,
                 });
             }
@@ -214,7 +214,7 @@ impl StreamingProcessor {
                     self.metrics.error_count += 1;
                     self.report_progress_at_timeout(elapsed);
                     return Err(StreamingError::NetworkError {
-                        message: format!("Failed to read chunk: {}", e),
+                        message: format!("Failed to read chunk: {e}"),
                         is_retryable: true,
                     });
                 }
@@ -451,7 +451,7 @@ impl StreamingProcessor {
                 }
 
                 Err(StreamingError::ParseError {
-                    message: format!("Failed to parse streaming JSON: {}", parse_err),
+                    message: format!("Failed to parse streaming JSON: {parse_err}"),
                     raw_response: trimmed.to_owned(),
                 })
             }
@@ -482,7 +482,7 @@ impl StreamingProcessor {
                 }
 
                 Err(StreamingError::ParseError {
-                    message: format!("Failed to parse streaming JSON: {}", parse_err),
+                    message: format!("Failed to parse streaming JSON: {parse_err}"),
                     raw_response: trimmed.to_owned(),
                 })
             }
@@ -637,7 +637,7 @@ impl StreamingProcessor {
                                     }
                                 } else {
                                     return Err(StreamingError::ParseError {
-                                        message: format!("Failed to parse candidate: {}", err),
+                                        message: format!("Failed to parse candidate: {err}"),
                                         raw_response: candidate_value.to_string(),
                                     });
                                 }

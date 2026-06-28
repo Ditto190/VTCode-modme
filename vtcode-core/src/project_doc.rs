@@ -272,7 +272,7 @@ pub fn merge_project_docs_with_skills(
     skills_section: Option<String>,
 ) -> Option<String> {
     match (project_doc, skills_section) {
-        (Some(doc), Some(skills)) => Some(format!("{}\n\n{}", doc, skills)),
+        (Some(doc), Some(skills)) => Some(format!("{doc}\n\n{skills}")),
         (Some(doc), None) => Some(doc),
         (None, Some(skills)) => Some(skills),
         (None, None) => None,
@@ -624,7 +624,7 @@ mod tests {
 
         assert!(appendix.contains("### Key points"));
         assert!(appendix.contains("Open `memory_summary.md` or `MEMORY.md`"));
-        assert!(approx_tokens < 120, "got ~{} tokens", approx_tokens);
+        assert!(approx_tokens < 120, "got ~{approx_tokens} tokens");
     }
 
     #[tokio::test]
@@ -645,6 +645,6 @@ mod tests {
         assert!(appendix.contains("### Instruction map"));
         assert!(appendix.contains("### Key points"));
         assert!(appendix.contains("### On-demand loading"));
-        assert!(approx_tokens < 140, "got ~{} tokens", approx_tokens);
+        assert!(approx_tokens < 140, "got ~{approx_tokens} tokens");
     }
 }

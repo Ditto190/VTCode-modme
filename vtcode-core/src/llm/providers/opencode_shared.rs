@@ -272,7 +272,7 @@ impl LLMProvider for OpenCodeCompatibleProvider {
                 }
                 Err(_elapsed) => {
                     let _ = tx.send(Err(LLMError::Provider {
-                        message: format!("{}: streaming timed out after 5 minutes", provider_name),
+                        message: format!("{provider_name}: streaming timed out after 5 minutes"),
                         metadata: None,
                     }));
                 }

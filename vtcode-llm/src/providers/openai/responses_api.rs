@@ -365,7 +365,7 @@ pub fn parse_responses_payload(
                                     entry.get("refusal").and_then(|value| value.as_str())
                                     && !refusal_text.is_empty()
                                 {
-                                    content_fragments.push(format!("[Refusal: {}]", refusal_text));
+                                    content_fragments.push(format!("[Refusal: {refusal_text}]"));
                                 }
                             }
                             _ => {}
@@ -392,7 +392,7 @@ pub fn parse_responses_payload(
                                 .unwrap_or("Untitled");
                             let url = r.get("url").and_then(|v| v.as_str()).unwrap_or("");
                             if !url.is_empty() {
-                                Some(format!("[{}]({})", title, url))
+                                Some(format!("[{title}]({url})"))
                             } else {
                                 None
                             }

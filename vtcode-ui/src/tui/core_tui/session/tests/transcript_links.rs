@@ -159,8 +159,7 @@ fn repeated_plain_click_on_different_transcript_file_links_is_not_throttled() {
     session.push_line(
         InlineMessageKind::Agent,
         vec![make_segment(&format!(
-            "Open {} and {}",
-            absolute_path, quoted_temp_path
+            "Open {absolute_path} and {quoted_temp_path}"
         ))],
     );
 
@@ -256,7 +255,7 @@ fn modifier_click_emits_open_file_event_for_quoted_path_with_spaces() {
     fs::write(&temp_file, "transcript-link").expect("write quoted transcript temp file");
     let quoted_path = format!("`{}`", temp_file.display());
     let _ = session.decorate_visible_transcript_links(
-        vec![transcript_line(format!("Open {}", quoted_path))],
+        vec![transcript_line(format!("Open {quoted_path}"))],
         Rect::new(0, 0, 200, 1),
     );
     let target = session
@@ -1101,14 +1100,14 @@ fn scroll_between_clicks_clears_double_click_history() {
 fn path_with_line_col_suffix_resolves_correctly() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     let absolute_path = transcript_file_fixture_absolute_path();
-    let path_with_loc = format!("{}:42:10", absolute_path);
+    let path_with_loc = format!("{absolute_path}:42:10");
     session.push_line(
         InlineMessageKind::Agent,
-        vec![make_segment(&format!("Error at {}", path_with_loc))],
+        vec![make_segment(&format!("Error at {path_with_loc}"))],
     );
 
     let decorated = session.decorate_visible_transcript_links(
-        vec![transcript_line(format!("Error at {}", path_with_loc))],
+        vec![transcript_line(format!("Error at {path_with_loc}"))],
         Rect::new(0, 0, 200, 1),
     );
 
@@ -1144,10 +1143,10 @@ fn path_with_line_col_suffix_resolves_correctly() {
 fn path_with_paren_location_resolves_correctly() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     let absolute_path = transcript_file_fixture_absolute_path();
-    let path_with_loc = format!("{}(10,5)", absolute_path);
+    let path_with_loc = format!("{absolute_path}(10,5)");
 
     let _ = session.decorate_visible_transcript_links(
-        vec![transcript_line(format!("Error at {}", path_with_loc))],
+        vec![transcript_line(format!("Error at {path_with_loc}"))],
         Rect::new(0, 0, 200, 1),
     );
 
@@ -1167,7 +1166,7 @@ fn path_with_hash_location_resolves_and_opens_with_canonical_suffix() {
     let hash_path = format!("{absolute_path}#L12C4");
 
     let _ = session.decorate_visible_transcript_links(
-        vec![transcript_line(format!("Error at {}", hash_path))],
+        vec![transcript_line(format!("Error at {hash_path}"))],
         Rect::new(0, 0, 200, 1),
     );
 

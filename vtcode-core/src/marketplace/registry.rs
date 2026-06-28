@@ -78,7 +78,7 @@ impl MarketplaceRegistry {
     pub async fn remove_marketplace(&self, id: &str) -> Result<()> {
         let mut marketplaces = self.marketplaces.write().await;
         if marketplaces.remove(id).is_none() {
-            bail!("Marketplace '{}' not found", id);
+            bail!("Marketplace '{id}' not found");
         }
 
         // Remove from cache as well
@@ -109,7 +109,7 @@ impl MarketplaceRegistry {
 
         let source = match source {
             Some(s) => s,
-            None => bail!("Marketplace '{}' not found", id),
+            None => bail!("Marketplace '{id}' not found"),
         };
 
         let manifest = self.fetch_manifest(&source).await?;
@@ -162,8 +162,7 @@ impl MarketplaceRegistry {
 
         // Construct the GitHub API URL to fetch the file
         let api_url = format!(
-            "https://api.github.com/repos/{}/{}/contents/.vtcode-plugin/marketplace.json?ref={}",
-            owner, repo, refspec
+            "https://api.github.com/repos/{owner}/{repo}/contents/.vtcode-plugin/marketplace.json?ref={refspec}"
         );
 
         // Create HTTP client with appropriate headers
@@ -176,18 +175,14 @@ impl MarketplaceRegistry {
             .await
             .with_context(|| {
                 format!(
-                    "Failed to fetch manifest from GitHub: {}/{} (ref: {})",
-                    owner, repo, refspec
+                    "Failed to fetch manifest from GitHub: {owner}/{repo} (ref: {refspec})"
                 )
             })?;
 
         if !response.status().is_success() {
             if response.status() == 404 {
                 bail!(
-                    "Marketplace manifest not found in GitHub repository: {}/{} (ref: {})",
-                    owner,
-                    repo,
-                    refspec
+                    "Marketplace manifest not found in GitHub repository: {owner}/{repo} (ref: {refspec})"
                 );
             } else {
                 bail!(
@@ -200,7 +195,7 @@ impl MarketplaceRegistry {
 
         // Parse the GitHub API response
         let json_response: Value = response.json().await.with_context(|| {
-            format!("Failed to parse GitHub API response for {}/{}", owner, repo)
+            format!("Failed to parse GitHub API response for {owner}/{repo}")
         })?;
 
         // Extract the content from the response
@@ -214,20 +209,18 @@ impl MarketplaceRegistry {
             base64::Engine::decode(&base64::engine::general_purpose::STANDARD, content_encoded)
                 .with_context(|| {
                     format!(
-                        "Failed to decode base64 content from GitHub: {}/{}",
-                        owner, repo
+                        "Failed to decode base64 content from GitHub: {owner}/{repo}"
                     )
                 })?;
 
         let content = String::from_utf8(content_bytes).with_context(|| {
             format!(
-                "Failed to decode UTF-8 content from GitHub: {}/{}",
-                owner, repo
+                "Failed to decode UTF-8 content from GitHub: {owner}/{repo}"
             )
         })?;
 
         // Parse the manifest from the content
-        parse_json_with_context(&content, &format!("GitHub: {}/{}", owner, repo))
+        parse_json_with_context(&content, &format!("GitHub: {owner}/{repo}"))
     }
 
     /// Fetch manifest from Git repository
@@ -257,17 +250,17 @@ impl MarketplaceRegistry {
         let output = git_cmd
             .output()
             .await
-            .with_context(|| format!("Failed to execute git clone for {}", url))?;
+            .with_context(|| format!("Failed to execute git clone for {url}"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Git clone failed for {}: {}", url, stderr);
+            bail!("Git clone failed for {url}: {stderr}");
         }
 
         // Look for the manifest file in the cloned repository
         let manifest_path = temp_path.join(".vtcode-plugin/marketplace.json");
         if !manifest_path.exists() {
-            bail!("Marketplace manifest not found in repository: {}", url);
+            bail!("Marketplace manifest not found in repository: {url}");
         }
 
         read_json_file(&manifest_path).await
@@ -288,7 +281,7 @@ impl MarketplaceRegistry {
             .get(url)
             .send()
             .await
-            .with_context(|| format!("Failed to fetch remote manifest from {}", url))?;
+            .with_context(|| format!("Failed to fetch remote manifest from {url}"))?;
 
         if !response.status().is_success() {
             bail!(
@@ -300,9 +293,9 @@ impl MarketplaceRegistry {
         let content = response
             .text()
             .await
-            .with_context(|| format!("Failed to read response body from {}", url))?;
+            .with_context(|| format!("Failed to read response body from {url}"))?;
 
-        parse_json_with_context(&content, &format!("remote manifest: {}", url))
+        parse_json_with_context(&content, &format!("remote manifest: {url}"))
     }
 
     /// Get cached manifest for a marketplace

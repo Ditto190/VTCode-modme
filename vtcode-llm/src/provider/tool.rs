@@ -358,8 +358,7 @@ impl ToolDefinition {
             other if other.starts_with("code_execution_") => Ok(()),
             other if other.starts_with("memory_") => Ok(()),
             other => Err(format!(
-                "Unsupported tool type: {}. Supported types: function, apply_patch, shell, custom, grammar, web_search, google_maps, url_context, file_search, mcp, code_execution, tool_search, tool_search_tool_*, web_search_*, code_execution_*, memory_*",
-                other
+                "Unsupported tool type: {other}. Supported types: function, apply_patch, shell, custom, grammar, web_search, google_maps, url_context, file_search, mcp, code_execution, tool_search, tool_search_tool_*, web_search_*, code_execution_*, memory_*"
             )),
         }
     }

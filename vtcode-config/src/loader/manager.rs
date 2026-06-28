@@ -32,8 +32,7 @@ impl ConfigManager {
             if !trimmed.is_empty() {
                 return Self::load_from_file(trimmed).with_context(|| {
                     format!(
-                        "Failed to load configuration from VTCODE_CONFIG_PATH={}",
-                        trimmed
+                        "Failed to load configuration from VTCODE_CONFIG_PATH={trimmed}"
                     )
                 });
             }
@@ -255,7 +254,7 @@ impl ConfigManager {
         } else {
             LayerDisabledReason::LoadError
         };
-        ConfigLayerEntry::disabled(source, reason, format!("{:#}", error))
+        ConfigLayerEntry::disabled(source, reason, format!("{error:#}"))
     }
 
     /// Check whether a parsed TOML value has `workspace.use_root_config = true`.

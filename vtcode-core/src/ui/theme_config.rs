@@ -314,8 +314,7 @@ impl ThemeConfig {
         for (ext, color_str) in &self.files.extensions {
             let style = parser.parse_flexible(color_str).with_context(|| {
                 format!(
-                    "Failed to parse style for extension '{}': {}",
-                    ext, color_str
+                    "Failed to parse style for extension '{ext}': {color_str}"
                 )
             })?;
             extension_styles.insert(ext.clone(), style);

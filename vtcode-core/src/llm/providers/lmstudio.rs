@@ -112,7 +112,7 @@ pub async fn fetch_lmstudio_models(base_url: Option<String>) -> Result<Vec<Strin
     let models_response: LmStudioModelsResponse = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse LM Studio models response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse LM Studio models response: {e}"))?;
 
     // Extract model IDs
     let model_ids: Vec<String> = models_response

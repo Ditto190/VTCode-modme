@@ -235,7 +235,7 @@ pub static PER_TOOL_RATE_LIMITER: Lazy<Mutex<PerToolRateLimiter>> =
 pub fn try_acquire() -> Result<()> {
     let mut guard: MutexGuard<'_, RateLimiterInner> = GLOBAL_RATE_LIMITER
         .lock()
-        .map_err(|e| anyhow!("rate limiter poisoned: {}", e))?;
+        .map_err(|e| anyhow!("rate limiter poisoned: {e}"))?;
     guard.try_acquire()
 }
 
@@ -244,7 +244,7 @@ pub fn try_acquire() -> Result<()> {
 pub fn try_acquire_for(tool_name: &str) -> Result<()> {
     let mut guard = PER_TOOL_RATE_LIMITER
         .lock()
-        .map_err(|e| anyhow!("per-tool rate limiter poisoned: {}", e))?;
+        .map_err(|e| anyhow!("per-tool rate limiter poisoned: {e}"))?;
     guard.try_acquire_for(tool_name)
 }
 

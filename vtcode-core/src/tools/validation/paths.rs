@@ -54,8 +54,7 @@ mod tests {
         for candidate in [None, Some(""), Some("/")] {
             assert!(
                 validate_non_root_listing_path(candidate).is_err(),
-                "should block {:?}",
-                candidate
+                "should block {candidate:?}"
             );
         }
     }
@@ -64,7 +63,7 @@ mod tests {
     fn allows_root_listing_path() {
         for candidate in [Some("."), Some("./")] {
             validate_non_root_listing_path(candidate)
-                .unwrap_or_else(|_| panic!("should allow {:?}", candidate));
+                .unwrap_or_else(|_| panic!("should allow {candidate:?}"));
         }
     }
 

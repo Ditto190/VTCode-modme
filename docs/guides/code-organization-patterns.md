@@ -88,7 +88,7 @@ module.
 
 ## Applied in VT Code
 
-As part of adopting these patterns, `AsyncToolPipeline` now explicitly owns and
+As part of adopting these patterns, the tool execution pipeline now explicitly owns and
 cleans up its background processing task:
 
 - Tracks spawned processing `JoinHandle`
@@ -96,5 +96,5 @@ cleans up its background processing task:
 - Awaits task completion during shutdown
 - Aborts lingering task on drop
 
-See: `vtcode-core/src/tools/async_pipeline.rs`.
+See: `vtcode-core/src/tools/exec_session.rs`.
 

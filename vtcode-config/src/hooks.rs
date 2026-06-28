@@ -213,7 +213,7 @@ fn validate_matcher(pattern: &str) -> Result<()> {
         return Ok(());
     }
 
-    let regex_pattern = format!("^(?:{})$", trimmed);
+    let regex_pattern = format!("^(?:{trimmed})$");
     Regex::new(&regex_pattern)
         .with_context(|| format!("failed to compile lifecycle hook matcher: {pattern}"))?;
     Ok(())

@@ -399,8 +399,8 @@ mod tests {
 
         // Insert 10 entries for different files
         for i in 0..10 {
-            let key = ToolCacheKey::new("tool", "params", &format!("/file_{}", i));
-            cache.insert(key, format!("result_{}", i));
+            let key = ToolCacheKey::new("tool", "params", &format!("/file_{i}"));
+            cache.insert(key, format!("result_{i}"));
         }
 
         let stats_before = cache.stats();
@@ -408,7 +408,7 @@ mod tests {
 
         // Access some entries to build hit count
         for i in 0..5 {
-            let key = ToolCacheKey::new("tool", "params", &format!("/file_{}", i));
+            let key = ToolCacheKey::new("tool", "params", &format!("/file_{i}"));
             let _ = cache.get(&key);
         }
 
@@ -420,11 +420,10 @@ mod tests {
 
         // The remaining 4 files' caches should still be valid
         for i in 1..5 {
-            let key = ToolCacheKey::new("tool", "params", &format!("/file_{}", i));
+            let key = ToolCacheKey::new("tool", "params", &format!("/file_{i}"));
             assert!(
                 cache.get(&key).is_some(),
-                "Cache for /file_{} should still be valid",
-                i
+                "Cache for /file_{i} should still be valid"
             );
         }
 

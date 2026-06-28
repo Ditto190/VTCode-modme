@@ -93,7 +93,7 @@ impl PipeSessionManager {
             .env(env);
         let spawned = spawn_pipe_process_with_options(opts)
             .await
-            .with_context(|| format!("failed to spawn pipe session '{}'", session_id))?;
+            .with_context(|| format!("failed to spawn pipe session '{session_id}'"))?;
 
         let metadata = VTCodeExecSession {
             id: session_id.clone(),
@@ -167,8 +167,7 @@ impl PipeSessionManager {
 
         let pending = output.get(start..).map(ToOwned::to_owned).ok_or_else(|| {
             anyhow!(
-                "pipe session '{}' produced invalid output boundary",
-                session_id
+                "pipe session '{session_id}' produced invalid output boundary"
             )
         })?;
 
@@ -194,14 +193,14 @@ impl PipeSessionManager {
             .handle
             .write(data.to_vec())
             .await
-            .map_err(|e| anyhow!("exec session '{}' is no longer writable: {e}", session_id))?;
+            .map_err(|e| anyhow!("exec session '{session_id}' is no longer writable: {e}"))?;
 
         if append_newline {
             record
                 .handle
                 .write(b"\n".to_vec())
                 .await
-                .map_err(|e| anyhow!("exec session '{}' is no longer writable: {e}", session_id))?;
+                .map_err(|e| anyhow!("exec session '{session_id}' is no longer writable: {e}"))?;
         }
 
         Ok(data.len() + usize::from(append_newline))
@@ -227,7 +226,7 @@ impl PipeSessionManager {
             let mut sessions = self.sessions.write().await;
             sessions
                 .remove(session_id)
-                .ok_or_else(|| anyhow!("exec session '{}' not found", session_id))?
+                .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))?
         };
 
         record.handle.terminate();
@@ -274,7 +273,7 @@ impl PipeSessionManager {
         sessions
             .get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow!("exec session '{}' not found", session_id))
+            .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))
     }
 
     fn ensure_within_workspace(&self, candidate: &Path) -> Result<()> {
@@ -504,7 +503,7 @@ impl ExecSessionManager {
             let mut sessions = self.sessions.write().await;
             sessions
                 .remove(session_id)
-                .ok_or_else(|| anyhow!("exec session '{}' not found", session_id))?
+                .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))?
         };
 
         let metadata = match record.backend {
@@ -581,7 +580,7 @@ impl ExecSessionManager {
     async fn ensure_session_absent(&self, session_id: &str) -> Result<()> {
         let sessions = self.sessions.read().await;
         if sessions.contains_key(session_id) {
-            return Err(anyhow!("exec session '{}' already exists", session_id));
+            return Err(anyhow!("exec session '{session_id}' already exists"));
         }
         Ok(())
     }
@@ -591,7 +590,7 @@ impl ExecSessionManager {
         sessions
             .get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow!("exec session '{}' not found", session_id))
+            .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))
     }
 }
 

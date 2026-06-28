@@ -1253,9 +1253,8 @@ fn warn_legacy_permission_rules(permissions: &AgentPermissionsConfig) -> Vec<Str
             // suggestion preserves any path constraints the user specified.
             let normalized = crate::core::permissions::normalize_permission_rule(rule);
             warnings.push(format!(
-                "permission rule '{}' uses legacy tool name '{}'; \
-                 consider using the semantic rule '{}' for clearer intent",
-                rule, tool_name, normalized
+                "permission rule '{rule}' uses legacy tool name '{tool_name}'; \
+                 consider using the semantic rule '{normalized}' for clearer intent"
             ));
         }
     }

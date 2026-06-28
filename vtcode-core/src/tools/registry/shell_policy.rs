@@ -111,8 +111,7 @@ impl ShellPolicyChecker {
             for (pattern, compiled) in &entry.deny_regexes {
                 if compiled.is_match(sub) {
                     return Err(anyhow!(
-                        "Shell command denied by agent regex policy: {}",
-                        pattern
+                        "Shell command denied by agent regex policy: {pattern}"
                     ));
                 }
             }
@@ -120,8 +119,7 @@ impl ShellPolicyChecker {
             for (pattern, compiled) in &entry.deny_globs {
                 if compiled.is_match(sub) {
                     return Err(anyhow!(
-                        "Shell command denied by agent glob policy: {}",
-                        pattern
+                        "Shell command denied by agent glob policy: {pattern}"
                     ));
                 }
             }

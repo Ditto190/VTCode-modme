@@ -126,7 +126,7 @@ impl ToolRegistryImprovement {
         });
 
         // Log metric - avoid format! if possible, but for key names it's needed
-        let metric_key = format!("{}_success_rate", tool_name);
+        let metric_key = format!("{tool_name}_success_rate");
         self.obs_context.metric("tool_effectiveness", &metric_key, {
             let metrics = self.tool_metrics.read();
             metrics
@@ -158,7 +158,7 @@ impl ToolRegistryImprovement {
 
     /// Cache result for tool execution (migrated to UnifiedCache)
     pub fn cache_result(&self, tool: &str, args: &str, result: &str) {
-        let key = ToolResultKey(format!("{}::{}", tool, args));
+        let key = ToolResultKey(format!("{tool}::{args}"));
         let size = result.len() as u64;
         self.result_cache
             .write()
@@ -167,7 +167,7 @@ impl ToolRegistryImprovement {
 
     /// Try to get cached result (migrated to UnifiedCache)
     pub fn get_cached_result(&self, tool: &str, args: &str) -> Option<String> {
-        let key = ToolResultKey(format!("{}::{}", tool, args));
+        let key = ToolResultKey(format!("{tool}::{args}"));
         self.result_cache.write().get_owned(&key)
     }
 

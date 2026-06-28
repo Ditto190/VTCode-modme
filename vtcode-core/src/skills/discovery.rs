@@ -316,7 +316,7 @@ impl SkillDiscovery {
 
                     let config = CliToolConfig {
                         name: tool_name.clone(),
-                        description: format!("CLI tool: {}", tool_name),
+                        description: format!("CLI tool: {tool_name}"),
                         executable_path: path.clone(),
                         readme_path,
                         schema_path,

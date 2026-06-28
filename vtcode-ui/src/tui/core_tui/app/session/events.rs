@@ -1246,8 +1246,7 @@ fn handle_running_slash_command_block_for_input(session: &mut Session, input: &s
     };
 
     let message = format!(
-        "'/{}' is disabled while a task is in progress. Please wait for the current task to complete before using this command.",
-        command_name
+        "'/{command_name}' is disabled while a task is in progress. Please wait for the current task to complete before using this command."
     );
     session.push_line(
         InlineMessageKind::Warning,

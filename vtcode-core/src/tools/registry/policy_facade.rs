@@ -108,7 +108,10 @@ impl ToolRegistry {
     }
 
     pub async fn set_policy_manager(&self, manager: ToolPolicyManager) {
-        self.policy_gateway.lock().await.set_policy_manager(manager);
+        {
+            let mut gateway = self.policy_gateway.lock().await;
+            gateway.set_policy_manager(manager);
+        }
         self.sync_policy_catalog().await;
     }
 
@@ -163,15 +166,39 @@ impl ToolRegistry {
     }
 
     pub async fn reset_tool_policies(&self) -> Result<()> {
-        self.policy_gateway.lock().await.reset_tool_policies().await
+        let mut manager = self
+            .policy_gateway
+            .lock()
+            .await
+            .policy_manager()
+            .ok_or_else(|| anyhow::anyhow!("Tool policy manager not available"))?;
+        manager.reset_all_to_prompt().await?;
+        self.policy_gateway.lock().await.set_policy_manager(manager);
+        Ok(())
     }
 
     pub async fn allow_all_tools(&self) -> Result<()> {
-        self.policy_gateway.lock().await.allow_all_tools().await
+        let mut manager = self
+            .policy_gateway
+            .lock()
+            .await
+            .policy_manager()
+            .ok_or_else(|| anyhow::anyhow!("Tool policy manager not available"))?;
+        manager.allow_all_tools().await?;
+        self.policy_gateway.lock().await.set_policy_manager(manager);
+        Ok(())
     }
 
     pub async fn deny_all_tools(&self) -> Result<()> {
-        self.policy_gateway.lock().await.deny_all_tools().await
+        let mut manager = self
+            .policy_gateway
+            .lock()
+            .await
+            .policy_manager()
+            .ok_or_else(|| anyhow::anyhow!("Tool policy manager not available"))?;
+        manager.deny_all_tools().await?;
+        self.policy_gateway.lock().await.set_policy_manager(manager);
+        Ok(())
     }
 
     pub async fn print_policy_status(&self) {
@@ -180,12 +207,14 @@ impl ToolRegistry {
 
     pub async fn apply_config_policies(&self, tools_config: &ToolsConfig) -> Result<()> {
         let normalized_tools_config = self.normalize_tools_config_policies(tools_config);
-        let mut policy_gateway = self.policy_gateway.lock().await;
-        if let Ok(policy_manager) = policy_gateway.policy_manager_mut() {
-            policy_manager
-                .apply_tools_config(&normalized_tools_config)
-                .await?;
-        }
+        let mut manager = self
+            .policy_gateway
+            .lock()
+            .await
+            .policy_manager()
+            .ok_or_else(|| anyhow::anyhow!("Tool policy manager not available"))?;
+        manager.apply_tools_config(&normalized_tools_config).await?;
+        self.policy_gateway.lock().await.set_policy_manager(manager);
 
         let detect_window = super::DEFAULT_LOOP_DETECT_WINDOW
             .max(

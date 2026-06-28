@@ -273,7 +273,7 @@ pub fn troubleshoot(status: &LocalServerStatus, caps: &LocalServerCapabilities) 
 
     lines.push("Status: Not running".to_string());
     if let Some(err) = &status.error {
-        lines.push(format!("Error: {}", err));
+        lines.push(format!("Error: {err}"));
     }
     lines.push(String::new());
 
@@ -585,8 +585,7 @@ async fn start_llamacpp() -> Result<String> {
 
     let child = cmd.spawn().with_context(|| {
         format!(
-            "Failed to start llama-server (`{binary} -m <model> --port {}`)",
-            port
+            "Failed to start llama-server (`{binary} -m <model> --port {port}`)"
         )
     })?;
 

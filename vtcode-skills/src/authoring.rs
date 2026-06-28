@@ -151,14 +151,14 @@ impl SkillAuthor {
             Err(error) => {
                 report
                     .errors
-                    .push(format!("Invalid YAML frontmatter: {}", error));
+                    .push(format!("Invalid YAML frontmatter: {error}"));
                 return Ok(report);
             }
         };
 
         // Validate frontmatter properties (only allowed: skill metadata fields)
         let raw_frontmatter: serde_json::Value =
-            serde_saphyr::from_str(parts[1].trim()).map_err(|e| anyhow!("Invalid YAML: {}", e))?;
+            serde_saphyr::from_str(parts[1].trim()).map_err(|e| anyhow!("Invalid YAML: {e}"))?;
         if let serde_json::Value::Object(map) = raw_frontmatter {
             for key in map.keys() {
                 if !crate::manifest::SUPPORTED_FRONTMATTER_KEYS.contains(&key.as_str()) {
@@ -262,7 +262,7 @@ impl SkillAuthor {
             .ok_or_else(|| anyhow!("Invalid skill directory name"))?;
 
         let output_dir = output_dir.unwrap_or_else(|| self.workspace_root.clone());
-        let output_file = output_dir.join(format!("{}.skill", skill_name));
+        let output_file = output_dir.join(format!("{skill_name}.skill"));
 
         // Create zip file
         use zip::ZipWriter;
@@ -286,8 +286,7 @@ impl SkillAuthor {
     fn validate_skill_name(&self, name: &str) -> Result<()> {
         if !self.is_valid_skill_name(name) {
             return Err(anyhow!(
-                "Invalid skill name '{}'. Must be lowercase alphanumeric with hyphens only",
-                name
+                "Invalid skill name '{name}'. Must be lowercase alphanumeric with hyphens only"
             ));
         }
         Ok(())
@@ -456,7 +455,7 @@ impl ValidationReport {
         if !self.errors.is_empty() {
             output.push_str("Errors:\n");
             for error in &self.errors {
-                output.push_str(&format!("  ✗ {}\n", error));
+                output.push_str(&format!("  ✗ {error}\n"));
             }
             output.push('\n');
         }
@@ -464,7 +463,7 @@ impl ValidationReport {
         if !self.warnings.is_empty() {
             output.push_str("Warnings:\n");
             for warning in &self.warnings {
-                output.push_str(&format!("  ⚠ {}\n", warning));
+                output.push_str(&format!("  ⚠ {warning}\n"));
             }
         }
 

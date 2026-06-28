@@ -420,10 +420,10 @@ impl McpClient {
             .iter()
             .find(|provider| provider.name == server_name)
             .cloned()
-            .ok_or_else(|| anyhow!("MCP server '{}' is not configured", server_name))?;
+            .ok_or_else(|| anyhow!("MCP server '{server_name}' is not configured"))?;
 
         if !provider_config.enabled {
-            bail!("MCP server '{}' is configured but disabled", server_name);
+            bail!("MCP server '{server_name}' is configured but disabled");
         }
 
         if let Some(reason) = self.requirement_mismatch_reason(&provider_config) {
@@ -475,7 +475,7 @@ impl McpClient {
             let provider = state
                 .providers
                 .remove(server_name)
-                .ok_or_else(|| anyhow!("MCP server '{}' is not connected", server_name))?;
+                .ok_or_else(|| anyhow!("MCP server '{server_name}' is not connected"))?;
             state
                 .tool_provider_index
                 .retain(|_, provider_name| provider_name != server_name);
@@ -607,7 +607,7 @@ impl McpClient {
             // Per-provider sections
             content.push_str("\n## Tools by Provider\n\n");
             for (provider, provider_tools) in by_provider {
-                content.push_str(&format!("### {}\n\n", provider));
+                content.push_str(&format!("### {provider}\n\n"));
                 for tool in provider_tools {
                     content.push_str(&format!(
                         "- **{}**: {}\n  - Path: `.vtcode/mcp/tools/{}/{}.md`\n",
@@ -860,20 +860,16 @@ impl McpClient {
         }
 
         Err(anyhow!(
-            "Tool '{}' not found on any MCP provider.\n\n\
+            "Tool '{tool_name}' not found on any MCP provider.\n\n\
             To use this tool:\n\
-            1. Install the MCP server: `uv tool install mcp-server-{}`\n\
+            1. Install the MCP server: `uv tool install mcp-server-{tool_name}`\n\
             2. Add to vtcode.toml:\n   \
                [[mcp.providers]]\n   \
-               name = \"{}\"\n   \
+               name = \"{tool_name}\"\n   \
                command = \"uvx\"\n   \
-               args = [\"mcp-server-{}\"]\n\
+               args = [\"mcp-server-{tool_name}\"]\n\
             3. Restart VT Code\n\n\
-            Or use the built-in alternative if available (e.g., web_fetch instead of mcp_fetch)",
-            tool_name,
-            tool_name,
-            tool_name,
-            tool_name
+            Or use the built-in alternative if available (e.g., web_fetch instead of mcp_fetch)"
         ))
     }
 
@@ -912,7 +908,7 @@ impl McpClient {
             }
         }
 
-        Err(anyhow!("Resource '{}' not found on any MCP provider", uri))
+        Err(anyhow!("Resource '{uri}' not found on any MCP provider"))
     }
 
     async fn resolve_provider_for_prompt(&self, prompt_name: &str) -> Result<Arc<McpProvider>> {
@@ -951,8 +947,7 @@ impl McpClient {
         }
 
         Err(anyhow!(
-            "Prompt '{}' not found on any MCP provider",
-            prompt_name
+            "Prompt '{prompt_name}' not found on any MCP provider"
         ))
     }
 
@@ -1202,10 +1197,7 @@ impl McpClient {
 
             let message = message.unwrap_or_else(|| "Unknown MCP tool error".to_owned());
             return Err(anyhow!(
-                "MCP tool '{}' on provider '{}' reported an error: {}",
-                tool_name,
-                provider_name,
-                message
+                "MCP tool '{tool_name}' on provider '{provider_name}' reported an error: {message}"
             ));
         }
 

@@ -52,13 +52,13 @@ impl AgentRunner {
             turns_executed, self.max_turns, tool_loops_used, max_tool_loops_label
         ));
 
-        let mut duration_line = format!("Duration: {} ms", total_duration_ms);
+        let mut duration_line = format!("Duration: {total_duration_ms} ms");
         let mut duration_metrics = Vec::new();
         if let Some(avg) = average_turn_duration_ms {
-            duration_metrics.push(format!("avg {:.1} ms/turn", avg));
+            duration_metrics.push(format!("avg {avg:.1} ms/turn"));
         }
         if let Some(max_turn) = max_turn_duration_ms {
-            duration_metrics.push(format!("max {} ms", max_turn));
+            duration_metrics.push(format!("max {max_turn} ms"));
         }
         if !duration_metrics.is_empty() {
             duration_line.push_str(" (");
@@ -93,21 +93,21 @@ impl AgentRunner {
         if !executed_commands.is_empty() {
             summary.push("Executed Commands:".to_owned());
             for command in executed_commands {
-                summary.push(format!(" - {}", command));
+                summary.push(format!(" - {command}"));
             }
         }
 
         if !modified_files.is_empty() {
             summary.push("Modified Files:".to_owned());
             for file in modified_files {
-                summary.push(format!(" - {}", file));
+                summary.push(format!(" - {file}"));
             }
         }
 
         if !warnings.is_empty() {
             summary.push("Warnings:".to_owned());
             for warning in warnings {
-                summary.push(format!(" - {}", warning));
+                summary.push(format!(" - {warning}"));
             }
         }
 

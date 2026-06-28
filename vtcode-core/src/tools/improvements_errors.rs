@@ -9,7 +9,7 @@ pub type ImprovementResult<T> = Result<T, ImprovementError>;
 
 /// Structured errors for tool improvements
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
-#[error("{operation}: {context} ({log_entry})", log_entry = format!("[{}] {} - {} ({}{})", match severity { ImprovementSeverity::Warning => "WARN", ImprovementSeverity::Error => "ERROR", ImprovementSeverity::Critical => "CRIT", }, operation, context, match kind { ErrorKind::ScoringFailed => "scoring_failed", ErrorKind::SelectionFailed => "selection_failed", ErrorKind::ChainExecutionFailed => "chain_failed", ErrorKind::CacheOperationFailed => "cache_failed", ErrorKind::ConfigurationInvalid => "config_invalid", _ => "unknown", }, source_message.as_ref().map(|s| format!(": {}", s)).unwrap_or_default()))]
+#[error("{operation}: {context} ({log_entry})", log_entry = format!("[{}] {} - {} ({}{})", match severity { ImprovementSeverity::Warning => "WARN", ImprovementSeverity::Error => "ERROR", ImprovementSeverity::Critical => "CRIT", }, operation, context, match kind { ErrorKind::ScoringFailed => "scoring_failed", ErrorKind::SelectionFailed => "selection_failed", ErrorKind::ChainExecutionFailed => "chain_failed", ErrorKind::CacheOperationFailed => "cache_failed", ErrorKind::ConfigurationInvalid => "config_invalid", _ => "unknown", }, source_message.as_ref().map(|s| format!(": {s}")).unwrap_or_default()))]
 pub struct ImprovementError {
     /// Error kind
     pub kind: ErrorKind,
@@ -127,7 +127,7 @@ impl ImprovementError {
             },
             self.source_message
                 .as_ref()
-                .map(|s| format!(": {}", s))
+                .map(|s| format!(": {s}"))
                 .unwrap_or_default()
         )
     }

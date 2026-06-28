@@ -122,7 +122,7 @@ pub fn render_agent_palette(session: &mut Session, frame: &mut Frame<'_>, area: 
                 } else {
                     dim_style
                 };
-                spans.push(Span::styled(format!("  {}", subtitle), sub_style));
+                spans.push(Span::styled(format!("  {subtitle}"), sub_style));
             }
 
             (
@@ -362,7 +362,7 @@ fn build_agent_palette_rows(
             .total_items()
             .saturating_sub(palette.current_page_number() * 20);
         rows.push(AgentPaletteRenderRow {
-            text: format!("... ({} more items)", remaining),
+            text: format!("... ({remaining} more items)"),
             subtitle: None,
             style: default.add_modifier(Modifier::DIM | Modifier::ITALIC),
             selectable: false,
@@ -386,7 +386,7 @@ fn agent_palette_instructions(session: &Session, palette: &AgentPalette) -> Vec<
         let count_text = if total == 1 {
             "1 agent".to_owned()
         } else {
-            format!("{} agents", total)
+            format!("{total} agents")
         };
 
         lines.push(Line::from(Span::styled(
@@ -396,7 +396,7 @@ fn agent_palette_instructions(session: &Session, palette: &AgentPalette) -> Vec<
 
         lines.push(Line::from(vec![
             Span::styled(
-                format!("Showing {}", count_text),
+                format!("Showing {count_text}"),
                 default_style(session).add_modifier(Modifier::DIM),
             ),
             Span::styled(
@@ -426,7 +426,7 @@ fn file_palette_instructions(session: &Session, palette: &FilePalette) -> Vec<Li
         let count_text = if total == 1 {
             "1 file".to_owned()
         } else {
-            format!("{} files", total)
+            format!("{total} files")
         };
 
         lines.push(Line::from(vec![Span::styled(
@@ -436,7 +436,7 @@ fn file_palette_instructions(session: &Session, palette: &FilePalette) -> Vec<Li
 
         lines.push(Line::from(vec![
             Span::styled(
-                format!("Showing {}", count_text),
+                format!("Showing {count_text}"),
                 default_style(session).add_modifier(Modifier::DIM),
             ),
             Span::styled(

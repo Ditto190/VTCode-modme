@@ -67,7 +67,7 @@ impl ChangeAttribution {
     pub fn normalized_model_id(&self) -> Option<String> {
         match (&self.model_id, &self.provider) {
             (Some(model), Some(provider)) if !model.contains('/') => {
-                Some(format!("{}/{}", provider, model))
+                Some(format!("{provider}/{model}"))
             }
             (Some(model), _) => Some(model.clone()),
             _ => None,
@@ -498,8 +498,8 @@ fn compute_unified_diff_with_labels(
     old_label: &str,
     new_label: &str,
 ) -> String {
-    let old_label = format!("a/{}", old_label);
-    let new_label = format!("b/{}", new_label);
+    let old_label = format!("a/{old_label}");
+    let new_label = format!("b/{new_label}");
     crate::utils::diff::format_unified_diff(
         old,
         new,

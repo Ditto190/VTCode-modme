@@ -436,9 +436,9 @@ impl PathRuleMatcher {
     fn compile(raw: &str, workspace_root: &Path, current_dir: &Path) -> Option<Self> {
         let home_dir = dirs::home_dir();
         let (root, pattern) = if let Some(path) = raw.strip_prefix("//") {
-            (PathBuf::from("/"), format!("/{}", path))
+            (PathBuf::from("/"), format!("/{path}"))
         } else if let Some(path) = raw.strip_prefix("~/") {
-            (home_dir?, format!("/{}", path))
+            (home_dir?, format!("/{path}"))
         } else if raw.starts_with('/') {
             (workspace_root.to_path_buf(), raw.to_string())
         } else if let Some(path) = raw.strip_prefix("./") {

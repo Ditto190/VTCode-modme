@@ -267,8 +267,7 @@ pub fn check_prompt_cache_retention_compat(
         }
         if !RESPONSES_API_MODELS.contains(&model) {
             return Some(format!(
-                "`prompt_cache_retention` is set but the selected model '{}' does not use the OpenAI Responses API. The setting will be ignored for this model. Run `vtcode models list --provider openai` to see supported Responses API models.",
-                model
+                "`prompt_cache_retention` is set but the selected model '{model}' does not use the OpenAI Responses API. The setting will be ignored for this model. Run `vtcode models list --provider openai` to see supported Responses API models."
             ));
         }
     }
@@ -292,8 +291,7 @@ pub fn check_openai_hosted_shell_compat(
 
     if !RESPONSES_API_MODELS.contains(&model) {
         return Some(format!(
-            "`provider.openai.hosted_shell.enabled` is set but the selected model '{}' does not use the OpenAI Responses API. VT Code will ignore hosted shell and keep the local shell tool for this model.",
-            model
+            "`provider.openai.hosted_shell.enabled` is set but the selected model '{model}' does not use the OpenAI Responses API. VT Code will ignore hosted shell and keep the local shell tool for this model."
         ));
     }
 
@@ -317,15 +315,13 @@ pub fn check_openai_hosted_shell_compat(
 
     if let Some(message) = hosted_shell.first_invalid_skill_message() {
         return Some(format!(
-            "{} VT Code will ignore hosted shell until the mounted skills are corrected.",
-            message
+            "{message} VT Code will ignore hosted shell until the mounted skills are corrected."
         ));
     }
 
     if let Some(message) = hosted_shell.first_invalid_network_policy_message() {
         return Some(format!(
-            "{} VT Code will ignore hosted shell until the hosted shell network policy is corrected.",
-            message
+            "{message} VT Code will ignore hosted shell until the hosted shell network policy is corrected."
         ));
     }
 

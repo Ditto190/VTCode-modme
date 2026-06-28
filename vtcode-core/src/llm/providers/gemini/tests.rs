@@ -1804,7 +1804,7 @@ fn part_json_deserialization_function_call_with_thought_signature() {
                 "thoughtSignature (camelCase) should be captured"
             );
         }
-        other => panic!("Expected FunctionCall, got {:?}", other),
+        other => panic!("Expected FunctionCall, got {other:?}"),
     }
 
     // Test 2: FunctionCall WITHOUT thought signature
@@ -1821,7 +1821,7 @@ fn part_json_deserialization_function_call_with_thought_signature() {
             assert_eq!(function_call.name, "test_func");
             assert_eq!(thought_signature, &None, "missing signature should be None");
         }
-        other => panic!("Expected FunctionCall, got {:?}", other),
+        other => panic!("Expected FunctionCall, got {other:?}"),
     }
 
     // Test 3: Text part
@@ -1831,7 +1831,7 @@ fn part_json_deserialization_function_call_with_thought_signature() {
         Part::Text { text, .. } => {
             assert_eq!(text, "hello world");
         }
-        other => panic!("Expected Text, got {:?}", other),
+        other => panic!("Expected Text, got {other:?}"),
     }
 
     // Test 4: Full candidate with function call + thought signature (simulates API response)
@@ -1860,6 +1860,6 @@ fn part_json_deserialization_function_call_with_thought_signature() {
                 "thought signature should be preserved from API response"
             );
         }
-        other => panic!("Expected FunctionCall in candidate, got {:?}", other),
+        other => panic!("Expected FunctionCall in candidate, got {other:?}"),
     }
 }

@@ -136,23 +136,23 @@ impl PluginDebugger {
         if let Some(author) = &manifest.author {
             output.push_str(&format!("  Author: {}\n", author.name));
             if let Some(email) = &author.email {
-                output.push_str(&format!("    Email: {}\n", email));
+                output.push_str(&format!("    Email: {email}\n"));
             }
             if let Some(url) = &author.url {
-                output.push_str(&format!("    URL: {}\n", url));
+                output.push_str(&format!("    URL: {url}\n"));
             }
         }
 
         if let Some(homepage) = &manifest.homepage {
-            output.push_str(&format!("  Homepage: {}\n", homepage));
+            output.push_str(&format!("  Homepage: {homepage}\n"));
         }
 
         if let Some(repository) = &manifest.repository {
-            output.push_str(&format!("  Repository: {}\n", repository));
+            output.push_str(&format!("  Repository: {repository}\n"));
         }
 
         if let Some(license) = &manifest.license {
-            output.push_str(&format!("  License: {}\n", license));
+            output.push_str(&format!("  License: {license}\n"));
         }
 
         if let Some(keywords) = &manifest.keywords {
@@ -165,9 +165,9 @@ impl PluginDebugger {
         let skills_count = manifest.skills.as_ref().map_or(0, |s| s.len());
 
         output.push_str("  Components:\n");
-        output.push_str(&format!("    Commands: {}\n", commands_count));
-        output.push_str(&format!("    Agents: {}\n", agents_count));
-        output.push_str(&format!("    Skills: {}\n", skills_count));
+        output.push_str(&format!("    Commands: {commands_count}\n"));
+        output.push_str(&format!("    Agents: {agents_count}\n"));
+        output.push_str(&format!("    Skills: {skills_count}\n"));
         output.push_str(&format!(
             "    Hooks: {}\n",
             if manifest.hooks.is_some() {
@@ -202,11 +202,11 @@ impl PluginDebugger {
 
         // Run validation checks
         if let Err(e) = PluginValidator::validate_manifest(manifest) {
-            issues.push(format!("Validation error: {}", e));
+            issues.push(format!("Validation error: {e}"));
         }
 
         if let Err(e) = PluginValidator::validate_plugin_security(manifest) {
-            issues.push(format!("Security warning: {}", e));
+            issues.push(format!("Security warning: {e}"));
         }
 
         // Create debug output
@@ -215,7 +215,7 @@ impl PluginDebugger {
         if !issues.is_empty() {
             output.push_str("\nIssues found:\n");
             for issue in issues {
-                output.push_str(&format!("  - {}\n", issue));
+                output.push_str(&format!("  - {issue}\n"));
             }
         } else {
             output.push_str("\nNo issues found.\n");

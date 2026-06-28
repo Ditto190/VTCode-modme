@@ -276,7 +276,7 @@ impl ContextManager {
                 // Create new entry from active skills
                 match inner.active_skills.get(name) {
                     Some(active_entry) => active_entry.clone(),
-                    None => return Err(anyhow!("Skill '{}' not found in active skills", name)),
+                    None => return Err(anyhow!("Skill '{name}' not found in active skills")),
                 }
             }
         };
@@ -418,9 +418,7 @@ impl ContextManager {
 
         if freed_tokens < required_tokens {
             return Err(anyhow!(
-                "Unable to free enough tokens. Required: {}, Freed: {}",
-                required_tokens,
-                freed_tokens
+                "Unable to free enough tokens. Required: {required_tokens}, Freed: {freed_tokens}"
             ));
         }
 

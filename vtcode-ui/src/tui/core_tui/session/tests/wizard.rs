@@ -81,10 +81,10 @@ fn wizard_multistep_defaulted_enter_advances_and_returns_default_answer() {
                 InlineListSelection::RequestUserInputAnswer { other, .. } => {
                     assert_eq!(other.as_deref(), Some("10m"));
                 }
-                other => panic!("unexpected first selection: {:?}", other),
+                other => panic!("unexpected first selection: {other:?}"),
             }
         }
-        other => panic!("Expected final wizard submission, got {:?}", other),
+        other => panic!("Expected final wizard submission, got {other:?}"),
     }
     assert!(session.wizard_overlay().is_none());
 }

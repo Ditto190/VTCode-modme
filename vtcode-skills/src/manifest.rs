@@ -245,8 +245,8 @@ pub fn generate_skill_template(name: &str, description: &str) -> String {
 
     format!(
         r#"---
-name: {}
-description: {}
+name: {name}
+description: {description}
 license: Apache-2.0
 # Optional fields (uncomment to use):
 # compatibility: "Requires git and network access"
@@ -257,7 +257,7 @@ license: Apache-2.0
 #   version: "1.0"
 ---
 
-# {}
+# {skill_title}
 
 ## Purpose
 
@@ -285,8 +285,7 @@ Summarize the workflow, expected inputs, and the artifact or outcome this skill 
 
 - Keep SKILL.md concise; move deep detail into `references/` files.
 - If output needs a fixed shape, store a starter template or asset alongside the skill.
-"#,
-        name, description, skill_title
+"#
     )
 }
 

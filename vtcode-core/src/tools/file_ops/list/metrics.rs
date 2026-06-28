@@ -113,7 +113,7 @@ impl FileOpsTool {
             entries
         })
         .await
-        .map_err(|e| anyhow!("Blocking task join error: {}", e))?;
+        .map_err(|e| anyhow!("Blocking task join error: {e}"))?;
 
         // Filter excluded paths asynchronously
         let mut entries = Vec::new();

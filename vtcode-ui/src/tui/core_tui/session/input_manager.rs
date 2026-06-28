@@ -444,7 +444,7 @@ impl InputManager {
             return;
         }
 
-        let new_content = format!("{}{}", new_before, new_after);
+        let new_content = format!("{new_before}{new_after}");
         let new_cursor = cursor - removed_before;
 
         self.set_content(new_content);

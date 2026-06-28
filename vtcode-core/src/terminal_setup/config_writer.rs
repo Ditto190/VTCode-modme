@@ -130,11 +130,10 @@ impl ConfigWriter {
         };
 
         let header = format!(
-            "{} {}\n{} VT Code-managed section - auto-generated\n{} Do not edit manually",
-            comment_prefix, VTCODE_BEGIN_MARKER, comment_prefix, comment_prefix
+            "{comment_prefix} {VTCODE_BEGIN_MARKER}\n{comment_prefix} VT Code-managed section - auto-generated\n{comment_prefix} Do not edit manually"
         );
 
-        let footer = format!("{} {}", comment_prefix, VTCODE_END_MARKER);
+        let footer = format!("{comment_prefix} {VTCODE_END_MARKER}");
 
         format!("{}\n{}\n{}", header, content.trim(), footer)
     }

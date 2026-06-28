@@ -356,7 +356,7 @@ impl ContinuationController {
                 "verify": verify
             }))
             .await
-            .with_context(|| format!("update internal scaffold step {}", index))?;
+            .with_context(|| format!("update internal scaffold step {index}"))?;
         Ok(())
     }
 }

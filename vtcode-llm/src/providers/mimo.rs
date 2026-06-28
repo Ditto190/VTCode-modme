@@ -244,7 +244,7 @@ impl MiMoProvider {
         request.send().await.map_err(|e| LLMError::Network {
             message: error_display::format_llm_error(
                 PROVIDER_NAME,
-                &format!("network error: {}", e),
+                &format!("network error: {e}"),
             ),
             metadata: None,
         })

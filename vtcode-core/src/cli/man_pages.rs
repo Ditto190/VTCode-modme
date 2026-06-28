@@ -216,7 +216,7 @@ impl ManPageGenerator {
             "create-project" => Self::generate_create_project_man_page(),
             "init" => Self::generate_init_man_page(),
             "man" => Self::generate_man_man_page(),
-            _ => bail!("Unknown command: {}", command),
+            _ => bail!("Unknown command: {command}"),
         }
     }
 

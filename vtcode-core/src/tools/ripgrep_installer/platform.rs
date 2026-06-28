@@ -148,8 +148,12 @@ fn install_via_apt() -> Result<()> {
         );
 
         // Check if sudo is available
-        let sudo_check = Command::new("sudo").args(["-n", "true"]).output();
-        if sudo_check.is_err() || !sudo_check.unwrap().status.success() {
+        let sudo_ok = Command::new("sudo")
+            .args(["-n", "true"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if !sudo_ok {
             return Err(anyhow!(
                 "sudo is required to install ripgrep via apt, but is not available or requires a password. \
                  Please install ripgrep manually or run with sudo."

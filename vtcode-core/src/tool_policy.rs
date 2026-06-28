@@ -803,7 +803,7 @@ impl ToolPolicyManager {
                     policy
                         .tools
                         .keys()
-                        .map(move |tool| format!("mcp::{}::{}", provider, tool))
+                        .map(move |tool| format!("mcp::{provider}::{tool}"))
                 }),
         );
 
@@ -1022,7 +1022,7 @@ impl ToolPolicyManager {
         let mut summary = self.config.policies.clone();
         for (provider, policy) in &self.config.mcp.providers {
             for (tool, status) in &policy.tools {
-                summary.insert(format!("mcp::{}::{}", provider, tool), status.clone());
+                summary.insert(format!("mcp::{provider}::{tool}"), status.clone());
             }
         }
         summary
@@ -1273,7 +1273,7 @@ impl ToolPolicyManager {
 
             println!(
                 "  {} {}",
-                style(format!("{:15}", tool)).cyan(),
+                style(format!("{tool:15}")).cyan(),
                 status_styled
             );
         }

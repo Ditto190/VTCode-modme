@@ -127,7 +127,7 @@ async fn write_to_temp_file(content: &str, url: &str) -> Result<PathBuf> {
         format!("{:016x}", hasher.finish())
     };
 
-    let filename = format!("{}_{}.txt", url_hash, timestamp);
+    let filename = format!("{url_hash}_{timestamp}.txt");
     let file_path = temp_dir.join(&filename);
 
     tokio::fs::write(&file_path, content)
@@ -144,7 +144,7 @@ pub async fn cleanup_old_web_fetch_temps(max_age_secs: u64) -> Result<usize> {
         Err(_) => return Ok(0),
     };
 
-    if !tokio::fs::metadata(&temp_dir).await.is_ok() {
+    if tokio::fs::metadata(&temp_dir).await.is_err() {
         return Ok(0);
     }
 
@@ -385,8 +385,7 @@ impl WebFetchTool {
         }
 
         Err(anyhow!(
-            "Domain '{}' is not in the whitelist. Only explicitly allowed domains are permitted in whitelist mode.",
-            domain
+            "Domain '{domain}' is not in the whitelist. Only explicitly allowed domains are permitted in whitelist mode."
         ))
     }
 
@@ -421,8 +420,7 @@ impl WebFetchTool {
         for domain in &all_blocked_domains {
             if url.contains(domain) {
                 return Err(anyhow!(
-                    "Access to sensitive domain '{}' is blocked for privacy and security reasons",
-                    domain
+                    "Access to sensitive domain '{domain}' is blocked for privacy and security reasons"
                 ));
             }
         }
@@ -431,8 +429,7 @@ impl WebFetchTool {
         for pattern in &all_blocked_patterns {
             if url.contains(pattern) {
                 return Err(anyhow!(
-                    "URL contains sensitive pattern '{}'. Fetching URLs with credentials or sensitive data is blocked",
-                    pattern
+                    "URL contains sensitive pattern '{pattern}'. Fetching URLs with credentials or sensitive data is blocked"
                 ));
             }
         }
@@ -486,8 +483,7 @@ impl WebFetchTool {
             Ok(())
         } else {
             Err(anyhow!(
-                "Content type '{}' is not supported. Only text-based content types are allowed.",
-                content_type
+                "Content type '{content_type}' is not supported. Only text-based content types are allowed."
             ))
         }
     }

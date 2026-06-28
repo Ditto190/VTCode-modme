@@ -537,7 +537,7 @@ fn command_skill_metadata(spec: &CommandSkillSpec, backend: &str) -> SkillManife
 }
 
 fn built_in_path(skill_name: &str) -> PathBuf {
-    PathBuf::from(format!("<built-in>/{}", skill_name))
+    PathBuf::from(format!("<built-in>/{skill_name}"))
 }
 
 #[cfg(test)]

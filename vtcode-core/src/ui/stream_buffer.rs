@@ -221,7 +221,7 @@ mod tests {
 
         for i in 0..5 {
             let segment = InlineSegment {
-                text: format!("line {}", i),
+                text: format!("line {i}"),
                 style: std::sync::Arc::new(Default::default()),
             };
             let should_flush = buffer.append_line(vec![segment]);

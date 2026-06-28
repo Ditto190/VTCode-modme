@@ -670,22 +670,19 @@ fn blocking_interactive_logout_command(
 
     let status = wait_thread.join().map_err(|panic| {
         anyhow!(
-            "interactive copilot logout wait thread panicked: {:?}",
-            panic
+            "interactive copilot logout wait thread panicked: {panic:?}"
         )
     })?;
 
     let writer_result = writer_thread.join().map_err(|panic| {
         anyhow!(
-            "interactive copilot logout writer thread panicked: {:?}",
-            panic
+            "interactive copilot logout writer thread panicked: {panic:?}"
         )
     })?;
 
     let reader_result = reader_thread.join().map_err(|panic| {
         anyhow!(
-            "interactive copilot logout reader thread panicked: {:?}",
-            panic
+            "interactive copilot logout reader thread panicked: {panic:?}"
         )
     })?;
 

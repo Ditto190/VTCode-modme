@@ -106,8 +106,7 @@ mod tests {
         for c in challenge.code_verifier.chars() {
             assert!(
                 CODE_VERIFIER_CHARSET.contains(&(c as u8)),
-                "Invalid character in verifier: {}",
-                c
+                "Invalid character in verifier: {c}"
             );
         }
 

@@ -25,8 +25,8 @@ mod memory_profiling {
 
         // Insert more entries than capacity
         for i in 0..150 {
-            let key = MemTestKey(format!("key_{}", i));
-            let value = format!("value_{}", i);
+            let key = MemTestKey(format!("key_{i}"));
+            let value = format!("value_{i}");
             let size_bytes = value.len() as u64;
             cache.insert(key, value, size_bytes);
         }
@@ -150,8 +150,8 @@ mod memory_profiling {
 
         // Insert 10,000 entries
         for i in 0..10_000 {
-            let key = MemTestKey(format!("key_{}", i));
-            let value = format!("value_{}", i);
+            let key = MemTestKey(format!("key_{i}"));
+            let value = format!("value_{i}");
             cache.insert(key, value.clone(), value.len() as u64);
         }
 
@@ -160,14 +160,14 @@ mod memory_profiling {
         let start = std::time::Instant::now();
         // Read operations
         for i in 0..1_000 {
-            let key = MemTestKey(format!("key_{}", i));
+            let key = MemTestKey(format!("key_{i}"));
             let _ = cache.get(&key);
         }
 
         let read_time = start.elapsed();
 
-        println!("Insert 10k entries: {:?}", insert_time);
-        println!("Read 1k entries: {:?}", read_time);
+        println!("Insert 10k entries: {insert_time:?}");
+        println!("Read 1k entries: {read_time:?}");
         println!("Cache size: {}", cache.len());
         println!("Cache stats: {:?}", cache.stats());
 

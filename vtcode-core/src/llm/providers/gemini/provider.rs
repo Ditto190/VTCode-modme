@@ -121,8 +121,7 @@ impl GeminiProvider {
             let formatted_error = error_display::format_llm_error(
                 "Gemini",
                 &format!(
-                    "Authentication failed: {}. Check your GOOGLE_API_KEY or GEMINI_API_KEY environment variable.",
-                    error_text
+                    "Authentication failed: {error_text}. Check your GOOGLE_API_KEY or GEMINI_API_KEY environment variable."
                 ),
             );
             return LLMError::Authentication {
@@ -140,7 +139,7 @@ impl GeminiProvider {
         if status_code == 400 {
             let formatted_error = error_display::format_llm_error(
                 "Gemini",
-                &format!("Invalid request: {}", error_text),
+                &format!("Invalid request: {error_text}"),
             );
             return LLMError::InvalidRequest {
                 message: formatted_error,
@@ -150,7 +149,7 @@ impl GeminiProvider {
 
         // Generic error for other cases
         let formatted_error =
-            error_display::format_llm_error("Gemini", &format!("HTTP {}: {}", status, error_text));
+            error_display::format_llm_error("Gemini", &format!("HTTP {status}: {error_text}"));
         LLMError::Provider {
             message: formatted_error,
             metadata: None,

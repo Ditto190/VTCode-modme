@@ -22,7 +22,7 @@ pub(crate) fn save_json_cache<T: Serialize>(
     fs::create_dir_all(state_dir)
         .with_context(|| format!("Failed to create {}", state_dir.display()))?;
     let content =
-        serde_json::to_string(value).with_context(|| format!("Failed to serialize {}", label))?;
+        serde_json::to_string(value).with_context(|| format!("Failed to serialize {label}"))?;
     fs::write(path, content)
         .with_context(|| format!("Failed to write {} at {}", label, path.display()))?;
     Ok(())

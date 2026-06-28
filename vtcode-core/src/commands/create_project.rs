@@ -24,8 +24,7 @@ pub async fn handle_create_project_command(
     println!(
         "{}",
         style(format!(
-            "Creating Rust project '{}' with features: {}",
-            name, features
+            "Creating Rust project '{name}' with features: {features}"
         ))
         .cyan()
         .bold()
@@ -58,7 +57,7 @@ pub async fn handle_create_project_command(
 
     if let Err(e) = &create_dir_result {
         println!("   {} Failed to create directory: {}", style("✗").red(), e);
-        return Err(anyhow!("Failed to create project directory: {}", e));
+        return Err(anyhow!("Failed to create project directory: {e}"));
     }
     print_result("Created project directory", &create_dir_result);
 
@@ -122,9 +121,8 @@ fn main() {
     } else {
         &format!(
             r#"fn main() {{
-    println!("Hello, {}!", env!("CARGO_PKG_NAME"));
-}}"#,
-            name
+    println!("Hello, {name}!", env!("CARGO_PKG_NAME"));
+}}"#
         )
     };
 
@@ -250,8 +248,7 @@ Cargo.lock
     println!(
         "{}",
         style(format!(
-            " Run 'cd {} && cargo run' to test your new project",
-            name
+            " Run 'cd {name} && cargo run' to test your new project"
         ))
         .dim()
     );

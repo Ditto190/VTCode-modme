@@ -204,7 +204,7 @@ impl DocumentProcessor {
             DocumentType::Image => self.process_image(document_path).await,
             other => {
                 warn!("Unsupported document type: {:?}", other);
-                Err(anyhow!("Unsupported document type: {:?}", other))
+                Err(anyhow!("Unsupported document type: {other:?}"))
             }
         }
     }
@@ -324,7 +324,7 @@ impl DocumentProcessor {
         prompt.push_str("\n1. A summary of the content");
         prompt.push_str("\n2. Key insights or findings");
         prompt.push_str("\n3. Answers to specific questions");
-        prompt.push_str(&format!("\n\nSpecific query: {}\n", query));
+        prompt.push_str(&format!("\n\nSpecific query: {query}\n"));
 
         Ok(prompt)
     }

@@ -383,7 +383,7 @@ where
     /// // Removes all cache entries related to this file
     /// ```
     pub fn invalidate_path(&self, path: &str) {
-        self.invalidate_prefix(&format!("{}:", path));
+        self.invalidate_prefix(&format!("{path}:"));
     }
 
     /// Invalidate cache entries matching a key suffix (selective eviction)
@@ -581,7 +581,7 @@ pub fn create_cache_key<T: Serialize>(data: &T) -> Result<String> {
         hash = hash.rotate_left((i % 64) as u32);
     }
 
-    Ok(format!("{:016x}", hash))
+    Ok(format!("{hash:016x}"))
 }
 
 /// Context-aware cache that limits results to MAX_CONTEXT_ITEMS
@@ -729,7 +729,7 @@ mod tests {
 
         // Insert 10 entries
         for i in 0..10 {
-            cache.insert(TestKey(format!("key_{}", i)), format!("value_{}", i), 100);
+            cache.insert(TestKey(format!("key_{i}")), format!("value_{i}"), 100);
         }
 
         assert_eq!(cache.len(), 10);
@@ -747,7 +747,7 @@ mod tests {
 
         // Insert 10 entries
         for i in 0..10 {
-            cache.insert(TestKey(format!("key_{}", i)), format!("value_{}", i), 100);
+            cache.insert(TestKey(format!("key_{i}")), format!("value_{i}"), 100);
         }
 
         // Access some entries to mark them as used

@@ -376,8 +376,7 @@ mod tests {
             let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
             assert!(
                 text.chars().count() <= 40,
-                "Line exceeds 40 chars: {:?}",
-                text
+                "Line exceeds 40 chars: {text:?}"
             );
         }
     }
@@ -440,8 +439,7 @@ mod tests {
             let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
             assert!(
                 text.chars().count() <= 30,
-                "Line exceeds 30 chars: {:?}",
-                text
+                "Line exceeds 30 chars: {text:?}"
             );
         }
     }
@@ -464,7 +462,7 @@ mod tests {
         // Each line should be within max_width
         for line in &lines {
             let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
-            assert!(text.chars().count() <= 25, "Line too wide: {:?}", text);
+            assert!(text.chars().count() <= 25, "Line too wide: {text:?}");
         }
     }
 }

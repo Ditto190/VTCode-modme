@@ -353,7 +353,7 @@ impl RequestProcessor {
         Ok(response.bytes_stream().map(|result| {
             result
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-                .map_err(|e| anyhow::anyhow!("Stream error: {}", e))
+                .map_err(|e| anyhow::anyhow!("Stream error: {e}"))
         }))
     }
 }

@@ -131,8 +131,8 @@ impl AppSession {
         ) {
             let before = &self.core.input_manager.content()[..start];
             let after = &self.core.input_manager.content()[end..];
-            let reference_alias = format!("@agent-{}", agent_name);
-            let new_content = format!("{}{} {}", before, reference_alias, after);
+            let reference_alias = format!("@agent-{agent_name}");
+            let new_content = format!("{before}{reference_alias} {after}");
             let new_cursor = start + reference_alias.len() + 1;
 
             self.core.input_manager.set_content(new_content);
@@ -272,8 +272,8 @@ impl AppSession {
         ) {
             let before = &self.core.input_manager.content()[..start];
             let after = &self.core.input_manager.content()[end..];
-            let reference_alias = format!("@{}", file_path);
-            let new_content = format!("{}{} {}", before, reference_alias, after);
+            let reference_alias = format!("@{file_path}");
+            let new_content = format!("{before}{reference_alias} {after}");
             let new_cursor = start + reference_alias.len() + 1;
 
             self.core.input_manager.set_content(new_content);

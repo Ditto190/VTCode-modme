@@ -51,8 +51,7 @@ fn parse_harmony_completion_messages_with_recovery(
                     let formatted_error = error_display::format_llm_error(
                         "OpenAI",
                         &format!(
-                            "Failed to parse completion tokens: {}. Non-strict recovery also failed: {}",
-                            strict_error, recovery_error
+                            "Failed to parse completion tokens: {strict_error}. Non-strict recovery also failed: {recovery_error}"
                         ),
                     );
                     provider::LLMError::Provider {
@@ -290,7 +289,7 @@ impl OpenAIProvider {
             .map_err(|join_err| {
                 let formatted_error = error_display::format_llm_error(
                     "OpenAI",
-                    &format!("Failed to load harmony encoding (task join): {}", join_err),
+                    &format!("Failed to load harmony encoding (task join): {join_err}"),
                 );
                 provider::LLMError::Provider {
                     message: formatted_error,
@@ -300,7 +299,7 @@ impl OpenAIProvider {
             .map_err(|e| {
                 let formatted_error = error_display::format_llm_error(
                     "OpenAI",
-                    &format!("Failed to load harmony encoding: {}", e),
+                    &format!("Failed to load harmony encoding: {e}"),
                 );
                 provider::LLMError::Provider {
                     message: formatted_error,
@@ -317,7 +316,7 @@ impl OpenAIProvider {
             .map_err(|e| {
                 let formatted_error = error_display::format_llm_error(
                     "OpenAI",
-                    &format!("Failed to render conversation: {}", e),
+                    &format!("Failed to render conversation: {e}"),
                 );
                 provider::LLMError::Provider {
                     message: formatted_error,
@@ -402,7 +401,7 @@ impl OpenAIProvider {
         let encoding = load_harmony_encoding(HarmonyEncodingName::HarmonyGptOss).map_err(|e| {
             let formatted_error = error_display::format_llm_error(
                 "OpenAI",
-                &format!("Failed to load harmony encoding for stop tokens: {}", e),
+                &format!("Failed to load harmony encoding for stop tokens: {e}"),
             );
             provider::LLMError::Provider {
                 message: formatted_error,
@@ -413,7 +412,7 @@ impl OpenAIProvider {
         let stop_token_ids = encoding.stop_tokens_for_assistant_actions().map_err(|e| {
             let formatted_error = error_display::format_llm_error(
                 "OpenAI",
-                &format!("Failed to get stop tokens: {}", e),
+                &format!("Failed to get stop tokens: {e}"),
             );
             provider::LLMError::Provider {
                 message: formatted_error,
@@ -437,7 +436,7 @@ impl OpenAIProvider {
 
         // Send HTTP request to inference server
         let response = headers::apply_json_content_type(
-            self.http_client.post(format!("{}/generate", server_url)),
+            self.http_client.post(format!("{server_url}/generate")),
         )
         .json(&request_body)
         .send()
@@ -446,8 +445,7 @@ impl OpenAIProvider {
             let formatted_error = error_display::format_llm_error(
                 "OpenAI",
                 &format!(
-                    "Failed to send request to harmony inference server at {}: {}",
-                    server_url, e
+                    "Failed to send request to harmony inference server at {server_url}: {e}"
                 ),
             );
             provider::LLMError::Network {
@@ -481,7 +479,7 @@ impl OpenAIProvider {
         let response_json: Value = response.json().await.map_err(|e| {
             let formatted_error = error_display::format_llm_error(
                 "OpenAI",
-                &format!("Failed to parse harmony inference response: {}", e),
+                &format!("Failed to parse harmony inference response: {e}"),
             );
             provider::LLMError::Provider {
                 message: formatted_error,

@@ -483,14 +483,14 @@ impl ShellCommand {
 
     /// Append a `-Name` flag unconditionally.
     fn flag(mut self, name: &str) -> Self {
-        self.parts.push(format!("-{}", name));
+        self.parts.push(format!("-{name}"));
         self
     }
 
     /// Append a `-Name` flag only if `condition` holds.
     fn flag_if(mut self, condition: bool, name: &str) -> Self {
         if condition {
-            self.parts.push(format!("-{}", name));
+            self.parts.push(format!("-{name}"));
         }
         self
     }
@@ -502,7 +502,7 @@ impl ShellCommand {
         let v = value.into();
         let token = match self.shell {
             ShellKind::Unix => v,
-            ShellKind::Windows => format!("-{} {}", name, v),
+            ShellKind::Windows => format!("-{name} {v}"),
         };
         self.parts.push(token);
         self

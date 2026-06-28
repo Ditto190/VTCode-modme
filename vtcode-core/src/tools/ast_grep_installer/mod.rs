@@ -72,8 +72,7 @@ impl AstGrepStatus {
         {
             let reason = cache.failure_reason.as_deref().unwrap_or("unknown reason");
             bail!(
-                "Previous ast-grep installation attempt failed ({}). Not retrying for 24 hours.",
-                reason
+                "Previous ast-grep installation attempt failed ({reason}). Not retrying for 24 hours."
             );
         }
 

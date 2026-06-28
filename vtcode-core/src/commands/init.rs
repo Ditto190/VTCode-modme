@@ -1019,7 +1019,7 @@ fn build_critical_instruction_candidates(
                 continue;
             };
             let lower = line.to_ascii_lowercase();
-            let description = format!("Inferred from {}.", path);
+            let description = format!("Inferred from {path}.");
 
             if lower.contains("conventional commit") {
                 candidates.add(

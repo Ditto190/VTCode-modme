@@ -62,10 +62,10 @@ pub enum ToolIntent {
 impl fmt::Display for ToolIntent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Search(s) => write!(f, "search: {}", s),
-            Self::Execute(s) => write!(f, "execute: {}", s),
-            Self::Analyze(s) => write!(f, "analyze: {}", s),
-            Self::Modify(s) => write!(f, "modify: {}", s),
+            Self::Search(s) => write!(f, "search: {s}"),
+            Self::Execute(s) => write!(f, "execute: {s}"),
+            Self::Analyze(s) => write!(f, "analyze: {s}"),
+            Self::Modify(s) => write!(f, "modify: {s}"),
         }
     }
 }

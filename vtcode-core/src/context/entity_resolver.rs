@@ -175,7 +175,7 @@ impl EntityResolver {
         {
             let content = read_file_with_context(cache_path, "entity cache")
                 .await
-                .with_context(|| format!("Failed to read entity cache at {:?}", cache_path))?;
+                .with_context(|| format!("Failed to read entity cache at {cache_path:?}"))?;
 
             self.index = serde_json::from_str(&content)
                 .with_context(|| "Failed to deserialize entity cache")?;
@@ -191,7 +191,7 @@ impl EntityResolver {
 
             write_file_with_context(cache_path, &content, "entity cache")
                 .await
-                .with_context(|| format!("Failed to write entity cache to {:?}", cache_path))?;
+                .with_context(|| format!("Failed to write entity cache to {cache_path:?}"))?;
         }
         Ok(())
     }

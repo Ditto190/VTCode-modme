@@ -383,14 +383,14 @@ impl SkillManifest {
         }
 
         let parent_dir = skill_path.parent().ok_or_else(|| {
-            anyhow::anyhow!("Cannot determine parent directory of: {:?}", skill_path)
+            anyhow::anyhow!("Cannot determine parent directory of: {skill_path:?}")
         })?;
 
         let dir_name = parent_dir
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| {
-                anyhow::anyhow!("Cannot extract directory name from: {:?}", parent_dir)
+                anyhow::anyhow!("Cannot extract directory name from: {parent_dir:?}")
             })?;
 
         if dir_name != self.name {
@@ -695,7 +695,7 @@ mod tests {
 
         // Invalid: too many tools (> 16)
         let tools = (0..17)
-            .map(|i| format!("Tool{}", i))
+            .map(|i| format!("Tool{i}"))
             .collect::<Vec<_>>()
             .join(" ");
         let m = SkillManifest {

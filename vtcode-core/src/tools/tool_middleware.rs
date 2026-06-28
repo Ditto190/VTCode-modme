@@ -283,7 +283,7 @@ mod tests {
         for i in 0..5 {
             chain.before_execute(&req).await.unwrap();
             let res = ToolResponse {
-                id: format!("req-2-{}", i),
+                id: format!("req-2-{i}"),
                 success: true,
                 result: Some(Value::Null),
                 error: None,

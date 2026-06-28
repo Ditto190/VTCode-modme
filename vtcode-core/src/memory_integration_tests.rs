@@ -51,7 +51,7 @@ mod memory_integration {
 
         // Simulate long PTY output
         for i in 0..NUM_LINES {
-            let line = format!("[{}] Output line with some content\n", i);
+            let line = format!("[{i}] Output line with some content\n");
             total_bytes += line.len();
 
             scrollback.push_back(line);
@@ -69,9 +69,7 @@ mod memory_integration {
         let max_with_overshoot = ((MAX_BUFFER_SIZE as f64 * 1.1).max(0.0)) as usize;
         assert!(
             total_bytes <= max_with_overshoot, // Allow 10% overshoot
-            "PTY scrollback grew beyond limit: {} bytes (limit: {} bytes)",
-            total_bytes,
-            max_with_overshoot
+            "PTY scrollback grew beyond limit: {total_bytes} bytes (limit: {max_with_overshoot} bytes)"
         );
 
         println!(
@@ -93,7 +91,7 @@ mod memory_integration {
 
         // Simulate parsing 200 different files
         for i in 0..200 {
-            let key = MemKey(format!("file_{}.rs", i));
+            let key = MemKey(format!("file_{i}.rs"));
             let parsed_tree = vec![0u8; ENTRY_SIZE]; // Fake parsed data
 
             cache.insert(key, parsed_tree, ENTRY_SIZE as u64);
@@ -107,9 +105,7 @@ mod memory_integration {
         let max_with_overshoot = ((max_expected_memory as f64 * 1.1).max(0.0)) as usize;
         assert!(
             actual_memory <= max_with_overshoot,
-            "Parse cache exceeded bounds: {} bytes vs {} bytes max",
-            actual_memory,
-            max_with_overshoot
+            "Parse cache exceeded bounds: {actual_memory} bytes vs {max_with_overshoot} bytes max"
         );
 
         println!(
@@ -131,7 +127,7 @@ mod memory_integration {
 
         // Insert way more than capacity
         for i in 0..1_000 {
-            let key = MemKey(format!("key_{}", i));
+            let key = MemKey(format!("key_{i}"));
             let large_value = "x".repeat(100_000); // 100KB per entry
             cache.insert(key, large_value, 100_000);
 
@@ -169,14 +165,14 @@ mod memory_integration {
 
         // Insert entries
         for i in 0..100 {
-            let key = MemKey(format!("key_{}", i));
+            let key = MemKey(format!("key_{i}"));
             cache.insert(key, vec![0u8; 100_000], 100_000);
         }
 
         let initial_size = cache.len();
         let initial_memory = cache.stats().total_memory_bytes as f64 / 1_000_000.0;
 
-        println!("Initial: {} entries, {:.1}MB", initial_size, initial_memory);
+        println!("Initial: {initial_size} entries, {initial_memory:.1}MB");
 
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(150));
@@ -187,14 +183,12 @@ mod memory_integration {
         let final_size = cache.len();
         let final_memory = cache.stats().total_memory_bytes as f64 / 1_000_000.0;
 
-        println!("After TTL: {} entries, {:.1}MB", final_size, final_memory);
+        println!("After TTL: {final_size} entries, {final_memory:.1}MB");
 
         // Should have cleaned up significantly
         assert!(
             final_size < initial_size,
-            "TTL-based cleanup didn't work: {} vs {}",
-            final_size,
-            initial_size
+            "TTL-based cleanup didn't work: {final_size} vs {initial_size}"
         );
     }
 
@@ -216,14 +210,14 @@ mod memory_integration {
         for cycle in 0..50 {
             // Insert just enough to exceed cache capacity and force eviction
             for i in 0..10 {
-                let key = MemKey(format!("cycle_{}_key_{}", cycle, i));
+                let key = MemKey(format!("cycle_{cycle}_key_{i}"));
                 let value = "x".repeat(1_000); // 1KB per item
                 cache.insert(key, value, 1_000);
             }
 
             // Access some items (update LRU)
             for i in 0..5 {
-                let key = MemKey(format!("cycle_{}_key_{}", cycle, i));
+                let key = MemKey(format!("cycle_{cycle}_key_{i}"));
                 let _ = cache.get(&key);
             }
 
@@ -255,8 +249,7 @@ mod memory_integration {
                 / stable_period_readings.len() as f64;
 
             println!(
-                "Stable period: avg={:.0}B, variance={:.0}B",
-                stable_avg, stable_variance
+                "Stable period: avg={stable_avg:.0}B, variance={stable_variance:.0}B"
             );
 
             // Variance should be relatively small compared to actual memory use
@@ -332,21 +325,20 @@ mod memory_integration {
         // Insert test
         let start = Instant::now();
         for i in 0..5_000 {
-            let key = MemKey(format!("key_{}", i));
+            let key = MemKey(format!("key_{i}"));
             cache_before.insert(key, "value".into(), 100);
         }
         let before_insert = start.elapsed();
 
         let start = Instant::now();
         for i in 0..5_000 {
-            let key = MemKey(format!("key_{}", i));
+            let key = MemKey(format!("key_{i}"));
             cache_after.insert(key, "value".into(), 100);
         }
         let after_insert = start.elapsed();
 
         println!(
-            "Insertion performance (5000 items):\n  Before: {:?}\n  After: {:?}",
-            before_insert, after_insert
+            "Insertion performance (5000 items):\n  Before: {before_insert:?}\n  After: {after_insert:?}"
         );
 
         // Memory comparison
@@ -364,7 +356,7 @@ mod memory_integration {
         let start = Instant::now();
         let mut hits = 0;
         for i in 0..1_000 {
-            let key = MemKey(format!("key_{}", i));
+            let key = MemKey(format!("key_{i}"));
             if cache_before.get(&key).is_some() {
                 hits += 1;
             }
@@ -374,7 +366,7 @@ mod memory_integration {
         let start = Instant::now();
         let mut hits_after = 0;
         for i in 0..1_000 {
-            let key = MemKey(format!("key_{}", i));
+            let key = MemKey(format!("key_{i}"));
             if cache_after.get(&key).is_some() {
                 hits_after += 1;
             }
@@ -382,8 +374,7 @@ mod memory_integration {
         let after_hits = start.elapsed();
 
         println!(
-            "Hit rate (1000 accesses):\n  Before: {} hits in {:?}\n  After: {} hits in {:?}",
-            hits, before_hits, hits_after, after_hits
+            "Hit rate (1000 accesses):\n  Before: {hits} hits in {before_hits:?}\n  After: {hits_after} hits in {after_hits:?}"
         );
     }
 }

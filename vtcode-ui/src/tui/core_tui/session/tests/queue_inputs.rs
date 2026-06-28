@@ -20,7 +20,7 @@ fn shift_enter_inserts_newline() {
 fn paste_preserves_all_newlines() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     let pasted = (0..15)
-        .map(|i| format!("line {}", i))
+        .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
     let (tx, _rx) = mpsc::unbounded_channel();

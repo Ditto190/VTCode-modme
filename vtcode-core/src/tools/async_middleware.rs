@@ -270,7 +270,7 @@ impl AsyncMiddleware for AsyncLoggingMiddleware {
             self.obs_context.event(
                 crate::tools::EventType::ToolSelected,
                 "executor",
-                format!("executed {} in {}ms", tool_name, duration),
+                format!("executed {tool_name} in {duration}ms"),
                 Some(1.0),
             );
         } else {

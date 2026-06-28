@@ -161,7 +161,7 @@ pub async fn fetch_llamacpp_models(base_url: Option<String>) -> Result<Vec<Strin
     let models_response: LlamaCppModelsResponse = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse llama.cpp models response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse llama.cpp models response: {e}"))?;
 
     Ok(models_response
         .data
@@ -487,8 +487,7 @@ impl LlamaCppProvider {
                             Some(model_path) => {
                                 if !Self::is_local_base_url(&self.base_url) {
                                     return Err(Self::provider_error(format!(
-                                        "{} Auto-start is only available for localhost llama.cpp endpoints.",
-                                        LLAMACPP_CONNECTION_ERROR
+                                        "{LLAMACPP_CONNECTION_ERROR} Auto-start is only available for localhost llama.cpp endpoints."
                                     )));
                                 }
                                 state.status = ServerStatus::starting(Some(model_path));

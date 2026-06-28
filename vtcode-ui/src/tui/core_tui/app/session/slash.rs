@@ -329,7 +329,7 @@ pub(super) fn apply_selected_slash_suggestion(session: &mut Session) -> bool {
     };
 
     let suffix = input_content[range.end..].to_owned();
-    let mut new_input = format!("/{}", command_name);
+    let mut new_input = format!("/{command_name}");
 
     let cursor_position = if suffix.is_empty() {
         new_input.push(' ');
@@ -379,7 +379,7 @@ pub(super) fn autocomplete_slash_suggestion(session: &mut Session) -> bool {
 
     // Handle static command
     let suffix = &input_content[range.end..];
-    let mut new_input = format!("/{}", best_command);
+    let mut new_input = format!("/{best_command}");
 
     let cursor_position = if suffix.is_empty() {
         new_input.push(' ');

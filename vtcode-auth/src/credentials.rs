@@ -347,7 +347,7 @@ impl CredentialStorage {
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring_core::Error::NoEntry) => Ok(None),
-            Err(e) => Err(anyhow!("Failed to read from keyring: {}", e)),
+            Err(e) => Err(anyhow!("Failed to read from keyring: {e}")),
         }
     }
 
@@ -399,7 +399,7 @@ impl CredentialStorage {
                 );
             }
             Err(keyring_core::Error::NoEntry) => {}
-            Err(e) => return Err(anyhow!("Failed to clear keyring entry: {}", e)),
+            Err(e) => return Err(anyhow!("Failed to clear keyring entry: {e}")),
         }
 
         Ok(())

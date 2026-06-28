@@ -359,7 +359,7 @@ mod tests {
     fn test_container_max_skills() {
         let mut container = SkillContainer::new();
         for i in 0..8 {
-            let spec = SkillSpec::custom(format!("skill{}", i));
+            let spec = SkillSpec::custom(format!("skill{i}"));
             container.add_skill(spec).unwrap();
         }
         assert_eq!(container.len(), 8);
@@ -385,7 +385,7 @@ mod tests {
     fn test_container_add_skills_batch_overflow() {
         let mut container = SkillContainer::new();
         for i in 0..7 {
-            let spec = SkillSpec::custom(format!("skill{}", i));
+            let spec = SkillSpec::custom(format!("skill{i}"));
             container.add_skill(spec).ok();
         }
         assert_eq!(container.len(), 7);
@@ -448,7 +448,7 @@ mod tests {
         let mut container = SkillContainer::new();
         for i in 0..8 {
             container
-                .add_skill(SkillSpec::custom(format!("skill{}", i)))
+                .add_skill(SkillSpec::custom(format!("skill{i}")))
                 .ok();
         }
         container.validate().unwrap();

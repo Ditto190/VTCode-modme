@@ -55,7 +55,7 @@ pub fn style_provider_name(provider: &str) -> String {
 pub fn format_llm_error(provider: &str, error: &str) -> String {
     let provider_styled = style_provider_name(provider);
     let error_styled = style_llm_error(error);
-    format!("{} {}", provider_styled, error_styled)
+    format!("{provider_styled} {error_styled}")
 }
 
 /// Format an LLM warning for display with enhanced coloring
@@ -63,28 +63,28 @@ pub fn format_llm_error(provider: &str, error: &str) -> String {
 pub fn format_llm_warning(provider: &str, warning: &str) -> String {
     let provider_styled = style_provider_name(provider);
     let warning_styled = style_llm_warning(warning);
-    format!("{} {}", provider_styled, warning_styled)
+    format!("{provider_styled} {warning_styled}")
 }
 
 /// Format an LLM success message for display with enhanced coloring
 pub fn format_llm_success(provider: &str, message: &str) -> String {
     let provider_styled = style_provider_name(provider);
     let success_styled = style_llm_success(message);
-    format!("{} {}", provider_styled, success_styled)
+    format!("{provider_styled} {success_styled}")
 }
 
 /// Format a network error for display with enhanced coloring.
 /// This is a convenience wrapper for the common "Network error: {}" pattern.
 #[cold]
 pub fn format_network_error(provider: &str, error: &impl std::fmt::Display) -> String {
-    format_llm_error(provider, &format!("Network error: {}", error))
+    format_llm_error(provider, &format!("Network error: {error}"))
 }
 
 /// Format a parse error for display with enhanced coloring.
 /// This is a convenience wrapper for the common "Parse error: {}" pattern.
 #[cold]
 pub fn format_parse_error(provider: &str, error: &impl std::fmt::Display) -> String {
-    format_llm_error(provider, &format!("Parse error: {}", error))
+    format_llm_error(provider, &format!("Parse error: {error}"))
 }
 
 #[cfg(test)]

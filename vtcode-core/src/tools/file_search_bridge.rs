@@ -141,7 +141,7 @@ pub fn filter_by_extension(matches: Vec<FileMatch>, extensions: &[&str]) -> Vec<
         .filter(|m| {
             extensions
                 .iter()
-                .any(|ext| m.path.ends_with(&format!(".{}", ext)) || m.path.ends_with(ext))
+                .any(|ext| m.path.ends_with(&format!(".{ext}")) || m.path.ends_with(ext))
         })
         .collect()
 }

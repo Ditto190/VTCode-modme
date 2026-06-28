@@ -84,8 +84,7 @@ static DEFAULT_PII_PATTERNS: Lazy<Result<Vec<(PiiType, Regex)>, String>> = Lazy:
             Ok(regex) => compiled.push((pii_type, regex)),
             Err(e) => {
                 return Err(format!(
-                    "Failed to compile PII regex for {:?}: {}",
-                    pii_type, e
+                    "Failed to compile PII regex for {pii_type:?}: {e}"
                 ));
             }
         }
@@ -131,7 +130,7 @@ impl PiiTokenizer {
         // Note: Cloning Regex is cheap (Arc-based internally)
         let patterns = DEFAULT_PII_PATTERNS
             .as_ref()
-            .map_err(|e| anyhow::anyhow!("PII pattern initialization failed: {}", e))?
+            .map_err(|e| anyhow::anyhow!("PII pattern initialization failed: {e}"))?
             .iter()
             .map(|(pii_type, regex)| (*pii_type, regex.clone()))
             .collect();
@@ -204,7 +203,7 @@ impl PiiTokenizer {
             let mut inner = self
                 .inner
                 .lock()
-                .map_err(|e| anyhow::anyhow!("Failed to acquire token store lock: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to acquire token store lock: {e}"))?;
             // Clone tokens into the inner store so we can still return them
             inner.token_store.extend(new_tokens.clone());
         }
@@ -219,7 +218,7 @@ impl PiiTokenizer {
         let inner = self
             .inner
             .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to acquire token store lock: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to acquire token store lock: {e}"))?;
         let mut result = text.to_string();
 
         for (token, pii_token) in inner.token_store.iter() {
@@ -244,7 +243,7 @@ impl PiiTokenizer {
         let inner = self
             .inner
             .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to acquire token store lock: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to acquire token store lock: {e}"))?;
         Ok(inner
             .token_store
             .values()

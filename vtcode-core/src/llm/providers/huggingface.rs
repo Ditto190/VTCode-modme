@@ -591,7 +591,7 @@ Enable that provider in your HuggingFace Inference Providers settings, or switch
                 models::huggingface::STEP_3_5_FLASH_PROVIDER
             )
         } else {
-            format!("HuggingFace API error ({}): {}", status, body)
+            format!("HuggingFace API error ({status}): {body}")
         };
 
         LLMError::Provider {
@@ -824,7 +824,7 @@ Enable that provider in your HuggingFace Inference Providers settings, or switch
     fn get_endpoint(&self, use_responses_api: bool) -> String {
         let base = self.base_url.trim_end_matches('/');
         if use_responses_api {
-            format!("{}/responses", base)
+            format!("{base}/responses")
         } else {
             super::common::chat_completions_url(base)
         }

@@ -632,7 +632,7 @@ pub fn generate_tracker_markdown_from_plan(plan_markdown: &str) -> Option<String
             continue;
         }
 
-        let mut entry = format!("- [ ] {}\n", main);
+        let mut entry = format!("- [ ] {main}\n");
         for segment in segments.iter().skip(1) {
             if let Some(files) = segment.strip_prefix("files:") {
                 let values = parse_bracket_list(files);
@@ -644,7 +644,7 @@ pub fn generate_tracker_markdown_from_plan(plan_markdown: &str) -> Option<String
             if let Some(outcome) = segment.strip_prefix("outcome:") {
                 let outcome = outcome.trim().trim_start_matches('[').trim_end_matches(']');
                 if !outcome.is_empty() {
-                    entry.push_str(&format!("  outcome: {}\n", outcome));
+                    entry.push_str(&format!("  outcome: {outcome}\n"));
                 }
                 continue;
             }
@@ -653,11 +653,11 @@ pub fn generate_tracker_markdown_from_plan(plan_markdown: &str) -> Option<String
                 if values.is_empty() {
                     let trimmed = verify.trim();
                     if !trimmed.is_empty() {
-                        entry.push_str(&format!("  verify: {}\n", trimmed));
+                        entry.push_str(&format!("  verify: {trimmed}\n"));
                     }
                 } else {
                     for value in values {
-                        entry.push_str(&format!("  verify: {}\n", value));
+                        entry.push_str(&format!("  verify: {value}\n"));
                     }
                 }
             }
@@ -861,7 +861,7 @@ fn render_initial_plan_file_content(
     plan_file: &Path,
     validation_hints: &ValidationCommandHints,
 ) -> String {
-    let mut content = format!("# {}\n\n", plan_title);
+    let mut content = format!("# {plan_title}\n\n");
     content.push_str("Status: drafting\n");
     content.push_str(&format!(
         "Created: {}\n",
@@ -869,7 +869,7 @@ fn render_initial_plan_file_content(
     ));
     content.push_str(&format!("Plan file: `{}`\n", plan_file.display()));
     if let Some(description) = description.map(str::trim).filter(|value| !value.is_empty()) {
-        content.push_str(&format!("Description: {}\n", description));
+        content.push_str(&format!("Description: {description}\n"));
     }
     content.push('\n');
     content.push_str("> Planning workflow is active. Research first, then materialize one concrete `<proposed_plan>` draft here.\n");
@@ -1036,7 +1036,7 @@ impl Tool for StartPlanningTool {
                 existing_plan_file.as_deref(),
                 self.state
                     .plans_dir()
-                    .join(format!("{}.md", fallback_plan_name)),
+                    .join(format!("{fallback_plan_name}.md")),
                 &fallback_plan_name,
             );
             let plan_title = title_from_plan_name(&plan_title_seed);
@@ -1083,7 +1083,7 @@ impl Tool for StartPlanningTool {
             &workspace_root,
             args.plan_path.as_deref(),
             None,
-            self.state.plans_dir().join(format!("{}.md", plan_name)),
+            self.state.plans_dir().join(format!("{plan_name}.md")),
             &plan_name,
         );
         let plan_title = title_from_plan_name(&plan_title_seed);

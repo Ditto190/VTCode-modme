@@ -414,7 +414,7 @@ pub async fn parse_json_response(
     response.json().await.map_err(|e| LLMError::Provider {
         message: error_display::format_llm_error(
             provider_name,
-            &format!("failed to parse response: {}", e),
+            &format!("failed to parse response: {e}"),
         ),
         metadata: None,
     })
@@ -519,7 +519,7 @@ pub fn spawn_openai_compatible_stream(
             }
             Err(_elapsed) => {
                 let _ = tx.send(Err(LLMError::Provider {
-                    message: format!("{}: streaming timed out after 5 minutes", provider_name),
+                    message: format!("{provider_name}: streaming timed out after 5 minutes"),
                     metadata: None,
                 }));
             }
@@ -719,7 +719,7 @@ pub async fn execute_token_count_request(
     let response = request_builder.json(payload).send().await.map_err(|e| {
         let message = error_display::format_llm_error(
             provider_name,
-            &format!("Token-count network error: {}", e),
+            &format!("Token-count network error: {e}"),
         );
         LLMError::Network {
             message,
@@ -743,7 +743,7 @@ pub async fn execute_token_count_request(
         let body = response.text().await.unwrap_or_default();
         let message = error_display::format_llm_error(
             provider_name,
-            &format!("Token-count request failed ({}): {}", status, body),
+            &format!("Token-count request failed ({status}): {body}"),
         );
         return Err(LLMError::Provider {
             message,
@@ -754,7 +754,7 @@ pub async fn execute_token_count_request(
     let value = response.json::<Value>().await.map_err(|e| {
         let message = error_display::format_llm_error(
             provider_name,
-            &format!("Failed to parse token-count response: {}", e),
+            &format!("Failed to parse token-count response: {e}"),
         );
         LLMError::Provider {
             message,
@@ -915,8 +915,7 @@ pub fn serialize_messages_openai_format(
                 None => {
                     return Err(LLMError::InvalidRequest {
                         message: format!(
-                            "Tool response message missing required tool_call_id (provider: {})",
-                            provider_key
+                            "Tool response message missing required tool_call_id (provider: {provider_key})"
                         ),
                         metadata: None,
                     });

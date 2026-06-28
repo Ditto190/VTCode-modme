@@ -37,7 +37,7 @@ pub(super) async fn execute_tree_view(tool: &FileOpsTool, input: &ListInput) -> 
         .max_depth(Some(10))
         .build()
     {
-        let entry = entry.map_err(|e| anyhow!("Walk error: {}", e))?;
+        let entry = entry.map_err(|e| anyhow!("Walk error: {e}"))?;
         let path = entry.path();
 
         if tool.should_exclude(path).await {

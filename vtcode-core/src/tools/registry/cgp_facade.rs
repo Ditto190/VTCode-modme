@@ -523,9 +523,7 @@ impl ToolRegistry {
     /// Invalidate the hot tool cache after CGP wrapping.
     fn invalidate_hot_cache(&self) {
         self.hot_tool_cache.write().clear();
-        if let Ok(mut cache) = self.cached_available_tools.write() {
-            *cache = None;
-        }
+        *self.cached_available_tools.write() = None;
     }
 }
 

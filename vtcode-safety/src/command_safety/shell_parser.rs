@@ -79,7 +79,7 @@ fn parse_with_tree_sitter(script: &str) -> Result<Vec<Vec<String>>, String> {
     let parser_guard = get_bash_parser()?;
     let mut parser = parser_guard
         .lock()
-        .map_err(|e| format!("Failed to lock parser: {}", e))?;
+        .map_err(|e| format!("Failed to lock parser: {e}"))?;
 
     let tree = parser
         .parse(script, None)

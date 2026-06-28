@@ -79,7 +79,7 @@ fn build_parallel_walker(
     if !exclude.is_empty() {
         let mut override_builder = ignore::overrides::OverrideBuilder::new(search_directory);
         for exclude_pattern in exclude {
-            let pattern = format!("!{}", exclude_pattern);
+            let pattern = format!("!{exclude_pattern}");
             override_builder.add(&pattern)?;
         }
         walk_builder.overrides(override_builder.build()?);

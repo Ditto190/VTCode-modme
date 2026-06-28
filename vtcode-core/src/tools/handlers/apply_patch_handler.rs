@@ -135,7 +135,7 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
     ) -> Result<ExecToolCallOutput, ToolError> {
         // Parse and apply the patch
         let patch = Patch::parse(&req.patch)
-            .map_err(|e| ToolError::Rejected(format!("Failed to parse patch: {}", e)))?;
+            .map_err(|e| ToolError::Rejected(format!("Failed to parse patch: {e}")))?;
 
         if patch.is_empty() {
             return Ok(ExecToolCallOutput {
@@ -157,7 +157,7 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
             }
             Err(e) => Ok(ExecToolCallOutput {
                 stdout: String::new(),
-                stderr: format!("Patch application failed: {}", e),
+                stderr: format!("Patch application failed: {e}"),
                 exit_code: 1,
             }),
         }
@@ -195,7 +195,7 @@ impl ToolHandler for ApplyPatchHandler {
         let patch_input = match payload {
             ToolPayload::Function { arguments } => {
                 let args: Value = serde_json::from_str(&arguments).map_err(|e| {
-                    ToolCallError::respond(format!("Failed to parse function arguments: {}", e))
+                    ToolCallError::respond(format!("Failed to parse function arguments: {e}"))
                 })?;
                 crate::tools::apply_patch::decode_apply_patch_input(&args)
                     .map_err(|e| {
@@ -219,7 +219,7 @@ impl ToolHandler for ApplyPatchHandler {
 
         // Parse the patch to get file changes
         let patch = Patch::parse(&patch_input)
-            .map_err(|e| ToolCallError::respond(format!("Failed to parse patch: {}", e)))?;
+            .map_err(|e| ToolCallError::respond(format!("Failed to parse patch: {e}")))?;
 
         // Convert patch operations to file changes for tracking
         let changes = convert_patch_to_changes(&patch, &turn.cwd);
@@ -342,8 +342,7 @@ pub fn create_apply_patch_json_tool() -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: tools::APPLY_PATCH.to_string(),
         description: format!(
-            "{}\n\n{}",
-            APPLY_PATCH_DESCRIPTION, APPLY_PATCH_GRAMMAR_HELP
+            "{APPLY_PATCH_DESCRIPTION}\n\n{APPLY_PATCH_GRAMMAR_HELP}"
         ),
         strict: false,
         parameters: json!({
@@ -393,7 +392,7 @@ pub async fn intercept_apply_patch(
 
     // Parse the patch
     let patch = Patch::parse(&patch_input)
-        .map_err(|e| ToolCallError::respond(format!("Failed to parse patch: {}", e)))?;
+        .map_err(|e| ToolCallError::respond(format!("Failed to parse patch: {e}")))?;
 
     let changes = convert_patch_to_changes(&patch, ctx.cwd);
 

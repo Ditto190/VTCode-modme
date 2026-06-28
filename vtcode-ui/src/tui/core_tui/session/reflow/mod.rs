@@ -313,7 +313,7 @@ impl Session {
         let top = if label.is_empty() {
             format!("{}{}", rule_indent, dash.repeat(rule_width))
         } else {
-            let label_segment = format!(" {} ", label);
+            let label_segment = format!(" {label} ");
             let label_width = label_segment.chars().count();
             if label_width + 2 >= rule_width {
                 format!("{}{}", rule_indent, dash.repeat(rule_width))

@@ -121,7 +121,7 @@ impl PerformanceProfiler {
             let mut sessions = self.sessions.write().await;
             sessions
                 .remove(session_name)
-                .ok_or_else(|| anyhow::anyhow!("Benchmark session '{}' not found", session_name))?
+                .ok_or_else(|| anyhow::anyhow!("Benchmark session '{session_name}' not found"))?
         };
 
         self.resource_monitor.stop_monitoring().await?;
@@ -452,12 +452,12 @@ impl BenchmarkUtils {
         let baseline = history
             .iter()
             .find(|r| r.test_name == baseline_name)
-            .ok_or_else(|| anyhow::anyhow!("Baseline '{}' not found", baseline_name))?;
+            .ok_or_else(|| anyhow::anyhow!("Baseline '{baseline_name}' not found"))?;
 
         let current = history
             .iter()
             .find(|r| r.test_name == current_name)
-            .ok_or_else(|| anyhow::anyhow!("Current '{}' not found", current_name))?;
+            .ok_or_else(|| anyhow::anyhow!("Current '{current_name}' not found"))?;
 
         let comparison = profiler.compare_results(baseline, current);
 

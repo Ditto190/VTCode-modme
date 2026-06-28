@@ -84,7 +84,7 @@ impl FileOpsTool {
 
         // Validate offset and page size
         if offset_lines > usize::MAX / 2 {
-            return Err(anyhow!("Offset too large: {}", offset_lines));
+            return Err(anyhow!("Offset too large: {offset_lines}"));
         }
         if page_size_lines == 0 {
             return Err(anyhow!("Page size must be greater than 0"));
@@ -93,9 +93,7 @@ impl FileOpsTool {
         // Check for overflow before adding
         if offset_lines > usize::MAX - page_size_lines {
             return Err(anyhow!(
-                "Offset_lines + page_size_lines would overflow: {} + {}",
-                offset_lines,
-                page_size_lines
+                "Offset_lines + page_size_lines would overflow: {offset_lines} + {page_size_lines}"
             ));
         }
 

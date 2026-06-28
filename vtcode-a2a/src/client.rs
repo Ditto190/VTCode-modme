@@ -46,7 +46,7 @@ impl A2aClient {
 
     fn next_id(&self) -> String {
         let id = self.request_id.fetch_add(1, Ordering::Relaxed);
-        format!("a2a-{}", id)
+        format!("a2a-{id}")
     }
 
     fn rpc_url(&self) -> String {

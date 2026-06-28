@@ -214,18 +214,13 @@ impl ToolInventory {
                 let alias_lower = alias.to_ascii_lowercase();
                 if alias_lower != name_lower && tools.contains_key(&alias_lower) {
                     return Err(anyhow::anyhow!(
-                        "Cannot register alias '{}' for tool '{}': alias conflicts with existing tool name",
-                        alias,
-                        name
+                        "Cannot register alias '{alias}' for tool '{name}': alias conflicts with existing tool name"
                     ));
                 }
                 if let Some(existing_target) = state.aliases.get(&alias_lower) {
                     if existing_target != &name_lower {
                         return Err(anyhow::anyhow!(
-                            "Cannot register alias '{}' for tool '{}': alias already exists for tool '{}'",
-                            alias,
-                            name,
-                            existing_target
+                            "Cannot register alias '{alias}' for tool '{name}': alias already exists for tool '{existing_target}'"
                         ));
                     }
                     continue;
@@ -418,7 +413,7 @@ impl ToolInventory {
 
         let entry = tools
             .get(&name_lower)
-            .ok_or_else(|| anyhow::anyhow!("tool '{}' not found for handler replacement", name))?;
+            .ok_or_else(|| anyhow::anyhow!("tool '{name}' not found for handler replacement"))?;
 
         let old_reg = &entry.registration;
         if !matches!(

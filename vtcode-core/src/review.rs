@@ -73,16 +73,16 @@ pub fn build_review_prompt(spec: &ReviewSpec) -> String {
         ReviewTarget::Files(files) => {
             prompt.push_str("Target: review these files:\n");
             for file in files {
-                let _ = writeln!(prompt, "- {}", file);
+                let _ = writeln!(prompt, "- {file}");
             }
         }
         ReviewTarget::Custom(target) => {
-            let _ = writeln!(prompt, "Target: review `{}`.", target);
+            let _ = writeln!(prompt, "Target: review `{target}`.");
         }
     }
 
     if let Some(style) = &spec.style {
-        let _ = writeln!(prompt, "Style: {}.", style);
+        let _ = writeln!(prompt, "Style: {style}.");
     }
 
     prompt.push_str(

@@ -126,9 +126,9 @@ impl Session {
     ) -> Vec<Line<'static>> {
         if max_width < 2 {
             let fallback = if show_right_border {
-                format!("{}││", first_prefix)
+                format!("{first_prefix}││")
             } else {
-                format!("{}│", first_prefix)
+                format!("{first_prefix}│")
             };
             return vec![Line::from(fallback).style(border_style)];
         }

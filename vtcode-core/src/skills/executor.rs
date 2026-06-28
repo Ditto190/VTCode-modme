@@ -655,8 +655,7 @@ pub async fn execute_skill_with_sub_llm(
                 wait_cycles += 1;
                 if wait_cycles > MAX_RATE_LIMIT_WAIT_CYCLES {
                     return Err(anyhow!(
-                        "Skill execution stayed rate-limited for too long ({} cycles)",
-                        MAX_RATE_LIMIT_WAIT_CYCLES
+                        "Skill execution stayed rate-limited for too long ({MAX_RATE_LIMIT_WAIT_CYCLES} cycles)"
                     ));
                 }
 
@@ -685,8 +684,7 @@ pub async fn execute_skill_with_sub_llm(
             iterations += 1;
             if iterations > MAX_SKILL_LLM_ITERATIONS {
                 let reason = skill_tool_free_synthesis_prompt(&format!(
-                    "Skill execution reached the maximum tool-call iterations ({}).",
-                    MAX_SKILL_LLM_ITERATIONS
+                    "Skill execution reached the maximum tool-call iterations ({MAX_SKILL_LLM_ITERATIONS})."
                 ));
                 warn!(
                     skill = skill.name(),
@@ -752,8 +750,7 @@ pub async fn execute_skill_with_sub_llm(
                             messages.push(Message::tool_response(
                                 tool_call.id.clone(),
                                 format!(
-                                    "{}\n\nTool execution was skipped to prevent a loop.",
-                                    loop_warning
+                                    "{loop_warning}\n\nTool execution was skipped to prevent a loop."
                                 ),
                             ));
                             force_tool_free_synthesis_reason =
@@ -840,7 +837,7 @@ pub async fn execute_skill_with_sub_llm(
                 return ensure_visible_skill_content(skill, content);
             }
             FinishReason::Error(ref msg) => {
-                return Err(anyhow!("LLM error during skill execution: {}", msg));
+                return Err(anyhow!("LLM error during skill execution: {msg}"));
             }
             FinishReason::Pause => {
                 // For skill execution, treatment is similar to ToolCalls: we continue the loop

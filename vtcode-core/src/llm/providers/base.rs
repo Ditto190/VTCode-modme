@@ -55,20 +55,20 @@ impl ProviderConfig {
 pub fn handle_http_error(status: StatusCode, error_text: &str, _model: &str) -> LLMError {
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => LLMError::Authentication {
-            message: format!("Authentication failed ({}): {}", status, error_text),
+            message: format!("Authentication failed ({status}): {error_text}"),
             metadata: None,
         },
         StatusCode::TOO_MANY_REQUESTS => LLMError::RateLimit { metadata: None },
         StatusCode::REQUEST_TIMEOUT => LLMError::Network {
-            message: format!("Request timeout ({}): {}", status, error_text),
+            message: format!("Request timeout ({status}): {error_text}"),
             metadata: None,
         },
         _ if status.is_server_error() => LLMError::Provider {
-            message: format!("Server error ({}): {}", status, error_text),
+            message: format!("Server error ({status}): {error_text}"),
             metadata: None,
         },
         _ => LLMError::Network {
-            message: format!("HTTP error ({}): {}", status, error_text),
+            message: format!("HTTP error ({status}): {error_text}"),
             metadata: None,
         },
     }
@@ -97,7 +97,7 @@ pub mod request_builder {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         // Default authorization header (can be overridden by providers)
-        if let Ok(auth_value) = HeaderValue::from_str(&format!("Bearer {}", api_key)) {
+        if let Ok(auth_value) = HeaderValue::from_str(&format!("Bearer {api_key}")) {
             headers.insert(AUTHORIZATION, auth_value);
         }
 
@@ -244,7 +244,7 @@ pub trait BaseProvider: Send + Sync {
                                 }
                                 Err(e) => {
                                     let error = LLMError::Network {
-                                        message: format!("Failed to read response: {}", e),
+                                        message: format!("Failed to read response: {e}"),
                                         metadata: None,
                                     };
                                     if attempt < max_retries {
@@ -257,7 +257,7 @@ pub trait BaseProvider: Send + Sync {
                         }
                         Err(e) => {
                             let error = LLMError::Network {
-                                message: format!("Request failed: {}", e),
+                                message: format!("Request failed: {e}"),
                                 metadata: None,
                             };
                             if attempt < max_retries {

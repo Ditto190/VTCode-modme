@@ -81,26 +81,14 @@ impl ToolRegistry {
     }
 
     pub async fn initialize_async(&self) -> Result<()> {
-        let mcp_client_is_none = {
-            self.mcp_client
-                .read()
-                .ok()
-                .map(|g| g.is_none())
-                .unwrap_or(true)
-        };
+        let mcp_client_is_none = self.mcp_client.read().is_none();
         if self.initialized.load(std::sync::atomic::Ordering::Relaxed)
             && (mcp_client_is_none || !self.mcp_tool_index.read().await.is_empty())
         {
             return Ok(());
         }
 
-        let mcp_client_is_some = {
-            self.mcp_client
-                .read()
-                .ok()
-                .map(|g| g.is_some())
-                .unwrap_or(false)
-        };
+        let mcp_client_is_some = self.mcp_client.read().is_some();
         if mcp_client_is_some
             && self.mcp_tool_index.read().await.is_empty()
             && let Err(err) = self.refresh_mcp_tools().await

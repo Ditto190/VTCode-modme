@@ -974,7 +974,7 @@ impl EnhancedSkillLoader {
                     report.add_incompatible_skill(
                         skill_ctx.manifest().name.clone(),
                         skill_ctx.manifest().description.clone(),
-                        format!("Load error: {}", e),
+                        format!("Load error: {e}"),
                     );
                 }
             }

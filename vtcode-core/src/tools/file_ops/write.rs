@@ -217,8 +217,7 @@ impl FileOpsTool {
             }
             _ => {
                 return Err(anyhow!(
-                    "Error: Unsupported write mode '{}'. Allowed: overwrite, append, skip_if_exists, fail_if_exists.",
-                    effective_mode
+                    "Error: Unsupported write mode '{effective_mode}'. Allowed: overwrite, append, skip_if_exists, fail_if_exists."
                 ));
             }
         }

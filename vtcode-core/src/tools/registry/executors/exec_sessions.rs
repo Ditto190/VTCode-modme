@@ -595,8 +595,7 @@ impl ToolRegistry {
                 .await
                 .with_context(|| {
                     format!(
-                        "exec session '{}' disappeared during settlement",
-                        session_id
+                        "exec session '{session_id}' disappeared during settlement"
                     )
                 })?;
         }
@@ -625,8 +624,7 @@ impl ToolRegistry {
             .get(*peeked_bytes..)
             .ok_or_else(|| {
                 anyhow!(
-                    "exec session '{}' output boundary became invalid",
-                    session_id
+                    "exec session '{session_id}' output boundary became invalid"
                 )
             })?
             .to_string();
@@ -724,7 +722,7 @@ fn exec_session_payload<'a>(
     args: &'a Value,
     object_error: &str,
 ) -> Result<&'a serde_json::Map<String, Value>> {
-    args.as_object().ok_or_else(|| anyhow!("{}", object_error))
+    args.as_object().ok_or_else(|| anyhow!("{object_error}"))
 }
 
 fn resolve_exec_session_id(
@@ -735,6 +733,6 @@ fn resolve_exec_session_id(
 ) -> Result<String> {
     let _payload = exec_session_payload(args, object_error)?;
     let raw_sid = crate::tools::command_args::session_id_text(args)
-        .ok_or_else(|| anyhow!("{}", session_id_error))?;
+        .ok_or_else(|| anyhow!("{session_id_error}"))?;
     Ok(validate_exec_session_id(raw_sid, validation_context)?.to_string())
 }

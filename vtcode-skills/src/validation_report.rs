@@ -134,11 +134,11 @@ impl SkillValidationReport {
             for error in &self.errors {
                 summary.push_str(&format!("  - {}", error.message));
                 if let Some(field) = &error.field {
-                    summary.push_str(&format!(" [{}]", field));
+                    summary.push_str(&format!(" [{field}]"));
                 }
                 summary.push('\n');
                 if let Some(suggestion) = &error.suggestion {
-                    summary.push_str(&format!("    💡 Suggestion: {}\n", suggestion));
+                    summary.push_str(&format!("    💡 Suggestion: {suggestion}\n"));
                 }
             }
         }
@@ -148,7 +148,7 @@ impl SkillValidationReport {
             for warning in &self.warnings {
                 summary.push_str(&format!("  - {}", warning.message));
                 if let Some(field) = &warning.field {
-                    summary.push_str(&format!(" [{}]", field));
+                    summary.push_str(&format!(" [{field}]"));
                 }
                 summary.push('\n');
             }
@@ -159,7 +159,7 @@ impl SkillValidationReport {
             for suggestion in &self.suggestions {
                 summary.push_str(&format!("  - {}", suggestion.message));
                 if let Some(field) = &suggestion.field {
-                    summary.push_str(&format!(" [{}]", field));
+                    summary.push_str(&format!(" [{field}]"));
                 }
                 summary.push('\n');
             }

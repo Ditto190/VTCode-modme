@@ -228,7 +228,7 @@ pub(crate) fn format_tool_markdown(tool: &McpToolInfo) -> String {
             content.push_str("## Required Parameters\n\n");
             for req in required {
                 if let Some(name) = req.as_str() {
-                    let _ = writeln!(content, "- `{}`", name);
+                    let _ = writeln!(content, "- `{name}`");
                 }
             }
             content.push('\n');
@@ -248,10 +248,10 @@ pub(crate) fn format_tool_markdown(tool: &McpToolInfo) -> String {
                     .get("description")
                     .and_then(|d| d.as_str())
                     .unwrap_or("");
-                let _ = write!(content, "### `{}`\n\n", param_name);
-                let _ = writeln!(content, "- **Type**: {}", param_type);
+                let _ = write!(content, "### `{param_name}`\n\n");
+                let _ = writeln!(content, "- **Type**: {param_type}");
                 if !param_desc.is_empty() {
-                    let _ = writeln!(content, "- **Description**: {}", param_desc);
+                    let _ = writeln!(content, "- **Description**: {param_desc}");
                 }
                 content.push('\n');
             }

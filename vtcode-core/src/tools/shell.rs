@@ -101,7 +101,7 @@ impl CommandExecutor for DryRunExecutor {
             .context("Failed to record dry-run command")?;
         log.push(command.to_string());
         Ok(ShellOutput {
-            stdout: format!("(dry-run) {}", command),
+            stdout: format!("(dry-run) {command}"),
             stderr: String::new(),
             exit_code: 0,
         })
@@ -256,10 +256,10 @@ impl<E: CommandExecutor> ShellRunner<E> {
 
         // Single metadata call avoids TOCTOU between exists() and is_dir()
         let meta = target.metadata().map_err(|_| {
-            anyhow::anyhow!("directory `{}` does not exist or is not accessible", path)
+            anyhow::anyhow!("directory `{path}` does not exist or is not accessible")
         })?;
         if !meta.is_dir() {
-            bail!("path `{}` is not a directory", path);
+            bail!("path `{path}` is not a directory");
         }
 
         let normalized = ensure_path_within_workspace(&target, &self.workspace_root)?;

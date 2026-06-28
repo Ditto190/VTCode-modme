@@ -35,11 +35,11 @@ pub enum EvaluationReason {
 impl std::fmt::Display for EvaluationReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PolicyAllow(msg) => write!(f, "Policy Allow: {}", msg),
-            Self::PolicyDeny(msg) => write!(f, "Policy Deny: {}", msg),
+            Self::PolicyAllow(msg) => write!(f, "Policy Allow: {msg}"),
+            Self::PolicyDeny(msg) => write!(f, "Policy Deny: {msg}"),
             Self::SafetyAllow => write!(f, "Safety Allow"),
-            Self::SafetyDeny(msg) => write!(f, "Safety Deny: {}", msg),
-            Self::DangerousCommand(msg) => write!(f, "Dangerous: {}", msg),
+            Self::SafetyDeny(msg) => write!(f, "Safety Deny: {msg}"),
+            Self::DangerousCommand(msg) => write!(f, "Dangerous: {msg}"),
             Self::CacheHit(allowed, msg) => {
                 write!(
                     f,
@@ -220,8 +220,7 @@ impl UnifiedCommandEvaluator {
                     let result = EvaluationResult {
                         allowed: false,
                         primary_reason: EvaluationReason::SafetyDeny(format!(
-                            "sub-command denied: {}",
-                            reason
+                            "sub-command denied: {reason}"
                         )),
                         secondary_reasons: vec![],
                         resolved_path: None,

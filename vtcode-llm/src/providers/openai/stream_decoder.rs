@@ -252,7 +252,7 @@ pub(crate) fn create_chat_stream(
             let chunk = chunk_result.map_err(|err| {
                 let formatted_error = error_display::format_llm_error(
                     "OpenAI",
-                    &format!("Streaming error: {}", err),
+                    &format!("Streaming error: {err}"),
                 );
                 provider::LLMError::Network { message: formatted_error, metadata: None }
             })?;
@@ -347,7 +347,7 @@ pub(crate) fn create_responses_stream(
             let chunk = chunk_result.map_err(|err| {
                 let formatted_error = error_display::format_llm_error(
                     "OpenAI",
-                    &format!("Streaming error: {}", err),
+                    &format!("Streaming error: {err}"),
                 );
                 provider::LLMError::Network { message: formatted_error, metadata: None }
             })?;

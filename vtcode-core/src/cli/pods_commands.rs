@@ -43,7 +43,7 @@ pub async fn handle_pods_command(command: PodsCommands) -> Result<()> {
             let stopped = manager
                 .stop_model(&name)
                 .await?
-                .ok_or_else(|| anyhow!("unknown model '{}'", name))?;
+                .ok_or_else(|| anyhow!("unknown model '{name}'"))?;
             println!(
                 "{} Stopped {} (pid {})",
                 green("✓"),
@@ -77,7 +77,7 @@ fn parse_gpu_entries(raw: &[String]) -> Result<Vec<PodGpu>> {
             let (id, name) = entry
                 .split_once(':')
                 .or_else(|| entry.split_once('='))
-                .ok_or_else(|| anyhow!("invalid GPU entry '{}'; expected ID:NAME", entry))?;
+                .ok_or_else(|| anyhow!("invalid GPU entry '{entry}'; expected ID:NAME"))?;
             let id = id
                 .trim()
                 .parse::<u32>()

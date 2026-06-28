@@ -119,8 +119,7 @@ impl CommandTool {
         }
         if program.contains(char::is_whitespace) {
             return Err(anyhow!(
-                "Program name cannot contain whitespace: {}",
-                program
+                "Program name cannot contain whitespace: {program}"
             ));
         }
 
@@ -147,8 +146,7 @@ impl CommandTool {
         if !eval_result.allowed {
             if !policy_allowed {
                 return Err(anyhow!(
-                    "command '{}' is not permitted by the execution policy",
-                    program
+                    "command '{program}' is not permitted by the execution policy"
                 ));
             }
             // If unified evaluator denied, still allow explicitly confirmed risky commands

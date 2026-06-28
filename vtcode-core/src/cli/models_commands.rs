@@ -59,7 +59,7 @@ async fn handle_list_models(_cli: &Cli) -> Result<()> {
         } else {
             bold(&provider_display)
         };
-        println!("{}", colored_provider);
+        println!("{colored_provider}");
 
         if let Some(models) = supported_models_for_provider(provider_name) {
             let current_model = &config.preferences.default_model;
@@ -72,7 +72,7 @@ async fn handle_list_models(_cli: &Cli) -> Result<()> {
                 } else {
                     cyan(model)
                 };
-                println!("  {}{}", model_status, colored_model);
+                println!("  {model_status}{colored_model}");
             }
             if models.len() > 3 {
                 println!("  {} +{} more models", dimmed("..."), models.len() - 3);
@@ -87,7 +87,7 @@ async fn handle_list_models(_cli: &Cli) -> Result<()> {
         } else {
             yellow("・  Not configured")
         };
-        println!("  {}", config_status);
+        println!("  {config_status}");
         println!();
     }
 
@@ -153,8 +153,7 @@ async fn handle_set_provider(_cli: &Cli, provider: &str) -> Result<()> {
         "{} Configure: {}",
         cyan("・"),
         dimmed(&format!(
-            "vtcode models config {} --api-key YOUR_KEY",
-            provider
+            "vtcode models config {provider} --api-key YOUR_KEY"
         ))
     );
 
@@ -206,7 +205,7 @@ async fn handle_config_provider(
         | "llamacpp" | "stepfun" | "evolink" => {
             configure_standard_provider(&mut config, provider, api_key, base_url, model)?;
         }
-        _ => return Err(anyhow!("Unsupported provider: {}", provider)),
+        _ => return Err(anyhow!("Unsupported provider: {provider}")),
     }
 
     // Reuse the same manager instance
@@ -242,7 +241,7 @@ fn configure_standard_provider(
         "minimax" => get_provider_config!(anthropic), // Note: maps to anthropic
         "stepfun" => get_provider_config!(stepfun),
         "evolink" => get_provider_config!(evolink),
-        _ => return Err(anyhow!("Unknown provider: {}", provider)),
+        _ => return Err(anyhow!("Unknown provider: {provider}")),
     };
 
     if let Some(key) = api_key {
@@ -332,7 +331,7 @@ fn get_provider_credentials(
         "llamacpp" => config.providers.llamacpp.as_ref(),
         "stepfun" => config.providers.stepfun.as_ref(),
         "evolink" => config.providers.evolink.as_ref(),
-        _ => return Err(anyhow!("Unknown provider: {}", provider)),
+        _ => return Err(anyhow!("Unknown provider: {provider}")),
     };
 
     Ok(provider_config
@@ -365,7 +364,7 @@ async fn handle_model_info(_cli: &Cli, model: &str) -> Result<()> {
     if let Some(resolved) = resolved {
         println!("Provider: {}", resolved.provider.label());
         if let Some(context_window) = resolved.context_window() {
-            println!("Context: {}", context_window);
+            println!("Context: {context_window}");
         }
         println!(
             "Reasoning: {}",

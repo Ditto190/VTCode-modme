@@ -83,8 +83,7 @@ impl AuthHandler {
                     .all(|c: char| c.is_alphanumeric() || c == '_')
                 {
                     anyhow::bail!(
-                        "Invalid environment variable name: '{}'. Must contain only alphanumeric characters and underscores.",
-                        var_name
+                        "Invalid environment variable name: '{var_name}'. Must contain only alphanumeric characters and underscores."
                     );
                 }
 

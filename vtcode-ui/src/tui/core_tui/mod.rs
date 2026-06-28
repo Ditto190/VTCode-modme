@@ -156,12 +156,12 @@ pub fn spawn_session_with_prompts_and_options(
             if error_msg.contains("stdin is not a terminal") {
                 eprintln!("Error: Interactive TUI requires a proper terminal.");
                 if let Some(hint) = non_interactive_hint.as_deref() {
-                    eprintln!("{}", hint);
+                    eprintln!("{hint}");
                 } else {
                     eprintln!("Use a non-interactive mode in your host app for piped input.");
                 }
             } else {
-                eprintln!("Error: TUI startup failed: {:#}", error);
+                eprintln!("Error: TUI startup failed: {error:#}");
             }
             tracing::error!(%error, "inline session terminated unexpectedly");
         }

@@ -539,8 +539,7 @@ impl StructuralSearchRequest {
         let glob_count = self.normalized_globs().len();
         if glob_count > MAX_ALLOWED_GLOBS {
             bail!(
-                "action='structural' accepts at most {} non-empty `globs` entries",
-                MAX_ALLOWED_GLOBS
+                "action='structural' accepts at most {MAX_ALLOWED_GLOBS} non-empty `globs` entries"
             );
         }
 
@@ -548,8 +547,7 @@ impl StructuralSearchRequest {
             && context_lines > MAX_ALLOWED_CONTEXT_LINES
         {
             bail!(
-                "action='structural' accepts at most {} `context_lines`",
-                MAX_ALLOWED_CONTEXT_LINES
+                "action='structural' accepts at most {MAX_ALLOWED_CONTEXT_LINES} `context_lines`"
             );
         }
 
@@ -1459,7 +1457,7 @@ async fn execute_structural_query(
             .ok_or_else(|| anyhow!("lang is required for debug query"))?;
         let mut command = ast_grep_command(ast_grep, workspace_root, "run");
         command
-            .arg(format!("--pattern={}", pattern))
+            .arg(format!("--pattern={pattern}"))
             .arg("--lang")
             .arg(lang)
             .arg(format!("--debug-query={}", debug_query.as_str()))
@@ -1791,8 +1789,8 @@ async fn execute_structural_rewrite(
         .ok_or_else(|| anyhow!("rewrite template is required"))?;
     let mut command = ast_grep_command(ast_grep, workspace_root, "run");
     command
-        .arg(format!("--pattern={}", pattern))
-        .arg(format!("--rewrite={}", template))
+        .arg(format!("--pattern={pattern}"))
+        .arg(format!("--rewrite={template}"))
         .arg("--json=compact")
         .arg("--color=never");
 
@@ -1919,7 +1917,7 @@ fn build_atomic_rule_yaml(request: &StructuralSearchRequest, lang: &str) -> Stri
     {
         yaml.push_str("utils:\n");
         for (util_name, util_rule) in utils {
-            let _ = writeln!(yaml, "  {}:", util_name);
+            let _ = writeln!(yaml, "  {util_name}:");
             value_to_yaml(&mut yaml, util_rule, 4);
         }
     }
@@ -2013,7 +2011,7 @@ fn build_atomic_rule_yaml(request: &StructuralSearchRequest, lang: &str) -> Stri
     {
         yaml.push_str("  constraints:\n");
         for (var_name, constraint_value) in constraints {
-            yaml.push_str(&format!("    {}:\n", var_name));
+            yaml.push_str(&format!("    {var_name}:\n"));
             value_to_yaml(&mut yaml, constraint_value, 6);
         }
     }
@@ -2074,7 +2072,7 @@ fn build_atomic_rule_yaml(request: &StructuralSearchRequest, lang: &str) -> Stri
     {
         yaml.push_str("transform:\n");
         for (var_name, transform_def) in transform {
-            let _ = writeln!(yaml, "  {}:", var_name);
+            let _ = writeln!(yaml, "  {var_name}:");
             value_to_yaml(&mut yaml, transform_def, 4);
         }
     }
@@ -2656,7 +2654,7 @@ fn build_fixconfig_rule_yaml(
         yaml.push_str("transform:\n");
         for (var_name, transform_def) in transform {
             use std::fmt::Write as _;
-            let _ = writeln!(yaml, "  {}:", var_name);
+            let _ = writeln!(yaml, "  {var_name}:");
             value_to_yaml(&mut yaml, transform_def, 4);
         }
     }
@@ -2712,20 +2710,20 @@ fn append_expand_rule_yaml(yaml: &mut String, rule: &FixExpandRule) {
                                 ));
                             }
                             Value::Number(n) => {
-                                yaml.push_str(&format!("      {}: {}\n", key, n));
+                                yaml.push_str(&format!("      {key}: {n}\n"));
                             }
                             Value::Bool(b) => {
-                                yaml.push_str(&format!("      {}: {}\n", key, b));
+                                yaml.push_str(&format!("      {key}: {b}\n"));
                             }
                             _ => {
-                                yaml.push_str(&format!("      {}: {}\n", key, val));
+                                yaml.push_str(&format!("      {key}: {val}\n"));
                             }
                         }
                     }
                 }
             }
             _ => {
-                yaml.push_str(&format!("    stopBy: {}\n", stop_by));
+                yaml.push_str(&format!("    stopBy: {stop_by}\n"));
             }
         }
     }
@@ -3146,8 +3144,8 @@ async fn execute_structural_apply(
         let command_path = search_path.command_arg.clone();
         let mut command = ast_grep_command(ast_grep, workspace_root, "run");
         command
-            .arg(format!("--pattern={}", pattern))
-            .arg(format!("--rewrite={}", template))
+            .arg(format!("--pattern={pattern}"))
+            .arg(format!("--rewrite={template}"))
             .arg("--json=compact")
             .arg("--color=never");
 
@@ -3485,8 +3483,7 @@ fn reject_forbidden_args(args: &Value) -> Result<()> {
     for key in STRUCTURAL_FORBIDDEN_KEYS {
         if has_argument_key(object, key) {
             bail!(
-                "action='structural' is read-only; remove `{}`. For `sg scan`, `sg test`, `sg new`, `sgconfig.yml`, or rewrite-oriented ast-grep tasks, load the bundled `ast-grep` skill first and use `unified_exec` only when the public structural surface cannot express the needed CLI flow.",
-                key
+                "action='structural' is read-only; remove `{key}`. For `sg scan`, `sg test`, `sg new`, `sgconfig.yml`, or rewrite-oriented ast-grep tasks, load the bundled `ast-grep` skill first and use `unified_exec` only when the public structural surface cannot express the needed CLI flow."
             );
         }
     }

@@ -82,8 +82,7 @@ impl TaskOutcome {
                 max_turns,
                 actual_turns,
             } => format!(
-                "Stopped after reaching turn limit (max: {}, reached: {})",
-                max_turns, actual_turns
+                "Stopped after reaching turn limit (max: {max_turns}, reached: {actual_turns})"
             ),
             Self::BudgetLimitReached {
                 max_budget_usd,
@@ -97,19 +96,17 @@ impl TaskOutcome {
             } => {
                 if *max_tool_loops == 0 {
                     format!(
-                        "Stopped after a tool-loop safeguard halted execution (reached: {})",
-                        actual_tool_loops
+                        "Stopped after a tool-loop safeguard halted execution (reached: {actual_tool_loops})"
                     )
                 } else {
                     format!(
-                        "Stopped after reaching tool loop limit (max: {}, reached: {})",
-                        max_tool_loops, actual_tool_loops
+                        "Stopped after reaching tool loop limit (max: {max_tool_loops}, reached: {actual_tool_loops})"
                     )
                 }
             }
             Self::LoopDetected => "Stopped due to infinite loop detection".into(),
             Self::Cancelled => "Task cancelled by user".into(),
-            Self::Failed { reason } => format!("Task failed: {}", reason),
+            Self::Failed { reason } => format!("Task failed: {reason}"),
             Self::Unknown => "Task outcome could not be determined".into(),
         }
     }

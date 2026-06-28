@@ -38,12 +38,12 @@ impl RipgrepStatus {
                             reason: "rg --version returned empty output".to_string(),
                         }
                     } else {
-                        debug_log(&format!("ripgrep available: {}", version));
+                        debug_log(&format!("ripgrep available: {version}"));
                         RipgrepStatus::Available { version }
                     }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    debug_log(&format!("ripgrep check failed: {}", stderr));
+                    debug_log(&format!("ripgrep check failed: {stderr}"));
                     RipgrepStatus::Error {
                         reason: if stderr.is_empty() {
                             "rg exited with error".to_string()
@@ -58,7 +58,7 @@ impl RipgrepStatus {
                     debug_log("ripgrep not found in PATH");
                     RipgrepStatus::NotFound
                 } else {
-                    debug_log(&format!("ripgrep check error: {}", err));
+                    debug_log(&format!("ripgrep check error: {err}"));
                     RipgrepStatus::Error {
                         reason: err.to_string(),
                     }
@@ -97,10 +97,9 @@ impl RipgrepStatus {
             && cache.status == "failed"
         {
             let reason = cache.failure_reason.as_deref().unwrap_or("unknown reason");
-            debug_log(&format!("Cache shows previous failure: {}", reason));
+            debug_log(&format!("Cache shows previous failure: {reason}"));
             return Err(anyhow!(
-                "Previous installation attempt failed ({}). Not retrying for 24 hours.",
-                reason
+                "Previous installation attempt failed ({reason}). Not retrying for 24 hours."
             ));
         }
 
@@ -114,7 +113,7 @@ impl RipgrepStatus {
                     Ok(())
                 }
                 status => {
-                    let msg = format!("Installation verification failed: {:?}", status);
+                    let msg = format!("Installation verification failed: {status:?}");
                     debug_log(&msg);
                     InstallationCache::mark_failed("auto-detected", &msg);
                     Err(anyhow!(msg))
@@ -122,7 +121,7 @@ impl RipgrepStatus {
             },
             Err(err) => {
                 let msg = err.to_string();
-                debug_log(&format!("Installation failed: {}", msg));
+                debug_log(&format!("Installation failed: {msg}"));
                 InstallationCache::mark_failed("all-methods", &msg);
                 Err(anyhow!(msg))
             }

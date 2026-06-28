@@ -239,7 +239,7 @@ impl OpenAIProvider {
         let response_json: Value = response.json().await.map_err(|e| {
             let formatted_error = error_display::format_llm_error(
                 "OpenAI",
-                &format!("Failed to parse compaction response: {}", e),
+                &format!("Failed to parse compaction response: {e}"),
             );
             provider::LLMError::Provider {
                 message: formatted_error,
@@ -352,7 +352,7 @@ impl OpenAIProvider {
                         let openai_response: Value = retry_response.json().await.map_err(|e| {
                             let formatted_error = error_display::format_llm_error(
                                 "OpenAI",
-                                &format!("Failed to parse response: {}", e),
+                                &format!("Failed to parse response: {e}"),
                             );
                             provider::LLMError::Provider {
                                 message: formatted_error,
@@ -413,7 +413,7 @@ impl OpenAIProvider {
                                     retry_response.json().await.map_err(|e| {
                                         let formatted_error = error_display::format_llm_error(
                                             "OpenAI",
-                                            &format!("Failed to parse response: {}", e),
+                                            &format!("Failed to parse response: {e}"),
                                         );
                                         provider::LLMError::Provider {
                                             message: formatted_error,
@@ -486,7 +486,7 @@ impl OpenAIProvider {
                 let openai_response: Value = response.json().await.map_err(|e| {
                     let formatted_error = error_display::format_llm_error(
                         "OpenAI",
-                        &format!("Failed to parse response: {}", e),
+                        &format!("Failed to parse response: {e}"),
                     );
                     provider::LLMError::Provider {
                         message: formatted_error,
@@ -549,7 +549,7 @@ impl OpenAIProvider {
                     let openai_response: Value = retry_response.json().await.map_err(|e| {
                         let formatted_error = error_display::format_llm_error(
                             "OpenAI",
-                            &format!("Failed to parse response: {}", e),
+                            &format!("Failed to parse response: {e}"),
                         );
                         provider::LLMError::Provider {
                             message: formatted_error,
@@ -589,7 +589,7 @@ impl OpenAIProvider {
         let openai_response: Value = response.json().await.map_err(|e| {
             let formatted_error = error_display::format_llm_error(
                 "OpenAI",
-                &format!("Failed to parse response: {}", e),
+                &format!("Failed to parse response: {e}"),
             );
             provider::LLMError::Provider {
                 message: formatted_error,

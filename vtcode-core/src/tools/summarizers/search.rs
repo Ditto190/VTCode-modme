@@ -56,7 +56,7 @@ impl Summarizer for GrepSummarizer {
                 .top_files
                 .iter()
                 .take(self.max_files)
-                .map(|(file, count)| format!("{} ({})", file, count))
+                .map(|(file, count)| format!("{file} ({count})"))
                 .collect();
             summary.push_str(&format!(". Key files: {}", file_list.join(", ")));
         }
@@ -217,7 +217,7 @@ fn extract_symbols(line: &str, symbols: &mut hashbrown::HashSet<String>) {
         if let Some(paren_pos) = after_fn.find('(') {
             let name = after_fn[..paren_pos].trim();
             if !name.is_empty() && name.len() < 30 {
-                symbols.insert(format!("{}()", name));
+                symbols.insert(format!("{name}()"));
             }
         }
     }

@@ -171,7 +171,7 @@ impl std::fmt::Display for OpenResponseErrorCode {
             Self::ToolExecutionFailed => write!(f, "tool_execution_failed"),
             Self::Timeout => write!(f, "timeout"),
             Self::RateLimitExceeded => write!(f, "rate_limit_exceeded"),
-            Self::Custom(code) => write!(f, "{}", code),
+            Self::Custom(code) => write!(f, "{code}"),
         }
     }
 }

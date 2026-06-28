@@ -268,7 +268,7 @@ pub fn generate_response_id() -> String {
         .unwrap_or(0);
     let count = COUNTER.fetch_add(1, Ordering::Relaxed);
 
-    format!("resp_{:x}_{:04x}", timestamp, count)
+    format!("resp_{timestamp:x}_{count:04x}")
 }
 
 /// Generates a unique output item ID.

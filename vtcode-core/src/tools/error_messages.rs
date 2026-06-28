@@ -16,7 +16,7 @@ pub mod agent_execution {
     /// Build the canonical Planning workflow denial message.
     pub fn planning_workflow_denial_message(tool_name: &str) -> String {
         format!(
-            "Tool '{}' execution failed: tool denied by planning workflow\n\n\
+            "Tool '{tool_name}' execution failed: tool denied by planning workflow\n\n\
              This tool is MUTATING and blocked during planning.\n\n\
              What you CAN do during planning:\n\
              - Read files: unified_file with action='read'\n\
@@ -27,8 +27,7 @@ pub mod agent_execution {
              1. Call `finish_planning` tool to show the user your plan for approval\n\
              2. Wait for user to confirm (they will see the Implementation Blueprint)\n\
              3. After approval, mutating tools will be enabled\n\n\
-             Fallback if automatic planning handoff keeps failing: call `finish_planning` to present the plan again.",
-            tool_name
+             Fallback if automatic planning handoff keeps failing: call `finish_planning` to present the plan again."
         )
     }
 
@@ -39,12 +38,11 @@ pub mod agent_execution {
         original_error: Option<&str>,
     ) -> String {
         let mut message = format!(
-            "{}: Tool '{}' has been called {} times with identical parameters and is now blocked.\n\n\
-             {}\n\n\
+            "{LOOP_DETECTION_PREFIX}: Tool '{tool_name}' has been called {repeat_count} times with identical parameters and is now blocked.\n\n\
+             {LOOP_RETRY_BLOCKED_LINE}\n\n\
              If you need the result from this tool:\n\
              1. Check if you already have the result from a previous successful call in your conversation history\n\
-             2. If not available, use a different approach or modify your request",
-            LOOP_DETECTION_PREFIX, tool_name, repeat_count, LOOP_RETRY_BLOCKED_LINE
+             2. If not available, use a different approach or modify your request"
         );
 
         if let Some(error) = original_error {
@@ -71,7 +69,7 @@ pub mod skill_ops {
 
     /// Build a formatted "skill not found" error message.
     pub fn skill_not_found_error(name: &str) -> anyhow::Error {
-        anyhow::anyhow!("Skill '{}' not found", name)
+        anyhow::anyhow!("Skill '{name}' not found")
     }
 }
 

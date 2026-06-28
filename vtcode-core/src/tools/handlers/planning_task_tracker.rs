@@ -424,7 +424,7 @@ fn parse_index_path(value: &str) -> Result<Vec<usize>> {
         .map(|token| {
             let parsed = token
                 .parse::<usize>()
-                .with_context(|| format!("Invalid index component '{}'", token))?;
+                .with_context(|| format!("Invalid index component '{token}'"))?;
             if parsed == 0 {
                 bail!("index_path components must be >= 1");
             }
@@ -778,7 +778,7 @@ impl PlanningTaskTrackerTool {
 
         let (old_status, new_status_str) = {
             let node = get_node_mut_by_index_path(document.items.as_mut_slice(), &path)
-                .with_context(|| format!("No item at index_path '{}'", index_path))?;
+                .with_context(|| format!("No item at index_path '{index_path}'"))?;
             let old_status = node.status.as_str().to_string();
             node.status = new_status;
             if let Some(files) = args.files.as_deref() {
@@ -798,8 +798,7 @@ impl PlanningTaskTrackerTool {
         self.persist_document_and_payload(
             "updated",
             format!(
-                "Item {} status changed: {} -> {}",
-                index_path, old_status, new_status_str
+                "Item {index_path} status changed: {old_status} -> {new_status_str}"
             ),
             &document,
         )
@@ -852,7 +851,7 @@ impl PlanningTaskTrackerTool {
             let parent_path = parse_index_path(parent_path_str)?;
             let parent = get_node_mut_by_index_path(document.items.as_mut_slice(), &parent_path)
                 .with_context(|| {
-                    format!("No parent item at parent_index_path '{}'", parent_path_str)
+                    format!("No parent item at parent_index_path '{parent_path_str}'")
                 })?;
             parent.children.push(node);
         } else {

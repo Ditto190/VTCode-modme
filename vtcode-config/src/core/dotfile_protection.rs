@@ -345,7 +345,7 @@ impl DotfileProtectionConfig {
                 }
             }
         } else {
-            path == pattern || path.ends_with(&format!("/{}", pattern))
+            path == pattern || path.ends_with(&format!("/{pattern}"))
         }
     }
 }

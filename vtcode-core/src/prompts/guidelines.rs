@@ -424,7 +424,7 @@ mod tests {
         ];
         let guidelines = generate_tool_guidelines(&tools, None);
         let approx_tokens = guidelines.len() / 4;
-        assert!(approx_tokens < 145, "got ~{} tokens", approx_tokens);
+        assert!(approx_tokens < 145, "got ~{approx_tokens} tokens");
     }
 
     #[test]

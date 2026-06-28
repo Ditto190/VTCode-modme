@@ -199,7 +199,7 @@ mod tests {
     use super::*;
 
     fn test_path(name: &str) -> PathBuf {
-        PathBuf::from(format!("/workspace/{}", name))
+        PathBuf::from(format!("/workspace/{name}"))
     }
 
     #[test]
@@ -333,7 +333,7 @@ mod tests {
 
         for i in 0..5 {
             cache.cache_grant(
-                test_path(&format!("file{}.rs", i)),
+                test_path(&format!("file{i}.rs")),
                 PermissionGrant::Session,
             );
         }
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(cache.stats().cached_entries, 5);
 
         for i in 0..5 {
-            let grant = cache.get_permission(&test_path(&format!("file{}.rs", i)));
+            let grant = cache.get_permission(&test_path(&format!("file{i}.rs")));
             assert_eq!(grant, Some(PermissionGrant::Session));
         }
 

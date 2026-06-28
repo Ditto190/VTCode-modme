@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn test_error_category_display() {
         let err = VtCodeError::network(ErrorCode::ConnectionFailed, "Connection failed");
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("Network error"));
         assert!(display.contains("Connection failed"));
     }

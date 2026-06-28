@@ -199,13 +199,13 @@ pub fn init_panic_hook() {
 
                 if let Some(repository) = metadata.repository {
                     report_metadata = report_metadata
-                        .support(format!("Open a support request at {}", repository));
+                        .support(format!("Open a support request at {repository}"));
                 }
 
                 let file_path = human_panic_dump(&report_metadata, panic_info);
                 if let Err(error) = print_msg(file_path, &report_metadata) {
                     eprintln!("\nVT Code encountered a critical error and needs to shut down.");
-                    eprintln!("Failed to print crash report details: {}", error);
+                    eprintln!("Failed to print crash report details: {error}");
                     original_hook(panic_info);
                 }
             }

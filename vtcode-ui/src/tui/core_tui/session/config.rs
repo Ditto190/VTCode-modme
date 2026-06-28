@@ -312,14 +312,14 @@ impl SessionConfig {
             "behavior.max_input_lines" => {
                 self.behavior.max_input_lines = value
                     .parse()
-                    .map_err(|_| format!("Cannot parse '{}' as number", value))?;
+                    .map_err(|_| format!("Cannot parse '{value}' as number"))?;
             }
             "performance.lru_cache_size" => {
                 self.performance.lru_cache_size = value
                     .parse()
-                    .map_err(|_| format!("Cannot parse '{}' as number", value))?;
+                    .map_err(|_| format!("Cannot parse '{value}' as number"))?;
             }
-            _ => return Err(format!("Unknown configuration key: {}", key)),
+            _ => return Err(format!("Unknown configuration key: {key}")),
         }
         Ok(())
     }

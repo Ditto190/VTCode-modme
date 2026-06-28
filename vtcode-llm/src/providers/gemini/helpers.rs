@@ -766,7 +766,7 @@ impl GeminiProvider {
             StreamingError::NetworkError { message, .. } => {
                 let formatted = error_display::format_llm_error(
                     "Gemini",
-                    &format!("Network error: {}", message),
+                    &format!("Network error: {message}"),
                 );
                 LLMError::Network {
                     message: formatted,
@@ -781,7 +781,7 @@ impl GeminiProvider {
                 if status_code == 401 || status_code == 403 {
                     let formatted = error_display::format_llm_error(
                         "Gemini",
-                        &format!("HTTP {}: {}", status_code, message),
+                        &format!("HTTP {status_code}: {message}"),
                     );
                     LLMError::Authentication {
                         message: formatted,
@@ -792,7 +792,7 @@ impl GeminiProvider {
                 } else {
                     let formatted = error_display::format_llm_error(
                         "Gemini",
-                        &format!("API error ({}): {}", status_code, message),
+                        &format!("API error ({status_code}): {message}"),
                     );
                     LLMError::Provider {
                         message: formatted,
@@ -802,7 +802,7 @@ impl GeminiProvider {
             }
             StreamingError::ParseError { message, .. } => {
                 let formatted =
-                    error_display::format_llm_error("Gemini", &format!("Parse error: {}", message));
+                    error_display::format_llm_error("Gemini", &format!("Parse error: {message}"));
                 LLMError::Provider {
                     message: formatted,
                     metadata: None,
@@ -815,8 +815,7 @@ impl GeminiProvider {
                 let formatted = error_display::format_llm_error(
                     "Gemini",
                     &format!(
-                        "Streaming timeout during {} after {:?}",
-                        operation, duration
+                        "Streaming timeout during {operation} after {duration:?}"
                     ),
                 );
                 LLMError::Network {
@@ -827,7 +826,7 @@ impl GeminiProvider {
             StreamingError::ContentError { message } => {
                 let formatted = error_display::format_llm_error(
                     "Gemini",
-                    &format!("Content error: {}", message),
+                    &format!("Content error: {message}"),
                 );
                 LLMError::Provider {
                     message: formatted,
@@ -837,7 +836,7 @@ impl GeminiProvider {
             StreamingError::StreamingError { message, .. } => {
                 let formatted = error_display::format_llm_error(
                     "Gemini",
-                    &format!("Streaming error: {}", message),
+                    &format!("Streaming error: {message}"),
                 );
                 LLMError::Provider {
                     message: formatted,
@@ -894,7 +893,7 @@ fn parts_from_message_content(content: &MessageContent) -> Vec<Part> {
                             .or_else(|| file_url.clone())
                             .unwrap_or_else(|| "attached file".to_string());
                         converted.push(Part::Text {
-                            text: format!("[File input not directly supported: {}]", fallback),
+                            text: format!("[File input not directly supported: {fallback}]"),
                             thought_signature: None,
                         });
                     }

@@ -361,7 +361,7 @@ impl GrepSearchManager {
 
         // Add support for max file size
         if let Some(max_file_size) = input.max_file_size {
-            cmd.arg("--max-filesize").arg(format!("{}B", max_file_size));
+            cmd.arg("--max-filesize").arg(format!("{max_file_size}B"));
         }
 
         // Case sensitivity
@@ -421,11 +421,11 @@ impl GrepSearchManager {
 
         if input.respect_ignore_files.unwrap_or(true) {
             for pattern in DEFAULT_IGNORE_GLOBS {
-                cmd.arg("--glob").arg(format!("!{}", pattern));
+                cmd.arg("--glob").arg(format!("!{pattern}"));
             }
             if let Some(extra) = &input.extra_ignore_globs {
                 for pattern in extra {
-                    cmd.arg("--glob").arg(format!("!{}", pattern));
+                    cmd.arg("--glob").arg(format!("!{pattern}"));
                 }
             }
         }

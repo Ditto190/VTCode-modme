@@ -75,7 +75,7 @@ pub(super) fn draw_selection_ui(
                         && description != &entry.title
                     {
                         lines.push(Line::from(Span::styled(
-                            format!("    {}", description),
+                            format!("    {description}"),
                             styles::DESCRIPTION,
                         )));
                     }
@@ -114,7 +114,7 @@ pub(super) fn draw_selection_ui(
                 && description != &current.title
             {
                 summary_lines.push(Line::from(Span::styled(
-                    format!("  {}", description),
+                    format!("  {description}"),
                     styles::DESCRIPTION,
                 )));
             }

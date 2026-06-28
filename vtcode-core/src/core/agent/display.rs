@@ -40,13 +40,13 @@ pub fn format_tool_result_for_display(tool_name: &str, result: &Value) -> String
                     "errors": extracted.join("\n"),
                     "note": "Showing error lines + context only"
                 });
-                return format!("Tool {} result: {}", display_tool_name, compact);
+                return format!("Tool {display_tool_name} result: {compact}");
             }
         }
-        return format!("Tool {} result: {}", display_tool_name, result);
+        return format!("Tool {display_tool_name} result: {result}");
     }
 
-    format!("Tool {} result: {}", display_tool_name, result)
+    format!("Tool {display_tool_name} result: {result}")
 }
 
 fn format_unified_search_result_for_display(tool_name: &str, result: &Value) -> String {
@@ -70,7 +70,7 @@ fn format_unified_search_result_for_display(tool_name: &str, result: &Value) -> 
             "truncated": obj.get("truncated"),
             "url": obj.get("url")
         });
-        return format!("Tool {} result: {}", tool_name, status);
+        return format!("Tool {tool_name} result: {status}");
     }
 
     if let Some(obj) = result.as_object()
@@ -84,7 +84,7 @@ fn format_unified_search_result_for_display(tool_name: &str, result: &Value) -> 
             "overflow": format!("[+{} more matches]", overflow),
             "total": matches.len()
         });
-        return format!("Tool {} result: {}", tool_name, summary);
+        return format!("Tool {tool_name} result: {summary}");
     }
 
     if let Some(obj) = result.as_object()
@@ -97,8 +97,8 @@ fn format_unified_search_result_for_display(tool_name: &str, result: &Value) -> 
             "sample": sample,
             "note": format!("Showing 5 of {} files", files.len())
         });
-        return format!("Tool {} result: {}", tool_name, summary);
+        return format!("Tool {tool_name} result: {summary}");
     }
 
-    format!("Tool {} result: {}", tool_name, result)
+    format!("Tool {tool_name} result: {result}")
 }

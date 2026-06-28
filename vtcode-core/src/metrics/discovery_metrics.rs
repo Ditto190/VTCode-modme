@@ -156,7 +156,7 @@ mod tests {
     fn test_recent_queries_limit() {
         let mut metrics = DiscoveryMetrics::new();
         for i in 0..150 {
-            metrics.record_query(format!("query_{}", i), 1, 10);
+            metrics.record_query(format!("query_{i}"), 1, 10);
         }
 
         assert_eq!(metrics.total_queries, 150);

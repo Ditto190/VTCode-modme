@@ -152,7 +152,7 @@ async fn execute_request(
             }
             tokio::fs::write(&resolved.absolute, file_text)
                 .await
-                .with_context(|| format!("Failed to write {}", path))?;
+                .with_context(|| format!("Failed to write {path}"))?;
             rebuild_generated_memory_files(config, workspace_root).await?;
             Ok(format!("Created {path}"))
         }
@@ -167,7 +167,7 @@ async fn execute_request(
             ensure_writable_path(&resolved.relative, path)?;
             let content = tokio::fs::read_to_string(&resolved.absolute)
                 .await
-                .with_context(|| format!("Failed to read {}", path))?;
+                .with_context(|| format!("Failed to read {path}"))?;
             let matches = content.matches(old_str).count();
             if matches == 0 {
                 bail!("old_str not found in {path}");
@@ -177,7 +177,7 @@ async fn execute_request(
             }
             tokio::fs::write(&resolved.absolute, content.replacen(old_str, new_str, 1))
                 .await
-                .with_context(|| format!("Failed to write {}", path))?;
+                .with_context(|| format!("Failed to write {path}"))?;
             rebuild_generated_memory_files(config, workspace_root).await?;
             Ok(format!("Replaced in {path}"))
         }
@@ -191,18 +191,18 @@ async fn execute_request(
             ensure_writable_path(&resolved.relative, path)?;
             let content = tokio::fs::read_to_string(&resolved.absolute)
                 .await
-                .with_context(|| format!("Failed to read {}", path))?;
+                .with_context(|| format!("Failed to read {path}"))?;
             let mut lines = content
                 .split('\n')
                 .map(ToOwned::to_owned)
                 .collect::<Vec<_>>();
             if insert_line > lines.len() {
-                bail!("insert_line {} is out of bounds for {}", insert_line, path);
+                bail!("insert_line {insert_line} is out of bounds for {path}");
             }
             lines.insert(insert_line, insert_text.to_string());
             tokio::fs::write(&resolved.absolute, lines.join("\n"))
                 .await
-                .with_context(|| format!("Failed to write {}", path))?;
+                .with_context(|| format!("Failed to write {path}"))?;
             rebuild_generated_memory_files(config, workspace_root).await?;
             Ok(format!("Inserted at line {insert_line} in {path}"))
         }
@@ -212,15 +212,15 @@ async fn execute_request(
             ensure_writable_path(&resolved.relative, path)?;
             let metadata = tokio::fs::metadata(&resolved.absolute)
                 .await
-                .with_context(|| format!("Failed to stat {}", path))?;
+                .with_context(|| format!("Failed to stat {path}"))?;
             if metadata.is_dir() {
                 tokio::fs::remove_dir_all(&resolved.absolute)
                     .await
-                    .with_context(|| format!("Failed to delete {}", path))?;
+                    .with_context(|| format!("Failed to delete {path}"))?;
             } else {
                 tokio::fs::remove_file(&resolved.absolute)
                     .await
-                    .with_context(|| format!("Failed to delete {}", path))?;
+                    .with_context(|| format!("Failed to delete {path}"))?;
             }
             rebuild_generated_memory_files(config, workspace_root).await?;
             Ok(format!("Deleted {path}"))
@@ -257,11 +257,11 @@ async fn view(root: &Path, path: &str) -> Result<String> {
 
     let metadata = tokio::fs::metadata(&resolved.absolute)
         .await
-        .with_context(|| format!("Failed to stat {}", path))?;
+        .with_context(|| format!("Failed to stat {path}"))?;
     if metadata.is_dir() {
         let mut entries = tokio::fs::read_dir(&resolved.absolute)
             .await
-            .with_context(|| format!("Failed to list {}", path))?;
+            .with_context(|| format!("Failed to list {path}"))?;
         let mut names = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
             let entry_path = entry.path();
@@ -278,7 +278,7 @@ async fn view(root: &Path, path: &str) -> Result<String> {
 
     let content = tokio::fs::read_to_string(&resolved.absolute)
         .await
-        .with_context(|| format!("Failed to read {}", path))?;
+        .with_context(|| format!("Failed to read {path}"))?;
     Ok(content
         .split('\n')
         .enumerate()

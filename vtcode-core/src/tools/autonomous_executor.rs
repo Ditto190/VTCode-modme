@@ -199,9 +199,8 @@ impl AutonomousExecutor {
         // Check circuit breaker first (fail fast)
         if !self.circuit_breaker.allow_request_for_tool(tool_key) {
             return Some(format!(
-                "Tool '{}' blocked by circuit breaker due to repeated failures. \
-                 Cooling down before retrying.",
-                tool_key
+                "Tool '{tool_key}' blocked by circuit breaker due to repeated failures. \
+                 Cooling down before retrying."
             ));
         }
 
@@ -218,8 +217,7 @@ impl AutonomousExecutor {
                 // Check if hard limit already exceeded
                 if detector.is_hard_limit_exceeded(tool_key) {
                     return Some(format!(
-                        "Tool '{}' blocked: hard limit exceeded. Agent is stuck in a loop.",
-                        tool_key
+                        "Tool '{tool_key}' blocked: hard limit exceeded. Agent is stuck in a loop."
                     ));
                 }
 
@@ -229,8 +227,7 @@ impl AutonomousExecutor {
                     && let Some(suggestion) = detector.suggest_alternative(tool_key)
                 {
                     return Some(format!(
-                        "Tool '{}' called {} times. Consider alternative approach:\n{}",
-                        tool_key, count, suggestion
+                        "Tool '{tool_key}' called {count} times. Consider alternative approach:\n{suggestion}"
                     ));
                 }
             }
@@ -369,9 +366,8 @@ impl AutonomousExecutor {
             }
 
             anyhow::bail!(
-                "Absolute path outside workspace boundary: {}. \
-                 Only paths within WORKSPACE_DIR or /tmp/vtcode are allowed.",
-                path_str
+                "Absolute path outside workspace boundary: {path_str}. \
+                 Only paths within WORKSPACE_DIR or /tmp/vtcode are allowed."
             );
         }
 
@@ -386,12 +382,11 @@ impl AutonomousExecutor {
                     resolve_workspace_path(workspace, &workspace.join(path_obj)).is_ok();
                 let lexical_ok = is_within_workspace_lexically(workspace, path_obj);
                 if !canonical_ok && !lexical_ok {
-                    anyhow::bail!("Path traversal escapes workspace boundary: {}", path_str);
+                    anyhow::bail!("Path traversal escapes workspace boundary: {path_str}");
                 }
             } else {
                 anyhow::bail!(
-                    "Path traversal blocked: workspace boundary is unknown for '{}'",
-                    path_str
+                    "Path traversal blocked: workspace boundary is unknown for '{path_str}'"
                 );
             }
         }
@@ -399,9 +394,8 @@ impl AutonomousExecutor {
         // If workspace directory is unknown, conservatively block writes to avoid escaping boundaries.
         if self.workspace_dir.is_none() {
             anyhow::bail!(
-                "Workspace directory is not set; refusing to write to relative path '{}'. \
-                 Set WORKSPACE_DIR or call set_workspace_dir().",
-                path_str
+                "Workspace directory is not set; refusing to write to relative path '{path_str}'. \
+                 Set WORKSPACE_DIR or call set_workspace_dir()."
             );
         }
 
@@ -412,8 +406,7 @@ impl AutonomousExecutor {
     fn validate_command_text(&self, cmd: &str) -> Result<()> {
         if self.is_destructive_command(cmd) {
             anyhow::bail!(
-                "Destructive command requires explicit confirmation: {}",
-                cmd
+                "Destructive command requires explicit confirmation: {cmd}"
             );
         }
 
@@ -466,8 +459,7 @@ impl AutonomousExecutor {
             };
 
             format!(
-                "Will write {} lines ({} KB) to: {}\nPreview:{}",
-                lines, size_kb, path, preview
+                "Will write {lines} lines ({size_kb} KB) to: {path}\nPreview:{preview}"
             )
         } else if tool_name == tools::EDIT_FILE
             || (tool_name == tools::UNIFIED_FILE && unified_file_action_is(args, "edit"))
@@ -498,7 +490,7 @@ impl AutonomousExecutor {
                 ""
             };
 
-            format!("Will execute: {}{}", cmd, warning)
+            format!("Will execute: {cmd}{warning}")
         } else if tool_name == tools::APPLY_PATCH
             || (tool_name == tools::UNIFIED_FILE && unified_file_action_is(args, "patch"))
         {
@@ -508,9 +500,9 @@ impl AutonomousExecutor {
                 .map(|patch| patch.text)
                 .unwrap_or_default();
             let lines = patch.lines().count();
-            format!("Will apply patch with {} lines of changes", lines)
+            format!("Will apply patch with {lines} lines of changes")
         } else {
-            format!("Will execute: {} with args: {:?}", tool_name, args)
+            format!("Will execute: {tool_name} with args: {args:?}")
         }
     }
 

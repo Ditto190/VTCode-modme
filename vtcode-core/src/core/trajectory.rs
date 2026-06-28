@@ -322,7 +322,7 @@ mod tests {
         fs::create_dir_all(&logs_dir).unwrap();
 
         for i in 0..5 {
-            let name = format!("trajectory-2024010{}T000000Z.jsonl", i);
+            let name = format!("trajectory-2024010{i}T000000Z.jsonl");
             fs::write(logs_dir.join(name), "data").unwrap();
         }
 

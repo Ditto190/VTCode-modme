@@ -152,7 +152,7 @@ impl FileOpsTool {
             if !final_content.is_empty() {
                 final_content.push('\n');
             }
-            final_content.push_str(&format!("... {} lines omitted ...", omitted));
+            final_content.push_str(&format!("... {omitted} lines omitted ..."));
         }
 
         if tail_lines > 0 {

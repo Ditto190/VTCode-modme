@@ -89,7 +89,7 @@ async fn serve_a2a_agent(
 async fn discover_agent(agent_url: String) -> anyhow::Result<()> {
     use crate::a2a::A2aClient;
 
-    println!("Discovering A2A agent at: {}", agent_url);
+    println!("Discovering A2A agent at: {agent_url}");
 
     let client = A2aClient::new(&agent_url)?;
     let agent_card = client.agent_card().await?;
@@ -108,7 +108,7 @@ async fn discover_agent(agent_url: String) -> anyhow::Result<()> {
         println!("\nProvider:");
         println!("  Organization: {}", provider.organization);
         if let Some(url) = &provider.url {
-            println!("  URL: {}", url);
+            println!("  URL: {url}");
         }
     }
 
@@ -130,7 +130,7 @@ async fn discover_agent(agent_url: String) -> anyhow::Result<()> {
         for skill in &agent_card.skills {
             println!("  - {}", skill.name);
             if let Some(desc) = &skill.description {
-                println!("    Description: {}", desc);
+                println!("    Description: {desc}");
             }
             if !skill.tags.is_empty() {
                 println!("    Tags: {:?}", skill.tags);
@@ -154,7 +154,7 @@ async fn send_task_to_agent(
     use crate::a2a::{A2aClient, Message, rpc::MessageSendParams};
     use futures::StreamExt;
 
-    println!("Connecting to A2A agent: {}", agent_url);
+    println!("Connecting to A2A agent: {agent_url}");
 
     let client = A2aClient::new(&agent_url)?;
     let msg = Message::user_text(message);
@@ -176,7 +176,7 @@ async fn send_task_to_agent(
                     match event {
                         crate::a2a::rpc::StreamingEvent::Message { message, .. } => {
                             if let Some(text) = message.parts.iter().find_map(|p| p.as_text()) {
-                                println!("Agent: {}", text);
+                                println!("Agent: {text}");
                             }
                         }
                         crate::a2a::rpc::StreamingEvent::TaskStatus { status, .. } => {
@@ -184,7 +184,7 @@ async fn send_task_to_agent(
                             if let Some(msg) = status.message
                                 && let Some(text) = msg.parts.iter().find_map(|p| p.as_text())
                             {
-                                println!("  Message: {}", text);
+                                println!("  Message: {text}");
                             }
                         }
                         crate::a2a::rpc::StreamingEvent::TaskArtifact { artifact, .. } => {
@@ -194,7 +194,7 @@ async fn send_task_to_agent(
                     }
                 }
                 Err(e) => {
-                    eprintln!("Stream error: {}", e);
+                    eprintln!("Stream error: {e}");
                     break;
                 }
             }
@@ -208,7 +208,7 @@ async fn send_task_to_agent(
         if let Some(msg) = &task.status.message
             && let Some(text) = msg.parts.iter().find_map(|p| p.as_text())
         {
-            println!("Response: {}", text);
+            println!("Response: {text}");
         }
 
         if !task.artifacts.is_empty() {
@@ -231,7 +231,7 @@ async fn list_agent_tasks(
     use crate::a2a::{A2aClient, rpc::ListTasksParams};
     use serde_json::Value;
 
-    println!("Fetching tasks from: {}", agent_url);
+    println!("Fetching tasks from: {agent_url}");
 
     let client = A2aClient::new(&agent_url)?;
     let mut params = ListTasksParams::default();
@@ -263,15 +263,15 @@ async fn list_agent_tasks(
 
     for task_value in tasks_array {
         if let Some(task_id) = task_value.get("id").and_then(|v| v.as_str()) {
-            println!("Task: {}", task_id);
+            println!("Task: {task_id}");
         }
         if let Some(status) = task_value.get("status")
             && let Some(state) = status.get("state").and_then(|v| v.as_str())
         {
-            println!("  Status: {}", state);
+            println!("  Status: {state}");
         }
         if let Some(ctx_id) = task_value.get("contextId").and_then(|v| v.as_str()) {
-            println!("  Context: {}", ctx_id);
+            println!("  Context: {ctx_id}");
         }
         if let Some(artifacts) = task_value.get("artifacts").and_then(|v| v.as_array()) {
             println!("  Artifacts: {}", artifacts.len());
@@ -286,7 +286,7 @@ async fn list_agent_tasks(
 async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()> {
     use crate::a2a::A2aClient;
 
-    println!("Fetching task {} from: {}", task_id, agent_url);
+    println!("Fetching task {task_id} from: {agent_url}");
 
     let client = A2aClient::new(&agent_url)?;
     let task = client.get_task(task_id.clone()).await?;
@@ -297,7 +297,7 @@ async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()
 
     println!("Status: {:?}", task.status.state);
     if let Some(ctx_id) = &task.context_id {
-        println!("Context: {}", ctx_id);
+        println!("Context: {ctx_id}");
     }
 
     if let Some(msg) = &task.status.message {
@@ -305,9 +305,9 @@ async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()
         println!("  Role: {:?}", msg.role);
         for part in &msg.parts {
             match part {
-                crate::a2a::types::Part::Text { text } => println!("  Text: {}", text),
-                crate::a2a::types::Part::File { file } => println!("  File: {:?}", file),
-                crate::a2a::types::Part::Data { data } => println!("  Data: {}", data),
+                crate::a2a::types::Part::Text { text } => println!("  Text: {text}"),
+                crate::a2a::types::Part::File { file } => println!("  File: {file:?}"),
+                crate::a2a::types::Part::Data { data } => println!("  Data: {data}"),
                 crate::a2a::types::Part::Unknown => {}
             }
         }
@@ -322,14 +322,14 @@ async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()
                     crate::a2a::types::Part::Text { text } => {
                         let preview =
                             vtcode_commons::formatting::truncate_byte_budget(text, 60, "...");
-                        println!("    Text: {}", preview);
+                        println!("    Text: {preview}");
                     }
-                    crate::a2a::types::Part::File { file } => println!("    File: {:?}", file),
+                    crate::a2a::types::Part::File { file } => println!("    File: {file:?}"),
                     crate::a2a::types::Part::Data { data } => {
                         let s = data.to_string();
                         let preview =
                             vtcode_commons::formatting::truncate_byte_budget(&s, 60, "...");
-                        println!("    Data: {}", preview);
+                        println!("    Data: {preview}");
                     }
                     crate::a2a::types::Part::Unknown => {}
                 }
@@ -351,7 +351,7 @@ async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()
 async fn cancel_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()> {
     use crate::a2a::A2aClient;
 
-    println!("Canceling task {} at: {}", task_id, agent_url);
+    println!("Canceling task {task_id} at: {agent_url}");
 
     let client = A2aClient::new(&agent_url)?;
     client.cancel_task(task_id).await?;

@@ -199,10 +199,7 @@ fn edit_not_found_error(
     };
 
     anyhow!(
-        "Could not find text to replace in file.\n\nExpected to replace:\n{}\n\nFile content preview:\n{}\n\nFix: The old_str must EXACTLY match the file content including all whitespace and newlines. Use read_file first to get the exact text, then copy it precisely into old_str. Do NOT add extra newlines or change indentation.{}",
-        effective_old_str,
-        content_preview,
-        numbering_note
+        "Could not find text to replace in file.\n\nExpected to replace:\n{effective_old_str}\n\nFile content preview:\n{content_preview}\n\nFix: The old_str must EXACTLY match the file content including all whitespace and newlines. Use read_file first to get the exact text, then copy it precisely into old_str. Do NOT add extra newlines or change indentation.{numbering_note}"
     )
 }
 
@@ -242,9 +239,7 @@ impl ToolRegistry {
         {
             let guidance = crate::tools::error_helpers::USE_PATCH_FOR_LARGE_EDITS;
             return Err(anyhow!(
-                "edit_file is limited to small literal replacements (≤ {lines} lines or ≤ {chars} characters). {guidance}",
-                lines = EDIT_FILE_MAX_LINES,
-                chars = EDIT_FILE_MAX_CHARS,
+                "edit_file is limited to small literal replacements (≤ {EDIT_FILE_MAX_LINES} lines or ≤ {EDIT_FILE_MAX_CHARS} characters). {guidance}",
             ));
         }
 

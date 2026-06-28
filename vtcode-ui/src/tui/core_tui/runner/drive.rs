@@ -123,7 +123,7 @@ fn suspend_to_shell<B: Backend, S: TuiSessionDriver>(
             execute!(stderr, EnterAlternateScreen)
                 .context("failed to re-enter alternate screen after resume")?;
             terminal.clear().map_err(|error| {
-                anyhow::anyhow!("failed to clear terminal after resume: {}", error)
+                anyhow::anyhow!("failed to clear terminal after resume: {error}")
             })?;
         }
 
@@ -259,7 +259,7 @@ fn render_if_dirty<B: Backend, S: TuiSessionDriver>(
     let draw_started_at = Instant::now();
     terminal
         .draw(|frame| session.render(frame))
-        .map_err(|e| anyhow::anyhow!("failed to draw inline session: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to draw inline session: {e}"))?;
     let draw_elapsed = draw_started_at.elapsed();
     if let Some(input_started_at) = input_started_at {
         let input_to_draw_elapsed = input_started_at.elapsed();

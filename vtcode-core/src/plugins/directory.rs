@@ -21,13 +21,13 @@ impl PluginTemplate {
     ) -> PluginResult<()> {
         // Create the plugin directory
         fs::create_dir_all(plugin_dir).await.map_err(|e| {
-            PluginError::LoadingError(format!("Failed to create plugin directory: {}", e))
+            PluginError::LoadingError(format!("Failed to create plugin directory: {e}"))
         })?;
 
         // Create the .vtcode-plugin directory for the manifest
         let vtcode_plugin_dir = plugin_dir.join(".vtcode-plugin");
         fs::create_dir_all(&vtcode_plugin_dir).await.map_err(|e| {
-            PluginError::LoadingError(format!("Failed to create .vtcode-plugin directory: {}", e))
+            PluginError::LoadingError(format!("Failed to create .vtcode-plugin directory: {e}"))
         })?;
 
         // Write the plugin manifest
@@ -37,7 +37,7 @@ impl PluginTemplate {
         fs::write(&manifest_path, &manifest_json)
             .await
             .map_err(|e| {
-                PluginError::LoadingError(format!("Failed to write plugin manifest: {}", e))
+                PluginError::LoadingError(format!("Failed to write plugin manifest: {e}"))
             })?;
 
         // Create standard directories if specified in manifest
@@ -58,7 +58,7 @@ impl PluginTemplate {
         if manifest.commands.is_some() || Self::should_create_default_commands_dir(manifest) {
             let commands_dir = plugin_dir.join("commands");
             fs::create_dir_all(&commands_dir).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to create commands directory: {}", e))
+                PluginError::LoadingError(format!("Failed to create commands directory: {e}"))
             })?;
         }
 
@@ -66,7 +66,7 @@ impl PluginTemplate {
         if manifest.agents.is_some() || Self::should_create_default_agents_dir(manifest) {
             let agents_dir = plugin_dir.join("agents");
             fs::create_dir_all(&agents_dir).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to create agents directory: {}", e))
+                PluginError::LoadingError(format!("Failed to create agents directory: {e}"))
             })?;
         }
 
@@ -74,7 +74,7 @@ impl PluginTemplate {
         if manifest.skills.is_some() || Self::should_create_default_skills_dir(manifest) {
             let skills_dir = plugin_dir.join("skills");
             fs::create_dir_all(&skills_dir).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to create skills directory: {}", e))
+                PluginError::LoadingError(format!("Failed to create skills directory: {e}"))
             })?;
         }
 
@@ -82,7 +82,7 @@ impl PluginTemplate {
         if manifest.hooks.is_some() {
             let hooks_dir = plugin_dir.join("hooks");
             fs::create_dir_all(&hooks_dir).await.map_err(|e| {
-                PluginError::LoadingError(format!("Failed to create hooks directory: {}", e))
+                PluginError::LoadingError(format!("Failed to create hooks directory: {e}"))
             })?;
         }
 
@@ -127,8 +127,7 @@ This command demonstrates how to create a plugin command for VT Code.
                     .await
                     .map_err(|e| {
                         PluginError::LoadingError(format!(
-                            "Failed to create example command: {}",
-                            e
+                            "Failed to create example command: {e}"
                         ))
                     })?;
             }
@@ -161,7 +160,7 @@ This agent can be used to demonstrate how agents work in VT Code plugins.
                 fs::write(&example_agent, example_content)
                     .await
                     .map_err(|e| {
-                        PluginError::LoadingError(format!("Failed to create example agent: {}", e))
+                        PluginError::LoadingError(format!("Failed to create example agent: {e}"))
                     })?;
             }
         }
@@ -172,8 +171,7 @@ This agent can be used to demonstrate how agents work in VT Code plugins.
             let example_skill_dir = skills_dir.join("example-skill");
             fs::create_dir_all(&example_skill_dir).await.map_err(|e| {
                 PluginError::LoadingError(format!(
-                    "Failed to create example skill directory: {}",
-                    e
+                    "Failed to create example skill directory: {e}"
                 ))
             })?;
 
@@ -200,7 +198,7 @@ This skill demonstrates how to create a model-invoked capability in VT Code.
                     plugin_name = manifest.name
                 );
                 fs::write(&skill_md, example_content).await.map_err(|e| {
-                    PluginError::LoadingError(format!("Failed to create example skill: {}", e))
+                    PluginError::LoadingError(format!("Failed to create example skill: {e}"))
                 })?;
             }
         }
@@ -229,8 +227,7 @@ This skill demonstrates how to create a model-invoked capability in VT Code.
                     .await
                     .map_err(|e| {
                         PluginError::LoadingError(format!(
-                            "Failed to create example hooks config: {}",
-                            e
+                            "Failed to create example hooks config: {e}"
                         ))
                     })?;
             }
@@ -250,7 +247,7 @@ This skill demonstrates how to create a model-invoked capability in VT Code.
   }
 }"#;
                 fs::write(&mcp_config, example_content).await.map_err(|e| {
-                    PluginError::LoadingError(format!("Failed to create example MCP config: {}", e))
+                    PluginError::LoadingError(format!("Failed to create example MCP config: {e}"))
                 })?;
             }
         }
@@ -269,7 +266,7 @@ This skill demonstrates how to create a model-invoked capability in VT Code.
   }
 }"#;
                 fs::write(&lsp_config, example_content).await.map_err(|e| {
-                    PluginError::LoadingError(format!("Failed to create example LSP config: {}", e))
+                    PluginError::LoadingError(format!("Failed to create example LSP config: {e}"))
                 })?;
             }
         }
@@ -320,10 +317,10 @@ This skill demonstrates how to create a model-invoked capability in VT Code.
         // Validate manifest can be parsed
         let manifest_content = fs::read_to_string(&manifest_path)
             .await
-            .map_err(|e| PluginError::LoadingError(format!("Failed to read manifest: {}", e)))?;
+            .map_err(|e| PluginError::LoadingError(format!("Failed to read manifest: {e}")))?;
 
         let _manifest: PluginManifest = serde_json::from_str(&manifest_content).map_err(|e| {
-            PluginError::ManifestValidationError(format!("Invalid manifest JSON: {}", e))
+            PluginError::ManifestValidationError(format!("Invalid manifest JSON: {e}"))
         })?;
 
         Ok(())

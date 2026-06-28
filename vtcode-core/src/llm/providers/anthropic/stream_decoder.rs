@@ -61,7 +61,7 @@ pub fn create_stream(
 
                     let event: AnthropicStreamEvent = serde_json::from_str(trimmed_payload).map_err(|err| {
                         LLMError::Provider {
-                            message: format!("Failed to parse stream event: {}", err),
+                            message: format!("Failed to parse stream event: {err}"),
                             metadata: None,
                         }
                     })?;

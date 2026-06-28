@@ -34,7 +34,7 @@ impl FilePalette {
                 let relative_path = Self::make_relative(&self.workspace_root, &path);
                 let is_dir = Path::new(&path).is_dir();
                 let display_name = if is_dir {
-                    format!("{}/", relative_path)
+                    format!("{relative_path}/")
                 } else {
                     relative_path.clone()
                 };

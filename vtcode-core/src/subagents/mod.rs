@@ -227,7 +227,7 @@ impl SubagentController {
             state
                 .background_children
                 .get(target)
-                .ok_or_else(|| anyhow!("Unknown background subprocess {}", target))?
+                .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?
                 .build_status_entry()
         };
 
@@ -528,7 +528,7 @@ impl SubagentController {
             let record = state
                 .background_children
                 .get_mut(target)
-                .ok_or_else(|| anyhow!("Unknown background subprocess {}", target))?;
+                .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?;
             record.desired_enabled = false;
             record.status = BackgroundSubprocessStatus::Stopped;
             record.updated_at = Utc::now();
@@ -567,7 +567,7 @@ impl SubagentController {
             let record = state
                 .background_children
                 .get_mut(target)
-                .ok_or_else(|| anyhow!("Unknown background subprocess {}", target))?;
+                .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?;
             record.desired_enabled = false;
             record.status = BackgroundSubprocessStatus::Stopped;
             record.updated_at = Utc::now();
@@ -618,7 +618,7 @@ impl SubagentController {
             let record = state
                 .children
                 .get(target)
-                .ok_or_else(|| anyhow!("Unknown subagent id {}", target))?;
+                .ok_or_else(|| anyhow!("Unknown subagent id {target}"))?;
             (
                 record.id.clone(),
                 record.session_id.clone(),
@@ -645,8 +645,7 @@ impl SubagentController {
 
         let effective_config = effective_config.ok_or_else(|| {
             anyhow!(
-                "Subagent {} does not have a captured runtime configuration yet",
-                target
+                "Subagent {target} does not have a captured runtime configuration yet"
             )
         })?;
         let snapshot = match thread_handle {
@@ -1018,7 +1017,7 @@ impl SubagentController {
         let record = state
             .children
             .get(target)
-            .ok_or_else(|| anyhow!("Unknown subagent id {}", target))?;
+            .ok_or_else(|| anyhow!("Unknown subagent id {target}"))?;
         Ok(record.build_status_entry())
     }
 
@@ -1054,7 +1053,7 @@ impl SubagentController {
         let record = state
             .children
             .get_mut(target)
-            .ok_or_else(|| anyhow!("Unknown subagent id {}", target))?;
+            .ok_or_else(|| anyhow!("Unknown subagent id {target}"))?;
         if matches!(
             record.status,
             SubagentStatus::Running | SubagentStatus::Queued
@@ -1078,7 +1077,7 @@ impl SubagentController {
         let record = state
             .children
             .get_mut(target)
-            .ok_or_else(|| anyhow!("Unknown subagent id {}", target))?;
+            .ok_or_else(|| anyhow!("Unknown subagent id {target}"))?;
         if record.status == SubagentStatus::Closed {
             return Ok(record.build_status_entry());
         }
@@ -1097,7 +1096,7 @@ impl SubagentController {
         let record = state
             .background_children
             .get(target)
-            .ok_or_else(|| anyhow!("Unknown background subprocess {}", target))?;
+            .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?;
         Ok(record.build_status_entry())
     }
 
@@ -1269,7 +1268,7 @@ impl SubagentController {
             let record = state
                 .background_children
                 .get_mut(&record_id)
-                .ok_or_else(|| anyhow!("Unknown background subprocess {}", record_id))?;
+                .ok_or_else(|| anyhow!("Unknown background subprocess {record_id}"))?;
             record.exec_session_id = exec_session_id;
             record.pid = metadata.child_pid;
             record.started_at = metadata.started_at;
@@ -1291,7 +1290,7 @@ impl SubagentController {
                 .background_children
                 .get(target)
                 .map(|record| record.session_id.clone())
-                .ok_or_else(|| anyhow!("Unknown background subprocess {}", target))?
+                .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?
         };
 
         if let Some(listing) = find_session_by_identifier(&session_id).await? {
@@ -1342,7 +1341,7 @@ impl SubagentController {
         let requested = requested.unwrap_or("default");
         self.find_spec(requested)
             .await
-            .ok_or_else(|| anyhow!("Unknown subagent type {}", requested))
+            .ok_or_else(|| anyhow!("Unknown subagent type {requested}"))
     }
 
     async fn prepare_delegation_context(
@@ -1524,8 +1523,7 @@ impl SubagentController {
             .min(SUBAGENT_HARD_CONCURRENCY_LIMIT);
         if active_count >= effective_max_concurrent {
             bail!(
-                "Subagent concurrency limit reached (max_concurrent={})",
-                effective_max_concurrent
+                "Subagent concurrency limit reached (max_concurrent={effective_max_concurrent})"
             );
         }
         let is_background_child = background;
@@ -1604,7 +1602,7 @@ impl SubagentController {
             let record = state
                 .children
                 .get_mut(target)
-                .ok_or_else(|| anyhow!("Unknown subagent id {}", target))?;
+                .ok_or_else(|| anyhow!("Unknown subagent id {target}"))?;
             if record.queued_prompts.is_empty()
                 && let Some(prompt) = record.last_prompt.clone()
             {
@@ -1613,7 +1611,7 @@ impl SubagentController {
             !record.queued_prompts.is_empty()
         };
         if !has_queued_input {
-            bail!("Subagent {} has no queued input", target);
+            bail!("Subagent {target} has no queued input");
         }
         self.launch_child(target).await
     }
@@ -1627,7 +1625,7 @@ impl SubagentController {
             let record = state
                 .children
                 .get_mut(child_id)
-                .ok_or_else(|| anyhow!("Unknown subagent id {}", child_id))?;
+                .ok_or_else(|| anyhow!("Unknown subagent id {child_id}"))?;
             record.status = SubagentStatus::Queued;
             record.updated_at = Utc::now();
         }
@@ -1768,7 +1766,7 @@ impl SubagentController {
             let record = state
                 .children
                 .get_mut(child_id)
-                .ok_or_else(|| anyhow!("Unknown subagent id {}", child_id))?;
+                .ok_or_else(|| anyhow!("Unknown subagent id {child_id}"))?;
             record.status = SubagentStatus::Running;
             record.updated_at = Utc::now();
             (
@@ -1844,7 +1842,7 @@ impl SubagentController {
             let record = state
                 .children
                 .get_mut(child_id)
-                .ok_or_else(|| anyhow!("Unknown subagent id {}", child_id))?;
+                .ok_or_else(|| anyhow!("Unknown subagent id {child_id}"))?;
             record.archive_metadata = Some(archive_metadata.clone());
             record.archive_path = Some(archive_path.clone());
             record.effective_config = Some(child_cfg.clone());
@@ -1951,11 +1949,10 @@ impl SubagentController {
 
         let prompt = format!(
             "Verify the following proposed change.\n\n\
-             ## Diff Description\n{}\n\n\
-             ## Affected Files\n{}\n\n\
+             ## Diff Description\n{diff_description}\n\n\
+             ## Affected Files\n{files_list}\n\n\
              Read each affected file and check for correctness, safety, and convention adherence.\n\
-             Respond with your verification result in the format specified in your instructions.",
-            diff_description, files_list
+             Respond with your verification result in the format specified in your instructions."
         );
 
         let request = SpawnAgentRequest {
@@ -1995,11 +1992,7 @@ impl SubagentController {
 
                 let approved = if explicitly_rejected {
                     false
-                } else if explicitly_approved && issues.is_empty() {
-                    true
-                } else {
-                    false
-                };
+                } else { explicitly_approved && issues.is_empty() };
 
                 Ok(VerificationResult {
                     approved,

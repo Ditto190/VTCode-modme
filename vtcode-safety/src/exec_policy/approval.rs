@@ -169,7 +169,7 @@ impl ExecPolicyAmendment {
     /// Convert the amendment to a policy rule string.
     pub fn to_rule_string(&self) -> String {
         let pattern_json = serde_json::to_string(&self.pattern).unwrap_or_default();
-        format!("prefix_rule(pattern={}, decision=\"allow\")", pattern_json)
+        format!("prefix_rule(pattern={pattern_json}, decision=\"allow\")")
     }
 
     /// Get the command pattern for Codex compatibility.

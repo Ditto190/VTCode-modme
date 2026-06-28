@@ -285,7 +285,7 @@ impl From<crate::tools::handlers::ToolCallError> for UnifiedToolError {
                 UnifiedToolError::new(kind, e.to_string()).with_source(e)
             }
             ToolCallError::Timeout(ms) => {
-                UnifiedToolError::new(UnifiedErrorKind::Timeout, format!("Timeout after {}ms", ms))
+                UnifiedToolError::new(UnifiedErrorKind::Timeout, format!("Timeout after {ms}ms"))
             }
         }
     }
@@ -307,7 +307,7 @@ impl From<crate::tools::handlers::sandboxing::ToolError> for UnifiedToolError {
                 UnifiedToolError::new(UnifiedErrorKind::SandboxFailure, msg)
             }
             ToolError::Timeout(ms) => {
-                UnifiedToolError::new(UnifiedErrorKind::Timeout, format!("Timeout after {}ms", ms))
+                UnifiedToolError::new(UnifiedErrorKind::Timeout, format!("Timeout after {ms}ms"))
             }
         }
     }

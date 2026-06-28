@@ -74,12 +74,12 @@ fn render_file_header(
         Span::styled(&preview.file_path, header_style),
         Span::styled(" (", header_style),
         Span::styled(
-            format!("+{}", additions),
+            format!("+{additions}"),
             Style::default().fg(ratatui_color_from_ansi(palette.added_fg)),
         ),
         Span::styled(" ", header_style),
         Span::styled(
-            format!("-{}", deletions),
+            format!("-{deletions}"),
             Style::default().fg(ratatui_color_from_ansi(palette.removed_fg)),
         ),
         Span::styled(")", header_style),
@@ -230,7 +230,7 @@ fn control_lines(preview: &DiffPreviewState) -> Vec<Line<'static>> {
                     Span::styled("4", Style::default().fg(Color::Cyan)),
                     Span::raw("-Auto "),
                     Span::styled(
-                        format!("[{}]", trust),
+                        format!("[{trust}]"),
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::BOLD),

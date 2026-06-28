@@ -200,7 +200,7 @@ fn wizard_tabbed_list_enter_submits_single_selection() {
                 InlineListSelection::AskUserChoice { .. }
             ));
         }
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -255,10 +255,10 @@ fn wizard_tabbed_list_mouse_click_submits_on_first_click() {
                 InlineListSelection::AskUserChoice { choice_id, .. } => {
                     assert_eq!(choice_id, "choice_b");
                 }
-                other => panic!("unexpected selection: {:?}", other),
+                other => panic!("unexpected selection: {other:?}"),
             }
         }
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -436,10 +436,10 @@ fn wizard_inline_custom_note_sets_other_answer_and_submits_on_enter() {
                 InlineListSelection::RequestUserInputAnswer { other, .. } => {
                     assert_eq!(other.as_deref(), Some("me"));
                 }
-                other => panic!("unexpected selection: {:?}", other),
+                other => panic!("unexpected selection: {other:?}"),
             }
         }
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -463,10 +463,10 @@ fn wizard_inline_custom_note_uses_default_on_empty_enter() {
                 InlineListSelection::RequestUserInputAnswer { other, .. } => {
                     assert_eq!(other.as_deref(), Some("10m"));
                 }
-                other => panic!("unexpected selection: {:?}", other),
+                other => panic!("unexpected selection: {other:?}"),
             }
         }
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -490,10 +490,10 @@ fn wizard_inline_custom_note_accepts_empty_string_default_on_enter() {
                 InlineListSelection::RequestUserInputAnswer { other, .. } => {
                     assert_eq!(other.as_deref(), Some(""));
                 }
-                other => panic!("unexpected selection: {:?}", other),
+                other => panic!("unexpected selection: {other:?}"),
             }
         }
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -534,9 +534,9 @@ fn wizard_inline_custom_note_typed_text_overrides_default() {
             InlineListSelection::RequestUserInputAnswer { other, .. } => {
                 assert_eq!(other.as_deref(), Some("20m"));
             }
-            other => panic!("unexpected selection: {:?}", other),
+            other => panic!("unexpected selection: {other:?}"),
         },
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -558,9 +558,9 @@ fn wizard_multistep_mouse_click_uses_default_submission_path() {
             InlineListSelection::RequestUserInputAnswer { other, .. } => {
                 assert_eq!(other.as_deref(), Some("10m"));
             }
-            other => panic!("unexpected selection: {:?}", other),
+            other => panic!("unexpected selection: {other:?}"),
         },
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -616,10 +616,10 @@ fn wizard_multistep_numeric_select_submits() {
                 InlineListSelection::RequestUserInputAnswer { selected, .. } => {
                     assert_eq!(selected, &vec!["Choice B".to_owned()]);
                 }
-                other => panic!("unexpected selection: {:?}", other),
+                other => panic!("unexpected selection: {other:?}"),
             }
         }
-        other => panic!("Expected submit, got: {:?}", other),
+        other => panic!("Expected submit, got: {other:?}"),
     }
 }
 
@@ -731,7 +731,7 @@ fn list_modal_handles_search_typing() {
 
     match result {
         ModalListKeyResult::Redraw => {}
-        other => panic!("expected redraw, got {:?}", other),
+        other => panic!("expected redraw, got {other:?}"),
     }
 
     let query = modal.search.unwrap().query.clone();
@@ -750,7 +750,7 @@ fn list_modal_submit_emits_event() {
         ))) => {
             assert_eq!(selection, InlineListSelection::Model(0));
         }
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }
 
@@ -765,7 +765,7 @@ fn list_modal_mouse_click_selects_then_submits() {
         ))) => {
             assert_eq!(selection, InlineListSelection::Model(1));
         }
-        other => panic!("unexpected selection result: {:?}", other),
+        other => panic!("unexpected selection result: {other:?}"),
     }
 
     let submit = modal.handle_list_mouse_click(1);
@@ -775,7 +775,7 @@ fn list_modal_mouse_click_selects_then_submits() {
         ))) => {
             assert_eq!(selection, InlineListSelection::Model(1));
         }
-        other => panic!("unexpected submit result: {:?}", other),
+        other => panic!("unexpected submit result: {other:?}"),
     }
 }
 
@@ -901,7 +901,7 @@ fn list_modal_cancel_emits_event() {
 
     match result {
         ModalListKeyResult::Redraw => {}
-        other => panic!("expected redraw to clear query first, got {:?}", other),
+        other => panic!("expected redraw to clear query first, got {other:?}"),
     }
 
     let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
@@ -909,7 +909,7 @@ fn list_modal_cancel_emits_event() {
 
     match result {
         ModalListKeyResult::Cancel(InlineEvent::Overlay(OverlayEvent::Cancelled)) => {}
-        other => panic!("expected cancel event, got {:?}", other),
+        other => panic!("expected cancel event, got {other:?}"),
     }
 }
 

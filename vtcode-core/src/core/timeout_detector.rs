@@ -349,7 +349,7 @@ impl TimeoutDetector {
         loop {
             let handle = self
                 .start_operation(
-                    format!("{}_{}", operation_id, attempt),
+                    format!("{operation_id}_{attempt}"),
                     operation_type.clone(),
                 )
                 .await;
@@ -375,7 +375,7 @@ impl TimeoutDetector {
             match result {
                 Ok(value) => {
                     if attempt > 0 {
-                        self.record_successful_retry(&format!("{}_{}", operation_id, attempt))
+                        self.record_successful_retry(&format!("{operation_id}_{attempt}"))
                             .await;
                     }
                     return Ok(value);
@@ -385,14 +385,14 @@ impl TimeoutDetector {
 
                     if !should_retry_op {
                         if attempt > 0 {
-                            self.record_failed_retry(&format!("{}_{}", operation_id, attempt))
+                            self.record_failed_retry(&format!("{operation_id}_{attempt}"))
                                 .await;
                         }
                         return Err(error);
                     }
 
                     attempt += 1;
-                    self.record_failed_retry(&format!("{}_{}", operation_id, attempt))
+                    self.record_failed_retry(&format!("{operation_id}_{attempt}"))
                         .await;
 
                     let delay = self.calculate_retry_delay(&operation_type, attempt).await;

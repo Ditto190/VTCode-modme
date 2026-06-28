@@ -305,7 +305,7 @@ impl ToolEmitter {
                 Err(ToolCallError::Rejected(msg))
             }
             Err(ToolError::Timeout(ms)) => {
-                let msg = format!("Command timed out after {}ms", ms);
+                let msg = format!("Command timed out after {ms}ms");
                 self.emit(
                     ctx,
                     ToolEventStage::Failure(ToolEventFailureKind::Message(msg.clone())),

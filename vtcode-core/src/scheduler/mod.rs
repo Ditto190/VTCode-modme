@@ -483,8 +483,7 @@ impl SessionScheduler {
     fn ensure_capacity(&self) -> Result<()> {
         if self.tasks.len() >= MAX_SCHEDULED_TASKS {
             bail!(
-                "A session can hold at most {} scheduled tasks",
-                MAX_SCHEDULED_TASKS
+                "A session can hold at most {MAX_SCHEDULED_TASKS} scheduled tasks"
             );
         }
         Ok(())
@@ -716,8 +715,7 @@ impl DurableTaskStore {
         let current_count = self.definition_paths()?.len();
         if current_count >= MAX_SCHEDULED_TASKS {
             bail!(
-                "VT Code supports at most {} durable scheduled tasks",
-                MAX_SCHEDULED_TASKS
+                "VT Code supports at most {MAX_SCHEDULED_TASKS} durable scheduled tasks"
             );
         }
 
@@ -963,7 +961,7 @@ impl SchedulerDaemon {
                 let run_status = match execution {
                     Ok(status) if status.success() => TaskRunStatus::Success,
                     Ok(status) => TaskRunStatus::Failed {
-                        message: format!("vtcode exec exited with {}", status),
+                        message: format!("vtcode exec exited with {status}"),
                     },
                     Err(error) => TaskRunStatus::Failed {
                         message: format!("{error:#}"),

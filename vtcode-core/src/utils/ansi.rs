@@ -505,9 +505,9 @@ impl AnsiRenderer {
         }
         let ansi_style = style.style();
         if self.color {
-            write!(self.writer, "{ansi_style}{}{Reset}", text)?;
+            write!(self.writer, "{ansi_style}{text}{Reset}")?;
         } else {
-            write!(self.writer, "{}", text)?;
+            write!(self.writer, "{text}")?;
         }
         self.writer.flush()?;
         Ok(())
@@ -551,9 +551,9 @@ impl AnsiRenderer {
             text
         };
         if self.color {
-            writeln!(self.writer, "{style}{}{Reset}", display)?;
+            writeln!(self.writer, "{style}{display}{Reset}")?;
         } else {
-            writeln!(self.writer, "{}", display)?;
+            writeln!(self.writer, "{display}")?;
         }
         self.writer.flush()?;
         transcript::append(display);
@@ -572,7 +572,7 @@ impl AnsiRenderer {
 
     /// Write a raw line without styling
     pub fn raw_line(&mut self, text: &str) -> Result<()> {
-        writeln!(self.writer, "{}", text)?;
+        writeln!(self.writer, "{text}")?;
         self.writer.flush()?;
         transcript::append(text);
         Ok(())

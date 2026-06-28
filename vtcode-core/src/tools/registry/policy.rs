@@ -163,6 +163,10 @@ impl ToolPolicyGateway {
         Ok(args)
     }
 
+    pub fn policy_manager(&self) -> Option<ToolPolicyManager> {
+        self.tool_policy.clone()
+    }
+
     pub fn policy_manager_mut(&mut self) -> Result<&mut ToolPolicyManager> {
         self.tool_policy
             .as_mut()
@@ -222,30 +226,6 @@ impl ToolPolicyGateway {
             .as_ref()
             .map(|tp| tp.get_policy(canonical))
             .unwrap_or(ToolPolicy::Allow)
-    }
-
-    pub async fn reset_tool_policies(&mut self) -> Result<()> {
-        if let Some(tp) = self.tool_policy.as_mut() {
-            tp.reset_all_to_prompt().await
-        } else {
-            Err(anyhow!("Tool policy manager not available"))
-        }
-    }
-
-    pub async fn allow_all_tools(&mut self) -> Result<()> {
-        if let Some(tp) = self.tool_policy.as_mut() {
-            tp.allow_all_tools().await
-        } else {
-            Err(anyhow!("Tool policy manager not available"))
-        }
-    }
-
-    pub async fn deny_all_tools(&mut self) -> Result<()> {
-        if let Some(tp) = self.tool_policy.as_mut() {
-            tp.deny_all_tools().await
-        } else {
-            Err(anyhow!("Tool policy manager not available"))
-        }
     }
 
     pub fn print_policy_status(&self) {

@@ -2145,9 +2145,7 @@ mod tests {
                 .count();
             assert!(
                 default_count <= 1,
-                "Provider {:?} has {} defaults, expected 0 or 1",
-                provider,
-                default_count
+                "Provider {provider:?} has {default_count} defaults, expected 0 or 1"
             );
         }
     }

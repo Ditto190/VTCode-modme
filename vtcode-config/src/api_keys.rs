@@ -154,9 +154,7 @@ pub fn get_api_key(provider: &str, _sources: &ApiKeySources) -> Result<String> {
         // All other providers: env var was already checked above, nothing more to do
         _ => {
             return Err(anyhow::anyhow!(
-                "{} API key not found. Set {} environment variable or add to .env file.",
-                normalized_provider,
-                inferred_env,
+                "{normalized_provider} API key not found. Set {inferred_env} environment variable or add to .env file.",
             ));
         }
     };

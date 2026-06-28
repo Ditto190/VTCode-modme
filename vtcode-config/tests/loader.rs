@@ -54,8 +54,7 @@ fn write_config(path: &Path, provider: &str) -> Result<()> {
     }
 
     let contents = format!(
-        "[agent]\nprovider = \"{}\"\nmax_conversation_turns = 5\n",
-        provider
+        "[agent]\nprovider = \"{provider}\"\nmax_conversation_turns = 5\n"
     );
     fs::write(path, contents)?;
     Ok(())

@@ -551,8 +551,7 @@ fn transform_command_with_sandbox_policy(
     let executable = exec_env.program.to_string_lossy().to_string();
     if exec_env.sandbox_active && !Path::new(&executable).exists() {
         return Err(anyhow!(
-            "Sandbox is enabled but executable '{}' was not found on this system.",
-            executable
+            "Sandbox is enabled but executable '{executable}' was not found on this system."
         ));
     }
 
@@ -580,8 +579,7 @@ fn map_sandbox_transform_error(
         ),
         SandboxTransformError::CreationFailed(msg) | SandboxTransformError::InvalidPolicy(msg) => {
             anyhow!(
-                "Failed to initialize sandbox for command execution: {}",
-                msg
+                "Failed to initialize sandbox for command execution: {msg}"
             )
         }
     }

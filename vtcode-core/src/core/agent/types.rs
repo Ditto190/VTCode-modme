@@ -85,7 +85,7 @@ impl fmt::Display for AgentType {
             Self::Explore => f.write_str("explore"),
             Self::Plan => f.write_str("plan"),
             Self::General => f.write_str("general"),
-            Self::Custom(name) => write!(f, "custom:{}", name),
+            Self::Custom(name) => write!(f, "custom:{name}"),
         }
     }
 }
@@ -101,7 +101,7 @@ impl std::str::FromStr for AgentType {
             "plan" => Ok(Self::Plan),
             "general" => Ok(Self::General),
             _ if s.starts_with("custom:") => Ok(Self::Custom(s[7..].to_string())),
-            _ => Err(format!("Unknown agent type: {}", s)),
+            _ => Err(format!("Unknown agent type: {s}")),
         }
     }
 }

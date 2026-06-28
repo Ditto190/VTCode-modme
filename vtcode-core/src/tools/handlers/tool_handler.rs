@@ -392,7 +392,7 @@ impl From<super::sandboxing::ToolError> for ToolCallError {
             super::sandboxing::ToolError::Rejected(msg) => ToolCallError::Rejected(msg),
             super::sandboxing::ToolError::Codex(e) => ToolCallError::Internal(e),
             super::sandboxing::ToolError::SandboxDenied(msg) => {
-                ToolCallError::Rejected(format!("Sandbox denied: {}", msg))
+                ToolCallError::Rejected(format!("Sandbox denied: {msg}"))
             }
             super::sandboxing::ToolError::Timeout(ms) => ToolCallError::Timeout(ms),
         }

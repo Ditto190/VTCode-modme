@@ -225,7 +225,7 @@ impl PluginInstaller {
             runtime
                 .unload_plugin(plugin_id)
                 .await
-                .with_context(|| format!("Failed to unload plugin from runtime: {}", plugin_id))?;
+                .with_context(|| format!("Failed to unload plugin from runtime: {plugin_id}"))?;
             tracing::info!(plugin_id = %plugin_id, "unloaded plugin from core runtime");
         } else {
             tracing::info!(plugin_id = %plugin_id, "no core plugin runtime, skipping removal");

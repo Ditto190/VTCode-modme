@@ -575,8 +575,7 @@ impl Message {
             "openai" | "openrouter" | "zai" | "stepfun" | "evolink" => {
                 if self.role == MessageRole::Tool && self.tool_call_id.is_none() {
                     return Err(format!(
-                        "{} requires tool_call_id for tool messages",
-                        provider
+                        "{provider} requires tool_call_id for tool messages"
                     ));
                 }
             }
@@ -731,7 +730,7 @@ impl MessageRole {
                 if matches!(provider, "openai" | "openrouter" | "deepseek" | "zai")
                     && !has_tool_call_id =>
             {
-                Err(format!("{} tool messages must have tool_call_id", provider))
+                Err(format!("{provider} tool messages must have tool_call_id"))
             }
             (MessageRole::Tool, "gemini") if !has_tool_call_id => {
                 Err("Gemini tool messages need tool_call_id for function mapping".to_owned())

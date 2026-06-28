@@ -103,9 +103,9 @@ mod tests {
         // branch, so we exercise the panic by passing a value that
         // differs from the first one observed in this process.
         let divergent = ToolConfigSnapshot {
-            web_search: vtcode_config::WebSearchConfig {
+            web_search: WebSearchConfig {
                 max_results: 999,
-                ..vtcode_config::WebSearchConfig::default()
+                ..WebSearchConfig::default()
             },
             ..ToolConfigSnapshot::default()
         };

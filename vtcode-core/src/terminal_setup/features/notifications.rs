@@ -92,7 +92,7 @@ pub fn generate_notification_config(
             config_lines.push("# Test with: echo -e \"\\a\"".to_string());
         }
         _ => {
-            config_lines.push(format!("# {:?} Notification Configuration", terminal_type));
+            config_lines.push(format!("# {terminal_type:?} Notification Configuration"));
             config_lines
                 .push("# This terminal supports standard ANSI bell notifications.".to_string());
             config_lines.push(

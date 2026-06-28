@@ -240,7 +240,7 @@ impl DeepSeekProvider {
             .map_err(|e| LLMError::Network {
                 message: error_display::format_llm_error(
                     PROVIDER_NAME,
-                    &format!("network error: {}", e),
+                    &format!("network error: {e}"),
                 ),
                 metadata: None,
             })
@@ -430,7 +430,7 @@ impl LLMProvider for DeepSeekProvider {
         // Strip /v1 suffix to get the root API URL for the balance endpoint.
         let base = self.base_url.trim_end_matches('/');
         let root = base.strip_suffix("/v1").unwrap_or(base);
-        let url = format!("{}/user/balance", root);
+        let url = format!("{root}/user/balance");
 
         let response = self
             .http_client
@@ -441,7 +441,7 @@ impl LLMProvider for DeepSeekProvider {
             .map_err(|e| LLMError::Network {
                 message: error_display::format_llm_error(
                     PROVIDER_NAME,
-                    &format!("balance request failed: {}", e),
+                    &format!("balance request failed: {e}"),
                 ),
                 metadata: None,
             })?;
@@ -452,7 +452,7 @@ impl LLMProvider for DeepSeekProvider {
             return Err(LLMError::Provider {
                 message: error_display::format_llm_error(
                     PROVIDER_NAME,
-                    &format!("balance API returned {}: {}", status, body),
+                    &format!("balance API returned {status}: {body}"),
                 ),
                 metadata: None,
             });
@@ -462,7 +462,7 @@ impl LLMProvider for DeepSeekProvider {
             response.json().await.map_err(|e| LLMError::Provider {
                 message: error_display::format_llm_error(
                     PROVIDER_NAME,
-                    &format!("failed to parse balance response: {}", e),
+                    &format!("failed to parse balance response: {e}"),
                 ),
                 metadata: None,
             })?;

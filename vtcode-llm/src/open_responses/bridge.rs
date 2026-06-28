@@ -81,7 +81,7 @@ fn tool_output_text(output: &ToolOutputItem) -> String {
     output
         .spool_path
         .as_deref()
-        .map(|path| format!("Output saved to {}", path))
+        .map(|path| format!("Output saved to {path}"))
         .unwrap_or_default()
 }
 

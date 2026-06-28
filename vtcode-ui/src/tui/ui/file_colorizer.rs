@@ -64,7 +64,7 @@ impl FileColorizer {
 
         // First try to match by extension (e.g., "*.rs", "*.toml")
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            let ext_key = format!("*.{}", ext);
+            let ext_key = format!("*.{ext}");
             if let Some(style) = self.get_style(&ext_key) {
                 return Some(style);
             }

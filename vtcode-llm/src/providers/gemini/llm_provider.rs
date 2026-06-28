@@ -132,7 +132,7 @@ impl LLMProvider for GeminiProvider {
                         let chunk = chunk_result.map_err(|err| {
                             let formatted_error = error_display::format_llm_error(
                                 "Gemini",
-                                &format!("Streaming error: {}", err),
+                                &format!("Streaming error: {err}"),
                             );
                             LLMError::Network {
                                 message: formatted_error,
@@ -344,8 +344,7 @@ impl LLMProvider for GeminiProvider {
                 let formatted_error = error_display::format_llm_error(
                     "Gemini",
                     &format!(
-                        "Requested max_tokens ({}) exceeds model limit ({}) for {}",
-                        max_tokens, max_output_tokens, model
+                        "Requested max_tokens ({max_tokens}) exceeds model limit ({max_output_tokens}) for {model}"
                     ),
                 );
                 return Err(LLMError::InvalidRequest {

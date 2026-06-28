@@ -295,7 +295,7 @@ async fn compact_history_native_inline(
             config.retained_user_messages,
         );
         let mut compacted = Vec::with_capacity(retained_users.len().saturating_add(1));
-        compacted.push(Message::system(format!("{SUMMARY_PREFIX}{}", summary)));
+        compacted.push(Message::system(format!("{SUMMARY_PREFIX}{summary}")));
         compacted.extend(retained_users);
         return Ok((compacted, CompactionMode::Provider));
     }

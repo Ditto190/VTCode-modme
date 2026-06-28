@@ -68,20 +68,17 @@ impl McpOAuthConfig {
     pub fn validate(&self, provider_name: &str) -> Result<()> {
         if self.authorization_url.trim().is_empty() {
             bail!(
-                "MCP provider '{}' is missing oauth.authorization_url",
-                provider_name
+                "MCP provider '{provider_name}' is missing oauth.authorization_url"
             );
         }
         if self.token_url.trim().is_empty() {
             bail!(
-                "MCP provider '{}' is missing oauth.token_url",
-                provider_name
+                "MCP provider '{provider_name}' is missing oauth.token_url"
             );
         }
         if self.client_id.trim().is_empty() {
             bail!(
-                "MCP provider '{}' is missing oauth.client_id",
-                provider_name
+                "MCP provider '{provider_name}' is missing oauth.client_id"
             );
         }
         Ok(())
@@ -230,9 +227,7 @@ impl McpOAuthService {
                 save_token(provider_name, &token, config.credentials_store_mode)?;
             } else {
                 bail!(
-                    "Stored MCP OAuth token for '{}' expired and cannot be refreshed. Run `vtcode mcp login {}` again.",
-                    provider_name,
-                    provider_name
+                    "Stored MCP OAuth token for '{provider_name}' expired and cannot be refreshed. Run `vtcode mcp login {provider_name}` again."
                 );
             }
         }
@@ -362,7 +357,7 @@ async fn send_token_request(token_url: &str, form: &[(String, String)]) -> Resul
         .context("failed to read MCP OAuth response body")?;
 
     if !status.is_success() {
-        bail!("MCP OAuth request failed (HTTP {}): {}", status, body);
+        bail!("MCP OAuth request failed (HTTP {status}): {body}");
     }
 
     let payload: TokenResponse =

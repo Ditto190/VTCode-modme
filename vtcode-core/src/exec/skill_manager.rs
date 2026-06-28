@@ -112,7 +112,7 @@ impl SkillManager {
         let code_filename = match skill.metadata.language.as_str() {
             "python3" | "python" => "skill.py",
             "javascript" | "js" => "skill.js",
-            lang => return Err(anyhow!("unsupported language: {}", lang)),
+            lang => return Err(anyhow!("unsupported language: {lang}")),
         };
 
         let code_path = skill_dir.join(code_filename);
@@ -182,7 +182,7 @@ impl SkillManager {
                 legacy_skill_dir,
             )
         } else {
-            return Err(anyhow!("skill '{}' not found", name));
+            return Err(anyhow!("skill '{name}' not found"));
         };
 
         // Load code
@@ -260,7 +260,7 @@ impl SkillManager {
                 .await
                 .context(ERR_DELETE_SKILL)?;
         } else {
-            return Err(anyhow!("skill '{}' not found", name));
+            return Err(anyhow!("skill '{name}' not found"));
         }
 
         info!(skill_name = %name, "Skill deleted successfully");

@@ -220,13 +220,12 @@ impl SafeCommandRegistry {
         // Check safe subcommands (if restricted list exists)
         if let Some(ref safe_subs) = rule.safe_subcommands {
             if command.len() < 2 {
-                return SafetyDecision::Deny(format!("Command {} requires a subcommand", cmd_name));
+                return SafetyDecision::Deny(format!("Command {cmd_name} requires a subcommand"));
             }
             let subcommand = &command[1];
             if !safe_subs.contains(subcommand) {
                 return SafetyDecision::Deny(format!(
-                    "Subcommand {} not in safe list for {}",
-                    subcommand, cmd_name
+                    "Subcommand {subcommand} not in safe list for {cmd_name}"
                 ));
             }
         }
@@ -237,7 +236,7 @@ impl SafeCommandRegistry {
             let forbidden_with_eq: Vec<String> = rule
                 .forbidden_options
                 .iter()
-                .map(|opt| format!("{}=", opt))
+                .map(|opt| format!("{opt}="))
                 .collect();
 
             for arg in command {
@@ -246,8 +245,7 @@ impl SafeCommandRegistry {
                 {
                     if arg == forbidden || arg.starts_with(forbidden_eq) {
                         return SafetyDecision::Deny(format!(
-                            "Option {} is not allowed for {}",
-                            forbidden, cmd_name
+                            "Option {forbidden} is not allowed for {cmd_name}"
                         ));
                     }
                 }
@@ -392,8 +390,7 @@ impl SafeCommandRegistry {
         for arg in command.iter().skip(1) {
             if UNSAFE_OPTIONS.contains(&arg.as_str()) {
                 return SafetyDecision::Deny(format!(
-                    "base64 {} is not allowed (output redirection)",
-                    arg
+                    "base64 {arg} is not allowed (output redirection)"
                 ));
             }
             if arg.starts_with("--output=") || (arg.starts_with("-o") && arg != "-o") {

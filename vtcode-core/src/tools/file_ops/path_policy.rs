@@ -111,8 +111,7 @@ impl FileOpsTool {
 
         if !within_workspace {
             return Err(anyhow!(
-                "Error: Path '{}' resolves outside the workspace.",
-                original_display
+                "Error: Path '{original_display}' resolves outside the workspace."
             ));
         }
 

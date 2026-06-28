@@ -415,7 +415,7 @@ impl DotManager {
     pub async fn backup_config(&self) -> Result<PathBuf, DotError> {
         let timestamp = unix_timestamp_secs()?;
 
-        let backup_name = format!("config_backup_{}.toml", timestamp);
+        let backup_name = format!("config_backup_{timestamp}.toml");
         let backup_path = self.backups_dir().join(backup_name);
 
         if fs::try_exists(&self.config_file).await.unwrap_or(false) {

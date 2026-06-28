@@ -110,7 +110,7 @@ Example pivot:
 
 Policies are defined in:
 - **Core defaults**: `vtcode-config/src/core/tools.rs` (tool policies)
-- **Command validation**: `vtcode-core/src/execpolicy/mod.rs` (command whitelisting)
+- **Command validation**: `vtcode-core/src/exec_policy/mod.rs` (command whitelisting)
 - **User overrides**: `vtcode.toml` in project root or `~/.vtcode/` directory
 
 Override examples in `vtcode.toml`:

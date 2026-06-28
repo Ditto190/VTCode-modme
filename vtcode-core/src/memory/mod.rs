@@ -129,7 +129,7 @@ impl MemoryMonitor {
 
         let kb: usize = rss_str
             .parse()
-            .map_err(|_e| MemoryError::Parse(format!("invalid ps output: {}", rss_str)))?;
+            .map_err(|_e| MemoryError::Parse(format!("invalid ps output: {rss_str}")))?;
 
         Ok(kb * 1024) // Convert KB to bytes
     }
@@ -272,7 +272,7 @@ mod tests {
                 assert!(rss < 10 * 1024 * 1024 * 1024, "RSS should be < 10GB");
             }
             Err(e) => {
-                println!("Warning: Could not get RSS: {}", e);
+                println!("Warning: Could not get RSS: {e}");
                 // This is acceptable on unsupported platforms
             }
         }
@@ -284,10 +284,10 @@ mod tests {
         match monitor.check_pressure() {
             Ok(pressure) => {
                 // Should always return a valid pressure level
-                let _ = format!("{:?}", pressure);
+                let _ = format!("{pressure:?}");
             }
             Err(e) => {
-                println!("Warning: Could not check pressure: {}", e);
+                println!("Warning: Could not check pressure: {e}");
                 // Acceptable on unsupported platforms
             }
         }
@@ -328,7 +328,7 @@ mod tests {
                 assert!(report.hard_limit_mb > report.soft_limit_mb);
             }
             Err(e) => {
-                println!("Warning: Could not generate report: {}", e);
+                println!("Warning: Could not generate report: {e}");
                 // Acceptable on unsupported platforms
             }
         }

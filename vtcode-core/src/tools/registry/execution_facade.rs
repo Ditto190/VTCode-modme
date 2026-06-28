@@ -757,7 +757,7 @@ impl ToolRegistry {
                 let display = if canonical == name {
                     canonical.clone()
                 } else {
-                    format!("{} (alias for {})", name, canonical)
+                    format!("{name} (alias for {canonical})")
                 };
                 (canonical.clone(), canonical.clone(), display)
             } else {
@@ -870,8 +870,7 @@ impl ToolRegistry {
                 {
                     debug_assert!(
                         false,
-                        "prevalidated execution received invalid call for '{}': {}",
-                        tool_name, err
+                        "prevalidated execution received invalid call for '{tool_name}': {err}"
                     );
                 }
             }
@@ -931,8 +930,7 @@ impl ToolRegistry {
                 .map(|backoff| format!(" retry_after={}s.", backoff.as_secs()))
                 .unwrap_or_default();
             let error_msg = format!(
-                "Tool '{}' is temporarily disabled due to high failure rate (Circuit Breaker OPEN).{}",
-                display_name, retry_after
+                "Tool '{display_name}' is temporarily disabled due to high failure rate (Circuit Breaker OPEN).{retry_after}"
             );
             self.execution_history.add_record(
                 ToolExecutionRecord::failure(
@@ -994,10 +992,6 @@ impl ToolRegistry {
         let base_timeout_ms = self
             .timeout_policy
             .read()
-            .unwrap_or_else(|poisoned| {
-                warn!("timeout policy lock poisoned while reading execution timeout; recovering");
-                poisoned.into_inner()
-            })
             .ceiling_for(timeout_category)
             .map(|d| d.as_millis() as u64);
         let adaptive_timeout_ms = self
@@ -1192,8 +1186,7 @@ impl ToolRegistry {
                 tool_name_owned.clone(),
                 ToolErrorType::PolicyViolation,
                 format!(
-                    "Tool '{}' is not permitted while full-auto permission review is active",
-                    display_name
+                    "Tool '{display_name}' is not permitted while full-auto permission review is active"
                 ),
             );
 
@@ -1211,8 +1204,7 @@ impl ToolRegistry {
             );
 
             return Err(anyhow!(
-                "Tool '{}' is not permitted while full-auto permission review is active",
-                display_name
+                "Tool '{display_name}' is not permitted while full-auto permission review is active"
             )
             .context("tool denied by full-auto allowlist"));
         }
@@ -1238,9 +1230,9 @@ impl ToolRegistry {
         if !decision.is_allowed() {
             let error_msg = match decision {
                 ToolExecutionDecision::DeniedWithFeedback(feedback) => {
-                    format!("Tool '{}' denied by user: {}", display_name, feedback)
+                    format!("Tool '{display_name}' denied by user: {feedback}")
                 }
-                _ => format!("Tool '{}' execution denied by policy", display_name),
+                _ => format!("Tool '{display_name}' execution denied by policy"),
             };
 
             let _error = ToolExecutionError::new(
@@ -1262,7 +1254,7 @@ impl ToolRegistry {
                 false,
             );
 
-            return Err(anyhow!("{}", error_msg).context("tool denied by policy"));
+            return Err(anyhow!("{error_msg}").context("tool denied by policy"));
         }
 
         let args = match self
@@ -1285,7 +1277,7 @@ impl ToolRegistry {
                     false,
                     None,
                     args_for_recording,
-                    format!("Failed to apply policy constraints: {}", err),
+                    format!("Failed to apply policy constraints: {err}"),
                     timeout_category_label.clone(),
                     base_timeout_ms,
                     adaptive_timeout_ms,
@@ -1319,7 +1311,7 @@ impl ToolRegistry {
             mcp_tool_name = Some(remote_tool.to_string());
         }
 
-        let mcp_client_opt = { self.mcp_client.read().ok().and_then(|g| g.clone()) };
+        let mcp_client_opt = self.mcp_client.read().clone();
         if !is_mcp_tool && let Some(mcp_client) = mcp_client_opt {
             let mut resolved_mcp_name = legacy_mcp_tool_name(name)
                 .map(str::to_string)
@@ -1361,7 +1353,7 @@ impl ToolRegistry {
                 let error = ToolExecutionError::with_original_error(
                     tool_name_owned.clone(),
                     ToolErrorType::ExecutionError,
-                    format!("Failed to resolve MCP tool '{}': {}", display_name, err),
+                    format!("Failed to resolve MCP tool '{display_name}': {err}"),
                     err.to_string(),
                 );
 
@@ -1370,7 +1362,7 @@ impl ToolRegistry {
                     is_mcp_tool,
                     mcp_provider.clone(),
                     args_for_recording,
-                    format!("Failed to resolve MCP tool '{}': {}", display_name, err),
+                    format!("Failed to resolve MCP tool '{display_name}': {err}"),
                     timeout_category_label.clone(),
                     base_timeout_ms,
                     adaptive_timeout_ms,
@@ -1389,8 +1381,7 @@ impl ToolRegistry {
             };
             let available_tool_list = all_tool_names.join(", ");
             let message = format!(
-                "Unknown tool: {}. Available tools: {}.{}",
-                display_name, available_tool_list, suggestion
+                "Unknown tool: {display_name}. Available tools: {available_tool_list}.{suggestion}"
             );
             let error = ToolExecutionError::new(
                 tool_name_owned.clone(),
@@ -1582,10 +1573,9 @@ impl ToolRegistry {
                 let error_msg = if tool_name != requested_name {
                     // An alias was attempted but didn't resolve to an actual tool
                     format!(
-                        "Tool '{}' (registered alias for '{}') not found in registry. \
-                        Available tools: {}. \
-                        Note: Tool aliases are defined during tool registration.",
-                        requested_name, tool_name, available_tool_list
+                        "Tool '{requested_name}' (registered alias for '{tool_name}') not found in registry. \
+                        Available tools: {available_tool_list}. \
+                        Note: Tool aliases are defined during tool registration."
                     )
                 } else {
                     let suggestion = if !similar_tools.is_empty() {
@@ -1595,8 +1585,7 @@ impl ToolRegistry {
                     };
 
                     format!(
-                        "Tool '{}' not found in registry. Available tools: {}.{}",
-                        display_name, available_tool_list, suggestion
+                        "Tool '{display_name}' not found in registry. Available tools: {available_tool_list}.{suggestion}"
                     )
                 };
 
@@ -1841,7 +1830,7 @@ impl ToolRegistry {
                     is_mcp_tool,
                     mcp_provider,
                     args_for_recording,
-                    format!("Tool execution failed: {}", err),
+                    format!("Tool execution failed: {err}"),
                     timeout_category_label.clone(),
                     base_timeout_ms,
                     adaptive_timeout_ms,

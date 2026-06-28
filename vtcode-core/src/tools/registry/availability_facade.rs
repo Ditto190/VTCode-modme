@@ -64,7 +64,7 @@ impl ToolRegistry {
     /// Get a list of all available tools, including MCP tools.
     pub async fn available_tools(&self) -> Vec<String> {
         // Use try_read to avoid blocking on contested locks
-        if let Ok(cache) = self.cached_available_tools.try_read()
+        if let Some(cache) = self.cached_available_tools.try_read()
             && let Some(tools) = cache.as_ref()
         {
             return tools.clone();
@@ -75,7 +75,7 @@ impl ToolRegistry {
             .await;
 
         // Update cache with try_write to avoid blocking
-        if let Ok(mut cache) = self.cached_available_tools.try_write() {
+        if let Some(mut cache) = self.cached_available_tools.try_write() {
             *cache = Some(tools.clone());
         }
 

@@ -209,9 +209,9 @@ async fn run_add(add_args: AddArgs) -> Result<()> {
     write_global_config(&path, &config).await?;
 
     if was_new {
-        println!("Added MCP provider '{}'.", name);
+        println!("Added MCP provider '{name}'.");
     } else {
-        println!("Updated MCP provider '{}'.", name);
+        println!("Updated MCP provider '{name}'.");
     }
 
     Ok(())

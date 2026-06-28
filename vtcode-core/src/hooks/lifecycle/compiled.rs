@@ -81,7 +81,7 @@ fn compile_groups(groups: &[HookGroupConfig]) -> Result<Vec<CompiledHookGroup>> 
             if trimmed.is_empty() || trimmed == "*" {
                 HookMatcher::Any
             } else {
-                let regex = Regex::new(&format!("^(?:{})$", trimmed))
+                let regex = Regex::new(&format!("^(?:{trimmed})$"))
                     .with_context(|| format!("invalid lifecycle hook matcher: {pattern}"))?;
                 HookMatcher::Pattern(regex)
             }

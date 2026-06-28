@@ -81,7 +81,7 @@ impl LLMFactory {
             self.providers
                 .get(provider_name)
                 .ok_or_else(|| LLMError::InvalidRequest {
-                    message: format!("Unknown provider: {}", provider_name),
+                    message: format!("Unknown provider: {provider_name}"),
                     metadata: None,
                 })?;
 
@@ -167,7 +167,7 @@ pub fn create_provider_for_model(
     let provider_name = infer_provider_from_model(model)
         .map(|provider| provider.to_string())
         .ok_or_else(|| LLMError::InvalidRequest {
-            message: format!("Cannot determine provider for model: {}", model),
+            message: format!("Cannot determine provider for model: {model}"),
             metadata: None,
         })?;
     let factory = get_factory().lock().map_err(|_e| LLMError::Provider {

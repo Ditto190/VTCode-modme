@@ -8,7 +8,7 @@ pub use vtcode_commons::image::*;
 /// Reads an image from a URL and converts it to base64 format
 pub async fn read_image_from_url(url: &str) -> Result<ImageData> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(anyhow::anyhow!("Invalid URL: {}", url));
+        return Err(anyhow::anyhow!("Invalid URL: {url}"));
     }
 
     let client = reqwest::Client::builder()
@@ -20,7 +20,7 @@ pub async fn read_image_from_url(url: &str) -> Result<ImageData> {
         .get(url)
         .send()
         .await
-        .with_context(|| format!("Failed to fetch image from URL: {}", url))?;
+        .with_context(|| format!("Failed to fetch image from URL: {url}"))?;
 
     if !response.status().is_success() {
         return Err(anyhow::anyhow!(
@@ -33,8 +33,7 @@ pub async fn read_image_from_url(url: &str) -> Result<ImageData> {
     let content_length = response.content_length().unwrap_or(0);
     if content_length > 20 * 1024 * 1024 {
         return Err(anyhow::anyhow!(
-            "Image from URL too large: {} bytes (max 20MB)",
-            content_length
+            "Image from URL too large: {content_length} bytes (max 20MB)"
         ));
     }
 
@@ -47,7 +46,7 @@ pub async fn read_image_from_url(url: &str) -> Result<ImageData> {
     let file_contents = response
         .bytes()
         .await
-        .with_context(|| format!("Failed to read response body from: {}", url))?
+        .with_context(|| format!("Failed to read response body from: {url}"))?
         .to_vec();
 
     let mime_type = mime_type.unwrap_or_else(|| detect_mime_type_from_data(&file_contents));

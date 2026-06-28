@@ -94,7 +94,7 @@ struct FieldVisitor {
 
 impl Visit for FieldVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
-        let rendered = format!("{:?}", value);
+        let rendered = format!("{value:?}");
         if field.name() == "message" {
             self.message = Some(rendered);
         } else {
@@ -199,7 +199,7 @@ where
         };
 
         // Filter out redundant system warnings that clutter the UI
-        let combined_message = format!("{}{}", message, extras);
+        let combined_message = format!("{message}{extras}");
         if should_filter_log_message(&combined_message) {
             return;
         }

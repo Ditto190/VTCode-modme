@@ -166,9 +166,7 @@ pub(super) fn validate_exec_session_id<'a>(
         Ok(session_id)
     } else {
         Err(anyhow!(
-            "Invalid session_id for {}: '{}'. Expected an ASCII token (letters, digits, '-', '_').",
-            context,
-            raw_session_id
+            "Invalid session_id for {context}: '{raw_session_id}'. Expected an ASCII token (letters, digits, '-', '_')."
         ))
     }
 }
@@ -517,7 +515,7 @@ pub(super) fn filter_lines(
     let matcher = if literal {
         None
     } else {
-        Some(Regex::new(query).with_context(|| format!("Invalid regex query: {}", query))?)
+        Some(Regex::new(query).with_context(|| format!("Invalid regex query: {query}"))?)
     };
 
     let mut matches = Vec::new();
@@ -567,8 +565,7 @@ pub(super) fn resolve_workspace_scoped_path(
     let normalized_workspace = crate::utils::path::normalize_path(workspace_root);
     if !normalized.starts_with(&normalized_workspace) {
         return Err(anyhow!(
-            "spool_path must stay within workspace: {}",
-            raw_path
+            "spool_path must stay within workspace: {raw_path}"
         ));
     }
 
@@ -648,7 +645,7 @@ pub(super) fn parse_command_parts(
             .map_err(|error| anyhow!(error))?
         {
             Some(indexed_parts) => (indexed_parts, None),
-            None => return Err(anyhow!("{}", missing_error)),
+            None => return Err(anyhow!("{missing_error}")),
         },
     };
 
@@ -663,7 +660,7 @@ pub(super) fn parse_command_parts(
     }
 
     if parts.is_empty() {
-        return Err(anyhow!("{}", empty_error));
+        return Err(anyhow!("{empty_error}"));
     }
 
     Ok((parts, raw_command))
@@ -783,7 +780,7 @@ fn build_shell_command_string(raw: Option<&str>, parts: &[String], _shell: &str)
     if suffix.is_empty() {
         raw.to_string()
     } else {
-        format!("{} {}", raw, suffix)
+        format!("{raw} {suffix}")
     }
 }
 
@@ -905,7 +902,7 @@ pub(super) fn parse_pty_dimension(name: &str, value: Option<&Value>, default: u1
         Some(v) => {
             let n = v
                 .as_u64()
-                .ok_or_else(|| anyhow!("{} must be a number", name))?;
+                .ok_or_else(|| anyhow!("{name} must be a number"))?;
             Ok(n as u16)
         }
         None => Ok(default),
@@ -949,8 +946,7 @@ pub(super) fn enforce_pty_command_policy(display_command: &str, confirm: bool) -
             return Ok(());
         }
         return Err(anyhow!(
-            "Command '{}' is blocked by PTY safety policy. Set confirm=true to force execution.",
-            display_command
+            "Command '{display_command}' is blocked by PTY safety policy. Set confirm=true to force execution."
         ));
     }
 

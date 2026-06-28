@@ -23,8 +23,7 @@ impl ZeroTrustContext {
     pub fn authorize(&self, identity: &str) -> Result<()> {
         ensure!(
             self.allowed_identities.contains(identity),
-            "principal {} not authorized under zero-trust policy",
-            identity
+            "principal {identity} not authorized under zero-trust policy"
         );
         Ok(())
     }

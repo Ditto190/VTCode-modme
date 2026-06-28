@@ -201,7 +201,7 @@ impl AuditLog {
         if let Some(parent) = log_path.parent() {
             ensure_dir_exists(parent)
                 .await
-                .with_context(|| format!("Failed to create audit log directory: {:?}", parent))?;
+                .with_context(|| format!("Failed to create audit log directory: {parent:?}"))?;
         }
 
         // Read the last hash from the log if it exists
@@ -277,7 +277,7 @@ impl AuditLog {
             .open(&self.log_path)
             .with_context(|| format!("Failed to open audit log: {:?}", self.log_path))?;
 
-        writeln!(file, "{}", json).with_context(|| "Failed to write audit entry")?;
+        writeln!(file, "{json}").with_context(|| "Failed to write audit entry")?;
 
         // Ensure data is flushed to disk
         file.sync_all()
@@ -415,7 +415,7 @@ mod tests {
         // Add multiple entries
         for i in 0..5 {
             let entry = AuditEntry::new(
-                format!(".env.{}", i),
+                format!(".env.{i}"),
                 AccessType::Modify,
                 AuditOutcome::Blocked,
                 "test_tool",

@@ -10,7 +10,7 @@ impl ToolRegistry {
         let mut keys = Vec::with_capacity(capacity);
         for (provider, tools) in index.iter() {
             for tool in tools {
-                keys.push(format!("mcp::{}::{}", provider, tool));
+                keys.push(format!("mcp::{provider}::{tool}"));
             }
         }
         keys

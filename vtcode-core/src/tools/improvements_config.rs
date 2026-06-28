@@ -217,7 +217,7 @@ impl ImprovementsConfig {
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
         let content =
             read_file_with_context_sync(std::path::Path::new(path), "improvements config")?;
-        toml::from_str(&content).map_err(|e| anyhow::anyhow!("failed to parse config: {}", e))
+        toml::from_str(&content).map_err(|e| anyhow::anyhow!("failed to parse config: {e}"))
     }
 
     /// Save configuration to TOML file

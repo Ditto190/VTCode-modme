@@ -99,8 +99,7 @@ impl RuntimeModelAdapter for ProviderRuntimeModelAdapter<'_> {
                 Ok(result) => result?,
                 Err(_) => {
                     return Err(anyhow::anyhow!(
-                        "Stream request timed out after {:?}",
-                        duration
+                        "Stream request timed out after {duration:?}"
                     ));
                 }
             }

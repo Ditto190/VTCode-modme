@@ -338,7 +338,7 @@ fn get_or_create_path_mut<'a>(root: &'a mut TomlValue, path: &str) -> Result<&'a
         let is_last = index == parts.len() - 1;
         let table = current
             .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("Path '{}' traverses non-table value", path))?;
+            .ok_or_else(|| anyhow::anyhow!("Path '{path}' traverses non-table value"))?;
 
         if is_last {
             let entry = table
@@ -352,7 +352,7 @@ fn get_or_create_path_mut<'a>(root: &'a mut TomlValue, path: &str) -> Result<&'a
             .or_insert_with(|| TomlValue::Table(toml::Table::new()));
     }
 
-    bail!("Could not resolve config path '{}'", path)
+    bail!("Could not resolve config path '{path}'")
 }
 
 fn get_value_by_path<'a>(root: &'a TomlValue, path: &str) -> Option<&'a TomlValue> {

@@ -613,7 +613,7 @@ impl SessionWithFileLink {
         let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
         session.push_line(
             InlineMessageKind::Agent,
-            vec![make_segment(&format!("Open {}", path))],
+            vec![make_segment(&format!("Open {path}"))],
         );
         let _ = visible_transcript(&mut session);
         Self { session, path }
@@ -639,7 +639,7 @@ impl AppSessionWithFileLink {
         let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
         session.push_line(
             InlineMessageKind::Agent,
-            vec![make_segment(&format!("Open {}", path))],
+            vec![make_segment(&format!("Open {path}"))],
         );
         let _ = rendered_app_session_lines(&mut session, VIEW_ROWS);
         Self { session, path }

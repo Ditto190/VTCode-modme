@@ -290,7 +290,7 @@ impl Session {
                 stage_style = stage_style
                     .remove_modifier(Modifier::DIM)
                     .add_modifier(Modifier::BOLD);
-                spans.push(Span::styled(format!("[{}]", stage), stage_style));
+                spans.push(Span::styled(format!("[{stage}]"), stage_style));
                 spans.push(Span::raw(" "));
             }
 
@@ -440,7 +440,7 @@ impl Session {
                 if body.is_empty() || body.eq_ignore_ascii_case(ui::HEADER_UNKNOWN_PLACEHOLDER) {
                     continue;
                 }
-                values.push(format!("MCP: {}", body));
+                values.push(format!("MCP: {body}"));
                 continue;
             }
 
@@ -603,9 +603,9 @@ impl Session {
         if entries.len() > 1 {
             let remaining = entries.len() - 1;
             if !summary.is_empty() {
-                let _ = write!(summary, " (+{} more)", remaining);
+                let _ = write!(summary, " (+{remaining} more)");
             } else {
-                summary = format!("(+{} more)", remaining);
+                summary = format!("(+{remaining} more)");
             }
         }
         summary

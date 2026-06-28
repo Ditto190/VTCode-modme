@@ -109,9 +109,7 @@ impl DistributedOrchestrator {
                 Err(_) => {
                     warn!(target = %target_key, "executor timed out after {:?}", exec_deadline);
                     return Err(anyhow!(
-                        "executor for target {} timed out after {:?}",
-                        target_key,
-                        exec_deadline
+                        "executor for target {target_key} timed out after {exec_deadline:?}"
                     ));
                 }
             }

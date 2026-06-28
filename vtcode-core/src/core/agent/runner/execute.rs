@@ -716,8 +716,7 @@ impl AgentRunner {
                     #[allow(clippy::cast_sign_loss)]
                     let warning_pct = (utilization * 100.0) as u32;
                     runtime.state.warnings.push(format!(
-                        "Token budget at {}% - approaching context limit",
-                        warning_pct
+                        "Token budget at {warning_pct}% - approaching context limit"
                     ));
                 }
 
@@ -973,7 +972,7 @@ impl AgentRunner {
                     && let Some(args_value) = detect_textual_exec_tool_call(response.content_text())
                 {
                     effective_tool_calls = Some(vec![ToolCall::function(
-                        format!("call_text_{}", turn),
+                        format!("call_text_{turn}"),
                         tools::UNIFIED_EXEC.to_string(),
                         args_value.to_string(),
                     )]);
@@ -1197,7 +1196,7 @@ impl AgentRunner {
             let total_duration_ms = run_started_at.elapsed().as_millis();
 
             // Agent execution completed
-            self.runner_println(format_args!("{} Done", agent_prefix));
+            self.runner_println(format_args!("{agent_prefix} Done"));
 
             // Generate meaningful summary based on agent actions
             let average_turn_duration_ms = if runtime.state.turn_count > 0 {

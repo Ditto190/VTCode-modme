@@ -365,8 +365,7 @@ impl LoopDetector {
                     self.tool_counts.insert(tool_name.to_string(), hard_limit);
 
                     return Some(format!(
-                        "HARD STOP: Identical tool call repeated {} times: {} with same arguments. This indicates a loop.",
-                        limit, tool_name
+                        "HARD STOP: Identical tool call repeated {limit} times: {tool_name} with same arguments. This indicates a loop."
                     ));
                 }
             }
@@ -495,9 +494,8 @@ impl LoopDetector {
         let hard_limit = max_calls * HARD_LIMIT_MULTIPLIER;
         if count >= hard_limit {
             return Some(format!(
-                "CRITICAL: Tool '{}' called {} times (hard limit: {}). Execution halted to prevent infinite loop.\n\
-                 Agent must reformulate task or request user guidance.",
-                tool_name, count, hard_limit
+                "CRITICAL: Tool '{tool_name}' called {count} times (hard limit: {hard_limit}). Execution halted to prevent infinite loop.\n\
+                 Agent must reformulate task or request user guidance."
             ));
         }
 
@@ -514,10 +512,9 @@ impl LoopDetector {
                 let alternatives = Self::suggest_alternative_for_tool(tool_name);
 
                 return Some(format!(
-                    "Loop detected: '{}' called {} times in last {} operations.\n\n\
-                     {}\n\n\
-                     Hard limit at {} calls.",
-                    tool_name, count, DETECTION_WINDOW, alternatives, hard_limit
+                    "Loop detected: '{tool_name}' called {count} times in last {DETECTION_WINDOW} operations.\n\n\
+                     {alternatives}\n\n\
+                     Hard limit at {hard_limit} calls."
                 ));
             }
         }
@@ -814,10 +811,9 @@ impl LoopDetector {
                 let pattern_str = pattern_desc.join(" -> ");
 
                 return Some(format!(
-                    "Repetitive pattern detected: [{}]\n\
+                    "Repetitive pattern detected: [{pattern_str}]\n\
                      The agent appears to be cycling through the same actions. \
-                     Please pause and reassess the strategy.",
-                    pattern_str
+                     Please pause and reassess the strategy."
                 ));
             }
 
@@ -1430,8 +1426,7 @@ mod tests {
         let msg = r.unwrap();
         assert!(
             msg.contains("HARD STOP"),
-            "Expected HARD STOP, got: {}",
-            msg
+            "Expected HARD STOP, got: {msg}"
         );
         assert!(msg.contains("Cargo.lock"));
         assert!(msg.contains("offset/limit"));
@@ -1475,11 +1470,11 @@ mod tests {
                 &json!({"action": "read", "path": "src/lib.rs", "offset": offset}),
             );
             if i < offsets.len() - 1 {
-                assert!(result.is_none(), "call {} should not trigger", i);
+                assert!(result.is_none(), "call {i} should not trigger");
             } else {
-                assert!(result.is_some(), "call {} should trigger HARD STOP", i);
+                assert!(result.is_some(), "call {i} should trigger HARD STOP");
                 let msg = result.unwrap();
-                assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {}", msg);
+                assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {msg}");
                 assert!(msg.contains("src/lib.rs"));
             }
         }
@@ -1613,7 +1608,7 @@ mod tests {
             "Navigation hard stop should fire at streak 7"
         );
         let msg = warning.unwrap();
-        assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {}", msg);
+        assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {msg}");
         assert!(detector.is_hard_limit_exceeded(tools::UNIFIED_SEARCH));
     }
 
@@ -1636,7 +1631,7 @@ mod tests {
             "Subagent navigation hard stop should fire at streak 5"
         );
         let msg = warning.unwrap();
-        assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {}", msg);
+        assert!(msg.contains("HARD STOP"), "Expected HARD STOP: {msg}");
     }
 
     #[test]
@@ -1660,13 +1655,11 @@ mod tests {
         let msg = warning.unwrap();
         assert!(
             msg.contains("Global read-only budget exhausted"),
-            "Expected budget exhaustion: {}",
-            msg
+            "Expected budget exhaustion: {msg}"
         );
         assert!(
             msg.contains("limit: 20"),
-            "Expected limit 20 in message: {}",
-            msg
+            "Expected limit 20 in message: {msg}"
         );
     }
 
@@ -1691,8 +1684,7 @@ mod tests {
         let msg = warning.unwrap();
         assert!(
             msg.contains("limit: 30"),
-            "Expected limit 30 in message: {}",
-            msg
+            "Expected limit 30 in message: {msg}"
         );
     }
 

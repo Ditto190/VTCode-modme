@@ -11,7 +11,7 @@ pub async fn handle_memory_command() -> Result<MemoryReport> {
     // Generate the report
     let report = monitor
         .get_report()
-        .map_err(|e| anyhow::anyhow!("Failed to generate memory report: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to generate memory report: {e}"))?;
 
     println!("{}", style("Memory Usage Report").cyan().bold());
     display_memory_report(&report);
@@ -44,7 +44,7 @@ fn display_memory_report(report: &MemoryReport) {
         MemoryPressure::Warning => style(pressure_str).red(),
         MemoryPressure::Critical => style(pressure_str).red().bold(),
     };
-    println!("  Level: {}", pressure_colored);
+    println!("  Level: {pressure_colored}");
     println!("  Description: {}", report.pressure.description());
     println!(
         "  Usage: {:.1}% of hard limit",

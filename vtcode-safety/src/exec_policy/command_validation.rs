@@ -15,7 +15,7 @@ fn validate_allowed_flags(
 ) -> Result<()> {
     for arg in args {
         if arg.starts_with('-') && !allowed_flags.contains(&arg.as_str()) {
-            return Err(anyhow!("unsupported {} flag '{}'", command_name, arg));
+            return Err(anyhow!("unsupported {command_name} flag '{arg}'"));
         }
     }
     Ok(())
@@ -26,7 +26,7 @@ fn validate_no_args(args: &[String], command_name: &str) -> Result<()> {
     if args.is_empty() {
         Ok(())
     } else {
-        Err(anyhow!("{} does not accept arguments", command_name))
+        Err(anyhow!("{command_name} does not accept arguments"))
     }
 }
 
@@ -74,8 +74,7 @@ pub async fn validate_command(
         "npm" => validate_npm(args, workspace_root, working_dir).await,
         "node" => validate_node(args, workspace_root, working_dir).await,
         other => Err(anyhow!(
-            "command '{}' is not permitted by the execution policy",
-            other
+            "command '{other}' is not permitted by the execution policy"
         )),
     }
 }
@@ -93,8 +92,7 @@ pub async fn sanitize_working_dir(
         let candidate = normalize_path(&normalized_root.join(dir));
         if !candidate.starts_with(&normalized_root) {
             return Err(anyhow!(
-                "working directory '{}' escapes the workspace root",
-                dir
+                "working directory '{dir}' escapes the workspace root"
             ));
         }
         ensure_within_workspace(&normalized_root, &candidate).await?;
@@ -113,7 +111,7 @@ async fn validate_ls(args: &[String], workspace_root: &Path, working_dir: &Path)
     for arg in args {
         if arg.starts_with('-') {
             if !allowed_ls_flags.contains(&arg.as_str()) {
-                return Err(anyhow!("unsupported ls flag '{}'", arg));
+                return Err(anyhow!("unsupported ls flag '{arg}'"));
             }
         } else {
             let path = resolve_path(workspace_root, working_dir, arg).await?;
@@ -130,7 +128,7 @@ async fn validate_cat(args: &[String], workspace_root: &Path, working_dir: &Path
     for arg in args {
         if arg.starts_with('-') {
             if !allowed_cat_flags.contains(&arg.as_str()) {
-                return Err(anyhow!("unsupported cat flag '{}'", arg));
+                return Err(anyhow!("unsupported cat flag '{arg}'"));
             }
         } else {
             let path = resolve_path(workspace_root, working_dir, arg).await?;
@@ -156,7 +154,7 @@ async fn validate_cp(args: &[String], workspace_root: &Path, working_dir: &Path)
                 allow_recursive = true;
             }
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported cp flag '{}'", value));
+                return Err(anyhow!("unsupported cp flag '{value}'"));
             }
             value => positional.push(value.to_owned()),
         }
@@ -175,15 +173,14 @@ async fn validate_cp(args: &[String], workspace_root: &Path, working_dir: &Path)
         let path = resolve_path(workspace_root, working_dir, source).await?;
         let metadata = fs::metadata(&path)
             .await
-            .with_context(|| format!("failed to inspect source '{}'", source))?;
+            .with_context(|| format!("failed to inspect source '{source}'"))?;
         if metadata.is_dir() && !allow_recursive {
             return Err(anyhow!(
-                "copying directories requires the recursive flag for '{}'",
-                source
+                "copying directories requires the recursive flag for '{source}'"
             ));
         }
         if !metadata.is_file() && !metadata.is_dir() {
-            return Err(anyhow!("unsupported source type for '{}'", source));
+            return Err(anyhow!("unsupported source type for '{source}'"));
         }
     }
 
@@ -210,13 +207,13 @@ async fn validate_head(args: &[String], workspace_root: &Path, working_dir: &Pat
             "-c" | "-n" => {
                 let value = args
                     .get(index + 1)
-                    .ok_or_else(|| anyhow!("option '{}' requires a value", current))?;
+                    .ok_or_else(|| anyhow!("option '{current}' requires a value"))?;
                 parse_positive_int(value)
-                    .with_context(|| format!("invalid value '{}' for '{}'", value, current))?;
+                    .with_context(|| format!("invalid value '{value}' for '{current}'"))?;
                 index += 2;
             }
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported head flag '{}'", value));
+                return Err(anyhow!("unsupported head flag '{value}'"));
             }
             value => {
                 positional.push(value);
@@ -247,7 +244,7 @@ fn validate_printenv(args: &[String]) -> Result<()> {
                     .chars()
                     .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
             {
-                return Err(anyhow!("invalid environment variable name '{}'", name));
+                return Err(anyhow!("invalid environment variable name '{name}'"));
             }
             Ok(())
         }
@@ -274,25 +271,24 @@ async fn validate_rg(args: &[String], workspace_root: &Path, working_dir: &Path)
             // SECURITY: Block preprocessor flags that enable arbitrary command execution
             "--pre" | "--pre-glob" => {
                 return Err(anyhow!(
-                    "ripgrep preprocessor flag '{}' is not permitted for security reasons. \
-                     This flag enables arbitrary command execution.",
-                    current
+                    "ripgrep preprocessor flag '{current}' is not permitted for security reasons. \
+                     This flag enables arbitrary command execution."
                 ));
             }
             "-A" | "-B" | "-C" | "-d" | "--max-depth" | "-m" | "--max-count" => {
                 let value = args
                     .get(index + 1)
-                    .ok_or_else(|| anyhow!("option '{}' requires a value", current))?;
+                    .ok_or_else(|| anyhow!("option '{current}' requires a value"))?;
                 parse_positive_int(value)
-                    .with_context(|| format!("invalid value '{}' for '{}'", value, current))?;
+                    .with_context(|| format!("invalid value '{value}' for '{current}'"))?;
                 index += 2;
             }
             "-g" | "--glob" => {
                 let value = args
                     .get(index + 1)
-                    .ok_or_else(|| anyhow!("option '{}' requires a value", current))?;
+                    .ok_or_else(|| anyhow!("option '{current}' requires a value"))?;
                 if value.is_empty() {
-                    return Err(anyhow!("glob value for '{}' cannot be empty", current));
+                    return Err(anyhow!("glob value for '{current}' cannot be empty"));
                 }
                 index += 2;
             }
@@ -306,7 +302,7 @@ async fn validate_rg(args: &[String], workspace_root: &Path, working_dir: &Path)
                 index += 1;
             }
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported ripgrep flag '{}'", value));
+                return Err(anyhow!("unsupported ripgrep flag '{value}'"));
             }
             _ => break,
         }
@@ -332,7 +328,7 @@ async fn validate_rg(args: &[String], workspace_root: &Path, working_dir: &Path)
         let search_root = &remaining[rem_index];
         let path = resolve_path_allow_dir(workspace_root, working_dir, search_root).await?;
         if !fs::try_exists(&path).await.unwrap_or(false) {
-            return Err(anyhow!("search path '{}' does not exist", search_root));
+            return Err(anyhow!("search path '{search_root}' does not exist"));
         }
         if remaining.len() > rem_index + 1 {
             return Err(anyhow!("ripgrep accepts at most one search path"));
@@ -362,7 +358,7 @@ async fn validate_sed(args: &[String], workspace_root: &Path, working_dir: &Path
                 index += 2;
             }
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported sed flag '{}'", value));
+                return Err(anyhow!("unsupported sed flag '{value}'"));
             }
             value => {
                 if commands.is_empty() {
@@ -399,7 +395,7 @@ fn validate_which(args: &[String]) -> Result<()> {
         match arg.as_str() {
             "-a" | "-s" => continue,
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported which flag '{}'", value));
+                return Err(anyhow!("unsupported which flag '{value}'"));
             }
             value => {
                 if value.is_empty()
@@ -407,8 +403,7 @@ fn validate_which(args: &[String]) -> Result<()> {
                     || value.chars().any(|ch| ch.is_whitespace())
                 {
                     return Err(anyhow!(
-                        "program name '{}' contains unsupported characters",
-                        value
+                        "program name '{value}' contains unsupported characters"
                     ));
                 }
             }
@@ -506,13 +501,11 @@ async fn validate_git(
         }
 
         "filter-branch" | "rebase" | "cherry-pick" => Err(anyhow!(
-            "git {} is not permitted - complex history operations require confirmation",
-            subcommand
+            "git {subcommand} is not permitted - complex history operations require confirmation"
         )),
 
         other => Err(anyhow!(
-            "git subcommand '{}' is not permitted by the execution policy",
-            other
+            "git subcommand '{other}' is not permitted by the execution policy"
         )),
     }
 }
@@ -630,7 +623,7 @@ async fn validate_git_add(
                 index += 1;
             }
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported git add flag '{}'", value));
+                return Err(anyhow!("unsupported git add flag '{value}'"));
             }
             path => {
                 // Validate the file path
@@ -666,7 +659,7 @@ fn validate_git_commit(args: &[String]) -> Result<()> {
                 index += 1;
             }
             value if value.starts_with('-') => {
-                return Err(anyhow!("unsupported git commit flag '{}'", value));
+                return Err(anyhow!("unsupported git commit flag '{value}'"));
             }
             _ => {
                 index += 1;
@@ -706,8 +699,7 @@ fn validate_git_reset(args: &[String], confirm: bool) -> Result<()> {
                     "-q" | "--quiet" | "-p" | "--patch" => continue,
                     _ => {
                         return Err(anyhow!(
-                            "unsupported git reset flag '{}'. Use --soft, --mixed, or --hard (with confirm) modes.",
-                            arg
+                            "unsupported git reset flag '{arg}'. Use --soft, --mixed, or --hard (with confirm) modes."
                         ));
                     }
                 }
@@ -769,7 +761,7 @@ fn validate_git_stash(args: &[String]) -> Result<()> {
     let first = args[0].as_str();
 
     if !allowed_ops.contains(&first) {
-        return Err(anyhow!("git stash operation '{}' is not permitted", first));
+        return Err(anyhow!("git stash operation '{first}' is not permitted"));
     }
 
     // Allow flags for these operations
@@ -786,7 +778,7 @@ fn validate_git_stash(args: &[String]) -> Result<()> {
                 | "--include-untracked"
                 | "-a"
                 | "--all" => continue,
-                _ => return Err(anyhow!("unsupported git stash flag '{}'", arg)),
+                _ => return Err(anyhow!("unsupported git stash flag '{arg}'")),
             }
         }
     }
@@ -805,8 +797,7 @@ fn validate_git_merge(args: &[String]) -> Result<()> {
     for arg in args {
         if dangerous_flags.contains(&arg.as_str()) {
             return Err(anyhow!(
-                "git merge with {} flag is not permitted; use simpler merge",
-                arg
+                "git merge with {arg} flag is not permitted; use simpler merge"
             ));
         }
     }
@@ -817,10 +808,10 @@ fn validate_git_merge(args: &[String]) -> Result<()> {
 async fn resolve_path(workspace_root: &Path, working_dir: &Path, value: &str) -> Result<PathBuf> {
     let base = build_candidate_path(workspace_root, working_dir, value).await?;
     if !fs::try_exists(&base).await.unwrap_or(false) {
-        return Err(anyhow!("path '{}' does not exist", value));
+        return Err(anyhow!("path '{value}' does not exist"));
     }
     if !base.starts_with(workspace_root) {
-        return Err(anyhow!("path '{}' is outside the workspace root", value));
+        return Err(anyhow!("path '{value}' is outside the workspace root"));
     }
     Ok(base)
 }
@@ -832,7 +823,7 @@ async fn resolve_path_allow_new(
 ) -> Result<PathBuf> {
     let candidate = build_candidate_path(workspace_root, working_dir, value).await?;
     if !candidate.starts_with(workspace_root) {
-        return Err(anyhow!("path '{}' is outside the workspace root", value));
+        return Err(anyhow!("path '{value}' is outside the workspace root"));
     }
     Ok(candidate)
 }
@@ -844,7 +835,7 @@ async fn resolve_path_allow_dir(
 ) -> Result<PathBuf> {
     let candidate = build_candidate_path(workspace_root, working_dir, value).await?;
     if !candidate.starts_with(workspace_root) {
-        return Err(anyhow!("path '{}' is outside the workspace root", value));
+        return Err(anyhow!("path '{value}' is outside the workspace root"));
     }
     Ok(candidate)
 }
@@ -864,7 +855,7 @@ async fn build_candidate_path(
     };
 
     if !candidate.starts_with(&normalized_root) {
-        return Err(anyhow!("path '{}' escapes the workspace root", value));
+        return Err(anyhow!("path '{value}' escapes the workspace root"));
     }
     ensure_within_workspace(&normalized_root, &candidate).await?;
     Ok(candidate)
@@ -1109,7 +1100,7 @@ fn validate_uname(args: &[String]) -> Result<()> {
     let safe_flags = ["-a", "-s", "-n", "-r", "-v", "-m"];
     for arg in args {
         if arg.starts_with('-') && !safe_flags.contains(&arg.as_str()) {
-            return Err(anyhow!("unsupported uname flag '{}'", arg));
+            return Err(anyhow!("unsupported uname flag '{arg}'"));
         }
     }
     Ok(())
@@ -1154,14 +1145,12 @@ async fn validate_cargo(
                 Ok(())
             } else {
                 Err(anyhow!(
-                    "cargo {} is potentially destructive; set `confirm=true` to proceed.",
-                    subcommand
+                    "cargo {subcommand} is potentially destructive; set `confirm=true` to proceed."
                 ))
             }
         }
         other => Err(anyhow!(
-            "cargo subcommand '{}' is not permitted by the execution policy",
-            other
+            "cargo subcommand '{other}' is not permitted by the execution policy"
         )),
     }
 }
@@ -1186,8 +1175,7 @@ async fn validate_python(args: &[String], workspace_root: &Path, working_dir: &P
     // Reject -e and -c variants that bypass file-based execution
     if first_arg == "-e" || first_arg == "-exec" {
         return Err(anyhow!(
-            "python {} is not permitted: it enables arbitrary code execution",
-            first_arg
+            "python {first_arg} is not permitted: it enables arbitrary code execution"
         ));
     }
 
@@ -1216,8 +1204,7 @@ async fn validate_npm(args: &[String], workspace_root: &Path, working_dir: &Path
     match subcommand {
         // Dangerous operations
         "publish" | "unpublish" => Err(anyhow!(
-            "npm {} is not permitted by the execution policy",
-            subcommand
+            "npm {subcommand} is not permitted by the execution policy"
         )),
         // Allow safe and other commands by default, as npm is generally safe in workspace
         _ => Ok(()),
@@ -1236,9 +1223,8 @@ async fn validate_node(args: &[String], workspace_root: &Path, working_dir: &Pat
     // Reject -e/--eval (execute code string) - arbitrary code execution risk
     if first_arg == "-e" || first_arg == "--eval" {
         return Err(anyhow!(
-            "node {} is not permitted for security reasons: \
-             it enables arbitrary code execution outside the workspace sandbox",
-            first_arg
+            "node {first_arg} is not permitted for security reasons: \
+             it enables arbitrary code execution outside the workspace sandbox"
         ));
     }
 

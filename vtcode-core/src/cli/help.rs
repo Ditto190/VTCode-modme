@@ -3,7 +3,7 @@ use crate::config::constants::models;
 /// Returns an informative help snippet listing OpenAI models that use the Responses API.
 pub fn openai_responses_models_help() -> String {
     let names = models::openai::RESPONSES_API_MODELS.join(", ");
-    format!("OpenAI Responses API models: {}", names)
+    format!("OpenAI Responses API models: {names}")
 }
 
 #[cfg(test)]

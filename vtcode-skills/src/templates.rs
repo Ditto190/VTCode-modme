@@ -459,7 +459,7 @@ impl TemplateEngine {
     ) -> Result<PathBuf> {
         let template = self
             .get_template(template_name)
-            .ok_or_else(|| anyhow!("Template '{}' not found", template_name))?;
+            .ok_or_else(|| anyhow!("Template '{template_name}' not found"))?;
 
         // Validate required variables
         self.validate_variables(template, &variables)?;
@@ -600,7 +600,7 @@ impl TemplateEngine {
 
         // Simple variable substitution: {{variable_name}}
         for (key, value) in variables {
-            let placeholder = format!("{{{{{}}}}}", key);
+            let placeholder = format!("{{{{{key}}}}}");
             rendered = rendered.replace(&placeholder, value);
         }
 
@@ -635,8 +635,8 @@ impl TemplateEngine {
             .or_else(|| variables.get("tool_description"))
             .unwrap_or(&default_desc);
 
-        content.push_str(&format!("name: {}\n", skill_name));
-        content.push_str(&format!("description: {}\n", description));
+        content.push_str(&format!("name: {skill_name}\n"));
+        content.push_str(&format!("description: {description}\n"));
 
         content.push_str("---\n\n");
 
@@ -673,10 +673,10 @@ impl TemplateEngine {
     pub fn save_template_to_file(&self, template_name: &str, path: &Path) -> Result<()> {
         let template = self
             .get_template(template_name)
-            .ok_or_else(|| anyhow!("Template '{}' not found", template_name))?;
+            .ok_or_else(|| anyhow!("Template '{template_name}' not found"))?;
 
         let content = serde_json::to_string_pretty(template)
-            .with_context(|| format!("Failed to serialize template '{}'", template_name))?;
+            .with_context(|| format!("Failed to serialize template '{template_name}'"))?;
 
         write_file_with_context_sync(path, &content, "template file")?;
 

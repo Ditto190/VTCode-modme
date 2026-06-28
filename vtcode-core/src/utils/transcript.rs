@@ -368,7 +368,7 @@ mod tests {
 
         // Fill queue to max capacity
         for i in 0..MAX_QUEUE_SIZE {
-            enqueue(&format!("message {}", i));
+            enqueue(&format!("message {i}"));
         }
         assert_eq!(queue_len(), MAX_QUEUE_SIZE);
 

@@ -56,11 +56,11 @@ pub fn render_pty_output_fn(output: &str, title: &str, command: Option<&str>) ->
     writeln!(handle, "{} {}", style("==").bold(), style(title).bold())?;
 
     if let Some(cmd) = command {
-        writeln!(handle, "{}", style(format!("> {}", cmd)).dim())?;
+        writeln!(handle, "{}", style(format!("> {cmd}")).dim())?;
     }
 
     writeln!(handle, "{}", style("-".repeat(80)).dim())?;
-    write!(handle, "{}", output)?;
+    write!(handle, "{output}")?;
     writeln!(handle, "{}", style("-".repeat(80)).dim())?;
     writeln!(handle, "{}", style("==").bold())?;
     writeln!(handle, "{}", style("=".repeat(80)).dim())?;

@@ -260,8 +260,7 @@ impl CachedToolExecutor {
                 let err = UnifiedToolError::new(
                     UnifiedErrorKind::Timeout,
                     format!(
-                        "Tool '{}' timed out after {} seconds",
-                        tool_name, timeout_secs
+                        "Tool '{tool_name}' timed out after {timeout_secs} seconds"
                     ),
                 )
                 .with_tool_name(tool_name);
@@ -450,7 +449,7 @@ fn make_cache_key(tool_name: &str, args: &Value) -> String {
         hasher.write(&bytes);
     }
     let h = hasher.finish();
-    format!("{}:{:x}", tool_name, h)
+    format!("{tool_name}:{h:x}")
 }
 
 // test above added to the test module further below

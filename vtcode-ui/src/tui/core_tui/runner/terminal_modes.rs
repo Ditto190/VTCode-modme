@@ -93,7 +93,7 @@ pub(super) fn enable_terminal_modes(
     match enable_raw_mode() {
         Ok(_) => state.raw_mode_enabled = true,
         Err(error) => {
-            return Err(anyhow::anyhow!("failed to enable raw mode: {}", error));
+            return Err(anyhow::anyhow!("failed to enable raw mode: {error}"));
         }
     }
 
@@ -142,7 +142,7 @@ pub(super) fn restore_terminal_modes(state: &TerminalModeState) -> Result<()> {
         && let Err(error) = execute!(stderr, LeaveAlternateScreen)
     {
         tracing::debug!(%error, "failed to leave alternate screen");
-        errors.push(format!("alternate screen: {}", error));
+        errors.push(format!("alternate screen: {error}"));
     }
 
     // 1. Pop keyboard enhancement flags (if they were pushed)
@@ -150,7 +150,7 @@ pub(super) fn restore_terminal_modes(state: &TerminalModeState) -> Result<()> {
         crate::tui::ui::tui::panic_hook::mark_keyboard_enhancements_pushed(false);
         if let Err(error) = execute!(stderr, PopKeyboardEnhancementFlags) {
             tracing::debug!(%error, "failed to pop keyboard enhancement flags");
-            errors.push(format!("keyboard enhancements: {}", error));
+            errors.push(format!("keyboard enhancements: {error}"));
         }
     }
 
@@ -159,7 +159,7 @@ pub(super) fn restore_terminal_modes(state: &TerminalModeState) -> Result<()> {
         && let Err(error) = execute!(stderr, DisableFocusChange)
     {
         tracing::debug!(%error, "failed to disable focus change events");
-        errors.push(format!("focus change: {}", error));
+        errors.push(format!("focus change: {error}"));
     }
 
     // 3. Disable mouse capture (if it was enabled)
@@ -167,7 +167,7 @@ pub(super) fn restore_terminal_modes(state: &TerminalModeState) -> Result<()> {
         && let Err(error) = execute!(stderr, DisableMouseCapture)
     {
         tracing::debug!(%error, "failed to disable mouse capture");
-        errors.push(format!("mouse capture: {}", error));
+        errors.push(format!("mouse capture: {error}"));
     }
 
     // 4. Disable bracketed paste (if it was enabled)
@@ -175,7 +175,7 @@ pub(super) fn restore_terminal_modes(state: &TerminalModeState) -> Result<()> {
         && let Err(error) = execute!(stderr, DisableBracketedPaste)
     {
         tracing::debug!(%error, "failed to disable bracketed paste");
-        errors.push(format!("bracketed paste: {}", error));
+        errors.push(format!("bracketed paste: {error}"));
     }
 
     // Drain any terminal responses from the restore sequences above
@@ -189,14 +189,14 @@ pub(super) fn restore_terminal_modes(state: &TerminalModeState) -> Result<()> {
         && let Err(error) = disable_raw_mode()
     {
         tracing::debug!(%error, "failed to disable raw mode");
-        errors.push(format!("raw mode: {}", error));
+        errors.push(format!("raw mode: {error}"));
     }
 
     if state.cursor_position_saved
         && let Err(error) = execute!(stderr, RestorePosition)
     {
         tracing::debug!(%error, "failed to restore cursor position for inline session");
-        errors.push(format!("cursor position: {}", error));
+        errors.push(format!("cursor position: {error}"));
     }
 
     if errors.is_empty() {

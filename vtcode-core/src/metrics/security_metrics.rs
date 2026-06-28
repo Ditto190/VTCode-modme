@@ -161,7 +161,7 @@ mod tests {
     fn test_audit_events_limit() {
         let mut metrics = SecurityMetrics::new();
         for i in 0..150 {
-            metrics.record_audit_event(format!("event_{}", i), "info".to_owned());
+            metrics.record_audit_event(format!("event_{i}"), "info".to_owned());
         }
 
         assert_eq!(metrics.audit_events.len(), 100);

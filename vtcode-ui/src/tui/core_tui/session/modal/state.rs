@@ -492,8 +492,7 @@ fn map_config_selection_for_arrow(
         if is_left {
             let key = action.trim_end_matches(":cycle");
             return Some(InlineListSelection::ConfigAction(format!(
-                "{}:cycle_prev",
-                key
+                "{key}:cycle_prev"
             )));
         }
         return Some(selection.clone());
@@ -502,7 +501,7 @@ fn map_config_selection_for_arrow(
     if action.ends_with(":inc") {
         if is_left {
             let key = action.trim_end_matches(":inc");
-            return Some(InlineListSelection::ConfigAction(format!("{}:dec", key)));
+            return Some(InlineListSelection::ConfigAction(format!("{key}:dec")));
         }
         return Some(selection.clone());
     }
@@ -512,7 +511,7 @@ fn map_config_selection_for_arrow(
             return Some(selection.clone());
         }
         let key = action.trim_end_matches(":dec");
-        return Some(InlineListSelection::ConfigAction(format!("{}:inc", key)));
+        return Some(InlineListSelection::ConfigAction(format!("{key}:inc")));
     }
 
     if action.ends_with(":toggle") {
@@ -1474,7 +1473,7 @@ impl WizardModalState {
             if step.notes.is_empty()
                 && let Some(placeholder) = step.freeform_placeholder.as_ref()
             {
-                return Some(format!("{} {}", label, placeholder));
+                return Some(format!("{label} {placeholder}"));
             }
             Some(format!("{} {}", label, step.notes))
         } else {

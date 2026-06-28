@@ -190,7 +190,7 @@ impl ModeTool for FileOpsTool {
             "find_content" => self.execute_find_by_content(&input).await,
             "largest" => self.execute_largest_files(&input).await,
             "tree" => self.execute_tree_view(&input).await,
-            _ => Err(anyhow!("Unsupported file operation mode: {}", mode)),
+            _ => Err(anyhow!("Unsupported file operation mode: {mode}")),
         }
     }
 }

@@ -353,13 +353,13 @@ impl ComprehensiveSkillValidator {
             if self.strict_mode {
                 report.add_error(
                     None,
-                    format!("File reference issue: {}", error),
+                    format!("File reference issue: {error}"),
                     Some("Fix the file reference or ensure the referenced file exists".to_string()),
                 );
             } else {
                 report.add_warning(
                     None,
-                    format!("File reference issue: {}", error),
+                    format!("File reference issue: {error}"),
                     Some("Fix the file reference or ensure the referenced file exists".to_string()),
                 );
             }

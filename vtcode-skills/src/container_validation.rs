@@ -439,7 +439,7 @@ impl ContainerValidationReport {
             for skill in &self.incompatible_skills {
                 output.push_str(&format!("\n  • {} - {}", skill.name, skill.description));
                 for rec in &skill.recommendations {
-                    output.push_str(&format!("\n    {}", rec));
+                    output.push_str(&format!("\n    {rec}"));
                 }
             }
         }

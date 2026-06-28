@@ -26,7 +26,7 @@ pub(super) fn compile_list_glob(input: &ListInput) -> Result<Option<Pattern>> {
     };
 
     Pattern::new(pattern)
-        .with_context(|| format!("invalid list glob pattern '{}'", pattern))
+        .with_context(|| format!("invalid list glob pattern '{pattern}'"))
         .map(Some)
 }
 

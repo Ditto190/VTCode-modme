@@ -142,12 +142,12 @@ impl EditorContextSnapshot {
 
         let path_label = file.display_path(workspace_root, self.workspace_root.as_deref());
         if !path_label.is_empty() {
-            parts.push(format!("File: {}", path_label));
+            parts.push(format!("File: {path_label}"));
         }
 
         if let Some(language) = file.display_language() {
             if parts.is_empty() {
-                parts.push(format!("Lang: {}", language));
+                parts.push(format!("Lang: {language}"));
             } else {
                 parts.push(language);
             }
@@ -184,10 +184,10 @@ impl EditorContextSnapshot {
             "- IDE family: {}",
             provider_family_label(self.provider_family)
         ));
-        lines.push(format!("- Active file: {}", active_path));
+        lines.push(format!("- Active file: {active_path}"));
 
         if let Some(language) = file.display_language() {
-            lines.push(format!("- Language: {}", language));
+            lines.push(format!("- Language: {language}"));
         }
 
         if let Some(line_range) = file.line_range {
@@ -224,7 +224,7 @@ impl EditorContextSnapshot {
             {
                 let fence_language = file.language_id.as_deref().unwrap_or("text");
                 lines.push("- Selected text:".to_string());
-                lines.push(format!("```{}", fence_language));
+                lines.push(format!("```{fence_language}"));
                 lines.push(text.to_string());
                 lines.push("```".to_string());
             }
@@ -241,7 +241,7 @@ impl EditorContextSnapshot {
             .collect::<Vec<_>>();
         if !open_files.is_empty() {
             lines.push("- Open files:".to_string());
-            lines.extend(open_files.into_iter().map(|path| format!("  - {}", path)));
+            lines.extend(open_files.into_iter().map(|path| format!("  - {path}")));
         }
 
         Some(lines.join("\n"))
@@ -370,7 +370,7 @@ fn parse_legacy_markdown_snapshot(markdown: &str) -> Option<EditorContextSnapsho
         let normalized = if section.starts_with("### ") {
             section.to_string()
         } else {
-            format!("### {}", section)
+            format!("### {section}")
         };
 
         if let Some(file) = parse_legacy_editor_section(&normalized, "### Active Editor:") {

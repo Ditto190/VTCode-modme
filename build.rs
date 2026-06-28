@@ -51,16 +51,16 @@ fn main() {
         let git_path = std::path::Path::new(git_dir);
         let refs_path = git_path.join("refs");
         if git_path.join("HEAD").exists() {
-            println!("cargo:rerun-if-changed={}/HEAD", git_dir);
+            println!("cargo:rerun-if-changed={git_dir}/HEAD");
         }
         if git_path.join("packed-refs").exists() {
-            println!("cargo:rerun-if-changed={}/packed-refs", git_dir);
+            println!("cargo:rerun-if-changed={git_dir}/packed-refs");
         }
         if refs_path.join("heads").exists() {
-            println!("cargo:rerun-if-changed={}/refs/heads", git_dir);
+            println!("cargo:rerun-if-changed={git_dir}/refs/heads");
         }
         if refs_path.join("tags").exists() {
-            println!("cargo:rerun-if-changed={}/refs/tags", git_dir);
+            println!("cargo:rerun-if-changed={git_dir}/refs/tags");
         }
     }
 
@@ -84,9 +84,9 @@ fn main() {
             let git_info = &git_info.replace('g', "");
             git_describe = git_info.to_string();
         } else {
-            git_describe = format!("v{}-{}", cargo_pkg_version, git_info);
+            git_describe = format!("v{cargo_pkg_version}-{git_info}");
         }
     }
 
-    println!("cargo:rustc-env=VT_CODE_GIT_INFO={}", git_describe);
+    println!("cargo:rustc-env=VT_CODE_GIT_INFO={git_describe}");
 }

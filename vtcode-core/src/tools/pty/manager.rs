@@ -261,7 +261,7 @@ match reader.read(&mut buffer) {
 
                 let wait_result = match wait_rx.recv_timeout(timeout_duration) {
                     Ok(()) => wait_thread.join().map_err(|panic| {
-anyhow!("PTY command wait thread panicked: {:?}", panic)
+anyhow!("PTY command wait thread panicked: {panic:?}")
                     })?,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         // Kill the process group and the direct child process handle.
@@ -291,8 +291,7 @@ match wait_rx.recv_timeout(grace_period) {
         drop(wait_thread);
         drop(reader_thread);
         return Err(anyhow!(
-            "PTY command timed out after {} milliseconds and did not respond to kill signal",
-            timeout
+            "PTY command timed out after {timeout} milliseconds and did not respond to kill signal"
         ));
     }
 }
@@ -346,8 +345,7 @@ match reader_handle.join() {
 }
 
 return Err(anyhow!(
-    "PTY command timed out after {} milliseconds",
-    timeout
+    "PTY command timed out after {timeout} milliseconds"
 ));
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -369,8 +367,7 @@ if wait_wrapper.is_finished() {
         }
         Ok(Err(panic)) => {
             return Err(anyhow!(
-                "PTY wait thread panicked: {:?}",
-                panic
+                "PTY wait thread panicked: {panic:?}"
             ));
         }
         Err(_) => {
@@ -419,7 +416,7 @@ return Err(anyhow!(
 
                 let output_bytes = reader_thread
                     .join()
-                    .map_err(|panic| anyhow!("PTY command reader thread panicked: {:?}", panic))?
+                    .map_err(|panic| anyhow!("PTY command reader thread panicked: {panic:?}"))?
                     .context("failed to read PTY command output")?;
                 let mut output = String::from_utf8_lossy(&output_bytes).into_owned();
                 let exit_code = exit_status_code(status);
@@ -521,7 +518,7 @@ if output.len() > max_tokens * 4 {
         use hashbrown::hash_map::Entry;
         let entry = match sessions.entry(session_id.clone()) {
             Entry::Occupied(_) => {
-                return Err(anyhow!("PTY session '{}' already exists", session_id));
+                return Err(anyhow!("PTY session '{session_id}' already exists"));
             }
             Entry::Vacant(e) => e,
         };
@@ -547,9 +544,7 @@ if output.len() > max_tokens * 4 {
             // Verify we have a valid command string
             if full_command.is_empty() {
                 return Err(anyhow!(
-                    "Failed to construct command string from program '{}' and args {:?}",
-                    program,
-                    args
+                    "Failed to construct command string from program '{program}' and args {args:?}"
                 ));
             }
 
@@ -581,7 +576,7 @@ if output.len() > max_tokens * 4 {
         );
 
         let child = pair.slave.spawn_command(builder).with_context(|| {
-            format!("failed to spawn PTY session command '{}'", display_program)
+            format!("failed to spawn PTY session command '{display_program}'")
         })?;
 
         // Capture the child process ID for process group management

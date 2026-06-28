@@ -87,12 +87,11 @@ fn test_invalid_layer_is_reported_with_source_context() {
         assert!(result.is_err(), "expected load to fail for invalid layer");
         let error = match result {
             Ok(_) => String::new(),
-            Err(err) => format!("{:#}", err),
+            Err(err) => format!("{err:#}"),
         };
         assert!(
             error.contains(&user_config_path.display().to_string()),
-            "error should include invalid layer path, got: {}",
-            error
+            "error should include invalid layer path, got: {error}"
         );
     });
 }
@@ -251,9 +250,8 @@ fn vtcode_config_validation_fails_for_invalid_highlight_timeout() {
         .validate()
         .expect_err("validation should fail for zero highlight timeout");
     assert!(
-        format!("{:#}", error).contains("highlight"),
-        "expected error to mention highlight, got: {:#}",
-        error
+        format!("{error:#}").contains("highlight"),
+        "expected error to mention highlight, got: {error:#}"
     );
 }
 
@@ -271,8 +269,7 @@ fn load_from_file_rejects_invalid_syntax_highlighting() {
     let error = format!("{:?}", result.err().unwrap());
     assert!(
         error.contains("validate"),
-        "expected validation context in error, got: {}",
-        error
+        "expected validation context in error, got: {error}"
     );
 }
 
@@ -409,7 +406,7 @@ default_model = "gpt-5-nano"
 default_policy = "deny"
 "#;
 
-    write!(temp_file, "{}", config_with_comments).expect("failed to write temp config");
+    write!(temp_file, "{config_with_comments}").expect("failed to write temp config");
     temp_file.flush().expect("failed to flush");
 
     // Load config
@@ -521,13 +518,11 @@ show_sidebar = false
     let saved_content = fs::read_to_string(&config_path).expect("failed to read saved config");
     assert!(
         saved_content.contains("display_mode = \"full\""),
-        "saved config should contain full display_mode. Got:\n{}",
-        saved_content
+        "saved config should contain full display_mode. Got:\n{saved_content}"
     );
     assert!(
         !saved_content.contains("show_sidebar"),
-        "saved config should prune default show_sidebar. Got:\n{}",
-        saved_content
+        "saved config should prune default show_sidebar. Got:\n{saved_content}"
     );
 
     // Create a NEW manager to simulate reopening /config palette
@@ -570,8 +565,7 @@ fn save_config_writes_sparse_model_theme_and_permission_values() {
     let saved_content = fs::read_to_string(&config_path).expect("failed to read saved config");
     assert!(
         !saved_content.contains("default_primary_agent"),
-        "unchanged default primary agent should not be persisted. Got:\n{}",
-        saved_content
+        "unchanged default primary agent should not be persisted. Got:\n{saved_content}"
     );
     assert!(saved_content.contains("[agent]"));
     assert!(saved_content.contains("default_model = \"gpt-5.4\""));
@@ -580,13 +574,11 @@ fn save_config_writes_sparse_model_theme_and_permission_values() {
     assert!(saved_content.contains("allow = [\"read_file\"]"));
     assert!(
         !saved_content.contains("provider = \"openai\""),
-        "default agent provider should not be expanded. Got:\n{}",
-        saved_content
+        "default agent provider should not be expanded. Got:\n{saved_content}"
     );
     assert!(
         !saved_content.contains("[ui]"),
-        "default UI section should not be expanded. Got:\n{}",
-        saved_content
+        "default UI section should not be expanded. Got:\n{saved_content}"
     );
 
     let reloaded = ConfigManager::load_from_workspace(workspace).expect("failed to reload config");

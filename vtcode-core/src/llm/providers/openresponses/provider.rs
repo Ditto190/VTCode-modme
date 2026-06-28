@@ -270,7 +270,7 @@ impl OpenResponsesProvider {
             let body = response.text().await.unwrap_or_default();
             let formatted_error = error_display::format_llm_error(
                 "OpenResponses",
-                &format!("Compaction endpoint error (HTTP {}): {}", status, body),
+                &format!("Compaction endpoint error (HTTP {status}): {body}"),
             );
             return Err(LLMError::Provider {
                 message: formatted_error,
@@ -356,7 +356,7 @@ impl OpenResponsesProvider {
                                     ..
                                 } => {
                                     content.push(ContentPart::InputImage(InputImageContent {
-                                        image_url: format!("data:{};base64,{}", mime_type, data),
+                                        image_url: format!("data:{mime_type};base64,{data}"),
                                         detail: Some(ImageDetail::Auto),
                                     }));
                                 }
@@ -566,7 +566,7 @@ impl OpenResponsesProvider {
             let body = response.text().await.unwrap_or_default();
             let formatted_error = error_display::format_llm_error(
                 "OpenResponses",
-                &format!("HTTP {}: {}", status, body),
+                &format!("HTTP {status}: {body}"),
             );
             return Err(LLMError::Provider {
                 message: formatted_error,
@@ -673,7 +673,7 @@ impl OpenResponsesProvider {
             let body = response.text().await.unwrap_or_default();
             let formatted_error = error_display::format_llm_error(
                 "OpenResponses",
-                &format!("HTTP {}: {}", status, body),
+                &format!("HTTP {status}: {body}"),
             );
             return Err(LLMError::Provider {
                 message: formatted_error,
@@ -857,7 +857,7 @@ impl LLMProvider for OpenResponsesProvider {
             let body = response.text().await.unwrap_or_default();
             let formatted_error = error_display::format_llm_error(
                 "OpenResponses",
-                &format!("HTTP {}: {}", status, body),
+                &format!("HTTP {status}: {body}"),
             );
             return Err(LLMError::Provider {
                 message: formatted_error,
@@ -900,7 +900,7 @@ impl LLMProvider for OpenResponsesProvider {
             let body = response.text().await.unwrap_or_default();
             let formatted_error = error_display::format_llm_error(
                 "OpenResponses",
-                &format!("HTTP {}: {}", status, body),
+                &format!("HTTP {status}: {body}"),
             );
             return Err(LLMError::Provider {
                 message: formatted_error,
@@ -1021,7 +1021,7 @@ impl LLMProvider for OpenResponsesProvider {
             let body = response.text().await.unwrap_or_default();
             let formatted_error = error_display::format_llm_error(
                 "OpenResponses",
-                &format!("HTTP {}: {}", status, body),
+                &format!("HTTP {status}: {body}"),
             );
             return Err(LLMError::Provider {
                 message: formatted_error,

@@ -77,8 +77,7 @@ pub fn resolve_lightweight_route(
         }
 
         warning = Some(format!(
-            "ignored lightweight override model '{}' because it does not match the active provider '{}'",
-            configured_model, main_provider
+            "ignored lightweight override model '{configured_model}' because it does not match the active provider '{main_provider}'"
         ));
     }
 
@@ -113,8 +112,7 @@ pub fn resolve_lightweight_route(
         }
 
         warning = Some(format!(
-            "ignored lightweight model '{}' because it does not match the active provider '{}'",
-            configured_model, main_provider
+            "ignored lightweight model '{configured_model}' because it does not match the active provider '{main_provider}'"
         ));
     }
 

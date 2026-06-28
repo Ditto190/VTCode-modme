@@ -135,8 +135,7 @@ fn arrow_keys_never_launch_editor() {
         let result = session.process_key(event);
         assert!(
             !matches!(result, Some(InlineEvent::LaunchEditor { .. })),
-            "Right arrow with modifiers {:?} should not launch editor",
-            modifiers
+            "Right arrow with modifiers {modifiers:?} should not launch editor"
         );
     }
 
@@ -146,8 +145,7 @@ fn arrow_keys_never_launch_editor() {
         let result = session.process_key(event);
         assert!(
             !matches!(result, Some(InlineEvent::LaunchEditor { .. })),
-            "{:?} with SUPER should not launch editor",
-            key_code
+            "{key_code:?} with SUPER should not launch editor"
         );
     }
 }

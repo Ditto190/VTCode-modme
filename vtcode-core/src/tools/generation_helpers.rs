@@ -30,8 +30,7 @@ impl GenerationHelper {
                 file_info.size
             )),
             None => Ok(format!(
-                "⚠ File not found: {}. Generation may have failed or file was created in a different location.",
-                filename
+                "⚠ File not found: {filename}. Generation may have failed or file was created in a different location."
             )),
         }
     }
@@ -45,7 +44,7 @@ impl GenerationHelper {
         let file_report = self.verify_and_report(filename).await?;
 
         let response = if let Some(info) = additional_info {
-            format!("{}\n\n{}", info, file_report)
+            format!("{info}\n\n{file_report}")
         } else {
             file_report
         };

@@ -394,7 +394,7 @@ impl DiffRenderer {
                     output.push(' ');
                 }
                 use std::fmt::Write as FmtWrite;
-                let _ = write!(output, "{}", n);
+                let _ = write!(output, "{n}");
                 output.push_str(&self.cached_styles.reset);
             } else {
                 output.push_str("    ");
@@ -738,7 +738,7 @@ impl DiffChatRenderer {
             for (i, stat) in check.file_stats.iter().enumerate() {
                 if i >= max_files_to_show {
                     let remaining = check.file_stats.len() - max_files_to_show;
-                    let _ = writeln!(output, "  ... and {} more file(s)", remaining);
+                    let _ = writeln!(output, "  ... and {remaining} more file(s)");
                     break;
                 }
 
@@ -780,7 +780,7 @@ impl DiffChatRenderer {
 
         // Show reason in dimmed text
         if let Some(reason) = &check.reason {
-            let _ = writeln!(output, "\nReason: {}", reason);
+            let _ = writeln!(output, "\nReason: {reason}");
         }
 
         // Tip for viewing full diff
@@ -799,8 +799,8 @@ impl DiffChatRenderer {
     ) -> String {
         let status_indicator = if success { "✓" } else { "✗" };
         let status_label = if success { "Success" } else { "Failure" };
-        let mut summary = format!("\n{} [{}] {}\n", status_indicator, status_label, operation);
-        let _ = writeln!(summary, "└─ {} file(s) affected", files_affected);
+        let mut summary = format!("\n{status_indicator} [{status_label}] {operation}\n");
+        let _ = writeln!(summary, "└─ {files_affected} file(s) affected");
 
         if success {
             summary.push_str("   Operation completed successfully\n");
@@ -813,8 +813,8 @@ impl DiffChatRenderer {
 }
 
 pub fn generate_unified_diff(old_content: &str, new_content: &str, filename: &str) -> String {
-    let old_label = format!("a/{}", filename);
-    let new_label = format!("b/{}", filename);
+    let old_label = format!("a/{filename}");
+    let new_label = format!("b/{filename}");
     let options = crate::utils::diff::DiffOptions {
         context_lines: 3,
         old_label: Some(&old_label),
@@ -849,9 +849,9 @@ mod tests {
         let mut changes = Vec::new();
         for i in 0..(diff_constants::MAX_INLINE_DIFF_FILES + 5) {
             changes.push((
-                format!("file{}.rs", i),
-                format!("old{}", i),
-                format!("new{}", i),
+                format!("file{i}.rs"),
+                format!("old{i}"),
+                format!("new{i}"),
             ));
         }
 
@@ -866,8 +866,8 @@ mod tests {
         let renderer = DiffChatRenderer::new(true, 3, false);
 
         // Create a file with many changes
-        let old_content: String = (0..300).map(|i| format!("old line {}\n", i)).collect();
-        let new_content: String = (0..300).map(|i| format!("new line {}\n", i)).collect();
+        let old_content: String = (0..300).map(|i| format!("old line {i}\n")).collect();
+        let new_content: String = (0..300).map(|i| format!("new line {i}\n")).collect();
 
         let changes = vec![("large_file.rs".to_owned(), old_content, new_content)];
 
@@ -912,7 +912,7 @@ mod tests {
         let mut changes = Vec::new();
         for i in 0..(diff_constants::MAX_INLINE_DIFF_FILES + 2) {
             changes.push((
-                format!("file{}.rs", i),
+                format!("file{i}.rs"),
                 "old".to_string(),
                 "new".to_string(),
             ));

@@ -236,9 +236,7 @@ impl NativePlugin {
         let abi_version = unsafe { version_fn() };
         if abi_version != PLUGIN_ABI_VERSION {
             return Err(anyhow!(
-                "Plugin ABI version mismatch: expected {}, got {}",
-                PLUGIN_ABI_VERSION,
-                abi_version
+                "Plugin ABI version mismatch: expected {PLUGIN_ABI_VERSION}, got {abi_version}"
             ));
         }
 
@@ -406,7 +404,7 @@ impl PluginLoader {
         // - Verify ABI version compatibility in `NativePlugin::new`.
         // - Validate metadata format.
         let library = unsafe { Library::new(&lib_path) }
-            .with_context(|| format!("Failed to load dynamic library at {:?}", lib_path))?;
+            .with_context(|| format!("Failed to load dynamic library at {lib_path:?}"))?;
 
         let plugin = NativePlugin::new(library, plugin_path.clone())?;
 
@@ -448,7 +446,7 @@ impl PluginLoader {
         if self.is_in_trusted_dir(&path) {
             Ok(path)
         } else {
-            Err(anyhow!("{label} {:?} is not in a trusted directory", path))
+            Err(anyhow!("{label} {path:?} is not in a trusted directory"))
         }
     }
 
@@ -461,7 +459,7 @@ impl PluginLoader {
         // Look for plugin.json to confirm this is a plugin directory
         let metadata_path = plugin_dir.join("plugin.json");
         if !metadata_path.exists() {
-            return Err(anyhow!("No plugin.json found in {:?}", plugin_dir));
+            return Err(anyhow!("No plugin.json found in {plugin_dir:?}"));
         }
 
         // Look for dynamic library with platform-specific naming
@@ -482,9 +480,7 @@ impl PluginLoader {
         }
 
         Err(anyhow!(
-            "No dynamic library found in {:?}. Expected one of: {}, or alternatives",
-            plugin_dir,
-            lib_name
+            "No dynamic library found in {plugin_dir:?}. Expected one of: {lib_name}, or alternatives"
         ))
     }
 
@@ -510,15 +506,15 @@ impl PluginLoader {
         if let Some(stripped) = base_name.strip_prefix("lib") {
             alternatives.push(stripped.to_string());
         } else {
-            alternatives.push(format!("lib{}", base_name));
+            alternatives.push(format!("lib{base_name}"));
         }
 
         // Try different extensions
         let base = base_name.strip_prefix("lib").unwrap_or(base_name);
         #[cfg(target_os = "macos")]
         {
-            alternatives.push(format!("{}.dylib", base));
-            alternatives.push(format!("lib{}.dylib", base));
+            alternatives.push(format!("{base}.dylib"));
+            alternatives.push(format!("lib{base}.dylib"));
         }
         #[cfg(target_os = "linux")]
         {
@@ -559,7 +555,7 @@ impl PluginLoader {
     pub fn library_filename(&self, name: &str) -> String {
         #[cfg(target_os = "macos")]
         {
-            format!("lib{}.dylib", name)
+            format!("lib{name}.dylib")
         }
         #[cfg(target_os = "linux")]
         {

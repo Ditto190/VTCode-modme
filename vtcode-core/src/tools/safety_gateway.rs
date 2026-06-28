@@ -396,7 +396,7 @@ fn proposed_changes_preview(args: &Value) -> String {
             .get("new_str")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        return format!("Replace:\n  '{}'\nWith:\n  '{}'", old_str, new_str);
+        return format!("Replace:\n  '{old_str}'\nWith:\n  '{new_str}'");
     }
 
     if let Ok(Some(patch_input)) = decode_apply_patch_input(args) {
@@ -671,8 +671,7 @@ impl SafetyGateway {
 
         if self.config.read().planning_active && self.is_mutating_call(tool_name, args) {
             let reason = format!(
-                "Tool '{}' is blocked in planning workflow (read-only). Finish planning to execute.",
-                tool_name
+                "Tool '{tool_name}' is blocked in planning workflow (read-only). Finish planning to execute."
             );
             tracing::info!(
                 invocation_id = %inv_id,
@@ -686,7 +685,7 @@ impl SafetyGateway {
             && let Some(command) = command_text_for_tool(tool_name, args)
             && !policy.allows_text(&command)
         {
-            let reason = format!("Command '{}' blocked by policy", command);
+            let reason = format!("Command '{command}' blocked by policy");
             tracing::info!(
                 invocation_id = %inv_id,
                 command = %command,
@@ -733,8 +732,7 @@ impl SafetyGateway {
 
         if self.is_destructive_call(tool_name, args) {
             let justification = format!(
-                "Tool '{}' is destructive and may modify files or execute commands.",
-                tool_name
+                "Tool '{tool_name}' is destructive and may modify files or execute commands."
             );
             tracing::info!(
                 invocation_id = %inv_id,
@@ -929,8 +927,7 @@ impl SafetyGateway {
                 Err(e) => {
                     tracing::error!("Dotfile protection check failed: {}", e);
                     return Some(SafetyDecision::Deny(format!(
-                        "Dotfile protection check failed: {}",
-                        e
+                        "Dotfile protection check failed: {e}"
                     )));
                 }
             }
@@ -999,15 +996,15 @@ impl SafetyGateway {
     ) -> String {
         let mut parts = Vec::new();
 
-        parts.push(format!("Tool: {}", tool_name));
-        parts.push(format!("Risk level: {}", risk_level));
+        parts.push(format!("Tool: {tool_name}"));
+        parts.push(format!("Risk level: {risk_level}"));
 
         if self.is_destructive_call(tool_name, args) {
             parts.push("This tool may modify or delete files.".to_string());
         }
 
         if let Some(command) = command_text_for_tool(tool_name, args) {
-            parts.push(format!("Command: {}", command));
+            parts.push(format!("Command: {command}"));
         }
 
         let file_targets = file_access_targets(tool_name, args);

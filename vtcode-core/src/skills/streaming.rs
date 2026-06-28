@@ -184,12 +184,12 @@ impl StreamingSkillExecutor {
 
             // Add arguments
             if let Err(e) = Self::configure_arguments(&mut cmd, &args) {
-                yield Err(anyhow!("Failed to configure arguments: {}", e));
+                yield Err(anyhow!("Failed to configure arguments: {e}"));
                 return;
             }
 
             // Get command string for logging
-            let _command_str = format!("{:?}", cmd);
+            let _command_str = format!("{cmd:?}");
             let args: Vec<String> = cmd.as_std().get_args()
                 .map(|arg| arg.to_string_lossy().to_string())
                 .collect();
@@ -205,7 +205,7 @@ impl StreamingSkillExecutor {
             let mut child = match cmd.spawn() {
                 Ok(child) => child,
                 Err(e) => {
-                    yield Err(anyhow!("Failed to spawn process: {}", e));
+                    yield Err(anyhow!("Failed to spawn process: {e}"));
                     return;
                 }
             };
@@ -289,7 +289,7 @@ impl StreamingSkillExecutor {
                             }
                             Ok(event) => yield Ok(event),
                             Err(e) => {
-                                yield Err(anyhow!("Stdout stream error: {}", e));
+                                yield Err(anyhow!("Stdout stream error: {e}"));
                                 break;
                             }
                         }
@@ -312,7 +312,7 @@ impl StreamingSkillExecutor {
                             }
                             Ok(event) => yield Ok(event),
                             Err(e) => {
-                                yield Err(anyhow!("Stderr stream error: {}", e));
+                                yield Err(anyhow!("Stderr stream error: {e}"));
                             }
                         }
                     }
@@ -338,7 +338,7 @@ impl StreamingSkillExecutor {
             ).await {
                 Ok(Ok(status)) => status,
                 Ok(Err(e)) => {
-                    yield Err(anyhow!("Failed to wait for process: {}", e));
+                    yield Err(anyhow!("Failed to wait for process: {e}"));
                     return;
                 }
                 Err(_) => {
@@ -425,7 +425,7 @@ impl StreamingSkillExecutor {
                         }
                     }
                     Err(e) => {
-                        yield Err(anyhow!("Read error: {}", e));
+                        yield Err(anyhow!("Read error: {e}"));
                         break;
                     }
                 }
@@ -506,10 +506,10 @@ impl StreamingSkillExecutor {
             Value::Object(map) => {
                 for (key, value) in map {
                     if let Some(s) = value.as_str() {
-                        cmd.arg(format!("--{}", key));
+                        cmd.arg(format!("--{key}"));
                         cmd.arg(s);
                     } else if value.as_bool().is_some_and(|flag| flag) {
-                        cmd.arg(format!("--{}", key));
+                        cmd.arg(format!("--{key}"));
                     }
                 }
             }

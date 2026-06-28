@@ -37,7 +37,7 @@ impl ToolJustification {
             tool_name: tool_name.into(),
             reason: reason.into(),
             expected_outcome: None,
-            risk_level: format!("{:?}", risk_level),
+            risk_level: format!("{risk_level:?}"),
             timestamp: chrono::Local::now().to_rfc3339(),
         }
     }
@@ -179,7 +179,7 @@ impl JustificationManager {
         let mut patterns = self
             .patterns
             .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to lock patterns: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to lock patterns: {e}"))?;
 
         for (key, disk) in loaded_patterns {
             patterns
@@ -262,7 +262,7 @@ impl JustificationManager {
             let patterns = self
                 .patterns
                 .lock()
-                .map_err(|e| anyhow::anyhow!("Failed to lock patterns: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to lock patterns: {e}"))?;
             patterns.clone()
         };
 

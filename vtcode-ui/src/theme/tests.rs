@@ -33,8 +33,7 @@ fn test_all_themes_resolvable() {
     for id in available_themes() {
         assert!(
             ensure_theme(id).is_ok(),
-            "Theme {} should be resolvable",
-            id
+            "Theme {id} should be resolvable"
         );
     }
 }

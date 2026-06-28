@@ -186,7 +186,7 @@ fn create_llm_client(config: &AgentConfig) -> Result<AnyClient> {
             workspace_root: Some(config.workspace.clone()),
         },
     )
-    .with_context(|| format!("Failed to initialize provider '{}'", provider_name))?;
+    .with_context(|| format!("Failed to initialize provider '{provider_name}'"))?;
 
     Ok(Box::new(ProviderClientAdapter::new(
         provider,
@@ -206,7 +206,7 @@ fn build_session_info(duration: Result<Duration, Duration>) -> SessionInfo {
     let (start_time, session_id) = match duration {
         Ok(duration) => {
             let secs = duration.as_secs();
-            (secs, format!("session_{}", secs))
+            (secs, format!("session_{secs}"))
         }
         Err(delta) => {
             let fallback = delta.as_secs();
@@ -214,7 +214,7 @@ fn build_session_info(duration: Result<Duration, Duration>) -> SessionInfo {
                 fallback_seconds = fallback,
                 "System time is before UNIX epoch; using fallback session id"
             );
-            (fallback, format!("session_fallback_{}", fallback))
+            (fallback, format!("session_fallback_{fallback}"))
         }
     };
 

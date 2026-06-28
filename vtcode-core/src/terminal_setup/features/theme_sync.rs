@@ -102,15 +102,15 @@ impl Rgb {
     fn from_hex(hex: &str) -> Result<Self> {
         let trimmed = hex.trim_start_matches('#');
         if trimmed.len() != 6 {
-            return Err(anyhow!("Invalid hex color '{}': expected #RRGGBB", hex));
+            return Err(anyhow!("Invalid hex color '{hex}': expected #RRGGBB"));
         }
 
         let r = u8::from_str_radix(&trimmed[0..2], 16)
-            .map_err(|e| anyhow!("Invalid red component in '{}': {e}", hex))?;
+            .map_err(|e| anyhow!("Invalid red component in '{hex}': {e}"))?;
         let g = u8::from_str_radix(&trimmed[2..4], 16)
-            .map_err(|e| anyhow!("Invalid green component in '{}': {e}", hex))?;
+            .map_err(|e| anyhow!("Invalid green component in '{hex}': {e}"))?;
         let b = u8::from_str_radix(&trimmed[4..6], 16)
-            .map_err(|e| anyhow!("Invalid blue component in '{}': {e}", hex))?;
+            .map_err(|e| anyhow!("Invalid blue component in '{hex}': {e}"))?;
 
         Ok(Self { r, g, b })
     }

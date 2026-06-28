@@ -210,9 +210,9 @@ pub fn render_markdown_to_lines_with_options(
                     .push_segment(base_style, if checked { "[x] " } else { "[ ] " });
             }
             Event::Html(html) | Event::InlineHtml(html) => append_text(&html, &mut ctx),
-            Event::FootnoteReference(r) => append_text(&format!("[^{}]", r), &mut ctx),
-            Event::InlineMath(m) => append_text(&format!("${}$", m), &mut ctx),
-            Event::DisplayMath(m) => append_text(&format!("$$\n{}\n$$", m), &mut ctx),
+            Event::FootnoteReference(r) => append_text(&format!("[^{r}]"), &mut ctx),
+            Event::InlineMath(m) => append_text(&format!("${m}$"), &mut ctx),
+            Event::DisplayMath(m) => append_text(&format!("$$\n{m}\n$$"), &mut ctx),
         }
     }
 

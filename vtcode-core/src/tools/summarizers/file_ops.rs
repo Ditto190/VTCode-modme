@@ -54,7 +54,7 @@ impl Summarizer for ReadSummarizer {
         // Add file size if significant
         if stats.total_chars > 10_000 {
             let kb = stats.total_chars / 1024;
-            summary.push_str(&format!(" ({} KB)", kb));
+            summary.push_str(&format!(" ({kb} KB)"));
         }
 
         // Add preview of first lines
@@ -67,7 +67,7 @@ impl Summarizer for ReadSummarizer {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            summary.push_str(&format!("\n\nPreview:\n{}", preview));
+            summary.push_str(&format!("\n\nPreview:\n{preview}"));
 
             if stats.total_lines > self.max_preview_lines {
                 summary.push_str(&format!(
@@ -89,7 +89,7 @@ impl Summarizer for ReadSummarizer {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            summary.push_str(&format!("\n\nEnd:\n{}", suffix));
+            summary.push_str(&format!("\n\nEnd:\n{suffix}"));
         }
 
         // Add guidance for long files
@@ -150,7 +150,7 @@ impl Summarizer for EditSummarizer {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            summary.push_str(&format!(". Changed: {}", files));
+            summary.push_str(&format!(". Changed: {files}"));
 
             if stats.affected_files.len() > 5 {
                 summary.push_str(&format!(" (+{} more)", stats.affected_files.len() - 5));
@@ -282,7 +282,7 @@ mod tests {
     fn test_read_summarizer_large_file() {
         let mut lines = Vec::new();
         for i in 1..=100 {
-            lines.push(format!("Line {}", i));
+            lines.push(format!("Line {i}"));
         }
         let full_output = lines.join("\n");
 

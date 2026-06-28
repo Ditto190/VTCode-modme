@@ -35,14 +35,14 @@ impl MarkdownStorage {
 
     /// Store data as markdown
     pub fn store<T: Serialize>(&self, key: &str, data: &T, title: &str) -> Result<()> {
-        let file_path = self.storage_dir.join(format!("{}.md", key));
+        let file_path = self.storage_dir.join(format!("{key}.md"));
         let markdown = self.serialize_to_markdown(data, title)?;
         write_with_lock(&file_path, markdown.as_bytes())
     }
 
     /// Load data from markdown
     pub fn load<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Result<T> {
-        let file_path = self.storage_dir.join(format!("{}.md", key));
+        let file_path = self.storage_dir.join(format!("{key}.md"));
         let content = read_with_shared_lock(&file_path)?;
         self.deserialize_from_markdown(&content)
     }
@@ -67,7 +67,7 @@ impl MarkdownStorage {
 
     /// Delete stored item
     pub fn delete(&self, key: &str) -> Result<()> {
-        let file_path = self.storage_dir.join(format!("{}.md", key));
+        let file_path = self.storage_dir.join(format!("{key}.md"));
         if file_path.exists() {
             // Try to obtain an exclusive lock before removing the file so
             // concurrent readers or writers can finish gracefully.
@@ -94,7 +94,7 @@ impl MarkdownStorage {
 
     /// Check if item exists
     pub fn exists(&self, key: &str) -> bool {
-        let file_path = self.storage_dir.join(format!("{}.md", key));
+        let file_path = self.storage_dir.join(format!("{key}.md"));
         file_path.exists()
     }
 
@@ -137,7 +137,7 @@ impl MarkdownStorage {
     }
 
     fn extract_code_block<'a>(&self, content: &'a str, language: &str) -> Option<&'a str> {
-        let start_pattern = format!("```{}", language);
+        let start_pattern = format!("```{language}");
         let end_pattern = "```";
 
         if let Some(start_idx) = content.find(&start_pattern) {
@@ -166,7 +166,7 @@ impl MarkdownStorage {
 
     fn format_value(&self, value: &serde_json::Value) -> String {
         match value {
-            serde_json::Value::String(s) => format!("\"{}\"", s),
+            serde_json::Value::String(s) => format!("\"{s}\""),
             serde_json::Value::Number(n) => n.to_string(),
             serde_json::Value::Bool(b) => b.to_string(),
             serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
@@ -263,14 +263,14 @@ impl SimpleKVStorage {
     pub fn put(&self, key: &str, value: &str) -> Result<()> {
         let data = IndexMap::from([("value".to_string(), value.to_string())]);
         self.storage
-            .store(key, &data, &format!("Key-Value: {}", key))
+            .store(key, &data, &format!("Key-Value: {key}"))
     }
 
     pub fn get(&self, key: &str) -> Result<String> {
         let data: IndexMap<String, String> = self.storage.load(key)?;
         data.get("value")
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Value not found for key: {}", key))
+            .ok_or_else(|| anyhow::anyhow!("Value not found for key: {key}"))
     }
 
     pub fn delete(&self, key: &str) -> Result<()> {
@@ -445,7 +445,7 @@ impl SimpleProjectManager {
 
         let mut info = format!("Project: {}\n", project.name);
         if let Some(desc) = &project.description {
-            info.push_str(&format!("Description: {}\n", desc));
+            info.push_str(&format!("Description: {desc}\n"));
         }
         info.push_str(&format!("Version: {}\n", project.version));
         info.push_str(&format!("Tags: {}\n", project.tags.join(", ")));
@@ -453,7 +453,7 @@ impl SimpleProjectManager {
         if !project.metadata.is_empty() {
             info.push_str("\nMetadata:\n");
             for (key, value) in &project.metadata {
-                info.push_str(&format!("  {}: {}\n", key, value));
+                info.push_str(&format!("  {key}: {value}\n"));
             }
         }
 
@@ -502,19 +502,19 @@ impl SimpleCache {
 
     /// Store data in cache
     pub fn store(&self, key: &str, data: &str) -> Result<()> {
-        let file_path = self.cache_dir.join(format!("{}.txt", key));
+        let file_path = self.cache_dir.join(format!("{key}.txt"));
         write_with_lock(&file_path, data.as_bytes())
     }
 
     /// Load data from cache
     pub fn load(&self, key: &str) -> Result<String> {
-        let file_path = self.cache_dir.join(format!("{}.txt", key));
+        let file_path = self.cache_dir.join(format!("{key}.txt"));
         read_with_shared_lock(&file_path).map_err(|err| {
             if err
                 .downcast_ref::<std::io::Error>()
                 .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound)
             {
-                anyhow::anyhow!("Cache key '{}' not found", key)
+                anyhow::anyhow!("Cache key '{key}' not found")
             } else {
                 err
             }
@@ -523,7 +523,7 @@ impl SimpleCache {
 
     /// Check if cache entry exists
     pub fn exists(&self, key: &str) -> bool {
-        let file_path = self.cache_dir.join(format!("{}.txt", key));
+        let file_path = self.cache_dir.join(format!("{key}.txt"));
         file_path.exists()
     }
 

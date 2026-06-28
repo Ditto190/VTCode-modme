@@ -97,10 +97,10 @@ fn annotate_exec_run_response(response: &mut Value, is_git_diff: bool) {
 fn acquire_executor_rate_limit(bucket: &str, multiplier: f64) -> Result<()> {
     let mut guard = crate::tools::rate_limiter::PER_TOOL_RATE_LIMITER
         .lock()
-        .map_err(|err| anyhow!("per-tool rate limiter poisoned: {}", err))?;
+        .map_err(|err| anyhow!("per-tool rate limiter poisoned: {err}"))?;
     guard
         .try_acquire_for_scaled(bucket, multiplier)
-        .map_err(|e| anyhow!("tool rate limit exceeded for {}: {e}", bucket))
+        .map_err(|e| anyhow!("tool rate limit exceeded for {bucket}: {e}"))
 }
 
 fn parse_action<T>(action_str: &str) -> Result<T>
@@ -108,7 +108,7 @@ where
     T: DeserializeOwned,
 {
     serde_json::from_value(json!(action_str))
-        .with_context(|| format!("Invalid action: {}", action_str))
+        .with_context(|| format!("Invalid action: {action_str}"))
 }
 
 /// Generate an executor that delegates to a cloned tool instance from the inventory.
@@ -912,7 +912,7 @@ impl ToolRegistry {
                 let skills = skill_manager.list_skills().await?;
                 Ok(json!({ "success": true, "skills": skills }))
             }
-            _ => Err(anyhow!("Unknown skill sub_action: {}", sub_action)),
+            _ => Err(anyhow!("Unknown skill sub_action: {sub_action}")),
         }
     }
 

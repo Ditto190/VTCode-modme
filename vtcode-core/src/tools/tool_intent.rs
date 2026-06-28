@@ -1021,11 +1021,10 @@ mod tests {
                 tools::UNIFIED_EXEC,
                 &json!({"action": "run", "command": cmd}),
             );
-            assert!(!intent.mutating, "expected '{}' to be read-only", cmd);
+            assert!(!intent.mutating, "expected '{cmd}' to be read-only");
             assert!(
                 intent.readonly_unified_action,
-                "expected '{}' to be readonly_unified_action",
-                cmd
+                "expected '{cmd}' to be readonly_unified_action"
             );
         }
     }
@@ -1044,8 +1043,7 @@ mod tests {
             );
             assert!(
                 intent.mutating,
-                "expected '{}' to be mutating because it contains redirection/substitution",
-                cmd
+                "expected '{cmd}' to be mutating because it contains redirection/substitution"
             );
         }
     }
@@ -1063,8 +1061,7 @@ mod tests {
             );
             assert!(
                 intent.mutating,
-                "expected '{}' to be mutating because it has destructive find flags",
-                cmd
+                "expected '{cmd}' to be mutating because it has destructive find flags"
             );
         }
     }
@@ -1082,8 +1079,7 @@ mod tests {
             );
             assert!(
                 intent.mutating,
-                "expected '{}' to be mutating because a pipeline segment is unsafe",
-                cmd
+                "expected '{cmd}' to be mutating because a pipeline segment is unsafe"
             );
         }
     }

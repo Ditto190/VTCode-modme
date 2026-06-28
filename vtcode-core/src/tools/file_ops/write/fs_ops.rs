@@ -23,20 +23,17 @@ impl FileOpsTool {
 
         if self.should_exclude(&from_path).await {
             return Err(anyhow!(
-                "Error: Path '{}' is excluded by .vtcodegitignore and cannot be {}.",
-                path,
-                operation
+                "Error: Path '{path}' is excluded by .vtcodegitignore and cannot be {operation}."
             ));
         }
         if self.should_exclude(&to_path).await {
             return Err(anyhow!(
-                "Error: Destination '{}' is excluded by .vtcodegitignore.",
-                destination
+                "Error: Destination '{destination}' is excluded by .vtcodegitignore."
             ));
         }
 
         if !tokio::fs::try_exists(&from_path).await? {
-            return Err(anyhow!("Source path '{}' does not exist", path));
+            return Err(anyhow!("Source path '{path}' does not exist"));
         }
 
         if let Some(parent) = to_path.parent() {
@@ -60,15 +57,13 @@ impl FileOpsTool {
 
         if self.should_exclude(&file_path).await {
             return Err(anyhow!(
-                "Error: Path '{}' is excluded by .vtcodegitignore",
-                path
+                "Error: Path '{path}' is excluded by .vtcodegitignore"
             ));
         }
 
         if tokio::fs::try_exists(&file_path).await? {
             return Err(anyhow!(
-                "Error: File '{}' already exists. Use write_file with mode='overwrite' to replace it.",
-                path
+                "Error: File '{path}' already exists. Use write_file with mode='overwrite' to replace it."
             ));
         }
 
@@ -125,8 +120,7 @@ impl FileOpsTool {
             }
 
             return Err(anyhow!(
-                "Error: Path '{}' does not exist. Provide force=true to ignore missing files.",
-                path
+                "Error: Path '{path}' does not exist. Provide force=true to ignore missing files."
             ));
         }
 
@@ -138,15 +132,13 @@ impl FileOpsTool {
 
         if !canonical.starts_with(self.canonical_workspace_root()) {
             return Err(anyhow!(
-                "Error: Path '{}' resolves outside the workspace and cannot be deleted.",
-                path
+                "Error: Path '{path}' resolves outside the workspace and cannot be deleted."
             ));
         }
 
         if self.should_exclude(&canonical).await {
             return Err(anyhow!(
-                "Error: Path '{}' is excluded by .vtcodegitignore and cannot be deleted.",
-                path
+                "Error: Path '{path}' is excluded by .vtcodegitignore and cannot be deleted."
             ));
         }
 
@@ -159,8 +151,7 @@ impl FileOpsTool {
         let deleted_kind = if metadata.is_dir() {
             if !recursive {
                 return Err(anyhow!(
-                    "Error: '{}' is a directory. Pass recursive=true to remove directories.",
-                    path
+                    "Error: '{path}' is a directory. Pass recursive=true to remove directories."
                 ));
             }
 
@@ -203,14 +194,13 @@ impl FileOpsTool {
 
         if tokio::fs::try_exists(&to_path).await? && !force {
             return Err(anyhow!(
-                "Destination path '{}' already exists. Use force=true to overwrite.",
-                destination
+                "Destination path '{destination}' already exists. Use force=true to overwrite."
             ));
         }
 
         tokio::fs::rename(&from_path, &to_path)
             .await
-            .with_context(|| format!("Failed to move '{}' to '{}'", path, destination))?;
+            .with_context(|| format!("Failed to move '{path}' to '{destination}'"))?;
 
         info!(from = %path, to = %destination, "Moved successfully");
 
@@ -239,8 +229,7 @@ impl FileOpsTool {
         if metadata.is_dir() {
             if !recursive {
                 return Err(anyhow!(
-                    "Path '{}' is a directory. Use recursive=true to copy directories.",
-                    path
+                    "Path '{path}' is a directory. Use recursive=true to copy directories."
                 ));
             }
             // Simple recursive copy
@@ -266,7 +255,7 @@ impl FileOpsTool {
         } else {
             tokio::fs::copy(&from_path, &to_path)
                 .await
-                .with_context(|| format!("Failed to copy '{}' to '{}'", path, destination))?;
+                .with_context(|| format!("Failed to copy '{path}' to '{destination}'"))?;
         }
 
         info!(from = %path, to = %destination, "Copied successfully");

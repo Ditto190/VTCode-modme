@@ -128,10 +128,10 @@ pub struct ToolRegistry {
     policy_gateway: Arc<tokio::sync::Mutex<ToolPolicyGateway>>,
     pty_sessions: PtySessionManager,
     exec_sessions: ExecSessionManager,
-    mcp_client: Arc<RwLock<Option<Arc<McpClient>>>>,
+    mcp_client: Arc<parking_lot::RwLock<Option<Arc<McpClient>>>>,
     mcp_tool_index: Arc<tokio::sync::RwLock<FxHashMap<String, Vec<String>>>>,
     mcp_reverse_index: Arc<tokio::sync::RwLock<FxHashMap<String, String>>>,
-    timeout_policy: Arc<RwLock<ToolTimeoutPolicy>>,
+    timeout_policy: Arc<parking_lot::RwLock<ToolTimeoutPolicy>>,
     execution_history: ToolExecutionHistory,
     harness_context: HarnessContext,
 
@@ -151,7 +151,7 @@ pub struct ToolRegistry {
     active_pty_sessions: Arc<RwLock<Option<Arc<std::sync::atomic::AtomicUsize>>>>,
 
     // Caching
-    cached_available_tools: Arc<RwLock<Option<Vec<String>>>>,
+    cached_available_tools: Arc<parking_lot::RwLock<Option<Vec<String>>>>,
     /// Callback for streaming tool output and progress
     progress_callback: Arc<RwLock<Option<ToolProgressCallback>>>,
     // Performance Observability

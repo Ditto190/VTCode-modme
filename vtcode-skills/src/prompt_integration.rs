@@ -90,11 +90,11 @@ fn render_skills_lean(skills: &[SkillMetadata]) -> String {
             skill.name, skill.description, location, scope
         );
 
-        let _ = writeln!(prompt, "{}", line);
+        let _ = writeln!(prompt, "{line}");
     }
 
     if overflow > 0 {
-        let _ = write!(prompt, "\n(+{} more skills available)", overflow);
+        let _ = write!(prompt, "\n(+{overflow} more skills available)");
     }
 
     // Append usage rules (Codex pattern)
@@ -161,7 +161,7 @@ pub fn generate_skills_prompt_xml(skills: &[SkillMetadata]) -> String {
     }
 
     if overflow > 0 {
-        let _ = writeln!(xml, "  <!-- +{} more skills available -->", overflow);
+        let _ = writeln!(xml, "  <!-- +{overflow} more skills available -->");
     }
 
     xml.push_str("</available_skills>\n");
@@ -276,8 +276,8 @@ mod tests {
 
         for i in 0..5 {
             let manifest = SkillManifest {
-                name: format!("skill-{}", i),
-                description: format!("Example skill number {}", i),
+                name: format!("skill-{i}"),
+                description: format!("Example skill number {i}"),
                 ..Default::default()
             };
 
@@ -285,7 +285,7 @@ mod tests {
                 name: manifest.name.clone(),
                 description: manifest.description.clone(),
                 short_description: None,
-                path: PathBuf::from(format!("/path/to/skill-{}", i)),
+                path: PathBuf::from(format!("/path/to/skill-{i}")),
                 scope: SkillScope::User,
                 manifest: Some(manifest.into()),
             };

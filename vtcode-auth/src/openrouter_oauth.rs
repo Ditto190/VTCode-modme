@@ -121,7 +121,7 @@ struct EncryptedToken {
 /// # Returns
 /// The full authorization URL to redirect the user to.
 pub fn get_auth_url(challenge: &PkceChallenge, callback_port: u16) -> String {
-    let callback_url = format!("http://localhost:{}/callback", callback_port);
+    let callback_url = format!("http://localhost:{callback_port}/callback");
     format!(
         "{}?callback_url={}&code_challenge={}&code_challenge_method={}",
         OPENROUTER_AUTH_URL,
@@ -180,7 +180,7 @@ pub async fn exchange_code_for_token(code: &str, challenge: &PkceChallenge) -> R
                 "Method not allowed. Ensure you're using POST over HTTPS."
             ));
         }
-        return Err(anyhow!("Token exchange failed (HTTP {}): {}", status, body));
+        return Err(anyhow!("Token exchange failed (HTTP {status}): {body}"));
     }
 
     // Parse the response to extract the key
@@ -379,7 +379,7 @@ fn load_oauth_token_keyring() -> Result<Option<OpenRouterToken>> {
     let token_json = match entry.get_password() {
         Ok(json) => json,
         Err(keyring_core::Error::NoEntry) => return Ok(None),
-        Err(e) => return Err(anyhow!("Failed to read from keyring: {}", e)),
+        Err(e) => return Err(anyhow!("Failed to read from keyring: {e}")),
     };
 
     let token: OpenRouterToken =
@@ -464,7 +464,7 @@ fn clear_oauth_token_keyring() -> Result<()> {
     match entry.delete_credential() {
         Ok(_) => tracing::info!("OAuth token cleared from keyring"),
         Err(keyring_core::Error::NoEntry) => {}
-        Err(e) => return Err(anyhow!("Failed to clear keyring entry: {}", e)),
+        Err(e) => return Err(anyhow!("Failed to clear keyring entry: {e}")),
     }
 
     Ok(())
@@ -577,15 +577,14 @@ impl AuthStatus {
             } => {
                 let label_str = label
                     .as_ref()
-                    .map(|l| format!(" ({})", l))
+                    .map(|l| format!(" ({l})"))
                     .unwrap_or_default();
                 let age_str = humanize_duration(*age_seconds);
                 let expiry_str = expires_in
                     .map(|e| format!(", expires in {}", humanize_duration(e)))
                     .unwrap_or_default();
                 format!(
-                    "Authenticated{}, obtained {}{}",
-                    label_str, age_str, expiry_str
+                    "Authenticated{label_str}, obtained {age_str}{expiry_str}"
                 )
             }
             AuthStatus::NotAuthenticated => "Not authenticated".to_string(),
@@ -596,7 +595,7 @@ impl AuthStatus {
 /// Convert seconds to human-readable duration.
 fn humanize_duration(seconds: u64) -> String {
     if seconds < 60 {
-        format!("{}s ago", seconds)
+        format!("{seconds}s ago")
     } else if seconds < 3600 {
         format!("{}m ago", seconds / 60)
     } else if seconds < 86400 {

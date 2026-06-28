@@ -473,11 +473,10 @@ impl NotificationManager {
                 exit_code,
             } => {
                 let exit_code_str = exit_code
-                    .map(|code| format!(" (exit code: {})", code))
+                    .map(|code| format!(" (exit code: {code})"))
                     .unwrap_or_default();
                 format!(
-                    "Command failed: {}{} - Error: {}",
-                    command, exit_code_str, error
+                    "Command failed: {command}{exit_code_str} - Error: {error}"
                 )
             }
             NotificationEvent::ToolFailure {
@@ -487,29 +486,29 @@ impl NotificationManager {
             } => {
                 let details_str = details
                     .as_ref()
-                    .map(|d| format!(" - Details: {}", d))
+                    .map(|d| format!(" - Details: {d}"))
                     .unwrap_or_default();
-                format!("Tool '{}' failed: {}{}", tool_name, error, details_str)
+                format!("Tool '{tool_name}' failed: {error}{details_str}")
             }
             NotificationEvent::ToolSuccess { tool_name, details } => {
                 let details_str = details
                     .as_ref()
-                    .map(|d| format!(" - {}", d))
+                    .map(|d| format!(" - {d}"))
                     .unwrap_or_default();
-                format!("Tool '{}' completed{}", tool_name, details_str)
+                format!("Tool '{tool_name}' completed{details_str}")
             }
             NotificationEvent::Error { message, context } => {
                 let context_str = context
                     .as_ref()
-                    .map(|ctx| format!(" [{}]", ctx))
+                    .map(|ctx| format!(" [{ctx}]"))
                     .unwrap_or_default();
-                format!("Error occurred{}: {}", context_str, message)
+                format!("Error occurred{context_str}: {message}")
             }
             NotificationEvent::PolicyApprovalRequest { action, details } => {
-                format!("Policy approval required: {} - {}", action, details)
+                format!("Policy approval required: {action} - {details}")
             }
             NotificationEvent::HumanInTheLoop { prompt, context } => {
-                format!("Human input required: {} [Context: {}]", prompt, context)
+                format!("Human input required: {prompt} [Context: {context}]")
             }
             NotificationEvent::PermissionPrompt { title, message } => {
                 format!("{title}: {message}")
@@ -530,19 +529,19 @@ impl NotificationManager {
                 };
                 let details_str = details
                     .as_ref()
-                    .map(|d| format!(" - {}", d))
+                    .map(|d| format!(" - {d}"))
                     .unwrap_or_default();
                 if task == "turn" {
-                    format!("Agent turn ended: {}{}", status_str, details_str)
+                    format!("Agent turn ended: {status_str}{details_str}")
                 } else {
-                    format!("Task '{}' {}{}", task, status_str, details_str)
+                    format!("Task '{task}' {status_str}{details_str}")
                 }
             }
             NotificationEvent::Request {
                 request_type,
                 details,
             } => {
-                format!("New {} request: {}", request_type, details)
+                format!("New {request_type} request: {details}")
             }
         }
     }

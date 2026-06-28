@@ -232,13 +232,8 @@ fn enforce_unified_file_payload_limit(
     );
 
     failures.push(format!(
-        "Patch/edit payload too large for '{}': action='{}', payload={} bytes exceeds {} bytes. \
-         Split the change into smaller patch/edit calls, or raise {} for intentional large edits.",
-        normalized_tool_name,
-        action,
-        payload_bytes,
-        max_payload_bytes,
-        UNIFIED_FILE_MAX_PAYLOAD_BYTES_ENV
+        "Patch/edit payload too large for '{normalized_tool_name}': action='{action}', payload={payload_bytes} bytes exceeds {max_payload_bytes} bytes. \
+         Split the change into smaller patch/edit calls, or raise {UNIFIED_FILE_MAX_PAYLOAD_BYTES_ENV} for intentional large edits."
     ));
 }
 
@@ -336,7 +331,7 @@ pub(super) fn preflight_validate_resolved_call(
     let mut failures = Vec::new();
     for key in required {
         if is_missing_required_arg(&effective_tool_name, validation_args.as_ref(), key) {
-            failures.push(format!("Missing required argument: {}", key));
+            failures.push(format!("Missing required argument: {key}"));
         }
     }
     if effective_tool_name == tool_names::UNIFIED_EXEC {
@@ -345,7 +340,7 @@ pub(super) fn preflight_validate_resolved_call(
                 validation_args.as_ref(),
             )
             .into_iter()
-            .map(|key| format!("Missing required argument: {}", key)),
+            .map(|key| format!("Missing required argument: {key}")),
         );
     }
 
@@ -379,7 +374,7 @@ pub(super) fn preflight_validate_resolved_call(
         })
         && let Err(err) = paths::validate_path_safety(path)
     {
-        failures.push(format!("Path security check failed: {}", err));
+        failures.push(format!("Path security check failed: {err}"));
     }
 
     let should_validate_command = matches!(
@@ -395,7 +390,7 @@ pub(super) fn preflight_validate_resolved_call(
             .flatten()
         && let Err(err) = commands::validate_command_safety(&command)
     {
-        failures.push(format!("Command security check failed: {}", err));
+        failures.push(format!("Command security check failed: {err}"));
     }
     enforce_unified_file_payload_limit(
         &effective_tool_name,
@@ -416,16 +411,14 @@ pub(super) fn preflight_validate_resolved_call(
         && crate::tools::tool_intent::unified_exec_action(validation_args.as_ref()).is_none()
     {
         return Err(anyhow!(
-            "Invalid arguments for tool '{}': missing action; provide `action` or inferable exec arguments",
-            effective_tool_name
+            "Invalid arguments for tool '{effective_tool_name}': missing action; provide `action` or inferable exec arguments"
         ));
     }
     if effective_tool_name == tool_names::UNIFIED_SEARCH
         && crate::tools::tool_intent::unified_search_action(validation_args.as_ref()).is_none()
     {
         return Err(anyhow!(
-            "Invalid arguments for tool '{}': missing action; provide `action` or inferable search arguments",
-            effective_tool_name
+            "Invalid arguments for tool '{effective_tool_name}': missing action; provide `action` or inferable search arguments"
         ));
     }
     let effective_parameter_schema = registry
@@ -436,9 +429,7 @@ pub(super) fn preflight_validate_resolved_call(
         && let Err(errors) = jsonschema::validate(schema, validation_args.as_ref())
     {
         return Err(anyhow!(
-            "Invalid arguments for tool '{}': {}",
-            effective_tool_name,
-            errors
+            "Invalid arguments for tool '{effective_tool_name}': {errors}"
         ));
     }
 

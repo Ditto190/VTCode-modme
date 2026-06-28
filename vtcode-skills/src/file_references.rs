@@ -33,7 +33,7 @@ impl FileReferenceValidator {
 
         for reference in &references {
             if let Err(e) = self.validate_reference(reference) {
-                errors.push(format!("Invalid reference '{}': {}", reference, e));
+                errors.push(format!("Invalid reference '{reference}': {e}"));
             }
         }
 
@@ -94,8 +94,7 @@ impl FileReferenceValidator {
             let first_dir = first_component.as_os_str().to_string_lossy();
             if !matches!(first_dir.as_ref(), "scripts" | "references" | "assets") {
                 return Err(format!(
-                    "Invalid directory '{}'. Must be 'scripts/', 'references/', or 'assets/'",
-                    first_dir
+                    "Invalid directory '{first_dir}'. Must be 'scripts/', 'references/', or 'assets/'"
                 ));
             }
         }
@@ -103,8 +102,7 @@ impl FileReferenceValidator {
         // Check depth - must be one level deep (e.g., scripts/file.py, not scripts/subdir/file.py)
         if components.len() > 2 {
             return Err(format!(
-                "Path is too deep: '{}'. Per Agent Skills spec, references must be one level deep.",
-                reference
+                "Path is too deep: '{reference}'. Per Agent Skills spec, references must be one level deep."
             ));
         }
 
@@ -112,7 +110,7 @@ impl FileReferenceValidator {
         if components.len() == 2 {
             let full_path = self.skill_root.join(path);
             if !full_path.exists() {
-                return Err(format!("Referenced file does not exist: {:?}", full_path));
+                return Err(format!("Referenced file does not exist: {full_path:?}"));
             }
         }
 

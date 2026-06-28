@@ -283,7 +283,7 @@ fn content_blocks_from_message_content(
                             .or_else(|| file_url.clone())
                             .unwrap_or_else(|| "attached file".to_string());
                         blocks.push(AnthropicContentBlock::Text {
-                            text: format!("[File input not directly supported: {}]", fallback),
+                            text: format!("[File input not directly supported: {fallback}]"),
                             citations: None,
                             cache_control: None,
                         });
@@ -339,9 +339,9 @@ fn add_prefill_message(request: &LLMRequest, messages: &mut Vec<AnthropicMessage
         if request.character_reinforcement
             && let Some(name) = &request.character_name
         {
-            let tag = format!("[{}]", name);
+            let tag = format!("[{name}]");
             if !text.contains(&tag) {
-                text = format!("{} {}", tag, text).trim().to_string();
+                text = format!("{tag} {text}").trim().to_string();
             }
         }
         if !text.is_empty() {
@@ -360,7 +360,7 @@ fn add_prefill_message(request: &LLMRequest, messages: &mut Vec<AnthropicMessage
         messages.push(AnthropicMessage {
             role: "assistant".to_string(),
             content: vec![AnthropicContentBlock::Text {
-                text: format!("[{}]", name),
+                text: format!("[{name}]"),
                 citations: None,
                 cache_control: None,
             }],

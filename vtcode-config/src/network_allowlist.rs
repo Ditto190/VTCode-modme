@@ -401,7 +401,7 @@ mod tests {
             .filter_map(|e| e.name.as_deref())
             .collect();
         assert!(
-            unverified.iter().any(|n| n.contains(&"MiMo")),
+            unverified.iter().any(|n| n.contains("MiMo")),
             "expected MiMo to be flagged verify=true; got {unverified:?}"
         );
     }

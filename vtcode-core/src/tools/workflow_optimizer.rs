@@ -155,7 +155,7 @@ impl WorkflowOptimizer {
                     optimization_type: OptimizationType::SkipRedundant,
                     tools: vec![tool.clone()],
                     expected_improvement: 0.2,
-                    reason: format!("Tool '{}' appears in {} different patterns", tool, count),
+                    reason: format!("Tool '{tool}' appears in {count} different patterns"),
                     confidence: 0.5,
                 });
             }

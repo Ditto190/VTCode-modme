@@ -45,7 +45,7 @@ impl FormattingOrchestrator {
     /// Format a file based on its extension
     pub async fn format_file(&self, file_path: &Path) -> Option<FormatResult> {
         let extension = file_path.extension()?.to_str()?;
-        let extension_with_dot = format!(".{}", extension);
+        let extension_with_dot = format!(".{extension}");
 
         for config in &self.configs {
             if config.enabled && config.file_extensions.contains(&extension_with_dot) {

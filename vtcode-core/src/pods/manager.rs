@@ -294,7 +294,7 @@ impl PodManager {
             return Err(anyhow!("no active pod configured"));
         };
         let Some(entry) = pod.models.get(name) else {
-            return Err(anyhow!("unknown model '{}'", name));
+            return Err(anyhow!("unknown model '{name}'"));
         };
 
         let log_path = format!("~/{DEFAULT_LOG_DIR}/{}.log", sanitize_component(name));
@@ -394,7 +394,7 @@ impl PodManager {
                 .iter()
                 .find(|profile| profile.name == profile_name)
                 .cloned()
-                .ok_or_else(|| anyhow!("unknown pod profile '{}'", profile_name))?;
+                .ok_or_else(|| anyhow!("unknown pod profile '{profile_name}'"))?;
             return Ok(profile);
         }
 

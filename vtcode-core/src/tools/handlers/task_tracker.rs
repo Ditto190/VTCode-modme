@@ -220,13 +220,12 @@ fn parse_single_index_from_path(index_path: &str) -> Result<usize> {
     let first = parts.next().context("index_path cannot be empty")?;
     if parts.next().is_some() {
         bail!(
-            "Hierarchical index_path '{}' requires Planning workflow support. Use 'index' for standard task-tracker updates or switch to Planning workflow.",
-            index_path
+            "Hierarchical index_path '{index_path}' requires Planning workflow support. Use 'index' for standard task-tracker updates or switch to Planning workflow."
         );
     }
     let parsed = first
         .parse::<usize>()
-        .with_context(|| format!("Invalid index_path '{}': expected integer", index_path))?;
+        .with_context(|| format!("Invalid index_path '{index_path}': expected integer"))?;
     if parsed == 0 {
         bail!("index_path must be >= 1");
     }
@@ -935,7 +934,7 @@ impl TaskTrackerTool {
             .iter()
             .position(|i| i.index == index)
             .with_context(|| {
-                format!("No item at index {}. Valid range: 1-{}", index, item_count)
+                format!("No item at index {index}. Valid range: 1-{item_count}")
             })?;
 
         let old_status = checklist.items[pos].status.to_string();

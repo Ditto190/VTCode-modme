@@ -32,7 +32,7 @@ impl FileConflictAuditLog {
         ensure_dir_exists_sync(&audit_dir).context(ERR_CREATE_AUDIT_DIR)?;
 
         let date = Local::now().format("%Y-%m-%d");
-        let log_path = audit_dir.join(format!("file-conflicts-{}.log", date));
+        let log_path = audit_dir.join(format!("file-conflicts-{date}.log"));
         Ok(Self {
             writer: None,
             log_path,

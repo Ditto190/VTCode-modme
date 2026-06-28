@@ -78,7 +78,7 @@ pub async fn run_terminal_setup_wizard(
         Err(e) => {
             renderer.line(
                 MessageStyle::Error,
-                &format!("Failed to determine config path: {}", e),
+                &format!("Failed to determine config path: {e}"),
             )?;
             return Ok(());
         }
@@ -104,7 +104,7 @@ pub async fn run_terminal_setup_wizard(
             Err(e) => {
                 renderer.line(
                     MessageStyle::Error,
-                    &format!("Failed to create backup: {}", e),
+                    &format!("Failed to create backup: {e}"),
                 )?;
                 return Ok(());
             }

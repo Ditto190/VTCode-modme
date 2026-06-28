@@ -174,7 +174,7 @@ impl SnapshotManager {
     }
 
     fn snapshot_path(&self, turn_number: usize) -> PathBuf {
-        self.storage_dir.join(format!("turn_{}.json", turn_number))
+        self.storage_dir.join(format!("turn_{turn_number}.json"))
     }
 
     fn normalize_path(&self, path: &Path) -> Option<PathBuf> {
@@ -356,7 +356,7 @@ impl SnapshotManager {
             Self::resolve_prompt_metadata(prompt_text, prompt_message_index, conversation);
         let description_source = prompt_text.as_deref().unwrap_or(description);
         let metadata = SnapshotMetadata {
-            id: format!("turn_{}", turn_number),
+            id: format!("turn_{turn_number}"),
             turn_number,
             created_at: timestamp,
             description: Self::truncate_description(description_source),

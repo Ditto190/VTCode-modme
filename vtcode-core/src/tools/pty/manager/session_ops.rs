@@ -58,7 +58,7 @@ impl PtyManager {
             let mut writer_guard = handle.writer.lock();
             let writer = writer_guard
                 .as_mut()
-                .ok_or_else(|| anyhow!("PTY session '{}' is no longer writable", session_id))?;
+                .ok_or_else(|| anyhow!("PTY session '{session_id}' is no longer writable"))?;
 
             writer
                 .write_all(data)
@@ -218,7 +218,7 @@ impl PtyManager {
                     content.push_str(&format!("- **Args**: {}\n", session.args.join(" ")));
                 }
                 if let Some(cwd) = &session.working_dir {
-                    content.push_str(&format!("- **Working Dir**: {}\n", cwd));
+                    content.push_str(&format!("- **Working Dir**: {cwd}\n"));
                 }
                 content.push_str(&format!(
                     "- **Terminal Size**: {}x{}\n",
@@ -248,7 +248,7 @@ impl PtyManager {
             let mut sessions = self.inner.sessions.lock();
             sessions
                 .remove(session_id)
-                .ok_or_else(|| anyhow!("PTY session '{}' not found", session_id))?
+                .ok_or_else(|| anyhow!("PTY session '{session_id}' not found"))?
         };
 
         // Lock order: writer -> child -> reader_thread (follow documented order)
@@ -300,6 +300,6 @@ impl PtyManager {
         sessions
             .get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow!("PTY session '{}' not found", session_id))
+            .ok_or_else(|| anyhow!("PTY session '{session_id}' not found"))
     }
 }

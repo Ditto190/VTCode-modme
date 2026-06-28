@@ -135,7 +135,7 @@ impl SkillFileTracker {
         }
 
         // Search entire workspace recursively
-        let pattern = format!("**/{}", filename);
+        let pattern = format!("**/{filename}");
         if let Some(path) = self
             .file_tracker
             .find_files_matching_pattern(&pattern)
@@ -229,7 +229,7 @@ impl SkillFileTracker {
             for file in missing {
                 summary.push_str(&format!("   ✗ {}\n", file.filename));
                 for suggestion in &file.suggestions {
-                    summary.push_str(&format!("     • {}\n", suggestion));
+                    summary.push_str(&format!("     • {suggestion}\n"));
                 }
             }
         }

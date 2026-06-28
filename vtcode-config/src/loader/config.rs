@@ -1263,8 +1263,7 @@ mod tests {
 
         assert!(
             created.iter().any(|entry| entry == ".vtcode/README.md"),
-            "created files: {:?}",
-            created
+            "created files: {created:?}"
         );
         assert!(workspace.path().join(".vtcode/README.md").exists());
     }

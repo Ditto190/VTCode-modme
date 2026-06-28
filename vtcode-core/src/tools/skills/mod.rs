@@ -374,31 +374,28 @@ fn discover_skill_catalog(
 fn required_string_arg<'a>(args: &'a Value, key: &str) -> anyhow::Result<&'a str> {
     args.get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("Missing '{}' argument", key))
+        .ok_or_else(|| anyhow::anyhow!("Missing '{key}' argument"))
 }
 
 fn unsupported_activation_error(skill_name: &str, skill: EnhancedSkill) -> anyhow::Error {
     let message = match skill {
         EnhancedSkill::CliTool(_) => {
             format!(
-                "Skill '{}' is a system utility and cannot be activated via load_skill",
-                skill_name
+                "Skill '{skill_name}' is a system utility and cannot be activated via load_skill"
             )
         }
         EnhancedSkill::BuiltInCommand(_) => {
             format!(
-                "Skill '{}' is a built-in command skill and cannot be activated via load_skill; use /skills use {} instead",
-                skill_name, skill_name
+                "Skill '{skill_name}' is a built-in command skill and cannot be activated via load_skill; use /skills use {skill_name} instead"
             )
         }
         EnhancedSkill::NativePlugin(_) => {
             format!(
-                "Skill '{}' is a native plugin and cannot be activated via load_skill",
-                skill_name
+                "Skill '{skill_name}' is a native plugin and cannot be activated via load_skill"
             )
         }
         EnhancedSkill::Traditional(_) => {
-            format!("Skill '{}' is already a traditional skill", skill_name)
+            format!("Skill '{skill_name}' is already a traditional skill")
         }
     };
 
@@ -418,8 +415,7 @@ fn resolve_skill_resource_path(skill_root: &Path, resource_path: &str) -> anyhow
         })
     {
         return Err(anyhow::anyhow!(
-            "Resource path '{}' must be relative to the skill directory",
-            resource_path
+            "Resource path '{resource_path}' must be relative to the skill directory"
         ));
     }
 
@@ -429,19 +425,17 @@ fn resolve_skill_resource_path(skill_root: &Path, resource_path: &str) -> anyhow
         .with_context(|| format!("Failed to resolve skill root {}", skill_root.display()))?;
     let canonical_path = full_path
         .canonicalize()
-        .with_context(|| format!("Resource '{}' not found", resource_path))?;
+        .with_context(|| format!("Resource '{resource_path}' not found"))?;
 
     if !canonical_path.starts_with(&canonical_root) {
         return Err(anyhow::anyhow!(
-            "Resource '{}' escapes the skill directory",
-            resource_path
+            "Resource '{resource_path}' escapes the skill directory"
         ));
     }
 
     if !canonical_path.is_file() {
         return Err(anyhow::anyhow!(
-            "Resource '{}' is not a readable file",
-            resource_path
+            "Resource '{resource_path}' is not a readable file"
         ));
     }
 
@@ -597,8 +591,7 @@ impl Tool for LoadSkillTool {
                 let tools = discover_session_utilities(&self.workspace_root, &codex_home).await?;
                 if tools.iter().any(|tool| tool.name == name) {
                     return Err(anyhow::anyhow!(
-                        "Skill '{}' is a system utility and cannot be activated via load_skill",
-                        name
+                        "Skill '{name}' is a system utility and cannot be activated via load_skill"
                     ));
                 }
 
@@ -612,10 +605,7 @@ impl Tool for LoadSkillTool {
                 };
 
                 return Err(anyhow::anyhow!(
-                    "Failed to load skill '{}': {}.{}",
-                    name,
-                    error,
-                    detail
+                    "Failed to load skill '{name}': {error}.{detail}"
                 ));
             }
         };

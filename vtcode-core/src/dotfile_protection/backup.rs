@@ -103,7 +103,7 @@ impl BackupManager {
         // Create backup directory if it doesn't exist
         ensure_dir_exists(&backup_dir)
             .await
-            .with_context(|| format!("Failed to create backup directory: {:?}", backup_dir))?;
+            .with_context(|| format!("Failed to create backup directory: {backup_dir:?}"))?;
 
         Ok(Self {
             backup_dir,
@@ -119,18 +119,18 @@ impl BackupManager {
         session_id: impl Into<String>,
     ) -> Result<DotfileBackup> {
         if !file_path.exists() {
-            bail!("Cannot backup non-existent file: {:?}", file_path);
+            bail!("Cannot backup non-existent file: {file_path:?}");
         }
 
         // Read original content
         let content = tokio::fs::read(file_path)
             .await
-            .with_context(|| format!("Failed to read file for backup: {:?}", file_path))?;
+            .with_context(|| format!("Failed to read file for backup: {file_path:?}"))?;
 
         // Get file metadata
         let metadata = tokio::fs::metadata(file_path)
             .await
-            .with_context(|| format!("Failed to get metadata: {:?}", file_path))?;
+            .with_context(|| format!("Failed to get metadata: {file_path:?}"))?;
 
         // Compute content hash
         let content_hash = calculate_sha256(&content);
@@ -148,7 +148,7 @@ impl BackupManager {
         // Write backup
         tokio::fs::write(&backup_path, &content)
             .await
-            .with_context(|| format!("Failed to write backup: {:?}", backup_path))?;
+            .with_context(|| format!("Failed to write backup: {backup_path:?}"))?;
 
         // Preserve permissions on backup
         #[cfg(unix)]
@@ -156,7 +156,7 @@ impl BackupManager {
             let perms = metadata.permissions();
             tokio::fs::set_permissions(&backup_path, perms.clone())
                 .await
-                .with_context(|| format!("Failed to set backup permissions: {:?}", backup_path))?;
+                .with_context(|| format!("Failed to set backup permissions: {backup_path:?}"))?;
         }
 
         #[cfg(unix)]
@@ -202,7 +202,7 @@ impl BackupManager {
 
         write_json_file(&index_path, &backups)
             .await
-            .with_context(|| format!("Failed to write backup index: {:?}", index_path))?;
+            .with_context(|| format!("Failed to write backup index: {index_path:?}"))?;
 
         Ok(())
     }
@@ -217,7 +217,7 @@ impl BackupManager {
 
         let backups: Vec<DotfileBackup> = read_json_file(&index_path)
             .await
-            .with_context(|| format!("Failed to parse backup index: {:?}", index_path))?;
+            .with_context(|| format!("Failed to parse backup index: {index_path:?}"))?;
 
         Ok(backups)
     }
@@ -298,7 +298,7 @@ impl BackupManager {
         let backup = self
             .get_latest_backup(file_path)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("No backup found for: {:?}", file_path))?;
+            .ok_or_else(|| anyhow::anyhow!("No backup found for: {file_path:?}"))?;
 
         backup.restore().await
     }
@@ -395,11 +395,11 @@ mod tests {
 
         // Create 5 backups (should keep only 2)
         for i in 0..5 {
-            tokio::fs::write(&test_file, format!("content {}", i))
+            tokio::fs::write(&test_file, format!("content {i}"))
                 .await
                 .unwrap();
             manager
-                .create_backup(&test_file, format!("backup {}", i), "test-session")
+                .create_backup(&test_file, format!("backup {i}"), "test-session")
                 .await
                 .unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;

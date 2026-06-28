@@ -746,7 +746,7 @@ mod tests {
         temp_file.flush().unwrap();
 
         let escaped = image_path.to_string_lossy().replace(' ', "\\ ");
-        let input = format!("see {}", escaped);
+        let input = format!("see {escaped}");
         let result = parse_at_patterns(&input, temp_dir.path()).await.unwrap();
 
         match result {

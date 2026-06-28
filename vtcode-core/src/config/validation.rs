@@ -47,7 +47,7 @@ impl ValidationResult {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            bail!("Configuration validation failed:\n{}", error_msg);
+            bail!("Configuration validation failed:\n{error_msg}");
         }
 
         // Print warnings if any
@@ -160,7 +160,7 @@ fn validate_agent_model(provider: &str, model: &str, result: &mut ValidationResu
             }
         }
         Err(e) => {
-            result.add_error(format!("Agent model configuration invalid: {}", e));
+            result.add_error(format!("Agent model configuration invalid: {e}"));
         }
     }
 }
@@ -177,9 +177,8 @@ fn validate_context_window(config: &VTCodeConfig, result: &mut ValidationResult)
         && context_window > model_context
     {
         result.add_warning(format!(
-            "Configured context window {} exceeds model capacity {}. \
-             The model will use its maximum context size.",
-            context_window, model_context
+            "Configured context window {context_window} exceeds model capacity {model_context}. \
+             The model will use its maximum context size."
         ));
     }
 }

@@ -311,7 +311,7 @@ fn function_output_items_from_parts(parts: &[ContentPart]) -> Vec<FunctionOutput
                 data, mime_type, ..
             } => {
                 items.push(FunctionOutputContentItem::InputImage {
-                    image_url: format!("data:{};base64,{}", mime_type, data),
+                    image_url: format!("data:{mime_type};base64,{data}"),
                 });
             }
             ContentPart::File { .. } => {}

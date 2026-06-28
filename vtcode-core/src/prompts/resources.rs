@@ -568,7 +568,7 @@ fn derive_template_description(body: &str, name: &str) -> String {
         return line.to_string();
     }
 
-    format!("Prompt template `{}`", name)
+    format!("Prompt template `{name}`")
 }
 
 fn normalize_newlines(content: &str) -> String {

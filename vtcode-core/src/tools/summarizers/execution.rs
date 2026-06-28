@@ -65,7 +65,7 @@ impl Summarizer for BashSummarizer {
             if duration_ms > 1000 {
                 summary.push_str(&format!("Duration: {:.1}s\n", duration_ms as f64 / 1000.0));
             } else {
-                summary.push_str(&format!("Duration: {}ms\n", duration_ms));
+                summary.push_str(&format!("Duration: {duration_ms}ms\n"));
             }
         }
 
@@ -75,7 +75,7 @@ impl Summarizer for BashSummarizer {
 
             if result.total_bytes > 10_000 {
                 let kb = result.total_bytes / 1024;
-                summary.push_str(&format!(" ({} KB)", kb));
+                summary.push_str(&format!(" ({kb} KB)"));
             }
 
             summary.push('\n');
@@ -93,7 +93,7 @@ impl Summarizer for BashSummarizer {
                         .total_lines
                         .saturating_sub(self.max_head_lines + self.max_tail_lines);
                     if omitted > 0 {
-                        summary.push_str(&format!("[...{} more lines]\n", omitted));
+                        summary.push_str(&format!("[...{omitted} more lines]\n"));
                     }
                 }
             }
@@ -293,7 +293,7 @@ mod tests {
     fn test_bash_summarizer_large_output() {
         let mut lines = Vec::new();
         for i in 1..=100 {
-            lines.push(format!("Line {}: Some output here", i));
+            lines.push(format!("Line {i}: Some output here"));
         }
         let stdout = lines.join("\n");
 

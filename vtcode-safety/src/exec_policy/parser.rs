@@ -106,7 +106,7 @@ impl PolicyParser {
             "allow" | "yes" | "true" | "1" => Ok(Decision::Allow),
             "prompt" | "ask" | "confirm" => Ok(Decision::Prompt),
             "forbidden" | "forbid" | "deny" | "no" | "false" | "0" => Ok(Decision::Forbidden),
-            _ => anyhow::bail!("Invalid decision: {}", s),
+            _ => anyhow::bail!("Invalid decision: {s}"),
         }
     }
 

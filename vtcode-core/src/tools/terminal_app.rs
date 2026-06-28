@@ -127,14 +127,13 @@ impl TerminalAppLauncher {
             Self::build_editor_command_from_string(preferred, &target, wait_for_editor)
                 .with_context(|| {
                     format!(
-                        "failed to parse tools.editor.preferred_editor '{}'",
-                        preferred
+                        "failed to parse tools.editor.preferred_editor '{preferred}'"
                     )
                 })?
         } else if let Some(env_command) = Self::editor_command_from_env() {
             debug!("using editor command from environment: {}", env_command);
             Self::build_editor_command_from_string(&env_command, &target, wait_for_editor)
-                .with_context(|| format!("failed to parse editor command '{}'", env_command))?
+                .with_context(|| format!("failed to parse editor command '{env_command}'"))?
         } else {
             // If EDITOR/VISUAL not set, search for available editors in PATH
             debug!("EDITOR/VISUAL not set, searching for available editors");
@@ -199,7 +198,7 @@ impl TerminalAppLauncher {
         wait_for_editor: bool,
     ) -> Result<Command> {
         let tokens = shell_words::split(command)
-            .with_context(|| format!("invalid editor command: {}", command))?;
+            .with_context(|| format!("invalid editor command: {command}"))?;
         let (program, args) = tokens
             .split_first()
             .ok_or_else(|| anyhow!("editor command cannot be empty"))?;
@@ -381,11 +380,11 @@ impl TerminalAppLauncher {
             let mut restore_errors = Vec::new();
 
             if let Err(error) = enable_raw_mode() {
-                restore_errors.push(format!("failed to re-enable raw mode: {}", error));
+                restore_errors.push(format!("failed to re-enable raw mode: {error}"));
             }
 
             if let Err(error) = io::stdout().execute(EnterAlternateScreen) {
-                restore_errors.push(format!("failed to re-enter alternate screen: {}", error));
+                restore_errors.push(format!("failed to re-enter alternate screen: {error}"));
             }
 
             // Drain terminal replies triggered by the fullscreen app while raw mode is active.
@@ -396,15 +395,15 @@ impl TerminalAppLauncher {
             // This prevents ANSI escape codes from external apps' background color requests
             // from appearing in the TUI.
             if let Err(error) = io::stdout().execute(Clear(ClearType::All)) {
-                restore_errors.push(format!("failed to clear terminal: {}", error));
+                restore_errors.push(format!("failed to clear terminal: {error}"));
             }
 
             if !restore_errors.is_empty() {
                 let restore_summary = restore_errors.join("; ");
                 return match result {
-                    Ok(_) => Err(anyhow!("terminal restore failed: {}", restore_summary)),
+                    Ok(_) => Err(anyhow!("terminal restore failed: {restore_summary}")),
                     Err(command_error) => Err(command_error
-                        .context(format!("terminal restore also failed: {}", restore_summary))),
+                        .context(format!("terminal restore also failed: {restore_summary}"))),
                 };
             }
         }
@@ -451,7 +450,7 @@ impl TerminalAppLauncher {
             let status = cmd
                 .current_dir(&self.workspace_root)
                 .status()
-                .with_context(|| format!("failed to spawn update command: {}", command))?;
+                .with_context(|| format!("failed to spawn update command: {command}"))?;
 
             Ok(TerminalAppResult {
                 exit_code: status.code().unwrap_or(-1),
@@ -479,7 +478,7 @@ impl TerminalAppLauncher {
             let status = Command::new(git_cmd)
                 .current_dir(&self.workspace_root)
                 .status()
-                .with_context(|| format!("failed to spawn {}", git_cmd))?;
+                .with_context(|| format!("failed to spawn {git_cmd}"))?;
 
             if !status.success() {
                 return Err(anyhow!(

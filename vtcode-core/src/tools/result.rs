@@ -130,8 +130,8 @@ impl ToolResult {
         let error_msg = error.into();
         Self {
             tool_name: tool_name.into(),
-            llm_content: format!("Tool failed: {}", error_msg),
-            ui_content: format!("Error: {}", error_msg),
+            llm_content: format!("Tool failed: {error_msg}"),
+            ui_content: format!("Error: {error_msg}"),
             success: false,
             error: Some(error_msg),
             metadata: ToolMetadata::default(),

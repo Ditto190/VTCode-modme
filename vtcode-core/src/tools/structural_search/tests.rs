@@ -3126,7 +3126,7 @@ async fn structural_rewrite_normalizes_replacement_fields() {
     fs::write(src_dir.join("lib.rs"), "fn alpha() {}\n").expect("write rust file");
 
     let replacement_json = r#"{"text":"fn alpha() {}","range":{"start":{"line":5,"column":0},"end":{"line":5,"column":14}},"file":"src/lib.rs","lines":"5: fn alpha() {}","language":"Rust","replacement":"fn renamed() {}","replacementOffsets":{"start":0,"end":14}}"#;
-    let script = format!("#!/bin/sh\nprintf '[{}]\n'\n", replacement_json);
+    let script = format!("#!/bin/sh\nprintf '[{replacement_json}]\n'\n");
     let (_script_dir, script_path) = write_fake_sg(&script);
 
     let _override = set_ast_grep_binary_override_for_tests(Some(script_path));

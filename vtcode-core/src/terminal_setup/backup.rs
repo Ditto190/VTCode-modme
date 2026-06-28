@@ -161,7 +161,7 @@ impl ConfigBackupManager {
             .context("Invalid config path")?
             .to_string_lossy();
 
-        let backup_name = format!("{}.vtcode_backup_{}", config_name, timestamp);
+        let backup_name = format!("{config_name}.vtcode_backup_{timestamp}");
         let parent = config_path
             .parent()
             .context("Config file has no parent directory")?;
@@ -170,7 +170,7 @@ impl ConfigBackupManager {
         let mut collision_suffix: u32 = 0;
         while backup_path.exists() {
             collision_suffix += 1;
-            backup_path = parent.join(format!("{}_{}", backup_name, collision_suffix));
+            backup_path = parent.join(format!("{backup_name}_{collision_suffix}"));
         }
 
         Ok(backup_path)

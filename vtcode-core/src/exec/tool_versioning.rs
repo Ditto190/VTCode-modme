@@ -50,7 +50,7 @@ impl ToolVersion {
     pub fn from_string(s: &str) -> Result<(u32, u32, u32)> {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() != 3 {
-            return Err(anyhow!("Invalid version format: {}", s));
+            return Err(anyhow!("Invalid version format: {s}"));
         }
         Ok((parts[0].parse()?, parts[1].parse()?, parts[2].parse()?))
     }
@@ -214,7 +214,7 @@ impl SkillCompatibilityChecker {
 
         let req_parts: Vec<&str> = required.split('.').collect();
         if req_parts.is_empty() || req_parts.len() > 2 {
-            return Err(anyhow!("Invalid required version format: {}", required));
+            return Err(anyhow!("Invalid required version format: {required}"));
         }
 
         let req_major: u32 = req_parts[0].parse()?;
@@ -234,8 +234,7 @@ impl SkillCompatibilityChecker {
             (true, false) if avail_minor > req_minor => {
                 // Major matches, available minor is newer: warning
                 VersionCompatibility::Warning(format!(
-                    "Tool available version {} is newer than required {}",
-                    available, required
+                    "Tool available version {available} is newer than required {required}"
                 ))
             }
             (true, false) if avail_minor < req_minor => {
@@ -245,15 +244,13 @@ impl SkillCompatibilityChecker {
             (false, _) if avail_major > req_major => {
                 // Major version upgrade: usually breaking
                 VersionCompatibility::Incompatible(format!(
-                    "Tool major version changed from {} to {}",
-                    req_major, avail_major
+                    "Tool major version changed from {req_major} to {avail_major}"
                 ))
             }
             _ => {
                 // Anything else is incompatible
                 VersionCompatibility::Incompatible(format!(
-                    "Tool version {} not compatible with required {}",
-                    available, required
+                    "Tool version {available} not compatible with required {required}"
                 ))
             }
         };
@@ -271,14 +268,14 @@ impl SkillCompatibilityChecker {
         if !report.warnings.is_empty() {
             output.push_str("\nWarnings:\n");
             for warning in &report.warnings {
-                let _ = writeln!(output, "  - {}", warning);
+                let _ = writeln!(output, "  - {warning}");
             }
         }
 
         if !report.errors.is_empty() {
             output.push_str("\nErrors:\n");
             for error in &report.errors {
-                let _ = writeln!(output, "  - {}", error);
+                let _ = writeln!(output, "  - {error}");
             }
         }
 
@@ -309,7 +306,7 @@ mod tests {
             minor,
             patch,
             released: Utc::now(),
-            description: format!("Test tool {}", version),
+            description: format!("Test tool {version}"),
             input_schema: serde_json::json!({}),
             output_schema: serde_json::json!({}),
             breaking_changes: vec![],

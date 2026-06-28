@@ -199,7 +199,7 @@ pub fn validate_theme_contrast(theme_id: &str) -> ThemeValidationResult {
         Some(theme) => theme,
         None => {
             result.is_valid = false;
-            result.errors.push(format!("Unknown theme: {}", theme_id));
+            result.errors.push(format!("Unknown theme: {theme_id}"));
             return result;
         }
     };

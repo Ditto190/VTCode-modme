@@ -153,14 +153,14 @@ impl CommandPolicyEvaluator {
         // Determine reason - use static strings where possible to avoid allocations
         let reason = if allowed {
             if self.matches_prefix(cmd, &self.allow_prefixes) {
-                format!("allow_list match: {}", cmd)
+                format!("allow_list match: {cmd}")
             } else if Self::matches_any(&self.allow_glob_regexes, cmd) {
                 "allow_glob match".to_string()
             } else {
                 "allow_regex match".to_string()
             }
         } else if self.matches_prefix(cmd, &self.deny_prefixes) {
-            format!("deny_list match: {}", cmd)
+            format!("deny_list match: {cmd}")
         } else if Self::matches_any(&self.deny_glob_regexes, cmd) {
             "deny_glob match".to_string()
         } else {

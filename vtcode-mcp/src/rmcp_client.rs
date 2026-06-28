@@ -190,8 +190,7 @@ impl RmcpClient {
 
         let http_client = client_builder.build().with_context(|| {
             format!(
-                "failed to construct reqwest client for MCP provider '{}'",
-                provider_name
+                "failed to construct reqwest client for MCP provider '{provider_name}'"
             )
         })?;
 

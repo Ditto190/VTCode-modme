@@ -265,7 +265,7 @@ impl SkillsManager {
         // Parse SKILL.md on-demand
         let skill_md = skill_path.join("SKILL.md");
         let content = read_file_with_context_sync(&skill_md, "skill instructions")
-            .map_err(|e| anyhow::anyhow!("Failed to read SKILL.md for '{}': {}", skill_name, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to read SKILL.md for '{skill_name}': {e}"))?;
 
         let (manifest, instructions) = crate::skills::manifest::parse_skill_content(&content)?;
         let skill = Skill::new(manifest, skill_path.to_path_buf(), instructions)?;
@@ -532,11 +532,7 @@ mod tests {
 
         assert!(
             diff <= tolerance,
-            "Lightweight discovery found {} skills, full discovery found {}. Difference {} exceeds tolerance {}",
-            light_count,
-            full_count,
-            diff,
-            tolerance
+            "Lightweight discovery found {light_count} skills, full discovery found {full_count}. Difference {diff} exceeds tolerance {tolerance}"
         );
     }
 
