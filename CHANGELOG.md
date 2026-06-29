@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.133.23 - 2026-06-29
+
+### Highlights
+### Other Changes
+#### Other
+
+- Refactor code structure for improved readability and maintainability (643f7d2c) 
 ## 0.133.22 - 2026-06-28
 
 ### Highlights
