@@ -134,7 +134,7 @@ tools/
  grep_file.rs        # Ripgrep-backed search manager (internal)
  file_ops.rs         # File operations (internal)
  command.rs          # Command execution (internal)
- structural_search.rs# AST-grep structural search
+ structural_search/  # AST-grep structural search (mod.rs dispatcher + submodules)
  registry/
    builtins.rs       # Tool registration and declarations
    executors.rs      # Unified tool executors (unified_search, unified_file, unified_exec)

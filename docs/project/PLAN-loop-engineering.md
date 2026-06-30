@@ -136,7 +136,7 @@ Each step is independently shippable behind a feature flag; do not bundle.
 |---|------|-----------------|--------|
 | B1 | Add a `WorktreeManager` module exposing `create()`, `list()`, `remove()` wrapping `git worktree` | New `vtcode-core/src/git/worktree.rs` (+ new `git/mod.rs` module) | Unit test for create/list/remove against a temp git repo |
 | B2 | Add a `WorktreeReconciler` that runs a verifier sub-agent on the worktree diff before merge-back | `vtcode-core/src/git/worktree.rs` (extended) | Integration test: create worktree, make change, reconcile, assert merge |
-| B3 | Wire worktree creation into `SubagentController::spawn_with_spec()` when `isolation == "worktree"` (currently returns an error at line 1471 of `subagents/mod.rs`) | `vtcode-core/src/subagents/mod.rs` | Existing test suite passes; new test for worktree-spawned subagent |
+| B3 | Wire worktree creation into `SubagentController::spawn_with_spec()` when `isolation == "worktree"` (currently returns an error at line 1471 of `subagents/mod.rs`) | `vtcode-core/src/subagents/controller_spawn_run.rs` | Existing test suite passes; new test for worktree-spawned subagent |
 
 **Status: Complete** (B1 done with `WorktreeManager`; B3 done — `isolation == "worktree"` now creates a worktree under `.vtcode/worktrees/`; B2 done — `WorktreeReconciler` with `reconcile()` method using synchronous verify closure in `spawn_blocking`, integrated into `SubagentController::launch_child`)
 
@@ -194,7 +194,7 @@ Each step is independently shippable behind a feature flag; do not bundle.
 - `cargo test -p vtcode-core --lib -- loop_memory` — 6 tests pass (default features); 11 tests with `--features sqlite` (5 sqlite tests are feature-gated)
 - `cargo clippy -p vtcode-core` — clean (pre-existing warnings in `vtcode-commons` only)
 - New modules: `vtcode-core/src/loop_state.rs`, `vtcode-core/src/loop_memory.rs`, `vtcode-core/src/git/worktree.rs`, `vtcode-core/src/git/mod.rs`
-- Modified: `vtcode-core/src/subagents/mod.rs` (worktree isolation + verifier), `vtcode-core/src/subagents/types.rs` (worktree_path field), `vtcode-config/src/core/automation.rs` (verify_mutations), `vtcode-core/src/lib.rs` (module declarations)
+- Modified: `vtcode-core/src/subagents/mod.rs` + `controller_spawn_run.rs` / `controller_verify.rs` (worktree isolation + verifier), `vtcode-core/src/subagents/types.rs` (worktree_path field), `vtcode-config/src/core/automation.rs` (verify_mutations), `vtcode-core/src/lib.rs` (module declarations)
 
 ---
 
