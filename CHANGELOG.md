@@ -2,6 +2,14 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.134.2 - 2026-07-01
+
+### Highlights
+#### Bug Fixes
+
+- Downgrade notify-rust to 4.17.0 for rustc 1.88.0 compat (797fa278) 
+- Adapt to rmcp 2.0.0 breaking API changes (c4501adf) 
+### Other Changes
 ## 0.134.1 - 2026-07-01
 
 ### Highlights
