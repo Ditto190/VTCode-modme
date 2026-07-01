@@ -1,9 +1,10 @@
 use super::super::helpers::build_available_commands;
-use super::super::types::{NotificationEnvelope, PlanProgress};
+use super::super::types::PlanProgress;
 use super::ZedAgent;
 use crate::acp;
+use crate::acp::Error as SdkError;
+use crate::zed::connection::ConnectionHandle;
 use anyhow::Result;
-use tokio::sync::oneshot;
 use vtcode_core::prompts::discover_prompt_templates;
 use vtcode_core::ui::slash::visible_commands;
 
@@ -12,27 +13,19 @@ impl ZedAgent {
         &self,
         session_id: &acp::SessionId,
         update: acp::SessionUpdate,
-    ) -> Result<(), acp::Error> {
-        let (completion, completion_rx) = oneshot::channel();
+    ) -> Result<(), SdkError> {
+        let Some(client) = self.client() else {
+            return Err(SdkError::internal_error());
+        };
         let notification = acp::SessionNotification::new(session_id.clone(), update);
-
-        self.session_update_tx
-            .send(NotificationEnvelope {
-                notification,
-                completion,
-            })
-            .map_err(|_err| acp::Error::internal_error())?;
-
-        completion_rx
-            .await
-            .map_err(|_err| acp::Error::internal_error())
+        ConnectionHandle::send_session_notification(&client, notification)
     }
 
     pub(super) async fn send_plan_update(
         &self,
         session_id: &acp::SessionId,
         plan: &PlanProgress,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), SdkError> {
         if !plan.has_entries() {
             return Ok(());
         }
@@ -44,7 +37,7 @@ impl ZedAgent {
     pub(super) async fn send_available_commands_update(
         &self,
         session_id: &acp::SessionId,
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), SdkError> {
         let slash_commands = visible_commands();
         let prompt_templates = discover_prompt_templates(&self.config.workspace).await;
         let available_commands = build_available_commands(&slash_commands, &prompt_templates);
@@ -64,5 +57,20 @@ impl ZedAgent {
             )),
         )
         .await
+    }
+
+    pub(super) async fn advance_plan_to_response(
+        &self,
+        session_id: &acp::SessionId,
+        plan: &mut PlanProgress,
+    ) -> Result<(), crate::acp::Error> {
+        if plan.has_context_step() && !plan.context_completed() && plan.complete_context() {
+            self.send_plan_update(session_id, plan).await?;
+        }
+        if plan.start_response() {
+            self.send_plan_update(session_id, plan).await?;
+        }
+
+        Ok(())
     }
 }

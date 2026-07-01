@@ -1,6 +1,7 @@
 use super::ZedAgent;
 use crate::acp;
-use agent_client_protocol::Client;
+use crate::acp::Error as SdkError;
+use crate::zed::connection::ConnectionHandle;
 use anyhow::Result;
 use percent_encoding::percent_decode_str;
 use std::path::PathBuf;
@@ -92,7 +93,7 @@ impl ZedAgent {
         &self,
         session_id: &acp::SessionId,
         prompt: &[acp::ContentBlock],
-    ) -> Result<String, acp::Error> {
+    ) -> Result<String, SdkError> {
         let mut aggregated = String::new();
 
         for block in prompt {
@@ -145,7 +146,7 @@ impl ZedAgent {
         &self,
         session_id: &acp::SessionId,
         link: &acp::ResourceLink,
-    ) -> Result<String, acp::Error> {
+    ) -> Result<String, SdkError> {
         let Some(client) = self.client() else {
             return Ok(Self::render_context_block(&link.name, &link.uri, None));
         };
@@ -163,7 +164,7 @@ impl ZedAgent {
 
         let request = acp::ReadTextFileRequest::new(session_id.clone(), path);
 
-        match client.read_text_file(request).await {
+        match ConnectionHandle::read_text_file(&client, request).await {
             Ok(response) => Ok(Self::render_context_block(
                 &link.name,
                 &link.uri,

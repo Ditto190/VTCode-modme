@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use vtcode_core::core::interfaces::acp::{AcpClientAdapter, AcpLaunchParams};
 
 mod agent;
+pub(crate) mod connection;
 pub(crate) mod constants;
 mod helpers;
 mod session;
@@ -46,17 +47,15 @@ mod tests {
         PrimaryAgentCatalog, SESSION_CONFIG_MODEL_ID, SESSION_CONFIG_PRIMARY_AGENT_ID,
         SESSION_CONFIG_PROVIDER_ID, SESSION_CONFIG_THOUGHT_LEVEL_ID,
     };
-    use crate::zed::types::NotificationEnvelope;
-    use agent_client_protocol::{
-        Agent, LoadSessionRequest, NewSessionRequest, SessionConfigKind,
-        SessionConfigSelectOptions, SetSessionConfigOptionRequest, ToolCallStatus,
+    use agent_client_protocol::schema::v1::{
+        LoadSessionRequest, NewSessionRequest, SetSessionConfigOptionRequest, ToolCallStatus,
     };
+    use agent_client_protocol::schema::v1::{SessionConfigKind, SessionConfigSelectOptions};
     use assert_fs::TempDir;
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
     use std::path::Path;
     use tokio::fs;
-    use tokio::sync::mpsc;
     use vtcode_config::{SubagentDiscoveryInput, discover_subagents};
     use vtcode_core::config::core::PromptCachingConfig;
     use vtcode_core::config::models::{ModelId, Provider};
@@ -98,13 +97,6 @@ mod tests {
         zed_config.tools.read_file = false;
 
         let tools_config = ToolsConfig::default();
-        let (tx, mut rx) = mpsc::unbounded_channel::<NotificationEnvelope>();
-        // Spawn a task to handle session updates so send_update doesn't fail
-        tokio::spawn(async move {
-            while let Some(envelope) = rx.recv().await {
-                let _ = envelope.completion.send(());
-            }
-        });
         let mut discovery_input = SubagentDiscoveryInput::new(workspace.to_path_buf());
         discovery_input.include_user_agents = false;
         let discovered = discover_subagents(&discovery_input).expect("discover primary agents");
@@ -117,7 +109,6 @@ mod tests {
             tools_config,
             CommandsConfig::default(),
             String::new(),
-            tx,
             Some("Zed".to_string()),
             primary_agents,
         )
@@ -258,7 +249,7 @@ mod tests {
 
         {
             let session = agent.session_handle(&session_id).unwrap();
-            let mut data = session.data.borrow_mut();
+            let mut data = session.data.lock().unwrap();
             data.primary_agent = "build".to_string();
             data.reasoning_effort = ReasoningEffortLevel::High;
         }
@@ -374,7 +365,7 @@ mod tests {
             .unwrap();
 
         let session = agent.session_handle(&session_id).unwrap();
-        assert_eq!(session.data.borrow().primary_agent, "build");
+        assert_eq!(session.data.lock().unwrap().primary_agent, "build");
         assert!(response.config_options.iter().any(|option| {
             option.id == crate::acp::SessionConfigId::new(SESSION_CONFIG_PRIMARY_AGENT_ID)
                 && matches!(
@@ -403,7 +394,7 @@ mod tests {
                 .unwrap();
 
             let session = agent.session_handle(&session_id).unwrap();
-            assert_eq!(session.data.borrow().primary_agent, primary_agent);
+            assert_eq!(session.data.lock().unwrap().primary_agent, primary_agent);
             assert_eq!(
                 primary_agent_current_value(&response.config_options),
                 Some(primary_agent.to_string())
@@ -417,7 +408,7 @@ mod tests {
         let agent = build_agent(temp.path()).await;
         let session_id = agent.register_session();
         let session = agent.session_handle(&session_id).unwrap();
-        session.data.borrow_mut().primary_agent = "build".to_string();
+        session.data.lock().unwrap().primary_agent = "build".to_string();
 
         let result = agent
             .set_session_config_option(SetSessionConfigOptionRequest::new(
@@ -431,7 +422,7 @@ mod tests {
         let error = format!("{error:?}");
         assert!(error.contains("unknown_primary_agent"));
         assert!(error.contains("research"));
-        assert_eq!(session.data.borrow().primary_agent, "build");
+        assert_eq!(session.data.lock().unwrap().primary_agent, "build");
     }
 
     #[tokio::test]
@@ -456,7 +447,7 @@ Research primary prompt."#,
         let agent = build_agent(temp.path()).await;
         let session_id = agent.register_session();
         let session = agent.session_handle(&session_id).unwrap();
-        session.data.borrow_mut().primary_agent = "research".to_string();
+        session.data.lock().unwrap().primary_agent = "research".to_string();
 
         let response = agent
             .load_session(LoadSessionRequest::new(session_id, temp.path()))
@@ -511,7 +502,7 @@ Project build prompt."#,
             .await
             .unwrap();
 
-        assert_eq!(session.data.borrow().primary_agent, "build");
+        assert_eq!(session.data.lock().unwrap().primary_agent, "build");
         assert!(
             primary_agent_select_labels(&response.config_options).contains(&"Project Build".into())
         );
@@ -534,7 +525,7 @@ Project build prompt."#,
 
         let session = agent.session_handle(&session_id).unwrap();
         assert_eq!(
-            session.data.borrow().reasoning_effort,
+            session.data.lock().unwrap().reasoning_effort,
             ReasoningEffortLevel::XHigh
         );
         assert!(response.config_options.iter().any(|option| {
@@ -567,8 +558,8 @@ Project build prompt."#,
             .unwrap();
 
         let session = agent.session_handle(&session_id).unwrap();
-        assert_eq!(session.data.borrow().provider, "anthropic");
-        assert_eq!(session.data.borrow().model, anthropic_default);
+        assert_eq!(session.data.lock().unwrap().provider, "anthropic");
+        assert_eq!(session.data.lock().unwrap().model, anthropic_default);
         assert!(response.config_options.iter().any(|option| {
             option.id == crate::acp::SessionConfigId::new(SESSION_CONFIG_PROVIDER_ID)
                 && matches!(
@@ -605,8 +596,8 @@ Project build prompt."#,
             .unwrap();
 
         let session = agent.session_handle(&session_id).unwrap();
-        assert_eq!(session.data.borrow().provider, "openai");
-        assert_eq!(session.data.borrow().model, "gpt-5.4-mini");
+        assert_eq!(session.data.lock().unwrap().provider, "openai");
+        assert_eq!(session.data.lock().unwrap().model, "gpt-5.4-mini");
         assert!(response.config_options.iter().any(|option| {
             option.id == crate::acp::SessionConfigId::new(SESSION_CONFIG_MODEL_ID)
                 && matches!(

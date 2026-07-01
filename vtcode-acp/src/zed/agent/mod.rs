@@ -1,12 +1,11 @@
 use crate::acp;
 use crate::permissions::{AcpPermissionPrompter, DefaultPermissionPrompter};
 use crate::tooling::AcpToolRegistry;
+use crate::zed::connection::ConnectionHandle;
 use hashbrown::HashMap;
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tracing::warn;
 use vtcode_core::config::ToolDocumentationMode;
 use vtcode_core::config::types::{AgentConfig as CoreAgentConfig, CapabilityLevel};
@@ -18,9 +17,9 @@ use vtcode_core::tools::handlers::{SessionSurface, SessionToolsConfig, ToolModel
 use vtcode_core::tools::registry::ToolRegistry as CoreToolRegistry;
 
 use super::helpers::PrimaryAgentCatalog;
-use super::types::{NotificationEnvelope, SessionHandle};
+use super::types::SessionHandle;
 
-mod handlers;
+pub(crate) mod handlers;
 mod prompt;
 mod session_state;
 mod tool_config;
@@ -30,18 +29,20 @@ mod tool_execution;
 mod tool_execution_local;
 mod updates;
 
+/// SACP-style agent bridge. `Send + Sync` so it can be moved into SACP
+/// `cx.spawn` tasks and held inside the global connection registry.
 pub(crate) struct ZedAgent {
-    config: CoreAgentConfig,
+    pub(crate) config: CoreAgentConfig,
     system_prompt: String,
-    sessions: Rc<RefCell<HashMap<acp::SessionId, SessionHandle>>>,
-    next_session_id: Cell<u64>,
-    session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
-    acp_tool_registry: Rc<AcpToolRegistry>,
-    permission_prompter: Rc<dyn AcpPermissionPrompter>,
+    sessions: Arc<Mutex<HashMap<acp::SessionId, SessionHandle>>>,
+    next_session_id: AtomicU64,
+    acp_tool_registry: Arc<AcpToolRegistry>,
+    permission_prompter: Arc<dyn AcpPermissionPrompter + Send + Sync>,
     local_tool_registry: CoreToolRegistry,
     file_ops_tool: Option<FileOpsTool>,
     thread_manager: ThreadManager,
-    client_capabilities: Rc<RefCell<Option<acp::ClientCapabilities>>>,
+    client_capabilities: Arc<Mutex<Option<acp::ClientCapabilities>>>,
+    client: Arc<Mutex<Option<Arc<ConnectionHandle>>>>,
     title: Option<String>,
     primary_agents: PrimaryAgentCatalog,
     tool_loop_limit: usize,
@@ -55,7 +56,6 @@ impl ZedAgent {
         tools_config: ToolsConfig,
         commands_config: CommandsConfig,
         system_prompt: String,
-        session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
         title: Option<String>,
         primary_agents: PrimaryAgentCatalog,
     ) -> Self {
@@ -88,32 +88,53 @@ impl ZedAgent {
                 ToolModelCapabilities::default(),
             ))
             .await;
-        let acp_tool_registry = Rc::new(AcpToolRegistry::new(
+        let acp_tool_registry = Arc::new(AcpToolRegistry::new(
             workspace_root.as_path(),
             read_file_enabled,
             list_files_enabled,
             local_definitions,
         ));
-        let permission_prompter: Rc<dyn AcpPermissionPrompter> = Rc::new(
-            DefaultPermissionPrompter::new(Rc::clone(&acp_tool_registry)),
+        let permission_prompter: Arc<dyn AcpPermissionPrompter + Send + Sync> = Arc::new(
+            DefaultPermissionPrompter::new(Arc::clone(&acp_tool_registry) as Arc<_>),
         );
 
         Self {
             config,
             system_prompt,
-            sessions: Rc::new(RefCell::new(HashMap::with_capacity(10))),
-            next_session_id: Cell::new(0),
-            session_update_tx,
+            sessions: Arc::new(Mutex::new(HashMap::with_capacity(10))),
+            next_session_id: AtomicU64::new(0),
             acp_tool_registry,
             permission_prompter,
             local_tool_registry: core_tool_registry,
             file_ops_tool,
             thread_manager: ThreadManager::new(),
-            client_capabilities: Rc::new(RefCell::new(None)),
+            client_capabilities: Arc::new(Mutex::new(None)),
+            client: Arc::new(Mutex::new(None)),
             title,
             primary_agents,
             tool_loop_limit,
             tool_call_delay,
         }
+    }
+
+    /// Attach the live SACP `cx` handle. Called once after the SACP
+    /// connection has been opened.
+    pub(crate) fn attach_client(&self, client: Arc<ConnectionHandle>) {
+        if let Ok(mut guard) = self.client.lock() {
+            *guard = Some(client);
+        }
+    }
+
+    /// Borrow the SACP `cx` handle, if one is attached.
+    pub(crate) fn client(&self) -> Option<Arc<ConnectionHandle>> {
+        self.client
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned())
+    }
+
+    /// Optional human-readable title used during `initialize`.
+    pub(crate) fn title(&self) -> Option<String> {
+        self.title.clone()
     }
 }

@@ -1,6 +1,5 @@
 use super::ZedAgent;
 use crate::acp;
-use crate::acp::{AgentSideConnection, Client};
 use crate::reports::{
     TOOL_RESPONSE_KEY_CONTENT, TOOL_RESPONSE_KEY_PATH, TOOL_RESPONSE_KEY_STATUS,
     TOOL_RESPONSE_KEY_TOOL, TOOL_RESPONSE_KEY_TRUNCATED, TOOL_SUCCESS_LABEL, ToolExecutionReport,
@@ -11,6 +10,7 @@ use crate::tooling::{
     TOOL_LIST_FILES_RESULT_KEY, TOOL_LIST_FILES_SUMMARY_MAX_ITEMS, TOOL_LIST_FILES_URI_ARG,
     TOOL_READ_FILE_LIMIT_ARG, TOOL_READ_FILE_LINE_ARG,
 };
+use crate::zed::connection::ConnectionHandle;
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -160,7 +160,7 @@ impl ZedAgent {
 
     pub(super) async fn run_read_file(
         &self,
-        client: &AgentSideConnection,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         args: &Value,
     ) -> Result<ToolExecutionReport, String> {

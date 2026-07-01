@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::acp;
-use crate::acp::{Client, Error as AcpError};
+use crate::acp::Error as SdkError;
+use crate::zed::connection::ConnectionHandle;
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{error, warn};
@@ -35,8 +36,13 @@ impl<'a> PermissionToolContext<'a> {
     }
 }
 
-#[async_trait(?Send)]
-pub trait AcpPermissionPrompter {
+/// Prompts the connected ACP client for permission before running a tool call.
+///
+/// The trait stays object-safe (`Send + Sync`) so the agent can keep the
+/// prompter behind an `Arc<dyn ...>` in its shared state and ship it into
+/// SACP `cx.spawn` tasks along with the agent itself.
+#[async_trait]
+pub trait AcpPermissionPrompter: Send + Sync {
     fn permission_options(
         &self,
         tool: SupportedTool,
@@ -45,21 +51,21 @@ pub trait AcpPermissionPrompter {
 
     async fn request_tool_permission(
         &self,
-        client: &dyn Client,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         call: &acp::ToolCall,
         tool: SupportedTool,
         args: &Value,
-    ) -> Result<Option<ToolExecutionReport>, AcpError>;
+    ) -> Result<Option<ToolExecutionReport>, SdkError>;
 
     async fn request_named_tool_permission(
         &self,
-        client: &dyn Client,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         call: &acp::ToolCall,
         tool: PermissionToolContext<'_>,
         args: &Value,
-    ) -> Result<Option<ToolExecutionReport>, AcpError>;
+    ) -> Result<Option<ToolExecutionReport>, SdkError>;
 }
 
 pub struct DefaultPermissionPrompter<P> {
@@ -117,10 +123,10 @@ where
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<P> AcpPermissionPrompter for DefaultPermissionPrompter<P>
 where
-    P: ToolRegistryProvider,
+    P: ToolRegistryProvider + Send + Sync,
 {
     fn permission_options(
         &self,
@@ -133,12 +139,12 @@ where
 
     async fn request_tool_permission(
         &self,
-        client: &dyn Client,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         call: &acp::ToolCall,
         tool: SupportedTool,
         args: &Value,
-    ) -> Result<Option<ToolExecutionReport>, AcpError> {
+    ) -> Result<Option<ToolExecutionReport>, SdkError> {
         let action_label = self.render_action_label(tool, Some(args));
         self.request_named_tool_permission(
             client,
@@ -152,12 +158,12 @@ where
 
     async fn request_named_tool_permission(
         &self,
-        client: &dyn Client,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         call: &acp::ToolCall,
         tool: PermissionToolContext<'_>,
         args: &Value,
-    ) -> Result<Option<ToolExecutionReport>, AcpError> {
+    ) -> Result<Option<ToolExecutionReport>, SdkError> {
         let fields = acp::ToolCallUpdateFields::default()
             .title(call.title.clone())
             .kind(tool.kind)

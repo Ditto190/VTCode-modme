@@ -64,17 +64,21 @@ impl ZedAgent {
 
     pub(super) fn client_supports_read_text_file(&self) -> bool {
         self.client_capabilities
-            .borrow()
-            .as_ref()
-            .map(|capabilities| capabilities.fs.read_text_file)
+            .lock()
+            .ok()
+            .and_then(|guard| {
+                guard
+                    .as_ref()
+                    .map(|capabilities| capabilities.fs.read_text_file)
+            })
             .unwrap_or(false)
     }
 
     pub(super) fn client_supports_terminal(&self) -> bool {
         self.client_capabilities
-            .borrow()
-            .as_ref()
-            .map(|capabilities| capabilities.terminal)
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|capabilities| capabilities.terminal))
             .unwrap_or(false)
     }
 
@@ -258,7 +262,7 @@ impl ZedAgent {
         &self,
         session_id: &acp::SessionId,
         reasons: &[(SupportedTool, ToolDisableReason<'_>)],
-    ) -> Result<(), acp::Error> {
+    ) -> Result<(), crate::acp::Error> {
         if reasons.is_empty() {
             return Ok(());
         }

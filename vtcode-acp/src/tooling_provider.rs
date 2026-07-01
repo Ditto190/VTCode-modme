@@ -51,7 +51,7 @@ impl ToolRegistryProvider for AcpToolRegistry {
     }
 }
 
-impl<T> ToolRegistryProvider for std::rc::Rc<T>
+impl<T> ToolRegistryProvider for std::sync::Arc<T>
 where
     T: ToolRegistryProvider,
 {

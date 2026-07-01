@@ -1,14 +1,54 @@
+//! SACP `AgentToClient` handler registration for `ZedAgent`.
+//!
+//! The bridge translates SACP request/notification handlers into calls on
+//! the existing [`ZedAgent`] methods. The methods themselves are mostly
+//! preserved from the pre-1.0.0 trait-based implementation; the only thing
+//! that changed is the wiring layer (this file) and the connection storage
+//! ([`crate::zed::connection::ConnectionHandle`]).
+//!
+//! ## Spawn pattern
+//!
+//! [`PromptRequest`](acp::PromptRequest) is the one handler that needs to
+//! drive the SACP event loop forward *while* it runs. Per the SACP docs we
+//! therefore use [`ConnectionTo::spawn`] from inside the handler closure,
+//! and the actual prompt logic runs in the spawned task. The spawned task
+//! has full access to `block_task()` and the agent's client-side helpers.
+//!
+//! All other handlers are quick and can be served synchronously without
+//! `spawn`.
+//!
+//! ## Connection access
+//!
+//! The canonical `ConnectionHandle` is stashed in
+//! [`crate::register_acp_connection`] by `run_acp_agent` before the
+//! SACP event loop starts. Handlers reach the same handle through the
+//! agent's `self.client()` accessor — they must **not** re-wrap the
+//! per-handler `cx` into a new `ConnectionHandle` or they will race
+//! each other on the global `Mutex<Option<Arc<ConnectionHandle>>>`
+//! inside the agent.
+
 use super::super::constants::*;
 use super::super::helpers::{
     SESSION_CONFIG_MODEL_ID, SESSION_CONFIG_PRIMARY_AGENT_ID, SESSION_CONFIG_PROVIDER_ID,
     SESSION_CONFIG_THOUGHT_LEVEL_ID, agent_implementation_info, text_chunk,
 };
-use super::super::types::{PlanProgress, ToolRuntime};
+use super::super::types::PlanProgress;
 use super::ZedAgent;
 use crate::acp;
-use anyhow::Result;
+use crate::acp::Error as SdkError;
+use agent_client_protocol::schema::v1::{
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, InitializeRequest,
+    InitializeResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse,
+};
+use agent_client_protocol::{
+    Agent, Builder, Client, ConnectionTo, HandleDispatchFrom, Responder, RunWithConnectionTo,
+    on_receive_notification, on_receive_request,
+};
 use futures::StreamExt;
 use serde_json::json;
+use std::sync::Arc;
 use tracing::warn;
 use vtcode_core::config::api_keys::{ApiKeySources, get_api_key};
 use vtcode_core::config::types::ReasoningEffortLevel;
@@ -16,665 +56,642 @@ use vtcode_core::llm::factory::ProviderConfig;
 use vtcode_core::llm::factory::create_provider_with_config;
 use vtcode_core::llm::provider::{LLMRequest, LLMStreamEvent, Message};
 
-#[async_trait::async_trait(?Send)]
-impl acp::Agent for ZedAgent {
-    async fn initialize(
-        &self,
-        args: acp::InitializeRequest,
-    ) -> Result<acp::InitializeResponse, acp::Error> {
-        self.client_capabilities
-            .replace(Some(args.client_capabilities.clone()));
-
-        if args.protocol_version != acp::ProtocolVersion::V1 {
-            warn!(
-                requested = %args.protocol_version,
-                "{}",
-                INITIALIZE_VERSION_MISMATCH_LOG
-            );
-        }
-        let mut capabilities = acp::AgentCapabilities::default();
-        capabilities.prompt_capabilities.embedded_context = true;
-        capabilities.prompt_capabilities.image = true;
-        capabilities.prompt_capabilities.audio = true;
-        capabilities.mcp_capabilities.http = true;
-        capabilities.mcp_capabilities.sse = false;
-        capabilities.load_session = true;
-
-        let auth_methods = vec![
-            // Agent Auth (OAuth)
-            acp::AuthMethod::Agent(
-                acp::AuthMethodAgent::new("oauth-openai", "OpenAI OAuth")
-                    .description("Authenticate with OpenAI via OAuth 2.0 with PKCE"),
-            ),
-            acp::AuthMethod::Agent(
-                acp::AuthMethodAgent::new("oauth-openrouter", "OpenRouter OAuth")
-                    .description("Authenticate with OpenRouter via OAuth 2.0 with PKCE"),
-            ),
-            // Terminal Auth (Interactive Login)
-            acp::AuthMethod::Terminal(
-                acp::AuthMethodTerminal::new("terminal-login", "Terminal Login")
-                    .description(
-                        "Interactive terminal-based authentication via vtcode login command",
-                    )
-                    .args(vec!["login".to_string()]),
-            ),
-            // Env Var Auth (API Keys)
-            acp::AuthMethod::EnvVar(acp::AuthMethodEnvVar::new(
-                "env-api-keys",
-                "API Key",
-                vec![
-                    acp::AuthEnvVar::new("OPENAI_API_KEY").label("OpenAI"),
-                    acp::AuthEnvVar::new("ANTHROPIC_API_KEY").label("Anthropic"),
-                    acp::AuthEnvVar::new("GEMINI_API_KEY").label("Google Gemini"),
-                    acp::AuthEnvVar::new("OPENROUTER_API_KEY").label("OpenRouter"),
-                    acp::AuthEnvVar::new("DEEPSEEK_API_KEY").label("DeepSeek"),
-                    acp::AuthEnvVar::new("ZAI_API_KEY").label("Z.AI"),
-                    acp::AuthEnvVar::new("MOONSHOT_API_KEY").label("Moonshot"),
-                    acp::AuthEnvVar::new("MINIMAX_API_KEY").label("MiniMax"),
-                    acp::AuthEnvVar::new("GROQ_API_KEY").label("Groq"),
-                    acp::AuthEnvVar::new("XAI_API_KEY").label("xAI"),
-                    acp::AuthEnvVar::new("COHERE_API_KEY").label("Cohere"),
-                    acp::AuthEnvVar::new("HF_TOKEN").label("Hugging Face"),
-                    acp::AuthEnvVar::new("MISTRAL_API_KEY").label("Mistral"),
-                    acp::AuthEnvVar::new("GOOGLE_API_KEY")
-                        .label("Google (alt)")
-                        .optional(true),
-                    acp::AuthEnvVar::new("OLLAMA_API_KEY")
-                        .label("Ollama")
-                        .optional(true),
-                    acp::AuthEnvVar::new("LMSTUDIO_API_KEY")
-                        .label("LM Studio")
-                        .optional(true),
-                ],
-            )),
-            // Env Var Auth (Base URLs)
-            acp::AuthMethod::EnvVar(acp::AuthMethodEnvVar::new(
-                "env-base-urls",
-                "API Base URL",
-                vec![
-                    acp::AuthEnvVar::new("OPENAI_BASE_URL")
-                        .label("OpenAI")
-                        .optional(true),
-                    acp::AuthEnvVar::new("ANTHROPIC_BASE_URL")
-                        .label("Anthropic")
-                        .optional(true),
-                    acp::AuthEnvVar::new("GEMINI_BASE_URL")
-                        .label("Gemini")
-                        .optional(true),
-                    acp::AuthEnvVar::new("OPENROUTER_BASE_URL")
-                        .label("OpenRouter")
-                        .optional(true),
-                    acp::AuthEnvVar::new("DEEPSEEK_BASE_URL")
-                        .label("DeepSeek")
-                        .optional(true),
-                    acp::AuthEnvVar::new("ZAI_BASE_URL")
-                        .label("Z.AI")
-                        .optional(true),
-                    acp::AuthEnvVar::new("MOONSHOT_BASE_URL")
-                        .label("Moonshot")
-                        .optional(true),
-                    acp::AuthEnvVar::new("MINIMAX_BASE_URL")
-                        .label("MiniMax")
-                        .optional(true),
-                    acp::AuthEnvVar::new("XAI_BASE_URL")
-                        .label("xAI")
-                        .optional(true),
-                    acp::AuthEnvVar::new("HUGGINGFACE_BASE_URL")
-                        .label("Hugging Face")
-                        .optional(true),
-                    acp::AuthEnvVar::new("OLLAMA_BASE_URL")
-                        .label("Ollama")
-                        .optional(true),
-                    acp::AuthEnvVar::new("LMSTUDIO_BASE_URL")
-                        .label("LM Studio")
-                        .optional(true),
-                ],
-            )),
-        ];
-
-        Ok(acp::InitializeResponse::new(acp::ProtocolVersion::V1)
-            .agent_capabilities(capabilities)
-            .agent_info(agent_implementation_info(self.title.clone()))
-            .auth_methods(auth_methods))
-    }
-
-    async fn authenticate(
-        &self,
-        _args: acp::AuthenticateRequest,
-    ) -> Result<acp::AuthenticateResponse, acp::Error> {
-        Ok(acp::AuthenticateResponse::default())
-    }
-
-    async fn new_session(
-        &self,
-        _args: acp::NewSessionRequest,
-    ) -> Result<acp::NewSessionResponse, acp::Error> {
-        let session_id = self.register_session();
-        let session = self
-            .session_handle(&session_id)
-            .ok_or_else(acp::Error::internal_error)?;
-        let config_options = self.current_session_config_options(&session);
-
-        self.send_available_commands_update(&session_id).await?;
-
-        Ok(acp::NewSessionResponse::new(session_id).config_options(config_options))
-    }
-
-    async fn load_session(
-        &self,
-        args: acp::LoadSessionRequest,
-    ) -> Result<acp::LoadSessionResponse, acp::Error> {
-        let session = if let Some(session) = self.session_handle(&args.session_id) {
-            session
-        } else {
-            let identifier = args.session_id.0.as_ref();
-            self.attach_thread_from_archive(&args.session_id, identifier)
-                .await
-                .map_err(|err| acp::Error::internal_error().data(err.to_string()))?
-        };
-
-        self.send_available_commands_update(&args.session_id)
-            .await?;
-
-        let config_options = self.current_session_config_options(&session);
-
-        Ok(acp::LoadSessionResponse::new().config_options(config_options))
-    }
-
-    async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse, acp::Error> {
-        let Some(session) = self.session_handle(&args.session_id) else {
-            return Err(acp::Error::invalid_params().data(json!({ "reason": "unknown_session" })));
-        };
-
-        session.cancel_flag.set(false);
-
-        let user_message = self.resolve_prompt(&args.session_id, &args.prompt).await?;
-
-        self.push_message(&session, Message::user(user_message.clone()));
-
-        let (session_provider_name, session_model, session_reasoning_effort) = {
-            let data = session.data.borrow();
-            (
-                data.provider.clone(),
-                data.model.clone(),
-                data.reasoning_effort,
-            )
-        };
-        let session_api_key = self.resolve_api_key_for_provider(&session_provider_name);
-        let provider = create_provider_with_config(
-            &session_provider_name,
-            ProviderConfig {
-                api_key: Some(session_api_key),
-                openai_chatgpt_auth: if session_provider_name.eq_ignore_ascii_case("openai") {
-                    self.config.openai_chatgpt_auth.clone()
-                } else {
-                    None
-                },
-                copilot_auth: None,
-                base_url: None,
-                model: Some(session_model.clone()),
-                prompt_cache: Some(self.config.prompt_cache.clone()),
-                timeouts: None,
-                openai: None,
-                anthropic: None,
-                model_behavior: self.config.model_behavior.clone(),
-                workspace_root: Some(self.config.workspace.clone()),
+/// Register every SACP `AgentToClient` request/notification handler that the
+/// vtcode bridge implements. The agent must be `Send + Sync + 'static` so
+/// that the SACP `Builder` can move the handlers onto its background task.
+pub fn install_handlers<H, R>(
+    builder: Builder<Agent, H, R>,
+    agent: Arc<ZedAgent>,
+) -> Builder<Agent, impl HandleDispatchFrom<Client>, R>
+where
+    H: HandleDispatchFrom<Client>,
+    R: RunWithConnectionTo<Client>,
+{
+    builder
+        .on_receive_request(
+            {
+                let agent = Arc::clone(&agent);
+                move |req: InitializeRequest, request_cx: Responder<InitializeResponse>, _cx| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_initialize(agent, req, request_cx).await }
+                }
             },
+            on_receive_request!(),
         )
-        .map_err(acp::Error::into_internal_error)?;
+        .on_receive_request(
+            {
+                let agent = Arc::clone(&agent);
+                move |_req: AuthenticateRequest,
+                      request_cx: Responder<AuthenticateResponse>,
+                      _cx| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_authenticate(agent, request_cx).await }
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = Arc::clone(&agent);
+                move |req: NewSessionRequest, request_cx: Responder<NewSessionResponse>, _cx| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_new_session(agent, req, request_cx).await }
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = Arc::clone(&agent);
+                move |req: LoadSessionRequest, request_cx: Responder<LoadSessionResponse>, _cx| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_load_session(agent, req, request_cx).await }
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = Arc::clone(&agent);
+                move |req: SetSessionConfigOptionRequest,
+                      request_cx: Responder<SetSessionConfigOptionResponse>,
+                      _cx| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_set_session_config_option(agent, req, request_cx).await }
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = Arc::clone(&agent);
+                move |req: PromptRequest, request_cx: Responder<PromptResponse>, cx| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_prompt(agent, req, request_cx, cx).await }
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_notification(
+            {
+                let agent = Arc::clone(&agent);
+                move |notif: CancelNotification, _cx: ConnectionTo<Client>| {
+                    let agent = Arc::clone(&agent);
+                    async move { handle_cancel(agent, notif).await }
+                }
+            },
+            on_receive_notification!(),
+        )
+}
 
-        let supports_streaming = provider.supports_streaming();
-        let reasoning_effort = if provider.supports_reasoning_effort(&session_model) {
-            Some(session_reasoning_effort)
-        } else {
-            None
+async fn handle_initialize(
+    agent: Arc<ZedAgent>,
+    args: InitializeRequest,
+    request_cx: Responder<InitializeResponse>,
+) -> Result<(), SdkError> {
+    let caps = args.client_capabilities.clone();
+    if let Ok(mut guard) = agent.client_capabilities.lock() {
+        *guard = Some(caps);
+    }
+    if args.protocol_version != acp::ProtocolVersion::V1 {
+        warn!(
+            requested = %args.protocol_version,
+            "{}",
+            INITIALIZE_VERSION_MISMATCH_LOG
+        );
+    }
+    let mut capabilities = acp::AgentCapabilities::default();
+    capabilities.prompt_capabilities.embedded_context = true;
+    capabilities.prompt_capabilities.image = true;
+    capabilities.prompt_capabilities.audio = true;
+    capabilities.mcp_capabilities.http = true;
+    capabilities.mcp_capabilities.sse = false;
+    capabilities.load_session = true;
+
+    let auth_methods = build_auth_methods();
+    let response = InitializeResponse::new(acp::ProtocolVersion::V1)
+        .agent_capabilities(capabilities)
+        .agent_info(agent_implementation_info(agent.title()))
+        .auth_methods(auth_methods);
+    request_cx.respond(response)
+}
+
+fn build_auth_methods() -> Vec<acp::AuthMethod> {
+    let mut methods = vec![
+        acp::AuthMethod::Agent(
+            acp::AuthMethodAgent::new("oauth-openai", "OpenAI OAuth")
+                .description("Authenticate with OpenAI via OAuth 2.0 with PKCE"),
+        ),
+        acp::AuthMethod::Agent(
+            acp::AuthMethodAgent::new("oauth-openrouter", "OpenRouter OAuth")
+                .description("Authenticate with OpenRouter via OAuth 2.0 with PKCE"),
+        ),
+    ];
+    methods.push(acp::AuthMethod::Terminal(
+        acp::AuthMethodTerminal::new("terminal-login", "Terminal Login")
+            .description("Interactive terminal-based authentication via vtcode login command")
+            .args(vec!["login".to_string()]),
+    ));
+    methods.push(acp::AuthMethod::EnvVar(acp::AuthMethodEnvVar::new(
+        "env-api-keys",
+        "API Key",
+        env_api_keys(),
+    )));
+    methods.push(acp::AuthMethod::EnvVar(acp::AuthMethodEnvVar::new(
+        "env-base-urls",
+        "API Base URL",
+        env_base_urls(),
+    )));
+    methods
+}
+
+fn env_api_keys() -> Vec<acp::AuthEnvVar> {
+    const ENTRIES: &[(&str, &str, bool)] = &[
+        ("OPENAI_API_KEY", "OpenAI", false),
+        ("ANTHROPIC_API_KEY", "Anthropic", false),
+        ("GEMINI_API_KEY", "Google Gemini", false),
+        ("OPENROUTER_API_KEY", "OpenRouter", false),
+        ("DEEPSEEK_API_KEY", "DeepSeek", false),
+        ("ZAI_API_KEY", "Z.AI", false),
+        ("MOONSHOT_API_KEY", "Moonshot", false),
+        ("MINIMAX_API_KEY", "MiniMax", false),
+        ("GROQ_API_KEY", "Groq", false),
+        ("XAI_API_KEY", "xAI", false),
+        ("COHERE_API_KEY", "Cohere", false),
+        ("HF_TOKEN", "Hugging Face", false),
+        ("MISTRAL_API_KEY", "Mistral", false),
+        ("GOOGLE_API_KEY", "Google (alt)", true),
+        ("OLLAMA_API_KEY", "Ollama", true),
+        ("LMSTUDIO_API_KEY", "LM Studio", true),
+    ];
+    ENTRIES
+        .iter()
+        .map(|(name, label, optional)| {
+            let mut var = acp::AuthEnvVar::new(*name).label(*label);
+            if *optional {
+                var = var.optional(true);
+            }
+            var
+        })
+        .collect()
+}
+
+fn env_base_urls() -> Vec<acp::AuthEnvVar> {
+    const ENTRIES: &[(&str, &str)] = &[
+        ("OPENAI_BASE_URL", "OpenAI"),
+        ("ANTHROPIC_BASE_URL", "Anthropic"),
+        ("GEMINI_BASE_URL", "Gemini"),
+        ("OPENROUTER_BASE_URL", "OpenRouter"),
+        ("DEEPSEEK_BASE_URL", "DeepSeek"),
+        ("ZAI_BASE_URL", "Z.AI"),
+        ("MOONSHOT_BASE_URL", "Moonshot"),
+        ("MINIMAX_BASE_URL", "MiniMax"),
+        ("XAI_BASE_URL", "xAI"),
+        ("HUGGINGFACE_BASE_URL", "Hugging Face"),
+        ("OLLAMA_BASE_URL", "Ollama"),
+        ("LMSTUDIO_BASE_URL", "LM Studio"),
+    ];
+    ENTRIES
+        .iter()
+        .map(|(name, label)| acp::AuthEnvVar::new(*name).label(*label).optional(true))
+        .collect()
+}
+
+async fn handle_authenticate(
+    _agent: Arc<ZedAgent>,
+    request_cx: Responder<AuthenticateResponse>,
+) -> Result<(), SdkError> {
+    request_cx.respond(AuthenticateResponse::default())
+}
+
+async fn handle_new_session(
+    agent: Arc<ZedAgent>,
+    req: NewSessionRequest,
+    request_cx: Responder<NewSessionResponse>,
+) -> Result<(), SdkError> {
+    let response = agent.new_session(req).await?;
+    request_cx.respond(response)
+}
+
+async fn handle_load_session(
+    agent: Arc<ZedAgent>,
+    req: LoadSessionRequest,
+    request_cx: Responder<LoadSessionResponse>,
+) -> Result<(), SdkError> {
+    let response = agent.load_session(req).await?;
+    request_cx.respond(response)
+}
+
+async fn handle_set_session_config_option(
+    agent: Arc<ZedAgent>,
+    req: SetSessionConfigOptionRequest,
+    request_cx: Responder<SetSessionConfigOptionResponse>,
+) -> Result<(), SdkError> {
+    let response = agent.set_session_config_option(req).await?;
+    request_cx.respond(response)
+}
+
+async fn handle_cancel(agent: Arc<ZedAgent>, notif: CancelNotification) -> Result<(), SdkError> {
+    if let Some(session) = agent.session_handle(&notif.session_id) {
+        session
+            .cancel_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+async fn handle_prompt(
+    agent: Arc<ZedAgent>,
+    req: PromptRequest,
+    request_cx: Responder<PromptResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<(), SdkError> {
+    // The prompt handler drives several SACP RPCs (`fs/read_text_file`,
+    // `terminal/create`, `session/request_permission`) from inside the
+    // prompt loop. Those would deadlock if called directly on the
+    // dispatch loop's task, so we spawn the work onto a child task that
+    // is allowed to use `block_task()`. The canonical `ConnectionHandle`
+    // was registered globally by `run_acp_agent` — we do not re-wrap
+    // `cx` into a new handle here, that would race with concurrent
+    // prompts on the agent's internal `Mutex<Option<Arc<ConnectionHandle>>>`.
+    cx.spawn({
+        let agent = Arc::clone(&agent);
+        async move {
+            let result = run_prompt(agent, req).await;
+            if let Err(error) = request_cx.respond_with_result(result) {
+                warn!(%error, "Failed to send prompt response");
+            }
+            Ok(())
+        }
+    })
+    .map_err(|error| SdkError::internal_error().data(error.to_string()))?;
+    Ok(())
+}
+
+async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptResponse, SdkError> {
+    let Some(session) = agent.session_handle(&args.session_id) else {
+        return Err(SdkError::invalid_params().data(json!({ "reason": "unknown_session" })));
+    };
+
+    session
+        .cancel_flag
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+
+    let user_message = agent.resolve_prompt(&args.session_id, &args.prompt).await?;
+
+    agent.push_message(&session, Message::user(user_message.clone()));
+
+    let (session_provider_name, session_model, session_reasoning_effort) = {
+        let data = session
+            .data
+            .lock()
+            .map_err(|_| SdkError::internal_error())?;
+        (
+            data.provider.clone(),
+            data.model.clone(),
+            data.reasoning_effort,
+        )
+    };
+
+    let session_api_key = resolve_api_key_for_provider(&agent, &session_provider_name);
+    let provider = create_provider_with_config(
+        &session_provider_name,
+        ProviderConfig {
+            api_key: Some(session_api_key),
+            openai_chatgpt_auth: if session_provider_name.eq_ignore_ascii_case("openai") {
+                agent.config.openai_chatgpt_auth.clone()
+            } else {
+                None
+            },
+            copilot_auth: None,
+            base_url: None,
+            model: Some(session_model.clone()),
+            prompt_cache: Some(agent.config.prompt_cache.clone()),
+            timeouts: None,
+            openai: None,
+            anthropic: None,
+            model_behavior: agent.config.model_behavior.clone(),
+            workspace_root: Some(agent.config.workspace.clone()),
+        },
+    )
+    .map_err(|err| SdkError::internal_error().data(err.to_string()))?;
+
+    let supports_streaming = provider.supports_streaming();
+    let reasoning_effort = if provider.supports_reasoning_effort(&session_model) {
+        Some(session_reasoning_effort)
+    } else {
+        None
+    };
+
+    let mut stop_reason = acp::StopReason::EndTurn;
+    let mut assistant_message = String::with_capacity(4096);
+    let client_supports_read_text_file = agent.client_supports_read_text_file();
+    let provider_supports_tools = provider.supports_tools(&session_model);
+    let mut primary_agent = {
+        let data = session
+            .data
+            .lock()
+            .map_err(|_| SdkError::internal_error())?;
+        data.primary_agent.clone()
+    };
+    let availability = agent.tool_availability(
+        provider_supports_tools,
+        client_supports_read_text_file,
+        &session_provider_name,
+        &session_model,
+    );
+    let mut enabled_tools = Vec::with_capacity(5);
+    let mut disabled_tools = Vec::with_capacity(5);
+    for (tool, runtime) in availability {
+        match runtime {
+            super::super::types::ToolRuntime::Enabled => enabled_tools.push(tool),
+            super::super::types::ToolRuntime::Disabled(reason) => {
+                disabled_tools.push((tool, reason))
+            }
+        }
+    }
+    disabled_tools.sort_by_key(|(tool, _)| tool.sort_key());
+
+    let mut has_local_tools = agent.local_tools_available(&primary_agent);
+    let mut tools_allowed =
+        provider_supports_tools && (!enabled_tools.is_empty() || has_local_tools);
+    let mut tool_definitions = agent
+        .tool_definitions(provider_supports_tools, &enabled_tools, &primary_agent)
+        .map(std::sync::Arc::new);
+    let mut messages = agent.resolved_messages(&session);
+    let allow_streaming = supports_streaming && !tools_allowed;
+
+    let mut plan = PlanProgress::new(tools_allowed);
+    if plan.has_entries() {
+        let _ = agent.send_plan_update(&args.session_id, &plan).await;
+        if plan.complete_analysis() {
+            let _ = agent.send_plan_update(&args.session_id, &plan).await;
+        }
+    }
+
+    if allow_streaming {
+        let request = LLMRequest {
+            messages: messages.clone(),
+            model: session_model.clone(),
+            stream: true,
+            tools: tool_definitions,
+            tool_choice: agent.tool_choice(tools_allowed),
+            reasoning_effort,
+            ..Default::default()
         };
 
-        let mut stop_reason = acp::StopReason::EndTurn;
-        let mut assistant_message = String::with_capacity(4096);
-        let client_supports_read_text_file = self.client_supports_read_text_file();
-        let provider_supports_tools = provider.supports_tools(&session_model);
-        let mut primary_agent = session.data.borrow().primary_agent.clone();
-        let availability = self.tool_availability(
-            provider_supports_tools,
-            client_supports_read_text_file,
-            &session_provider_name,
-            &session_model,
-        );
-        let mut enabled_tools = Vec::with_capacity(5);
-        let mut disabled_tools = Vec::with_capacity(5);
-        for (tool, runtime) in availability {
-            match runtime {
-                ToolRuntime::Enabled => enabled_tools.push(tool),
-                ToolRuntime::Disabled(reason) => disabled_tools.push((tool, reason)),
+        let mut stream = provider
+            .stream(request)
+            .await
+            .map_err(|err| SdkError::internal_error().data(err.to_string()))?;
+
+        let _ = agent
+            .advance_plan_to_response(&args.session_id, &mut plan)
+            .await;
+
+        while let Some(event) = stream.next().await {
+            let event = event.map_err(|err| SdkError::internal_error().data(err.to_string()))?;
+
+            if session
+                .cancel_flag
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                stop_reason = acp::StopReason::Cancelled;
+                break;
+            }
+
+            match event {
+                LLMStreamEvent::Token { delta } => {
+                    if !delta.is_empty() {
+                        assistant_message.push_str(&delta);
+                        let chunk = text_chunk(delta);
+                        let _ = agent
+                            .send_update(
+                                &args.session_id,
+                                acp::SessionUpdate::AgentMessageChunk(chunk),
+                            )
+                            .await;
+                    }
+                }
+                LLMStreamEvent::Reasoning { delta } => {
+                    if !delta.is_empty() {
+                        let chunk = text_chunk(delta);
+                        let _ = agent
+                            .send_update(
+                                &args.session_id,
+                                acp::SessionUpdate::AgentThoughtChunk(chunk),
+                            )
+                            .await;
+                    }
+                }
+                LLMStreamEvent::ReasoningStage { .. } => {}
+                LLMStreamEvent::ReasoningSignature { .. } => {}
+                LLMStreamEvent::Completed { response } => {
+                    if assistant_message.is_empty()
+                        && let Some(content) = response.content
+                    {
+                        if !content.is_empty() {
+                            let chunk = text_chunk(content.clone());
+                            let _ = agent
+                                .send_update(
+                                    &args.session_id,
+                                    acp::SessionUpdate::AgentMessageChunk(chunk),
+                                )
+                                .await;
+                        }
+                        assistant_message.push_str(&content);
+                    }
+
+                    if let Some(reasoning) =
+                        response.reasoning.filter(|reasoning| !reasoning.is_empty())
+                    {
+                        let chunk = text_chunk(reasoning);
+                        let _ = agent
+                            .send_update(
+                                &args.session_id,
+                                acp::SessionUpdate::AgentThoughtChunk(chunk),
+                            )
+                            .await;
+                    }
+
+                    stop_reason = ZedAgent::stop_reason_from_finish(response.finish_reason);
+                    break;
+                }
             }
         }
-        disabled_tools.sort_by_key(|(tool, _)| tool.sort_key());
-        if !disabled_tools.is_empty() && self.should_send_tool_notice(&session) {
-            for (tool, reason) in &disabled_tools {
-                self.log_tool_disable_reason(*tool, reason);
+    } else {
+        let mut tool_loop_count = 0usize;
+        loop {
+            if session
+                .cancel_flag
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                stop_reason = acp::StopReason::Cancelled;
+                break;
             }
-            self.send_tool_disable_notices(&args.session_id, &disabled_tools)
-                .await?;
-            self.mark_tool_notice_sent(&session);
-        }
 
-        let mut has_local_tools = self.local_tools_available(&primary_agent);
-        let mut tools_allowed =
-            provider_supports_tools && (!enabled_tools.is_empty() || has_local_tools);
-        let mut tool_definitions = self
-            .tool_definitions(provider_supports_tools, &enabled_tools, &primary_agent)
-            .map(std::sync::Arc::new);
-        let mut messages = self.resolved_messages(&session);
-        let allow_streaming = supports_streaming && !tools_allowed;
-
-        tracing::debug!(
-            primary_agent = %primary_agent,
-            tools_allowed = tools_allowed,
-            has_local_tools = has_local_tools,
-            acp_tools_count = enabled_tools.len(),
-            local_tools_count = tool_definitions.as_ref().map_or(0, |t| t.len()),
-            "Tool configuration for ACP session"
-        );
-
-        let mut plan = PlanProgress::new(tools_allowed);
-        if plan.has_entries() {
-            self.send_plan_update(&args.session_id, &plan).await?;
-            if plan.complete_analysis() {
-                self.send_plan_update(&args.session_id, &plan).await?;
-            }
-        }
-
-        if allow_streaming {
             let request = LLMRequest {
                 messages: messages.clone(),
                 model: session_model.clone(),
-                stream: true,
-                tools: tool_definitions,
-                tool_choice: self.tool_choice(tools_allowed),
+                tools: tool_definitions.clone(),
+                tool_choice: agent.tool_choice(tools_allowed),
                 reasoning_effort,
                 ..Default::default()
             };
 
-            let mut stream = provider
-                .stream(request)
+            let response = provider
+                .generate(request)
                 .await
-                .map_err(acp::Error::into_internal_error)?;
+                .map_err(|err| SdkError::internal_error().data(err.to_string()))?;
 
-            self.advance_plan_to_response(&args.session_id, &mut plan)
-                .await?;
-
-            while let Some(event) = stream.next().await {
-                let event = event.map_err(acp::Error::into_internal_error)?;
-
-                if session.cancel_flag.get() {
-                    stop_reason = acp::StopReason::Cancelled;
-                    break;
-                }
-
-                match event {
-                    LLMStreamEvent::Token { delta } => {
-                        if !delta.is_empty() {
-                            assistant_message.push_str(&delta);
-                            let chunk = text_chunk(delta);
-                            self.send_update(
-                                &args.session_id,
-                                acp::SessionUpdate::AgentMessageChunk(chunk),
-                            )
-                            .await?;
-                        }
-                    }
-                    LLMStreamEvent::Reasoning { delta } => {
-                        if !delta.is_empty() {
-                            let chunk = text_chunk(delta);
-                            self.send_update(
-                                &args.session_id,
-                                acp::SessionUpdate::AgentThoughtChunk(chunk),
-                            )
-                            .await?;
-                        }
-                    }
-                    LLMStreamEvent::ReasoningStage { .. } => {
-                        // ACP protocol doesn't currently support specific reasoning stages
-                    }
-                    LLMStreamEvent::ReasoningSignature { .. } => {
-                        // Signature field not currently processed in ACP stream
-                    }
-                    LLMStreamEvent::Completed { response } => {
-                        if assistant_message.is_empty()
-                            && let Some(content) = response.content
-                        {
-                            if !content.is_empty() {
-                                let chunk = text_chunk(content.clone());
-                                self.send_update(
-                                    &args.session_id,
-                                    acp::SessionUpdate::AgentMessageChunk(chunk),
-                                )
-                                .await?;
-                            }
-                            assistant_message.push_str(&content);
-                        }
-
-                        if let Some(reasoning) =
-                            response.reasoning.filter(|reasoning| !reasoning.is_empty())
-                        {
-                            let chunk = text_chunk(reasoning);
-                            self.send_update(
-                                &args.session_id,
-                                acp::SessionUpdate::AgentThoughtChunk(chunk),
-                            )
-                            .await?;
-                        }
-
-                        stop_reason = Self::stop_reason_from_finish(response.finish_reason);
-                        break;
-                    }
-                }
+            if session
+                .cancel_flag
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                stop_reason = acp::StopReason::Cancelled;
+                break;
             }
-        } else {
-            let mut tool_loop_count = 0usize;
-            loop {
-                if session.cancel_flag.get() {
-                    stop_reason = acp::StopReason::Cancelled;
-                    break;
-                }
 
-                let request = LLMRequest {
-                    messages: messages.clone(),
-                    model: session_model.clone(),
-                    tools: tool_definitions.clone(),
-                    tool_choice: self.tool_choice(tools_allowed),
-                    reasoning_effort,
-                    ..Default::default()
-                };
-
-                let response = provider
-                    .generate(request)
-                    .await
-                    .map_err(acp::Error::into_internal_error)?;
-
-                if session.cancel_flag.get() {
-                    stop_reason = acp::StopReason::Cancelled;
-                    break;
-                }
-
-                if tools_allowed
-                    && let Some(tool_calls) = response
-                        .tool_calls
-                        .clone()
-                        .filter(|calls| !calls.is_empty())
-                {
-                    if self.tool_loop_limit_reached(tool_loop_count) {
-                        let message = self.tool_loop_limit_message();
-                        self.advance_plan_to_response(&args.session_id, &mut plan)
-                            .await?;
-                        self.send_update(
+            if tools_allowed
+                && let Some(tool_calls) = response
+                    .tool_calls
+                    .clone()
+                    .filter(|calls| !calls.is_empty())
+            {
+                if agent.tool_loop_limit_reached(tool_loop_count) {
+                    let message = agent.tool_loop_limit_message();
+                    let _ = agent
+                        .advance_plan_to_response(&args.session_id, &mut plan)
+                        .await;
+                    let _ = agent
+                        .send_update(
                             &args.session_id,
                             acp::SessionUpdate::AgentMessageChunk(text_chunk(message.clone())),
                         )
-                        .await?;
-                        assistant_message = message;
-                        stop_reason = acp::StopReason::EndTurn;
+                        .await;
+                    assistant_message = message;
+                    stop_reason = acp::StopReason::EndTurn;
+                    break;
+                }
+                tool_loop_count = tool_loop_count.saturating_add(1);
+                if plan.start_context() {
+                    let _ = agent.send_plan_update(&args.session_id, &plan).await;
+                }
+                agent.push_message(
+                    &session,
+                    Message::assistant_with_tools(
+                        response.content.clone().unwrap_or_default(),
+                        tool_calls.clone(),
+                    ),
+                );
+                let tool_results = match agent
+                    .execute_tool_calls(&session, &args.session_id, &tool_calls)
+                    .await
+                {
+                    Ok(results) => results,
+                    Err(error) => {
+                        warn!(%error, "Tool execution failed");
                         break;
                     }
-                    tool_loop_count = tool_loop_count.saturating_add(1);
-                    if plan.start_context() {
-                        self.send_plan_update(&args.session_id, &plan).await?;
-                    }
-                    self.push_message(
+                };
+                if plan.complete_context() {
+                    let _ = agent.send_plan_update(&args.session_id, &plan).await;
+                }
+                for result in tool_results {
+                    agent.push_message(
                         &session,
-                        Message::assistant_with_tools(
-                            response.content.clone().unwrap_or_default(),
-                            tool_calls.clone(),
-                        ),
+                        Message::tool_response(result.tool_call_id, result.llm_response),
                     );
-                    let tool_results = self
-                        .execute_tool_calls(&session, &args.session_id, &tool_calls)
-                        .await?;
-                    if plan.complete_context() {
-                        self.send_plan_update(&args.session_id, &plan).await?;
-                    }
-                    for result in tool_results {
-                        self.push_message(
-                            &session,
-                            Message::tool_response(result.tool_call_id, result.llm_response),
-                        );
-                    }
-                    if session.cancel_flag.get() {
+                }
+                if session
+                    .cancel_flag
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    stop_reason = acp::StopReason::Cancelled;
+                    break;
+                }
+                messages = agent.resolved_messages(&session);
+                primary_agent = {
+                    let data = session
+                        .data
+                        .lock()
+                        .map_err(|_| SdkError::internal_error())?;
+                    data.primary_agent.clone()
+                };
+                has_local_tools = agent.local_tools_available(&primary_agent);
+                tools_allowed =
+                    provider_supports_tools && (!enabled_tools.is_empty() || has_local_tools);
+                tool_definitions = agent
+                    .tool_definitions(provider_supports_tools, &enabled_tools, &primary_agent)
+                    .map(std::sync::Arc::new);
+                continue;
+            }
+
+            if let Some(content) = &response.content {
+                if !content.is_empty() {
+                    let _ = agent
+                        .advance_plan_to_response(&args.session_id, &mut plan)
+                        .await;
+                    if session
+                        .cancel_flag
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    {
                         stop_reason = acp::StopReason::Cancelled;
                         break;
                     }
-                    messages = self.resolved_messages(&session);
-                    primary_agent = session.data.borrow().primary_agent.clone();
-                    has_local_tools = self.local_tools_available(&primary_agent);
-                    tools_allowed =
-                        provider_supports_tools && (!enabled_tools.is_empty() || has_local_tools);
-                    tool_definitions = self
-                        .tool_definitions(provider_supports_tools, &enabled_tools, &primary_agent)
-                        .map(std::sync::Arc::new);
-                    continue;
-                }
-
-                if let Some(content) = &response.content {
-                    if !content.is_empty() {
-                        self.advance_plan_to_response(&args.session_id, &mut plan)
-                            .await?;
-                        if session.cancel_flag.get() {
-                            stop_reason = acp::StopReason::Cancelled;
-                            break;
-                        }
-                        let chunk = text_chunk(content.clone());
-                        self.send_update(
+                    let chunk = text_chunk(content.clone());
+                    let _ = agent
+                        .send_update(
                             &args.session_id,
                             acp::SessionUpdate::AgentMessageChunk(chunk),
                         )
-                        .await?;
-                    }
-                    assistant_message = content.clone();
+                        .await;
                 }
+                assistant_message = content.clone();
+            }
 
-                if let Some(reasoning) =
-                    response.reasoning.filter(|reasoning| !reasoning.is_empty())
+            if let Some(reasoning) = response.reasoning.filter(|reasoning| !reasoning.is_empty()) {
+                if session
+                    .cancel_flag
+                    .load(std::sync::atomic::Ordering::Relaxed)
                 {
-                    if session.cancel_flag.get() {
-                        stop_reason = acp::StopReason::Cancelled;
-                        break;
-                    }
-                    let chunk = text_chunk(reasoning);
-                    self.send_update(
+                    stop_reason = acp::StopReason::Cancelled;
+                    break;
+                }
+                let chunk = text_chunk(reasoning);
+                let _ = agent
+                    .send_update(
                         &args.session_id,
                         acp::SessionUpdate::AgentThoughtChunk(chunk),
                     )
-                    .await?;
-                }
-
-                stop_reason = Self::stop_reason_from_finish(response.finish_reason);
-                break;
+                    .await;
             }
-        }
 
-        if stop_reason != acp::StopReason::Cancelled && !assistant_message.is_empty() {
-            self.push_message(&session, Message::assistant(assistant_message));
+            stop_reason = ZedAgent::stop_reason_from_finish(response.finish_reason);
+            break;
         }
-
-        if stop_reason != acp::StopReason::Cancelled {
-            if plan.complete_context() {
-                self.send_plan_update(&args.session_id, &plan).await?;
-            }
-            if plan.complete_response() {
-                self.send_plan_update(&args.session_id, &plan).await?;
-            }
-        }
-
-        Ok(acp::PromptResponse::new(stop_reason))
     }
 
-    async fn set_session_config_option(
-        &self,
-        args: acp::SetSessionConfigOptionRequest,
-    ) -> Result<acp::SetSessionConfigOptionResponse, acp::Error> {
-        let Some(session) = self.session_handle(&args.session_id) else {
-            return Err(acp::Error::invalid_params().data(json!({ "reason": "unknown_session" })));
-        };
-
-        match args.config_id.0.as_ref() {
-            SESSION_CONFIG_PRIMARY_AGENT_ID => {
-                let Some(primary_agent) = self.primary_agents.resolve_id(args.value.0.as_ref())
-                else {
-                    return Err(acp::Error::invalid_params().data(json!({
-                        "reason": "unknown_primary_agent",
-                        "value": args.value.0,
-                    })));
-                };
-
-                if self.update_session_primary_agent(&session, primary_agent.to_string()) {
-                    let config_options = self.current_session_config_options(&session);
-                    self.send_update(
-                        &args.session_id,
-                        acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(
-                            config_options,
-                        )),
-                    )
-                    .await?;
-                }
-            }
-            SESSION_CONFIG_THOUGHT_LEVEL_ID => {
-                let (session_provider, session_model) = {
-                    let data = session.data.borrow();
-                    (data.provider.clone(), data.model.clone())
-                };
-                if !self.model_supports_thought_level(&session_provider, &session_model) {
-                    return Err(acp::Error::invalid_params().data(json!({
-                        "reason": "unsupported_config_option",
-                        "config_id": args.config_id.0,
-                    })));
-                }
-                let Some(reasoning_effort) = ReasoningEffortLevel::parse(args.value.0.as_ref())
-                else {
-                    return Err(acp::Error::invalid_params().data(json!({
-                        "reason": "unknown_thought_level",
-                        "value": args.value.0,
-                    })));
-                };
-
-                if self.update_session_reasoning_effort(&session, reasoning_effort) {
-                    let config_options = self.current_session_config_options(&session);
-                    self.send_update(
-                        &args.session_id,
-                        acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(
-                            config_options,
-                        )),
-                    )
-                    .await?;
-                }
-            }
-            SESSION_CONFIG_PROVIDER_ID => {
-                let provider = args.value.0.as_ref().trim().to_lowercase();
-                let current_provider = session.data.borrow().provider.clone();
-                if provider.is_empty() || !self.supports_provider(&provider, &current_provider) {
-                    return Err(acp::Error::invalid_params().data(json!({
-                        "reason": "unknown_provider",
-                        "value": args.value.0,
-                    })));
-                }
-
-                let current_model = session.data.borrow().model.clone();
-                let resolved_model = if self.provider_supports_model(&provider, &current_model) {
-                    current_model
-                } else {
-                    self.provider_default_model(&provider).ok_or_else(|| {
-                        acp::Error::invalid_params().data(json!({
-                            "reason": "provider_has_no_default_model",
-                            "provider": provider,
-                        }))
-                    })?
-                };
-
-                if self.update_session_provider_and_model(
-                    &session,
-                    provider.to_string(),
-                    resolved_model,
-                ) {
-                    let config_options = self.current_session_config_options(&session);
-                    self.send_update(
-                        &args.session_id,
-                        acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(
-                            config_options,
-                        )),
-                    )
-                    .await?;
-                }
-            }
-            SESSION_CONFIG_MODEL_ID => {
-                let model = args.value.0.as_ref().trim();
-                if model.is_empty() {
-                    return Err(acp::Error::invalid_params().data(json!({
-                        "reason": "unknown_model",
-                        "value": args.value.0,
-                    })));
-                }
-                let provider = session.data.borrow().provider.clone();
-                if !self.provider_supports_model(&provider, model) {
-                    return Err(acp::Error::invalid_params().data(json!({
-                        "reason": "model_not_supported_for_provider",
-                        "provider": provider,
-                        "model": model,
-                    })));
-                }
-
-                if self.update_session_provider_and_model(&session, provider, model.to_string()) {
-                    let config_options = self.current_session_config_options(&session);
-                    self.send_update(
-                        &args.session_id,
-                        acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(
-                            config_options,
-                        )),
-                    )
-                    .await?;
-                }
-            }
-            _ => {
-                return Err(acp::Error::invalid_params().data(json!({
-                    "reason": "unknown_config_option",
-                    "config_id": args.config_id.0,
-                })));
-            }
-        }
-
-        Ok(acp::SetSessionConfigOptionResponse::new(
-            self.current_session_config_options(&session),
-        ))
+    if stop_reason != acp::StopReason::Cancelled && !assistant_message.is_empty() {
+        agent.push_message(&session, Message::assistant(assistant_message));
     }
 
-    async fn cancel(&self, args: acp::CancelNotification) -> Result<(), acp::Error> {
-        if let Some(session) = self.session_handle(&args.session_id) {
-            session.cancel_flag.set(true);
+    if stop_reason != acp::StopReason::Cancelled {
+        if plan.complete_context() {
+            let _ = agent.send_plan_update(&args.session_id, &plan).await;
         }
-        Ok(())
+        if plan.complete_response() {
+            let _ = agent.send_plan_update(&args.session_id, &plan).await;
+        }
     }
+
+    Ok(PromptResponse::new(stop_reason))
 }
 
-impl ZedAgent {
-    async fn advance_plan_to_response(
-        &self,
-        session_id: &acp::SessionId,
-        plan: &mut PlanProgress,
-    ) -> Result<(), acp::Error> {
-        if plan.has_context_step() && !plan.context_completed() && plan.complete_context() {
-            self.send_plan_update(session_id, plan).await?;
-        }
-        if plan.start_response() {
-            self.send_plan_update(session_id, plan).await?;
-        }
-
-        Ok(())
+fn resolve_api_key_for_provider(agent: &ZedAgent, provider: &str) -> String {
+    if provider.eq_ignore_ascii_case(&agent.config.provider) && !agent.config.api_key.is_empty() {
+        return agent.config.api_key.clone();
     }
 
-    fn resolve_api_key_for_provider(&self, provider: &str) -> String {
-        if provider.eq_ignore_ascii_case(&self.config.provider) && !self.config.api_key.is_empty() {
-            return self.config.api_key.clone();
-        }
-
-        get_api_key(provider, &ApiKeySources::default()).unwrap_or_default()
-    }
+    get_api_key(provider, &ApiKeySources::default()).unwrap_or_default()
 }

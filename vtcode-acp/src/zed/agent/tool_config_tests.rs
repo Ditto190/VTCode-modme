@@ -1,14 +1,13 @@
 use super::ZedAgent;
 use crate::tooling::ToolDescriptor;
 use crate::zed::helpers::PrimaryAgentCatalog;
-use crate::zed::types::{NotificationEnvelope, ToolRuntime};
+use crate::zed::types::ToolRuntime;
 use assert_fs::TempDir;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use vtcode_config::{SubagentDiscoveryInput, discover_subagents};
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::core::PromptCachingConfig;
@@ -54,12 +53,6 @@ async fn build_agent_with_tools_config(workspace: &Path, tools_config: ToolsConf
     zed_config.tools.list_files = true;
     zed_config.tools.read_file = false;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<NotificationEnvelope>();
-    tokio::spawn(async move {
-        while let Some(envelope) = rx.recv().await {
-            let _ = envelope.completion.send(());
-        }
-    });
     let mut discovery_input = SubagentDiscoveryInput::new(workspace.to_path_buf());
     discovery_input.include_user_agents = false;
     let discovered = discover_subagents(&discovery_input).expect("discover primary agents");
@@ -72,7 +65,6 @@ async fn build_agent_with_tools_config(workspace: &Path, tools_config: ToolsConf
         tools_config,
         CommandsConfig::default(),
         String::new(),
-        tx,
         Some("Zed".to_string()),
         primary_agents,
     )

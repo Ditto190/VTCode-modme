@@ -1,8 +1,7 @@
 use crate::acp;
-use std::cell::{Cell, RefCell};
 use std::mem::discriminant;
-use std::rc::Rc;
-use tokio::sync::oneshot;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use tokio::time::Instant;
 use vtcode_core::config::types::ReasoningEffortLevel;
 use vtcode_core::core::threads::ThreadRuntimeHandle;
@@ -154,24 +153,23 @@ pub(crate) struct ToolCallResult {
     pub(crate) llm_response: String,
 }
 
+/// Per-session handle. `Arc`-shared so the agent can hand a clone to a
+/// spawned task that drives the prompt loop. The data is `Send + Sync`
+/// (backed by `Mutex`/`AtomicBool`) so it can travel across the
+/// `LocalSet`-less task boundary that SACP's `cx.spawn` enforces.
 #[derive(Clone)]
 pub(crate) struct SessionHandle {
-    pub(crate) data: Rc<RefCell<SessionData>>,
-    pub(crate) cancel_flag: Rc<Cell<bool>>,
+    pub(crate) data: Arc<Mutex<SessionData>>,
+    pub(crate) cancel_flag: Arc<AtomicBool>,
 }
 
 pub(crate) struct SessionData {
     pub(crate) _session_id: acp::SessionId,
     pub(crate) thread: ThreadRuntimeHandle,
-    pub(crate) tool_notice_sent: bool,
+    pub(crate) tool_notice_sent: AtomicBool,
     pub(crate) primary_agent: String,
     pub(crate) reasoning_effort: ReasoningEffortLevel,
     pub(crate) provider: String,
     pub(crate) model: String,
     pub(crate) last_tool_call_at: Option<Instant>,
-}
-
-pub(crate) struct NotificationEnvelope {
-    pub(crate) notification: acp::SessionNotification,
-    pub(crate) completion: oneshot::Sender<()>,
 }

@@ -1,14 +1,16 @@
 use super::ZedAgent;
 use crate::acp;
-use crate::acp::{AgentSideConnection, Client};
+use crate::acp::Error as SdkError;
 use crate::permissions::PermissionToolContext;
 use crate::reports::{
     TOOL_RESPONSE_KEY_STATUS, TOOL_RESPONSE_KEY_TOOL, TOOL_SUCCESS_LABEL, ToolExecutionReport,
 };
 use crate::tooling::{SupportedTool, ToolDescriptor};
+use crate::zed::connection::ConnectionHandle;
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::time::Instant;
 use vtcode_core::config::constants::tools;
 use vtcode_core::llm::provider::ToolCall as ProviderToolCall;
@@ -22,7 +24,7 @@ impl ZedAgent {
         session: &SessionHandle,
         session_id: &acp::SessionId,
         calls: &[ProviderToolCall],
-    ) -> Result<Vec<ToolCallResult>, acp::Error> {
+    ) -> Result<Vec<ToolCallResult>, SdkError> {
         if calls.is_empty() {
             return Ok(Vec::new());
         }
@@ -60,8 +62,8 @@ impl ZedAgent {
         session: &SessionHandle,
         session_id: &acp::SessionId,
         call: &ProviderToolCall,
-        client: &AgentSideConnection,
-    ) -> Result<ToolCallResult, acp::Error> {
+        client: &ConnectionHandle,
+    ) -> Result<ToolCallResult, SdkError> {
         let Some(func_ref) = call.function.as_ref() else {
             return Ok(Self::tool_call_result_from_report(
                 call,
@@ -105,11 +107,10 @@ impl ZedAgent {
         )
         .await?;
 
-        let permission_override = if let (false, Some(descriptor), Ok(args_value)) = (
-            session.cancel_flag.get(),
-            tool_descriptor,
-            args_value_result.as_ref(),
-        ) {
+        let cancel_active = session.cancel_flag.load(Ordering::Relaxed);
+        let permission_override = if let (false, Some(descriptor), Ok(args_value)) =
+            (cancel_active, tool_descriptor, args_value_result.as_ref())
+        {
             self.request_tool_permission(
                 client,
                 session_id,
@@ -123,8 +124,8 @@ impl ZedAgent {
             None
         };
 
-        if tool_descriptor.is_some() && permission_override.is_none() && !session.cancel_flag.get()
-        {
+        let cancel_after_permission = session.cancel_flag.load(Ordering::Relaxed);
+        if tool_descriptor.is_some() && permission_override.is_none() && !cancel_after_permission {
             let in_progress_fields =
                 acp::ToolCallUpdateFields::default().status(acp::ToolCallStatus::InProgress);
             let progress_update = acp::ToolCallUpdate::new(call_id.clone(), in_progress_fields);
@@ -137,7 +138,7 @@ impl ZedAgent {
 
         let mut report = if let Some(report) = permission_override {
             report
-        } else if session.cancel_flag.get() {
+        } else if cancel_after_permission {
             ToolExecutionReport::cancelled(&func_ref.name)
         } else {
             match (tool_descriptor, args_value_result) {
@@ -160,7 +161,9 @@ impl ZedAgent {
             }
         };
 
-        if session.cancel_flag.get() && matches!(report.status, acp::ToolCallStatus::Completed) {
+        if session.cancel_flag.load(Ordering::Relaxed)
+            && matches!(report.status, acp::ToolCallStatus::Completed)
+        {
             report = ToolExecutionReport::cancelled(&func_ref.name);
         }
 
@@ -177,7 +180,9 @@ impl ZedAgent {
         };
 
         let sleep_for = {
-            let data = session.data.borrow();
+            let Ok(data) = session.data.lock() else {
+                return;
+            };
             data.last_tool_call_at.and_then(|last_call| {
                 let elapsed = last_call.elapsed();
                 delay.checked_sub(elapsed)
@@ -188,7 +193,9 @@ impl ZedAgent {
             tokio::time::sleep(duration).await;
         }
 
-        session.data.borrow_mut().last_tool_call_at = Some(Instant::now());
+        if let Ok(mut data) = session.data.lock() {
+            data.last_tool_call_at = Some(Instant::now());
+        }
     }
 
     fn tool_name_from_call(call: &ProviderToolCall) -> &str {
@@ -226,7 +233,7 @@ impl ZedAgent {
         &self,
         descriptor: ToolDescriptor,
         tool_name: &str,
-        client: &AgentSideConnection,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         call_id: &str,
         args: &Value,
@@ -249,13 +256,13 @@ impl ZedAgent {
 
     async fn request_tool_permission(
         &self,
-        client: &AgentSideConnection,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         call: &acp::ToolCall,
         descriptor: ToolDescriptor,
         tool: PermissionToolContext<'_>,
         args: &Value,
-    ) -> Result<Option<ToolExecutionReport>, acp::Error> {
+    ) -> Result<Option<ToolExecutionReport>, SdkError> {
         match descriptor {
             ToolDescriptor::Acp(tool) => {
                 self.permission_prompter
@@ -273,7 +280,7 @@ impl ZedAgent {
     async fn execute_terminal_via_client(
         &self,
         tool_name: &str,
-        client: &AgentSideConnection,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         args: &Value,
     ) -> Option<ToolExecutionReport> {
@@ -299,7 +306,7 @@ impl ZedAgent {
     async fn launch_client_terminal(
         &self,
         tool_name: &str,
-        client: &AgentSideConnection,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         args: &Value,
     ) -> Result<ToolExecutionReport, String> {
@@ -351,7 +358,7 @@ impl ZedAgent {
     async fn execute_acp_tool(
         &self,
         tool: SupportedTool,
-        client: &AgentSideConnection,
+        client: &ConnectionHandle,
         session_id: &acp::SessionId,
         args: &Value,
     ) -> ToolExecutionReport {

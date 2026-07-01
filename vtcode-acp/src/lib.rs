@@ -19,8 +19,19 @@ pub mod transport;
 pub mod workspace;
 mod zed;
 
+/// Compatibility facade re-exporting the upstream
+/// [`agent_client_protocol`](https://docs.rs/agent-client-protocol) types that
+/// the ACP bridge uses internally. The protocol schema types now live under
+/// [`agent_client_protocol::schema::v1`], and the role/transport types are at
+/// the crate root. Re-exporting them here keeps the historical `acp::Foo` paths
+/// working while we migrate call sites to the new API.
 pub(crate) mod acp {
-    pub(crate) use agent_client_protocol::*;
+    pub(crate) use agent_client_protocol::schema::ProtocolVersion;
+    pub(crate) use agent_client_protocol::schema::v1::*;
+    // The role structs (`Agent`, `Client`) live at the crate root in 1.0+ and
+    // are not part of the schema module. Pull them in for downstream code that
+    // still refers to the old `acp::Agent` / `acp::Client` names.
+    pub(crate) use agent_client_protocol::{Agent, Client, Error as SdkError};
 }
 
 pub use capabilities::{
@@ -49,19 +60,25 @@ pub use messages::{AcpMessage, AcpRequest, AcpResponse};
 
 use std::sync::{Arc, OnceLock};
 
-static ACP_CONNECTION: OnceLock<Arc<acp::AgentSideConnection>> = OnceLock::new();
+/// Connection context handle for in-handler notification sending.
+///
+/// In ACP 1.0+ the agent emits session notifications by calling
+/// `cx.send_notification(...)` from inside a request handler. To preserve the
+/// original "send update from any method" flow, the bridge stores the active
+/// [`ConnectionHandle`] in a [`OnceLock`] for the lifetime of the connection.
+static ACP_CONNECTION: OnceLock<Arc<crate::zed::connection::ConnectionHandle>> = OnceLock::new();
 
 /// Register the global ACP connection from the host protocol.
 ///
 /// Returns `Err` with the provided connection if one has already been
 /// registered. Callers may drop the returned connection or reuse it as needed.
 pub fn register_acp_connection(
-    connection: Arc<acp::AgentSideConnection>,
-) -> Result<(), Arc<acp::AgentSideConnection>> {
+    connection: Arc<crate::zed::connection::ConnectionHandle>,
+) -> Result<(), Arc<crate::zed::connection::ConnectionHandle>> {
     ACP_CONNECTION.set(connection)
 }
 
 /// Retrieve the registered ACP connection, if available.
-pub fn acp_connection() -> Option<Arc<acp::AgentSideConnection>> {
+pub fn acp_connection() -> Option<Arc<crate::zed::connection::ConnectionHandle>> {
     ACP_CONNECTION.get().cloned()
 }

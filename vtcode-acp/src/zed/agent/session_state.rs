@@ -1,11 +1,9 @@
 use super::ZedAgent;
 use crate::acp;
-use crate::acp::AgentSideConnection;
-use crate::acp_connection;
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use tracing::warn;
 use vtcode_core::config::models::{ModelId, Provider};
 use vtcode_core::config::types::ReasoningEffortLevel;
 use vtcode_core::core::threads::{ThreadBootstrap, build_thread_archive_metadata};
@@ -112,23 +110,24 @@ impl ZedAgent {
         let model = self.session_model_for_thread(&thread);
         let primary_agent = self.session_primary_agent_for_thread(&thread);
         SessionHandle {
-            data: Rc::new(RefCell::new(SessionData {
+            data: Arc::new(Mutex::new(SessionData {
                 _session_id: session_id,
                 thread,
-                tool_notice_sent: false,
+                tool_notice_sent: std::sync::atomic::AtomicBool::new(false),
                 primary_agent,
                 reasoning_effort,
                 provider,
                 model,
                 last_tool_call_at: None,
             })),
-            cancel_flag: Rc::new(Cell::new(false)),
+            cancel_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
     pub(crate) fn register_session(&self) -> acp::SessionId {
-        let raw_id = self.next_session_id.get();
-        self.next_session_id.set(raw_id + 1);
+        let raw_id = self
+            .next_session_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let session_id = acp::SessionId::new(Arc::from(format!("{SESSION_PREFIX}-{raw_id}")));
         let metadata = build_thread_archive_metadata(
             self.config.workspace.as_path(),
@@ -142,26 +141,37 @@ impl ZedAgent {
             ThreadBootstrap::new(Some(metadata)),
         );
         let handle = self.build_session_handle(session_id.clone(), thread);
-        self.sessions
-            .borrow_mut()
-            .insert(session_id.clone(), handle);
+        if let Ok(mut guard) = self.sessions.lock() {
+            guard.insert(session_id.clone(), handle);
+        }
         session_id
     }
 
     pub(crate) fn session_handle(&self, session_id: &acp::SessionId) -> Option<SessionHandle> {
-        self.sessions.borrow().get(session_id).cloned()
+        self.sessions
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(session_id).cloned())
     }
 
     pub(super) fn push_message(&self, session: &SessionHandle, message: Message) {
-        session.data.borrow().thread.append_message(message);
+        if let Ok(data) = session.data.lock() {
+            data.thread.append_message(message);
+        }
     }
 
     pub(super) fn should_send_tool_notice(&self, session: &SessionHandle) -> bool {
-        !session.data.borrow().tool_notice_sent
+        session
+            .data
+            .lock()
+            .map(|data| !data.tool_notice_sent.load(Ordering::Relaxed))
+            .unwrap_or(false)
     }
 
     pub(super) fn mark_tool_notice_sent(&self, session: &SessionHandle) {
-        session.data.borrow_mut().tool_notice_sent = true;
+        if let Ok(data) = session.data.lock() {
+            data.tool_notice_sent.store(true, Ordering::Relaxed);
+        }
     }
 
     pub(super) fn update_session_primary_agent(
@@ -172,7 +182,10 @@ impl ZedAgent {
         let Some(primary_agent) = self.primary_agents.resolve_id(&primary_agent) else {
             return false;
         };
-        let mut data = session.data.borrow_mut();
+        let mut data = match session.data.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
         if data.primary_agent.eq_ignore_ascii_case(primary_agent) {
             return false;
         }
@@ -186,7 +199,10 @@ impl ZedAgent {
         session: &SessionHandle,
         reasoning_effort: ReasoningEffortLevel,
     ) -> bool {
-        let mut data = session.data.borrow_mut();
+        let mut data = match session.data.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
         if data.reasoning_effort == reasoning_effort {
             return false;
         }
@@ -201,7 +217,10 @@ impl ZedAgent {
         provider: String,
         model: String,
     ) -> bool {
-        let mut data = session.data.borrow_mut();
+        let mut data = match session.data.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
         if data.provider == provider && data.model == model {
             return false;
         }
@@ -320,7 +339,10 @@ impl ZedAgent {
         &self,
         session: &SessionHandle,
     ) -> Vec<acp::SessionConfigOption> {
-        let data = session.data.borrow();
+        let data = match session.data.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Vec::new(),
+        };
         let provider_options = self.provider_select_options(&data.provider);
         let model_options = self.model_select_options(&data.provider, &data.model);
         let config_options = session_config_options(
@@ -351,7 +373,9 @@ impl ZedAgent {
             messages.push(Message::system(self.system_prompt.clone()));
         }
 
-        let history = session.data.borrow();
+        let Ok(history) = session.data.lock() else {
+            return messages;
+        };
         if let Some(prompt) = self.primary_agents.prompt(&history.primary_agent) {
             messages.push(Message::system(prompt.to_string()));
         }
@@ -372,9 +396,9 @@ impl ZedAgent {
             ThreadBootstrap::from_listing(listing),
         );
         let handle = self.build_session_handle(session_id.clone(), thread);
-        self.sessions
-            .borrow_mut()
-            .insert(session_id.clone(), handle.clone());
+        if let Ok(mut guard) = self.sessions.lock() {
+            guard.insert(session_id.clone(), handle.clone());
+        }
         Ok(handle)
     }
 
@@ -389,8 +413,177 @@ impl ZedAgent {
         }
     }
 
-    pub(super) fn client(&self) -> Option<Arc<AgentSideConnection>> {
-        acp_connection()
+    /// Programmatic equivalent of the SACP `session/new` handler — exposed
+    /// for tests and for the SACP handler shim to call.
+    pub(crate) async fn new_session(
+        &self,
+        _req: acp::NewSessionRequest,
+    ) -> Result<acp::NewSessionResponse, acp::Error> {
+        let session_id = self.register_session();
+        let config_options = self
+            .session_handle(&session_id)
+            .map(|session| self.current_session_config_options(&session))
+            .unwrap_or_default();
+
+        if let Err(error) = self.send_available_commands_update(&session_id).await {
+            warn!(%error, "Failed to advertise initial slash commands");
+        }
+
+        Ok(acp::NewSessionResponse::new(session_id).config_options(config_options))
+    }
+
+    /// Programmatic equivalent of the SACP `session/load` handler.
+    pub(crate) async fn load_session(
+        &self,
+        args: acp::LoadSessionRequest,
+    ) -> Result<acp::LoadSessionResponse, acp::Error> {
+        let session = if let Some(session) = self.session_handle(&args.session_id) {
+            session
+        } else {
+            let identifier = args.session_id.0.as_ref();
+            self.attach_thread_from_archive(&args.session_id, identifier)
+                .await
+                .map_err(|err| acp::Error::internal_error().data(err.to_string()))?
+        };
+
+        if let Err(error) = self.send_available_commands_update(&args.session_id).await {
+            warn!(%error, "Failed to advertise slash commands on session load");
+        }
+
+        let config_options = self.current_session_config_options(&session);
+        Ok(acp::LoadSessionResponse::new().config_options(config_options))
+    }
+
+    /// Programmatic equivalent of the SACP `session/set_config_option`
+    /// handler. Used both by the SACP handler and by the test suite.
+    pub(crate) async fn set_session_config_option(
+        &self,
+        args: acp::SetSessionConfigOptionRequest,
+    ) -> Result<acp::SetSessionConfigOptionResponse, acp::Error> {
+        use crate::zed::helpers::SESSION_CONFIG_MODEL_ID;
+        use crate::zed::helpers::SESSION_CONFIG_PRIMARY_AGENT_ID;
+        use crate::zed::helpers::SESSION_CONFIG_PROVIDER_ID;
+        use crate::zed::helpers::SESSION_CONFIG_THOUGHT_LEVEL_ID;
+
+        let Some(session) = self.session_handle(&args.session_id) else {
+            return Err(acp::Error::invalid_params().data(serde_json::json!({
+                "reason": "unknown_session"
+            })));
+        };
+
+        let config_id = args.config_id.0.to_string();
+        let value = args.value.0.to_string();
+        let updated = match config_id.as_str() {
+            SESSION_CONFIG_PRIMARY_AGENT_ID => {
+                let Some(primary_agent) = self.primary_agents.resolve_id(&value) else {
+                    return Err(acp::Error::invalid_params().data(serde_json::json!({
+                        "reason": "unknown_primary_agent",
+                        "value": value,
+                    })));
+                };
+                self.update_session_primary_agent(&session, primary_agent.to_string())
+            }
+            SESSION_CONFIG_THOUGHT_LEVEL_ID => {
+                let (session_provider, session_model) = {
+                    let data = session
+                        .data
+                        .lock()
+                        .map_err(|_| acp::Error::internal_error())?;
+                    (data.provider.clone(), data.model.clone())
+                };
+                if !self.model_supports_thought_level(&session_provider, &session_model) {
+                    return Err(acp::Error::invalid_params().data(serde_json::json!({
+                        "reason": "unsupported_config_option",
+                        "config_id": config_id,
+                    })));
+                }
+                let Some(reasoning_effort) = ReasoningEffortLevel::parse(&value) else {
+                    return Err(acp::Error::invalid_params().data(serde_json::json!({
+                        "reason": "unknown_thought_level",
+                        "value": value,
+                    })));
+                };
+                self.update_session_reasoning_effort(&session, reasoning_effort)
+            }
+            SESSION_CONFIG_PROVIDER_ID => {
+                let provider = value.trim().to_lowercase();
+                let current_provider = {
+                    let data = session
+                        .data
+                        .lock()
+                        .map_err(|_| acp::Error::internal_error())?;
+                    data.provider.clone()
+                };
+                if provider.is_empty() || !self.supports_provider(&provider, &current_provider) {
+                    return Err(acp::Error::invalid_params().data(serde_json::json!({
+                        "reason": "unknown_provider",
+                        "value": value,
+                    })));
+                }
+                let current_model = {
+                    let data = session
+                        .data
+                        .lock()
+                        .map_err(|_| acp::Error::internal_error())?;
+                    data.model.clone()
+                };
+                let resolved_model = if self.provider_supports_model(&provider, &current_model) {
+                    current_model
+                } else {
+                    self.provider_default_model(&provider).ok_or_else(|| {
+                        acp::Error::invalid_params().data(serde_json::json!({
+                            "reason": "provider_has_no_default_model",
+                            "provider": provider,
+                        }))
+                    })?
+                };
+                self.update_session_provider_and_model(&session, provider, resolved_model)
+            }
+            SESSION_CONFIG_MODEL_ID => {
+                let model = value.trim();
+                if model.is_empty() {
+                    return Err(acp::Error::invalid_params().data(serde_json::json!({
+                        "reason": "unknown_model",
+                        "value": value,
+                    })));
+                }
+                let provider = {
+                    let data = session
+                        .data
+                        .lock()
+                        .map_err(|_| acp::Error::internal_error())?;
+                    data.provider.clone()
+                };
+                if !self.provider_supports_model(&provider, model) {
+                    return Err(acp::Error::invalid_params().data(serde_json::json!({
+                        "reason": "model_not_supported_for_provider",
+                        "provider": provider,
+                        "model": model,
+                    })));
+                }
+                self.update_session_provider_and_model(&session, provider, model.to_string())
+            }
+            _ => {
+                return Err(acp::Error::invalid_params().data(serde_json::json!({
+                    "reason": "unknown_config_option",
+                    "config_id": config_id,
+                })));
+            }
+        };
+
+        if updated {
+            let config_options = self.current_session_config_options(&session);
+            let update = acp::ConfigOptionUpdate::new(config_options);
+            let _ = self
+                .send_update(
+                    &args.session_id,
+                    acp::SessionUpdate::ConfigOptionUpdate(update),
+                )
+                .await;
+        }
+
+        let config_options = self.current_session_config_options(&session);
+        Ok(acp::SetSessionConfigOptionResponse::new(config_options))
     }
 }
 
@@ -398,13 +591,11 @@ impl ZedAgent {
 mod tests {
     use super::*;
     use crate::zed::helpers::PrimaryAgentCatalog;
-    use crate::zed::types::NotificationEnvelope;
     use assert_fs::TempDir;
     use chrono::Utc;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
-    use tokio::sync::mpsc;
     use vtcode_config::{SubagentDiscoveryInput, discover_subagents};
     use vtcode_core::config::core::PromptCachingConfig;
     use vtcode_core::config::types::{
@@ -449,12 +640,6 @@ mod tests {
             openai_chatgpt_auth: None,
         };
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<NotificationEnvelope>();
-        tokio::spawn(async move {
-            while let Some(envelope) = rx.recv().await {
-                let _ = envelope.completion.send(());
-            }
-        });
         let mut discovery_input = SubagentDiscoveryInput::new(workspace.to_path_buf());
         discovery_input.include_user_agents = false;
         let discovered = discover_subagents(&discovery_input).expect("discover primary agents");
@@ -469,11 +654,42 @@ mod tests {
             ToolsConfig::default(),
             CommandsConfig::default(),
             String::new(),
-            tx,
             Some("Zed".to_string()),
             primary_agents,
         )
         .await
+    }
+
+    fn primary_agent(session: &SessionHandle) -> String {
+        session
+            .data
+            .lock()
+            .map(|data| data.primary_agent.clone())
+            .unwrap_or_default()
+    }
+
+    fn reasoning_effort(session: &SessionHandle) -> ReasoningEffortLevel {
+        session
+            .data
+            .lock()
+            .map(|data| data.reasoning_effort)
+            .unwrap_or(ReasoningEffortLevel::Low)
+    }
+
+    fn provider(session: &SessionHandle) -> String {
+        session
+            .data
+            .lock()
+            .map(|data| data.provider.clone())
+            .unwrap_or_default()
+    }
+
+    fn model(session: &SessionHandle) -> String {
+        session
+            .data
+            .lock()
+            .map(|data| data.model.clone())
+            .unwrap_or_default()
     }
 
     #[tokio::test]
@@ -509,13 +725,10 @@ mod tests {
 
         let handle = agent.build_session_handle(acp::SessionId::new("session-1"), thread);
 
-        assert_eq!(handle.data.borrow().primary_agent, "build");
-        assert_eq!(
-            handle.data.borrow().reasoning_effort,
-            ReasoningEffortLevel::XHigh
-        );
-        assert_eq!(handle.data.borrow().provider, "openai");
-        assert_eq!(handle.data.borrow().model, "gpt-5.4");
+        assert_eq!(primary_agent(&handle), "build");
+        assert_eq!(reasoning_effort(&handle), ReasoningEffortLevel::XHigh);
+        assert_eq!(provider(&handle), "openai");
+        assert_eq!(model(&handle), "gpt-5.4");
     }
 
     #[tokio::test]
@@ -551,7 +764,7 @@ mod tests {
 
         let handle = agent.build_session_handle(acp::SessionId::new("session-1"), thread);
 
-        assert_eq!(handle.data.borrow().primary_agent, "duck");
+        assert_eq!(primary_agent(&handle), "duck");
     }
 
     #[tokio::test]
@@ -563,7 +776,7 @@ mod tests {
 
         // "research" is not in the discovered specs, so the resolver falls
         // back to the built-in "build" agent.
-        assert_eq!(session.data.borrow().primary_agent, "build");
+        assert_eq!(primary_agent(&session), "build");
     }
 
     #[tokio::test]
@@ -574,7 +787,7 @@ mod tests {
             let session_id = agent.register_session();
             let session = agent.session_handle(&session_id).unwrap();
 
-            assert_eq!(session.data.borrow().primary_agent, primary_agent);
+            assert_eq!(self::primary_agent(&session), primary_agent);
         }
     }
 
@@ -599,7 +812,7 @@ Research primary prompt."#,
         let session_id = agent.register_session();
         let session = agent.session_handle(&session_id).unwrap();
 
-        assert_eq!(session.data.borrow().primary_agent, "research");
+        assert_eq!(self::primary_agent(&session), "research");
     }
 
     #[tokio::test]
@@ -610,15 +823,14 @@ Research primary prompt."#,
         let session = agent.session_handle(&session_id).unwrap();
 
         assert!(agent.update_session_primary_agent(&session, "build".to_string()));
-        assert_eq!(session.data.borrow().primary_agent, "build");
+        assert_eq!(primary_agent(&session), "build");
         assert_eq!(
             session
                 .data
-                .borrow()
-                .thread
-                .metadata()
-                .unwrap()
-                .primary_agent
+                .lock()
+                .ok()
+                .and_then(|data| data.thread.metadata())
+                .and_then(|metadata| metadata.primary_agent)
                 .as_deref(),
             Some("build")
         );
@@ -635,12 +847,12 @@ Research primary prompt."#,
         assert_eq!(
             session
                 .data
-                .borrow()
-                .thread
-                .metadata()
-                .unwrap()
-                .reasoning_effort,
-            "high"
+                .lock()
+                .ok()
+                .and_then(|data| data.thread.metadata())
+                .map(|metadata| metadata.reasoning_effort)
+                .as_deref(),
+            Some("high")
         );
     }
 

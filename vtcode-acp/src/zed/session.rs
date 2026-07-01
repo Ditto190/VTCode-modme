@@ -1,26 +1,28 @@
-use crate::acp;
-use crate::acp::Client;
+//! Top-level glue: wire the [`ZedAgent`] into an SACP `AgentToClient`
+//! connection over stdio.
+
 use crate::register_acp_connection;
 use crate::workspace::{
     DefaultWorkspaceTrustSynchronizer, WorkspaceTrustSyncOutcome, WorkspaceTrustSynchronizer,
 };
+use crate::zed::agent::ZedAgent;
+use crate::zed::agent::handlers::install_handlers;
+use crate::zed::connection::ConnectionHandle;
+use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use anyhow::{Context, Result};
+use std::future::pending;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info, warn};
 use vtcode_config::{SubagentDiscoveryInput, discover_subagents};
 use vtcode_core::config::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 use vtcode_core::prompts::system::generate_system_instruction_with_config;
 
-use super::ZedAgent;
 use super::constants::{
     WORKSPACE_TRUST_ALREADY_SATISFIED_LOG, WORKSPACE_TRUST_DOWNGRADE_SKIPPED_LOG,
     WORKSPACE_TRUST_UPGRADE_LOG,
 };
 use super::helpers::PrimaryAgentCatalog;
-use super::types::NotificationEnvelope;
 
 pub async fn run_acp_agent(
     config: &CoreAgentConfig,
@@ -51,8 +53,6 @@ pub async fn run_acp_agent(
         }
     }
 
-    let outgoing = tokio::io::stdout().compat_write();
-    let incoming = tokio::io::stdin().compat();
     let content = generate_system_instruction_with_config(
         &Default::default(),
         &config.workspace,
@@ -78,9 +78,8 @@ pub async fn run_acp_agent(
     let zed_config_clone = zed_config.clone();
     let title_clone = title.clone();
 
-    local_set
+    let result = local_set
         .run_until(Box::pin(async move {
-            let (tx, mut rx) = mpsc::unbounded_channel::<NotificationEnvelope>();
             let tools_config_clone = tools_config.clone();
             let commands_config_clone = commands_config.clone();
             let agent = ZedAgent::new(
@@ -89,40 +88,44 @@ pub async fn run_acp_agent(
                 tools_config_clone,
                 commands_config_clone,
                 system_prompt,
-                tx,
                 title_clone,
                 primary_agents,
             )
             .await;
-            let (raw_conn, io_task) =
-                acp::AgentSideConnection::new(agent, outgoing, incoming, |fut| {
-                    tokio::task::spawn_local(fut);
-                });
-            let conn = Arc::new(raw_conn);
-            if let Err(existing) = register_acp_connection(Arc::clone(&conn)) {
-                warn!("ACP client already registered; continuing with existing instance");
-                drop(existing);
-            }
+            let agent: Arc<ZedAgent> = Arc::new(agent);
 
-            let notifications_conn = Arc::clone(&conn);
-            let notifications = tokio::task::spawn_local(async move {
-                while let Some(envelope) = rx.recv().await {
-                    let result = notifications_conn
-                        .session_notification(envelope.notification)
-                        .await;
-                    if let Err(error) = result {
-                        error!(%error, "Failed to forward ACP session notification");
+            // Build the SACP agent-side connection, then attach the
+            // vtcode request/notification handlers around `ZedAgent`.
+            let builder = install_handlers(Agent.builder().name("vtcode"), Arc::clone(&agent));
+
+            // The SACP dispatch loop never exposes `ConnectionTo` outside
+            // of handler closures, so we use `connect_with` to capture
+            // it. The closure parks on `pending()` so the spawned task
+            // lives for the entire connection lifetime (and is cancelled
+            // automatically when the connection closes).
+            let attach_agent = Arc::clone(&agent);
+            builder
+                .connect_with(Stdio::new(), async move |cx: ConnectionTo<Client>| {
+                    let handle = ConnectionHandle::new(cx);
+                    if let Err(existing) = register_acp_connection(Arc::clone(&handle)) {
+                        warn!("ACP client already registered; continuing with existing instance");
+                        drop(existing);
                     }
-                    let _ = envelope.completion.send(());
-                }
-            });
+                    attach_agent.attach_client(Arc::clone(&handle));
+                    // Park the main task so the connection stays alive.
+                    pending::<agent_client_protocol::Result<()>>().await;
+                    Ok(())
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("ACP stdio connection failed: {error}"))?;
 
-            let io_result = io_task.await;
-            notifications.abort();
-            io_result
+            Ok::<(), anyhow::Error>(())
         }))
-        .await
-        .context("ACP stdio bridge task failed")?;
+        .await;
 
+    if let Err(error) = result {
+        error!(%error, "ACP bridge task failed");
+        return Err(error);
+    }
     Ok(())
 }
