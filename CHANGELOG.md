@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.134.1 - 2026-07-01
+
+### Highlights
+#### Bug Fixes
+
+- Scope recovery cap to current turn  (66216d16) (@kernitus)
+### Other Changes
 ## 0.134.0 - 2026-07-01
 
 ### Highlights
