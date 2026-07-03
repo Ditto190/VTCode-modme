@@ -10,6 +10,7 @@ mod format;
 mod openrouter;
 mod parse;
 mod provider;
+mod table;
 
 pub use capabilities::{
     ModelCatalogEntry, ModelPricing, catalog_provider_keys, model_catalog_entry,
