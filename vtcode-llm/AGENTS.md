@@ -19,3 +19,10 @@
 ## Coding Conventions
 
 Providers in `providers/<name>/mod.rs`. Use `anyhow::Result`, `tracing`, not `println!`. Provider-specific types stay local; shared go in `types.rs` or `provider/`.
+
+## OpenAI-Compatible Providers
+
+- `providers/openai_compat.rs` owns the shared shell: `OpenAiCompatSpec` (per-provider consts/overrides) + `OpenAiCompatCore<S>` + `impl_openai_compat_provider!`. New compat providers implement a Spec (~50-200 lines), not a full `LLMProvider`.
+- Model normalization happens in `core.prepare()`, not `convert_request()` — payload tests must call `prepare` first. `stream: true` is only inserted when `request.stream` is set.
+- Providers with extra protocols (evolink Anthropic path, opencode) hand-write the provider over `OpenAiCompatCore` instead of using the macro.
+- Registration contract: keep the type name and 7-arg `from_config` consumed by `impl_standard_provider_constructor!` in vtcode-core.

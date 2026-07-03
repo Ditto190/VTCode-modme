@@ -22,3 +22,4 @@
 - `BashRunner::new()` canonicalizes root — bails if missing.
 - `path_cache` is LRU (256) — no fresh canonicalize every call.
 - `remove_env_var` is unsafe, single-threaded startup only.
+- `policy` containment delegates to `vtcode_commons::paths::ensure_path_within_workspace` — `..`-traversal paths are rejected (intentionally stricter than the old `starts_with`).

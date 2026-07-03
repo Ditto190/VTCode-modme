@@ -24,6 +24,8 @@ Implement in `vtcode-llm/src/providers/` (the canonical home). Use `adding-llm-p
 
 ## Gotchas
 
+- `retry.rs` re-exports `vtcode_commons::retry::RetryPolicy`; domain methods (typed downcasts, `run_with_retry`) live on the `RetryPolicyCoreExt` extension trait — import it for method syntax.
+- Error classification is `vtcode_commons::classify_anyhow_error` → `ErrorCategory`; `UnifiedErrorKind`/`ToolErrorType` are derived views and `ToolExecutionError.error_type` always derives from `category`.
 - `lib.rs` is 500+ lines — append re-exports, don't restructure.
 - `#[cfg_attr(not(test), allow(...))]` clippy suppressions — do not remove.
 - Provider implementations live in `vtcode-llm/src/providers/`, not in core. Core's `llm/providers/` is a re-export facade.
