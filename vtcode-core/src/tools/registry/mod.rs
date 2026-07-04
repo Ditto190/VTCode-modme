@@ -18,12 +18,14 @@ mod execution_facade;
 mod execution_history;
 mod execution_kernel;
 mod execution_request;
+mod execution_stages;
 mod executors;
 pub mod file_helpers;
 mod file_monitor_facade;
 mod harness;
 mod harness_facade;
 mod history_facade;
+pub mod interfaces;
 mod inventory;
 mod inventory_facade;
 mod justification;
@@ -61,6 +63,7 @@ mod timeout_category;
 mod timeout_facade;
 mod tool_catalog_facade;
 mod tool_executor_impl;
+mod trait_impls;
 mod unified_actions;
 mod utils;
 
@@ -91,6 +94,12 @@ pub use timeout::{
 };
 pub use tool_catalog_facade::SessionToolCatalogState;
 pub(crate) use unified_actions::{UnifiedExecAction, UnifiedFileAction, UnifiedSearchAction};
+
+// Re-export trait interfaces for external consumers.
+pub use interfaces::{
+    McpBridge, PtySessionControl, SharedRegistry, ToolCatalog, ToolMetrics, ToolRegistryApi,
+    ToolResilience, ToolSecurity,
+};
 
 use assembly::ToolAssembly;
 use inventory::ToolInventory;

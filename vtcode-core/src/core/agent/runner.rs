@@ -51,6 +51,7 @@ pub mod prompt_alignment;
 mod retry;
 mod summarize;
 mod summary;
+mod task_setup;
 mod telemetry;
 mod tool_access;
 mod tool_args;

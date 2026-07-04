@@ -1,5 +1,9 @@
 //! Centralized agent session state management.
 
+pub mod loop_detection;
+pub mod tracking_state;
+pub mod turn_metrics;
+
 use crate::core::agent::error_recovery::ErrorRecoveryState;
 use crate::core::agent::task::{TaskOutcome, TaskResults};
 use crate::core::pending_actions::PendingActions;

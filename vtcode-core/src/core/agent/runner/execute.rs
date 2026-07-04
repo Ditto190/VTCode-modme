@@ -1,7 +1,5 @@
 use super::AgentRunner;
-use super::continuation::{
-    CompletionAssessment, ContinuationController, VerificationResult, is_review_like_task,
-};
+use super::continuation::{CompletionAssessment, VerificationResult};
 use super::escalation::{EscalationDecision, EscalationGate};
 use super::helpers::detect_textual_exec_tool_call;
 use super::orchestration::EvaluatorGateOutcome;
@@ -13,9 +11,6 @@ use crate::config::tool_loop_limit_reached;
 use crate::config::types::{ReasoningEffortLevel, SystemPromptMode, VerbosityLevel};
 use crate::core::agent::blocked_handoff::write_blocked_handoff;
 use crate::core::agent::completion::{check_completion_candidate, check_for_response_loop};
-use crate::core::agent::conversation::{
-    build_conversation, build_messages_from_conversation, conversation_from_messages,
-};
 use crate::core::agent::events::ExecEventRecorder;
 use crate::core::agent::harness_artifacts::existing_harness_artifact_paths;
 use crate::core::agent::harness_kernel::{
@@ -168,7 +163,7 @@ fn estimate_session_cost_usd(
     ModelResolver::estimate_cost(pricing, &usage)
 }
 
-struct RuntimePromptBundle {
+pub(super) struct RuntimePromptBundle {
     system_instruction: Arc<String>,
     tool_snapshot: SessionToolCatalogSnapshot,
     request_tools: Option<Arc<Vec<ToolDefinition>>>,
@@ -296,7 +291,7 @@ impl AgentRunner {
         system_prompt.push_str(active_primary_agent.instructions.trim());
     }
 
-    async fn build_validated_runtime_prompt_bundle(
+    pub(super) async fn build_validated_runtime_prompt_bundle(
         &self,
         is_simple_task: bool,
     ) -> Result<RuntimePromptBundle> {
@@ -564,137 +559,25 @@ impl AgentRunner {
         task: &Task,
         contexts: &[ContextItem],
     ) -> Result<TaskResults> {
-        // Align harness context with runner session/task for structured telemetry
-        self.tool_registry
-            .set_harness_session(self.session_id.clone());
-        self.tool_registry.set_harness_task(Some(task.id.clone()));
+        // Phase 1: Setup — harness alignment, conversation building, session init,
+        // orchestration planning. Extracted to `prepare_task_execution` for testability.
+        let setup = self.prepare_task_execution(task, contexts).await?;
 
-        let steering_receiver = self.steering_receiver.lock().take();
-        let runtime_setup = {
-            // Agent execution status
-            let agent_prefix = format!("[{}]", self.agent_type);
-            // OPTIMIZATION: Avoid cloning session_id repeatedly by using reference
-            let mut event_recorder = ExecEventRecorder::new(
-                self.session_id.clone(),
-                self.event_sink.clone(),
-                Some(self.thread_handle.clone()),
-            );
-            event_recorder.turn_started();
-            self.runner_println(format_args!(
-                "{agent_prefix} Analyzing request and planning approach..."
-            ));
-
-            self.runner_println(format_args!(
-                "{} Executing {} task: {}",
-                style("[AGENT]").magenta().bold().on_black(),
-                self.agent_type,
-                task.title
-            ));
-
-            let run_started_at = std::time::Instant::now();
-            let is_simple_task = Self::is_simple_task(task, contexts);
-            let prompt_bundle = self
-                .build_validated_runtime_prompt_bundle(is_simple_task)
-                .await?;
-
-            let review_like = is_review_like_task(task);
-            let full_auto_active = self
-                .tool_registry
-                .current_full_auto_allowlist()
-                .await
-                .is_some();
-
-            let mut conversation = conversation_from_messages(&self.bootstrap_messages);
-            conversation.extend(build_conversation(task, contexts));
-
-            // Maintain a mirrored conversation history for providers that expect
-            // OpenAI/Anthropic style message roles.
-            let conversation_messages = build_messages_from_conversation(&conversation);
-
-            // Track execution results
-            // Determine loop guards via cached configuration
-            let max_tool_loops = self.config().tools.max_tool_loops;
-            let preserve_recent_turns = self.config().context.preserve_recent_turns;
-            let max_context_tokens = self.config().context.max_context_tokens;
-
-            let mut session_state = AgentSessionState::new(
-                self.session_id.clone(),
-                self.max_turns,
-                max_tool_loops,
-                max_context_tokens,
-            );
-            session_state.conversation = conversation;
-            session_state.messages = conversation_messages;
-            session_state.reconcile_token_count();
-            session_state.last_processed_message_idx = session_state.conversation.len();
-
-            let mut runtime = AgentRuntime::new(session_state, None, steering_receiver);
-
-            if let Err(err) = self.tool_registry.initialize_async().await {
-                warn!(
-                    error = %err,
-                    "Tool registry initialization failed at task start"
-                );
-                runtime
-                    .state
-                    .warnings
-                    .push(format!("Tool registry init failed: {err}"));
-            }
-            let orchestration_enabled =
-                self.harness_plan_build_evaluate_enabled(full_auto_active, review_like);
-            let planner_artifacts = if orchestration_enabled {
-                Some(self.run_planner_phase(task, &mut event_recorder).await?)
-            } else {
-                None
-            };
-            let effective_task = planner_artifacts
-                .as_ref()
-                .map(|artifacts| self.augment_generator_task(task, artifacts))
-                .unwrap_or_else(|| task.clone());
-
-            let mut continuation_controller = ContinuationController::new(
-                self._workspace.clone(),
-                self.tool_registry.planning_workflow_state(),
-                self.config().agent.harness.continuation_policy.clone(),
-                full_auto_active,
-                self.tool_registry.is_planning_active(),
-                review_like,
-            );
-            continuation_controller.prepare(&effective_task).await?;
-
-            (
-                agent_prefix,
-                event_recorder,
-                run_started_at,
-                is_simple_task,
-                prompt_bundle,
-                preserve_recent_turns,
-                max_tool_loops,
-                max_context_tokens,
-                runtime,
-                continuation_controller,
-                effective_task,
-                orchestration_enabled,
-            )
-        };
-
-        let (
-            agent_prefix,
-            mut event_recorder,
-            run_started_at,
-            is_simple_task,
-            mut prompt_bundle,
-            preserve_recent_turns,
-            max_tool_loops,
-            max_context_tokens,
-            mut runtime,
-            mut continuation_controller,
-            effective_task,
-            orchestration_enabled,
-        ) = runtime_setup;
+        let agent_prefix = setup.agent_prefix;
+        let mut event_recorder = setup.event_recorder;
+        let run_started_at = setup.run_started_at;
+        let is_simple_task = setup.is_simple_task;
+        let mut prompt_bundle = setup.prompt_bundle;
+        let preserve_recent_turns = setup.preserve_recent_turns;
+        let max_tool_loops = setup.max_tool_loops;
+        let max_context_tokens = setup.max_context_tokens;
+        let mut runtime = setup.runtime;
+        let mut continuation_controller = setup.continuation_controller;
+        let effective_task = setup.effective_task;
+        let orchestration_enabled = setup.orchestration_enabled;
         let mut cost_warning_emitted = false;
-        let max_budget_usd = self.config().agent.harness.max_budget_usd;
-        let max_revision_rounds = self.config().agent.harness.max_revision_rounds;
+        let max_budget_usd = setup.max_budget_usd;
+        let max_revision_rounds = setup.max_revision_rounds;
         let mut revision_rounds_used = 0usize;
         let mut should_write_blocked_handoff = false;
 

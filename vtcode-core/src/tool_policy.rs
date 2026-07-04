@@ -21,11 +21,10 @@ use crate::config::core::tools::ToolsConfig;
 pub use crate::config::core::tools::ToolPolicy;
 use crate::config::loader::{ConfigManager, VTCodeConfig};
 use crate::config::mcp::{McpAllowListConfig, McpAllowListRules};
-use crate::tools::mcp::parse_canonical_mcp_tool_name;
-use crate::tools::names::canonical_tool_name;
 use crate::utils::file_utils::{
     ensure_dir_exists, read_file_with_context, write_file_with_context,
 };
+use crate::utils::tool_name_parsing::{canonical_tool_name, parse_canonical_mcp_tool_name};
 
 const AUTO_ALLOW_TOOLS: &[&str] = &[
     tools::START_PLANNING,

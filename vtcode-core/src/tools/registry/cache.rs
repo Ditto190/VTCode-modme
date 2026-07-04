@@ -1,12 +1,20 @@
 use serde_json::json;
 
-use crate::tools::cache::FILE_CACHE;
+use crate::tools::cache::{FILE_CACHE, FileCache};
 
 use super::ToolRegistry;
 
 impl ToolRegistry {
+    /// Access the file cache used by this registry.
+    ///
+    /// Returns the global `FileCache` instance. In a future phase, this will
+    /// return a per-registry cache instance to enable test isolation.
+    pub fn file_cache(&self) -> &'static FileCache {
+        &FILE_CACHE
+    }
+
     pub async fn cache_stats(&self) -> serde_json::Value {
-        let stats = FILE_CACHE.stats().await;
+        let stats = self.file_cache().stats().await;
         json!({
             "hits": stats.hits,
             "misses": stats.misses,
@@ -19,6 +27,6 @@ impl ToolRegistry {
     }
 
     pub async fn clear_cache(&self) {
-        FILE_CACHE.clear().await;
+        self.file_cache().clear().await;
     }
 }

@@ -14,6 +14,7 @@ use std::time::Duration;
 use crate::error::{ErrorCategory, VtCodeError};
 use crate::retry_after::retry_after_from_llm_metadata;
 use crate::tools::registry::ToolExecutionError;
+use crate::tools::tool_intent::is_command_tool;
 use crate::tools::unified_error::UnifiedToolError;
 use vtcode_commons::llm::{LLMError, LLMErrorMetadata};
 
@@ -422,9 +423,6 @@ pub fn decision_for_anyhow_error(
     };
     policy.decision_for_anyhow(error, attempt_index, tool_name)
 }
-
-/// Re-export from [`tool_intent`] so existing callers keep compiling.
-pub use crate::tools::tool_intent::is_command_tool;
 
 #[cfg(test)]
 mod tests {

@@ -1,9 +1,5 @@
-/// Use direct tool name without alias resolution.
-/// Alias resolution is now handled by the tool registry inventory
-/// which maintains a mapping of aliases to canonical tool names.
-pub const fn canonical_tool_name(name: &str) -> &str {
-    name
-}
+// Re-export from shared utils to break the tool_policy <-> tools cycle.
+pub use crate::utils::tool_name_parsing::canonical_tool_name;
 
 #[test]
 fn test_canonical_tool_name_passes_through() {

@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use std::borrow::Cow;
 use vtcode_commons::ErrorCategory;
 
-use crate::retry::is_command_tool;
 use crate::retry::{RetryDecision, RetryPolicy, RetryPolicyCoreExt};
+use crate::tools::tool_intent::is_command_tool;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolErrorDebugContext {

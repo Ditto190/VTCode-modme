@@ -127,6 +127,7 @@ pub mod session_debug;
 pub mod style_helpers;
 pub mod terminal_color_probe;
 pub mod tokens;
+pub mod tool_name_parsing;
 pub mod trace_writer;
 pub mod transcript;
 pub mod tty;
