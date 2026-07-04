@@ -113,7 +113,7 @@ pub async fn run_acp_agent(
                     }
                     attach_agent.attach_client(Arc::clone(&handle));
                     // Park the main task so the connection stays alive.
-                    pending::<agent_client_protocol::Result<()>>().await;
+                    let _ = pending::<agent_client_protocol::Result<()>>().await;
                     Ok(())
                 })
                 .await

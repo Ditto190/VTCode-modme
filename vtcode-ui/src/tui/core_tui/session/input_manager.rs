@@ -915,7 +915,7 @@ impl InputManager {
     }
 
     fn next_image_attachment_placeholder_number(&self) -> usize {
-        let visible_max = image_attachment_placeholders(&self.content())
+        let visible_max = image_attachment_placeholders(self.content())
             .into_iter()
             .map(|(number, _)| number)
             .max()

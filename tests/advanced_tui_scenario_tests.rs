@@ -55,6 +55,8 @@ fn inline_command_variant_name(command: &InlineCommand) -> &'static str {
         InlineCommand::SetSkipConfirmations(_) => "SetSkipConfirmations",
         InlineCommand::Shutdown => "Shutdown",
         InlineCommand::SetReasoningStage(_) => "SetReasoningStage",
+        InlineCommand::SetImageInputEnabled(_) => "SetImageInputEnabled",
+        InlineCommand::RestoreInputDraft(_) => "RestoreInputDraft",
     }
 }
 

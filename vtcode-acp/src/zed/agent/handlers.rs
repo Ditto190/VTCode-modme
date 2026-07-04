@@ -28,10 +28,7 @@
 //! inside the agent.
 
 use super::super::constants::*;
-use super::super::helpers::{
-    SESSION_CONFIG_MODEL_ID, SESSION_CONFIG_PRIMARY_AGENT_ID, SESSION_CONFIG_PROVIDER_ID,
-    SESSION_CONFIG_THOUGHT_LEVEL_ID, agent_implementation_info, text_chunk,
-};
+use super::super::helpers::{agent_implementation_info, text_chunk};
 use super::super::types::PlanProgress;
 use super::ZedAgent;
 use crate::acp;
@@ -51,7 +48,6 @@ use serde_json::json;
 use std::sync::Arc;
 use tracing::warn;
 use vtcode_core::config::api_keys::{ApiKeySources, get_api_key};
-use vtcode_core::config::types::ReasoningEffortLevel;
 use vtcode_core::llm::factory::ProviderConfig;
 use vtcode_core::llm::factory::create_provider_with_config;
 use vtcode_core::llm::provider::{LLMRequest, LLMStreamEvent, Message};
@@ -345,7 +341,7 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
         let data = session
             .data
             .lock()
-            .map_err(|_| SdkError::internal_error())?;
+            .map_err(|_err| SdkError::internal_error())?;
         (
             data.provider.clone(),
             data.model.clone(),
@@ -391,7 +387,7 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
         let data = session
             .data
             .lock()
-            .map_err(|_| SdkError::internal_error())?;
+            .map_err(|_err| SdkError::internal_error())?;
         data.primary_agent.clone()
     };
     let availability = agent.tool_availability(
@@ -417,7 +413,7 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
         provider_supports_tools && (!enabled_tools.is_empty() || has_local_tools);
     let mut tool_definitions = agent
         .tool_definitions(provider_supports_tools, &enabled_tools, &primary_agent)
-        .map(std::sync::Arc::new);
+        .map(Arc::new);
     let mut messages = agent.resolved_messages(&session);
     let allow_streaming = supports_streaming && !tools_allowed;
 
@@ -615,7 +611,7 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
                     let data = session
                         .data
                         .lock()
-                        .map_err(|_| SdkError::internal_error())?;
+                        .map_err(|_err| SdkError::internal_error())?;
                     data.primary_agent.clone()
                 };
                 has_local_tools = agent.local_tools_available(&primary_agent);
@@ -623,7 +619,7 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
                     provider_supports_tools && (!enabled_tools.is_empty() || has_local_tools);
                 tool_definitions = agent
                     .tool_definitions(provider_supports_tools, &enabled_tools, &primary_agent)
-                    .map(std::sync::Arc::new);
+                    .map(Arc::new);
                 continue;
             }
 

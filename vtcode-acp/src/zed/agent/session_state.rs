@@ -125,9 +125,7 @@ impl ZedAgent {
     }
 
     pub(crate) fn register_session(&self) -> acp::SessionId {
-        let raw_id = self
-            .next_session_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let raw_id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
         let session_id = acp::SessionId::new(Arc::from(format!("{SESSION_PREFIX}-{raw_id}")));
         let metadata = build_thread_archive_metadata(
             self.config.workspace.as_path(),
@@ -160,6 +158,7 @@ impl ZedAgent {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn should_send_tool_notice(&self, session: &SessionHandle) -> bool {
         session
             .data
@@ -168,6 +167,7 @@ impl ZedAgent {
             .unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub(super) fn mark_tool_notice_sent(&self, session: &SessionHandle) {
         if let Ok(data) = session.data.lock() {
             data.tool_notice_sent.store(true, Ordering::Relaxed);
@@ -488,7 +488,7 @@ impl ZedAgent {
                     let data = session
                         .data
                         .lock()
-                        .map_err(|_| acp::Error::internal_error())?;
+                        .map_err(|_err| acp::Error::internal_error())?;
                     (data.provider.clone(), data.model.clone())
                 };
                 if !self.model_supports_thought_level(&session_provider, &session_model) {
@@ -511,7 +511,7 @@ impl ZedAgent {
                     let data = session
                         .data
                         .lock()
-                        .map_err(|_| acp::Error::internal_error())?;
+                        .map_err(|_err| acp::Error::internal_error())?;
                     data.provider.clone()
                 };
                 if provider.is_empty() || !self.supports_provider(&provider, &current_provider) {
@@ -524,7 +524,7 @@ impl ZedAgent {
                     let data = session
                         .data
                         .lock()
-                        .map_err(|_| acp::Error::internal_error())?;
+                        .map_err(|_err| acp::Error::internal_error())?;
                     data.model.clone()
                 };
                 let resolved_model = if self.provider_supports_model(&provider, &current_model) {
@@ -551,7 +551,7 @@ impl ZedAgent {
                     let data = session
                         .data
                         .lock()
-                        .map_err(|_| acp::Error::internal_error())?;
+                        .map_err(|_err| acp::Error::internal_error())?;
                     data.provider.clone()
                 };
                 if !self.provider_supports_model(&provider, model) {

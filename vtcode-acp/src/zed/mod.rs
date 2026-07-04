@@ -9,7 +9,7 @@ mod helpers;
 mod session;
 mod types;
 
-pub(crate) use agent::ZedAgent;
+// pub(crate) use agent::ZedAgent;
 use session::run_acp_agent;
 
 #[derive(Debug, Default, Clone, Copy)]

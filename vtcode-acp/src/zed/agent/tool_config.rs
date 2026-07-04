@@ -217,6 +217,7 @@ impl ZedAgent {
         template.replace("{argument}", argument)
     }
 
+    #[allow(dead_code)]
     pub(super) fn render_tool_disable_notice(
         &self,
         tool: SupportedTool,
@@ -234,6 +235,7 @@ impl ZedAgent {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn log_tool_disable_reason(
         &self,
         tool: SupportedTool,
@@ -258,11 +260,12 @@ impl ZedAgent {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) async fn send_tool_disable_notices(
         &self,
         session_id: &acp::SessionId,
         reasons: &[(SupportedTool, ToolDisableReason<'_>)],
-    ) -> Result<(), crate::acp::Error> {
+    ) -> Result<(), acp::Error> {
         if reasons.is_empty() {
             return Ok(());
         }

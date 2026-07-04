@@ -585,7 +585,7 @@ pub fn generate_specialized_instruction() -> Content {
 #[must_use]
 pub fn estimate_token_count(text: &str) -> u64 {
     // Round up to avoid underestimation
-    (text.len() as u64 + 3) / 4
+    text.len().div_ceil(4) as u64
 }
 
 /// Default soft budget for system prompt tokens.

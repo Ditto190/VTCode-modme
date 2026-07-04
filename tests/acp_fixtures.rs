@@ -1,13 +1,13 @@
-use agent_client_protocol as acp;
 use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct PermissionFixture {
     #[serde(rename = "sessionId")]
-    pub session_id: acp::SessionId,
+    pub session_id: Value,
     #[serde(rename = "toolCall")]
-    pub tool_call: acp::ToolCall,
+    pub tool_call: Value,
     pub arguments: Value,
 }
 

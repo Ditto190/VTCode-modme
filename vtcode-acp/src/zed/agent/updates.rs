@@ -63,7 +63,7 @@ impl ZedAgent {
         &self,
         session_id: &acp::SessionId,
         plan: &mut PlanProgress,
-    ) -> Result<(), crate::acp::Error> {
+    ) -> Result<(), acp::Error> {
         if plan.has_context_step() && !plan.context_completed() && plan.complete_context() {
             self.send_plan_update(session_id, plan).await?;
         }
