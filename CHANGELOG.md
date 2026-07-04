@@ -2,6 +2,38 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.134.4 - 2026-07-04
+
+### Highlights
+#### Documentation
+
+- Update per-crate AGENTS.md for DRY refactor conventions (daaec30c) 
+#### Features
+
+- Enhance error handling with failure classification and guidance (93d5565c) 
+- Implement JSON schema support for string-backed identifier newtypes (62fc40c4) 
+### Other Changes
+#### Other
+
+- Fix/keyboard input & image pasting  (be4b05b3) (@kernitus)
+- Add tool definition token tracking and improve tool search indexing (65a12f25) 
+#### Refactors
+
+- Unify workspace path-containment checks into vtcode-commons (48e7d3f6) 
+- Consolidate error classification onto ErrorCategory (f3372ba6) 
+- Consolidate retry policy math into vtcode-commons (e0e49b84) 
+- Table-drive ModelId string/provider/parse matches (d1acff00) 
+- Introduce OpenAiCompatSpec shell and migrate Moonshot provider (1a877fdd) 
+- Migrate Poolside provider onto OpenAiCompatSpec (60937ec1) 
+- Migrate Mistral provider onto OpenAiCompatSpec (4affecb2) 
+- Migrate Qwen provider onto OpenAiCompatSpec (43c2bd17) 
+- Migrate MiMo provider onto OpenAiCompatSpec (fdf95528) 
+- Migrate StepFun provider onto OpenAiCompatSpec (bb897ff7) 
+- Migrate Z.AI provider onto OpenAiCompatSpec (5de6f37e) 
+- Migrate DeepSeek provider onto OpenAiCompatSpec (2d20a102) 
+- Fold OpenCode providers onto OpenAiCompatCore (c39d3d08) 
+- Migrate Evolink provider onto OpenAiCompatSpec (409e6a8f) 
+- Introduce id_newtype for plugin and marketplace identifiers (fe557352) 
 ## 0.134.3 - 2026-07-01
 
 ### Highlights
