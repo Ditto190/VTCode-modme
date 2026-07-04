@@ -39,6 +39,7 @@ pub use types::{
 
 // ─── Public Utilities ───────────────────────────────────────────────────────
 
+/// Returns `true` if `name` is one of the reserved subagent-internal tool names.
 pub fn is_subagent_tool(name: &str) -> bool {
     SUBAGENT_TOOL_NAMES.contains(&name)
 }
@@ -106,22 +107,36 @@ use vtcode_config::subagents::SUBAGENT_HARD_CONCURRENCY_LIMIT;
 
 // ─── Controller Config ─────────────────────────────────────────────────────
 
+/// Configuration required to construct a [`SubagentController`].
 #[derive(Clone)]
 pub struct SubagentControllerConfig {
+    /// Workspace root directory for the session.
     pub workspace_root: PathBuf,
+    /// Session identifier of the parent agent.
     pub parent_session_id: String,
+    /// Model identifier used by the parent agent.
     pub parent_model: String,
+    /// Provider name used by the parent agent.
     pub parent_provider: String,
+    /// Reasoning effort level of the parent agent.
     pub parent_reasoning_effort: ReasoningEffortLevel,
+    /// API key for LLM provider access.
     pub api_key: String,
+    /// Full VT Code configuration.
     pub vt_cfg: VTCodeConfig,
+    /// Optional OpenAI ChatGPT authentication handle.
     pub openai_chatgpt_auth: Option<OpenAIChatGptAuthHandle>,
+    /// Current nesting depth of the subagent hierarchy.
     pub depth: usize,
+    /// Manager for exec sessions (PTY and pipe).
     pub exec_sessions: ExecSessionManager,
+    /// PTY session manager.
     pub pty_manager: PtyManager,
+    /// Whether this controller manages a background runtime subprocess.
     pub managed_background_runtime: bool,
 }
 
+/// Central controller that manages spawning, lifecycle, and state of all subagents.
 #[derive(Clone)]
 pub struct SubagentController {
     config: Arc<SubagentControllerConfig>,
@@ -132,6 +147,7 @@ pub struct SubagentController {
 }
 
 impl SubagentController {
+    /// Creates a new controller, discovering subagent specs and loading persisted background state.
     pub async fn new(config: SubagentControllerConfig) -> Result<Self> {
         let discovered = discover_controller_subagents(&config.workspace_root).await?;
         let lifecycle_hooks = LifecycleHookEngine::new_with_session(
@@ -161,17 +177,20 @@ impl SubagentController {
         })
     }
 
+    /// Re-discovers subagent specs from the workspace.
     pub async fn reload(&self) -> Result<()> {
         let discovered = discover_controller_subagents(&self.config.workspace_root).await?;
         self.state.write().await.discovered = discovered;
         Ok(())
     }
 
+    /// Stores the parent conversation messages for context forking into children.
     pub async fn set_parent_messages(&self, messages: &[Message]) {
         let cloned = messages.to_vec();
         self.state.write().await.parent_messages = cloned;
     }
 
+    /// Parses the current user input to extract explicit agent mentions and delegation signals.
     pub async fn set_turn_delegation_hints_from_input(&self, input: &str) -> Vec<String> {
         let mut state = self.state.write().await;
         let explicit_mentions =
@@ -186,22 +205,27 @@ impl SubagentController {
         explicit_mentions
     }
 
+    /// Resets delegation hints at the end of a turn.
     pub async fn clear_turn_delegation_hints(&self) {
         self.state.write().await.turn_hints = TurnDelegationHints::default();
     }
 
+    /// Updates the parent session identifier at runtime.
     pub async fn set_parent_session_id(&self, session_id: impl Into<String>) {
         *self.parent_session_id.write().await = session_id.into();
     }
 
+    /// Returns the currently effective subagent specifications (merged builtin + workspace).
     pub async fn effective_specs(&self) -> Vec<SubagentSpec> {
         self.state.read().await.discovered.effective.clone()
     }
 
+    /// Returns specs that are shadowed by workspace-level overrides.
     pub async fn shadowed_specs(&self) -> Vec<SubagentSpec> {
         self.state.read().await.discovered.shadowed.clone()
     }
 
+    /// Returns status entries for all tracked child subagents.
     pub async fn status_entries(&self) -> Vec<SubagentStatusEntry> {
         let state = self.state.read().await;
         state

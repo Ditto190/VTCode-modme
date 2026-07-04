@@ -23,7 +23,9 @@ pub struct ToolVersion {
     pub name: String,
     /// Semantic version components
     pub major: u32,
+    /// Minor version component.
     pub minor: u32,
+    /// Patch version component.
     pub patch: u32,
     /// When this version was released
     pub released: DateTime<Utc>,
@@ -42,6 +44,7 @@ pub struct ToolVersion {
 }
 
 impl ToolVersion {
+    /// Format the version as `"major.minor.patch"`.
     pub fn version_string(&self) -> String {
         format!("{}.{}.{}", self.major, self.minor, self.patch)
     }
@@ -98,41 +101,59 @@ pub struct ToolDependency {
 /// Result of compatibility checking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompatibilityReport {
+    /// Whether the skill is fully compatible with available tool versions.
     pub compatible: bool,
+    /// Non-fatal warnings (e.g., available version is newer than required).
     pub warnings: Vec<String>,
+    /// Fatal errors preventing compatibility.
     pub errors: Vec<String>,
+    /// Migrations that must be applied to resolve incompatibilities.
     pub migrations: Vec<Migration>,
 }
 
 /// A migration that needs to be applied
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Migration {
+    /// Name of the skill that needs migration.
     pub skill_name: String,
+    /// Name of the tool whose version changed.
     pub tool: String,
+    /// Version the skill was written against.
     pub from_version: String,
+    /// Current available version of the tool.
     pub to_version: String,
+    /// Code transformations to apply.
     pub transformations: Vec<CodeTransformation>,
 }
 
 /// A specific code transformation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeTransformation {
+    /// 1-based line number in the skill source code.
     pub line_number: usize,
+    /// Original code line.
     pub old_code: String,
+    /// Replacement code line.
     pub new_code: String,
+    /// Explanation of why this change is needed.
     pub reason: String,
 }
 
 /// Checks tool version compatibility
 pub enum VersionCompatibility {
+    /// Versions are fully compatible.
     Compatible,
+    /// Compatible but with a non-fatal warning message.
     Warning(String),
+    /// Requires a migration to become compatible.
     RequiresMigration,
+    /// Not compatible; includes an error message.
     Incompatible(String),
 }
 
 /// Checks if a skill is compatible with current tools
 pub struct SkillCompatibilityChecker {
+    /// Name of the skill being checked.
     skill_name: String,
     tool_dependencies: Vec<ToolDependency>,
     /// Current tool versions available

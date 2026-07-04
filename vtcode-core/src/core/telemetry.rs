@@ -14,28 +14,44 @@ pub struct TelemetryManager {
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelUsageStats {
+    /// Cumulative API call duration for this model.
     pub api_time: Duration,
+    /// Total prompt tokens consumed.
     pub prompt_tokens: u64,
+    /// Total completion tokens generated.
     pub completion_tokens: u64,
+    /// Total cached prompt tokens reused.
     pub cached_prompt_tokens: u64,
+    /// Total tokens read from the prompt cache.
     pub cache_read_tokens: u64,
+    /// Total tokens written into the prompt cache.
     pub cache_creation_tokens: u64,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TelemetryStats {
+    /// Total agent turns in the session.
     pub total_turns: usize,
+    /// Total tool invocations across all tools.
     pub total_tool_calls: usize,
-    pub total_tokens: usize, // Placeholder if we get token usage
+    /// Total tokens consumed (placeholder for future token tracking).
+    pub total_tokens: usize,
+    /// Per-tool invocation counts.
     pub tool_counts: HashMap<String, usize>,
+    /// Per-tool error counts.
     pub tool_errors: HashMap<String, usize>,
+    /// Total elapsed session duration.
     pub session_duration: Duration,
+    /// Cumulative time spent waiting for LLM API responses.
     pub api_time_spent: Duration,
+    /// Per-model usage breakdown.
     pub model_usage: HashMap<String, ModelUsageStats>,
+    /// Number of metric updates dropped due to lock contention.
     pub dropped_metric_updates: u64,
 }
 
 impl TelemetryManager {
+    /// Create a new telemetry manager and start the session timer.
     pub fn new() -> Self {
         Self {
             stats: Arc::new(Mutex::new(TelemetryStats::default())),
@@ -44,6 +60,7 @@ impl TelemetryManager {
         }
     }
 
+    /// Record that a new agent turn has started.
     pub fn record_turn(&self) {
         self.with_stats_mut_non_blocking(|stats| {
             stats.total_turns += 1;
@@ -53,6 +70,7 @@ impl TelemetryManager {
         });
     }
 
+    /// Record a tool invocation, incrementing error count if it failed.
     pub fn record_tool_usage(&self, tool: &str, success: bool) {
         self.with_stats_mut_non_blocking(|stats| {
             stats.total_tool_calls += 1;
@@ -71,6 +89,7 @@ impl TelemetryManager {
         });
     }
 
+    /// Record an LLM API request with its duration and optional token usage.
     pub fn record_llm_request(
         &self,
         model: &str,
@@ -118,6 +137,7 @@ impl TelemetryManager {
         }
     }
 
+    /// Take a snapshot of the current telemetry statistics.
     pub fn get_snapshot(&self) -> Result<TelemetryStats> {
         let stats = self
             .stats

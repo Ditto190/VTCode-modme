@@ -32,6 +32,7 @@ pub fn reasoning_from_selection_string(s: &str) -> ReasoningEffortLevel {
     ReasoningEffortLevel::parse(s).unwrap_or_default()
 }
 
+/// Convert a config [`UiSurfacePreference`] to the TUI [`SessionSurface`] enum.
 pub fn to_tui_surface(preference: crate::config::types::UiSurfacePreference) -> SessionSurface {
     match preference {
         crate::config::types::UiSurfacePreference::Auto => SessionSurface::Auto,
@@ -40,6 +41,7 @@ pub fn to_tui_surface(preference: crate::config::types::UiSurfacePreference) -> 
     }
 }
 
+/// Convert a [`KeyboardProtocolConfig`] to the TUI [`KeyboardProtocolSettings`].
 pub fn to_tui_keyboard_protocol(keyboard: KeyboardProtocolConfig) -> KeyboardProtocolSettings {
     KeyboardProtocolSettings {
         enabled: keyboard.enabled,
@@ -51,6 +53,7 @@ pub fn to_tui_keyboard_protocol(keyboard: KeyboardProtocolConfig) -> KeyboardPro
     }
 }
 
+/// Build [`FullscreenInteractionSettings`] from the loaded [`VTCodeConfig`].
 #[cfg(feature = "tui")]
 pub fn to_tui_fullscreen(config: &VTCodeConfig) -> FullscreenInteractionSettings {
     FullscreenInteractionSettings {
@@ -73,6 +76,7 @@ pub fn inline_theme_from_core_styles(styles: &ThemeStyles) -> InlineTheme {
     )
 }
 
+/// Convert core [`ThemeStyles`] to the TUI `ThemeStyles` variant (TUI build).
 #[cfg(feature = "tui")]
 pub fn tui_theme_styles_from_core(styles: &ThemeStyles) -> TuiThemeStyles {
     TuiThemeStyles {
@@ -95,11 +99,13 @@ pub fn tui_theme_styles_from_core(styles: &ThemeStyles) -> TuiThemeStyles {
     }
 }
 
+/// Convert core [`ThemeStyles`] to the TUI `ThemeStyles` variant (headless passthrough).
 #[cfg(not(feature = "tui"))]
 pub fn tui_theme_styles_from_core(styles: &ThemeStyles) -> ThemeStyles {
     styles.clone()
 }
 
+/// Convert a slice of [`SlashCommandInfo`] to TUI [`SlashCommandItem`] values.
 pub fn to_tui_slash_commands(commands: &[SlashCommandInfo]) -> Vec<SlashCommandItem> {
     commands
         .iter()
@@ -107,6 +113,7 @@ pub fn to_tui_slash_commands(commands: &[SlashCommandInfo]) -> Vec<SlashCommandI
         .collect()
 }
 
+/// Build a [`SessionAppearanceConfig`] from the loaded [`VTCodeConfig`].
 pub fn to_tui_appearance(config: &VTCodeConfig) -> SessionAppearanceConfig {
     let reduce_motion_mode =
         config.ui.reduce_motion_mode || matches!(config.tui.animations, Some(false));

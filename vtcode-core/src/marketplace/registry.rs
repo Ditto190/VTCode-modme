@@ -17,24 +17,42 @@ use super::{MarketplaceId, MarketplaceManifest, PluginManifest};
 pub enum MarketplaceSource {
     /// GitHub repository (owner/repo format)
     GitHub {
+        /// Unique identifier for this source.
         id: String,
+        /// Repository owner.
         owner: String,
+        /// Repository name.
         repo: String,
-        refspec: Option<String>, // branch, tag, or commit
+        /// Optional branch, tag, or commit refspec.
+        refspec: Option<String>,
     },
     /// Git URL with optional refspec
     Git {
+        /// Unique identifier for this source.
         id: String,
+        /// Git clone URL.
         url: String,
+        /// Optional branch, tag, or commit refspec.
         refspec: Option<String>,
     },
     /// Local directory path
-    Local { id: String, path: String },
+    Local {
+        /// Unique identifier for this source.
+        id: String,
+        /// Filesystem path to the marketplace directory.
+        path: String,
+    },
     /// Remote URL to a marketplace manifest
-    Remote { id: String, url: String },
+    Remote {
+        /// Unique identifier for this source.
+        id: String,
+        /// HTTP/HTTPS URL to the manifest file.
+        url: String,
+    },
 }
 
 impl MarketplaceSource {
+    /// Return the identifier for this marketplace source.
     pub fn id(&self) -> &str {
         match self {
             MarketplaceSource::GitHub { id, .. } => id,
@@ -59,6 +77,7 @@ pub struct MarketplaceRegistry {
 }
 
 impl MarketplaceRegistry {
+    /// Create a new registry rooted at the given base directory.
     pub fn new(base_dir: PathBuf) -> Self {
         Self {
             base_dir,

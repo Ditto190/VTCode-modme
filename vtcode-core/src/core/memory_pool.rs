@@ -9,12 +9,19 @@ use vtcode_config::MemoryPoolConfig;
 /// Memory pool statistics for auto-tuning
 #[derive(Debug, Clone, Default)]
 pub struct MemoryPoolStats {
+    /// Number of successful string pool retrievals.
     pub string_hits: usize,
+    /// Number of string pool misses requiring a new allocation.
     pub string_misses: usize,
+    /// Number of successful value pool retrievals.
     pub value_hits: usize,
+    /// Number of value pool misses requiring a new allocation.
     pub value_misses: usize,
+    /// Number of successful `Vec<String>` pool retrievals.
     pub vec_hits: usize,
+    /// Number of `Vec<String>` pool misses requiring a new allocation.
     pub vec_misses: usize,
+    /// Total allocations avoided by reusing pooled objects.
     pub allocations_avoided: usize,
 }
 
@@ -27,6 +34,7 @@ pub struct MemoryPool {
 }
 
 impl MemoryPool {
+    /// Create a memory pool with default capacities.
     pub fn new() -> Self {
         Self {
             string_pool: Mutex::new(VecDeque::with_capacity(64)),
@@ -260,23 +268,36 @@ fn calculate_size_recommendation(
 /// Memory pool tuning recommendation
 #[derive(Debug, Clone)]
 pub struct MemoryPoolTuningRecommendation {
+    /// Hit rate for the string pool (0.0 to 1.0).
     pub string_hit_rate: f64,
+    /// Hit rate for the value pool (0.0 to 1.0).
     pub value_hit_rate: f64,
+    /// Hit rate for the vector pool (0.0 to 1.0).
     pub vec_hit_rate: f64,
+    /// Current utilization of the string pool (0.0 to 1.0).
     pub string_utilization: f64,
+    /// Current utilization of the value pool (0.0 to 1.0).
     pub value_utilization: f64,
+    /// Current utilization of the vector pool (0.0 to 1.0).
     pub vec_utilization: f64,
+    /// Total allocations avoided across all pools.
     pub total_allocations_avoided: usize,
+    /// Recommended action for the string pool size.
     pub string_size_recommendation: SizeRecommendation,
+    /// Recommended action for the value pool size.
     pub value_size_recommendation: SizeRecommendation,
+    /// Recommended action for the vector pool size.
     pub vec_size_recommendation: SizeRecommendation,
 }
 
 /// Size recommendation enum
 #[derive(Debug, Clone, Copy)]
 pub enum SizeRecommendation {
+    /// Current pool size is appropriate.
     Maintain,
+    /// Pool size should be increased to the specified capacity.
     Increase(usize),
+    /// Pool size should be decreased to the specified capacity.
     Decrease(usize),
 }
 

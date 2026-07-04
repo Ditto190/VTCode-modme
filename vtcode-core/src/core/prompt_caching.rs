@@ -13,25 +13,40 @@ use crate::utils::tokens::estimate_tokens;
 /// Cached prompt entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedPrompt {
+    /// SHA-256 hash of the original prompt.
     pub prompt_hash: String,
+    /// The original prompt text.
     pub original_prompt: String,
+    /// The optimized prompt text produced by the LLM.
     pub optimized_prompt: String,
+    /// Model identifier used for optimization.
     pub model_used: String,
+    /// Estimated number of tokens saved by the optimization.
     pub tokens_saved: Option<u32>,
+    /// Quality score assigned during optimization (0.0 to 1.0).
     pub quality_score: Option<f64>,
+    /// Unix timestamp when the entry was created.
     pub created_at: u64,
+    /// Unix timestamp of the most recent access.
     pub last_used: u64,
+    /// Number of times this cached entry has been retrieved.
     pub usage_count: u32,
 }
 
 /// Prompt caching configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptCacheConfig {
+    /// Whether prompt caching is enabled.
     pub enabled: bool,
+    /// Directory where cache files are stored.
     pub cache_dir: PathBuf,
+    /// Maximum number of entries the cache will hold.
     pub max_cache_size: usize,
+    /// Maximum age of cache entries in days before expiration.
     pub max_age_days: u64,
+    /// Whether expired entries are cleaned up automatically on startup.
     pub enable_auto_cleanup: bool,
+    /// Minimum quality score required to store a cached entry.
     pub min_quality_threshold: f64,
 }
 
@@ -61,6 +76,7 @@ impl PromptCacheConfig {
         }
     }
 
+    /// Returns `true` if prompt caching is enabled.
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
@@ -81,10 +97,12 @@ pub struct PromptCache {
 }
 
 impl PromptCache {
+    /// Create a new prompt cache with default configuration.
     pub async fn new() -> Self {
         Self::with_config(PromptCacheConfig::default()).await
     }
 
+    /// Create a new prompt cache with the given configuration.
     pub async fn with_config(config: PromptCacheConfig) -> Self {
         let mut cache = Self {
             config,
@@ -281,9 +299,13 @@ impl PromptCache {
 /// Cache statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheStats {
+    /// Total number of entries currently in the cache.
     pub total_entries: usize,
+    /// Sum of all entries' usage counts.
     pub total_usage: u32,
+    /// Total tokens saved across all cached prompts.
     pub total_tokens_saved: u32,
+    /// Average quality score across all cached entries.
     pub avg_quality: f64,
 }
 
@@ -318,6 +340,7 @@ pub struct PromptOptimizer {
 }
 
 impl PromptOptimizer {
+    /// Create a new prompt optimizer with the given LLM provider.
     pub async fn new(llm_provider: Box<dyn crate::llm::provider::LLMProvider>) -> Self {
         Self {
             cache: PromptCache::new().await,
@@ -325,6 +348,7 @@ impl PromptOptimizer {
         }
     }
 
+    /// Replace the default cache with a custom [`PromptCache`] instance.
     pub fn with_cache(mut self, cache: PromptCache) -> Self {
         self.cache = cache;
         self

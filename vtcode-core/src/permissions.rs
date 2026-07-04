@@ -39,6 +39,7 @@ pub struct PermissionRuleMatches {
 }
 
 impl PermissionRuleMatches {
+    /// Converts these matches into a single [`PermissionRuleDecision`] using deny > ask > auto > allow precedence.
     pub const fn decision(self) -> PermissionRuleDecision {
         if self.deny {
             PermissionRuleDecision::Deny
@@ -54,31 +55,47 @@ impl PermissionRuleMatches {
     }
 }
 
+/// Categorizes a permission request by the type of operation being performed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionRequestKind {
+    /// A shell command execution request.
     Bash { command: String },
+    /// A file read request targeting the given paths.
     Read { paths: Vec<PathBuf> },
+    /// A file edit request targeting the given paths.
     Edit { paths: Vec<PathBuf> },
+    /// A file write/create/delete request targeting the given paths.
     Write { paths: Vec<PathBuf> },
+    /// A web fetch request targeting the given domains.
     WebFetch { domains: Vec<String> },
+    /// An MCP tool invocation for the given server and tool.
     Mcp { server: String, tool: String },
+    /// A tool call that does not fit the categories above.
     Other,
 }
 
+/// A fully described permission request carrying the tool name, operation kind,
+/// and any protected-path metadata needed for prompting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionRequest {
+    /// Exact (normalized) tool name that originated this request.
     pub exact_tool_name: String,
+    /// Categorized operation kind for rule matching.
     pub kind: PermissionRequestKind,
+    /// Whether this request mutates a file via a builtin file tool.
     pub builtin_file_mutation: bool,
+    /// Paths within protected directories (`.git`, `.vtcode`, etc.) that require extra confirmation.
     pub protected_write_paths: Vec<PathBuf>,
 }
 
 impl PermissionRequest {
+    /// Returns `true` if this request targets one or more protected write paths.
     pub fn requires_protected_write_prompt(&self) -> bool {
         !self.protected_write_paths.is_empty()
     }
 }
 
+/// Constructs a [`PermissionRequest`] from a normalized tool name and its arguments.
 pub fn build_permission_request(
     workspace_root: &Path,
     current_dir: &Path,
@@ -133,6 +150,8 @@ pub fn build_advertised_permission_requests(
         .collect()
 }
 
+/// Evaluates a permission request against the global permission configuration and
+/// returns which rule tiers matched.
 pub fn evaluate_permissions(
     config: &PermissionsConfig,
     workspace_root: &Path,
@@ -143,6 +162,8 @@ pub fn evaluate_permissions(
     evaluator.evaluate_matches(request)
 }
 
+/// Evaluates a permission request against an agent's permission configuration,
+/// returning the resolved decision using the agent's default when no rule matches.
 pub fn evaluate_agent_permissions(
     agent_permissions: &AgentPermissionsConfig,
     workspace_root: &Path,
@@ -154,6 +175,8 @@ pub fn evaluate_agent_permissions(
     evaluator.resolve(request, agent_permissions.default)
 }
 
+/// Evaluates a permission request by combining global and agent-level rules.
+/// Global deny is a hard ceiling; global ask forces a prompt unless the agent denies.
 pub fn evaluate_effective_permissions(
     global_config: &PermissionsConfig,
     agent_permissions: &AgentPermissionsConfig,

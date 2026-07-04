@@ -163,28 +163,48 @@
 //! This module provides a unified interface for different LLM providers
 //! with provider-specific implementations.
 
+/// Provider capability declarations and feature detection.
 pub mod capabilities;
+/// Context-Generic Provider (CGP) wiring for the LLM factory.
 pub mod cgp;
+/// Simplified LLM client trait and adapter.
 pub mod client;
+/// Adapter between config-level and factory-level provider configurations.
 pub mod config_adapter;
+/// Human-readable error formatting for LLM errors.
 pub mod error_display;
+/// LLM provider factory and global registry.
 pub mod factory;
+/// Shared HTTP client utilities for provider implementations.
 pub mod http_client;
+/// Lightweight (cheap/fast) model routing for auxiliary features.
 pub mod lightweight_routing;
 #[cfg(feature = "mock")]
+/// Mock LLM client for testing.
 pub mod mock_client;
+/// Model resolution, availability checks, and dynamic metadata.
 pub mod model_resolver;
+/// Optimized client with connection pooling and request deduplication.
 pub mod optimized_client;
+/// Core LLM provider trait and error types.
 pub mod provider;
-pub mod provider_base; // Shared provider utilities to eliminate duplicate code
+/// Shared provider utilities to eliminate duplicate code.
+pub mod provider_base;
+/// Generic provider builder with builder-pattern construction.
 pub mod provider_builder;
+/// Per-provider configuration types and the unified creation shim.
 pub mod provider_config;
+/// Re-exported provider implementations.
 pub mod providers;
+/// Adapter for the Rig agent framework.
 pub mod rig_adapter;
 mod single_response;
+/// Tool-call correlation and intent extraction for LLM responses.
 pub mod tool_bridge;
+/// LLM request/response types, errors, and backend kind.
 pub mod types;
-pub mod utils; // Shared utilities for request/response processing // Centralized HTTP client factory
+/// Shared utilities for request/response processing.
+pub mod utils;
 
 // Re-export main types for backward compatibility
 pub use capabilities::ProviderCapabilities;

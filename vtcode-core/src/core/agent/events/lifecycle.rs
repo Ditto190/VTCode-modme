@@ -23,8 +23,12 @@ struct ToolCallStreamState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Aggregated output from a tool execution, containing either inline text or a
+/// spool file reference.
 pub struct ToolOutputPayload {
+    /// Combined output text from the tool execution.
     pub aggregated_output: String,
+    /// Optional path to a spool file containing the full output.
     pub spool_path: Option<String>,
 }
 
@@ -210,6 +214,8 @@ fn append_unique_line(lines: &mut Vec<String>, line: &str) {
     }
 }
 
+/// Extract a [`ToolOutputPayload`] from a tool result JSON value, preferring
+/// spool path references and falling back to inline text aggregation.
 pub fn tool_output_payload_from_value(output: &Value) -> ToolOutputPayload {
     if let Some(spool_path) = output.get("spool_path").and_then(Value::as_str) {
         return ToolOutputPayload {
@@ -283,6 +289,7 @@ pub struct SharedLifecycleEmitter {
 }
 
 impl SharedLifecycleEmitter {
+    /// Generate the next unique item ID for lifecycle events.
     #[must_use]
     pub fn next_item_id(&mut self) -> String {
         let id = self.next_item_index;
@@ -290,6 +297,7 @@ impl SharedLifecycleEmitter {
         format!("item_{id}")
     }
 
+    /// Emit a completed agent message event with the full text.
     pub fn emit_completed_agent_message(&mut self, text: &str) {
         if text.trim().is_empty() {
             return;
@@ -306,19 +314,23 @@ impl SharedLifecycleEmitter {
             }));
     }
 
+    /// Replace the current assistant streaming text. Returns `true` if the text changed.
     pub fn replace_assistant_text(&mut self, text: &str) -> bool {
         replace_stream_text(&mut self.assistant, text)
     }
 
+    /// Whether the assistant text stream has been started.
     #[must_use]
     pub fn assistant_started(&self) -> bool {
         self.assistant.started
     }
 
+    /// Append a delta to the assistant text stream. Returns `true` if content was added.
     pub fn append_assistant_delta(&mut self, delta: &str) -> bool {
         append_stream_delta(&mut self.assistant, delta)
     }
 
+    /// Emit a snapshot of the current assistant text as an item event.
     pub fn emit_assistant_snapshot(&mut self, item_id: Option<String>) -> bool {
         let item_id = item_id.unwrap_or_else(|| self.next_item_id());
         emit_text_snapshot(
@@ -329,12 +341,14 @@ impl SharedLifecycleEmitter {
         )
     }
 
+    /// Complete the assistant text stream, emitting a final completed event.
     pub fn complete_assistant_stream(&mut self) -> bool {
         complete_text_stream(&mut self.pending_events, &mut self.assistant, |text| {
             ThreadItemDetails::AgentMessage(AgentMessageItem { text })
         })
     }
 
+    /// Emit a completed reasoning event with the full text.
     pub fn emit_completed_reasoning(&mut self, text: &str) {
         if text.trim().is_empty() {
             return;
@@ -352,14 +366,17 @@ impl SharedLifecycleEmitter {
             }));
     }
 
+    /// Replace the current reasoning streaming text. Returns `true` if the text changed.
     pub fn replace_reasoning_text(&mut self, text: &str) -> bool {
         replace_stream_text(&mut self.reasoning, text)
     }
 
+    /// Append a delta to the reasoning text stream. Returns `true` if content was added.
     pub fn append_reasoning_delta(&mut self, delta: &str) -> bool {
         append_stream_delta(&mut self.reasoning, delta)
     }
 
+    /// Update the reasoning stage label. Returns `true` if the stage changed.
     pub fn set_reasoning_stage(&mut self, stage: Option<String>) -> bool {
         if self.reasoning_stage == stage {
             return false;
@@ -368,16 +385,19 @@ impl SharedLifecycleEmitter {
         true
     }
 
+    /// Length of the accumulated reasoning text in bytes.
     #[must_use]
     pub fn reasoning_len(&self) -> usize {
         self.reasoning.text.len()
     }
 
+    /// Whether the reasoning text stream has been started.
     #[must_use]
     pub fn reasoning_started(&self) -> bool {
         self.reasoning.started
     }
 
+    /// Emit a snapshot of the current reasoning text as an item event.
     pub fn emit_reasoning_snapshot(&mut self, item_id: Option<String>) -> bool {
         let item_id = item_id.unwrap_or_else(|| self.next_item_id());
         let stage = self.reasoning_stage.clone();
@@ -394,6 +414,7 @@ impl SharedLifecycleEmitter {
         )
     }
 
+    /// Emit an update event reflecting the current reasoning stage.
     pub fn emit_reasoning_stage_update(&mut self) -> bool {
         if !self.reasoning.started {
             return false;
@@ -414,6 +435,7 @@ impl SharedLifecycleEmitter {
         true
     }
 
+    /// Complete the reasoning text stream, emitting a final completed event.
     pub fn complete_reasoning_stream(&mut self) -> bool {
         let stage = self.reasoning_stage.clone();
         complete_text_stream(&mut self.pending_events, &mut self.reasoning, move |text| {
@@ -424,6 +446,7 @@ impl SharedLifecycleEmitter {
         })
     }
 
+    /// Start tracking a tool call, emitting an item-started event.
     pub fn start_tool_call(
         &mut self,
         call_id: &str,
@@ -458,6 +481,7 @@ impl SharedLifecycleEmitter {
         true
     }
 
+    /// Append an argument delta to an in-progress tool call.
     pub fn append_tool_call_delta(
         &mut self,
         call_id: &str,

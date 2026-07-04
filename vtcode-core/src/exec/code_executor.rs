@@ -46,11 +46,14 @@ use tracing::{debug, info};
 /// Supported languages for code execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
+    /// Python 3 interpreter.
     Python3,
+    /// Node.js JavaScript interpreter.
     JavaScript,
 }
 
 impl Language {
+    /// Return the language name as a lowercase string identifier.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Python3 => "python3",
@@ -58,6 +61,7 @@ impl Language {
         }
     }
 
+    /// Return the default interpreter command name for this language.
     pub fn interpreter(&self) -> &'static str {
         match self {
             Self::Python3 => "python3",

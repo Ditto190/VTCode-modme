@@ -7,7 +7,9 @@ use crate::ui::search::{fuzzy_match, normalize_query};
 /// Metadata describing a slash command supported by the chat interface.
 #[derive(Clone, Copy, Debug)]
 pub struct SlashCommandInfo {
+    /// Command name typed after the `/` prefix (e.g. `"compact"`).
     pub name: &'static str,
+    /// Short human-readable description shown in autocomplete.
     pub description: &'static str,
 }
 
@@ -30,10 +32,12 @@ fn command_visible_for_terminal(command: &SlashCommandInfo, terminal: TerminalTy
     command.name != "terminal-setup" || terminal.should_offer_terminal_setup()
 }
 
+/// Return all slash commands visible for the auto-detected terminal.
 pub fn visible_commands() -> Vec<&'static SlashCommandInfo> {
     visible_commands_for_terminal(detected_terminal_for_visibility())
 }
 
+/// Return slash commands visible for the given terminal type.
 pub fn visible_commands_for_terminal(terminal: TerminalType) -> Vec<&'static SlashCommandInfo> {
     SLASH_COMMANDS
         .iter()
@@ -41,6 +45,7 @@ pub fn visible_commands_for_terminal(terminal: TerminalType) -> Vec<&'static Sla
         .collect()
 }
 
+/// Find a visible slash command by exact name for the auto-detected terminal.
 pub fn find_visible_command(name: &str) -> Option<&'static SlashCommandInfo> {
     let terminal = detected_terminal_for_visibility();
     SLASH_COMMANDS
@@ -48,10 +53,12 @@ pub fn find_visible_command(name: &str) -> Option<&'static SlashCommandInfo> {
         .find(|command| command.name == name && command_visible_for_terminal(command, terminal))
 }
 
+/// Find a slash command by exact name, regardless of terminal visibility.
 pub fn find_command(name: &str) -> Option<&'static SlashCommandInfo> {
     SLASH_COMMANDS.iter().find(|command| command.name == name)
 }
 
+/// Return fuzzy-matched slash command suggestions for the given terminal.
 pub fn suggestions_for_terminal(
     prefix: &str,
     terminal: TerminalType,

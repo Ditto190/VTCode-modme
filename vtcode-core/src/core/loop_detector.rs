@@ -424,10 +424,12 @@ pub struct LoopDetector {
 }
 
 impl LoopDetector {
+    /// Create a new detector with the default repeated-call limit.
     pub fn new() -> Self {
         Self::with_max_repeated_calls(defaults::DEFAULT_MAX_REPEATED_TOOL_CALLS)
     }
 
+    /// Create a new detector with a custom repeated-call limit.
     pub fn with_max_repeated_calls(limit: usize) -> Self {
         let normalized_limit = (limit > 1).then_some(limit);
         Self {
@@ -478,6 +480,7 @@ impl LoopDetector {
         self.custom_limits.insert(tool_name.to_string(), limit);
     }
 
+    /// Record a tool call and return a warning or hard-stop message if a loop is detected.
     pub fn record_call(&mut self, tool_name: &str, args: &serde_json::Value) -> Option<String> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -887,6 +890,7 @@ impl LoopDetector {
         self.tool_counts.len()
     }
 
+    /// Reset all tracking state.
     pub fn reset(&mut self) {
         self.recent_calls.clear();
         self.tool_counts.clear();

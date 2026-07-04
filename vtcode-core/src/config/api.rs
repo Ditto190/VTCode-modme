@@ -12,51 +12,78 @@ use vtcode_config::loader::{
     ConfigBuilder, ConfigManager, VTCodeConfig, fingerprint_str, merge_toml_values,
 };
 
+/// Request to read the effective configuration for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigReadRequest {
+    /// Root directory of the workspace to read configuration for.
     pub workspace: PathBuf,
+    /// Key-value overrides applied at runtime (e.g. CLI flags).
     #[serde(default)]
     pub runtime_overrides: Vec<(String, String)>,
 }
 
+/// View of a single configuration layer for API responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigLayerView {
+    /// Origin of this layer (e.g. user, workspace, project).
     pub source: ConfigLayerSource,
+    /// Metadata including name, version, and timestamps.
     pub metadata: ConfigLayerMetadata,
+    /// Reason this layer was skipped during merging, if disabled.
     pub disabled_reason: Option<String>,
+    /// Error message if this layer failed to load.
     pub error: Option<String>,
 }
 
+/// Response containing the merged effective configuration and layer details.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigReadResponse {
+    /// The fully merged configuration as a JSON value.
     pub effective_config: serde_json::Value,
+    /// Fingerprint of the merged layer stack for change detection.
     pub merged_version: String,
+    /// Ordered list of all configuration layers.
     pub layers: Vec<ConfigLayerView>,
+    /// Map of config path to the layer that provides its effective value.
     pub origins: BTreeMap<String, ConfigLayerMetadata>,
 }
 
+/// The configuration layer target for a write operation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigWriteTarget {
+    /// User-level configuration (`~/.vtcode/vtcode.toml`).
     User,
+    /// Workspace-level configuration (workspace root).
     Workspace,
+    /// Project-level configuration (`.vtcode/projects/<name>/config/`).
     Project,
 }
 
+/// Strategy for applying a value to the configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigWriteStrategy {
+    /// Replace the value at the given path unconditionally.
     Replace,
+    /// Merge into existing tables; replace non-table values.
     Upsert,
 }
 
+/// Request to write a value to a specific configuration layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigWriteRequest {
+    /// Root directory of the workspace.
     pub workspace: PathBuf,
+    /// Which configuration layer to write to.
     pub target: ConfigWriteTarget,
+    /// Dot-separated path to the configuration key (e.g. "agent.provider").
     pub path: String,
+    /// The TOML value to write.
     pub value: TomlValue,
+    /// How to apply the value to the existing configuration.
     pub strategy: ConfigWriteStrategy,
+    /// Optional expected version of the target layer for optimistic concurrency.
     #[serde(default)]
     pub expected_layer_version: Option<String>,
 }

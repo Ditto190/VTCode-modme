@@ -20,6 +20,7 @@ pub struct PluginInstaller {
 }
 
 impl PluginInstaller {
+    /// Create a new installer targeting the given plugins directory.
     pub fn new(plugins_dir: PathBuf, core_plugin_runtime: Option<PluginRuntime>) -> Self {
         Self {
             plugins_dir,

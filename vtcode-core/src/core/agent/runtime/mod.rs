@@ -36,25 +36,39 @@ fn merge_stream_and_completed_text(accumulated: &mut String, completed: Option<&
     accumulated.push_str(completed_text);
 }
 
+/// Control signal returned when polling the steering channel between turns or tool calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeControl {
+    /// No steering message pending; execution may proceed normally.
     Continue,
+    /// Execution was paused and has now been resumed.
     Resumed,
+    /// A stop request was received; the current turn should be cancelled.
     StopRequested,
 }
 
+/// Progress event emitted by the model adapter during a streaming LLM response.
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeModelProgress {
+    /// A chunk of assistant output text.
     OutputDelta(String),
+    /// A chunk of reasoning/thinking text.
     ReasoningDelta(String),
+    /// The active reasoning stage label changed.
     ReasoningStage(String),
+    /// A new tool call began streaming.
     ToolCallStarted {
+        /// Identifier of the tool call.
         call_id: String,
+        /// Optional name of the tool being invoked.
         name: Option<String>,
     },
+    /// A chunk of arguments for an in-progress tool call.
     ToolCallDelta {
+        /// Identifier of the tool call receiving the delta.
         call_id: String,
+        /// Serialized argument fragment.
         delta: String,
     },
 }
@@ -177,6 +191,7 @@ impl RuntimeModelAdapter for ProviderRuntimeModelAdapter<'_> {
     }
 }
 
+/// Manages steering messages (stop, pause, resume, follow-up inputs) for a running agent turn.
 pub struct RuntimeSteering {
     steering_receiver: Option<UnboundedReceiver<SteeringMessage>>,
     queued_follow_up_inputs: VecDeque<String>,
@@ -196,10 +211,12 @@ impl RuntimeSteering {
         }
     }
 
+    /// Replace the steering message receiver channel.
     pub fn set_receiver(&mut self, receiver: Option<UnboundedReceiver<SteeringMessage>>) {
         self.steering_receiver = receiver;
     }
 
+    /// Take ownership of the steering receiver, leaving `None` in its place.
     pub fn take_receiver(&mut self) -> Option<UnboundedReceiver<SteeringMessage>> {
         self.steering_receiver.take()
     }
@@ -209,18 +226,22 @@ impl RuntimeSteering {
         !self.queued_follow_up_inputs.is_empty()
     }
 
+    /// Dequeue the next follow-up user input, if any are pending.
     pub fn pop_follow_up_input(&mut self) -> Option<String> {
         self.queued_follow_up_inputs.pop_front()
     }
 
+    /// Queue a follow-up user input to be consumed after the current turn completes.
     pub fn queue_follow_up_input(&mut self, input: String) {
         self.queued_follow_up_inputs.push_back(input);
     }
 
+    /// Poll the steering channel for control signals during the current turn.
     pub async fn poll_turn_control(&mut self) -> RuntimeControl {
         self.poll_control().await
     }
 
+    /// Poll the steering channel for control signals during tool execution.
     pub async fn poll_tool_control(&mut self) -> RuntimeControl {
         self.poll_control().await
     }
@@ -281,15 +302,20 @@ impl RuntimeSteering {
     }
 }
 
+/// Result of executing a single LLM turn, containing the full response and extracted fields.
 pub struct TurnExecution {
+    /// The complete LLM response including usage and finish reason.
     pub response: LLMResponse,
+    /// The accumulated assistant output text.
     pub content: String,
+    /// The accumulated reasoning/thinking text, if present.
     pub reasoning: Option<String>,
 }
 
 const MIN_REASONING_UPDATE_BYTES: usize = 256;
 const MAX_REASONING_UPDATE_EVENTS: usize = 2;
 
+/// Bridges streaming model progress events to the lifecycle event sink for real-time UI updates.
 #[doc(hidden)]
 pub struct StreamingLifecycleBridge {
     event_sink: Option<EventSink>,
@@ -303,6 +329,7 @@ pub struct StreamingLifecycleBridge {
 }
 
 impl StreamingLifecycleBridge {
+    /// Create a new bridge that emits lifecycle events to the provided sink.
     #[must_use]
     pub fn new(event_sink: Option<EventSink>, turn_id: &str, step: usize, attempt: usize) -> Self {
         Self {
@@ -317,6 +344,7 @@ impl StreamingLifecycleBridge {
         }
     }
 
+    /// Forward a streaming progress event to the lifecycle emitter and sink.
     pub fn on_progress(&mut self, event: RuntimeModelProgress) {
         match event {
             RuntimeModelProgress::OutputDelta(delta) => self.push_assistant_delta(&delta),
@@ -331,6 +359,7 @@ impl StreamingLifecycleBridge {
         }
     }
 
+    /// Abort the streaming turn, marking all open items as failed and flushing events.
     pub fn abort(&mut self) {
         self.lifecycle.complete_open_text_items();
         self.lifecycle
@@ -338,11 +367,13 @@ impl StreamingLifecycleBridge {
         self.emit_pending_events();
     }
 
+    /// Complete all open text items gracefully and flush pending events.
     pub fn complete_open_items(&mut self) {
         self.lifecycle.complete_open_text_items();
         self.emit_pending_events();
     }
 
+    /// Take the mapping of tool call IDs to their lifecycle item IDs, leaving the map empty.
     #[must_use]
     pub fn take_streamed_tool_call_items(&mut self) -> hashbrown::HashMap<String, String> {
         std::mem::take(&mut self.tool_call_item_ids)
@@ -462,7 +493,9 @@ impl StreamingLifecycleBridge {
     }
 }
 
+/// Orchestrates a single agent turn: manages steering, lifecycle events, and the LLM call.
 pub struct AgentRuntime {
+    /// Mutable session state including conversation history and statistics.
     pub state: AgentSessionState,
     steering: RuntimeSteering,
     event_sink: Option<EventSink>,
@@ -471,6 +504,7 @@ pub struct AgentRuntime {
 }
 
 impl AgentRuntime {
+    /// Create a new runtime with the given session state, optional event sink, and steering receiver.
     pub fn new(
         state: AgentSessionState,
         event_sink: Option<EventSink>,
@@ -485,45 +519,55 @@ impl AgentRuntime {
         }
     }
 
+    /// Replace the structured event sink used for lifecycle event emission.
     pub fn set_event_handler(&mut self, sink: Option<EventSink>) {
         self.event_sink = sink;
     }
 
+    /// Replace the steering message receiver channel for this runtime.
     pub fn set_steering_receiver(&mut self, receiver: Option<UnboundedReceiver<SteeringMessage>>) {
         self.steering.set_receiver(receiver);
     }
 
+    /// Take ownership of the steering receiver, leaving `None` in its place.
     pub fn take_steering_receiver(&mut self) -> Option<UnboundedReceiver<SteeringMessage>> {
         self.steering.take_receiver()
     }
 
+    /// Borrow the session state and steering controller mutably at the same time.
     pub fn split_mut(&mut self) -> (&mut AgentSessionState, &mut RuntimeSteering) {
         (&mut self.state, &mut self.steering)
     }
 
+    /// Returns `true` if there are queued follow-up user inputs waiting to be consumed.
     #[must_use]
     pub fn has_pending_follow_up_inputs(&self) -> bool {
         self.steering.has_pending_follow_up_inputs()
     }
 
+    /// Pop the next queued follow-up input and add it as a user message, returning the input text.
     pub fn run_until_idle(&mut self) -> Option<String> {
         let input = self.steering.pop_follow_up_input()?;
         self.state.add_user_message(input.clone());
         Some(input)
     }
 
+    /// Poll the steering channel for control signals during the current turn.
     pub async fn poll_turn_control(&mut self) -> RuntimeControl {
         self.steering.poll_turn_control().await
     }
 
+    /// Poll the steering channel for control signals during tool execution.
     pub async fn poll_tool_control(&mut self) -> RuntimeControl {
         self.steering.poll_tool_control().await
     }
 
+    /// Take all emitted lifecycle events, leaving the internal buffer empty.
     pub fn take_emitted_events(&mut self) -> Vec<ThreadEvent> {
         std::mem::take(&mut self.emitted_events)
     }
 
+    /// Look up the lifecycle item ID for a given tool call identifier.
     #[must_use]
     pub fn tool_call_item_id(&self, call_id: &str) -> Option<String> {
         self.lifecycle
@@ -531,11 +575,13 @@ impl AgentRuntime {
             .map(str::to_string)
     }
 
+    /// Mark a specific tool call as completed with the given status and emit lifecycle events.
     pub fn complete_tool_call(&mut self, call_id: &str, status: ToolCallStatus) {
         let _ = self.lifecycle.complete_tool_call(call_id, status);
         self.emit_pending_lifecycle_events();
     }
 
+    /// Mark all still-open tool calls as completed with the given status and emit lifecycle events.
     pub fn complete_open_tool_calls(&mut self, status: ToolCallStatus) {
         self.lifecycle.complete_open_tool_calls_with_status(status);
         self.emit_pending_lifecycle_events();
@@ -751,6 +797,7 @@ impl AgentRuntime {
         })
     }
 
+    /// Execute a single LLM turn: stream the response, update session state, and return the result.
     pub async fn run_turn_once(
         &mut self,
         provider: &mut Box<dyn LLMProvider>,

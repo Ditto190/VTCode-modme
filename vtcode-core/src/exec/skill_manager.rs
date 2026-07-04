@@ -51,16 +51,22 @@ pub struct SkillMetadata {
 /// Parameter documentation for a skill.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterDoc {
+    /// Parameter name.
     pub name: String,
+    /// Parameter type (e.g., "str", "int", "list").
     pub r#type: String,
+    /// Human-readable description of the parameter.
     pub description: String,
+    /// Whether this parameter is required.
     pub required: bool,
 }
 
 /// A saved skill with code and metadata.
 #[derive(Debug, Clone)]
 pub struct Skill {
+    /// Descriptive metadata for the skill.
     pub metadata: SkillMetadata,
+    /// The skill implementation source code.
     pub code: String,
 }
 

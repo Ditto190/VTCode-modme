@@ -68,8 +68,11 @@ const MUTATING_OPTION_HINTS: &[&str] = &[
 /// Decision result for tool execution
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolExecutionDecision {
+    /// The tool is allowed to execute.
     Allowed,
+    /// The tool execution is denied.
     Denied,
+    /// The tool execution is denied with a feedback message.
     DeniedWithFeedback(String),
 }
 

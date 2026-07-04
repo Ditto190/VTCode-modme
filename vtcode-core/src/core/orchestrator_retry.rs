@@ -20,10 +20,15 @@ use vtcode_config::constants::execution::{
 /// Statistics about retry attempts
 #[derive(Debug, Clone, Default)]
 pub struct RetryStats {
+    /// Total number of attempts made (including first attempts).
     pub total_attempts: u32,
+    /// Number of operations that succeeded after at least one retry.
     pub successful_retries: u32,
+    /// Number of retry sequences that exhausted all attempts.
     pub failed_retries: u32,
+    /// Number of times the fallback model was activated.
     pub fallback_activations: u32,
+    /// Cumulative time spent waiting during backoff delays.
     pub total_backoff_time: Duration,
 }
 

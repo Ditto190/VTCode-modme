@@ -18,9 +18,12 @@ use crate::utils::gatekeeper;
 
 const DEFAULT_CAPTURE_LIMIT: usize = 256 * 1024; // 256 KiB
 
+/// Configuration for capturing a process stream (stdout or stderr).
 #[derive(Debug, Clone)]
 pub struct StreamCaptureConfig {
+    /// Whether to capture this stream.
     pub capture: bool,
+    /// Maximum number of bytes to capture before truncating.
     pub max_bytes: usize,
 }
 
@@ -33,31 +36,49 @@ impl Default for StreamCaptureConfig {
     }
 }
 
+/// Options for spawning an asynchronous process.
 #[derive(Debug, Clone, Default)]
 pub struct ProcessOptions {
+    /// The program to execute.
     pub program: String,
+    /// Arguments to pass to the program.
     pub args: Vec<String>,
+    /// Environment variables for the process.
     pub env: HashMap<OsString, OsString>,
+    /// Working directory for the process.
     pub current_dir: Option<PathBuf>,
+    /// Maximum time the process is allowed to run before being killed.
     pub timeout: Option<Duration>,
+    /// Token to externally cancel the process.
     pub cancellation_token: Option<CancellationToken>,
+    /// Configuration for stdout capture.
     pub stdout: StreamCaptureConfig,
+    /// Configuration for stderr capture.
     pub stderr: StreamCaptureConfig,
 }
 
+/// Output from a completed asynchronous process.
 #[derive(Debug)]
 pub struct ProcessOutput {
+    /// The exit status of the process.
     pub exit_status: ExitStatus,
+    /// Captured stdout bytes.
     pub stdout: Vec<u8>,
+    /// Captured stderr bytes.
     pub stderr: Vec<u8>,
+    /// Whether the process was killed due to a timeout.
     pub timed_out: bool,
+    /// Whether the process was cancelled via its cancellation token.
     pub cancelled: bool,
+    /// Wall-clock duration from spawn to completion.
     pub duration: Duration,
 }
 
+/// Runs a child process asynchronously with timeout and cancellation support.
 pub struct AsyncProcessRunner;
 
 impl AsyncProcessRunner {
+    /// Spawn and await a child process with the given options.
     pub async fn run(options: ProcessOptions) -> Result<ProcessOutput> {
         if options.program.is_empty() {
             return Err(anyhow!("program cannot be empty"));

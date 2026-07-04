@@ -12,12 +12,21 @@ const CURRENT_BLOCKED_FILE: &str = "current_blocked.md";
 const BLOCKERS_DIR: &str = "blockers";
 const CURRENT_TASK_FILE: &str = "current_task.md";
 
+/// Artifacts produced by [`write_blocked_handoff`], containing paths to the
+/// current and archived handoff files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedHandoffArtifacts {
+    /// Path to the current blocked handoff markdown file.
     pub current_path: PathBuf,
+    /// Path to the archived blocked handoff markdown file.
     pub archive_path: PathBuf,
 }
 
+/// Write a blocked-handoff artifact when the agent hits an unrecoverable blocker.
+///
+/// Creates both a `current_blocked.md` file and a timestamped archive under
+/// `.vtcode/tasks/blockers/`. The handoff includes the blocker summary, current
+/// tracker snapshot, and a resume command.
 pub fn write_blocked_handoff(
     workspace: &Path,
     session_id: &str,
@@ -109,7 +118,9 @@ fn render_blocked_handoff(
 /// Artifacts produced by [`write_async_approval_blocker`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsyncApprovalArtifacts {
+    /// Path to the async approval blocker markdown file.
     pub current_path: PathBuf,
+    /// Unique token used to approve or reject this request via CLI.
     pub approval_token: String,
 }
 

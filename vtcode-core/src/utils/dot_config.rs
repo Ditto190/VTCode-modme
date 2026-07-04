@@ -10,94 +10,148 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tokio::fs;
 
-/// VT Code configuration stored in ~/.vtcode/
+/// VT Code configuration stored in ~/.vtcode/.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DotConfig {
+    /// Configuration schema version.
     pub version: String,
+    /// Unix timestamp of the last update.
     pub last_updated: u64,
+    /// User preference settings.
     pub preferences: UserPreferences,
+    /// LLM provider configurations.
     pub providers: ProviderConfigs,
+    /// Cache settings.
     pub cache: CacheConfig,
+    /// UI configuration.
     pub ui: UiConfig,
+    /// Workspace trust records.
     #[serde(default)]
     pub workspace_trust: WorkspaceTrustStore,
+    /// Dependency notice display state.
     #[serde(default)]
     pub dependency_notices: DependencyNoticeStore,
 }
 
+/// User preference settings for the application.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserPreferences {
+    /// Default LLM model identifier.
     pub default_model: String,
+    /// Default LLM provider name.
     pub default_provider: String,
+    /// Maximum tokens for generation.
     pub max_tokens: Option<u32>,
+    /// Sampling temperature.
     pub temperature: Option<f32>,
+    /// Whether to auto-save on changes.
     pub auto_save: bool,
+    /// UI theme name.
     pub theme: String,
+    /// Custom keybinding mappings.
     pub keybindings: HashMap<String, String>,
 }
 
+/// Configuration for all supported LLM providers.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfigs {
+    /// OpenAI provider configuration.
     pub openai: Option<ProviderConfig>,
+    /// Anthropic provider configuration.
     pub anthropic: Option<ProviderConfig>,
+    /// Google Gemini provider configuration.
     pub gemini: Option<ProviderConfig>,
+    /// DeepSeek provider configuration.
     pub deepseek: Option<ProviderConfig>,
+    /// OpenRouter provider configuration.
     pub openrouter: Option<ProviderConfig>,
+    /// Ollama provider configuration.
     pub ollama: Option<ProviderConfig>,
+    /// LM Studio provider configuration.
     pub lmstudio: Option<ProviderConfig>,
+    /// llama.cpp provider configuration.
     pub llamacpp: Option<ProviderConfig>,
+    /// MiniMax provider configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimax: Option<ProviderConfig>,
+    /// StepFun provider configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stepfun: Option<ProviderConfig>,
+    /// Evolink provider configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evolink: Option<ProviderConfig>,
 }
 
+/// Store of workspace trust records.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceTrustStore {
+    /// Map of workspace paths to their trust records.
     #[serde(default)]
     pub entries: HashMap<String, WorkspaceTrustRecord>,
 }
 
+/// Record of a workspace's trust level and when it was granted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceTrustRecord {
+    /// Trust level assigned to the workspace.
     pub level: WorkspaceTrustLevel,
+    /// Unix timestamp when trust was granted.
     pub trusted_at: u64,
 }
 
+/// Store tracking which dependency notices have been shown.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DependencyNoticeStore {
+    /// Whether the ripgrep missing notice has been shown.
     #[serde(default)]
     pub ripgrep_missing_notice_shown: bool,
+    /// Whether the ast-grep missing notice has been shown.
     #[serde(default)]
     pub ast_grep_missing_notice_shown: bool,
 }
 
+/// Configuration for an individual LLM provider.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfig {
+    /// API key for authentication.
     pub api_key: Option<String>,
+    /// Custom base URL for the API endpoint.
     pub base_url: Option<String>,
+    /// Default model for this provider.
     pub model: Option<String>,
+    /// Whether this provider is enabled.
     pub enabled: bool,
-    pub priority: i32, // Higher priority = preferred
+    /// Priority for provider selection (higher = preferred).
+    pub priority: i32,
 }
 
+/// Cache configuration settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
+    /// Whether caching is enabled.
     pub enabled: bool,
+    /// Maximum cache size in megabytes.
     pub max_size_mb: u64,
+    /// Time-to-live for cached entries in days.
     pub ttl_days: u64,
+    /// Whether prompt caching is enabled.
     pub prompt_cache_enabled: bool,
+    /// Whether context caching is enabled.
     pub context_cache_enabled: bool,
 }
 
+/// UI configuration settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
+    /// Whether to show timestamps in output.
     pub show_timestamps: bool,
+    /// Maximum number of output lines to display.
     pub max_output_lines: usize,
+    /// Whether syntax highlighting is enabled.
     pub syntax_highlighting: bool,
+    /// Whether auto-completion is enabled.
     pub auto_complete: bool,
+    /// Number of history entries to retain.
     pub history_size: usize,
 }
 
@@ -154,7 +208,7 @@ impl Default for UiConfig {
     }
 }
 
-/// Dot folder manager for VT Code configuration and cache
+/// Dot folder manager for VT Code configuration and cache.
 #[derive(Clone)]
 pub struct DotManager {
     config_dir: PathBuf,
@@ -163,6 +217,7 @@ pub struct DotManager {
 }
 
 impl DotManager {
+    /// Creates a new `DotManager` using the default configuration directory.
     pub fn new() -> Result<Self, DotError> {
         let config_dir = get_config_dir().ok_or(DotError::HomeDirNotFound)?;
         let cache_dir = config_dir.join("cache");
@@ -472,44 +527,62 @@ impl DotManager {
     }
 }
 
+/// Statistics from a cache cleanup operation.
 #[derive(Debug, Default)]
 pub struct CacheCleanupStats {
+    /// Number of prompt cache entries cleaned.
     pub prompts_cleaned: u64,
+    /// Number of context cache entries cleaned.
     pub context_cleaned: u64,
+    /// Number of model cache entries cleaned.
     pub models_cleaned: u64,
 }
 
+/// Disk usage statistics for the dot folder.
 #[derive(Debug, Default)]
 pub struct DiskUsageStats {
+    /// Size of the configuration directory in bytes.
     pub config_size: u64,
+    /// Size of the cache directory in bytes.
     pub cache_size: u64,
+    /// Size of the logs directory in bytes.
     pub logs_size: u64,
+    /// Size of the sessions directory in bytes.
     pub sessions_size: u64,
+    /// Size of the backups directory in bytes.
     pub backups_size: u64,
+    /// Total size across all directories in bytes.
     pub total_size: u64,
 }
 
-/// Dot folder management errors
+/// Errors that can occur during dot folder operations.
 #[derive(Debug, thiserror::Error)]
 pub enum DotError {
+    /// The user's home directory could not be determined.
     #[error("Home directory not found")]
     HomeDirNotFound,
 
+    /// A system time error occurred.
     #[error("System time error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
 
+    /// An I/O error occurred.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// TOML serialization failed.
     #[error("TOML serialization error: {0}")]
     Toml(#[from] toml::ser::Error),
 
+    /// TOML deserialization failed.
     #[error("TOML deserialization error: {0}")]
     TomlDe(#[from] toml::de::Error),
 
+    /// The specified backup file was not found.
     #[error("Backup not found: {0}")]
     BackupNotFound(PathBuf),
 
+    /// The dot manager mutex was poisoned.
     #[error("Dot manager lock poisoned: {0}")]
     LockPoisoned(String),
 }

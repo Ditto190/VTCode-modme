@@ -30,35 +30,42 @@ impl<T> ProviderBuilder<T>
 where
     T: ProviderConfig,
 {
+    /// Create a new builder with all fields unset.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Set the API key for provider authentication.
     pub fn api_key(mut self, api_key: String) -> Self {
         self.api_key = Some(api_key);
         self
     }
 
+    /// Set the model identifier to use.
     pub fn model(mut self, model: String) -> Self {
         self.model = Some(model);
         self
     }
 
+    /// Set a custom base URL for the provider API endpoint.
     pub fn base_url(mut self, base_url: String) -> Self {
         self.base_url = Some(base_url);
         self
     }
 
+    /// Enable prompt caching with the given configuration.
     pub fn prompt_cache(mut self, prompt_cache: PromptCachingConfig) -> Self {
         self.prompt_cache = Some(prompt_cache);
         self
     }
 
+    /// Set request timeout configuration.
     pub fn timeouts(mut self, timeouts: TimeoutsConfig) -> Self {
         self.timeouts = Some(timeouts);
         self
     }
 
+    /// Build the provider, returning an error if creation fails.
     pub fn try_build(self) -> Result<Box<dyn LLMProvider>, LLMError> {
         crate::llm::provider_config::create_provider_unified(
             T::PROVIDER_KEY,
@@ -96,12 +103,18 @@ where
 
 /// Trait for provider-specific configuration and creation
 pub trait ProviderConfig {
+    /// Registry key used to look up this provider in the factory.
     const PROVIDER_KEY: &'static str;
+    /// Human-readable display name for this provider.
     const DISPLAY_NAME: &'static str;
+    /// Default model identifier when none is specified.
     const DEFAULT_MODEL: &'static str;
+    /// Base URL for the provider's API endpoint.
     const API_BASE_URL: &'static str;
+    /// Optional environment variable that overrides the base URL.
     const BASE_URL_ENV_VAR: Option<&'static str>;
 
+    /// Construct a boxed [`LLMProvider`] from the given configuration.
     fn create_provider(
         api_key: String,
         model: String,
@@ -136,6 +149,7 @@ pub trait ProviderConfig {
         }
     }
 
+    /// Provider-specific prompt cache configuration type.
     type PromptCacheSettings: Clone + Default + Send + Sync + 'static;
 }
 
@@ -192,6 +206,7 @@ mod http_client_pool {
         Arc::new(RwLock::new(pool))
     });
 
+    /// Retrieve a pooled HTTP client by key, falling back to the default client.
     pub fn get_http_client(key: &str) -> Arc<HttpClient> {
         let pool_guard = CLIENT_POOL.read();
         let pool = match pool_guard {
@@ -214,6 +229,7 @@ mod http_client_pool {
         Arc::new(HttpClient::new())
     }
 
+    /// Select an appropriate pooled HTTP client based on the timeout ceiling.
     pub fn get_http_client_for_timeouts(timeouts: &TimeoutsConfig) -> Arc<HttpClient> {
         let key = if timeouts.default_ceiling_seconds >= 120 {
             "timeout_120s"

@@ -38,24 +38,35 @@ pub enum ProviderBuildComponent {}
 
 /// Provider trait for provider metadata.
 pub trait ProviderMetadataProvider<Ctx> {
+    /// Registry key used to identify this provider in the factory.
     const PROVIDER_KEY: &'static str;
+    /// Human-readable display name.
     const DISPLAY_NAME: &'static str;
+    /// Default model identifier when none is specified.
     const DEFAULT_MODEL: &'static str;
+    /// Base URL for the provider's API endpoint.
     const API_BASE_URL: &'static str;
+    /// Optional environment variable that overrides the base URL.
     const BASE_URL_ENV_VAR: Option<&'static str>;
 }
 
 /// Provider trait for constructing boxed providers from factory config.
 pub trait ProviderBuildProvider<Ctx>: Send + Sync {
+    /// Construct a boxed [`LLMProvider`] from the given factory configuration.
     fn build_provider(config: FactoryProviderConfig) -> Box<dyn LLMProvider>;
 }
 
 /// Ergonomic blanket consumer over the metadata component.
 pub trait CanDescribeProvider {
+    /// Registry key used to identify this provider in the factory.
     const PROVIDER_KEY: &'static str;
+    /// Human-readable display name.
     const DISPLAY_NAME: &'static str;
+    /// Default model identifier when none is specified.
     const DEFAULT_MODEL: &'static str;
+    /// Base URL for the provider's API endpoint.
     const API_BASE_URL: &'static str;
+    /// Optional environment variable that overrides the base URL.
     const BASE_URL_ENV_VAR: Option<&'static str>;
 }
 
@@ -88,6 +99,7 @@ where
 
 /// Ergonomic blanket consumer over the provider build component.
 pub trait CanBuildProvider {
+    /// Construct a boxed [`LLMProvider`] from the given factory configuration.
     fn build_provider(config: FactoryProviderConfig) -> Box<dyn LLMProvider>;
 }
 
@@ -115,6 +127,8 @@ trait StandardProviderConstructor: LLMProvider + Send + Sync + 'static {
     ) -> Self;
 }
 
+/// Blanket build implementation for providers that follow the standard
+/// `from_config` constructor pattern.
 pub struct StandardProviderBuild<P>(PhantomData<P>);
 
 impl<Ctx, P> ProviderBuildProvider<Ctx> for StandardProviderBuild<P>
@@ -147,6 +161,7 @@ where
     }
 }
 
+/// Build implementation for the Anthropic provider with custom config handling.
 pub struct AnthropicProviderBuild;
 
 impl ProviderBuildProvider<AnthropicProviderConfig> for AnthropicProviderBuild {
@@ -176,6 +191,7 @@ impl ProviderBuildProvider<AnthropicProviderConfig> for AnthropicProviderBuild {
     }
 }
 
+/// Build implementation for the OpenAI provider with provider-specific config handling.
 pub struct OpenAIProviderBuild;
 
 impl ProviderBuildProvider<OpenAIProviderConfig> for OpenAIProviderBuild {
@@ -207,6 +223,7 @@ impl ProviderBuildProvider<OpenAIProviderConfig> for OpenAIProviderBuild {
     }
 }
 
+/// Build implementation for the GitHub Copilot provider.
 pub struct CopilotProviderBuild;
 
 impl ProviderBuildProvider<CopilotProviderConfig> for CopilotProviderBuild {

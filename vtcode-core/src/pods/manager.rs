@@ -14,57 +14,84 @@ const DEFAULT_LOG_DIR: &str = ".vllm_logs";
 /// Request payload for starting a model on a pod.
 #[derive(Debug, Clone)]
 pub struct PodStartRequest {
+    /// Name of the target pod (uses the active pod when `None`).
     pub pod_name: Option<String>,
+    /// SSH connection string for the pod.
     pub ssh: Option<String>,
+    /// GPU inventory for the pod.
     pub gpus: Vec<PodGpu>,
+    /// Path on the pod where model weights are stored.
     pub models_path: Option<String>,
+    /// User-facing name for this model instance.
     pub name: String,
+    /// Hugging Face model identifier.
     pub model: String,
+    /// Explicit profile name to use (auto-resolved when `None`).
     pub profile: Option<String>,
+    /// Override for the number of GPUs to allocate.
     pub requested_gpu_count: Option<usize>,
+    /// GPU memory utilization percentage (0.0 -- 100.0).
     pub memory: Option<f32>,
+    /// Maximum context length (e.g. `"32k"` or `"131072"`).
     pub context: Option<String>,
 }
 
 /// Result of a successful model launch.
 #[derive(Debug, Clone)]
 pub struct PodStartResult {
+    /// Updated pod state after launch.
     pub pod: PodState,
+    /// Metadata for the newly running model.
     pub entry: RunningModel,
+    /// The resolved deployment profile used for the launch.
     pub profile: PodProfile,
+    /// The shell command that was executed to start the model.
     pub launch_command: String,
 }
 
 /// Row returned by `pods list`.
 #[derive(Debug, Clone)]
 pub struct PodListEntry {
+    /// User-facing model instance name.
     pub name: String,
+    /// Hugging Face model identifier.
     pub model: String,
+    /// Port the model server is listening on.
     pub port: u16,
+    /// Remote process ID.
     pub pid: u32,
+    /// IDs of GPUs allocated to this model.
     pub gpu_ids: Vec<u32>,
+    /// Current health status.
     pub status: PodHealth,
 }
 
 /// Row returned by `pods known-models`.
 #[derive(Debug, Clone)]
 pub struct PodStatusDetail {
+    /// Profile name.
     pub name: String,
+    /// Hugging Face model identifier.
     pub model: String,
+    /// Number of GPUs required by this profile.
     pub gpu_count: usize,
 }
 
 /// Split known models into compatible and incompatible groups.
 #[derive(Debug, Clone)]
 pub struct KnownModelsReport {
+    /// Profiles that can run on the active pod.
     pub compatible: Vec<PodStatusDetail>,
+    /// Profiles that require more GPUs than the active pod provides.
     pub incompatible: Vec<PodStatusDetail>,
 }
 
 /// `pods list` report.
 #[derive(Debug, Clone)]
 pub struct PodStatusReport {
+    /// Name of the active pod.
     pub pod_name: String,
+    /// Running model entries on the pod.
     pub entries: Vec<PodListEntry>,
 }
 
@@ -78,6 +105,7 @@ pub struct PodManager {
 }
 
 impl PodManager {
+    /// Create a new `PodManager` using the default store and SSH transport.
     pub fn new() -> Result<Self> {
         Ok(Self::with_transport(
             PodsStore::default_store()?,
@@ -85,6 +113,7 @@ impl PodManager {
         ))
     }
 
+    /// Create a `PodManager` with an explicit store and transport (useful for testing).
     pub fn with_transport(store: PodsStore, transport: Arc<dyn PodTransport>) -> Self {
         Self {
             store,
@@ -94,6 +123,7 @@ impl PodManager {
         }
     }
 
+    /// Load the current pod state, returning a cached copy when available.
     pub async fn load_state(&self) -> Result<PodsState> {
         if let Some(state) = self.cached_state.read().clone() {
             return Ok(state);
@@ -104,6 +134,7 @@ impl PodManager {
         Ok(state)
     }
 
+    /// Load the deployment catalog, returning a cached copy when available.
     pub async fn load_catalog(&self) -> Result<PodCatalog> {
         if let Some(catalog) = self.cached_catalog.read().clone() {
             return Ok(catalog);
@@ -114,6 +145,7 @@ impl PodManager {
         Ok(catalog)
     }
 
+    /// Start a model on the active pod, uploading launch scripts via SSH.
     pub async fn start_model(&self, request: PodStartRequest) -> Result<PodStartResult> {
         let mut state = self.load_state().await?;
         let catalog = self.load_catalog().await?;
@@ -205,6 +237,7 @@ impl PodManager {
         })
     }
 
+    /// Stop a running model by name, sending `SIGTERM` followed by `SIGKILL`.
     pub async fn stop_model(&self, name: &str) -> Result<Option<RunningModel>> {
         let mut state = self.load_state().await?;
         let Some(pod) = state.active_pod.as_mut() else {
@@ -232,6 +265,7 @@ impl PodManager {
         Ok(Some(entry))
     }
 
+    /// Stop every running model on the active pod, returning the count stopped.
     pub async fn stop_all_models(&self) -> Result<usize> {
         let mut state = self.load_state().await?;
         let Some(pod) = state.active_pod.as_mut() else {
@@ -263,6 +297,7 @@ impl PodManager {
         Ok(stopped)
     }
 
+    /// List all running models on the active pod with their health status.
     pub async fn list_models(&self) -> Result<PodStatusReport> {
         let state = self.load_state().await?;
         let Some(pod) = state.active_pod.as_ref() else {
@@ -288,6 +323,7 @@ impl PodManager {
         })
     }
 
+    /// Stream the log output of a running model to the terminal via SSH.
     pub async fn stream_logs(&self, name: &str) -> Result<()> {
         let state = self.load_state().await?;
         let Some(pod) = state.active_pod.as_ref() else {
@@ -303,6 +339,7 @@ impl PodManager {
         self.transport.exec_stream(&pod.ssh, &command).await
     }
 
+    /// Return the catalog profiles split into compatible and incompatible with the active pod.
     pub async fn known_models(&self) -> Result<KnownModelsReport> {
         let state = self.load_state().await?;
         let Some(pod) = state.active_pod.as_ref() else {

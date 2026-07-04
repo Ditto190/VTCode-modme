@@ -6,29 +6,47 @@
 use crate::terminal_setup::detector::TerminalType;
 use anyhow::{Result, anyhow};
 
-/// Default VT Code dark theme colors
+/// Default VT Code dark theme colors.
 pub struct VTCodeDarkTheme {
+    /// Terminal background color in hex (`#RRGGBB`).
     pub background: &'static str,
+    /// Terminal foreground (text) color in hex.
     pub foreground: &'static str,
+    /// Cursor color in hex.
     pub cursor: &'static str,
+    /// Selection background color in hex.
     pub selection_bg: &'static str,
-    // ANSI colors (0-7)
+    /// ANSI black (color index 0).
     pub black: &'static str,
+    /// ANSI red (color index 1).
     pub red: &'static str,
+    /// ANSI green (color index 2).
     pub green: &'static str,
+    /// ANSI yellow (color index 3).
     pub yellow: &'static str,
+    /// ANSI blue (color index 4).
     pub blue: &'static str,
+    /// ANSI magenta (color index 5).
     pub magenta: &'static str,
+    /// ANSI cyan (color index 6).
     pub cyan: &'static str,
+    /// ANSI white (color index 7).
     pub white: &'static str,
-    // Bright ANSI colors (8-15)
+    /// Bright black, a.k.a. dark gray (color index 8).
     pub bright_black: &'static str,
+    /// Bright red (color index 9).
     pub bright_red: &'static str,
+    /// Bright green (color index 10).
     pub bright_green: &'static str,
+    /// Bright yellow (color index 11).
     pub bright_yellow: &'static str,
+    /// Bright blue (color index 12).
     pub bright_blue: &'static str,
+    /// Bright magenta (color index 13).
     pub bright_magenta: &'static str,
+    /// Bright cyan (color index 14).
     pub bright_cyan: &'static str,
+    /// Bright white (color index 15).
     pub bright_white: &'static str,
 }
 

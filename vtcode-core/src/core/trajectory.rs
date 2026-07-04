@@ -12,16 +12,21 @@ const TRAJECTORY_EXTENSION: &str = "jsonl";
 use super::SECONDS_PER_DAY;
 const BYTES_PER_MB: u64 = 1024 * 1024;
 
+/// Async JSONL logger for agent trajectory records (routes, tool calls).
 #[derive(Clone)]
 pub struct TrajectoryLogger {
     enabled: bool,
     writer: Option<Arc<AsyncLineWriter>>,
 }
 
+/// Retention policy for trajectory log files.
 #[derive(Debug, Clone, Copy)]
 pub struct TrajectoryRetention {
+    /// Maximum number of rotated trajectory files to keep.
     pub max_files: usize,
+    /// Maximum age of trajectory files in days before pruning.
     pub max_age_days: u64,
+    /// Maximum total size of all trajectory files in bytes.
     pub max_total_size_bytes: u64,
 }
 
@@ -38,10 +43,12 @@ impl Default for TrajectoryRetention {
 }
 
 impl TrajectoryLogger {
+    /// Create a trajectory logger in the workspace's `.vtcode/logs/` directory with default retention.
     pub fn new(workspace: &Path) -> Self {
         Self::with_retention(workspace, TrajectoryRetention::default())
     }
 
+    /// Create a trajectory logger with a custom retention policy.
     pub fn with_retention(workspace: &Path, retention: TrajectoryRetention) -> Self {
         let dir = workspace.join(".vtcode").join("logs");
         rotate_current_trajectory(&dir);
@@ -52,6 +59,7 @@ impl TrajectoryLogger {
         Self { enabled, writer }
     }
 
+    /// Create a disabled trajectory logger that discards all records.
     pub fn disabled() -> Self {
         Self {
             enabled: false,
@@ -59,6 +67,7 @@ impl TrajectoryLogger {
         }
     }
 
+    /// Write a serializable record to the trajectory log.
     pub fn log<T: Serialize>(&self, record: &T) {
         if !self.enabled {
             return;
@@ -79,6 +88,7 @@ impl TrajectoryLogger {
         }
     }
 
+    /// Log a model routing decision for a given turn.
     pub fn log_route(&self, turn: usize, selected_model: &str, class: &str, input_preview: &str) {
         #[derive(Serialize)]
         struct RouteRec<'a> {
@@ -100,6 +110,7 @@ impl TrajectoryLogger {
         self.log(&rec);
     }
 
+    /// Log a tool call with its arguments, success status, and agent context.
     pub fn log_tool_call(
         &self,
         turn: usize,

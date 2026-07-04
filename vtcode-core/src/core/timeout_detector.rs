@@ -110,22 +110,34 @@ impl TimeoutConfig {
 /// Information about a timeout event
 #[derive(Debug, Clone)]
 pub struct TimeoutEvent {
+    /// Unique identifier for the operation being tracked.
     pub operation_id: String,
+    /// Type of the operation that timed out.
     pub operation_type: OperationType,
+    /// Wall-clock time when the operation started.
     pub start_time: Instant,
+    /// Maximum duration allowed before timeout.
     pub timeout_duration: Duration,
+    /// Number of retries attempted so far.
     pub retry_count: u32,
+    /// Error message from the failed attempt, if any.
     pub error_message: Option<String>,
 }
 
 /// Statistics for timeout detection and retries
 #[derive(Debug, Clone, Default)]
 pub struct TimeoutStats {
+    /// Total number of operations monitored.
     pub total_operations: usize,
+    /// Number of operations that timed out.
     pub timed_out_operations: usize,
+    /// Number of retries that ultimately succeeded.
     pub successful_retries: usize,
+    /// Number of retries that ultimately failed.
     pub failed_retries: usize,
+    /// Average duration of monitored operations.
     pub average_timeout_duration: Duration,
+    /// Total retry attempts made across all operations.
     pub total_retry_attempts: usize,
 }
 
@@ -143,6 +155,7 @@ impl Default for TimeoutDetector {
 }
 
 impl TimeoutDetector {
+    /// Create a new timeout detector with default configurations for each operation type.
     pub fn new() -> Self {
         let mut configs = HashMap::new();
 

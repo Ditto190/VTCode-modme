@@ -64,20 +64,27 @@ impl ToolBehavior {
         }
     }
 
+    /// Classifies the tool's intent for the given arguments by delegating to the mutation model.
     pub fn classify(self, args: &Value) -> ToolIntent {
         self.mutation_model.classify(args)
     }
 }
 
+/// Describes whether a tool invocation is mutating, destructive, or safe to retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ToolIntent {
+    /// Whether the tool modifies state or files.
     pub mutating: bool,
+    /// Whether the tool performs potentially destructive operations.
     pub destructive: bool,
+    /// Whether the tool is a read-only unified action (e.g. `unified_file` read).
     pub readonly_unified_action: bool,
+    /// Whether the tool call is safe to retry on failure.
     pub retry_safe: bool,
 }
 
 impl ToolIntent {
+    /// Returns a read-only, non-destructive, retry-safe intent.
     pub const fn read_only() -> Self {
         Self {
             mutating: false,

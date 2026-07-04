@@ -32,6 +32,7 @@ use vtcode_config::subagents::SUBAGENT_HARD_CONCURRENCY_LIMIT;
 use super::*;
 
 impl SubagentController {
+    /// Returns status entries for all tracked background subprocesses.
     pub async fn background_status_entries(&self) -> Vec<BackgroundSubprocessEntry> {
         let state = self.state.read().await;
         state
@@ -41,6 +42,7 @@ impl SubagentController {
             .collect()
     }
 
+    /// Returns a snapshot of a background subprocess including its preview output.
     pub async fn background_snapshot(&self, target: &str) -> Result<BackgroundSubprocessSnapshot> {
         let _ = self.refresh_background_processes().await?;
 
@@ -80,11 +82,13 @@ impl SubagentController {
         Ok(BackgroundSubprocessSnapshot { entry, preview })
     }
 
+    /// Returns whether background subagents are enabled in the configuration.
     #[must_use]
     pub fn background_subagents_enabled(&self) -> bool {
         self.config.vt_cfg.subagents.background.enabled
     }
 
+    /// Returns the configured default background agent name, if any.
     #[must_use]
     pub fn configured_default_background_agent(&self) -> Option<&str> {
         self.config
@@ -97,6 +101,7 @@ impl SubagentController {
             .filter(|agent| !agent.is_empty())
     }
 
+    /// Toggles the default background subagent between running and stopped.
     pub async fn toggle_default_background_subagent(&self) -> Result<BackgroundSubprocessEntry> {
         if !self.background_subagents_enabled() {
             bail!("Background subagents are disabled by configuration");
@@ -128,6 +133,7 @@ impl SubagentController {
         }
     }
 
+    /// Restarts background subagents that were previously enabled but are no longer running.
     pub async fn restore_background_subagents(&self) -> Result<Vec<BackgroundSubprocessEntry>> {
         let desired_records = {
             let state = self.state.read().await;
@@ -176,6 +182,7 @@ impl SubagentController {
         self.refresh_background_processes().await
     }
 
+    /// Refreshes the state of all background subprocesses and respawns as needed.
     pub async fn refresh_background_processes(&self) -> Result<Vec<BackgroundSubprocessEntry>> {
         let record_ids = {
             let state = self.state.read().await;
@@ -341,6 +348,7 @@ impl SubagentController {
         }
     }
 
+    /// Gracefully stops a background subprocess by setting its desired state to disabled.
     pub async fn graceful_stop_background(
         &self,
         target: &str,
@@ -383,6 +391,7 @@ impl SubagentController {
         self.background_status_for(target).await
     }
 
+    /// Force-cancels a background subprocess, closing its exec session immediately.
     pub async fn force_cancel_background(&self, target: &str) -> Result<BackgroundSubprocessEntry> {
         let (agent_name, exec_session_id) = {
             let mut state = self.state.write().await;
@@ -417,6 +426,7 @@ impl SubagentController {
         self.background_status_for(target).await
     }
 
+    /// Returns a thread snapshot for a tracked child subagent by its target id.
     pub async fn snapshot_for_thread(&self, target: &str) -> Result<SubagentThreadSnapshot> {
         let (
             id,

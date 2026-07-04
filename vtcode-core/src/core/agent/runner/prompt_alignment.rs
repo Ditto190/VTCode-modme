@@ -46,12 +46,17 @@ pub enum AlignmentError {
 }
 
 impl AlignmentError {
+    /// Returns `true` when this misalignment indicates the runtime prompt should be rebuilt.
     #[must_use]
     pub const fn should_rebuild_runtime_prompt(&self) -> bool {
         true
     }
 }
 
+/// Validate `current` against `state` and rebuild it once if the validation fails with a
+/// recoverable [`AlignmentError`].  Logs warnings for any persistent misalignment.
+///
+/// Returns the validated (or rebuilt) value on success.
 pub async fn rebuild_once_on_alignment_mismatch<S, T, E, Build, Validate>(
     state: &mut S,
     mut current: T,

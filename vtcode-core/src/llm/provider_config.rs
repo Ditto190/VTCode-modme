@@ -6,7 +6,8 @@ use crate::llm::provider::{LLMError, LLMProvider};
 use crate::llm::provider_builder::ProviderConfig as LegacyProviderConfig;
 
 macro_rules! define_provider_config {
-    ($name:ident, $key:literal, $display:literal, $default_model:expr, $api_base:expr, $env_var:expr, $prompt_cache_settings:ty) => {
+    ($(#[$meta:meta])* $name:ident, $key:literal, $display:literal, $default_model:expr, $api_base:expr, $env_var:expr, $prompt_cache_settings:ty) => {
+        $(#[$meta])*
         pub struct $name;
 
         impl ProviderMetadataProvider<$name> for $name {
@@ -31,6 +32,7 @@ macro_rules! define_provider_config {
 }
 
 define_provider_config!(
+    /// Provider configuration for Google Gemini.
     GeminiProviderConfig,
     "gemini",
     "Gemini",
@@ -40,6 +42,7 @@ define_provider_config!(
     GeminiPromptCacheSettings
 );
 define_provider_config!(
+    /// Provider configuration for Anthropic.
     AnthropicProviderConfig,
     "anthropic",
     "Anthropic",
@@ -49,6 +52,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for GitHub Copilot.
     CopilotProviderConfig,
     "copilot",
     "GitHub Copilot",
@@ -58,6 +62,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for OpenAI.
     OpenAIProviderConfig,
     "openai",
     "OpenAI",
@@ -67,6 +72,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for HuggingFace Inference API.
     HuggingFaceProviderConfig,
     "huggingface",
     "HuggingFace",
@@ -76,6 +82,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for DeepSeek.
     DeepSeekProviderConfig,
     "deepseek",
     "DeepSeek",
@@ -85,6 +92,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Mistral AI.
     MistralProviderConfig,
     "mistral",
     "Mistral",
@@ -94,6 +102,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Moonshot AI.
     MoonshotProviderConfig,
     "moonshot",
     "Moonshot",
@@ -103,6 +112,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Z.AI (GLM).
     ZAIProviderConfig,
     "zai",
     "Z.AI",
@@ -112,6 +122,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for OpenRouter.
     OpenRouterProviderConfig,
     "openrouter",
     "OpenRouter",
@@ -121,6 +132,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for OpenResponses.
     OpenResponsesProviderConfig,
     "openresponses",
     "OpenResponses",
@@ -130,6 +142,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Ollama (local inference).
     OllamaProviderConfig,
     "ollama",
     "Ollama",
@@ -139,6 +152,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for LM Studio (local inference).
     LmStudioProviderConfig,
     "lmstudio",
     "LM Studio",
@@ -148,6 +162,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for llama.cpp (local inference).
     LlamaCppProviderConfig,
     "llamacpp",
     "llama.cpp",
@@ -157,6 +172,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Xiaomi MiMo.
     MiMoProviderConfig,
     "mimo",
     "Xiaomi MiMo",
@@ -166,6 +182,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Minimax.
     MinimaxProviderConfig,
     "minimax",
     "Minimax",
@@ -175,6 +192,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for OpenCode Zen.
     OpenCodeZenProviderConfig,
     "opencode-zen",
     "OpenCode Zen",
@@ -184,6 +202,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for OpenCode Go.
     OpenCodeGoProviderConfig,
     "opencode-go",
     "OpenCode Go",
@@ -193,6 +212,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Qwen.
     QwenProviderConfig,
     "qwen",
     "Qwen",
@@ -202,6 +222,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for StepFun.
     StepFunProviderConfig,
     "stepfun",
     "StepFun",
@@ -211,6 +232,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Evolink.
     EvolinkProviderConfig,
     "evolink",
     "Evolink",
@@ -220,6 +242,7 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for Poolside.
     PoolsideProviderConfig,
     "poolside",
     "Poolside",

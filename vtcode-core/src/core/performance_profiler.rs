@@ -12,27 +12,44 @@ use tokio::sync::RwLock;
 /// Performance benchmark results
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkResults {
+    /// Name of the benchmark test.
     pub test_name: String,
+    /// Total number of iterations executed.
     pub iterations: u64,
+    /// Wall-clock time for the entire benchmark run.
     pub total_duration: Duration,
+    /// Average duration per iteration in nanoseconds.
     pub avg_duration_ns: u64,
+    /// Minimum duration of any single iteration in nanoseconds.
     pub min_duration_ns: u64,
+    /// Maximum duration of any single iteration in nanoseconds.
     pub max_duration_ns: u64,
+    /// 95th percentile duration in nanoseconds.
     pub percentile_95_ns: u64,
+    /// 99th percentile duration in nanoseconds.
     pub percentile_99_ns: u64,
+    /// Operations per second throughput.
     pub throughput_ops_per_sec: f64,
+    /// Average memory usage in megabytes, if sampled.
     pub memory_usage_mb: Option<f64>,
+    /// Average CPU usage percentage, if sampled.
     pub cpu_usage_percent: Option<f64>,
 }
 
 /// System resource usage metrics
 #[derive(Debug, Clone, Default)]
 pub struct ResourceMetrics {
+    /// Memory usage in megabytes.
     pub memory_used_mb: f64,
+    /// CPU usage as a percentage (0.0 to 100.0).
     pub cpu_percent: f64,
+    /// Total bytes sent over the network.
     pub network_bytes_sent: u64,
+    /// Total bytes received over the network.
     pub network_bytes_received: u64,
+    /// Number of disk read operations.
     pub disk_reads: u64,
+    /// Number of disk write operations.
     pub disk_writes: u64,
 }
 
@@ -51,10 +68,15 @@ pub struct PerformanceProfiler {
 /// Individual benchmark session
 #[derive(Debug)]
 pub struct BenchmarkSession {
+    /// Name of the benchmark session.
     pub name: String,
+    /// Wall-clock time when the session started.
     pub start_time: Instant,
+    /// Number of iterations recorded so far.
     pub iterations: u64,
+    /// Duration of each recorded iteration.
     pub durations: Vec<Duration>,
+    /// Resource usage snapshots captured periodically during the session.
     pub resource_snapshots: Vec<ResourceMetrics>,
 }
 
@@ -71,6 +93,7 @@ pub struct ResourceMonitor {
 }
 
 impl PerformanceProfiler {
+    /// Create a new performance profiler with default settings.
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -280,15 +303,22 @@ impl PerformanceProfiler {
 /// Benchmark comparison report
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonReport {
+    /// Name of the baseline benchmark.
     pub baseline_name: String,
+    /// Name of the current benchmark being compared.
     pub current_name: String,
+    /// Percentage change in throughput (positive means improvement).
     pub throughput_change_percent: f64,
+    /// Percentage change in average latency (negative means improvement).
     pub avg_latency_change_percent: f64,
+    /// Percentage change in memory usage, if both benchmarks reported it.
     pub memory_change_percent: Option<f64>,
+    /// Whether the current benchmark shows an overall improvement over the baseline.
     pub is_improvement: bool,
 }
 
 impl ResourceMonitor {
+    /// Create a new resource monitor with the specified polling interval.
     pub fn new(monitor_interval: Duration) -> Self {
         Self {
             current_metrics: Arc::new(RwLock::new(ResourceMetrics::default())),

@@ -7,6 +7,7 @@ use crate::ui::{FileColorizer, GitColorConfig, ThemeConfig};
 use anyhow::Result;
 use std::path::Path;
 
+/// Loads and manages theme configuration from `.vtcode/theme.toml` and Git config.
 #[derive(Debug, Clone)]
 pub struct ThemeManager {
     /// Custom theme configuration loaded from theme.toml

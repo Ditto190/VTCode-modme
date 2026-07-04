@@ -16,20 +16,27 @@ use crate::tui::core_tui::session::Session as CoreSessionState;
 use crate::tui::core_tui::session::action::BindingStore;
 
 mod agent_palette;
+/// Diff preview overlay for file changes.
 pub mod diff_preview;
 mod events;
+/// File palette for workspace file selection.
 pub mod file_palette;
+/// Command history picker state and rendering.
 pub mod history_picker;
 mod impl_events;
 mod impl_render;
 mod layout;
 mod local_agents;
 mod palette;
+/// Session rendering logic and layout composition.
 pub mod render;
+/// Slash command detection and suggestion UI.
 pub mod slash;
+/// Slash command palette widget.
 pub mod slash_palette;
 mod transcript_review;
 mod transient;
+/// Workspace trust state management.
 pub mod trust;
 
 use self::file_palette::FilePalette;
@@ -67,6 +74,7 @@ pub struct AppSession {
 pub(super) type Session = AppSession;
 
 impl AppSession {
+    /// Create a new session with explicit log visibility, theme, and slash commands.
     pub fn new_with_logs(
         theme: crate::tui::core_tui::types::InlineTheme,
         placeholder: Option<String>,
@@ -106,6 +114,7 @@ impl AppSession {
         }
     }
 
+    /// Create a new session with explicit log visibility, theme, slash commands, and key bindings.
     pub fn new_with_logs_and_bindings(
         theme: crate::tui::core_tui::types::InlineTheme,
         placeholder: Option<String>,

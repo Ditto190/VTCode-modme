@@ -356,6 +356,7 @@ pub struct AgentBuilder {
 }
 
 impl AgentBuilder {
+    /// Create a new builder with default configuration.
     pub fn new() -> Self {
         Self {
             config: AgentConfig {
@@ -385,32 +386,38 @@ impl AgentBuilder {
         }
     }
 
+    /// Set the LLM provider.
     pub fn with_provider<S: Into<String>>(mut self, provider: S) -> Self {
         self.config.provider = provider.into();
         self
     }
 
+    /// Set the model identifier and mark it as a CLI override.
     pub fn with_model<S: Into<String>>(mut self, model: S) -> Self {
         self.config.model = model.into();
         self.config.model_source = ModelSelectionSource::CliOverride;
         self
     }
 
+    /// Set the API key for provider authentication.
     pub fn with_api_key<S: Into<String>>(mut self, api_key: S) -> Self {
         self.config.api_key = api_key.into();
         self
     }
 
+    /// Set the workspace root directory.
     pub fn with_workspace<P: Into<std::path::PathBuf>>(mut self, workspace: P) -> Self {
         self.config.workspace = workspace.into();
         self
     }
 
+    /// Enable or disable verbose logging output.
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.config.verbose = verbose;
         self
     }
 
+    /// Build the [`Agent`] instance using the configured settings.
     pub async fn build(self) -> Result<Agent> {
         Agent::new(self.config).await
     }

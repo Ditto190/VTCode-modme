@@ -11,13 +11,20 @@ use crate::config::types::{AgentConfig, ModelSelectionSource};
 use crate::llm::factory::infer_provider;
 use crate::utils::path::canonicalize_workspace;
 
+/// Resolved model selection for the current runtime, combining CLI overrides,
+/// workspace config defaults, and inferred provider information.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeModelSelection {
+    /// The selected model identifier.
     pub model: String,
+    /// The resolved provider name.
     pub provider: String,
+    /// Where the model selection originated (CLI, workspace config, etc.).
     pub model_source: ModelSelectionSource,
 }
 
+/// Resolve the model, provider, and selection source by merging CLI arguments
+/// with workspace configuration. CLI flags take precedence over config defaults.
 pub fn resolve_runtime_model_selection(args: &Cli, config: &VTCodeConfig) -> RuntimeModelSelection {
     let (model, model_source) = if let Some(agent) = args.agent.clone() {
         (agent, ModelSelectionSource::CliOverride)
@@ -44,6 +51,8 @@ pub fn resolve_runtime_model_selection(args: &Cli, config: &VTCodeConfig) -> Run
     }
 }
 
+/// Build a fully resolved [`AgentConfig`] from CLI arguments, workspace config,
+/// resolved model selection, API key, and theme selection.
 pub fn build_runtime_agent_config(
     args: &Cli,
     config: &VTCodeConfig,
@@ -98,6 +107,8 @@ pub fn build_runtime_agent_config(
     }
 }
 
+/// Resolve the checkpointing storage directory, joining relative paths against
+/// the workspace root. Returns `None` if no storage directory is configured.
 pub fn resolve_checkpointing_storage_dir(
     workspace: &Path,
     storage_dir: Option<&str>,
@@ -111,6 +122,8 @@ pub fn resolve_checkpointing_storage_dir(
     })
 }
 
+/// Return a human-readable display name for the given provider, consulting
+/// custom provider configuration when available.
 pub fn provider_label(provider: &str, vt_cfg: Option<&VTCodeConfig>) -> String {
     if let Some(vt_cfg) = vt_cfg {
         return vt_cfg.provider_display_name(provider);

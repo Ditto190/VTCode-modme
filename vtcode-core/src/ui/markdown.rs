@@ -15,11 +15,13 @@ pub use vtcode_commons::ui_protocol::{
     HighlightedSegment, MarkdownLine, MarkdownSegment, RenderMarkdownOptions,
 };
 
+/// Highlight a code block to an ANSI-escaped string (headless passthrough).
 #[cfg(not(feature = "tui"))]
 pub fn highlight_code_to_ansi(code: &str, _language: Option<&str>, _theme: &str) -> String {
     code.to_string()
 }
 
+/// Highlight a code block into styled segments (headless passthrough).
 #[cfg(not(feature = "tui"))]
 pub fn highlight_code_to_segments(
     code: &str,
@@ -32,6 +34,7 @@ pub fn highlight_code_to_segments(
     }]
 }
 
+/// Highlight a single line for diff display (headless passthrough).
 #[cfg(not(feature = "tui"))]
 pub fn highlight_line_for_diff(
     line: &str,
@@ -42,6 +45,7 @@ pub fn highlight_line_for_diff(
 
 // ── Markdown rendering ──────────────────────────────────────────────────────
 
+/// Render markdown source into styled lines using default rendering options.
 pub fn render_markdown_to_lines(
     source: &str,
     base_style: Style,
@@ -57,6 +61,7 @@ pub fn render_markdown_to_lines(
     )
 }
 
+/// Render markdown source into styled lines with custom rendering options (TUI build).
 #[cfg(feature = "tui")]
 pub fn render_markdown_to_lines_with_options(
     source: &str,
@@ -84,6 +89,7 @@ pub fn render_markdown_to_lines_with_options(
     )
 }
 
+/// Render markdown source into styled lines (headless passthrough, no syntax highlighting).
 #[cfg(not(feature = "tui"))]
 pub fn render_markdown_to_lines_with_options(
     source: &str,
@@ -112,6 +118,7 @@ pub fn render_markdown_to_lines_with_options(
     lines
 }
 
+/// Render markdown source using the currently active theme styles.
 pub fn render_markdown(source: &str) -> Vec<MarkdownLine> {
     let styles = theme::active_styles();
     render_markdown_to_lines(source, Style::default(), &styles, None)

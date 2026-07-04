@@ -66,6 +66,7 @@ pub struct PluginManifest {
 }
 
 impl PluginManifest {
+    /// Create a minimal manifest with the required fields and empty defaults for the rest.
     pub fn new(id: String, name: String, version: String) -> Self {
         Self {
             id,

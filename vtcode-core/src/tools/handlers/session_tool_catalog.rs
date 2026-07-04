@@ -20,19 +20,26 @@ use super::tool_handler::{ConfiguredToolSpec, ResponsesApiTool, ToolSpec};
 
 pub use crate::tools::registry::ToolCatalogSource;
 
+/// The surface (execution context) where tools are exposed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionSurface {
+    /// Interactive TUI session.
     Interactive,
+    /// Non-interactive agent runner.
     AgentRunner,
+    /// Agent Client Protocol (ACP) session.
     Acp,
 }
 
+/// Model-specific capabilities that affect tool catalog generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ToolModelCapabilities {
+    /// Whether the model supports the native `apply_patch` tool.
     pub supports_apply_patch_tool: bool,
 }
 
 impl ToolModelCapabilities {
+    /// Returns capabilities inferred from the model name.
     #[must_use]
     pub fn for_model_name(model_name: &str) -> Self {
         model_name
@@ -45,14 +52,18 @@ impl ToolModelCapabilities {
     }
 }
 
+/// The kind of deferred tool search supported by a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeferredToolSearchKind {
+    /// Anthropic's tool search with a specific algorithm.
     Anthropic(ToolSearchAlgorithm),
+    /// OpenAI's hosted tool search.
     OpenAIHosted,
 }
 
 const DIRECT_TOOL_EXPOSURE_THRESHOLD: usize = 100;
 
+/// Policy for deferred tool loading (tool search).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DeferredToolPolicy {
     search_kind: Option<DeferredToolSearchKind>,
@@ -60,6 +71,7 @@ pub struct DeferredToolPolicy {
 }
 
 impl DeferredToolPolicy {
+    /// Creates a policy for Anthropic's tool search.
     #[must_use]
     pub fn anthropic(
         algorithm: ToolSearchAlgorithm,
@@ -71,6 +83,7 @@ impl DeferredToolPolicy {
         }
     }
 
+    /// Creates a policy for OpenAI's hosted tool search.
     #[must_use]
     pub fn openai_hosted(always_available_tools: impl IntoIterator<Item = String>) -> Self {
         Self {
@@ -108,6 +121,7 @@ impl DeferredToolPolicy {
     }
 }
 
+/// Returns the deferred tool policy for the given provider and configuration.
 #[must_use]
 pub fn deferred_tool_policy_for_runtime(
     provider: Option<Provider>,
@@ -161,6 +175,7 @@ pub fn deferred_tool_policy_for_runtime(
     }
 }
 
+/// Returns whether Anthropic native memory is enabled for the given runtime.
 #[must_use]
 pub fn anthropic_native_memory_enabled_for_runtime(
     provider: Option<Provider>,
@@ -175,19 +190,29 @@ pub fn anthropic_native_memory_enabled_for_runtime(
         && vtcode_config.is_some_and(|cfg| cfg.provider.anthropic.memory.enabled)
 }
 
+/// Configuration for the session's tool catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionToolsConfig {
+    /// The execution surface (interactive, agent runner, ACP).
     pub surface: SessionSurface,
+    /// Minimum capability level required for tools to be visible.
     pub capability_level: CapabilityLevel,
+    /// Documentation detail mode for tool descriptions.
     pub documentation_mode: ToolDocumentationMode,
+    /// Whether the planning workflow is active.
     pub planning_active: bool,
+    /// Whether the request_user_input tool is enabled.
     pub request_user_input_enabled: bool,
+    /// Model-specific capabilities.
     pub model_capabilities: ToolModelCapabilities,
+    /// Policy for deferred tool loading.
     pub deferred_tool_policy: DeferredToolPolicy,
+    /// Whether Anthropic native memory is enabled.
     pub anthropic_native_memory_enabled: bool,
 }
 
 impl SessionToolsConfig {
+    /// Creates a full public configuration with all tools visible.
     pub fn full_public(
         surface: SessionSurface,
         capability_level: CapabilityLevel,
@@ -206,12 +231,14 @@ impl SessionToolsConfig {
         }
     }
 
+    /// Sets the deferred tool policy.
     #[must_use]
     pub fn with_deferred_tool_policy(mut self, deferred_tool_policy: DeferredToolPolicy) -> Self {
         self.deferred_tool_policy = deferred_tool_policy;
         self
     }
 
+    /// Enables or disables Anthropic native memory.
     #[must_use]
     pub fn with_anthropic_native_memory_enabled(mut self, enabled: bool) -> Self {
         self.anthropic_native_memory_enabled = enabled;
@@ -219,24 +246,39 @@ impl SessionToolsConfig {
     }
 }
 
+/// The kind of tool in the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogToolKind {
+    /// Standard function call tool.
     Function,
+    /// Native apply_patch tool.
     ApplyPatch,
 }
 
+/// An entry in the session tool catalog.
 #[derive(Debug, Clone)]
 pub struct ToolCatalogEntry {
+    /// Name exposed to the LLM.
     pub public_name: String,
+    /// Internal registration name.
     pub registration_name: String,
+    /// Tool description.
     pub description: String,
+    /// JSON Schema for tool parameters.
     pub parameters: Value,
+    /// Alternative names for the tool.
     pub aliases: Vec<String>,
+    /// Minimum capability level required to use this tool.
     pub capability: CapabilityLevel,
+    /// Default permission policy for this tool.
     pub default_permission: ToolPolicy,
+    /// Whether this tool supports parallel execution.
     pub supports_parallel_tool_calls: bool,
+    /// Source of this tool in the catalog.
     pub source: ToolCatalogSource,
+    /// The kind of tool (function or apply_patch).
     pub kind: CatalogToolKind,
+    /// The configured tool specification.
     pub configured_spec: ConfiguredToolSpec,
     /// Optional per-tool description length cap. When set, overrides the
     /// documentation mode's default max length. Used for MCP tools whose
@@ -244,23 +286,30 @@ pub struct ToolCatalogEntry {
     pub max_description_length: Option<usize>,
 }
 
+/// A simplified tool schema entry for serialization.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ToolSchemaEntry {
+    /// Tool name.
     pub name: String,
+    /// Tool description.
     pub description: String,
+    /// JSON Schema for tool parameters.
     pub parameters: Value,
 }
 
+/// The session's tool catalog containing all available tools.
 #[derive(Debug, Clone, Default)]
 pub struct SessionToolCatalog {
     entries: Vec<ToolCatalogEntry>,
 }
 
 impl SessionToolCatalog {
+    /// Creates a new catalog from the given entries.
     pub fn new(entries: Vec<ToolCatalogEntry>) -> Self {
         Self { entries }
     }
 
+    /// Rebuilds the catalog from tool registrations.
     pub fn rebuild_from_registrations(registrations: Vec<ToolRegistration>) -> Self {
         let mut entries = Vec::new();
         for registration in registrations {
@@ -277,12 +326,14 @@ impl SessionToolCatalog {
         Self { entries }
     }
 
+    /// Returns the names of all public tools visible with the given config.
     pub fn public_tool_names(&self, config: SessionToolsConfig) -> Vec<String> {
         self.filtered_entries(&config)
             .map(|entry| entry.public_name.clone())
             .collect()
     }
 
+    /// Returns schema entries for all visible tools.
     pub fn schema_entries(&self, config: SessionToolsConfig) -> Vec<ToolSchemaEntry> {
         self.filtered_entries(&config)
             .map(|entry| ToolSchemaEntry {
@@ -297,6 +348,7 @@ impl SessionToolCatalog {
             .collect()
     }
 
+    /// Returns Gemini function declarations for all visible tools.
     pub fn function_declarations(&self, config: SessionToolsConfig) -> Vec<FunctionDeclaration> {
         self.schema_entries(config)
             .into_iter()
@@ -308,6 +360,7 @@ impl SessionToolCatalog {
             .collect()
     }
 
+    /// Returns tool definitions for the LLM, including deferred loading support.
     pub fn model_tools(&self, config: SessionToolsConfig) -> Vec<ToolDefinition> {
         let filtered_entries = self.filtered_entries(&config).collect::<Vec<_>>();
         let deferable_tool_count = filtered_entries
@@ -368,6 +421,7 @@ impl SessionToolCatalog {
         tools
     }
 
+    /// Returns the schema entry for a tool by name.
     pub fn schema_for_name(
         &self,
         name: &str,

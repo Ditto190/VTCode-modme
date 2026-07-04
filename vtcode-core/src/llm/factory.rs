@@ -44,6 +44,7 @@ pub struct LLMFactory {
 }
 
 impl LLMFactory {
+    /// Create a new factory pre-populated with all built-in provider registrations.
     pub fn new() -> Self {
         let mut factory = Self {
             providers: HashMap::new(),
@@ -54,6 +55,7 @@ impl LLMFactory {
         factory
     }
 
+    /// Register a provider discovered through the CGP (Context-Generic Provider) substrate.
     pub fn register_cgp_provider<Ctx>(&mut self)
     where
         Ctx: CanDescribeProvider + CanBuildProvider + 'static,

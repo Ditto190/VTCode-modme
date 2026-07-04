@@ -86,33 +86,51 @@ impl GitDiffPalette {
     }
 }
 
+/// A single line within a unified diff output.
 #[derive(Debug, Clone)]
 pub struct DiffLine {
+    /// Whether this line is an addition, removal, context, or header.
     pub line_type: DiffLineType,
+    /// The text content of the diff line (without the leading `+`/`-`/` ` prefix).
     pub content: String,
+    /// Line number in the old file, if available.
     pub line_number_old: Option<u32>,
+    /// Line number in the new file, if available.
     pub line_number_new: Option<u32>,
 }
 
+/// The kind of a single diff line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineType {
+    /// A line added in the new file.
     Added,
+    /// A line removed from the old file.
     Removed,
+    /// An unchanged context line present in both files.
     Context,
+    /// A hunk header line (e.g. `@@ -1 +1 @@`).
     Header,
 }
 
+/// Aggregated diff result for a single file.
 #[derive(Debug)]
 pub struct FileDiff {
+    /// Relative or absolute path of the changed file.
     pub file_path: String,
+    /// Ordered sequence of diff lines including hunk headers.
     pub lines: Vec<DiffLine>,
+    /// Summary statistics for this file.
     pub stats: DiffStats,
 }
 
+/// Counters for additions, deletions, and total changes in a diff.
 #[derive(Debug, Clone)]
 pub struct DiffStats {
+    /// Number of added lines.
     pub additions: usize,
+    /// Number of removed lines.
     pub deletions: usize,
+    /// Total number of changed lines (additions + deletions).
     pub changes: usize,
 }
 
@@ -135,11 +153,14 @@ pub struct DiffSuppressionCheck {
     pub file_stats: Vec<FileChangeStats>,
 }
 
-/// Statistics for a single changed file
+/// Statistics for a single changed file.
 #[derive(Debug, Clone)]
 pub struct FileChangeStats {
+    /// File path relative to the repository root.
     pub path: String,
+    /// Number of added lines in this file.
     pub additions: usize,
+    /// Number of removed lines in this file.
     pub deletions: usize,
 }
 
@@ -149,10 +170,11 @@ struct DiffCacheEntry {
     diff: FileDiff,
 }
 
-/// Result of suppression check with optional cached diffs
+/// Result of a suppression check that may carry cached diffs for reuse.
 pub struct SuppressionResult {
+    /// The suppression check result with statistics.
     pub check: DiffSuppressionCheck,
-    /// Cached diffs if not suppressed (avoids recomputation)
+    /// Cached diffs if not suppressed (avoids recomputation).
     cached_diffs: Option<Vec<DiffCacheEntry>>,
 }
 
@@ -213,11 +235,11 @@ impl DiffSuppressionCheck {
     }
 }
 
+/// Renders unified diffs with ANSI-colored output and optional line numbers.
 pub struct DiffRenderer {
     show_line_numbers: bool,
     context_lines: usize,
     use_colors: bool,
-    // Pre-rendered ANSI codes for performance (cached)
     cached_styles: CachedStyles,
 }
 
@@ -272,6 +294,7 @@ impl CachedStyles {
 }
 
 impl DiffRenderer {
+    /// Create a new renderer with default ANSI color palette.
     pub fn new(show_line_numbers: bool, context_lines: usize, use_colors: bool) -> Self {
         let palette = GitDiffPalette::new(use_colors);
         let cached_styles = CachedStyles::new(&palette, use_colors);
@@ -300,6 +323,7 @@ impl DiffRenderer {
         }
     }
 
+    /// Render a single file diff to an ANSI-formatted string.
     pub fn render_diff(&self, diff: &FileDiff) -> String {
         // Pre-allocate buffer: header (~100 chars) + lines (~80 chars each)
         let estimated_size = 100 + diff.lines.len() * 80;
@@ -420,6 +444,7 @@ impl DiffRenderer {
         }
     }
 
+    /// Compute a diff between two file contents and return the structured result.
     pub fn generate_diff(&self, old_content: &str, new_content: &str, file_path: &str) -> FileDiff {
         let bundle = crate::utils::diff::compute_diff_with_theme(
             old_content,
@@ -479,11 +504,13 @@ impl DiffRenderer {
     }
 }
 
+/// High-level renderer that wraps [`DiffRenderer`] and adds suppression logic for large diffs.
 pub struct DiffChatRenderer {
     diff_renderer: DiffRenderer,
 }
 
 impl DiffChatRenderer {
+    /// Create a new chat renderer with default ANSI color palette.
     pub fn new(show_line_numbers: bool, context_lines: usize, use_colors: bool) -> Self {
         Self {
             diff_renderer: DiffRenderer::new(show_line_numbers, context_lines, use_colors),
@@ -507,6 +534,7 @@ impl DiffChatRenderer {
         }
     }
 
+    /// Render a single file change (old vs new content) to an ANSI string.
     pub fn render_file_change(
         &self,
         file_path: &Path,
@@ -521,6 +549,7 @@ impl DiffChatRenderer {
         self.diff_renderer.render_diff(&diff)
     }
 
+    /// Render multiple file changes, suppressing output when thresholds are exceeded.
     pub fn render_multiple_changes(&self, changes: Vec<(String, String, String)>) -> String {
         // Check suppression and get cached diffs if not suppressed
         let result = self.check_suppression_with_cache(&changes);
@@ -791,6 +820,7 @@ impl DiffChatRenderer {
         output
     }
 
+    /// Render a brief operation summary line (success or failure indicator).
     pub fn render_operation_summary(
         &self,
         operation: &str,
@@ -812,6 +842,7 @@ impl DiffChatRenderer {
     }
 }
 
+/// Generate a standard unified diff string between two file contents.
 pub fn generate_unified_diff(old_content: &str, new_content: &str, filename: &str) -> String {
     let old_label = format!("a/{filename}");
     let new_label = format!("b/{filename}");

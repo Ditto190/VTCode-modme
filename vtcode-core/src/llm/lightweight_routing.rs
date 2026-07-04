@@ -8,51 +8,82 @@ use crate::config::types::AgentConfig as RuntimeAgentConfig;
 use crate::llm::factory::{ProviderConfig, create_provider_with_config, infer_provider_from_model};
 use crate::llm::provider::LLMProvider;
 
+/// Features that may use a lightweight (cheaper, faster) model instead of the
+/// primary model to reduce cost and latency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LightweightFeature {
+    /// Conversation memory summarization.
     Memory,
+    /// Generating prompt suggestions for the user.
     PromptSuggestions,
+    /// Refining user-provided prompts before execution.
     PromptRefinement,
+    /// Reviewing auto-permission decisions.
     AutoPermissionReview,
+    /// Probing auto-permission suitability.
     AutoPermissionProbe,
+    /// Summarizing large file reads.
     LargeReadSummary,
+    /// Summarizing web-fetched content.
     WebSummary,
+    /// Summarizing git history.
     GitHistorySummary,
+    /// Running as a subagent delegate.
     Subagent,
 }
 
+/// A resolved provider-and-model pair that identifies a specific LLM endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRoute {
+    /// Lowercase provider registry key (e.g. `"openai"`, `"anthropic"`).
     pub provider_name: String,
+    /// Model identifier string (e.g. `"gpt-5"`, `"claude-4-sonnet"`).
     pub model: String,
 }
 
+/// Indicates how a lightweight route was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LightweightRouteSource {
+    /// An explicit per-feature model override was provided.
     FeatureOverride,
+    /// The shared `[agent.small_model]` config provided a model name.
     SharedConfigured,
+    /// The shared small-model config is enabled but no model was named, so one
+    /// was selected automatically.
     SharedAutomatic,
+    /// No lightweight model applies; the main model is used directly.
     MainModel,
 }
 
+/// Result of resolving which model a lightweight feature should use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightweightRouteResolution {
+    /// The model route that should be used for the feature.
     pub primary: ModelRoute,
+    /// The original main-model route, if the primary differs from it.
     pub fallback: Option<ModelRoute>,
+    /// How this resolution was determined.
     pub source: LightweightRouteSource,
+    /// Non-fatal warning generated during resolution (e.g. a cross-provider override).
     pub warning: Option<String>,
 }
 
 impl LightweightRouteResolution {
+    /// Return `true` when a model other than the main model was selected.
     pub fn uses_lightweight_model(&self) -> bool {
         !matches!(self.source, LightweightRouteSource::MainModel)
     }
 
+    /// Return a reference to the main-model fallback route, if one exists.
     pub fn fallback_to_main_model(&self) -> Option<&ModelRoute> {
         self.fallback.as_ref()
     }
 }
 
+/// Resolve the best model route for a given lightweight feature.
+///
+/// Checks, in priority order: explicit per-feature override, shared small-model
+/// config, and automatic model selection for the active provider.
 pub fn resolve_lightweight_route(
     runtime_config: &RuntimeAgentConfig,
     vt_cfg: Option<&VTCodeConfig>,
@@ -128,6 +159,7 @@ pub fn resolve_lightweight_route(
     }
 }
 
+/// Build a [`ModelRoute`] for the primary model from runtime configuration.
 pub fn main_model_route(runtime_config: &RuntimeAgentConfig) -> ModelRoute {
     let provider_name = if runtime_config.provider.trim().is_empty() {
         infer_provider_from_model(&runtime_config.model)
@@ -143,6 +175,10 @@ pub fn main_model_route(runtime_config: &RuntimeAgentConfig) -> ModelRoute {
     }
 }
 
+/// Automatically select a lightweight model for the given provider and active model.
+///
+/// Prefers a same-generation efficient variant when available, then falls back
+/// to provider defaults.
 pub fn auto_lightweight_model(provider_name: &str, active_model: &str) -> String {
     let trimmed_model = active_model.trim();
     let provider = resolve_provider_for_model(provider_name, trimmed_model);
@@ -167,6 +203,9 @@ pub fn auto_lightweight_model(provider_name: &str, active_model: &str) -> String
         .unwrap_or_else(|| trimmed_model.to_string())
 }
 
+/// Return the list of available lightweight model choices for the given provider.
+///
+/// The automatically selected model is always first in the list.
 pub fn lightweight_model_choices(provider_name: &str, active_model: &str) -> Vec<String> {
     let provider = resolve_provider_for_model(provider_name, active_model);
     let auto_model = auto_lightweight_model(provider_name, active_model);
@@ -204,6 +243,10 @@ pub fn lightweight_model_choices(provider_name: &str, active_model: &str) -> Vec
     choices
 }
 
+/// Instantiate an [`LLMProvider`] for the given model route.
+///
+/// Resolves the API key from the runtime config or environment and delegates
+/// to the global factory.
 pub fn create_provider_for_model_route(
     route: &ModelRoute,
     runtime_config: &RuntimeAgentConfig,
@@ -234,6 +277,9 @@ pub fn create_provider_for_model_route(
     })
 }
 
+/// Resolve the API key for a model route, using the runtime key when the route
+/// targets the same provider as the main model, or falling back to environment
+/// variables otherwise.
 pub fn resolve_api_key_for_model_route(
     route: &ModelRoute,
     runtime_config: &RuntimeAgentConfig,

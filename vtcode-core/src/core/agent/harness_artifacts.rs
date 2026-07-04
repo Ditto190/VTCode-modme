@@ -9,22 +9,27 @@ const CURRENT_CONTRACT_FILE: &str = "current_contract.md";
 const CURRENT_EVALUATION_FILE: &str = "current_evaluation.md";
 const SUMMARY_PREVIEW_CHARS: usize = 280;
 
+/// Return the path to the current task tracker file.
 pub fn current_task_path(workspace_root: &Path) -> PathBuf {
     workspace_root.join(TASKS_DIR).join(CURRENT_TASK_FILE)
 }
 
+/// Return the path to the current spec artifact file.
 pub fn current_spec_path(workspace_root: &Path) -> PathBuf {
     workspace_root.join(TASKS_DIR).join(CURRENT_SPEC_FILE)
 }
 
+/// Return the path to the current contract artifact file.
 pub fn current_contract_path(workspace_root: &Path) -> PathBuf {
     workspace_root.join(TASKS_DIR).join(CURRENT_CONTRACT_FILE)
 }
 
+/// Return the path to the current evaluation artifact file.
 pub fn current_evaluation_path(workspace_root: &Path) -> PathBuf {
     workspace_root.join(TASKS_DIR).join(CURRENT_EVALUATION_FILE)
 }
 
+/// Return the paths of all harness artifacts that currently exist on disk.
 pub fn existing_harness_artifact_paths(workspace_root: &Path) -> Vec<PathBuf> {
     [
         current_spec_path(workspace_root),
@@ -36,30 +41,36 @@ pub fn existing_harness_artifact_paths(workspace_root: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Read a short summary of the current spec artifact, or `None` if unavailable.
 pub fn read_spec_summary(workspace_root: &Path) -> Option<String> {
     read_markdown_summary(&current_spec_path(workspace_root), "Spec")
 }
 
+/// Read a short summary of the current contract artifact, or `None` if unavailable.
 pub fn read_contract_summary(workspace_root: &Path) -> Option<String> {
     read_markdown_summary(&current_contract_path(workspace_root), "Contract")
 }
 
+/// Read a short summary of the current evaluation artifact, or `None` if unavailable.
 pub fn read_evaluation_summary(workspace_root: &Path) -> Option<String> {
     read_markdown_summary(&current_evaluation_path(workspace_root), "Evaluation")
 }
 
+/// Write the spec artifact content to disk and return the path.
 pub async fn write_spec(workspace_root: &Path, content: &str) -> Result<PathBuf> {
     let path = current_spec_path(workspace_root);
     write_artifact(path.as_path(), content, "current spec").await?;
     Ok(path)
 }
 
+/// Write the evaluation artifact content to disk and return the path.
 pub async fn write_evaluation(workspace_root: &Path, content: &str) -> Result<PathBuf> {
     let path = current_evaluation_path(workspace_root);
     write_artifact(path.as_path(), content, "current evaluation").await?;
     Ok(path)
 }
 
+/// Write the contract artifact content to disk and return the path.
 pub async fn write_contract(workspace_root: &Path, content: &str) -> Result<PathBuf> {
     let path = current_contract_path(workspace_root);
     write_artifact(path.as_path(), content, "current contract").await?;

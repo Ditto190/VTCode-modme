@@ -10,7 +10,9 @@ use async_trait::async_trait;
 /// provider knows its own backend identity.
 #[async_trait]
 pub trait LLMClient: Send + Sync {
+    /// Send a prompt to the LLM and return the response.
     async fn generate(&mut self, prompt: &str) -> Result<LLMResponse, LLMError>;
+    /// Return the model identifier this client is connected to.
     fn model_id(&self) -> &str;
 }
 

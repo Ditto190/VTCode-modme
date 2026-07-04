@@ -401,6 +401,7 @@ impl AgentRunner {
         self.tool_registry.enable_planning();
     }
 
+    /// Disable read-only planning workflow for the underlying tool registry.
     pub fn disable_planning(&self) {
         self.tool_registry.disable_planning();
     }
@@ -428,6 +429,7 @@ impl AgentRunner {
         self.tool_registry.clone()
     }
 
+    /// Override the tool definitions used for LLM requests instead of the default registry projection.
     pub fn set_tool_definitions_override(
         &mut self,
         definitions: Vec<uni_provider::ToolDefinition>,
@@ -435,14 +437,17 @@ impl AgentRunner {
         *self.tool_definitions_override.write() = Some(definitions);
     }
 
+    /// Clear any previously set tool definition override, restoring the default registry projection.
     pub fn clear_tool_definitions_override(&mut self) {
         *self.tool_definitions_override.write() = None;
     }
 
+    /// Set an argument transformer applied to tool calls before validation and execution.
     pub fn set_tool_arg_transform(&mut self, transform: ToolArgTransform) {
         self.tool_arg_transform = Some(transform);
     }
 
+    /// Clear any previously set tool argument transformer.
     pub fn clear_tool_arg_transform(&mut self) {
         self.tool_arg_transform = None;
     }

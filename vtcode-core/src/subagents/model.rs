@@ -12,6 +12,11 @@ use crate::llm::factory::{infer_provider, infer_provider_from_model};
 
 // ─── Model Resolution ───────────────────────────────────────────────────────
 
+/// Resolves the model for a subagent given an optional request override.
+///
+/// When `requested` is `None`, `"inherit"`, or empty, the parent model is inherited.
+/// Special aliases like `"small"`, `"haiku"`, `"sonnet"`, and `"opus"` are mapped
+/// to concrete model identifiers based on the active provider.
 pub fn resolve_subagent_model(
     vt_cfg: &VTCodeConfig,
     parent_model: &str,
@@ -106,6 +111,8 @@ fn resolve_lightweight_model(
     }
 }
 
+/// Resolves the effective subagent model, preferring the explicit override, then the spec model,
+/// then falling back to the parent model.
 pub fn resolve_effective_subagent_model(
     vt_cfg: &VTCodeConfig,
     parent_model: &str,
@@ -250,6 +257,7 @@ fn alias_model_for_provider(parent_provider: &str, alias: &str, parent_model: &s
     }
 }
 
+/// Maps a subagent spec name to its corresponding [`AgentType`] variant.
 pub fn agent_type_for_spec(spec: &SubagentSpec) -> AgentType {
     match spec.name.as_str() {
         "explorer" | "explore" => AgentType::Explore,
@@ -267,6 +275,10 @@ use super::constants::{
 use crate::persistent_memory::extract_memory_highlights;
 use vtcode_config::SubagentMemoryScope;
 
+/// Loads the persistent memory appendix for a subagent, including key-point highlights.
+///
+/// Returns `None` when no memory scope is configured. Creates the memory directory
+/// if it does not exist, and returns a guidance prompt when the memory file is absent.
 pub fn load_memory_appendix(
     workspace_root: &Path,
     agent_name: &str,
@@ -318,6 +330,9 @@ pub fn load_memory_appendix(
     Ok(Some(appendix))
 }
 
+/// Loads a read-only memory appendix for the primary agent from a subagent's memory scope.
+///
+/// Unlike [`load_memory_appendix`], this does not create directories or prompt for writes.
 pub fn load_primary_memory_appendix(
     workspace_root: &Path,
     agent_name: &str,

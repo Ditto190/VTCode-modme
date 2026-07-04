@@ -19,20 +19,28 @@ impl Default for PodCatalog {
 /// A single deployment profile for a model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PodProfile {
+    /// Short identifier for this profile.
     pub name: String,
+    /// Hugging Face model identifier.
     pub model: String,
+    /// Number of GPUs required by this profile.
     pub gpu_count: usize,
+    /// Optional GPU type constraints (substring-matched against GPU names).
     #[serde(default)]
     pub gpu_types: Vec<String>,
+    /// Command template with `{{MODEL_ID}}`, `{{NAME}}`, `{{PORT}}`, and `{{VLLM_ARGS}}` placeholders.
     #[serde(default = "default_command_template")]
     pub command_template: String,
+    /// Extra command-line arguments passed to vLLM.
     #[serde(default)]
     pub vllm_args: Vec<String>,
+    /// Environment variables set before launching the server.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
 }
 
 impl PodCatalog {
+    /// Return the built-in catalog compiled into the binary.
     pub fn embedded_default() -> Self {
         match serde_json::from_str(include_str!("default_catalog.json")) {
             Ok(catalog) => catalog,
@@ -59,6 +67,7 @@ impl PodCatalog {
         }
     }
 
+    /// Return all profiles whose name or model field matches `model`.
     pub fn profiles_for_model(&self, model: &str) -> Vec<&PodProfile> {
         self.profiles
             .iter()
@@ -66,6 +75,7 @@ impl PodCatalog {
             .collect()
     }
 
+    /// Split all profiles into those compatible with `pod` and those that are not.
     pub fn compatible_profiles<'a>(
         &'a self,
         pod: &PodState,
@@ -86,6 +96,7 @@ impl PodCatalog {
 }
 
 impl PodProfile {
+    /// Return `true` if `pod` has enough GPUs of the required type for this profile.
     pub fn matches_pod(&self, pod: &PodState) -> bool {
         if self.gpu_count > pod.gpu_count() {
             return false;
@@ -112,6 +123,7 @@ impl PodProfile {
             >= self.gpu_count
     }
 
+    /// Return `true` if the profile requires exactly `count` GPUs.
     pub fn matches_gpu_count(&self, count: usize) -> bool {
         self.gpu_count == count
     }

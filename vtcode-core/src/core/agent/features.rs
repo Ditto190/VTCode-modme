@@ -5,18 +5,23 @@ use crate::tools::tool_intent::{ToolMutationModel, builtin_tool_behavior};
 /// Lifecycle stage for a feature gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureStage {
+    /// Feature is stable and fully supported.
     Stable,
+    /// Feature is in beta and may change without notice.
     Beta,
 }
 
 /// Generic feature gate with stage metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureGate {
+    /// Whether the feature is currently enabled.
     pub enabled: bool,
+    /// Lifecycle stage of the feature.
     pub stage: FeatureStage,
 }
 
 impl FeatureGate {
+    /// Create a new feature gate with the given enabled state and stage.
     pub const fn new(enabled: bool, stage: FeatureStage) -> Self {
         Self { enabled, stage }
     }
@@ -25,22 +30,32 @@ impl FeatureGate {
 /// Open Responses-specific feature gate data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenResponsesFeature {
+    /// Whether Open Responses support is enabled.
     pub enabled: bool,
+    /// Whether to emit Open Responses-specific lifecycle events.
     pub emit_events: bool,
+    /// Whether to map tool calls to Open Responses format.
     pub map_tool_calls: bool,
+    /// Whether to include reasoning content in responses.
     pub include_reasoning: bool,
+    /// Lifecycle stage of the feature.
     pub stage: FeatureStage,
 }
 
 /// Immutable session-scoped feature flags derived from config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeatureSet {
+    /// Gate for the `request_user_input` tool.
     pub request_user_input: FeatureGate,
+    /// Gate for automatic context compaction.
     pub auto_compaction: FeatureGate,
+    /// Gate for Open Responses-specific features.
     pub open_responses: OpenResponsesFeature,
 }
 
 impl FeatureSet {
+    /// Build a [`FeatureSet`] from the workspace configuration, falling back
+    /// to defaults when no config is provided.
     pub fn from_config(config: Option<&VTCodeConfig>) -> Self {
         let default_config;
         let cfg = if let Some(cfg) = config {
@@ -72,6 +87,7 @@ impl FeatureSet {
         }
     }
 
+    /// Whether the `request_user_input` tool is available in the current context.
     pub fn request_user_input_enabled(
         &self,
         _planning_active: bool,
@@ -80,10 +96,12 @@ impl FeatureSet {
         interactive_session && self.request_user_input.enabled
     }
 
+    /// Whether auto-compaction is enabled, requiring provider server-side support.
     pub fn auto_compaction_enabled(&self, supports_server_compaction: bool) -> bool {
         self.auto_compaction.enabled && supports_server_compaction
     }
 
+    /// Whether a specific tool is allowed in the current planning mode.
     pub fn tool_enabled_for_mode(
         tool_name: &str,
         planning_active: bool,
@@ -100,6 +118,7 @@ impl FeatureSet {
         }
     }
 
+    /// Whether a tool name is allowed given the current feature gates and session state.
     pub fn allows_tool_name(
         &self,
         tool_name: &str,

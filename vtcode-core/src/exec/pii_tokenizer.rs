@@ -33,6 +33,7 @@ pub enum PiiType {
 }
 
 impl PiiType {
+    /// Return the PII type as a lowercase string identifier.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Email => "email",

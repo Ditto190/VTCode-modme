@@ -353,121 +353,148 @@ impl ToolRegistration {
         self.name.as_ref()
     }
 
+    /// Returns the capability level of this tool.
     pub fn capability(&self) -> CapabilityLevel {
         self.capability
     }
 
+    /// Returns the catalog source of this tool.
     pub fn catalog_source(&self) -> ToolCatalogSource {
         self.catalog_source
     }
 
+    /// Returns whether this tool uses a PTY.
     pub fn uses_pty(&self) -> bool {
         self.uses_pty
     }
 
+    /// Returns whether this tool is visible to the LLM.
     pub fn expose_in_llm(&self) -> bool {
         self.expose_in_llm
     }
 
+    /// Returns whether this tool is deprecated.
     pub fn is_deprecated(&self) -> bool {
         self.deprecated
     }
 
+    /// Returns the deprecation message if this tool is deprecated.
     pub fn deprecation_message(&self) -> Option<&str> {
         self.deprecation_message.as_deref()
     }
 
+    /// Returns whether this tool is CGP-wrapped.
     pub fn is_cgp_wrapped(&self) -> bool {
         self.cgp_wrapped
     }
 
+    /// Returns the tool handler implementation.
     pub fn handler(&self) -> ToolHandler {
         self.handler.clone()
     }
 
+    /// Returns the native CGP factory if set.
     pub fn native_cgp_factory(&self) -> Option<NativeCgpToolFactory> {
         self.native_cgp_factory.clone()
     }
 
+    /// Returns a reference to the tool registration metadata.
     pub fn metadata(&self) -> &ToolRegistrationSpec {
         &self.metadata
     }
 
+    /// Returns the parameter JSON schema (delegates to metadata).
     pub fn parameter_schema(&self) -> Option<&Value> {
         self.metadata.parameter_schema()
     }
 
+    /// Returns the configuration JSON schema (delegates to metadata).
     pub fn config_schema(&self) -> Option<&Value> {
         self.metadata.config_schema()
     }
 
+    /// Returns the state JSON schema (delegates to metadata).
     pub fn state_schema(&self) -> Option<&Value> {
         self.metadata.state_schema()
     }
 
+    /// Returns the prompt file path (delegates to metadata).
     pub fn prompt_path(&self) -> Option<&str> {
         self.metadata.prompt_path()
     }
 
+    /// Returns the default permission policy (delegates to metadata).
     pub fn default_permission(&self) -> Option<ToolPolicy> {
         self.metadata.default_permission()
     }
 
+    /// Replaces the tool registration metadata.
     pub fn with_metadata(mut self, metadata: ToolRegistrationSpec) -> Self {
         self.metadata = metadata;
         self
     }
 
+    /// Sets the tool description (delegates to metadata).
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.metadata = self.metadata.with_description(description);
         self
     }
 
+    /// Sets the prompt file path (delegates to metadata).
     pub fn with_prompt_path(mut self, path: impl Into<String>) -> Self {
         self.metadata = self.metadata.with_prompt_path(path);
         self
     }
 
+    /// Sets the parameter JSON schema (delegates to metadata).
     pub fn with_parameter_schema(mut self, schema: Value) -> Self {
         self.metadata = self.metadata.with_parameter_schema(schema);
         self
     }
 
+    /// Sets the configuration JSON schema (delegates to metadata).
     pub fn with_config_schema(mut self, schema: Value) -> Self {
         self.metadata = self.metadata.with_config_schema(schema);
         self
     }
 
+    /// Sets the state JSON schema (delegates to metadata).
     pub fn with_state_schema(mut self, schema: Value) -> Self {
         self.metadata = self.metadata.with_state_schema(schema);
         self
     }
 
+    /// Sets the default permission policy (delegates to metadata).
     pub fn with_permission(mut self, permission: ToolPolicy) -> Self {
         self.metadata = self.metadata.with_permission(permission);
         self
     }
 
+    /// Adds glob patterns to the allowlist (delegates to metadata).
     pub fn with_allowlist(mut self, patterns: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.metadata = self.metadata.with_allowlist(patterns);
         self
     }
 
+    /// Adds glob patterns to the denylist (delegates to metadata).
     pub fn with_denylist(mut self, patterns: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.metadata = self.metadata.with_denylist(patterns);
         self
     }
 
+    /// Adds alternative names for the tool (delegates to metadata).
     pub fn with_aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.metadata = self.metadata.with_aliases(aliases);
         self
     }
 
+    /// Sets the MCP server hint (delegates to metadata).
     pub fn with_server_hint(mut self, hint: impl Into<String>) -> Self {
         self.metadata = self.metadata.with_server_hint(hint);
         self
     }
 
+    /// Sets the tool behavior classification (delegates to metadata).
     pub fn with_behavior(mut self, behavior: ToolBehavior) -> Self {
         self.metadata = self.metadata.with_behavior(behavior);
         self

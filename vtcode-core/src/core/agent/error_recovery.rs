@@ -108,6 +108,7 @@ impl ErrorRecoveryState {
         }
     }
 
+    /// Records a circuit-breaker state change or blocked call event.
     pub fn record_circuit_event(
         &mut self,
         tool_name: &str,
@@ -128,6 +129,8 @@ impl ErrorRecoveryState {
         }
     }
 
+    /// Records events derived from a circuit-breaker state transition,
+    /// including state changes and newly blocked calls.
     pub fn record_circuit_transition(
         &mut self,
         before: &ToolCircuitDiagnostics,
@@ -161,6 +164,8 @@ impl ErrorRecoveryState {
         }
     }
 
+    /// Builds a diagnostic summary from the current state, including whether
+    /// the agent should pause for user guidance.
     pub fn get_diagnostics(
         &self,
         open_circuits: &[String],
@@ -225,6 +230,8 @@ impl ErrorRecoveryState {
             .collect()
     }
 
+    /// Returns `true` if enough time has elapsed since the last recovery prompt
+    /// to show another one.
     pub fn can_prompt_user(&self) -> bool {
         if let Some(last_prompt) = self.last_recovery_prompt {
             last_prompt.elapsed() >= self.recovery_cooldown
@@ -233,18 +240,22 @@ impl ErrorRecoveryState {
         }
     }
 
+    /// Records that a recovery prompt was shown to the user, resetting the cooldown.
     pub fn mark_prompt_shown(&mut self) {
         self.last_recovery_prompt = Some(Instant::now());
     }
 
+    /// Clears all recorded recent errors.
     pub fn clear_recent_errors(&mut self) {
         self.recent_errors.clear();
     }
 
+    /// Clears all recorded circuit-breaker events.
     pub fn clear_circuit_events(&mut self) {
         self.circuit_events.clear();
     }
 
+    /// Clears all errors, circuit events, and the recovery prompt timestamp.
     pub fn reset(&mut self) {
         self.recent_errors.clear();
         self.circuit_events.clear();

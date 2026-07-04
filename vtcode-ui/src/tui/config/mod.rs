@@ -1,9 +1,12 @@
+/// TUI configuration constants split into sub-modules for defaults and UI tuning.
 pub mod constants {
     pub mod defaults;
     pub mod ui;
 }
 
+/// Config file loading and deserialization.
 pub mod loader;
+/// Configuration type definitions re-exported for convenience.
 pub mod types;
 
 use anyhow::Result;
@@ -15,42 +18,57 @@ pub use types::{
     VerbosityLevel,
 };
 
+/// Controls how tool call output is displayed in the TUI.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolOutputMode {
+    /// Show a condensed summary of tool output.
     #[default]
     Compact,
+    /// Show the full, untruncated tool output.
     Full,
 }
 
+/// Controls the overall density of the terminal UI layout.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiDisplayMode {
+    /// Full layout with all panels visible.
     Full,
+    /// Compact layout that minimizes chrome.
     #[default]
     Minimal,
+    /// Focuses on the active input area with reduced side panels.
     Focused,
 }
 
+/// Determines how desktop notifications are delivered.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationDeliveryMode {
+    /// Show notifications only in the terminal.
     Terminal,
+    /// Use both terminal and desktop notifications.
     #[default]
     Hybrid,
+    /// Show notifications via the OS desktop notification system.
     Desktop,
 }
 
+/// Workspace trust mode for the Agent Client Protocol (Zed integration).
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentClientProtocolZedWorkspaceTrustMode {
+    /// Grant full automatic trust to all workspace operations.
     FullAuto,
+    /// Use per-tool policy checks for untrusted operations.
     #[default]
     ToolsPolicy,
 }
 
 pub use vtcode_config::core::tools::ToolPolicy;
 
+/// Configuration for the terminal keyboard protocol (Kitty progressive enhancement).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KeyboardProtocolConfig {
     pub enabled: bool,
@@ -75,6 +93,7 @@ impl Default for KeyboardProtocolConfig {
 }
 
 impl KeyboardProtocolConfig {
+    /// Validate the keyboard protocol configuration.
     pub fn validate(&self) -> Result<()> {
         match self.mode.as_str() {
             "default" | "full" | "minimal" | "custom" => Ok(()),
@@ -86,6 +105,7 @@ impl KeyboardProtocolConfig {
     }
 }
 
+/// Configuration for UI notification behavior.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UiNotificationsConfig {
     pub enabled: bool,
@@ -113,6 +133,7 @@ impl Default for UiNotificationsConfig {
     }
 }
 
+/// Top-level UI configuration controlling display modes and input behavior.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UiConfig {
     pub tool_output_mode: ToolOutputMode,
@@ -144,11 +165,13 @@ impl Default for UiConfig {
     }
 }
 
+/// Configuration for agent checkpoint persistence.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AgentCheckpointingConfig {
     pub enabled: bool,
 }
 
+/// Configuration for the small (fast/cheap) model used for lightweight tasks.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AgentSmallModelConfig {
     pub enabled: bool,
@@ -159,6 +182,7 @@ pub struct AgentVibeCodingConfig {
     pub enabled: bool,
 }
 
+/// Top-level agent configuration covering model selection, prompt style, and limits.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentConfig {
     pub default_model: String,
@@ -192,6 +216,7 @@ impl Default for AgentConfig {
     }
 }
 
+/// Configuration for LLM prompt caching.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromptCacheConfig {
     pub enabled: bool,
@@ -203,6 +228,7 @@ impl Default for PromptCacheConfig {
     }
 }
 
+/// Configuration for Model Context Protocol connections.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpConfig {
     pub enabled: bool,
@@ -214,6 +240,7 @@ impl Default for McpConfig {
     }
 }
 
+/// Zed-specific Agent Client Protocol configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AcpZedConfig {
     pub workspace_trust: AgentClientProtocolZedWorkspaceTrustMode,
@@ -227,21 +254,25 @@ impl Default for AcpZedConfig {
     }
 }
 
+/// Agent Client Protocol configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AcpConfig {
     pub zed: AcpZedConfig,
 }
 
+/// Configuration for full-automation mode.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct FullAutoConfig {
     pub enabled: bool,
 }
 
+/// Automation settings controlling automatic execution behavior.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AutomationConfig {
     pub full_auto: FullAutoConfig,
 }
 
+/// Tool execution policy configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolsConfig {
     pub default_policy: ToolPolicy,
@@ -255,6 +286,7 @@ impl Default for ToolsConfig {
     }
 }
 
+/// Security-related settings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SecurityConfig {
     pub human_in_the_loop: bool,
@@ -268,6 +300,7 @@ impl Default for SecurityConfig {
     }
 }
 
+/// Context window management settings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ContextConfig {
     pub max_context_tokens: usize,
@@ -283,6 +316,7 @@ impl Default for ContextConfig {
     }
 }
 
+/// Configuration for syntax highlighting in code blocks.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SyntaxHighlightingConfig {
     pub enabled: bool,
@@ -317,6 +351,7 @@ impl Default for SyntaxHighlightingConfig {
     }
 }
 
+/// Pseudo-terminal (PTY) configuration for shell sessions.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PtyConfig {
     pub enabled: bool,

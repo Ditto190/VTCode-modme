@@ -9,17 +9,29 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// with their context-sensitive logic) remain hardcoded in `events.rs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Action {
+    /// Send an interrupt signal (Ctrl+C) to the running agent.
     Interrupt,
+    /// Exit the TUI session.
     Exit,
+    /// Run the current operation in the background.
     BackgroundOperation,
+    /// Open the model picker dialog.
     OpenModelPicker,
+    /// Clear the terminal screen.
     ClearScreen,
+    /// Scroll the conversation view up by one page.
     ScrollPageUp,
+    /// Scroll the conversation view down by one page.
     ScrollPageDown,
+    /// Open the input edit queue for reordering queued prompts.
     EditQueue,
+    /// Recall the previous input from history.
     HistoryPrevious,
+    /// Recall the next input from history.
     HistoryNext,
+    /// Toggle the log panel visibility.
     ToggleLogs,
+    /// Generate an inline prompt suggestion via the LLM.
     GeneratePromptSuggestion,
 }
 

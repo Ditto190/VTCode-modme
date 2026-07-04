@@ -52,11 +52,17 @@ impl std::fmt::Display for AuditOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccessType {
+    /// Read access to a dotfile.
     Read,
+    /// Write access to a dotfile.
     Write,
+    /// Create a new dotfile.
     Create,
+    /// Delete a dotfile.
     Delete,
+    /// Modify an existing dotfile.
     Modify,
+    /// Append to a dotfile.
     Append,
 }
 

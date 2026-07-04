@@ -32,6 +32,7 @@ use vtcode_config::subagents::SUBAGENT_HARD_CONCURRENCY_LIMIT;
 use super::*;
 
 impl SubagentController {
+    /// Spawns a new subagent child process from a [`SpawnAgentRequest`].
     pub async fn spawn(&self, request: SpawnAgentRequest) -> Result<SubagentStatusEntry> {
         let mut request = request;
         let delegation = self
@@ -67,6 +68,7 @@ impl SubagentController {
         .await
     }
 
+    /// Spawns a background subprocess for a subagent marked `background: true`.
     pub async fn spawn_background_subprocess(
         &self,
         request: SpawnBackgroundSubprocessRequest,
@@ -155,6 +157,7 @@ impl SubagentController {
         .await
     }
 
+    /// Spawns a subagent with a custom [`SubagentSpec`] that must be read-only.
     pub async fn spawn_custom(
         &self,
         spec: SubagentSpec,
@@ -201,6 +204,7 @@ impl SubagentController {
         .await
     }
 
+    /// Sends additional input to a running or queued subagent.
     pub async fn send_input(&self, request: SendInputRequest) -> Result<SubagentStatusEntry> {
         let prompt = request_prompt(&request.message, &request.items)
             .ok_or_else(|| anyhow!("send_input requires a message or items"))?;
@@ -248,6 +252,7 @@ impl SubagentController {
         self.status_for(&request.target).await
     }
 
+    /// Resumes a closed or errored subagent and its children by re-queuing their prompts.
     pub async fn resume(&self, target: &str) -> Result<SubagentStatusEntry> {
         let subtree_ids = self.collect_spawn_subtree_ids(target).await?;
         let mut restart_ids = Vec::new();
@@ -262,6 +267,7 @@ impl SubagentController {
         self.status_for(target).await
     }
 
+    /// Closes a subagent and all its descendants, aborting any in-flight work.
     pub async fn close(&self, target: &str) -> Result<SubagentStatusEntry> {
         let subtree_ids = self.collect_spawn_subtree_ids(target).await?;
         for node_id in subtree_ids.into_iter().rev() {
@@ -270,6 +276,7 @@ impl SubagentController {
         self.status_for(target).await
     }
 
+    /// Blocks until one of the target subagents reaches a terminal state or the timeout expires.
     pub async fn wait(
         &self,
         targets: &[String],
@@ -345,6 +352,7 @@ impl SubagentController {
         }
     }
 
+    /// Returns the current status of a tracked subagent by its target id.
     pub async fn status_for(&self, target: &str) -> Result<SubagentStatusEntry> {
         let state = self.state.read().await;
         let record = state

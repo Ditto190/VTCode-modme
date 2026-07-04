@@ -328,46 +328,69 @@ impl ThemeConfig {
     }
 }
 
-/// Parsed CLI colors with anstyle::Style values
+/// Parsed CLI colors with [`AnsiStyle`] values ready for rendering.
 #[derive(Debug, Clone)]
 pub struct ParsedCliColors {
+    /// Style for success messages.
     pub success: AnsiStyle,
+    /// Style for error messages.
     pub error: AnsiStyle,
+    /// Style for warning messages.
     pub warning: AnsiStyle,
+    /// Style for info messages.
     pub info: AnsiStyle,
+    /// Style for prompt text.
     pub prompt: AnsiStyle,
 }
 
-/// Parsed diff colors with anstyle::Style values
+/// Parsed diff colors with [`AnsiStyle`] values ready for rendering.
 #[derive(Debug, Clone)]
 pub struct ParsedDiffColors {
+    /// Style for added lines.
     pub new: AnsiStyle,
+    /// Style for removed lines.
     pub old: AnsiStyle,
+    /// Style for context (unchanged) lines.
     pub context: AnsiStyle,
+    /// Style for diff headers.
     pub header: AnsiStyle,
+    /// Style for diff metadata.
     pub meta: AnsiStyle,
+    /// Style for fragment indicators.
     pub frag: AnsiStyle,
 }
 
-/// Parsed status colors with anstyle::Style values
+/// Parsed status colors with [`AnsiStyle`] values ready for rendering.
 #[derive(Debug, Clone)]
 pub struct ParsedStatusColors {
+    /// Style for added files.
     pub added: AnsiStyle,
+    /// Style for modified files.
     pub modified: AnsiStyle,
+    /// Style for deleted files.
     pub deleted: AnsiStyle,
+    /// Style for untracked files.
     pub untracked: AnsiStyle,
+    /// Style for the current branch.
     pub current: AnsiStyle,
+    /// Style for local branches.
     pub local: AnsiStyle,
+    /// Style for remote branches.
     pub remote: AnsiStyle,
 }
 
-/// Parsed file colors with anstyle::Style values
+/// Parsed file-type colors with [`AnsiStyle`] values ready for rendering.
 #[derive(Debug, Clone)]
 pub struct ParsedFileColors {
+    /// Style for directories.
     pub directory: AnsiStyle,
+    /// Style for symbolic links.
     pub symlink: AnsiStyle,
+    /// Style for executable files.
     pub executable: AnsiStyle,
+    /// Style for regular files without a matching extension rule.
     pub regular: AnsiStyle,
+    /// Per-extension styles keyed by extension (without the leading dot).
     pub extensions: hashbrown::HashMap<String, AnsiStyle>,
 }
 

@@ -267,6 +267,7 @@ impl LifecycleHookEngine {
         Ok(messages)
     }
 
+    /// Execute all `UserPromptSubmit` hooks that match the prompt content.
     pub async fn run_user_prompt_submit(
         &self,
         turn_id: &str,
@@ -312,6 +313,7 @@ impl LifecycleHookEngine {
         Ok(outcome)
     }
 
+    /// Execute all `PermissionRequest` hooks that match the tool name.
     pub async fn run_permission_request(
         &self,
         tool_name: &str,
@@ -366,6 +368,7 @@ impl LifecycleHookEngine {
         Ok(outcome)
     }
 
+    /// Execute all `PreToolUse` hooks that match the tool name.
     pub async fn run_pre_tool_use(
         &self,
         tool_name: &str,
@@ -414,6 +417,7 @@ impl LifecycleHookEngine {
         Ok(outcome)
     }
 
+    /// Execute all `PostToolUse` hooks that match the tool name.
     pub async fn run_post_tool_use(
         &self,
         tool_name: &str,
@@ -455,6 +459,7 @@ impl LifecycleHookEngine {
         Ok(outcome)
     }
 
+    /// Execute all `PreCompact` hooks that match the compaction trigger.
     pub async fn run_pre_compact(
         &self,
         trigger: CompactionTrigger,
@@ -506,6 +511,7 @@ impl LifecycleHookEngine {
         Ok(outcome)
     }
 
+    /// Execute all `Notification` hooks that match the notification type.
     pub async fn run_notification(
         &self,
         notification_type: NotificationHookType,
@@ -550,6 +556,7 @@ impl LifecycleHookEngine {
         Ok(messages)
     }
 
+    /// Execute all `Stop` hooks.
     pub async fn run_stop(
         &self,
         last_assistant_message: &str,
@@ -594,11 +601,13 @@ impl LifecycleHookEngine {
         Ok(outcome)
     }
 
+    /// Update the transcript path that hooks can access via the `VT_TRANSCRIPT_PATH` env var.
     pub async fn update_transcript_path(&self, path: Option<PathBuf>) {
         let mut state = self.inner.state.lock().await;
         state.transcript_path = path;
     }
 
+    /// Return the current transcript path, if set.
     pub async fn transcript_path(&self) -> Option<PathBuf> {
         let state = self.inner.state.lock().await;
         state.transcript_path.clone()

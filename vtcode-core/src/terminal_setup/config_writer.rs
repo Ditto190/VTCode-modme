@@ -23,8 +23,9 @@ pub enum ConfigFormat {
     JavaScript,
 }
 
-/// Markers for identifying VT Code-managed configuration sections
+/// Opening marker for a VT Code-managed configuration section.
 pub const VTCODE_BEGIN_MARKER: &str = "BEGIN VTCODE CONFIGURATION";
+/// Closing marker for a VT Code-managed configuration section.
 pub const VTCODE_END_MARKER: &str = "END VTCODE CONFIGURATION";
 
 /// Safe atomic configuration file writer

@@ -257,9 +257,13 @@ impl BeliefSource {
 /// High-level category for a belief.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BeliefCategory {
+    /// Beliefs about the user (preferences, identity, working style).
     User,
+    /// Beliefs about the system (tools, project structure, limitations).
     System,
+    /// Beliefs about the current task (what has been done, what remains).
     Task,
+    /// Beliefs about the conversation state (context usage, important decisions).
     Conversation,
 }
 
