@@ -1,4 +1,4 @@
-- Converting stringly-typed IDs (PluginId, MarketplaceId, etc.) to newtypes.
+https://github.com/searxng/searxng
 
 ---
 

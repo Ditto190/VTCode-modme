@@ -24,6 +24,25 @@ macro_rules! define_id_newtype {
         #[serde(transparent)]
         $vis struct $name(compact_str::CompactString);
 
+        #[cfg(feature = "schema")]
+        impl schemars::JsonSchema for $name {
+            fn inline_schema() -> bool {
+                <String as schemars::JsonSchema>::inline_schema()
+            }
+
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                <String as schemars::JsonSchema>::schema_name()
+            }
+
+            fn schema_id() -> std::borrow::Cow<'static, str> {
+                <String as schemars::JsonSchema>::schema_id()
+            }
+
+            fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                <String as schemars::JsonSchema>::json_schema(generator)
+            }
+        }
+
         impl $name {
             /// Create a new identifier from anything string-like.
             pub fn new(value: impl Into<compact_str::CompactString>) -> Self {
