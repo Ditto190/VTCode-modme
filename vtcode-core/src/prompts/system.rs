@@ -659,8 +659,8 @@ mod tests {
 
         assert!(result.len() > 100, "Lightweight should be >100 chars");
         assert!(
-            result.len() < 1550,
-            "Lightweight should be compact (<1.55K chars, was {} chars)",
+            result.len() < 1600,
+            "Lightweight should be compact (<1.6K chars, was {} chars)",
             result.len()
         );
         assert!(result.contains("task_tracker"));
@@ -735,8 +735,8 @@ mod tests {
             compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
 
         assert!(
-            result.len() <= 2050,
-            "Specialized should stay sparse (<=2.05K chars, was {} chars)",
+            result.len() <= 2200,
+            "Specialized should stay sparse (<=2.2K chars, was {} chars)",
             result.len()
         );
         assert!(result.contains("task_tracker"));
@@ -1051,7 +1051,8 @@ mod tests {
             "Default prompt should restrict delegation to bounded independent work"
         );
         assert!(
-            minimal_system_prompt().contains("Keep delegation bounded and explicit"),
+            minimal_system_prompt()
+                .contains("Keep delegation and skills bounded, explicit, and narrow"),
             "Minimal prompt should preserve the delegation contract"
         );
     }

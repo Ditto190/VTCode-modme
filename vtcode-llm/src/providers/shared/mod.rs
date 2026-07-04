@@ -131,6 +131,16 @@ impl StreamDelta {
     }
 }
 
+/// Generate a globally unique fallback id for tool calls whose provider
+/// omitted one. Index-based fallbacks (`tool_call_{index}`) reset every
+/// response, so the same id recurs across assistant messages and corrupts
+/// id-keyed history correlation downstream. Uniqueness across responses and
+/// process restarts (resumed sessions replay ids from checkpoints) is
+/// required, hence a random uuid rather than a counter.
+pub fn generate_tool_call_id() -> String {
+    format!("call_{}", uuid::Uuid::new_v4().simple())
+}
+
 #[derive(Default, Clone)]
 pub struct ToolCallBuilder {
     id: Option<String>,
@@ -168,11 +178,9 @@ impl ToolCallBuilder {
         }
     }
 
-    pub fn finalize(self, fallback_index: usize) -> Option<ToolCall> {
+    pub fn finalize(self) -> Option<ToolCall> {
         let name = self.name?;
-        let id = self
-            .id
-            .unwrap_or_else(|| format!("tool_call_{fallback_index}"));
+        let id = self.id.unwrap_or_else(generate_tool_call_id);
         let arguments = if self.arguments.is_empty() {
             "{}".to_string()
         } else {
@@ -210,8 +218,7 @@ pub fn update_tool_calls(builders: &mut Vec<ToolCallBuilder>, deltas: &[Value]) 
 pub fn finalize_tool_calls(builders: Vec<ToolCallBuilder>) -> Option<Vec<ToolCall>> {
     let calls: Vec<ToolCall> = builders
         .into_iter()
-        .enumerate()
-        .filter_map(|(index, builder)| builder.finalize(index))
+        .filter_map(ToolCallBuilder::finalize)
         .collect();
 
     (!calls.is_empty()).then_some(calls)
@@ -1194,6 +1201,46 @@ mod tests {
     fn finalize_tool_calls_drops_empty_builders() {
         let builders = vec![ToolCallBuilder::default()];
         assert!(finalize_tool_calls(builders).is_none());
+    }
+
+    #[test]
+    fn finalize_fabricates_unique_ids_across_batches() {
+        let idless_builder = || {
+            let mut builder = ToolCallBuilder::default();
+            builder.apply_delta(&json!({"function": {"name": "foo", "arguments": "{}"}}));
+            builder
+        };
+
+        let first =
+            finalize_tool_calls(vec![idless_builder(), idless_builder()]).expect("calls expected");
+        let second =
+            finalize_tool_calls(vec![idless_builder(), idless_builder()]).expect("calls expected");
+
+        let ids: Vec<&str> = first
+            .iter()
+            .chain(second.iter())
+            .map(|call| call.id.as_str())
+            .collect();
+        let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "fabricated ids must be unique across responses"
+        );
+
+        for id in ids {
+            let hex = id.strip_prefix("call_").expect("fabricated id prefix");
+            assert_eq!(hex.len(), 32);
+            assert!(hex.chars().all(|ch| ch.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn finalize_preserves_provider_supplied_id() {
+        let mut builder = ToolCallBuilder::default();
+        builder.apply_delta(&json!({"id": "provider-id-1", "function": {"name": "foo"}}));
+        let call = builder.finalize().expect("call expected");
+        assert_eq!(call.id, "provider-id-1");
     }
 
     #[test]

@@ -458,7 +458,8 @@ fn register_defuddle_fetch(_plan_state: Option<&PlanningWorkflowState>) -> ToolR
             "url": {
                 "type": "string",
                 "format": "uri",
-                "description": "The URL to fetch through defuddle.md. Must be http(s)."
+                "pattern": "^https?://",
+                "description": "REMOTE web page URL (http:// or https:// ONLY). Do NOT use for local file paths — use unified_file action=read instead."
             },
             "max_bytes": {
                 "type": "integer",

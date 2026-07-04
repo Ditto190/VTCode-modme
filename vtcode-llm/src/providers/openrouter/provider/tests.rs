@@ -349,3 +349,131 @@ data: [DONE]\n\n",
             && delta == "done"
     ));
 }
+
+#[tokio::test]
+async fn stream_normalized_fabricates_and_reuses_id_when_provider_omits_it() {
+    let Some(server) = start_mock_server_or_skip().await else {
+        return;
+    };
+    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"unified_search\",\"arguments\":\"{\\\"pattern\\\":\\\"ph\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"ase\\\"}\"}}]}}]}\n\n\
+data: [DONE]\n\n",
+                ),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut stream = provider
+        .stream_normalized(LLMRequest {
+            model: models::openrouter::OPENAI_GPT_5.to_string(),
+            messages: vec![Message::user("hello".to_string())],
+            ..Default::default()
+        })
+        .await
+        .expect("normalized stream should succeed");
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event.expect("stream event should parse"));
+    }
+
+    let start_id = events
+        .iter()
+        .find_map(|event| match event {
+            NormalizedStreamEvent::ToolCallStart { call_id, .. } => Some(call_id.clone()),
+            _ => None,
+        })
+        .expect("tool call start expected");
+    let delta_ids: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            NormalizedStreamEvent::ToolCallDelta { call_id, .. } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        delta_ids.iter().all(|id| *id == start_id),
+        "all deltas must reuse the fabricated start id"
+    );
+    assert!(start_id.starts_with("call_"));
+
+    let finalized = events
+        .iter()
+        .find_map(|event| match event {
+            NormalizedStreamEvent::Done { response } => Some(response.clone()),
+            _ => None,
+        })
+        .expect("done event expected");
+    let finalized_id = finalized
+        .tool_calls
+        .as_ref()
+        .and_then(|calls| calls.first())
+        .map(|call| call.id.clone())
+        .expect("finalized tool call expected");
+    assert_eq!(
+        start_id, finalized_id,
+        "streamed id must match the finalized tool call id"
+    );
+}
+
+#[tokio::test]
+async fn stream_normalized_fabricates_distinct_ids_across_streams() {
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let Some(server) = start_mock_server_or_skip().await else {
+            return;
+        };
+        let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"unified_search\",\"arguments\":\"{}\"}}]}}]}\n\n\
+data: [DONE]\n\n",
+                    ),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut stream = provider
+            .stream_normalized(LLMRequest {
+                model: models::openrouter::OPENAI_GPT_5.to_string(),
+                messages: vec![Message::user("hello".to_string())],
+                ..Default::default()
+            })
+            .await
+            .expect("normalized stream should succeed");
+
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            events.push(event.expect("stream event should parse"));
+        }
+
+        let start_id = events
+            .iter()
+            .find_map(|event| match event {
+                NormalizedStreamEvent::ToolCallStart { call_id, .. } => Some(call_id.clone()),
+                _ => None,
+            })
+            .expect("tool call start expected");
+        ids.push(start_id);
+    }
+
+    assert_ne!(
+        ids[0], ids[1],
+        "fabricated ids must differ across separate streams"
+    );
+}

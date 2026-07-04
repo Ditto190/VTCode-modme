@@ -19,6 +19,7 @@ fn circuit_breaker_default_blocked(
     push_tool_response(
         ctx.working_history,
         tool_call_id,
+        Some(canonical_tool_name),
         build_validation_error_content_with_fallback(
             format!(
                 "Tool '{canonical_tool_name}' is temporarily disabled due to high failure rate (Circuit Breaker OPEN)."
@@ -53,6 +54,7 @@ pub(super) async fn apply_recovery_action(
             tracing::info!("Recovery: user chose Skip This Step");
             ctx.push_tool_response(
                 tool_call_id,
+                None,
                 serde_json::json!({
                     "skipped": true,
                     "reason": "Skipped by user via recovery wizard. Try a different approach."

@@ -32,7 +32,7 @@ const MAX_TIMEOUT_SECS: u64 = 60;
 const MAX_BYTES: usize = 256 * 1024;
 const DEFUDDLE_BASE_URL: &str = "https://defuddle.md/";
 
-pub(crate) const DEFUDDLE_FETCH_DESCRIPTION: &str = "Fetch a URL through the defuddle.md markdown extraction service and return the cleaned markdown inline. Use this sparingly: the hosted service is rate-limited, so this tool can be called at most ONCE per session. Accepts: { url: string, max_bytes?: number }. Returns { url, markdown, bytes, used_this_session, session_cap } or a structured error if the cap has been hit.";
+pub(crate) const DEFUDDLE_FETCH_DESCRIPTION: &str = "Fetch a REMOTE web page (http:// or https:// URLs ONLY) through the defuddle.md markdown extraction service and return the cleaned markdown inline. DO NOT use for local files — use unified_file with action='read' for local paths. Use this sparingly: the hosted service is rate-limited, so this tool can be called at most ONCE per session. Accepts: { url: string (must start with http:// or https://), max_bytes?: number }. Returns { url, markdown, bytes, used_this_session, session_cap } or a structured error if the cap has been hit.";
 
 #[derive(Debug, Deserialize)]
 struct DefuddleArgs {
@@ -93,6 +93,18 @@ impl DefuddleTool {
             .map(|u| u.trim().to_string())
             .filter(|u| !u.is_empty())
             .ok_or_else(|| anyhow!("defuddle_fetch requires a non-empty 'url'"))?;
+
+        // Reject anything that is not an HTTP/HTTPS URL before URL parsing.
+        // This prevents the LLM from accidentally using defuddle_fetch for
+        // local file reads, bare paths, or other non-web URLs.
+        let lower = url.to_ascii_lowercase();
+        if !lower.starts_with("http://") && !lower.starts_with("https://") {
+            return Err(anyhow!(
+                "defuddle_fetch only accepts http:// or https:// URLs for web content extraction. \
+                For local file reads, use unified_file with action='read' instead. \
+                Got: {url}"
+            ));
+        }
 
         validate_target_url(&url)?;
 
@@ -362,6 +374,27 @@ mod tests {
                 .unwrap()
                 .block_on(tool.run(json!({ "url": bad })));
             assert!(result.is_err(), "should reject {bad}");
+        }
+    }
+
+    #[test]
+    fn local_file_paths_are_rejected_before_url_parsing() {
+        let tool = DefuddleTool::new();
+        for bad in [
+            "/Users/vinhnguyenxuan/Documents/podcast/build-video.sh",
+            "./relative/path.txt",
+            "/etc/passwd",
+            "C:\\Users\\file.txt",
+        ] {
+            let result = tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(tool.run(json!({ "url": bad })));
+            assert!(result.is_err(), "should reject local path: {bad}");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("unified_file"),
+                "error should suggest unified_file for local paths: {err_msg}"
+            );
         }
     }
 

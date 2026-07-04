@@ -6,6 +6,7 @@ use crate::file_references::FileReferenceValidator;
 use crate::types::{SkillManifest, SkillManifestMetadata};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +21,7 @@ pub const SUPPORTED_FRONTMATTER_KEYS: &[&str] = &[
     "allowed-tools",
     "disable-model-invocation",
     "compatibility",
+    "hooks",
     "metadata",
 ];
 
@@ -39,6 +41,8 @@ pub struct SkillYaml {
     pub disable_model_invocation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compatibility: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<SkillManifestMetadata>,
 }
@@ -176,7 +180,7 @@ pub fn parse_skill_content(content: &str) -> anyhow::Result<(SkillManifest, Stri
         user_invocable: None,
         context: None,
         agent: None,
-        hooks: None,
+        hooks: yaml.hooks,
         requires_container: None,
         disallow_container: None,
         compatibility: yaml.compatibility,

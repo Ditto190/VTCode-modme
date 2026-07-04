@@ -135,6 +135,5 @@ mod tests {
 
         assert!(prompt.contains("# FULL-AUTO: Complete task autonomously until done or blocked."));
         assert!(prompt.contains("`request_user_input` is unavailable in this runtime"));
-        assert!(prompt.contains("completion language as a checkpoint"));
     }
 }

@@ -166,6 +166,7 @@ async fn run_safety_validation_loop(
         | Err(SafetyValidationFailure::SessionLimitPromptFailed(_)) => {
             ctx.push_tool_response(
                 tool_call_id,
+                Some(canonical_tool_name),
                 build_failure_error_content(
                     "Session tool limit reached and not increased by user".to_string(),
                     "safety_limit",
@@ -183,6 +184,7 @@ async fn run_safety_validation_loop(
             )?;
             ctx.push_tool_response(
                 tool_call_id,
+                Some(canonical_tool_name),
                 build_failure_error_content(
                     format!("Safety validation failed: {err}"),
                     "safety_validation",
@@ -337,6 +339,7 @@ pub(crate) async fn validate_tool_call<'a>(
     if tool_name.trim().is_empty() {
         ctx.push_tool_response(
             tool_call_id,
+            None,
             build_validation_error_content_with_fallback(
                 "Tool call has an empty tool name. Provide a valid tool name.".to_string(),
                 "preflight",
@@ -353,6 +356,7 @@ pub(crate) async fn validate_tool_call<'a>(
         let block_reason = build_tool_budget_exhausted_reason(exhaustion.used, exhaustion.max);
         ctx.push_tool_response(
             tool_call_id,
+            Some(tool_name),
             build_failure_error_content(error_msg, "policy"),
         );
         if notice.first_notice {
@@ -369,6 +373,7 @@ pub(crate) async fn validate_tool_call<'a>(
         let error_msg = exhaustion.policy_violation_message();
         ctx.push_tool_response(
             tool_call_id,
+            Some(tool_name),
             build_failure_error_content(error_msg, "policy"),
         );
         return Ok(ValidationResult::Blocked);
@@ -396,6 +401,7 @@ pub(crate) async fn validate_tool_call<'a>(
                     .unwrap_or((None, None));
                 ctx.push_tool_response(
                     tool_call_id,
+                    Some(tool_name),
                     build_validation_error_content_with_fallback(
                         format!("Tool preflight validation failed: {err}"),
                         "preflight",
@@ -412,6 +418,7 @@ pub(crate) async fn validate_tool_call<'a>(
     if !primary_agent_allows_tool(ctx.active_primary_agent.active(), &canonical_tool_name) {
         ctx.push_tool_response(
             tool_call_id,
+            Some(&canonical_tool_name),
             serde_json::to_string(
                 &ToolExecutionError::policy_violation(
                     canonical_tool_name.clone(),
@@ -592,6 +599,7 @@ pub(crate) async fn validate_tool_call<'a>(
             };
             ctx.push_tool_response(
                 tool_call_id,
+                Some(&canonical_tool_name),
                 serde_json::to_string(&denial).unwrap_or_else(|_| "{}".to_string()),
             );
             Ok(ValidationResult::Blocked)
@@ -611,7 +619,7 @@ pub(crate) async fn validate_tool_call<'a>(
             let err_json = serde_json::json!({
                 "error": format!("Failed to evaluate policy for tool '{}': {}", tool_name, err)
             });
-            ctx.push_tool_response(tool_call_id, err_json.to_string());
+            ctx.push_tool_response(tool_call_id, Some(tool_name), err_json.to_string());
             Ok(ValidationResult::Blocked)
         }
     }

@@ -85,6 +85,7 @@ pub(crate) async fn acquire_adaptive_rate_limit_slot<'a>(
                     push_tool_response(
                         ctx.working_history,
                         tool_call_id,
+                        Some(tool_name),
                         build_rate_limit_error_content(tool_name, retry_after_ms),
                     );
                     return Ok(Some(ValidationResult::Blocked));

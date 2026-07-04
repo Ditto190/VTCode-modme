@@ -253,13 +253,18 @@ impl<'a> TurnProcessingContext<'a> {
         self.harness_state.increment_post_tool_recovery_cycle()
     }
 
-    pub(crate) fn push_tool_response<S>(&mut self, tool_call_id: S, content: String)
-    where
+    pub(crate) fn push_tool_response<S>(
+        &mut self,
+        tool_call_id: S,
+        tool_name: Option<&str>,
+        content: String,
+    ) where
         S: AsRef<str> + Into<String>,
     {
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::push_tool_response(
             self.working_history,
             tool_call_id,
+            tool_name,
             content,
         );
     }

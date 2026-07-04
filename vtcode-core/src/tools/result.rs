@@ -281,13 +281,13 @@ mod tests {
     fn test_token_estimation() {
         let text = "Hello world";
         let tokens = estimate_tokens(text);
-        // "Hello world" = 11 chars / 4 ≈ 3 tokens
-        assert_eq!(tokens, 3);
+        // tiktoken cl100k_base BPE tokenizes "Hello world" as 2 tokens
+        assert_eq!(tokens, 2);
 
         let long_text = "a".repeat(1000);
         let long_tokens = estimate_tokens(&long_text);
-        // 1000 chars / 4 = 250 tokens
-        assert_eq!(long_tokens, 250);
+        // Repeated single chars: ~8 chars/token for 'a' in cl100k_base
+        assert_eq!(long_tokens, 125);
     }
 
     #[test]
@@ -321,11 +321,11 @@ mod tests {
     fn test_savings_calculation() {
         let result = ToolResult::new(
             "grep",
-            "Short summary",  // ~4 tokens
-            "a".repeat(1000), // ~250 tokens
+            "Short summary",  // ~2 tokens
+            "a".repeat(1000), // ~125 tokens (repeated chars: ~8 chars/token)
         );
 
-        assert!(result.metadata.token_counts.savings_tokens > 200);
+        assert!(result.metadata.token_counts.savings_tokens > 100);
         assert!(result.metadata.token_counts.savings_percent > 90.0);
         assert!(result.has_significant_savings());
     }

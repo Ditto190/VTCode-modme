@@ -9,7 +9,7 @@ use crate::providers::shared::Utf8StreamDecoder;
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::StreamExt;
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use serde_json::Value;
 
 use super::super::response_parser;
@@ -162,6 +162,11 @@ impl LLMProvider for OpenRouterProvider {
             let mut decoder = Utf8StreamDecoder::new();
             let mut aggregator = crate::providers::shared::StreamAggregator::new(resolved_model);
             let mut seen_tool_calls = HashSet::new();
+            // Ids fabricated for id-less tool calls, keyed by the provider's
+            // tool-call index so every delta of one logical call reuses the
+            // same id. Index-based fallback ids (`tool_call_{index}`) reset per
+            // response and collide across assistant messages downstream.
+            let mut fabricated_ids: HashMap<usize, String> = HashMap::new();
 
             while let Some(chunk_result) = body_stream.next().await {
                 let chunk = chunk_result.map_err(|e| format_network_error("OpenRouter", &e))?;
@@ -225,18 +230,38 @@ impl LLMProvider for OpenRouterProvider {
                                         }
 
                                         if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
-                                            for (position, tool_call) in tool_calls.iter().enumerate() {
+                                            // Patch fabricated ids into the payload handed to the
+                                            // aggregator so the ids in streamed events match the
+                                            // ids in the finalized response (lifecycle consumers
+                                            // correlate by call_id).
+                                            let mut patched_tool_calls = tool_calls.clone();
+                                            for (position, tool_call) in patched_tool_calls.iter_mut().enumerate() {
                                                 let index = tool_call
                                                     .get("index")
                                                     .and_then(|value| value.as_u64())
                                                     .map(|value| value as usize)
                                                     .unwrap_or(position);
-                                                let call_id = tool_call
+                                                let call_id = match tool_call
                                                     .get("id")
                                                     .and_then(|value| value.as_str())
                                                     .filter(|value| !value.is_empty())
                                                     .map(ToOwned::to_owned)
-                                                    .unwrap_or_else(|| format!("tool_call_{index}"));
+                                                {
+                                                    Some(call_id) => call_id,
+                                                    None => {
+                                                        let call_id = fabricated_ids
+                                                            .entry(index)
+                                                            .or_insert_with(crate::providers::shared::generate_tool_call_id)
+                                                            .clone();
+                                                        if let Some(object) = tool_call.as_object_mut() {
+                                                            object.insert(
+                                                                "id".to_string(),
+                                                                Value::String(call_id.clone()),
+                                                            );
+                                                        }
+                                                        call_id
+                                                    }
+                                                };
                                                 if seen_tool_calls.insert(call_id.clone()) {
                                                     let name = tool_call
                                                         .get("function")
@@ -261,7 +286,7 @@ impl LLMProvider for OpenRouterProvider {
                                                     }
                                                 }
                                             }
-                                            aggregator.handle_tool_calls(tool_calls);
+                                            aggregator.handle_tool_calls(&patched_tool_calls);
                                         }
                                     }
 

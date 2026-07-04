@@ -7,7 +7,7 @@ use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
 use serde_json::{Value, json};
 
-use super::{StreamAggregator, parse_cached_prompt_tokens_from_usage};
+use super::{StreamAggregator, generate_tool_call_id, parse_cached_prompt_tokens_from_usage};
 
 // Retained shared Responses stream processor.
 // Rig 0.39 can consume SSE, but VTCode needs a provider-agnostic
@@ -112,6 +112,8 @@ struct ResponsesNormalizedStreamProcessor<P> {
     tool_call_names: HashMap<String, String>,
     tool_call_ids_by_item_id: HashMap<String, String>,
     next_tool_call_index: usize,
+    fabricated_ids: HashMap<usize, String>,
+    fabricated_fallback_id: Option<String>,
     final_response: Option<Value>,
     done: bool,
 }
@@ -130,8 +132,27 @@ where
             tool_call_names: HashMap::new(),
             tool_call_ids_by_item_id: HashMap::new(),
             next_tool_call_index: 0,
+            fabricated_ids: HashMap::new(),
+            fabricated_fallback_id: None,
             final_response: None,
             done: false,
+        }
+    }
+
+    /// Fabricate an id once per logical call and reuse it across deltas.
+    /// Recomputing a fallback per delta fragments one id-less call into
+    /// several builders, and index-based ids collide across responses.
+    fn fabricated_call_id(&mut self, output_index: Option<usize>) -> String {
+        match output_index {
+            Some(index) => self
+                .fabricated_ids
+                .entry(index)
+                .or_insert_with(generate_tool_call_id)
+                .clone(),
+            None => self
+                .fabricated_fallback_id
+                .get_or_insert_with(generate_tool_call_id)
+                .clone(),
         }
     }
 
@@ -200,7 +221,7 @@ where
             } => {
                 let call_id = self.provider_tool_call_id(item_id.as_deref(), call_id);
                 let call_id = if call_id.is_empty() {
-                    format!("tool_call_{}", self.next_tool_call_index)
+                    self.fabricated_call_id(output_index)
                 } else {
                     call_id
                 };
@@ -795,6 +816,82 @@ mod tests {
                 "search_workspace".to_string(),
                 "{\"query\":\"vtcode\"}".to_string(),
             )]
+        );
+    }
+
+    #[test]
+    fn tool_call_delta_without_ids_fabricates_and_reuses_id() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), |_| {
+            Ok(LLMResponse {
+                model: "gpt-5".to_string(),
+                ..Default::default()
+            })
+        });
+
+        let delta_payload = |fragment: &str| {
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 1,
+                "delta": fragment
+            })
+        };
+
+        let first = processor
+            .handle_payload(delta_payload("{\"query\":"))
+            .expect("first tool delta should parse");
+        let first_id = match first.as_slice() {
+            [
+                NormalizedStreamEvent::ToolCallStart { call_id, .. },
+                NormalizedStreamEvent::ToolCallDelta {
+                    call_id: delta_id, ..
+                },
+            ] => {
+                assert_eq!(call_id, delta_id);
+                call_id.clone()
+            }
+            other => panic!("unexpected events: {other:?}"),
+        };
+        assert!(first_id.starts_with("call_"));
+
+        let second = processor
+            .handle_payload(delta_payload("\"vtcode\"}"))
+            .expect("second tool delta should parse");
+        assert!(matches!(
+            second.as_slice(),
+            [NormalizedStreamEvent::ToolCallDelta { call_id, .. }] if *call_id == first_id
+        ));
+    }
+
+    #[test]
+    fn tool_call_delta_without_ids_fabricates_distinct_ids_per_processor() {
+        let make_id = || {
+            let mut processor = ResponsesNormalizedStreamProcessor::new(options(), |_| {
+                Ok(LLMResponse {
+                    model: "gpt-5".to_string(),
+                    ..Default::default()
+                })
+            });
+            let events = processor
+                .handle_payload(json!({
+                    "type": "response.function_call_arguments.delta",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "sequence_number": 1,
+                    "delta": "{}"
+                }))
+                .expect("tool delta should parse");
+            match events.as_slice() {
+                [NormalizedStreamEvent::ToolCallStart { call_id, .. }, ..] => call_id.clone(),
+                other => panic!("unexpected events: {other:?}"),
+            }
+        };
+
+        assert_ne!(
+            make_id(),
+            make_id(),
+            "fabricated ids must differ across responses"
         );
     }
 

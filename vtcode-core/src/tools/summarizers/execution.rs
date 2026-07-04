@@ -263,11 +263,11 @@ mod tests {
         assert!(summary.contains("Output: 4 lines"));
         assert!(summary.contains("total 100"));
 
-        // Verify some savings (small test input has lower percentage)
+        // Verify some savings (small test input has lower percentage with BPE tokenizer)
         let savings = summarizer.estimate_savings(full_output, &summary);
         assert!(
-            savings.savings_percent > 15.0,
-            "Should save >15% (got {:.1}%)",
+            savings.savings_percent > 10.0,
+            "Should save >10% (got {:.1}%)",
             savings.savings_percent
         );
     }

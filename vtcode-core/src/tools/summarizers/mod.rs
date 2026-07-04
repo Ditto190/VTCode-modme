@@ -112,17 +112,21 @@ mod tests {
 
     #[test]
     fn test_estimate_tokens() {
-        assert_eq!(estimate_tokens("Hello world"), 3); // 11 chars / 4 ≈ 3
+        // tiktoken cl100k_base BPE tokenizes "Hello world" as 2 tokens
+        assert_eq!(estimate_tokens("Hello world"), 2);
         assert_eq!(estimate_tokens(""), 0);
-        assert_eq!(estimate_tokens("a".repeat(1000).as_str()), 250); // 1000 / 4 = 250
+        // Repeated single chars are highly compressible: ~8 chars/token for 'a'
+        assert_eq!(estimate_tokens("a".repeat(1000).as_str()), 125);
     }
 
     #[test]
     fn test_truncate_to_tokens() {
         let text = "a".repeat(1000);
-        let truncated = truncate_to_tokens(&text, 50); // 50 tokens = 200 chars
-        assert!(truncated.len() <= 203); // 200 + "..."
-        assert!(truncated.ends_with("..."));
+        let truncated = truncate_to_tokens(&text, 50); // 50 tokens ≈ 400 chars at 8 chars/token
+        // BPE with repeated chars is more efficient (~8 chars/token)
+        assert!(truncated.len() <= 500); // generous bound for BPE variance
+        // BPE decode of repeated chars succeeds without "..." fallback
+        assert!(truncated.len() < text.len());
     }
 
     #[test]

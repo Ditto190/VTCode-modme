@@ -60,7 +60,7 @@ pub(super) async fn push_tool_response_with_auto_permission_probe(
         auto_permission_probe_warning(t_ctx.ctx, tool_name, &content_for_model).await;
     t_ctx
         .ctx
-        .push_tool_response(tool_call_id, content_for_model);
+        .push_tool_response(tool_call_id, Some(tool_name), content_for_model);
     if let Some(probe_warning) = probe_warning {
         append_probe_warning(t_ctx.ctx, tool_name, probe_warning)?;
     }

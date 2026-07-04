@@ -114,10 +114,11 @@ fn derive_spool_fallback(path: &str) -> Option<(String, Value)> {
 fn push_guard_failure_messages(
     ctx: &mut TurnProcessingContext<'_>,
     tool_call_id: &str,
+    tool_name: &str,
     error_content: String,
     block_reason: &str,
 ) {
-    ctx.push_tool_response(tool_call_id, error_content);
+    ctx.push_tool_response(tool_call_id, Some(tool_name), error_content);
     ctx.push_system_message(block_reason.to_string());
 }
 
@@ -174,6 +175,7 @@ pub(super) fn enforce_blocked_tool_call_guard(
     push_guard_failure_messages(
         ctx,
         tool_call_id,
+        tool_name,
         build_failure_error_content(
             if recovery_total_fuse_tripped {
                 format!(
@@ -322,7 +324,7 @@ pub(super) fn enforce_read_after_write_guard(
     }
 
     let content = build_read_after_write_error(&path);
-    ctx.push_tool_response(tool_call_id, content);
+    ctx.push_tool_response(tool_call_id, Some(canonical_tool_name), content);
     Some(ValidationResult::Blocked)
 }
 
@@ -349,7 +351,7 @@ pub(super) fn enforce_duplicate_task_tracker_create_guard<'a>(
         "duplicate_task_tracker_create",
     )
     .to_string();
-    ctx.push_tool_response(tool_call_id, content);
+    ctx.push_tool_response(tool_call_id, Some(canonical_tool_name), content);
     Some(ValidationResult::Blocked)
 }
 
@@ -377,6 +379,7 @@ pub(super) fn enforce_repeated_read_only_call_guard(
             push_guard_failure_messages(
                 ctx,
                 tool_call_id,
+                canonical_tool_name,
                 build_repeated_file_read_family_error_content(target),
                 &block_reason,
             );
@@ -400,6 +403,7 @@ pub(super) fn enforce_repeated_read_only_call_guard(
             }
             ctx.push_tool_response(
                 tool_call_id,
+                Some(canonical_tool_name),
                 maybe_inline_spooled(canonical_tool_name, &reused_value),
             );
             return Some(ValidationResult::Handled);
@@ -429,6 +433,7 @@ pub(super) fn enforce_repeated_read_only_call_guard(
                 }
                 ctx.push_tool_response(
                     tool_call_id,
+                    Some(canonical_tool_name),
                     maybe_inline_spooled(canonical_tool_name, &reused_value),
                 );
                 ctx.harness_state
@@ -449,6 +454,7 @@ pub(super) fn enforce_repeated_read_only_call_guard(
         }
         ctx.push_tool_response(
             tool_call_id,
+            Some(canonical_tool_name),
             maybe_inline_spooled(canonical_tool_name, &reused_value),
         );
         ctx.harness_state
@@ -466,10 +472,11 @@ pub(super) fn enforce_repeated_read_only_call_guard(
             }
             ctx.push_tool_response(
                 tool_call_id,
+                Some(canonical_tool_name),
                 maybe_inline_spooled(canonical_tool_name, &parsed),
             );
         } else {
-            ctx.push_tool_response(tool_call_id, raw_output);
+            ctx.push_tool_response(tool_call_id, Some(canonical_tool_name), raw_output);
         }
         return Some(ValidationResult::Handled);
     }
@@ -502,6 +509,7 @@ pub(super) fn enforce_repeated_shell_run_guard(
     push_guard_failure_messages(
         ctx,
         tool_call_id,
+        canonical_tool_name,
         build_repeated_shell_run_error_content(max_repeated_runs),
         &block_reason,
     );
@@ -607,6 +615,7 @@ pub(super) fn enforce_spool_chunk_read_guard(
         if spool_content_looks_like_error(&head) {
             ctx.push_tool_response(
                 tool_call_id,
+                Some(canonical_tool_name),
                 build_previous_turn_error_spool_content(spool_path, &head),
             );
             ctx.push_system_message(format!(
@@ -639,6 +648,7 @@ pub(super) fn enforce_spool_chunk_read_guard(
     push_guard_failure_messages(
         ctx,
         tool_call_id,
+        canonical_tool_name,
         build_spool_chunk_guard_error_content(spool_path, max_reads_per_turn),
         &block_reason,
     );

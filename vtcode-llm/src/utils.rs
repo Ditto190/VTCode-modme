@@ -423,7 +423,8 @@ mod tests {
 
     #[test]
     fn test_estimate_token_count() {
-        assert_eq!(estimate_token_count("Hello world"), 3); // ~11 chars / 4
+        // tiktoken cl100k_base BPE tokenizes "Hello world" as 2 tokens
+        assert_eq!(estimate_token_count("Hello world"), 2);
         assert_eq!(estimate_token_count(""), 0); // empty input
         assert_eq!(estimate_token_count("a"), 1); // minimum 1
     }

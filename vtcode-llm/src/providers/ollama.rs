@@ -681,7 +681,7 @@ impl OllamaProvider {
         }
 
         let mut converted = Vec::new();
-        for (index, call) in tool_calls.into_iter().enumerate() {
+        for call in tool_calls.into_iter() {
             let function = call.function.ok_or_else(|| LLMError::Provider {
                 message: "Ollama response missing function details for tool call".to_string(),
                 metadata: None,
@@ -703,10 +703,9 @@ impl OllamaProvider {
                 })?,
             };
 
-            let id = function
-                .index
-                .map(|value| format!("tool_call_{value}"))
-                .unwrap_or_else(|| format!("tool_call_{index}"));
+            // Ollama omits tool-call ids; index-based fallbacks reset every
+            // response and collide across assistant messages downstream.
+            let id = crate::providers::shared::generate_tool_call_id();
 
             converted.push(ToolCall::function(id, name, arguments));
         }
@@ -1320,6 +1319,41 @@ mod tests {
             None,
             None,
         )
+    }
+
+    #[test]
+    fn convert_tool_calls_fabricates_unique_ids_when_missing() {
+        let make_call = |name: &str| OllamaResponseToolCall {
+            call_type: Some("function".to_string()),
+            function: Some(OllamaResponseFunctionCall {
+                name: Some(name.to_string()),
+                arguments: Some(json!({})),
+                index: None,
+            }),
+        };
+
+        let first =
+            OllamaProvider::convert_tool_calls(Some(vec![make_call("foo"), make_call("bar")]))
+                .expect("conversion should succeed")
+                .expect("calls expected");
+        let second = OllamaProvider::convert_tool_calls(Some(vec![make_call("foo")]))
+            .expect("conversion should succeed")
+            .expect("calls expected");
+
+        let ids: Vec<&str> = first
+            .iter()
+            .chain(second.iter())
+            .map(|call| call.id.as_str())
+            .collect();
+        let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "fabricated ids must be unique within and across responses"
+        );
+        for id in ids {
+            assert!(id.starts_with("call_"));
+        }
     }
 
     #[test]

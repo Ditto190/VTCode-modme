@@ -112,6 +112,8 @@ struct ResponsesToolCallState {
     item_id_to_call_id: HashMap<String, String>,
     tool_call_indexes: HashMap<String, usize>,
     next_tool_call_index: usize,
+    fabricated_ids: HashMap<usize, String>,
+    fabricated_fallback_id: Option<String>,
 }
 
 impl ResponsesToolCallState {
@@ -170,16 +172,15 @@ impl ResponsesToolCallState {
         let item_id = payload.get("item_id").and_then(Value::as_str);
         let payload_call_id = payload.get("call_id").and_then(Value::as_str);
         self.capture_item_call_id_mapping(item_id, payload_call_id);
-        let call_id = self
-            .resolve_provider_call_id(item_id, payload_call_id)
-            .unwrap_or_else(|| format!("tool_call_{}", self.next_tool_call_index));
-        let index = self.resolve_tool_call_index(
-            &call_id,
-            payload
-                .get("output_index")
-                .and_then(Value::as_u64)
-                .map(|value| value as usize),
-        );
+        let output_index = payload
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize);
+        let call_id = match self.resolve_provider_call_id(item_id, payload_call_id) {
+            Some(call_id) => call_id,
+            None => self.fabricated_call_id(output_index),
+        };
+        let index = self.resolve_tool_call_index(&call_id, output_index);
 
         if !delta.is_empty() {
             aggregator.handle_tool_calls(&[json!({
@@ -217,6 +218,23 @@ impl ResponsesToolCallState {
             })
             .or_else(|| item_id.filter(|value| !value.is_empty()))
             .map(ToOwned::to_owned)
+    }
+
+    /// Fabricate an id once per logical call and reuse it across deltas.
+    /// Recomputing a fallback per delta fragments one id-less call into
+    /// several builders, and index-based ids collide across responses.
+    fn fabricated_call_id(&mut self, output_index: Option<usize>) -> String {
+        match output_index {
+            Some(index) => self
+                .fabricated_ids
+                .entry(index)
+                .or_insert_with(crate::providers::shared::generate_tool_call_id)
+                .clone(),
+            None => self
+                .fabricated_fallback_id
+                .get_or_insert_with(crate::providers::shared::generate_tool_call_id)
+                .clone(),
+        }
     }
 
     fn resolve_tool_call_index(&mut self, call_id: &str, output_index: Option<usize>) -> usize {
@@ -690,6 +708,75 @@ mod tests {
                 "search_workspace".to_string(),
                 "{\"query\":\"vtcode\"}".to_string(),
             )])
+        );
+    }
+
+    #[test]
+    fn responses_tool_call_state_reuses_fabricated_id_across_deltas() {
+        let mut aggregator = StreamAggregator::new("gpt-5".to_string());
+        let mut tool_call_state = ResponsesToolCallState::default();
+
+        let delta = |fragment: &str| {
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "output_index": 0,
+                "delta": fragment
+            })
+        };
+        tool_call_state
+            .handle_arguments_delta(&mut aggregator, &delta("{\"query\":"))
+            .expect("tool delta should parse");
+        tool_call_state
+            .handle_arguments_delta(&mut aggregator, &delta("\"vtcode\"}"))
+            .expect("tool delta should parse");
+
+        // Supply the name the way metadata would, without an id, so finalize
+        // keeps the builder created by the id-less deltas.
+        aggregator.handle_tool_calls(&[json!({
+            "index": 0,
+            "function": {"name": "search_workspace"}
+        })]);
+
+        let calls = aggregator
+            .finalize()
+            .tool_calls
+            .expect("tool call expected");
+        assert_eq!(calls.len(), 1, "both deltas must land on one builder");
+        assert!(calls[0].id.starts_with("call_"));
+        assert_ne!(calls[0].id, "call_0");
+        let function = calls[0].function.as_ref().expect("function expected");
+        assert_eq!(function.arguments, "{\"query\":\"vtcode\"}");
+    }
+
+    #[test]
+    fn responses_tool_call_state_fabricates_distinct_ids_per_decoder() {
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let mut aggregator = StreamAggregator::new("gpt-5".to_string());
+            let mut tool_call_state = ResponsesToolCallState::default();
+            tool_call_state
+                .handle_arguments_delta(
+                    &mut aggregator,
+                    &json!({
+                        "type": "response.function_call_arguments.delta",
+                        "output_index": 0,
+                        "delta": "{}"
+                    }),
+                )
+                .expect("tool delta should parse");
+            aggregator.handle_tool_calls(&[json!({
+                "index": 0,
+                "function": {"name": "search_workspace"}
+            })]);
+            let calls = aggregator
+                .finalize()
+                .tool_calls
+                .expect("tool call expected");
+            ids.push(calls[0].id.clone());
+        }
+        assert_ne!(
+            ids[0], ids[1],
+            "fabricated ids must differ across responses"
         );
     }
 }

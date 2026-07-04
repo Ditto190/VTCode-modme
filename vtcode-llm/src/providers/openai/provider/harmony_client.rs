@@ -63,10 +63,7 @@ fn parse_harmony_completion_messages_with_recovery(
     }
 }
 
-fn harmony_tool_call_from_message(
-    message: &HarmonyMessage,
-    index: usize,
-) -> Option<provider::ToolCall> {
+fn harmony_tool_call_from_message(message: &HarmonyMessage) -> Option<provider::ToolCall> {
     if message.author.role != HarmonyRole::Assistant || message.channel.as_deref() == Some("final")
     {
         return None;
@@ -85,7 +82,7 @@ fn harmony_tool_call_from_message(
                 .or(raw_arguments.filter(|text| !text.trim().is_empty()))
                 .unwrap_or_else(|| "{}".to_string());
             return Some(provider::ToolCall::function(
-                format!("call_{index}"),
+                crate::providers::shared::generate_tool_call_id(),
                 tool_name,
                 arguments,
             ));
@@ -96,7 +93,7 @@ fn harmony_tool_call_from_message(
     let (tool_name, args) = OpenAIProvider::parse_harmony_tool_call_from_text(&text_content)?;
     let arguments = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
     Some(provider::ToolCall::function(
-        format!("call_{index}"),
+        crate::providers::shared::generate_tool_call_id(),
         tool_name,
         arguments,
     ))
@@ -109,7 +106,7 @@ fn extract_harmony_completion_parts(
     let mut tool_calls = Vec::with_capacity(8);
 
     for message in parsed_messages {
-        if let Some(tool_call) = harmony_tool_call_from_message(message, tool_calls.len()) {
+        if let Some(tool_call) = harmony_tool_call_from_message(message) {
             tool_calls.push(tool_call);
             continue;
         }
@@ -679,6 +676,31 @@ mod tests {
                 .map(|function| function.arguments.as_str()),
             Some(r#"{"location":"Tokyo"}"#)
         );
+    }
+
+    #[test]
+    fn harmony_tool_call_from_message_fabricates_unique_ids_when_missing() {
+        let make_message = |location: &str| {
+            HarmonyMessage::from_role_and_content(
+                HarmonyRole::Assistant,
+                format!(r#"{{"location":"{location}"}}"#),
+            )
+            .with_channel("analysis")
+            .with_recipient("lookup_weather")
+            .with_content_type("code")
+        };
+
+        let first =
+            harmony_tool_call_from_message(&make_message("Tokyo")).expect("tool call expected");
+        let second =
+            harmony_tool_call_from_message(&make_message("Paris")).expect("tool call expected");
+
+        assert_ne!(
+            first.id, second.id,
+            "fabricated ids must differ across messages"
+        );
+        assert!(first.id.starts_with("call_"));
+        assert!(second.id.starts_with("call_"));
     }
 
     #[test]

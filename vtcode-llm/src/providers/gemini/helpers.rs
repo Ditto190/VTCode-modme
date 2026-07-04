@@ -437,7 +437,7 @@ impl GeminiProvider {
                     let call_id = function_call
                         .id
                         .clone()
-                        .unwrap_or_else(|| format!("call_{}", tool_calls.len()));
+                        .unwrap_or_else(crate::providers::shared::generate_tool_call_id);
 
                     // Use the signature from the function call, or fall back to the one from preceding text
                     let effective_signature =
@@ -569,7 +569,8 @@ impl GeminiProvider {
                             )
                         };
 
-                    let call_id = id.unwrap_or_else(|| format!("call_{}", tool_calls.len()));
+                    let call_id =
+                        id.unwrap_or_else(crate::providers::shared::generate_tool_call_id);
 
                     tool_calls.push(ToolCall {
                         id: call_id,
@@ -1506,4 +1507,102 @@ pub fn serialize_gemini_tools(tools: &[ToolDefinition]) -> Option<Value> {
     let spec = collect_gemini_tool_spec(Some(tools));
     let generate_tools = spec.generate_tools?;
     serde_json::to_value(generate_tools).ok()
+}
+
+#[cfg(test)]
+mod fabricated_id_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn id_less_generate_content_response(function_name: &str) -> GenerateContentResponse {
+        GenerateContentResponse {
+            candidates: vec![Candidate {
+                content: Content {
+                    role: "model".to_string(),
+                    parts: vec![Part::FunctionCall {
+                        function_call: GeminiFunctionCall {
+                            name: function_name.to_string(),
+                            args: json!({}),
+                            id: None,
+                        },
+                        thought_signature: None,
+                    }],
+                },
+                finish_reason: None,
+            }],
+            prompt_feedback: None,
+            usage_metadata: None,
+        }
+    }
+
+    #[test]
+    fn convert_from_gemini_response_fabricates_unique_ids_when_missing() {
+        let first = GeminiProvider::convert_from_gemini_response(
+            id_less_generate_content_response("foo"),
+            "gemini-test".to_string(),
+        )
+        .expect("conversion should succeed");
+        let second = GeminiProvider::convert_from_gemini_response(
+            id_less_generate_content_response("bar"),
+            "gemini-test".to_string(),
+        )
+        .expect("conversion should succeed");
+
+        let first_id = first.tool_calls.expect("tool call expected")[0].id.clone();
+        let second_id = second.tool_calls.expect("tool call expected")[0].id.clone();
+
+        assert_ne!(
+            first_id, second_id,
+            "fabricated ids must differ across responses"
+        );
+        assert!(first_id.starts_with("call_"));
+        assert!(second_id.starts_with("call_"));
+    }
+
+    fn id_less_interaction(function_name: &str) -> Interaction {
+        Interaction {
+            id: "interaction-1".to_string(),
+            model: "gemini-test".to_string(),
+            status: None,
+            outputs: vec![InteractionOutput {
+                output_type: "function_call".to_string(),
+                text: None,
+                summary: None,
+                id: None,
+                name: Some(function_name.to_string()),
+                arguments: Some(json!({})),
+                signature: None,
+                function_call: None,
+            }],
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn convert_from_interaction_response_fabricates_unique_ids_when_missing() {
+        let first = GeminiProvider::convert_from_interaction_response(
+            id_less_interaction("foo"),
+            "gemini-test".to_string(),
+        )
+        .expect("conversion should succeed");
+        let second = GeminiProvider::convert_from_interaction_response(
+            id_less_interaction("bar"),
+            "gemini-test".to_string(),
+        )
+        .expect("conversion should succeed");
+
+        let first_id = first.tool_calls.expect("tool call expected")[0].id.clone();
+        let second_id = second.tool_calls.expect("tool call expected")[0].id.clone();
+
+        let mut unique = HashSet::new();
+        unique.insert(first_id.clone());
+        unique.insert(second_id.clone());
+        assert_eq!(
+            unique.len(),
+            2,
+            "fabricated ids must differ across responses"
+        );
+        assert!(first_id.starts_with("call_"));
+        assert!(second_id.starts_with("call_"));
+    }
 }

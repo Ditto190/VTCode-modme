@@ -269,23 +269,58 @@ fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &st
     }
 }
 
+/// Upsert a tool result into `history`, keyed on `tool_call_id`.
+///
+/// This is a **bounded** upsert: the reverse scan stops as soon as it reaches
+/// ANY Assistant message (regardless of its tool_calls). This is critical:
+/// Assistant messages represent turn boundaries. Tool responses from before an
+/// Assistant must never be overwritten by Tool responses from after it, even
+/// when fabricated tool_call_ids collide across turns.
+///
+/// If a Tool message with a matching id is found *before* the nearest
+/// Assistant boundary, it is a legitimate same-call update (e.g. an
+/// auto-permission probe replaying a result) and gets overwritten in place.
+/// If the boundary is hit first, the id has been reused across turns, so we
+/// append instead of clobbering an unrelated, earlier Tool result.
 pub(crate) fn push_tool_response<S>(
     history: &mut Vec<uni::Message>,
     tool_call_id: S,
+    tool_name: Option<&str>,
     content: String,
 ) where
     S: AsRef<str> + Into<String>,
 {
     let tool_call_id_ref = tool_call_id.as_ref();
-    if let Some(existing) = history
-        .iter_mut()
-        .rev()
-        .find(|message| message.tool_call_id.as_deref() == Some(tool_call_id_ref))
-    {
-        existing.content = uni::MessageContent::Text(content);
+    let mut overwrite_index = None;
+    for (index, message) in history.iter().enumerate().rev() {
+        match message.role {
+            uni::MessageRole::Tool => {
+                if message.tool_call_id.as_deref() == Some(tool_call_id_ref) {
+                    overwrite_index = Some(index);
+                    break;
+                }
+            }
+            // Stop at ANY Assistant message — it marks a turn boundary.
+            // Tool responses from before this Assistant must not be overwritten.
+            uni::MessageRole::Assistant => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(index) = overwrite_index {
+        history[index].content = uni::MessageContent::Text(content);
         return;
     }
-    history.push(uni::Message::tool_response(tool_call_id.into(), content));
+
+    let tool_call_id = tool_call_id.into();
+    history.push(match tool_name {
+        Some(name) => {
+            uni::Message::tool_response_with_origin(tool_call_id, content, name.to_string())
+        }
+        None => uni::Message::tool_response(tool_call_id, content),
+    });
 }
 
 pub(crate) fn push_invalid_tool_args_response<S>(
@@ -299,7 +334,7 @@ pub(crate) fn push_invalid_tool_args_response<S>(
     let payload = serde_json::json!({
         "error": format!("Invalid tool arguments for '{}': {}", tool_name, error)
     });
-    push_tool_response(history, tool_call_id, payload.to_string());
+    push_tool_response(history, tool_call_id, Some(tool_name), payload.to_string());
 }
 
 pub(crate) fn build_finish_planning_args(reason: &str) -> serde_json::Value {
@@ -646,6 +681,7 @@ mod tests {
         push_tool_response(
             &mut history,
             "call_1".to_string(),
+            None,
             "{\"output\":\"latest\"}".to_string(),
         );
 
@@ -653,6 +689,127 @@ mod tests {
         assert_eq!(
             history[0].content.as_text_borrowed(),
             Some("{\"output\":\"latest\"}")
+        );
+    }
+
+    #[test]
+    fn push_tool_response_sets_origin_tool_when_provided() {
+        let mut history = Vec::new();
+
+        push_tool_response(
+            &mut history,
+            "call_1".to_string(),
+            Some("read_file"),
+            "{\"output\":\"first\"}".to_string(),
+        );
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].origin_tool.as_deref(), Some("read_file"));
+    }
+
+    #[test]
+    fn push_tool_response_appends_when_id_reused_across_assistant_boundary() {
+        // Fabricated ids can collide across turns (e.g. index-based fallbacks).
+        // A later assistant message re-declaring the same id must not cause a
+        // new result to clobber the earlier, unrelated Tool response.
+        let mut history = vec![
+            uni::Message::assistant_with_tools(
+                "first".into(),
+                vec![uni::ToolCall::function(
+                    "call_1".into(),
+                    "unified_file".into(),
+                    "{}".into(),
+                )],
+            ),
+            uni::Message::tool_response("call_1".to_string(), "{\"output\":\"first\"}".into()),
+            uni::Message::assistant_with_tools(
+                "second".into(),
+                vec![uni::ToolCall::function(
+                    "call_1".into(),
+                    "unified_search".into(),
+                    "{}".into(),
+                )],
+            ),
+        ];
+
+        push_tool_response(
+            &mut history,
+            "call_1".to_string(),
+            Some("unified_search"),
+            "{\"output\":\"second\"}".to_string(),
+        );
+
+        let tool_messages: Vec<&uni::Message> = history
+            .iter()
+            .filter(|message| matches!(message.role, uni::MessageRole::Tool))
+            .collect();
+        assert_eq!(tool_messages.len(), 2, "must append, not overwrite");
+        assert_eq!(
+            tool_messages[0].content.as_text_borrowed(),
+            Some("{\"output\":\"first\"}"),
+            "earlier unrelated Tool result must remain intact"
+        );
+        assert_eq!(
+            tool_messages[1].content.as_text_borrowed(),
+            Some("{\"output\":\"second\"}")
+        );
+    }
+
+    #[test]
+    fn push_tool_response_appends_when_assistant_has_no_tool_calls() {
+        // When an Assistant message has no tool_calls (e.g. commentary-only
+        // message between tool calls), the boundary must STILL stop the scan.
+        // Otherwise a later Tool response with a colliding fabricated id would
+        // overwrite an earlier, unrelated Tool result.
+        let mut history = vec![
+            uni::Message::assistant_with_tools(
+                String::new(),
+                vec![uni::ToolCall::function(
+                    "call_0".into(),
+                    "unified_file".into(),
+                    "{}".into(),
+                )],
+            ),
+            uni::Message::tool_response(
+                "call_0".to_string(),
+                "{\"output\":\"file content\"}".into(),
+            ),
+            // Commentary Assistant with no tool_calls — must act as boundary
+            uni::Message::assistant("I need to retry.".into()),
+            uni::Message::assistant_with_tools(
+                String::new(),
+                vec![uni::ToolCall::function(
+                    "call_0".into(),
+                    "apply_patch".into(),
+                    "{}".into(),
+                )],
+            ),
+        ];
+
+        push_tool_response(
+            &mut history,
+            "call_0".to_string(),
+            Some("apply_patch"),
+            "{\"output\":\"patch result\"}".to_string(),
+        );
+
+        let tool_messages: Vec<&uni::Message> = history
+            .iter()
+            .filter(|message| matches!(message.role, uni::MessageRole::Tool))
+            .collect();
+        assert_eq!(
+            tool_messages.len(),
+            2,
+            "must append, not overwrite the earlier file read"
+        );
+        assert_eq!(
+            tool_messages[0].content.as_text_borrowed(),
+            Some("{\"output\":\"file content\"}"),
+            "earlier file read result must remain intact"
+        );
+        assert_eq!(
+            tool_messages[1].content.as_text_borrowed(),
+            Some("{\"output\":\"patch result\"}")
         );
     }
 

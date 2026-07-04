@@ -415,6 +415,7 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
                 push_tool_response(
                     working_history,
                     build_step_finish_planning_call_id(step_count),
+                    Some(tool_names::FINISH_PLANNING),
                     serde_json::to_string(output).unwrap_or_else(|_| "{}".to_string()),
                 );
             }
