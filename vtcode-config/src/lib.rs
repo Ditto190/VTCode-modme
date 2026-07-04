@@ -140,7 +140,10 @@ pub use types::{
     ReasoningEffortLevel, SystemPromptMode, ToolDocumentationMode, UiSurfacePreference,
     VerbosityLevel,
 };
-pub use workspace_env::{read_workspace_env_value, write_workspace_env_value};
+pub use workspace_env::{
+    read_workspace_env_value, workspace_env_path, workspace_env_path_display,
+    write_workspace_env_value,
+};
 
 // Re-export auth module types
 pub use auth::{

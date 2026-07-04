@@ -13,8 +13,8 @@ use vtcode_core::{initialize_dot_folder, update_model_preference};
 
 use super::dependency_advisories::render_optional_search_tools_notice;
 use super::first_run_prompts::{
-    default_model_for_provider, prompt_lightweight_model, prompt_model, prompt_persistent_memory,
-    prompt_provider, prompt_reasoning_effort, prompt_trust,
+    default_model_for_provider, prompt_api_key_interactive, prompt_lightweight_model, prompt_model,
+    prompt_persistent_memory, prompt_provider, prompt_reasoning_effort, prompt_trust,
     resolve_initial_persistent_memory_enabled, resolve_initial_provider,
 };
 
@@ -110,7 +110,10 @@ async fn run_first_run_setup(
 
             let provider = resolve_initial_provider(config);
             let provider = prompt_provider(&mut renderer, provider)?;
-            renderer.line(MessageStyle::Info, &api_key_hint(provider))?;
+            renderer.line(MessageStyle::Info, "")?;
+
+            // Interactive API key entry — key is written to .env by the prompt
+            prompt_api_key_interactive(&mut renderer, provider, workspace)?;
             renderer.line(MessageStyle::Info, "")?;
 
             let default_model = default_model_for_provider(provider);

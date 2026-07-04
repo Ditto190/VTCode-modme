@@ -274,6 +274,44 @@ impl ErrorCategory {
             ErrorCategory::ExecutionError => "Execution failed",
         }
     }
+
+    /// Build actionable guidance for authentication errors.
+    ///
+    /// Returns provider-specific steps including the env var name and
+    /// workspace `.env` path so the user can fix the issue immediately.
+    #[must_use]
+    pub fn auth_recovery_guidance(
+        &self,
+        provider_label: &str,
+        env_key: &str,
+        workspace_env_path: Option<&str>,
+    ) -> Vec<String> {
+        if !matches!(self, ErrorCategory::Authentication) {
+            return vec![];
+        }
+
+        let mut guidance = Vec::with_capacity(4);
+        guidance.push(format!("Authentication failed for {provider_label}."));
+
+        if env_key.is_empty() {
+            guidance.push(
+                "This provider uses managed authentication — run the provider's login command."
+                    .to_string(),
+            );
+        } else {
+            guidance.push(format!("To fix, set your API key ({env_key}):"));
+            guidance.push(format!("  1. Export: export {env_key}=your-key"));
+            if let Some(env_path) = workspace_env_path {
+                guidance.push(format!("  2. Or add to {env_path}: {env_key}=your-key"));
+            } else {
+                guidance
+                    .push(format!("  2. Or add to workspace .env: {env_key}=your-key"));
+            }
+            guidance.push("  3. Or run /model to enter a key interactively".to_string());
+        }
+
+        guidance
+    }
 }
 
 impl fmt::Display for ErrorCategory {

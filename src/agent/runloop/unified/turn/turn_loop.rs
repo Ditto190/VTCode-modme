@@ -726,12 +726,36 @@ pub(crate) async fn run_turn_loop(
                 // Show recovery hints derived from the canonical error category
                 {
                     let err_cat = vtcode_commons::classify_anyhow_error(&err);
-                    let suggestions = err_cat.recovery_suggestions();
-                    if !suggestions.is_empty() {
-                        let hint = suggestions.join("; ");
-                        turn_processing_ctx
-                            .renderer
-                            .line(MessageStyle::Info, &format!("Hint: {hint}"))?;
+                    if matches!(err_cat, vtcode_commons::ErrorCategory::Authentication) {
+                        // For auth errors, show actionable provider-specific guidance
+                        let provider_label = turn_processing_ctx
+                            .config
+                            .provider
+                            .parse::<vtcode_core::config::models::Provider>()
+                            .map(|p| p.label().to_string())
+                            .unwrap_or_else(|_| turn_processing_ctx.config.provider.clone());
+                        let env_key = &turn_processing_ctx.config.api_key_env;
+                        let env_path = vtcode_config::workspace_env_path_display(
+                            &turn_processing_ctx.config.workspace,
+                        );
+                        let guidance = err_cat.auth_recovery_guidance(
+                            &provider_label,
+                            env_key,
+                            Some(&env_path),
+                        );
+                        for line in &guidance {
+                            turn_processing_ctx
+                                .renderer
+                                .line(MessageStyle::Info, line)?;
+                        }
+                    } else {
+                        let suggestions = err_cat.recovery_suggestions();
+                        if !suggestions.is_empty() {
+                            let hint = suggestions.join("; ");
+                            turn_processing_ctx
+                                .renderer
+                                .line(MessageStyle::Info, &format!("Hint: {hint}"))?;
+                        }
                     }
                 }
                 // Log error via tracing instead of polluting conversation history

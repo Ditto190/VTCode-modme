@@ -195,7 +195,7 @@ pub(crate) fn prompt_reasoning_plain(
 pub(crate) fn prompt_api_key_plain(
     renderer: &mut AnsiRenderer,
     selection: &SelectionDetail,
-    _workspace: Option<&Path>,
+    workspace: Option<&Path>,
 ) -> Result<()> {
     if matches!(selection.provider_enum, Some(Provider::OpenAI)) {
         renderer.line(
@@ -209,6 +209,10 @@ pub(crate) fn prompt_api_key_plain(
         return Ok(());
     }
 
+    let env_path_display = workspace
+        .map(vtcode_config::workspace_env_path_display)
+        .unwrap_or_else(|| "workspace .env".to_string());
+
     renderer.line(
         MessageStyle::Info,
         &format!(
@@ -218,7 +222,7 @@ pub(crate) fn prompt_api_key_plain(
     )?;
     renderer.line(
         MessageStyle::Info,
-        "The key will be saved to secure storage (OS keyring) and your workspace .env file.",
+        &format!("The key will be saved to {env_path_display} and OS keyring."),
     )?;
     renderer.line(
         MessageStyle::Info,

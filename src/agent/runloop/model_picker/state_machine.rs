@@ -680,11 +680,16 @@ impl ModelPickerState {
                     return Ok(ModelPickerProgress::Completed(result?));
                 }
                 Ok(None) => {
+                    let env_path = self
+                        .workspace
+                        .as_deref()
+                        .map(vtcode_config::workspace_env_path_display)
+                        .unwrap_or_else(|| "workspace .env".to_string());
                     renderer.line(
                         MessageStyle::Error,
                         &format!(
-                            "No stored API key found under {}. Provide a key or update your workspace .env.",
-                            selection.env_key
+                            "No API key found for {}. To fix: set {} in {}, or paste a key below.",
+                            selection.provider_label, selection.env_key, env_path
                         ),
                     )?;
                     prompt_api_key_plain(renderer, selection, self.workspace.as_deref())?;

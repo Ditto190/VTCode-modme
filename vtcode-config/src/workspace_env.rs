@@ -1,9 +1,20 @@
 use anyhow::{Context, Result, anyhow};
+use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::Builder;
+
+/// Returns the workspace `.env` file path.
+pub fn workspace_env_path(workspace: &Path) -> PathBuf {
+    workspace.join(".env")
+}
+
+/// Display-friendly representation of the workspace `.env` path.
+pub fn workspace_env_path_display(workspace: &Path) -> String {
+    workspace_env_path(workspace).display().to_string()
+}
 
 pub fn read_workspace_env_value(workspace: &Path, env_key: &str) -> Result<Option<String>> {
     let env_path = workspace.join(".env");
