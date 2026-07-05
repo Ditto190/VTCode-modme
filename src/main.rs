@@ -18,7 +18,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use clap::FromArgMatches;
 use colorchoice::ColorChoice as GlobalColorChoice;
 use vtcode_commons::color_policy;
-#[cfg(target_os = "macos")]
 use vtcode_commons::env_lock;
 use vtcode_core::cli::args::Cli;
 use vtcode_core::config::api_keys::load_dotenv;
