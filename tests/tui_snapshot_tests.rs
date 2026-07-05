@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Snapshot tests for the Ratatui TUI components
 //!
 //! These tests use the `insta` crate to capture snapshots of the UI components and logic.

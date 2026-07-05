@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use anstyle::Style;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;

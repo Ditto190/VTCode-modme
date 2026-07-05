@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use serde_json::json;
 use vtcode_core::tools::types::{CreateInput, DeleteInput, EditInput, WriteInput};
 

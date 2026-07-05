@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use assert_fs::TempDir;
 use serde_json::json;
 use std::sync::Arc;

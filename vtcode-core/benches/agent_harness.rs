@@ -1,3 +1,5 @@
+#![allow(missing_docs, clippy::expect_used)]
+
 use std::hint::black_box;
 use std::sync::Arc;
 

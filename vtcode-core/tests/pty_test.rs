@@ -1,3 +1,4 @@
+#![allow(missing_docs, clippy::expect_used)]
 use serde_json::json;
 use std::fs;
 use tempfile::TempDir;

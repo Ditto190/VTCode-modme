@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use vtcode_core::ui::styled::*;
 
 fn main() {

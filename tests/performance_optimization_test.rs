@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::path::PathBuf;
 use std::time::Instant;
 use vtcode_core::config::loader::ConfigManager;

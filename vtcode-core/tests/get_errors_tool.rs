@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::path::PathBuf;
 use vtcode_core::tools::registry::ToolRegistry;
 

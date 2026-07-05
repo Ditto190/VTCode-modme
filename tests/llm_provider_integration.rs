@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for universal LLM provider system
 
 use vtcode_core::config::constants::models;

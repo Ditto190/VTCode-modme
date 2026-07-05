@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use anyhow::{Context as _, Result};
 use indexmap::IndexMap;
 use serde::Deserialize;

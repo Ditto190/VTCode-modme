@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for quick-cache functionality
 
 use serde_json::Value;

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! End-to-End MCP Integration Tests
 //!
 //! These tests verify that MCP integration works correctly with real MCP servers.

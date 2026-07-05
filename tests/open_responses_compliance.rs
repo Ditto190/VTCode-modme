@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Open Responses Specification Compliance Tests.
 //!
 //! This test suite validates that VT Code's Open Responses implementation

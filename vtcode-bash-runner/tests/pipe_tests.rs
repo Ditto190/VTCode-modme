@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for pipe-based process spawning.
 //!
 //! These tests verify the async pipe spawning functionality works correctly

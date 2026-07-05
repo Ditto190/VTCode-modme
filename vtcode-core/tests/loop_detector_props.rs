@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use proptest::prelude::*;
 use serde_json::json;
 use vtcode_config::constants::tools;

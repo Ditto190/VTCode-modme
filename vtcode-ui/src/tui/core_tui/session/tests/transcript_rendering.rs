@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use super::super::*;
 use super::helpers::*;
 use crate::tui::ui::tui::style::ratatui_style_from_inline;

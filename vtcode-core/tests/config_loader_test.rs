@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Test for configuration loading with home directory support
 
 use std::fs;

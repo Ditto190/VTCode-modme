@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Comprehensive tool call verification for all LLM providers
 
 use serde_json::json;

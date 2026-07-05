@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use clap::CommandFactory;
 use vtcode_core::cli::args::Cli;
 use vtcode_core::cli::help::openai_responses_models_help;

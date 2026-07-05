@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use super::super::*;
 use super::helpers::*;
 use crate::tui::core_tui::types::{ContentPart, SubmittedInput};

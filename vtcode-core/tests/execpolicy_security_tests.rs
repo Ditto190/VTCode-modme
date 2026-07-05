@@ -1,3 +1,4 @@
+#![allow(missing_docs, clippy::expect_used)]
 //! Security tests for execution policy argument injection protection
 
 use std::path::PathBuf;

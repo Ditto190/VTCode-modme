@@ -1,4 +1,5 @@
 #![allow(invalid_from_utf8)]
+#![allow(missing_docs)]
 //! Unicode handling test for VT Code
 //!
 //! This test demonstrates unicode handling issues that can occur in PTY output processing.

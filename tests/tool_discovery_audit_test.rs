@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use assert_fs::TempDir;
 use vtcode_core::config::ToolDocumentationMode;
 use vtcode_core::config::constants::tools;

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use vtcode_core::tools::rate_limiter::{RateLimiter, RateLimiterConfig};

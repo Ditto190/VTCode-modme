@@ -1,3 +1,4 @@
+#![allow(missing_docs, clippy::expect_used)]
 use assert_cmd::Command;
 use predicates::str::contains;
 use tempfile::TempDir;

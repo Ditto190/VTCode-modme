@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use hashbrown::HashMap;
 
 use vtcode_core::config::mcp::{

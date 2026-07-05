@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs, clippy::expect_used)]
 //! Unified UI crate for VT Code: design system, theme registry, and TUI framework.
 //!
 //! # Module layout

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use hashbrown::HashMap;
 use std::path::PathBuf;
 use tokio::process::Command;

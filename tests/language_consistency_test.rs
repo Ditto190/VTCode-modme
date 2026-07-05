@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Language consistency tests to detect mixed-language segments in LLM outputs
 //!
 //! These tests validate that structured outputs (JSON, Markdown) maintain

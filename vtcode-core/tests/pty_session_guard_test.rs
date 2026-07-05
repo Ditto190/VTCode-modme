@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 /// Test that PtySessionGuard automatically decrements session count when dropped
 #[test]
 fn pty_session_guard_auto_cleanup() {

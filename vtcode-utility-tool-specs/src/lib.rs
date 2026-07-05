@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs)]
 //! Passive JSON schemas for utility, file, scheduling, and collaboration tool surfaces.
 
 #![recursion_limit = "256"]

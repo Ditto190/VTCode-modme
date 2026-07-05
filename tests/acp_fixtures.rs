@@ -1,3 +1,4 @@
+#![allow(missing_docs, clippy::expect_used)]
 use serde::Deserialize;
 use serde_json::Value;
 

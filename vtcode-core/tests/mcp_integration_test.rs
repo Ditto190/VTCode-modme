@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! MCP Integration Tests
 //!
 //! Tests for MCP (Model Context Protocol) functionality including

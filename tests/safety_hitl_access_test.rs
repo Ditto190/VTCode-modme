@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Verifies `vtcode_core::safety::hitl` is reachable. This is a regression
 //! guard against the `safety.rs` + `safety/` ambiguity that previously made
 //! the human-in-the-loop submodule silently unbuilt.

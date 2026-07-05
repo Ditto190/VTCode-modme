@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use serde_json::json;
 use std::path::PathBuf;
 use vtcode_core::tools::ToolRegistry;

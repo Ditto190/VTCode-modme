@@ -1,7 +1,3 @@
-https://huggingface.co/docs/hub/agents-overview#register-your-agent-harness
-
----
-
 Notes for the team
 
 - Test-harness gap recorded in memory: cargo test -p vtcode --lib runs 0 tests because src/lib.rs has no mod agent. Use cargo test -p vtcode --bin vtcode to run the ~1848 inline agent tests.

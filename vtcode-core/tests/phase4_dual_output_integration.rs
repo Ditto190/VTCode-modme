@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration test for Phase 4: Split Tool Results
 //!
 //! Demonstrates dual-output execution with real tools showing token savings.

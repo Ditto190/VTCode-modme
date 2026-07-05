@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for modular architecture
 //!
 //! These tests validate that all refactored modules work together correctly

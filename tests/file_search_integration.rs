@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for file search bridge integration with grep_file.rs
 //!
 //! Phase 2C: Tool Integration Testing

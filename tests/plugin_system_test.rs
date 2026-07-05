@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use vtcode_core::config::PluginRuntimeConfig;
 use vtcode_core::plugins::{PluginManager, PluginManifest, PluginValidator};
 

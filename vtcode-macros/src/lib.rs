@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs)]
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input};

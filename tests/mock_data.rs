@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use serde_json::{Value, json};
 use vtcode_core::config::constants::tools;
 

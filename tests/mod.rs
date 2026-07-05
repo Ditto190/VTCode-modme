@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 pub mod acp_fixtures;
 pub mod common;
 pub mod mock_data;

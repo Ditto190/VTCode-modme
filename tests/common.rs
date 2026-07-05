@@ -1,4 +1,5 @@
-#![allow(clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic)]
+#![allow(missing_docs)]
 
 use assert_fs::TempDir;
 use assert_fs::prelude::*;

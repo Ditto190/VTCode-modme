@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for PATH environment variable inheritance
 //! Tests that the agent can properly access commands in user PATH locations
 //! This verifies the fix for: https://github.com/vinhnx/vtcode/issues/...

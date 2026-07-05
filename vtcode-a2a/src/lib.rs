@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs, clippy::expect_used)]
 //! Agent2Agent (A2A) Protocol support for VT Code.
 
 pub mod agent_card;

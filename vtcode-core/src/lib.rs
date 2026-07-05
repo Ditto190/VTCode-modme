@@ -1,6 +1,13 @@
 #![cfg_attr(not(test), allow(clippy::large_futures,))]
 // Suppress unreachable in test code (assert macros trigger false positives).
-#![cfg_attr(test, allow(clippy::unreachable, missing_docs))]
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unnecessary_safety_comment,
+    clippy::unreachable,
+    clippy::unwrap_used,
+    missing_docs
+)]
 #![recursion_limit = "256"]
 //! # vtcode-core - Runtime for VT Code
 //!

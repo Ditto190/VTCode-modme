@@ -397,7 +397,7 @@ impl InputManager {
                         for mid in &rep_parts[1..rep_parts.len() - 1] {
                             new_lines.push(mid.to_string());
                         }
-                        // SAFETY: has_newlines is true (rep_parts.len() > 1), so .last() is guaranteed Some
+                        // has_newlines is true (rep_parts.len() > 1), so .last() is guaranteed Some
                         let last = rep_parts
                             .last()
                             .expect("rep_parts has at least 2 elements when has_newlines");
@@ -438,7 +438,7 @@ impl InputManager {
                         for mid in &rep_parts[1..rep_parts.len() - 1] {
                             new_lines.push(mid.to_string());
                         }
-                        // SAFETY: has_newlines is true (rep_parts.len() > 1), so .last() is guaranteed Some
+                        // has_newlines is true (rep_parts.len() > 1), so .last() is guaranteed Some
                         let last = rep_parts
                             .last()
                             .expect("rep_parts has at least 2 elements when has_newlines");

@@ -1215,7 +1215,7 @@ fn compact_image_label(content: &str) -> Option<String> {
 }
 
 static IMAGE_PATH_INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    match Regex::new(
+    Regex::new(
         r#"(?ix)
         (?:^|[\s\(\[\{<\"'`])
         (
@@ -1229,10 +1229,8 @@ static IMAGE_PATH_INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
             [^\n]+?
             \.(?:png|jpe?g|gif|bmp|webp|tiff?|svg)
         )"#,
-    ) {
-        Ok(regex) => regex,
-        Err(error) => panic!("Failed to compile inline image path regex: {error}"),
-    }
+    )
+    .expect("Failed to compile inline image path regex")
 });
 
 fn compact_image_placeholders(content: &str) -> Option<String> {

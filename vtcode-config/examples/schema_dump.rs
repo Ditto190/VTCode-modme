@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 #[cfg(not(feature = "schema"))]
 fn main() {
     eprintln!("The schema_dump example requires --features schema");

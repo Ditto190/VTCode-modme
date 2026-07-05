@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 /// Integration test to ensure constants.rs stays in sync with docs/models.json
 /// This test enforces the "Always check ./docs/models.json" rule from the project guidelines.
 use hashbrown::HashSet;

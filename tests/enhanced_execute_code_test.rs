@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration test for enhanced execute_code with file tracking
 
 use serde_json::json;

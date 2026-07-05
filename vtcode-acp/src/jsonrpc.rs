@@ -299,6 +299,7 @@ impl JsonRpcError {
 }
 
 #[cfg(test)]
+#[allow(clippy::uninlined_format_args)]
 mod tests {
     use super::*;
     use serde_json::json;

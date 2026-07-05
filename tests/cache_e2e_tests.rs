@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! End-to-end tests for file operations with quick-cache integration
 
 use assert_fs::TempDir;

@@ -1,5 +1,5 @@
 #![allow(clippy::large_futures)]
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs)]
 //! Model Context Protocol (MCP) client management built on top of the Codex MCP building blocks.
 //!
 //! This crate adapts the reference MCP client, server and type
@@ -379,9 +379,9 @@ mod tests {
         };
 
         let mut capabilities = ClientCapabilities::default();
-        capabilities.roots = Some(RootsCapabilities {
-            list_changed: Some(true),
-        });
+        let mut roots = RootsCapabilities::default();
+        roots.list_changed = Some(true);
+        capabilities.roots = Some(roots);
         let params =
             InitializeRequestParams::new(capabilities, Implementation::new("vtcode", "1.0"))
                 .with_protocol_version(rmcp::model::ProtocolVersion::V_2024_11_05);

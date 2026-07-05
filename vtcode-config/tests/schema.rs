@@ -1,4 +1,5 @@
 #![cfg(feature = "schema")]
+#![allow(missing_docs)]
 
 use vtcode_config::{vtcode_config_schema, vtcode_config_schema_json, vtcode_config_schema_pretty};
 

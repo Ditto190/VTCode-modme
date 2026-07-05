@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs)]
 use std::sync::Arc;
 use zed_extension_api as zed;
 

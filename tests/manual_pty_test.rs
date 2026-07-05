@@ -1,3 +1,4 @@
+#![allow(missing_docs, clippy::unwrap_used)]
 //! Manual test for PTY functionality
 
 use anyhow::Result;

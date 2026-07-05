@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Test that verifies the REAL optimizations are integrated into the actual ToolRegistry
 
 #![allow(clippy::panic_in_result_fn)]

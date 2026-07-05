@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #[cfg(test)]
 mod minimax_integration_tests {
     use vtcode_core::config::constants::{model_helpers, models, urls};

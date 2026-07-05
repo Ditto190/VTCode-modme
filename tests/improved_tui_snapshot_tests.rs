@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Comprehensive Ratatui snapshot tests for VT Code TUI
 //!
 //! These tests use the `insta` crate to capture visual snapshots of the actual terminal UI.

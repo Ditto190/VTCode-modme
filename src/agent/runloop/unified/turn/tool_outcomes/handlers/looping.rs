@@ -149,9 +149,10 @@ fn read_file_raw_flag(args: &Value) -> Option<bool> {
 /// tool-free recovery pass that produces a garbage final answer.
 ///
 /// The suffix includes only fields that change *what* is read:
-///   - `offset`/`offset_lines`/`offset_bytes` -> `off=<n>`
-///   - `limit`/`page_size_lines`/`max_lines`/`chunk_lines` -> `lim=<n>`
-///   - `raw` -> `raw=<bool>`
+/// - `offset`/`offset_lines`/`offset_bytes` -> `off=<n>`
+/// - `limit`/`page_size_lines`/`max_lines`/`chunk_lines` -> `lim=<n>`
+/// - `raw` -> `raw=<bool>`
+///
 /// Fields that are absent contribute nothing, so a bare default read
 /// (`{path}` with no offset/limit/raw) still produces the same key it did
 /// before — only paginated/raw-flipped reads gain suffixes.

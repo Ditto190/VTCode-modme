@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use anyhow::Result;
 use hashbrown::HashMap;
 use serde_json::json;

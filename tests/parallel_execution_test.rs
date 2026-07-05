@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration test for parallel tool execution
 //!
 //! This test verifies that read-only tools (list_files, read_file, grep_file)

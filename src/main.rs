@@ -1,8 +1,15 @@
 //! VT Code - Research-preview Rust coding agent
 //!
 //! Thin binary entry point that delegates to modular CLI handlers.
-#![allow(clippy::large_futures)] // deep async call stacks are an architectural trade-off
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(
+    clippy::blocks_in_conditions,
+    clippy::expect_used,
+    clippy::filter_next,
+    clippy::large_futures,
+    clippy::uninlined_format_args,
+    clippy::unwrap_used
+)]
+#![allow(missing_docs)]
 
 use anyhow::{Context, Result};
 
@@ -109,6 +116,15 @@ fn bootstrap_main() -> Result<BootstrapOutcome> {
     let launch_argv = std::env::args_os().collect::<Vec<_>>();
     let launch_cwd = std::env::current_dir().context("failed to resolve current directory")?;
     configure_runtime_relaunch_context(launch_argv, launch_cwd);
+
+    // Mark this process as VTCode for HuggingFace agent harness detection.
+    // `huggingface_hub` reads this to attribute Hub traffic to VTCode in the
+    // public agent usage dataset.  Set early via env_lock before worker threads
+    // exist so the mutex acquisition is uncontended.
+    {
+        let _env_guard = env_lock::lock();
+        _env_guard.set_var("VTCODE", "1");
+    }
 
     // Suppress macOS malloc warnings that appear as stderr output
     // IMPORTANT: Remove the variables rather than setting to "0"

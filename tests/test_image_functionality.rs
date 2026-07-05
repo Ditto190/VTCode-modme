@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Test for image functionality implementation
 
 #[tokio::main]

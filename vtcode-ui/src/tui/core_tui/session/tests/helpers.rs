@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 pub use super::super::Session;
 use super::super::TranscriptLine;
 pub use crate::tui::config::constants::ui;

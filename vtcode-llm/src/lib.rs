@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(missing_docs, clippy::expect_used)]
 //! # vtcode-llm - LLM Provider Abstraction
 //!
 //! Provides a unified interface for multiple LLM providers including

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Tool serialization stability tests
 //!
 //! These tests ensure that tool descriptions and schemas remain consistent

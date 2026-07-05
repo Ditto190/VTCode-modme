@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for the permission system (CommandResolver, Cache, Audit)
 
 #[cfg(test)]

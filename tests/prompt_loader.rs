@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 /// Integration tests for system prompt loading functionality
 /// This test ensures the prompt loading system works correctly and provides good error messages.
 use assert_fs::TempDir;

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Example demonstrating dialoguer usage
 //
 // This example shows various prompt types available in dialoguer.

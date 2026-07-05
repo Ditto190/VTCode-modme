@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Unicode handling tests for PTY scrollback functionality
 //!
 //! This test file focuses specifically on testing the `push_utf8` function

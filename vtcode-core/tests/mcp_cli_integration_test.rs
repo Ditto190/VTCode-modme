@@ -1,3 +1,4 @@
+#![allow(missing_docs, clippy::expect_used)]
 use assert_fs::TempDir;
 use std::fs;
 use vtcode_core::mcp::cli::{

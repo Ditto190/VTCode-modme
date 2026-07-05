@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use super::helpers::*;
 use crate::tui::core_tui::session::clipboard_image::ClipboardImageError;
 use crate::tui::core_tui::session::input_manager::InputHistoryEntry;

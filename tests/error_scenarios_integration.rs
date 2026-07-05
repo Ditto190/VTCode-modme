@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration tests for error handling and recovery scenarios.
 //!
 //! Covers:

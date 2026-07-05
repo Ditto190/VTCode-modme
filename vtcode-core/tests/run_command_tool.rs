@@ -1,4 +1,5 @@
 #![allow(clippy::panic_in_result_fn)]
+#![allow(missing_docs)]
 use anyhow::Result;
 use serde_json::json;
 use vtcode_core::config::constants::tools;

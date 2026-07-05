@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Comprehensive tests for LLM providers refactor
 
 use serde_json::json;

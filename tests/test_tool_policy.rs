@@ -1,4 +1,5 @@
 #!/usr/bin/env rust-script
+#![allow(missing_docs)]
 //! ```cargo
 //! [dependencies]
 //! anyhow = "1.0"

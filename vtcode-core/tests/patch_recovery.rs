@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tempfile::TempDir;
 use vtcode_core::tools::editing::{Patch, PatchError};
 

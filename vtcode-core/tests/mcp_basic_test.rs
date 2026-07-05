@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Basic MCP Integration Tests
 //!
 //! These tests verify that MCP configuration and basic functionality work correctly.

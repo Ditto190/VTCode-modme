@@ -982,7 +982,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::{BooleanSchema, ElicitationSchema, PrimitiveSchema};
+    use rmcp::model::{BooleanSchema, ElicitationSchema, PrimitiveSchemaDefinition};
 
     #[test]
     fn restore_context_meta_adds_request_meta_and_removes_progress_token() {
@@ -1056,7 +1056,10 @@ mod tests {
             meta,
             message: "Confirm?".to_string(),
             requested_schema: ElicitationSchema::builder()
-                .required_property("confirmed", PrimitiveSchema::Boolean(BooleanSchema::new()))
+                .required_property(
+                    "confirmed",
+                    PrimitiveSchemaDefinition::Boolean(BooleanSchema::new()),
+                )
                 .build()
                 .expect("schema should build"),
         }

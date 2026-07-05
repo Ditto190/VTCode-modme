@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Test that verifies performance optimizations are actually integrated into execute_tool_ref
 //! This test validates that the optimizations work in the REAL execution path used by VT Code
 

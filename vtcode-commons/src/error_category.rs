@@ -304,8 +304,7 @@ impl ErrorCategory {
             if let Some(env_path) = workspace_env_path {
                 guidance.push(format!("  2. Or add to {env_path}: {env_key}=your-key"));
             } else {
-                guidance
-                    .push(format!("  2. Or add to workspace .env: {env_key}=your-key"));
+                guidance.push(format!("  2. Or add to workspace .env: {env_key}=your-key"));
             }
             guidance.push("  3. Or run /model to enter a key interactively".to_string());
         }

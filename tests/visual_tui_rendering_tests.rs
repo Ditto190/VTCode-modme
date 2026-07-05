@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! TUI backend smoke tests.
 //!
 //! These tests exercise `TestBackend` sizing and session command plumbing.

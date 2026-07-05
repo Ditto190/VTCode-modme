@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 #[cfg(target_os = "macos")]
 #[expect(
     unsafe_code,
@@ -27,7 +29,6 @@ fn main() {
             "MallocCheckHeapEach",
             "MallocCheckHeapAbort",
             "MallocCheckHeapSleep",
-            "MallocErrorAbort",
             "MallocCorruptionAbort",
             "MallocHelpOptions",
             "MallocStackLoggingNoCompact",

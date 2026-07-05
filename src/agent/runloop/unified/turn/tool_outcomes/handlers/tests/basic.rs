@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use super::*;
 
 #[tokio::test]

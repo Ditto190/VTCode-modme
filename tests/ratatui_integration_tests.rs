@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Integration snapshot tests for the Ratatui TUI components
 //!
 //! These tests use the `insta` crate to capture visual snapshots of the actual terminal output.

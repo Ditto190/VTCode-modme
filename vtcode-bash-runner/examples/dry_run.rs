@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use anyhow::Result;
 use assert_fs::TempDir;
 use vtcode_bash_runner::{AllowAllPolicy, BashRunner, DryRunCommandExecutor};

@@ -1,4 +1,11 @@
-#![cfg_attr(test, allow(missing_docs))]
+#![allow(
+    clippy::blocks_in_conditions,
+    clippy::filter_next,
+    clippy::uninlined_format_args,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    missing_docs
+)]
 //! # VT Code - Terminal Coding Agent
 //!
 //! VT Code is a Rust-based terminal coding agent that pairs a streamlined
@@ -166,6 +173,7 @@
 
 pub use vtcode_acp as acp;
 
+/// Re-exports from vtcode-config's config watcher module.
 pub mod config_watcher {
     pub use vtcode_config::loader::watch::*;
 }

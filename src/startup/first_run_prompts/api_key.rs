@@ -2,9 +2,9 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::Result;
+use vtcode_config::write_workspace_env_value;
 use vtcode_core::config::models::Provider;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
-use vtcode_config::write_workspace_env_value;
 
 /// Prompt the user to enter an API key interactively during first-run setup.
 ///
@@ -45,10 +45,7 @@ pub(crate) fn prompt_api_key_interactive(
             env_path.display()
         ),
     )?;
-    renderer.line(
-        MessageStyle::Info,
-        "It will NOT be stored in vtcode.toml.",
-    )?;
+    renderer.line(MessageStyle::Info, "It will NOT be stored in vtcode.toml.")?;
     renderer.line(
         MessageStyle::Info,
         "Paste your API key now, or press Enter to skip (you can set it later with /model).",
@@ -68,7 +65,9 @@ pub(crate) fn prompt_api_key_interactive(
     if trimmed.is_empty() {
         renderer.line(
             MessageStyle::Info,
-            &format!("Skipped. Set {env_key} in your environment or .env file before starting a chat."),
+            &format!(
+                "Skipped. Set {env_key} in your environment or .env file before starting a chat."
+            ),
         )?;
         return Ok(None);
     }
@@ -87,19 +86,12 @@ pub(crate) fn prompt_api_key_interactive(
     }
 
     // Write the key to the workspace .env file
-    write_workspace_env_value(workspace, env_key, trimmed).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to write API key to {}: {e}",
-            env_path.display()
-        )
-    })?;
+    write_workspace_env_value(workspace, env_key, trimmed)
+        .map_err(|e| anyhow::anyhow!("Failed to write API key to {}: {e}", env_path.display()))?;
 
     renderer.line(
         MessageStyle::Info,
-        &format!(
-            "API key saved to {}.",
-            env_path.display()
-        ),
+        &format!("API key saved to {}.", env_path.display()),
     )?;
 
     Ok(Some(trimmed.to_string()))

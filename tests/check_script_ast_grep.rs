@@ -1,4 +1,5 @@
 #![cfg(unix)]
+#![allow(missing_docs, clippy::expect_used)]
 
 use assert_cmd::Command;
 use std::fs;

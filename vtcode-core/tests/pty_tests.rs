@@ -1,4 +1,4 @@
-#![allow(clippy::panic_in_result_fn)]
+#![allow(missing_docs, clippy::panic_in_result_fn)]
 use std::time::Duration;
 
 use anyhow::Result;

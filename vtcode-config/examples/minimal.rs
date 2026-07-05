@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use assert_fs::TempDir;
 use std::path::PathBuf;
 use std::sync::Arc;

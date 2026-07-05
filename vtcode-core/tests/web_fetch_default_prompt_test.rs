@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use serde_json::json;
 use vtcode_core::tools::traits::Tool;
 use vtcode_core::tools::web_fetch::WebFetchTool;

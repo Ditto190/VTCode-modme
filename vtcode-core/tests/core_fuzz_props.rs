@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use proptest::prelude::*;
 use vtcode_core::command_safety::dangerous_commands::command_might_be_dangerous;
 use vtcode_core::command_safety::shell_parser::parse_shell_commands;

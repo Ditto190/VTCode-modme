@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Advanced TUI snapshot tests with real content rendering
 //!
 //! These tests simulate actual user interactions with real content to verify

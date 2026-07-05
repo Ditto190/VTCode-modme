@@ -1,4 +1,5 @@
 #!/usr/bin/env rust-script
+#![allow(missing_docs)]
 //! Test script for the consolidated search functionality
 
 use serde_json::json;

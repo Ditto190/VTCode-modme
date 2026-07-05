@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, anyhow};
-use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use anyhow::Result;
 use tokio::sync::mpsc;
 use vtcode_core::config::models::ModelId;

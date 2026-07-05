@@ -72,18 +72,21 @@ run_rustfmt() {
     fi
 }
 
+DEFAULT_MEMBERS=("-p" "vtcode" "-p" "vtcode-core" "-p" "vtcode-ui")
+
 run_clippy() {
-    local scope_args=""
+    local scope_args=()
+    local label="default-members"
     if [ "$RUN_WORKSPACE" = true ]; then
-        scope_args="--workspace"
-        SCOPE_LABEL="workspace"
+        scope_args=("--workspace")
+        label="workspace"
     else
-        scope_args=""
-        SCOPE_LABEL="default-members"
+        scope_args=("${DEFAULT_MEMBERS[@]}")
     fi
+    SCOPE_LABEL="$label"
 
     print_status "Running clippy ($SCOPE_LABEL)..."
-    if cargo clippy $scope_args --all-targets --all-features -- -D warnings; then
+    if cargo clippy "${scope_args[@]}" --all-targets --all-features -- -D warnings; then
         print_success "No clippy warnings found!"
         return 0
     else
@@ -93,17 +96,18 @@ run_clippy() {
 }
 
 run_check() {
-    local scope_args=""
+    local scope_args=()
+    local label="default-members"
     if [ "$RUN_WORKSPACE" = true ]; then
-        scope_args="--workspace"
-        SCOPE_LABEL="workspace"
+        scope_args=("--workspace")
+        label="workspace"
     else
-        scope_args=""
-        SCOPE_LABEL="default-members"
+        scope_args=("${DEFAULT_MEMBERS[@]}")
     fi
+    SCOPE_LABEL="$label"
 
     print_status "Running cargo check ($SCOPE_LABEL)..."
-    if cargo check $scope_args; then
+    if cargo check "${scope_args[@]}"; then
         print_success "Compilation successful!"
         return 0
     else
