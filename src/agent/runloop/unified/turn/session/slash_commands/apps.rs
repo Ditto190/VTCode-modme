@@ -35,7 +35,7 @@ use crate::agent::runloop::unified::wizard_modal::{
 const EVENT_STREAM_STOP_DELAY: Duration = Duration::from_millis(150);
 const DOCS_URL: &str = "https://deepwiki.com/vinhnx/vtcode";
 const DONATE_URL: &str = "https://buymeacoffee.com/vinhnx";
-const PROJECT_URL: &str = "https://github.com/vinhnx/vtcode";
+const PROJECT_URL: &str = "https://github.com/sponsors/vinhnx";
 const EXTERNAL_EDITOR_TITLE: &str = "External Editor";
 const FILE_OPENER_SETTINGS_PATH: &str = "file_opener";
 const EDITOR_ENABLED_ID: &str = "tools_editor_enabled";
@@ -110,7 +110,7 @@ pub(crate) async fn handle_open_donate_links(
         footer_hint: Some("Esc cancels".to_string()),
         items: vec![
             InlineListItem {
-                title: "Buy me a coffee".to_string(),
+                title: "Sponsor VT Code developement".to_string(),
                 subtitle: Some(DONATE_URL.to_string()),
                 badge: Some("Support".to_string()),
                 indent: 0,
@@ -118,7 +118,7 @@ pub(crate) async fn handle_open_donate_links(
                 search_value: None,
             },
             InlineListItem {
-                title: "Open GitHub repository".to_string(),
+                title: "Sponsor VT Code developement on GitHub".to_string(),
                 subtitle: Some(PROJECT_URL.to_string()),
                 badge: Some("GitHub".to_string()),
                 indent: 0,
