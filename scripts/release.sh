@@ -1082,9 +1082,13 @@ main() {
                 else
                     # Wait for the run to complete
                     local status="in_progress"
+                    local conclusion=""
                     while [[ "$status" == "in_progress" || "$status" == "queued" ]]; do
                         sleep 30
-                        status=$(gh run view "$run_id" --json status --jq '.status' 2>/dev/null || echo "failed")
+                        local run_info
+                        run_info=$(gh run view "$run_id" --json status,conclusion 2>/dev/null || echo '{"status":"failed","conclusion":"failure"}')
+                        status=$(echo "$run_info" | jq -r '.status')
+                        conclusion=$(echo "$run_info" | jq -r '.conclusion')
 
                         # Check timeout
                         local now=$(date +%s)
@@ -1097,13 +1101,13 @@ main() {
                         print_info "CI status: $status (${elapsed}s elapsed)"
                     done
 
-                    if [[ "$status" != "completed" && "$status" != "success" ]]; then
-                        print_warning "CI build failed with status: $status - will use macOS binaries only"
-                        gh run view "$run_id" --log || true
-                    else
+                    if [[ "$conclusion" == "success" ]]; then
                         print_success "CI builds completed successfully"
                         # Store run_id for later download
                         CI_RUN_ID="$run_id"
+                    else
+                        print_warning "CI build failed with conclusion: $conclusion - will use macOS binaries only"
+                        gh run view "$run_id" --log || true
                     fi
                 fi
             else
