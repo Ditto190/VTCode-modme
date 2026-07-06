@@ -24,6 +24,7 @@ FAILED_CHECKS=0
 RUN_TESTS=false
 RUN_WORKSPACE=false
 RUN_EXTRA_LINTS=false
+RUN_CHANGED=false
 SCOPE_LABEL="default-members"
 
 # Timing helper
@@ -118,17 +119,33 @@ run_check() {
 
 run_tests() {
     local scope_args=""
+    local nextest_args=()
+
     if [ "$RUN_WORKSPACE" = true ]; then
         scope_args="--workspace"
-    else
-        scope_args=""
+        nextest_args+=("--workspace")
+    fi
+
+    # Use quick profile by default for fast local iteration
+    nextest_args+=("--profile" "quick")
+
+    # Changed-crate mode: only test crates with changes since HEAD~1
+    if [ "$RUN_CHANGED" = true ]; then
+        if git rev-parse --git-dir > /dev/null 2>&1; then
+            print_status "Detecting changed crates since HEAD~1..."
+            nextest_args+=("--changed" "--since" "HEAD~1")
+        else
+            print_warning "Not a git repo; ignoring --changed flag."
+        fi
     fi
 
     print_status "Running tests ($SCOPE_LABEL)..."
     local test_exit=0
 
     if cargo nextest --version &> /dev/null; then
-        cargo nextest run $scope_args || test_exit=$?
+        # Enable incremental compilation for local test builds
+        # to avoid full recompiles on every test run.
+        CARGO_INCREMENTAL=1 cargo nextest run "${nextest_args[@]}" --no-tests=warn || test_exit=$?
     else
         print_warning "cargo-nextest not found. Falling back to cargo test."
         cargo test $scope_args || test_exit=$?
@@ -176,14 +193,16 @@ print_usage() {
     echo "  - cargo check (compilation)"
     echo ""
     echo "Options:"
-    echo "  --test, -t          Also run tests (slower)"
+    echo "  --test, -t          Also run tests (uses nextest --profile quick)"
     echo "  --workspace, -w     Run checks on full workspace (default: default-members only)"
     echo "  --lints, -l         Run extra lints (structured logging, agent legibility)"
+    echo "  --changed, -c       Only run tests in crates changed since HEAD~1 (implies --test)"
     echo "  --help, -h          Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0                  # Fast check (default-members only)"
-    echo "  $0 --test           # Fast check + tests"
+    echo "  $0 --test           # Fast check + tests (quick profile)"
+    echo "  $0 --changed        # Tests only for crates changed since last commit"
     echo "  $0 --workspace      # Workspace-wide fast check"
     echo "  $0 -t -w -l         # Full dev check with tests, workspace, and lints"
     echo ""
@@ -206,6 +225,11 @@ main() {
                 RUN_EXTRA_LINTS=true
                 shift
                 ;;
+            --changed|-c)
+                RUN_CHANGED=true
+                RUN_TESTS=true  # --changed implies --test
+                shift
+                ;;
             --help|-h)
                 print_usage
                 exit 0
@@ -224,6 +248,9 @@ main() {
         print_status "Scope: Full workspace"
     else
         print_status "Scope: Default members only"
+    fi
+    if [ "$RUN_CHANGED" = true ]; then
+        print_status "Test mode: Changed crates only (since HEAD~1)"
     fi
     echo ""
 
@@ -264,6 +291,9 @@ main() {
             echo "Note: Tests were not run. Add --test to include them."
         fi
         echo "For full release quality gate, run: ./scripts/check.sh"
+        if [ "$RUN_CHANGED" = true ]; then
+            echo "Tip: Run without --changed for full test suite."
+        fi
         echo ""
         exit 0
     else

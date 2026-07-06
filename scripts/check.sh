@@ -126,8 +126,8 @@ run_tests() {
     local test_exit=0
 
     if cargo nextest --version &> /dev/null; then
-        print_status "Using cargo-nextest..."
-        cargo nextest run || test_exit=$?
+        print_status "Using cargo-nextest (ci profile)..."
+        cargo nextest run --profile ci || test_exit=$?
     else
         print_warning "cargo-nextest not found. Falling back to cargo test."
         cargo test --workspace || test_exit=$?
@@ -212,9 +212,9 @@ run_ast_grep_scan() {
 run_harness_regression_tests() {
     print_status "Running harness PTY/TUI regression tests..."
 
-    if cargo test -p vtcode-core --test pty_tests \
-        && cargo test -p vtcode-bash-runner --test pipe_tests \
-        && cargo test -p vtcode --bin vtcode inline_events::tests; then
+    if cargo nextest run -p vtcode-core -E 'binary(/pty_tests/)' \
+        && cargo nextest run -p vtcode-bash-runner -E 'binary(/pipe_tests/)' \
+        && cargo nextest run -p vtcode -E 'binary(/inline_events/)'; then
         print_success "Harness PTY/TUI regression tests passed!"
         return 0
     else

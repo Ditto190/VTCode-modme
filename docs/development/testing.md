@@ -19,20 +19,38 @@ VT Code includes a multi-layered test suite designed to ensure reliability and p
 # Recommended: run all tests quickly
 cargo nextest run
 
-# Fallback: run all tests without nextest
-cargo test --workspace
+# TDD mode: skip integration/e2e/slow tests, fail fast
+cargo nextest run --profile quick
+
+# Full CI gate: retry flaky tests, no fail-fast
+cargo nextest run --profile ci
+
+# Run only tests in crates changed since last commit
+cargo nextest run --profile changed --changed --since HEAD~1
 
 # Run tests with detailed output
 cargo nextest run -- --nocapture
 
 # Run specific test
-cargo test test_tool_registry
+cargo nextest run test_name
 
-# Run tests for specific module
-cargo test tools::
+# Run tests for specific crate
+cargo nextest run -p vtcode-core
 
-# Run tests in release mode
+# Run tests in release mode (use --release with cargo test)
 cargo test --release
+```
+
+### Local Test Build Optimization
+
+For local test iteration, the test build uses `CARGO_INCREMENTAL=1` (via `check-dev.sh`) to avoid full recompiles when only a few files have changed. This overrides the `incremental = false` setting in `[profile.dev]` (which is needed for sccache compatibility in CI).
+
+```bash
+# Fast local test builds with incremental compilation
+CARGO_INCREMENTAL=1 cargo nextest run --profile quick
+
+# Or use the dev check script (handles this automatically)
+./scripts/check-dev.sh --test
 ```
 
 ### Structural Rule Checks
@@ -88,11 +106,11 @@ Catalog-style example discovery and adaptation are also routed there, especially
 ### Integration Tests
 
 ```bash
-# Run only integration tests
-cargo test --test integration_tests
+# Run only integration tests (binary filter)
+cargo nextest run -E 'binary(/integration/)'
 
 # Run integration tests with output
-cargo test --test integration_tests -- --nocapture
+cargo nextest run -E 'binary(/integration/)' -- --nocapture
 ```
 
 ### Benchmarks
@@ -137,6 +155,27 @@ src/
      analyzer.rs        # Unit tests for tree-sitter analyzer
 ```
 
+## **Test Profiles & Groups**
+
+Tests are organized into nextest profiles and test groups for selective execution:
+
+| Profile | Use Case | Key Settings |
+|---|---|---|
+| `default` | Local dev – everything | `fail-fast`, 30s timeout, 3 retry periods |
+| `quick` | TDD iteration | Skips integration/e2e/slow tests, 10s timeout |
+| `changed` | Changed-crate testing | `--changed --since HEAD~1` support |
+| `ci` | Full CI gate | `fail-fast=false`, 2 retries, 60s timeout |
+| `ci-partition` | Parallel CI shards | Hash-based partition, 1 retry |
+
+### Test Groups
+
+Tests assigned to groups inherit resource and timeout constraints:
+
+| Group | Max Threads | Timeout | Assigned Tests |
+|---|---|---|---|
+| `slow` | 2 | 120s | Tests tagged with `/slow_\|bench_\|heavy/` |
+| `integration` | 4 | 60s | Integration binaries, tests tagged `/e2e\|integration/` |
+
 ## **Test Categories**
 
 ### Unit Tests
@@ -180,7 +219,7 @@ Located in standalone files in `tests/`:
 
 ```bash
 # Run Open Responses compliance tests
-cargo test --test open_responses_compliance
+cargo nextest run -E 'binary(/open_responses_compliance/)'
 ```
 
 ### Benchmarks
@@ -381,7 +420,7 @@ jobs:
         steps:
             - uses: actions/checkout@v3
             - uses: dtolnay/rust-toolchain@stable
-            - run: cargo test
+            - run: cargo nextest run
             - run: cargo bench
 ```
 
@@ -403,11 +442,11 @@ open tarpaulin-report.html
 ### Running Failed Tests
 
 ```bash
-# Run only failed tests
-cargo test -- --failed
+# Rerun failed tests from previous run
+cargo nextest run --rerun '(<run-id>)'
 
 # Run with backtrace
-RUST_BACKTRACE=1 cargo test
+RUST_BACKTRACE=1 cargo nextest run
 ```
 
 ### Debugging Output

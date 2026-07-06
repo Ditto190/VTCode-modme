@@ -114,13 +114,3 @@ https://claude.ai/chat/5edab7cc-561f-427d-9d7b-e4623dfd4ea4
 optimize only for my local machine, not on CI/CD. for CI/CD check existing free github action infra and see if it can be optimized or streamlined.
 
 ===
-
-optmize and config cargo nextest pipeline and setup for speed and efficiency. This may involve configuring test filters, parallel execution, and caching strategies to reduce test run times. Ensure that the test suite is organized in a way that allows for selective execution of tests based on changes made, minimizing unnecessary test runs. Additionally, review the current test configuration to identify any bottlenecks or inefficiencies that can be addressed, and implement best practices for test organization and execution.
-
-https://nexte.st/docs/running/
-
-https://nexte.st/docs/configuring-nextest/
-
-https://nexte.st/docs/integrations/
-
-https://nexte.st/docs/design/how-it-works/

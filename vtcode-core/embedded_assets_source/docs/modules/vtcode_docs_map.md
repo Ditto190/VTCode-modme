@@ -39,7 +39,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/testing.md`
   - **Content**: **Testing Guide**
-  - **Topics**: **Test Overview**, **Running Tests**, **Test Structure**, **Test Categories**, **Testing Tools and Components**
+  - **Topics**: **Test Overview**, **Running Tests**, **Test Structure**, **Test Profiles & Groups**, **Test Categories**
   - **User Questions**: "What can you tell me about **Testing Guide**?", "How does **Test Overview** work?", "How does **Running Tests** work?"
 
 - **File**: `docs/development/ADDING_MODELS.md`

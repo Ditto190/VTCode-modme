@@ -15,7 +15,7 @@
 
 ## Testing
 
-`cargo nextest run -p vtcode-bash-runner` | pipe tests: `cargo test -p vtcode-bash-runner --test pipe_tests` | use `AllowAllPolicy` unless testing policy.
+`cargo nextest run -p vtcode-bash-runner` | pipe tests: `cargo nextest run -p vtcode-bash-runner -E 'binary(/pipe_tests/)'` | use `AllowAllPolicy` unless testing policy.
 
 ## Gotchas
 

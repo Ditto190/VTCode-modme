@@ -93,7 +93,8 @@ Prefer `./scripts/check-dev.sh` (10-30s) over `./scripts/check.sh` (2-5m) for it
 | Change | Command |
 |---|---|
 | Fast gate | `./scripts/check-dev.sh` |
-| + tests | `./scripts/check-dev.sh --test` |
+| + tests (quick) | `./scripts/check-dev.sh --test` |
+| + tests (changed crates) | `./scripts/check-dev.sh --changed` |
 | + workspace | `./scripts/check-dev.sh --workspace` |
 | + lints | `./scripts/check-dev.sh --lints` |
 | Harness PTY/TUI | `./scripts/check.sh harness` |
@@ -101,15 +102,15 @@ Prefer `./scripts/check-dev.sh` (10-30s) over `./scripts/check.sh` (2-5m) for it
 | Ast-grep rules | `vtcode check ast-grep` |
 | Ast-grep scan | `ast-grep scan` (requires `sgconfig.yml` + `rules/`) |
 
-Narrow commands: `cargo check`, `cargo nextest run`, `cargo fmt`, `cargo clippy`.
+Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profile quick`, `cargo fmt`, `cargo clippy`. **Never use `cargo test` — always use `cargo nextest run`.**
 
 ## Testing
 
-- Runner: `cargo nextest run` (parallel, fast). Fallback: `cargo test --workspace`.
-- Single test: `cargo nextest run test_name` or `cargo test test_name`.
+- Runner: `cargo nextest run` (parallel, fast). **Always use nextest — never `cargo test`**.
+- Single test: `cargo nextest run test_name`.
 - Single crate: `cargo nextest run -p vtcode-core`.
-- Profiles: `default` (local), `ci` (no fail-fast, 2 retries, 60s timeout), `quick` (TDD, skips integration/e2e).
-- Harness regressions: `cargo test -p vtcode-core --test pty_tests`; `cargo test -p vtcode-bash-runner --test pipe_tests`; `cargo test -p vtcode --bin vtcode inline_events::tests`.
+- Profiles: `default` (full), `quick` (TDD, skips integration/e2e/slow), `changed` (delta since HEAD~1), `ci` (retries flaky, no fail-fast).
+- Harness regressions: `cargo nextest run -p vtcode-core -E 'binary(/pty_tests/)'`; `cargo nextest run -p vtcode-bash-runner -E 'binary(/pipe_tests/)'`; `cargo nextest run -p vtcode -E 'binary(/inline_events/)'`.
 - Integration tests: `tests/` at workspace root. Unit tests: in-module.
 
 ## Skills & Special Workflows
