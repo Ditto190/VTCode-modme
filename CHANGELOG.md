@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.134.13 - 2026-07-06
+
+### Highlights
+### Other Changes
+#### Other
+
+- Update TODOs (9152b2d3) 
 ## 0.134.12 - 2026-07-06
 
 ### Highlights
