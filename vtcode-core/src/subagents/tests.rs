@@ -230,17 +230,123 @@ fn resolve_effective_subagent_model_uses_explicit_inherit_override() {
 
 #[test]
 fn resolve_effective_subagent_model_falls_back_to_parent_on_invalid_override() {
+    // For non-local providers, an unrecognized override must fall back to the
+    // parent model rather than being accepted as a custom identifier.
     let cfg = VTCodeConfig::default();
     let resolved = resolve_effective_subagent_model(
         &cfg,
-        models::ollama::GPT_OSS_120B_CLOUD,
-        "ollama",
+        models::openai::GPT_5_4,
+        "openai",
         Some("not-a-real-model"),
         None,
         "rust-engineer",
     )
     .expect("resolve model");
-    assert_eq!(resolved.as_str(), models::ollama::GPT_OSS_120B_CLOUD);
+    assert_eq!(resolved.as_str(), models::openai::GPT_5_4);
+}
+
+#[test]
+fn resolve_subagent_model_inherits_local_custom_model() {
+    // Local providers expose arbitrary model IDs not in the built-in catalog;
+    // inheriting such a model must succeed as a custom identifier.
+    let cfg = VTCodeConfig::default();
+    let resolved = resolve_subagent_model(
+        &cfg,
+        "qwen3.5-9b-sushi-coder-rl",
+        "lmstudio",
+        None,
+        "wiki-assistant",
+    )
+    .expect("resolve local inherit model");
+    assert_eq!(resolved.as_str(), "qwen3.5-9b-sushi-coder-rl");
+    assert_eq!(resolved.provider(), Provider::LmStudio);
+}
+
+#[test]
+fn resolve_subagent_model_honors_explicit_local_model() {
+    let cfg = VTCodeConfig::default();
+    let resolved = resolve_subagent_model(
+        &cfg,
+        "qwen3.5-9b-sushi-coder-rl",
+        "lmstudio",
+        Some("ornith-1.0-9b"),
+        "wiki-assistant",
+    )
+    .expect("resolve explicit local model");
+    assert_eq!(resolved.as_str(), "ornith-1.0-9b");
+    assert_eq!(resolved.provider(), Provider::LmStudio);
+}
+
+#[test]
+fn resolve_subagent_model_honors_provider_override_model() {
+    use vtcode_config::core::ProviderOverrideConfig;
+
+    let mut cfg = VTCodeConfig::default();
+    cfg.provider_overrides.insert(
+        "openai".to_string(),
+        ProviderOverrideConfig {
+            models: vec!["my-fine-tuned-gpt".to_string()],
+            ..ProviderOverrideConfig::default()
+        },
+    );
+    let resolved = resolve_subagent_model(
+        &cfg,
+        models::openai::GPT_5_4,
+        "openai",
+        Some("my-fine-tuned-gpt"),
+        "reviewer",
+    )
+    .expect("resolve override model");
+    assert_eq!(resolved.as_str(), "my-fine-tuned-gpt");
+}
+
+#[test]
+fn resolve_effective_subagent_model_ignores_cross_provider_override_model() {
+    use vtcode_config::core::ProviderOverrideConfig;
+
+    // An override belonging to a DIFFERENT provider must not be accepted for the
+    // active provider; resolution must fall back to the parent model instead.
+    let mut cfg = VTCodeConfig::default();
+    cfg.provider_overrides.insert(
+        "anthropic".to_string(),
+        ProviderOverrideConfig {
+            models: vec!["not-a-real-model".to_string()],
+            ..ProviderOverrideConfig::default()
+        },
+    );
+    let resolved = resolve_effective_subagent_model(
+        &cfg,
+        models::openai::GPT_5_4,
+        "openai",
+        Some("not-a-real-model"),
+        None,
+        "reviewer",
+    )
+    .expect("resolve model");
+    assert_eq!(resolved.as_str(), models::openai::GPT_5_4);
+}
+
+#[test]
+fn resolve_subagent_model_honors_custom_provider_model() {
+    use vtcode_config::core::CustomProviderConfig;
+
+    let mut cfg = VTCodeConfig::default();
+    cfg.custom_providers.push(CustomProviderConfig {
+        name: "mycorp".to_string(),
+        display_name: "MyCorp".to_string(),
+        base_url: "https://llm.corp.example/v1".to_string(),
+        model: "mycorp-special-coder".to_string(),
+        ..CustomProviderConfig::default()
+    });
+    let resolved = resolve_subagent_model(
+        &cfg,
+        "mycorp-special-coder",
+        "mycorp",
+        None,
+        "wiki-assistant",
+    )
+    .expect("resolve custom provider model");
+    assert_eq!(resolved.as_str(), "mycorp-special-coder");
 }
 
 #[test]

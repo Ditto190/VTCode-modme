@@ -103,3 +103,7 @@ area—the validate_startup_configuration and init_global_guardian/dotfolder—t
 ---
 
 total eleminate `unsafe {` calls in the codebase. The goal is to ensure that the code is safe and free from undefined behavior, which can lead to security vulnerabilities and runtime errors. This may involve refactoring code to use safe abstractions, leveraging Rust's ownership and borrowing system, and applying best practices for memory safety. We should also review existing unsafe blocks to determine if they can be replaced with safe alternatives or if they are necessary for performance reasons. The aim is to maintain a high level of safety and reliability in the codebase while still achieving the desired functionality.
+
+---
+
+remove local models via LM Studio / Ollama / llama.ccp support. Please note that local model inference via LM Studio and Ollama/llama.ccp is very experimental and not working as expected. Since using local models is hard and take much effort, I might plan to remove local model support completely in the future and use remote LLM API instead.

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use vtcode_config::SubagentSpec;
+use vtcode_config::core::{CustomProviderConfig, ProviderOverrideConfig};
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::VTCodeConfig;
@@ -26,12 +28,13 @@ pub fn resolve_subagent_model(
 ) -> Result<ModelId> {
     let requested = requested.unwrap_or("inherit").trim();
     if requested.eq_ignore_ascii_case("inherit") || requested.is_empty() {
-        return resolve_inherit_model(parent_model, parent_provider, agent_name);
+        return resolve_inherit_model(vt_cfg, parent_model, parent_provider, agent_name);
     }
     resolve_explicit_model(vt_cfg, parent_provider, parent_model, requested, agent_name)
 }
 
 fn resolve_inherit_model(
+    vt_cfg: &VTCodeConfig,
     parent_model: &str,
     parent_provider: &str,
     agent_name: &str,
@@ -51,10 +54,106 @@ fn resolve_inherit_model(
         return Ok(fallback);
     }
 
-    let normalized = normalize_subagent_model_alias(parent_model);
-    normalized.parse::<ModelId>().with_context(|| {
+    finalize_subagent_model(
+        &RuntimeModelSources::from_config(vt_cfg),
+        parent_model,
+        parent_provider,
+        agent_name,
+    )
+}
+
+/// Narrow, read-only view of the config-defined runtime model sources that are
+/// not part of the built-in [`ModelId`] catalog.
+///
+/// Isolating these two fields (instead of passing the whole [`VTCodeConfig`])
+/// keeps the custom-model fallback policy independently testable and prevents
+/// the resolution logic from coupling to unrelated config surface.
+struct RuntimeModelSources<'a> {
+    provider_overrides: &'a BTreeMap<String, ProviderOverrideConfig>,
+    custom_providers: &'a [CustomProviderConfig],
+}
+
+impl<'a> RuntimeModelSources<'a> {
+    fn from_config(vt_cfg: &'a VTCodeConfig) -> Self {
+        Self {
+            provider_overrides: &vt_cfg.provider_overrides,
+            custom_providers: &vt_cfg.custom_providers,
+        }
+    }
+}
+
+/// Normalizes `raw_model` and resolves it into a [`ModelId`], attaching a
+/// consistent subagent context message on failure.
+///
+/// Shared by the inherit and explicit resolution paths so both apply the same
+/// alias normalization, custom-model fallback, and error wording.
+fn finalize_subagent_model(
+    sources: &RuntimeModelSources<'_>,
+    raw_model: &str,
+    provider_hint: &str,
+    agent_name: &str,
+) -> Result<ModelId> {
+    let normalized = normalize_subagent_model_alias(raw_model);
+    parse_model_or_custom(sources, normalized, provider_hint).with_context(|| {
         format!("Failed to resolve model '{normalized}' for subagent {agent_name}")
     })
+}
+
+/// Parses `model` into a [`ModelId`], falling back to a runtime [`ModelId::Custom`]
+/// variant for user-defined providers and local providers.
+///
+/// Local providers (Ollama, LM Studio, llama.cpp), `[providers.<name>]`
+/// overrides, and `[[custom_providers]]` endpoints expose arbitrary model
+/// identifiers that are not part of the built-in catalog, so a strict
+/// `parse::<ModelId>()` would incorrectly reject valid runtime models. This
+/// helper honors those identifiers instead of failing subagent resolution.
+///
+/// Config-defined models are only honored when they belong to the active
+/// provider (`provider_hint`); this preserves the invalid-override fallback for
+/// unrelated providers and avoids mis-routing a model to the wrong endpoint.
+fn parse_model_or_custom(
+    sources: &RuntimeModelSources<'_>,
+    model: &str,
+    provider_hint: &str,
+) -> Result<ModelId> {
+    let trimmed = model.trim();
+    if let Ok(parsed) = trimmed.parse::<ModelId>() {
+        return Ok(parsed);
+    }
+
+    let provider_hint = provider_hint.trim();
+    let hinted_provider = provider_hint.parse::<Provider>().ok();
+
+    // Built-in provider overrides (`[providers.<name>]`), scoped to the active provider.
+    for (provider_key, override_cfg) in sources.provider_overrides {
+        let matches_hint = match hinted_provider {
+            Some(active) => provider_key.parse::<Provider>().ok() == Some(active),
+            None => provider_key.eq_ignore_ascii_case(provider_hint),
+        };
+        if matches_hint && override_cfg.models.iter().any(|m| m.trim() == trimmed) {
+            return Ok(ModelId::Custom(provider_key.clone(), trimmed.to_string()));
+        }
+    }
+
+    // Custom OpenAI-compatible providers (`[[custom_providers]]`), matched by key.
+    for custom in sources.custom_providers {
+        if custom.name.eq_ignore_ascii_case(provider_hint)
+            && custom.effective_models().iter().any(|m| m == trimmed)
+        {
+            return Ok(ModelId::Custom(
+                custom.name.to_lowercase(),
+                trimmed.to_string(),
+            ));
+        }
+    }
+
+    // Local providers expose arbitrary runtime model identifiers that cannot be
+    // validated against the built-in catalog; honor them as custom models.
+    if let Some(provider) = hinted_provider.filter(|provider| provider.is_local()) {
+        return Ok(ModelId::Custom(provider.to_string(), trimmed.to_string()));
+    }
+
+    Ok(trimmed.parse::<ModelId>()?)
 }
 
 fn resolve_explicit_model(
@@ -75,10 +174,12 @@ fn resolve_explicit_model(
         requested.to_string()
     };
 
-    let normalized = normalize_subagent_model_alias(resolved.as_str());
-    normalized.parse::<ModelId>().with_context(|| {
-        format!("Failed to resolve model '{normalized}' for subagent {agent_name}")
-    })
+    finalize_subagent_model(
+        &RuntimeModelSources::from_config(vt_cfg),
+        resolved.as_str(),
+        parent_provider,
+        agent_name,
+    )
 }
 
 fn resolve_lightweight_model(
