@@ -1157,9 +1157,6 @@ main() {
          # Build macOS binaries in parallel
          print_info "Building macOS binaries in parallel..."
          
-         # Clear RUSTC_WRAPPER to avoid sccache permission issues
-         unset RUSTC_WRAPPER
-         
          # Build both architectures in parallel on multi-core machines
          cargo build --release --target x86_64-apple-darwin &>/dev/null &
          local pid_x86=$!
