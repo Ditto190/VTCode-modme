@@ -2,6 +2,31 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.134.14 - 2026-07-07
+
+### Highlights
+#### Bug Fixes
+
+- Resolve warnings and improve CI status reporting (cff3a5b7) (@vinhnx)
+- Improve CI status reporting to reflect accurate build conclusions (c3077862) (@vinhnx)
+- Fix #693: enhance model resolution and testing for local and custom providers (369cf8bc) 
+#### Features
+
+- Add nord and nord-light themes with syntax highlighting support (2385d63c) 
+- Update theme colors for improved WCAG AA contrast compliance (cddb8f1b) 
+- Enhance diff rendering styles for better accessibility and theme support (50152ddf) 
+- Increase codegen units for improved parallelism during check/clippy (9d57197a) 
+### Other Changes
+#### CI
+
+- Add rust-cache + sccache to all build jobs; use --cargo-profile ci for nextest (016ad679) (@vinhnx)
+- Remove redundant check job; add SCCACHE_CACHE_SIZE; consolidate sccache env (d37c812c) (@vinhnx)
+#### Other
+
+- Update TODO (7d612523) 
+#### Refactors
+
+- Improve input rendering style handling and add ANSI color support (73a715b7) 
 ## 0.134.13 - 2026-07-06
 
 ### Highlights
