@@ -65,7 +65,14 @@ use vtcode_core::config::types::AgentConfig;
 use vtcode_core::core::agent::error_recovery::ErrorType;
 use vtcode_core::primary_agent::ActivePrimaryAgentState;
 
-const RECOVERY_SYNTHESIS_MAX_TOKENS: u32 = 1024;
+/// Max completion tokens for the tool-free recovery synthesis pass.
+///
+/// Raised from 1024 → 4096: recovery synthesis must summarize the entire
+/// turn's tool outputs (often dozens of file reads and searches). 1024 tokens
+/// truncated substantive answers — observed in checkpoint turn_621 where a
+/// launch-time analysis over ~60 messages could not fit and the pass
+/// destabilized into emitting tool-call markup instead of prose.
+const RECOVERY_SYNTHESIS_MAX_TOKENS: u32 = 4096;
 /// Maximum number of times the recovery pass is retried when the model
 /// returns tool calls (discarded) instead of text during tool-free recovery.
 ///
