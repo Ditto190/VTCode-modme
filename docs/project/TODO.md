@@ -58,21 +58,53 @@ Tool use
 
 There are also some things to watch out for in tool use. For example, the number of tools cannot expand without limit, otherwise the model wastes attention on choosing. Tools should not overlap too much in functionality, otherwise the model does not know which one to use. Tool descriptions should clearly explain when to use them and when not to use them, namely they should make the boundaries clear. Return values should be token-efficient and should not pour irrelevant data into context. Returned error messages should let the model know what to repair next. Names should be clear, so the agent can infer boundaries from the names. Also, tools are preferably not exposed directly to the model as direct tool calls, but mapped into code APIs / a file tree, so the agent can call them through code. This way, the agent can read only the tool definitions it currently needs, filter large data inside the code execution environment, and return only summaries or a small number of results to the model. It can use loops, conditionals, and exception handling to complete complex control flow, or write intermediate state into files instead of stuffing it into context. Tool outputs are deterministic; we should leave deterministic computation to code. Judgment and planning, such as how to call tools, which tools to call, in what order, and how many times, should be left to the model.
 
-==
-
-
-===
-
----
-
-• I've already gathered enough context. Let me also quickly check the dispatch/mod.rs files and one more critical
-area—the validate_startup_configuration and init_global_guardian/dotfolder—to confirm my findings.<tool_call>
-<invoke name="unified_search"><action>list</action><items>structure</items><max_depth>1</max_depth><path>
-/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/vtcode-core/src/config/loader</path></invoke>
-</tool_call>"
-
-==> check logs: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/checkpoints/turn_621.json
-
 ---
 
 remove local models via LM Studio / Ollama / llama.ccp support. Please note that local model inference via LM Studio and Ollama/llama.ccp is very experimental and not working as expected. Since using local models is hard and take much effort, I might plan to remove local model support completely in the future and use remote LLM API instead.
+
+===
+
+Fix plan: tool-free recovery dies instead of retrying synthesis (checkpoint turn_621)
+
+Root cause chain
+
+1. Turn hit the 600s tool wall-clock budget mid-exploration; harness correctly switched to a tool-free recovery pass ([run_loop_context.rs#L154](file:///Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/src/agent/runloop/unified/run_loop_context.rs#L154)).
+2. The model emitted its answer as text containing <tool_call>…</tool_call> markup. In [result_handler.rs#L204-L272](file:///Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/src/agent/runloop/unified/turn/turn_processing/result_handler.rs#L204-L272), the two cleanup attempts (strip_dsml_markup, strip_textual_tool_call_regions) failed, so it broke with RECOVERY_CONTRACT_VIOLATION_REASON — with no retry.
+3. normalize_tool_free_recovery_break_outcome ([post_tool_recovery.rs#L145-L165](file:///Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/src/agent/runloop/unified/turn/turn_loop/post_tool_recovery.rs#L145-L165)) immediately converted that to the canned final answer "Recovery synthesis failed; no tool call applied…", discarding ~60 messages of gathered context.
+
+Contrast: the Empty + native-tool-calls path in [turn_loop.rs#L862-L878](file:///Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/src/agent/runloop/unified/turn/turn_loop.rs#L862-L878) does retry up to MAX_RECOVERY_RETRIES (3) with a corrective directive. The textual-markup path and the ToolCalls-variant path ([result_handler.rs#L112-L118](file:///Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/src/agent/runloop/unified/turn/turn_processing/result_handler.rs#L112-L118)) get zero retries.
+
+Contributing factors
+
+- RECOVERY_SYNTHESIS_MAX_TOKENS = 1024 ([turn_loop.rs#L68](file:///Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/src/agent/runloop/unified/turn/turn_loop.rs#L68)) — far too small to synthesize a launch-time plan from a 60-message exploration; likely truncates and destabilizes the response.
+- Three stacked, partly contradictory system messages injected before recovery (budget exhausted / synthesize now, POST_TOOL_RESUME_DIRECTIVE "follow tool guidance first", POST_TOOL_RECOVERY_REASON).
+- The turn burned budget on 3 identical unified_search preflight validation failures (invalid content arg) with no corrective schema hint injected.
+
+Changes
+
+1. Retry instead of bail on recovery contract violation (primary fix)
+
+- In result*handler.rs, both Blocked-with-RECOVERY_CONTRACT_VIOLATION_REASON sites: instead of breaking immediately, route through the same retry mechanism as the Empty path — if recovery_retry_count() < MAX_RECOVERY_RETRIES, push RECOVERY_TOOL_CALL_RETRY_DIRECTIVE, call retry_recovery_pass(), and continue the loop. Only after retries exhaust fall through to the fallback. This likely needs a new TurnHandlerOutcome/TurnLoopResult signal (e.g. Blocked reason checked in turn_loop.rs before normalize*… converts it) so the retry counter lives in one place.
+
+2. Salvage a real answer in the fallback
+
+- In complete_turn_after_failed_tool_free_recovery, before pushing the canned string: if the rejected response's markup-stripped text has non-trivial prose (even if markers remain), use that as the final answer with a [!] recovery note, rather than discarding it. Requires threading the last rejected text into the fallback (or storing it on the turn ctx).
+
+3. Raise recovery synthesis token budget
+
+- Bump RECOVERY_SYNTHESIS_MAX_TOKENS from 1024 to ~4096. Synthesizing a plan from a long exploration cannot fit in 1024.
+
+4. Consolidate recovery system messages
+
+- In prepare_post_tool_tool_free_recovery / budget-exhaustion path, emit one coherent directive instead of stacking POST_TOOL_RESUME_DIRECTIVE (which tells the model to follow tool-output guidance/next_action — wrong when tools are disabled) plus the recovery reason. When tool-free recovery is active, suppress POST_TOOL_RESUME_DIRECTIVE.
+
+5. (Secondary) Preflight-failure schema hint
+
+- After a repeated identical preflight validation failure for the same tool, append the tool's valid parameter list to the error payload so the model self-corrects instead of retrying blind. Scope: wherever the "Tool preflight validation failed" error is built.
+
+Verification
+
+- Unit tests in turn_loop/tests.rs / result_handler.rs tests: recovery pass returning textual tool-call markup retries up to MAX_RECOVERY_RETRIES, then falls back; fallback prefers salvaged prose over canned string; POST_TOOL_RESUME_DIRECTIVE absent when tool-free recovery active.
+- ./scripts/check-dev.sh --test, plus cargo nextest run -p vtcode -E 'binary(/inline_events/)' for harness regressions.
+
+Items 1–4 are one coherent change in src/agent/runloop/unified/turn/; item 5 is separable. Want me to implement 1–4 now?
