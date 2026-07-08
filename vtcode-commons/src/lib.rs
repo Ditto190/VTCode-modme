@@ -36,6 +36,7 @@ pub mod http;
 pub mod image;
 pub mod llm;
 pub mod lr_map;
+pub mod memory;
 pub mod message_metadata;
 pub mod model_family;
 pub mod paths;

@@ -490,6 +490,26 @@ pub struct BackgroundSubagentArgs {
     pub reasoning_override: Option<String>,
 }
 
+/// Arguments for `vtcode bench-allocator` — see the command docs for meaning.
+#[derive(Debug, Clone, clap::Args)]
+pub struct BenchAllocatorArgs {
+    /// Number of bursts to run
+    #[arg(long, default_value_t = 3)]
+    pub bursts: usize,
+    /// Concurrent tasks per burst (Semaphore cap)
+    #[arg(long, default_value_t = 30)]
+    pub concurrency: usize,
+    /// Tokens allocated per task (each roughly up to 1KB)
+    #[arg(long, default_value_t = 200)]
+    pub tokens_per_task: usize,
+    /// Idle seconds between bursts (lets Tokio workers go idle)
+    #[arg(long, default_value_t = 2)]
+    pub idle_seconds: u64,
+    /// Payload size per task in bytes
+    #[arg(long, default_value_t = 4096)]
+    pub payload_bytes: usize,
+}
+
 /// Available commands
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
@@ -660,6 +680,16 @@ pub enum Commands {
         #[arg(long, value_name = "COUNT")]
         max_tasks: Option<usize>,
     },
+
+    /// Measure allocator RSS behavior under a bursty/sparse Tokio workload
+    ///
+    /// Reproduces the mimalloc-vs-jemalloc analysis pattern: many short-lived
+    /// tasks allocated across Tokio worker threads, with idle gaps between
+    /// bursts. Reports the RSS trajectory so you can see whether the global
+    /// allocator returns memory to the OS (jemalloc) or pins it (mimalloc/glibc).
+    /// Build with `--features allocator-jemalloc` to compare allocators.
+    #[command(name = "bench-allocator")]
+    BenchAllocator(BenchAllocatorArgs),
 
     /// Create complete Rust project
     CreateProject {

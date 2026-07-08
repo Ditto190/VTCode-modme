@@ -47,6 +47,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Quick Checklist, Detailed Steps, Verification, Template for Copy-Paste
   - **User Questions**: "What can you tell me about Adding New Models to VT Code?", "How does Overview work?", "How does Quick Checklist work?"
 
+- **File**: `docs/development/ALLOCATOR_MEMORY.md`
+  - **Content**: Allocator & Memory Behavior
+  - **Topics**: The problem, Allocator selection, Measuring it, Implementation
+  - **User Questions**: "What can you tell me about Allocator & Memory Behavior?", "How does The problem work?", "How does Allocator selection work?"
+
 - **File**: `docs/development/EXTENDED_THINKING.md`
   - **Content**: Anthropic Thinking in VT Code
   - **Topics**: Compact Runtime Matrix, Configuration, Adaptive Thinking Behavior, Budgeted Thinking Behavior, Feature Compatibility

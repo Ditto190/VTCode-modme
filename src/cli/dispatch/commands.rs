@@ -12,6 +12,7 @@ use crate::cli::acp::handle_acp_command;
 use crate::cli::adapters::{ask_options, skills_options};
 use crate::cli::anthropic_api::handle_anthropic_api_command;
 use crate::cli::app_server::handle_app_server_command;
+use crate::cli::bench_allocator::handle_bench_allocator_command;
 use crate::cli::{
     analyze, benchmark, check, config, create_project, dependencies, exec, init, init_project, man,
     notify, revert, review, schedule, schema, skills, snapshots, trajectory, update,
@@ -213,6 +214,9 @@ pub(crate) async fn dispatch_command(
         }
         Commands::Man { command, output } => {
             man::handle_man_command(command, output).await?;
+        }
+        Commands::BenchAllocator(args) => {
+            handle_bench_allocator_command(args).await?;
         }
         Commands::ListSkills {} => {
             let skills_options = skills_options(startup);
