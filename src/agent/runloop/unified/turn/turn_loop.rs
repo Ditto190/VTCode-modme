@@ -997,6 +997,36 @@ pub(crate) async fn run_turn_loop(
         match turn_outcome {
             TurnHandlerOutcome::Continue => continue,
             TurnHandlerOutcome::Break(outcome_result) => {
+                // When the model violates the tool-free recovery contract
+                // (emits tool calls or textual tool-call markup instead of a
+                // final answer), retry the synthesis pass with a corrective
+                // directive instead of immediately concluding with the
+                // deterministic fallback answer. Mirrors the Empty+tool_calls
+                // retry path above. Observed in checkpoint turn_621: a single
+                // textual `<tool_call>` block in the recovery response
+                // terminated the turn and discarded ~60 messages of gathered
+                // context.
+                let contract_violation = matches!(
+                    outcome_result,
+                    TurnLoopResult::Blocked {
+                        reason: Some(ref reason)
+                    } if reason == RECOVERY_CONTRACT_VIOLATION_REASON
+                );
+                if tool_free_recovery
+                    && contract_violation
+                    && ctx.harness_state.recovery_retry_count() < MAX_RECOVERY_RETRIES
+                    && ctx.harness_state.retry_recovery_pass()
+                {
+                    tracing::warn!(
+                        retry = ctx.harness_state.recovery_retry_count(),
+                        max = MAX_RECOVERY_RETRIES,
+                        "Recovery contract violation; retrying tool-free synthesis pass"
+                    );
+                    working_history.push(uni::Message::system(
+                        RECOVERY_TOOL_CALL_RETRY_DIRECTIVE.to_string(),
+                    ));
+                    continue;
+                }
                 result = normalize_tool_free_recovery_break_outcome(
                     working_history,
                     outcome_result,

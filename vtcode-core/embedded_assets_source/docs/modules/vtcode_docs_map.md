@@ -729,11 +729,6 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Conformance Overview, What is Open Responses?, Implementation Details, Conformance Levels, Response Object Structure
   - **User Questions**: "What can you tell me about Open Responses Specification Conformance?", "How does Conformance Overview work?", "How does What is Open Responses? work?"
 
-- **File**: `docs/project/PLAN-loop-engineering.md`
-  - **Content**: PLAN: vtcode Loop Engineering — Apply Addy Osmani's Pattern to vtcode-core
-  - **Topics**: 1. Why this plan exists, 2. The article's checklist mapped to vtcode, 3. Goals (in order of priority), 4. Non-goals, 5. Architectural decisions
-  - **User Questions**: "What can you tell me about PLAN: vtcode Loop Engineering — Apply Addy Osmani's Pattern to vtcode-core?", "How does 1. Why this plan exists work?", "How does 2. The article's checklist mapped to vtcode work?"
-
 - **File**: `docs/pty/PTY_ANSI_HANDLING.md`
   - **Content**: PTY Output ANSI Handling
   - **Topics**: Overview, Architecture, ANSI Parser Implementation, Data Flow, Testing
@@ -843,11 +838,6 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Vtcode Styling System Documentation
   - **Topics**: Files, Quick Summary, Architecture Overview, Dependencies, Related Code Locations
   - **User Questions**: "What can you tell me about Vtcode Styling System Documentation?", "How does Files work?", "How does Quick Summary work?"
-
-- **File**: `docs/project/web-fetch-hilt-fix.md`
-  - **Content**: Web Fetch Tool Registration & HITL Popup Fix
-  - **Topics**: Problem, Root Cause Analysis, Solution, Testing, Files Changed
-  - **User Questions**: "What can you tell me about Web Fetch Tool Registration & HITL Popup Fix?", "How does Problem work?", "How does Root Cause Analysis work?"
 
 - **File**: `docs/protocols/XDG_DIRECTORY_SPECIFICATION.md`
   - **Content**: XDG Base Directory Specification Implementation
