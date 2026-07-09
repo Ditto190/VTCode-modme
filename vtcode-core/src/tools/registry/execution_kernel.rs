@@ -507,6 +507,21 @@ mod tests {
     }
 
     #[test]
+    fn condensed_schema_hint_renders_enum_options() {
+        let schema = json!({
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {"type": "string", "enum": ["grep", "glob", "list"]},
+                "pattern": {"type": "string"}
+            }
+        });
+        let hint = condensed_schema_hint(&schema).unwrap();
+        assert_eq!(hint["properties"]["action"], "string(grep|glob|list)");
+        assert_eq!(hint["properties"]["pattern"], "string");
+    }
+
+    #[test]
     fn condensed_schema_hint_returns_none_without_properties() {
         let schema = json!({"type": "object"});
         assert!(condensed_schema_hint(&schema).is_none());
