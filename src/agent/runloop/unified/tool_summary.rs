@@ -22,6 +22,34 @@ use crate::agent::runloop::unified::tool_summary_helpers::{
 const RUN_SUMMARY_FIRST_WIDTH: usize = 62;
 const RUN_SUMMARY_CONTINUATION_WIDTH: usize = 58;
 
+/// Infer the action string for a `unified_file` tool call from its arguments.
+/// This is the single source of truth for action inference — all three call sites
+/// (`render_file_operation_indicator`, `is_file_modification_tool`, `describe_tool_action`)
+/// must use this function to stay consistent.
+fn unified_file_action(args: &Value) -> &'static str {
+    if let Some(action) = args.get("action").and_then(Value::as_str) {
+        return match action {
+            "write" | "create" => "write",
+            "edit" => "edit",
+            "patch" | "apply_patch" => "patch",
+            "delete" => "delete",
+            "move" => "move",
+            _ => "read",
+        };
+    }
+    if args.get("old_str").is_some() {
+        "edit"
+    } else if args.get("patch").is_some() {
+        "patch"
+    } else if args.get("content").is_some() {
+        "write"
+    } else if args.get("destination").is_some() {
+        "move"
+    } else {
+        "read"
+    }
+}
+
 /// Pre-execution indicators for file modification operations
 /// These provide visual feedback before the actual edit/write/patch is applied
 pub(crate) fn render_file_operation_indicator(
@@ -41,28 +69,14 @@ pub(crate) fn render_file_operation_indicator(
         name if name == tool_names::SEARCH_REPLACE => ("❋", "Search/replace in"),
         name if name == tool_names::DELETE_FILE => ("❋", "Deleting"),
         name if name == tool_names::UNIFIED_FILE => {
-            // Determine action from unified_file parameters
-            let action = args
-                .get("action")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    if args.get("old_str").is_some() {
-                        Some("edit")
-                    } else if args.get("patch").is_some() {
-                        Some("patch")
-                    } else if args.get("content").is_some() {
-                        Some("write")
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or("read");
+            let action = unified_file_action(args);
 
             match action {
                 "write" | "create" => ("❋", "Writing"),
                 "edit" => ("❋", "Editing"),
                 "patch" | "apply_patch" => ("❋", "Applying patch to"),
                 "delete" => ("❋", "Deleting"),
+                "move" => ("❋", "Moving"),
                 _ => return Ok(()), // Skip indicator for read operations
             }
         }
@@ -114,26 +128,11 @@ pub(crate) fn is_file_modification_tool(tool_name: &str, args: &Value) -> bool {
             true
         }
         name if name == tool_names::UNIFIED_FILE => {
-            // Check if unified_file is doing a write operation
-            let action = args
-                .get("action")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    if args.get("old_str").is_some() {
-                        Some("edit")
-                    } else if args.get("patch").is_some() {
-                        Some("patch")
-                    } else if args.get("content").is_some() {
-                        Some("write")
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or("read");
+            let action = unified_file_action(args);
 
             matches!(
                 action,
-                "write" | "create" | "edit" | "patch" | "apply_patch" | "delete"
+                "write" | "create" | "edit" | "patch" | "apply_patch" | "delete" | "move"
             )
         }
         _ => false,
@@ -334,7 +333,7 @@ fn split_command_and_args(text: &str) -> (&str, &str) {
 }
 
 fn build_tool_summary(action_label: &str, headline: &str) -> String {
-    let normalized = headline.trim().trim_start_matches("MCP ").trim();
+    let normalized = headline.trim().trim_start_matches("MCP ");
     if action_label == "Run command" {
         if normalized.is_empty() {
             return "Ran command".to_string();
@@ -595,23 +594,7 @@ pub(crate) fn describe_tool_action(tool_name: &str, args: &Value) -> (String, Ha
                 })
         }
         actual_name if actual_name == tool_names::UNIFIED_FILE => {
-            let action = args
-                .get("action")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    if args.get("old_str").is_some() {
-                        Some("edit")
-                    } else if args.get("patch").is_some() {
-                        Some("patch")
-                    } else if args.get("content").is_some() {
-                        Some("write")
-                    } else if args.get("destination").is_some() {
-                        Some("move")
-                    } else {
-                        Some("read")
-                    }
-                })
-                .unwrap_or("read");
+            let action = unified_file_action(args);
 
             let (verb, keys): (&str, &[&str]) = match action {
                 "read" => ("Read file", &["path", "file_path", "target_path"]),

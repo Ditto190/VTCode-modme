@@ -41,6 +41,9 @@ use crate::agent::runloop::unified::turn::compaction::{
 };
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 
+/// Default turn timeout when no explicit configuration is set (seconds).
+const DEFAULT_TURN_TIMEOUT_SECS: u64 = 300;
+
 pub(super) fn is_openai_prompt_cache_enabled(
     provider_name: &str,
     global_prompt_cache_enabled: bool,
@@ -55,16 +58,15 @@ pub(super) fn resolve_prompt_cache_shaping_mode(
     provider_name: &str,
     prompt_cache: &PromptCachingConfig,
 ) -> PromptCacheShapingMode {
+    debug_assert_eq!(provider_name, provider_name.to_ascii_lowercase());
+
     if !prompt_cache.cache_friendly_prompt_shaping
         || !prompt_cache.is_provider_enabled(provider_name)
     {
         return PromptCacheShapingMode::Disabled;
     }
 
-    if matches!(
-        provider_name.to_ascii_lowercase().as_str(),
-        "anthropic" | "minimax"
-    ) {
+    if matches!(provider_name, "anthropic" | "minimax") {
         PromptCacheShapingMode::AnthropicBlockRuntimeContext
     } else {
         PromptCacheShapingMode::TrailingRuntimeContext
@@ -98,6 +100,7 @@ struct PromptAssemblyInput<'a> {
 struct PromptAssemblyOutput {
     system_prompt: String,
     tool_snapshot: SessionToolCatalogSnapshot,
+    agent_prompt_context: Option<PromptContext>,
 }
 
 pub(super) struct TurnRequestBuildResult {
@@ -173,7 +176,7 @@ pub(super) fn capture_turn_request_snapshot(
     let turn_timeout_secs = ctx
         .vt_cfg
         .map(|cfg| cfg.optimization.agent_execution.max_execution_time_secs)
-        .unwrap_or(300);
+        .unwrap_or(DEFAULT_TURN_TIMEOUT_SECS);
     let openai_prompt_cache_key_mode = prompt_cache_config
         .providers
         .openai
@@ -240,7 +243,19 @@ async fn build_prompt_output(
         )
         .await?;
 
-    append_active_primary_agent_skills(&mut system_prompt, ctx, &input.turn.active_primary_agent);
+    let agent = &input.turn.active_primary_agent;
+    let agent_prompt_context = if agent.skills.is_empty() {
+        None
+    } else {
+        Some(active_primary_agent_prompt_context(ctx, agent))
+    };
+
+    append_active_primary_agent_skills(
+        &mut system_prompt,
+        ctx,
+        agent,
+        agent_prompt_context.as_ref(),
+    );
 
     upsert_harness_limits_section(
         &mut system_prompt,
@@ -314,6 +329,7 @@ async fn build_prompt_output(
     Ok(PromptAssemblyOutput {
         system_prompt,
         tool_snapshot,
+        agent_prompt_context,
     })
 }
 
@@ -424,14 +440,18 @@ fn active_primary_agent_prompt_context(
 
 fn append_active_primary_agent_skills(
     system_prompt: &mut String,
-    ctx: &TurnProcessingContext<'_>,
+    _ctx: &TurnProcessingContext<'_>,
     agent: &ActivePrimaryAgent,
+    prompt_context: Option<&PromptContext>,
 ) {
     if agent.skills.is_empty() {
         return;
     }
 
-    let prompt_context = active_primary_agent_prompt_context(ctx, agent);
+    let Some(prompt_context) = prompt_context else {
+        return;
+    };
+
     let mut lines = Vec::with_capacity(2 + agent.skills.len());
     lines.push("## Active Primary Agent Skills".to_string());
     lines.push("These skills are scoped to the active primary agent for this request.".to_string());
@@ -441,7 +461,7 @@ fn append_active_primary_agent_skills(
             lines.push(format!("- {skill}"));
         }
     } else {
-        let mut skills = prompt_context.available_skill_metadata;
+        let mut skills: Vec<_> = prompt_context.available_skill_metadata.iter().collect();
         skills.sort_by(|left, right| left.name.cmp(&right.name));
         for skill in skills {
             lines.push(format!("- {}: {}", skill.name, skill.description));
@@ -701,6 +721,7 @@ async fn render_primary_agent_runtime_context(
     tool_snapshot: &SessionToolCatalogSnapshot,
     agent: &ActivePrimaryAgent,
     reasoning_effort: Option<vtcode_core::config::types::ReasoningEffortLevel>,
+    agent_prompt_context: Option<&PromptContext>,
 ) -> String {
     // Upper bound on the number of lines pushed below (two static headers
     // plus a bounded set of conditional runtime-state lines).
@@ -748,20 +769,26 @@ async fn render_primary_agent_runtime_context(
         ));
     }
     if !agent.skills.is_empty() {
-        let prompt_context = active_primary_agent_prompt_context(ctx, agent);
-        if prompt_context.available_skill_metadata.is_empty() {
+        if let Some(prompt_context) = agent_prompt_context {
+            if prompt_context.available_skill_metadata.is_empty() {
+                lines.push(format!(
+                    "- Active primary skills: {}",
+                    agent.skills.join(", ")
+                ));
+            } else {
+                let mut names = prompt_context
+                    .available_skill_metadata
+                    .iter()
+                    .map(|skill| skill.name.as_str())
+                    .collect::<Vec<_>>();
+                names.sort_unstable();
+                lines.push(format!("- Active primary skills: {}", names.join(", ")));
+            }
+        } else {
             lines.push(format!(
                 "- Active primary skills: {}",
                 agent.skills.join(", ")
             ));
-        } else {
-            let mut names = prompt_context
-                .available_skill_metadata
-                .iter()
-                .map(|skill| skill.name.as_str())
-                .collect::<Vec<_>>();
-            names.sort_unstable();
-            lines.push(format!("- Active primary skills: {}", names.join(", ")));
         }
     }
     if let Some(cfg) = ctx.vt_cfg
@@ -860,6 +887,7 @@ pub(super) async fn build_turn_request(
         &prompt_output.tool_snapshot,
         &turn_snapshot.active_primary_agent,
         reasoning_effort,
+        prompt_output.agent_prompt_context.as_ref(),
     )
     .await;
     let _ = writeln!(prompt_output.system_prompt, "\n{primary_agent_context}");
@@ -2121,6 +2149,7 @@ mod tests {
         let misaligned_output = PromptAssemblyOutput {
             system_prompt: misaligned_prompt,
             tool_snapshot: make_snapshot(),
+            agent_prompt_context: None,
         };
 
         let aligned_snapshot = make_snapshot();
@@ -2129,6 +2158,7 @@ mod tests {
         let aligned_output = PromptAssemblyOutput {
             system_prompt: aligned_prompt,
             tool_snapshot: aligned_snapshot,
+            agent_prompt_context: None,
         };
 
         let err = validate_prompt_output_alignment(&misaligned_output, &turn)

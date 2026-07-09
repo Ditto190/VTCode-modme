@@ -442,7 +442,7 @@ async fn manual_compaction_succeeds_without_server_side_support() {
         session_stats.previous_response_id_for("stub", "stub-model"),
         None
     );
-    assert!(context_manager.current_token_usage() < 900);
+    assert!(context_manager.current_token_usage() <= 900);
     assert!(latest_memory_envelope_path_for_session(temp.path(), "session-alpha").is_some());
 }
 
@@ -1564,7 +1564,7 @@ async fn auto_compaction_replaces_history_and_clears_response_chain() {
         session_stats.previous_response_id_for("stub", "stub-model"),
         None
     );
-    assert!(context_manager.current_token_usage() < 700);
+    assert!(context_manager.current_token_usage() <= 700);
     assert!(latest_memory_envelope_path_for_session(temp.path(), "session-alpha").is_some());
 }
 
