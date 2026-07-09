@@ -75,6 +75,19 @@ const OPENAI_GPT55_CONTRACT_LINES: &[&str] = &[
     "Use retrieved evidence for citation-sensitive work; use the minimum evidence sufficient to answer correctly, then stop.",
 ];
 
+const OPENAI_GPT56_CONTRACT_HEADER: &str = "## GPT-5.6 OpenAI Addendum";
+const OPENAI_GPT56_CONTRACT_LINES: &[&str] = &[
+    "State the outcome, constraints, evidence, and output shape up front; avoid over-prescribing the path unless the exact steps matter.",
+    "If context is missing, say so plainly; use the smallest missing detail that would change the result, and finish any unblocked portion first.",
+    "Verify changes yourself with the smallest relevant check; never claim a check passed unless you ran it.",
+    "Before multi-step tool work, send a brief progress update that names the first step.",
+    "Use retrieved evidence for citation-sensitive work; use the minimum evidence sufficient to answer correctly, then stop.",
+    "Lead with the conclusion. Include the evidence needed to support it, any material caveat, and the next action. Omit secondary detail and repetition.",
+    "Keep all required facts, decisions, caveats, and next steps. Trim introductions, repetition, generic reassurance, and optional background first.",
+    "Do not use generic brevity instructions such as 'Be concise' or 'Keep it short' — the model already compresses naturally. Instead, prioritize completeness: include all material facts, decisions, and next steps.",
+    "Be direct and tactful. Acknowledge friction specifically when relevant. Avoid canned reassurance and unnecessary sign-offs.",
+];
+
 /// Contract rules shared across all prompt modes.
 const SHARED_CONTRACT_LINES: &[&str] = &[
     "If context is missing, say so, do not guess, finish unblocked slices.",
@@ -176,6 +189,25 @@ pub fn openai_gpt55_contract_addendum() -> String {
     prompt.push_str(OPENAI_GPT55_CONTRACT_HEADER);
     prompt.push_str("\n\n");
     for line in OPENAI_GPT55_CONTRACT_LINES {
+        prompt.push_str("- ");
+        prompt.push_str(line);
+        prompt.push('\n');
+    }
+    prompt.pop();
+    prompt
+}
+
+pub fn openai_gpt56_contract_addendum() -> String {
+    let lines_len = OPENAI_GPT56_CONTRACT_LINES
+        .iter()
+        .map(|line| line.len())
+        .sum::<usize>();
+    let mut prompt = String::with_capacity(
+        OPENAI_GPT56_CONTRACT_HEADER.len() + lines_len + OPENAI_GPT56_CONTRACT_LINES.len() * 3 + 8,
+    );
+    prompt.push_str(OPENAI_GPT56_CONTRACT_HEADER);
+    prompt.push_str("\n\n");
+    for line in OPENAI_GPT56_CONTRACT_LINES {
         prompt.push_str("- ");
         prompt.push_str(line);
         prompt.push('\n');
@@ -1104,6 +1136,22 @@ mod tests {
         assert!(addendum.contains("brief progress update"));
         assert!(addendum.contains("minimum evidence sufficient"));
         assert!(!default_system_prompt().contains(OPENAI_GPT55_CONTRACT_HEADER));
+    }
+
+    #[test]
+    fn test_openai_gpt56_contract_addendum_is_specific() {
+        let addendum = openai_gpt56_contract_addendum();
+
+        assert!(addendum.contains(OPENAI_GPT56_CONTRACT_HEADER));
+        assert!(addendum.contains("outcome, constraints, evidence, and output shape"));
+        assert!(addendum.contains("smallest missing detail"));
+        assert!(addendum.contains("brief progress update"));
+        assert!(addendum.contains("minimum evidence sufficient"));
+        assert!(addendum.contains("Lead with the conclusion"));
+        assert!(addendum.contains("Trim introductions, repetition"));
+        assert!(addendum.contains("Do not use generic brevity instructions"));
+        assert!(addendum.contains("Be direct and tactful"));
+        assert!(!default_system_prompt().contains(OPENAI_GPT56_CONTRACT_HEADER));
     }
 
     #[tokio::test]
