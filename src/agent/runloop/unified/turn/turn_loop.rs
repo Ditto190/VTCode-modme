@@ -108,9 +108,14 @@ const RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER: &str = "Recovery synthesis faile
 /// `result_handler` (producer) and `post_tool_recovery` (consumer).
 pub(super) const RECOVERY_CONTRACT_VIOLATION_REASON: &str = "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls.";
 /// System message injected before retrying a tool-free recovery pass when the model
-/// produced tool calls (which are discarded) instead of text.
-const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE: &str =
-    "Recovery: tools disabled. Summarize findings from tool outputs in history.";
+/// produced tool calls or textual tool-call markup (which are discarded) instead of
+/// plain text. It names the failure mode explicitly so the model can self-correct on
+/// the retry rather than repeating the same violation (observed in checkpoint turn_621,
+/// where a single `<tool_call>` block terminated the turn instead of being retried).
+const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE: &str = "Recovery: tools are disabled, so respond with plain text only. Your previous \
+     attempt included tool-call or function-call markup; summarize the findings from \
+     the tool outputs already in history as a final answer, without any <tool_call>, \
+     <function=...>, or other tool-call syntax.";
 
 /// Shared logic for the `PostToolFailureRecovery::RetryToolFree` arm.
 ///
