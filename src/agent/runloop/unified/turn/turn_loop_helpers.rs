@@ -641,7 +641,6 @@ mod tests {
     use std::time::Duration;
     use vtcode_core::config::loader::VTCodeConfig;
     use vtcode_core::core::agent::steering::SteeringMessage;
-    use vtcode_core::llm::provider as uni;
 
     #[test]
     fn detects_implement_the_plan_trigger() {

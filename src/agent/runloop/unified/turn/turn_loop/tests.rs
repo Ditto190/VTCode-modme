@@ -616,3 +616,101 @@ fn count_assistant_text_responses_in_turn_matches_observed_pattern() {
         "anti-runaway guard would trip on this history"
     );
 }
+
+/// End-to-end regression test for the tool-free recovery contract-violation
+/// retry (checkpoint turn_621): when the model emits textual tool-call markup
+/// during a tool-free synthesis pass instead of prose, the turn loop must
+/// retry up to `MAX_RECOVERY_RETRIES` times with a corrective directive rather
+/// than immediately concluding with the canned fallback answer. After retries
+/// are exhausted, the turn must conclude with the salvaged prose from the
+/// rejected synthesis response.
+#[tokio::test]
+async fn tool_free_recovery_retries_on_contract_violation_then_salvages() {
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct ContractViolationProvider {
+        requests: Arc<Mutex<usize>>,
+        content: String,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for ContractViolationProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        async fn generate(
+            &self,
+            request: uni::LLMRequest,
+        ) -> Result<uni::LLMResponse, uni::LLMError> {
+            *self.requests.lock().expect("requests lock") += 1;
+            Ok(uni::LLMResponse {
+                content: Some(self.content.clone()),
+                model: request.model.clone(),
+                tool_calls: None,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    backing.activate_tool_free_recovery_for_test("post-tool follow-up failure");
+
+    // Markup with surrounding prose so the salvage step has non-trivial text.
+    // A dangling `</tool_call>` close tag trips `contains_pseudo_tool_call_markers`
+    // (so the recovery guard fires) but has no matching opening `<tool_call>`
+    // for `strip_textual_tool_call_regions` to remove, so the response cannot
+    // be "cleaned" into a valid final answer. The turn must retry, then salvage.
+    let markup = "Here is my plan: the change was not applied because tools were disabled. \
+                  </tool_call> Please re-run with tools enabled.";
+    let requests = Arc::new(Mutex::new(0usize));
+    backing.set_provider(Box::new(ContractViolationProvider {
+        requests: requests.clone(),
+        content: markup.to_string(),
+    }));
+
+    let mut history = vec![uni::Message::user("summarize the tool outputs".to_string())];
+    run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("turn loop should complete after recovery retries");
+
+    // Exactly MAX_RECOVERY_RETRIES retries: 1 initial recovery pass + 3 retries.
+    assert_eq!(
+        *requests.lock().expect("requests lock"),
+        super::MAX_RECOVERY_RETRIES as usize + 1,
+        "recovery must retry exactly MAX_RECOVERY_RETRIES times before falling back"
+    );
+
+    // The turn must conclude with the salvaged prose, not the canned string.
+    let final_text = history
+        .iter()
+        .rev()
+        .find(|m| m.role == uni::MessageRole::Assistant)
+        .map(|m| m.content.as_text().to_string())
+        .unwrap_or_default();
+    assert!(
+        final_text.contains("Here is my plan:"),
+        "expected salvaged prose, got: {final_text}"
+    );
+    assert!(
+        !final_text.contains(RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER),
+        "must not emit canned fallback when salvage is available"
+    );
+    assert!(backing.recovery_is_tool_free());
+}
