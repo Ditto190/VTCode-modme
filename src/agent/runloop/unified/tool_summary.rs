@@ -82,7 +82,7 @@ pub(crate) fn render_file_operation_indicator(
         })
         .unwrap_or_else(|| "file".to_string());
 
-    let mut line = String::new();
+    let mut line = String::with_capacity(64);
 
     // Icon
     line.push_str(indicator_icon);
@@ -180,7 +180,7 @@ pub(crate) fn render_tool_call_summary(
         .get_fg_color()
         .unwrap_or(Color::Ansi(anstyle::AnsiColor::Green));
 
-    let mut line = String::new();
+    let mut line = String::with_capacity(128);
     line.push_str(&render_styled("•", palette.muted, Some("dim".to_string())));
     line.push(' ');
     let mut wrapped_run_segments: Option<Vec<String>> = None;
@@ -230,7 +230,7 @@ pub(crate) fn render_tool_call_summary(
     renderer.line(MessageStyle::Info, &line)?;
     if let Some(wrapped) = wrapped_run_segments {
         for segment in wrapped.into_iter().skip(1) {
-            let mut continuation = String::new();
+            let mut continuation = String::with_capacity(segment.len() + 32);
             continuation.push_str("  ");
             continuation.push_str(&render_styled("│", palette.muted, Some("dim".to_string())));
             continuation.push(' ');
@@ -240,7 +240,7 @@ pub(crate) fn render_tool_call_summary(
     }
 
     if let Some(command_line) = command_line {
-        let mut styled = String::new();
+        let mut styled = String::with_capacity(64);
         crate::agent::runloop::tool_output::push_tree_prefix(&mut styled, &palette);
         styled.push_str(&render_styled("$", palette.accent, None));
         styled.push(' ');
@@ -283,7 +283,7 @@ fn render_summary_with_highlights(
 
     ranges.sort_by_key(|(start, _)| *start);
 
-    let mut rendered = String::new();
+    let mut rendered = String::with_capacity(summary.len() * 3);
     let mut cursor = 0usize;
     for (start, end) in ranges {
         if start < cursor || start >= summary.len() || end > summary.len() {
@@ -308,7 +308,7 @@ fn render_run_command_segment(segment: &str, command_color: Color, args_color: C
         return render_styled(segment, args_color, None);
     }
 
-    let mut rendered = String::new();
+    let mut rendered = String::with_capacity(segment.len() * 2);
     rendered.push_str(&render_styled(command, command_color, None));
     if !args.is_empty() {
         rendered.push_str(&render_styled(&format!(" {args}"), args_color, None));
