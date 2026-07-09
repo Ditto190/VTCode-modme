@@ -83,6 +83,9 @@ fn prepare_post_tool_tool_free_recovery_is_idempotent_near_history_tail() {
     prepare_post_tool_tool_free_recovery(&mut history, POST_TOOL_RECOVERY_REASON);
     prepare_post_tool_tool_free_recovery(&mut history, POST_TOOL_RECOVERY_REASON);
 
+    // The resume directive must NOT be injected for tool-free recovery: it
+    // instructs the model to follow tool-output guidance, contradicting the
+    // tools-disabled synthesis contract.
     let resume_directive_count = history
         .iter()
         .filter(|message| {
@@ -90,7 +93,7 @@ fn prepare_post_tool_tool_free_recovery_is_idempotent_near_history_tail() {
                 && message.content.as_text() == POST_TOOL_RESUME_DIRECTIVE
         })
         .count();
-    assert_eq!(resume_directive_count, 1);
+    assert_eq!(resume_directive_count, 0);
 
     let recovery_reason_count = history
         .iter()
@@ -140,6 +143,8 @@ fn retryable_post_tool_follow_up_failure_schedules_tool_free_recovery_once() {
     .expect("repeat recovery should succeed");
     assert_eq!(action_again, PostToolFailureRecovery::RetryToolFree);
 
+    // Retry path injects only the recovery reason; the resume directive is
+    // reserved for the turn-ending (StopAfterDirective) path.
     let directive_count = history
         .iter()
         .filter(|message| {
@@ -147,7 +152,7 @@ fn retryable_post_tool_follow_up_failure_schedules_tool_free_recovery_once() {
                 && message.content.as_text() == POST_TOOL_RESUME_DIRECTIVE
         })
         .count();
-    assert_eq!(directive_count, 1);
+    assert_eq!(directive_count, 0);
 
     let recovery_reason_count = history
         .iter()
@@ -185,6 +190,11 @@ fn retryable_post_tool_follow_up_failure_stops_after_recovery_pass_is_spent() {
     assert!(!history.iter().any(|message| {
         message.role == uni::MessageRole::System
             && message.content.as_text() == POST_TOOL_RECOVERY_REASON
+    }));
+    // Turn-ending path keeps the resume directive for the next turn.
+    assert!(history.iter().any(|message| {
+        message.role == uni::MessageRole::System
+            && message.content.as_text() == POST_TOOL_RESUME_DIRECTIVE
     }));
 }
 

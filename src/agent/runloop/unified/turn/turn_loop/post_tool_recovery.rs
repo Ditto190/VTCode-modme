@@ -43,7 +43,12 @@ pub(crate) fn prepare_post_tool_tool_free_recovery(
     working_history: &mut Vec<uni::Message>,
     reason: &str,
 ) {
-    ensure_post_tool_resume_directive(working_history);
+    // Deliberately do NOT push POST_TOOL_RESUME_DIRECTIVE here: it instructs
+    // the model to follow tool-output guidance (`next_action`, `fallback_tool`,
+    // `rerun_hint`), which contradicts the tool-free recovery contract and
+    // encourages emitting tool-call markup (observed in checkpoint turn_621,
+    // where three stacked, conflicting system directives preceded a failed
+    // synthesis). Only the tools-disabled recovery reason is injected.
     ensure_recent_system_message(working_history, reason);
 }
 
@@ -82,11 +87,12 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
             "Tip: rerun with a narrower prompt or switch provider/model for the follow-up.",
         )?;
     }
-    ensure_post_tool_resume_directive(working_history);
-
     let should_retry = allow_tool_free_retry
         && (err_cat.is_retryable() || matches!(err_cat, ErrorCategory::ExecutionError));
     let action = if should_retry {
+        // Tool-free recovery: inject only the tools-disabled recovery reason.
+        // The resume directive would contradict it (see
+        // `prepare_post_tool_tool_free_recovery`).
         prepare_post_tool_tool_free_recovery(working_history, POST_TOOL_RECOVERY_REASON);
         renderer.line(
             MessageStyle::Info,
@@ -94,6 +100,9 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
         )?;
         PostToolFailureRecovery::RetryToolFree
     } else {
+        // Turn ends here; the resume directive guides the *next* turn to
+        // reuse this turn's tool outputs instead of re-running exploration.
+        ensure_post_tool_resume_directive(working_history);
         PostToolFailureRecovery::StopAfterDirective
     };
 
