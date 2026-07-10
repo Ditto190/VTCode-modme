@@ -119,6 +119,29 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
     Ok(action)
 }
 
+/// Extract file paths from tool responses in the working history.
+/// Looks for JSON tool outputs that contain a `path` field, which indicates
+/// a file read operation. Returns deduplicated paths.
+fn gather_files_read_this_turn(working_history: &[uni::Message]) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for msg in working_history.iter() {
+        if msg.role != uni::MessageRole::Tool {
+            continue;
+        }
+        let text = msg.content.as_text();
+        // Tool outputs are JSON with a `path` field for file reads.
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(path) = val.get("path").and_then(serde_json::Value::as_str) {
+                if seen.insert(path.to_string()) {
+                    files.push(path.to_string());
+                }
+            }
+        }
+    }
+    files
+}
+
 pub(super) fn complete_turn_after_failed_tool_free_recovery(
     working_history: &mut Vec<uni::Message>,
     failure_stage: &str,
@@ -143,15 +166,34 @@ pub(super) fn complete_turn_after_failed_tool_free_recovery(
         return TurnLoopResult::Completed;
     }
 
+    // Build a richer fallback that lists files already read, so the next
+    // turn can reuse them instead of re-exploring.
+    let files_read = gather_files_read_this_turn(working_history);
+    let fallback = if files_read.is_empty() {
+        RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER.to_string()
+    } else {
+        format!(
+            "{RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER}\n\n\
+             Files already read this turn (do NOT re-read):\n{}",
+            files_read
+                .iter()
+                .map(|f| format!("  - {f}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+
     let has_recent_fallback = working_history.iter().rev().take(3).any(|message| {
         message.role == uni::MessageRole::Assistant
             && message.phase == Some(uni::AssistantPhase::FinalAnswer)
-            && message.content.as_text() == RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER
+            && message
+                .content
+                .as_text()
+                .starts_with(RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER)
     });
     if !has_recent_fallback {
         working_history.push(
-            uni::Message::assistant(RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER.to_string())
-                .with_phase(Some(uni::AssistantPhase::FinalAnswer)),
+            uni::Message::assistant(fallback).with_phase(Some(uni::AssistantPhase::FinalAnswer)),
         );
     }
 

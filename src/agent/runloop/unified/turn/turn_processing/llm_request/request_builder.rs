@@ -972,7 +972,11 @@ pub(super) async fn build_turn_request(
     let request_plan = build_harness_request_plan(HarnessRequestPlanInput {
         messages: request_messages,
         system_prompt: prompt_output.system_prompt,
-        tools: if use_out_of_band_copilot_tools {
+        tools: if use_out_of_band_copilot_tools || turn_snapshot.tool_free_recovery {
+            // Strip tool definitions during tool-free recovery (including
+            // wall-clock exhaustion recovery) so the model cannot even attempt
+            // tool calls. ToolChoice::none() alone is advisory — the model
+            // still sees definitions and may try (observed in turn_637).
             None
         } else {
             prompt_output.tool_snapshot.snapshot.clone()

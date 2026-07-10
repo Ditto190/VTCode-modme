@@ -106,7 +106,7 @@ const MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN: u32 = 2;
 /// the post-tool failure path cyclically.
 const MAX_POST_TOOL_RECOVERY_CYCLES: u8 = 2;
 pub(crate) const POST_TOOL_RECOVERY_REASON: &str = "Tool follow-up failed. Tools disabled; respond with text using context and recent tool outputs.";
-const RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER: &str = "Recovery synthesis failed; no tool call applied. Reuse recent tool outputs or re-state your request.";
+const RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER: &str = "Recovery synthesis failed; no tool call applied. The tool outputs gathered above contain the information needed. Re-state your request and the next turn will reuse the gathered context from this conversation history.";
 /// Reason set on `TurnLoopResult::Blocked` when the model emits tool calls or
 /// textual tool-call markup during a tool-free recovery pass.  Shared between
 /// `result_handler` (producer) and `post_tool_recovery` (consumer).
@@ -441,7 +441,7 @@ impl<'a> TurnLoopContext<'a> {
     }
 }
 
-pub(crate) const POST_TOOL_RESUME_DIRECTIVE: &str = "Previous turn already completed tool execution. Reuse the latest tool outputs in history instead of rerunning the same exploration. If those tool outputs include `critical_note`, `hint`, `next_action`, `fallback_tool`, `fallback_tool_args`, or `rerun_hint`, follow that guidance first.";
+pub(crate) const POST_TOOL_RESUME_DIRECTIVE: &str = "Previous turn already completed tool execution. Reuse the latest tool outputs in history instead of rerunning the same exploration. If those tool outputs include `critical_note`, `hint`, `next_action`, `fallback_tool`, `fallback_tool_args`, or `rerun_hint`, follow that guidance first. Do NOT re-read files that were already read in the previous turn — their content is in the conversation history above. Synthesize a plan or answer from what is already gathered.";
 
 // For `TurnLoopContext`, we will reuse the generic `handle_pipeline_output` via an adapter below.
 
