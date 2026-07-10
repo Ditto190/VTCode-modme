@@ -36,7 +36,7 @@ pub const REASONING_MODELS: &[&str] = &[
 pub const ADVISOR_MIN_MODEL: &str = CLAUDE_SONNET_4_6;
 
 /// Returns the base model id with any `-YYYYMMDD` version suffix stripped.
-fn normalize_model_id(model: &str) -> &str {
+pub fn normalize_model_id(model: &str) -> &str {
     // Split off a trailing `-YYYYMMDD` version pin.
     if let Some(idx) = model.rfind('-') {
         let suffix = &model[idx + 1..];

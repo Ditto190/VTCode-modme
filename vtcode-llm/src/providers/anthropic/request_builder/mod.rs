@@ -144,14 +144,9 @@ pub fn convert_to_anthropic_format(
                     guidance_block,
                 ]));
             }
-            Some(other) => {
-                // Non-string/non-array system value — wrap in an array with the guidance.
-                system_value = Some(Value::Array(vec![
-                    json!({ "type": "text", "text": other.to_string() }),
-                    guidance_block,
-                ]));
-            }
-            None => {
+            // build_system_prompt only produces String, Array, or None —
+            // this arm is defensive for forward-compatibility.
+            _ => {
                 system_value = Some(Value::Array(vec![guidance_block]));
             }
         }
@@ -367,18 +362,8 @@ fn effort_from_reasoning_for_adaptive(effort: ReasoningEffortLevel) -> &'static 
 /// with `vtcode_config::constants::models::anthropic::normalize_model_id` so the
 /// executor check and the advisor-pair validation agree on normalization.
 pub(crate) fn is_anthropic_executor_model(model: &str) -> bool {
-    use vtcode_config::constants::models::anthropic::SUPPORTED_MODELS;
-    // Strip any trailing `-YYYYMMDD` version suffix for normalization.
-    let normalized = if let Some(idx) = model.rfind('-') {
-        let suffix = &model[idx + 1..];
-        if suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_digit()) {
-            &model[..idx]
-        } else {
-            model
-        }
-    } else {
-        model
-    };
+    use vtcode_config::constants::models::anthropic::{SUPPORTED_MODELS, normalize_model_id};
+    let normalized = normalize_model_id(model);
     SUPPORTED_MODELS.contains(&normalized)
 }
 
