@@ -965,8 +965,7 @@ pub fn normalize_unified_search_args(args: &Value) -> Value {
     if action.eq_ignore_ascii_case("grep") {
         // Map `match` -> `pattern` for grep action.  The `match` field is
         // only valid for `outline` action, but the model sometimes uses it
-        // with grep (checkpoint turn_635: agent passed `match: "doctor"`
-        // instead of `pattern`).
+        // with grep instead of `pattern`.
         if !normalized.contains_key("pattern") {
             let match_value = normalized
                 .get("match")

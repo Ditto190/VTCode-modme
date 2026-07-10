@@ -425,19 +425,37 @@ pub(super) fn preflight_validate_resolved_call(
         .inventory
         .registration_for(&effective_tool_name)
         .and_then(|registration| registration.parameter_schema().cloned());
-    if let Some(schema) = effective_parameter_schema.as_ref()
-        && let Err(errors) = jsonschema::validate(schema, validation_args.as_ref())
-    {
-        // Include a condensed schema hint so the model can self-correct
-        // instead of retrying blind with the same malformed arguments.
-        let schema_hint = condensed_schema_hint(schema);
-        let hint_msg = match schema_hint {
-            Some(hint) => format!("\nExpected schema (required fields and types): {hint}"),
-            None => String::new(),
+    if let Some(schema) = effective_parameter_schema.as_ref() {
+        // Collect every validation failure (not just the first) so the model
+        // can self-correct all of them in one pass instead of retrying blind
+        // with the same malformed arguments. Each failure is rendered with its
+        // field path and, for enum/const/type failures, the accepted values.
+        let error_msg = match jsonschema::validator_for(schema) {
+            Ok(validator) => {
+                let errors: Vec<_> = validator.iter_errors(validation_args.as_ref()).collect();
+                if errors.is_empty() {
+                    String::new()
+                } else {
+                    errors
+                        .iter()
+                        .map(crate::tools::validation::describe_jsonschema_error)
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                }
+            }
+            // The parameter schema itself is invalid; surface that instead.
+            Err(schema_error) => crate::tools::validation::describe_jsonschema_error(&schema_error),
         };
-        return Err(anyhow!(
-            "Invalid arguments for tool '{effective_tool_name}': {errors}{hint_msg}"
-        ));
+        if !error_msg.is_empty() {
+            let schema_hint = condensed_schema_hint(schema);
+            let hint_msg = match schema_hint {
+                Some(hint) => format!("\nExpected schema (required fields and types): {hint}"),
+                None => String::new(),
+            };
+            return Err(anyhow!(
+                "Invalid arguments for tool '{effective_tool_name}': {error_msg}{hint_msg}"
+            ));
+        }
     }
 
     let intent = crate::tools::tool_intent::classify_tool_intent(

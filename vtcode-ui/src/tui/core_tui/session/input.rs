@@ -1433,9 +1433,9 @@ mod input_highlight_tests {
 
     #[test]
     fn slash_command_with_following_text() {
-        let tokens = kinds("/doctor hello");
+        let tokens = kinds("/checkup hello");
         assert_eq!(tokens[0].0, InputTokenKind::SlashCommand);
-        assert_eq!(tokens[0].1, "/doctor");
+        assert_eq!(tokens[0].1, "/checkup");
         assert_eq!(tokens[1].0, InputTokenKind::Normal);
     }
 

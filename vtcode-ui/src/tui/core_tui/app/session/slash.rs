@@ -485,6 +485,7 @@ const IMMEDIATE_SUBMIT_COMMANDS: &[&str] = &[
     "/status",
     "/stop",
     "/pause",
+    "/checkup",
     "/doctor",
     "/mcp",
     "/skills",
