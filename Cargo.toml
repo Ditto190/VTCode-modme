@@ -349,6 +349,11 @@ lto = true        # Enables Link-time Optimization for better performance and si
 opt-level = 3     # Optimize for performance on M4 (was "s" for size)
 strip = true      # Ensures debug symbols are removed.
 panic = "abort"   # Reduce size of panic paths.
+# Keep asserts active in shipped binaries: a violated invariant must crash loud,
+# not let the program run under wrong assumptions. Disabling asserts in prod
+# lets falsifiable invariants fester and misbehave silently. See kristoff.it/blog/fix-your-asserts.
+debug-assertions = true
+overflow-checks = true
 # Additional performance optimizations:
 incremental = false # Disable incremental compilation for better optimization
 
