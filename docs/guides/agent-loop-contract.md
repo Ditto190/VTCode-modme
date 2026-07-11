@@ -58,9 +58,32 @@ Fields:
 - `compacted_message_count`
 - `history_artifact_path`: optional archived history path
 
-This is emitted for manual `/compact` flows and for automatic local fallback
-compaction. When Open Responses is enabled, VT Code surfaces these as VT Code
-custom extension events without changing the core Open Responses response model.
+This is emitted for manual `/compact` flows, for automatic compaction, and for
+automatic local fallback compaction. When Open Responses is enabled, VT Code
+surfaces these as VT Code custom extension events without changing the core Open
+Responses response model.
+
+### Unified auto-compaction
+
+Auto-compaction is **on by default** (`agent.harness.auto_compaction_enabled`,
+default `true`) and is **unified across both runloops**: the core `AgentRunner`
+loop and the binary unified runloop both delegate to the shared
+`vtcode_core::compaction` orchestrator (`auto_compact_messages`) rather than
+maintaining separate compaction logic. It fires when the live token usage
+crosses `agent.harness.auto_compaction_threshold_tokens` (or a context-size
+ratio default).
+
+To preserve conversational continuity, every compacted history keeps:
+
+- a **continuity tail** — the most recent turn retained verbatim so the model
+  keeps "what it was just doing" (last assistant action and any in-progress
+  tool calls);
+- the structured **session memory envelope** injected at the boundary (see
+  Resume and fork continuity).
+
+The fork/branch history builder (`build_summarized_fork_history`) deliberately
+omits the continuity tail and produces a minimal resume artifact (envelope +
+summary + retained users only).
 
 ## Budget and Limits
 

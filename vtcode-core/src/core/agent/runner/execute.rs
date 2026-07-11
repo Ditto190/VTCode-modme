@@ -673,11 +673,13 @@ impl AgentRunner {
                     Some(2000)
                 };
 
-                self.summarize_conversation_if_needed(
+                self.maybe_auto_compact(
                     &mut runtime.state,
+                    &mut event_recorder,
+                    &turn_model,
                     preserve_recent_turns,
-                    utilization,
-                );
+                )
+                .await;
 
                 let parallel_tool_config = if self.model.len() < 20 {
                     None

@@ -1320,7 +1320,11 @@ mod tests {
             }))
         );
 
-        ctx.vt_cfg = Some(Box::leak(Box::new(VTCodeConfig::default())));
+        // Default now enables auto-compaction, so explicitly disable it here to
+        // assert the "no context management payload" (disabled) path.
+        let mut disabled_cfg = VTCodeConfig::default();
+        disabled_cfg.agent.harness.auto_compaction_enabled = false;
+        ctx.vt_cfg = Some(Box::leak(Box::new(disabled_cfg)));
         let built = build_turn_request(
             &mut ctx,
             1,

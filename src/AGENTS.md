@@ -17,6 +17,7 @@
   allocator memory pinning; use it before changing the default allocator (see Gotchas).
 - `vtcode_ui::tui::panic_hook` installs custom panic handler — must run before any output.
 - `agent/runloop/` contains the single-agent runloop. Multi-agent is in `vtcode-core::subagents`.
+- `agent/runloop/unified/turn/compaction/` is a **thin delegator** — all compaction logic (auto/manual orchestration, memory envelope, dedup, thresholds) lives in `vtcode-core::compaction`. Do not re-implement compaction here; call the shared orchestrator.
 
 ## Gotchas
 

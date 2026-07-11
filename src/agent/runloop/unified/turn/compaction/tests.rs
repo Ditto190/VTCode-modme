@@ -436,7 +436,9 @@ async fn manual_compaction_succeeds_without_server_side_support() {
     .expect("history should compact");
 
     assert_eq!(outcome.original_len, 12);
-    assert_eq!(outcome.compacted_len, 5);
+    // Pre-envelope length: summary + 4 retained user messages + 2-message
+    // continuity tail (the most recent turn is always kept verbatim).
+    assert_eq!(outcome.compacted_len, 7);
     assert_local_compaction_history(&history, 0);
     assert_eq!(
         session_stats.previous_response_id_for("stub", "stub-model"),
@@ -1551,7 +1553,9 @@ async fn auto_compaction_replaces_history_and_clears_response_chain() {
     .expect("history should compact");
 
     assert_eq!(outcome.original_len, 12);
-    assert_eq!(outcome.compacted_len, 5);
+    // Post-envelope length: summary + 4 retained user messages + 2-message
+    // continuity tail + the injected session memory envelope (index 4).
+    assert_eq!(outcome.compacted_len, 8);
     assert_local_compaction_history(&history, 4);
     assert!(
         history[0]
@@ -1600,7 +1604,9 @@ async fn targeted_compaction_preserves_prefix_and_replaces_suffix() {
 
     assert_eq!(&history[..1], preserved_prefix.as_slice());
     assert_eq!(outcome.original_len, 12);
-    assert_eq!(outcome.compacted_len, 6);
+    // Prefix (1, preserved) + suffix (summary + 4 retained users + continuity
+    // tail). Pre-envelope length.
+    assert_eq!(outcome.compacted_len, 7);
     assert!(history.len() >= 5);
     assert!(
         history
@@ -1995,7 +2001,9 @@ async fn compaction_strips_existing_memory_envelope_before_recompacting() {
     .expect("history should compact");
 
     assert_eq!(outcome.original_len, 12);
-    assert_eq!(outcome.compacted_len, 5);
+    // Pre-envelope length: summary + 4 retained user messages + 2-message
+    // continuity tail (the most recent turn is always kept verbatim).
+    assert_eq!(outcome.compacted_len, 7);
     assert_eq!(
         history
             .iter()

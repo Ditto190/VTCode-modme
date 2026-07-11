@@ -1061,7 +1061,7 @@ const fn default_harness_max_parallel_tool_calls() -> usize {
 
 #[inline]
 const fn default_harness_auto_compaction_enabled() -> bool {
-    false
+    true
 }
 
 const fn default_harness_compact_on_model_switch() -> bool {

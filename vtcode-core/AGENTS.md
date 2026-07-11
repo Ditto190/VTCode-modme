@@ -4,7 +4,7 @@
 
 ## Key Modules
 
-`core/agent/` runtime | `llm/` **thin re-export layer** + `models_manager/` + `factory.rs` + `cgp.rs` | `tools/` + `tool_policy.rs` registry | `safety/` + `sandboxing/` + `exec_policy/` + `command_safety/` policies | `config/` + `constants.rs` | `context/` + `memory/` conversation | `prompts/` | `exec/events.rs` (re-exports `vtcode-exec-events::ThreadEvent`) | `git/` worktree management | `loop_memory.rs` + `loop_state.rs` loop persistence | `tools/web_search/` | `tools/defuddle/` | `tools/outline_search/`
+`core/agent/` runtime | `llm/` **thin re-export layer** + `models_manager/` + `factory.rs` + `cgp.rs` | `tools/` + `tool_policy.rs` registry | `safety/` + `sandboxing/` + `exec_policy/` + `command_safety/` policies | `config/` + `constants.rs` | `context/` + `memory/` conversation | `prompts/` | `exec/events.rs` (re-exports `vtcode-exec-events::ThreadEvent`) | `git/` worktree management | `loop_memory.rs` + `loop_state.rs` loop persistence | `tools/web_search/` | `tools/defuddle/` | `tools/outline_search/` | `compaction/` unified auto+manual orchestrator + shared memory envelope (single source of truth for both runloops)
 
 ## Rules
 
