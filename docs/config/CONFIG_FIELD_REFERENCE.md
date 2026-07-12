@@ -62,6 +62,8 @@ python3 scripts/generate_config_field_reference.py
 | `agent.harness.confidence_escalation.prompt_user_on_exhaust` | `boolean` | no | `true` | Whether to prompt the user when the escalation chain is exhausted. When false, the chain falls through directly to abort-with-partial-results. |
 | `agent.harness.confidence_escalation.use_llm_confidence` | `boolean` | no | `false` | Whether to solicit LLM-based confidence estimation alongside heuristics. When false (default), only heuristic signals (error history, tool class) are used to estimate p_success. |
 | `agent.harness.continuation_policy` | `string` | no | `"all"` | Controls whether harness-managed continuation loops are enabled. |
+| `agent.harness.context_reset_mode` | `string` | no | `"off"` | When to trigger a context reset (clean session from artifacts only). Options: `off`, `on_stall`, `on_compaction`. Distinct from compaction. |
+| `agent.harness.context_reset_stall_threshold` | `integer` | no | `2` | Number of consecutive stalled turns before `on_stall` context reset triggers. |
 | `agent.harness.event_log_path` | `null \| string` | no | `null` | Optional JSONL event log path for harness events. Defaults to `~/.vtcode/sessions/` when unset. |
 | `agent.harness.max_budget_usd` | `null \| number` | no | `null` | Optional maximum estimated API cost in USD before VT Code stops the session. |
 | `agent.harness.max_parallel_tool_calls` | `integer` | no | `4` | Maximum number of tool calls that may execute concurrently within a single parallel batch. Set to `0` to disable the cap (unlimited concurrency). Default: 4. |

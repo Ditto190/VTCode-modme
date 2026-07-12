@@ -371,6 +371,25 @@ pub enum ExecSubcommand {
         long_about = "Resume a previous exec session with a follow-up prompt.\n\nExamples:\n  vtcode exec resume session-123 \"continue from the prior investigation\"\n  vtcode exec resume --last \"continue from the prior investigation\"\n  echo \"continue from stdin\" | vtcode exec resume --last"
     )]
     Resume(ExecResumeArgs),
+    /// Run an evaluation suite for regression or capability testing
+    #[command(
+        long_about = "Run an evaluation suite against the agent. Each task in the suite is\n\
+                      executed autonomously, then verified with environment probes.\n\
+                      Results are aggregated into a report with pass@k and pass^k metrics.\n\n\
+                      Examples:\n  vtcode exec eval --suite my-suite.json\n  vtcode exec eval --suite suite.json --output report.md"
+    )]
+    Eval(ExecEvalArgs),
+}
+
+/// Arguments for `vtcode exec eval`.
+#[derive(Args, Debug, Clone)]
+pub struct ExecEvalArgs {
+    /// Path to the eval suite JSON file
+    #[arg(long, value_name = "FILE")]
+    pub suite: String,
+    /// Optional path to write the markdown report
+    #[arg(long, value_name = "FILE")]
+    pub output: Option<String>,
 }
 
 /// Arguments for `vtcode exec resume`.

@@ -156,6 +156,47 @@ These VT Code settings line up with common agent-loop controls:
 - Tool discovery: MCP and tool catalog flows
 - Resume and fork continuity: session archives, thread bootstrap, and compaction envelopes
 
+## Context Reset
+
+Context reset is a context engineering technique **distinct from compaction**.
+While compaction preserves conversational continuity within the same task,
+context reset deliberately discards conversation history so a fresh agent can
+reorient from durable artifacts only.
+
+### When It Triggers
+
+Configured via `agent.harness.context_reset_mode`:
+
+| Mode | Trigger | Use Case |
+|------|---------|----------|
+| `off` (default) | Never | Normal operation |
+| `on_stall` | `context_reset_stall_threshold` consecutive stalled turns | Long-horizon tasks where the agent gets stuck |
+| `on_compaction` | After every auto-compaction | Clear noise accumulated before compaction |
+
+### What Happens
+
+When a reset triggers:
+
+1. A `ContextResetManifest` is written to `.vtcode/tasks/current_context_reset.md`
+   recording the trigger reason, stall count, and timestamp.
+2. The next session starts with **only** `OrientationContext` — no conversation
+   history is carried forward.
+3. The orient phase reads the manifest and prepends a `### Context Reset` banner:
+   "This session starts from a clean context. Reorient from the artifacts below."
+
+### Artifacts That Survive a Reset
+
+All durable artifacts persist across a reset:
+
+- Progress ledger (`vtcode-session-store/src/progress.rs`)
+- Harness artifacts (spec, contract, feature list, evaluation, sprint contract)
+- Loop memory (notes, decisions)
+- Git log and working tree state
+- Compaction summary
+
+See [docs/harness/HARNESS_EVALUATION.md](../harness/HARNESS_EVALUATION.md) for
+the compaction-vs-reset comparison table.
+
 ## Loop Engineering Additions
 
 The subagent layer now supports loop-engineering primitives:

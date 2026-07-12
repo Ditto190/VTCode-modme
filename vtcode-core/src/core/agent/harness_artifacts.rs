@@ -9,6 +9,7 @@ const CURRENT_CONTRACT_FILE: &str = "current_contract.md";
 const CURRENT_EVALUATION_FILE: &str = "current_evaluation.md";
 const CURRENT_SPRINT_CONTRACT_FILE: &str = "current_sprint_contract.md";
 const CURRENT_OUTCOME_VERIFICATION_FILE: &str = "current_outcome_verification.md";
+const CURRENT_FEATURE_LIST_FILE: &str = "current_feature_list.md";
 const SUMMARY_PREVIEW_CHARS: usize = 280;
 
 /// Return the path to the current task tracker file.
@@ -63,6 +64,7 @@ pub fn existing_harness_artifact_paths(workspace_root: &Path) -> Vec<PathBuf> {
         current_evaluation_path(workspace_root),
         current_sprint_contract_path(workspace_root),
         current_outcome_verification_path(workspace_root),
+        current_feature_list_path(workspace_root),
     ]
     .into_iter()
     .filter(|path| path.exists())
@@ -129,6 +131,32 @@ pub fn read_outcome_verification_summary(workspace_root: &Path) -> Option<String
         &current_outcome_verification_path(workspace_root),
         "OutcomeVerification",
     )
+}
+
+/// Return the path to the current feature list artifact file.
+///
+/// The feature list is a persistent artifact the planner creates and the
+/// evaluator modifies during feedback-driven replanning. It lists the
+/// project's features with their acceptance criteria, so each agent session
+/// can pick up an incremental unit of work. Following the long-running
+/// harness pattern: "the planner can achieve replanning by modifying external
+/// files: feature_list, sprint_contract, known_issues, next_actions."
+pub fn current_feature_list_path(workspace_root: &Path) -> PathBuf {
+    workspace_root
+        .join(TASKS_DIR)
+        .join(CURRENT_FEATURE_LIST_FILE)
+}
+
+/// Read a short summary of the feature list artifact, or `None` if unavailable.
+pub fn read_feature_list_summary(workspace_root: &Path) -> Option<String> {
+    read_markdown_summary(&current_feature_list_path(workspace_root), "FeatureList")
+}
+
+/// Write the feature list artifact content to disk and return the path.
+pub async fn write_feature_list(workspace_root: &Path, content: &str) -> Result<PathBuf> {
+    let path = current_feature_list_path(workspace_root);
+    write_artifact(path.as_path(), content, "feature list").await?;
+    Ok(path)
 }
 
 /// Write the outcome verification artifact content to disk and return the path.
@@ -267,6 +295,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn writes_and_summarizes_feature_list() {
+        let temp = tempdir().expect("tempdir");
+
+        write_feature_list(
+            temp.path(),
+            "# Feature List\n\n- [ ] Auth: login endpoint returns JWT\n- [x] API: health check endpoint\n",
+        )
+        .await
+        .expect("write feature list");
+
+        let paths = existing_harness_artifact_paths(temp.path());
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            read_feature_list_summary(temp.path()),
+            Some(
+                "FeatureList: - [ ] Auth: login endpoint returns JWT | - [x] API: health check endpoint"
+                    .to_string()
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn all_artifacts_counted_in_existing_paths() {
         let temp = tempdir().expect("tempdir");
 
@@ -283,8 +333,11 @@ mod tests {
         write_outcome_verification(temp.path(), "# Outcome\ncontent\n")
             .await
             .unwrap();
+        write_feature_list(temp.path(), "# Features\ncontent\n")
+            .await
+            .unwrap();
 
         let paths = existing_harness_artifact_paths(temp.path());
-        assert_eq!(paths.len(), 5);
+        assert_eq!(paths.len(), 6);
     }
 }

@@ -305,8 +305,70 @@ impl<'de> Deserialize<'de> for ContinuationPolicy {
     }
 }
 
+/// When to trigger a context reset — starting a clean session from external
+/// artifacts only, discarding conversation history to clear noise and bad
+/// assumptions. This is distinct from compaction, which preserves
+/// conversational continuity within the same task/agent loop.
+///
+/// Following the context engineering pattern: "Context reset uses external
+/// artifacts (files from note-taking, git logs, test results, task lists) as
+/// startup material to open a clean new context/session. It does not preserve
+/// the full conversation history, and can clear noise and bad assumptions so
+/// that a new agent can reorient itself."
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(rename_all = "snake_case"))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextResetMode {
+    /// Never reset — always carry forward conversation history (current behavior).
+    #[default]
+    Off,
+    /// Reset when the progress monitor detects a stall (no forward progress for
+    /// `context_reset_stall_threshold` consecutive turns).
+    OnStall,
+    /// Reset after every automatic compaction, so the post-compaction session
+    /// starts from artifacts only rather than the compacted summary.
+    OnCompaction,
+}
+
+impl ContextResetMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::OnStall => "on_stall",
+            Self::OnCompaction => "on_compaction",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        let normalized = value.trim();
+        if normalized.eq_ignore_ascii_case("off") {
+            Some(Self::Off)
+        } else if normalized.eq_ignore_ascii_case("on_stall")
+            || normalized.eq_ignore_ascii_case("on-stall")
+        {
+            Some(Self::OnStall)
+        } else if normalized.eq_ignore_ascii_case("on_compaction")
+            || normalized.eq_ignore_ascii_case("on-compaction")
+        {
+            Some(Self::OnCompaction)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ContextResetMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(Self::parse(&raw).unwrap_or_default())
+    }
+}
+
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessOrchestrationMode {
@@ -407,6 +469,17 @@ pub struct AgentHarnessConfig {
     /// Controls whether harness-managed continuation loops are enabled.
     #[serde(default)]
     pub continuation_policy: ContinuationPolicy,
+    /// When to trigger a context reset — starting a clean session from
+    /// external artifacts only, discarding conversation history. Distinct
+    /// from compaction (which preserves conversational continuity).
+    /// Default: `off` (carry forward history as before).
+    #[serde(default)]
+    pub context_reset_mode: ContextResetMode,
+    /// Number of consecutive stall turns before `on_stall` context reset
+    /// triggers. Ignored unless `context_reset_mode = "on_stall"`.
+    /// Default: 2.
+    #[serde(default = "default_harness_context_reset_stall_threshold")]
+    pub context_reset_stall_threshold: u32,
     /// Optional JSONL event log path for harness events.
     /// Defaults to `~/.vtcode/sessions/` when unset.
     #[serde(default)]
@@ -452,6 +525,8 @@ impl Default for AgentHarnessConfig {
             max_budget_usd: None,
             budget_warning_threshold: default_harness_budget_warning_threshold(),
             continuation_policy: ContinuationPolicy::default(),
+            context_reset_mode: ContextResetMode::default(),
+            context_reset_stall_threshold: default_harness_context_reset_stall_threshold(),
             event_log_path: None,
             orchestration_mode: HarnessOrchestrationMode::default(),
             max_revision_rounds: default_harness_max_revision_rounds(),
@@ -1066,6 +1141,11 @@ const fn default_harness_auto_compaction_enabled() -> bool {
 
 const fn default_harness_compact_on_model_switch() -> bool {
     true
+}
+
+#[inline]
+const fn default_harness_context_reset_stall_threshold() -> u32 {
+    2
 }
 
 #[inline]

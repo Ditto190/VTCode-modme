@@ -129,6 +129,7 @@ members = [
     "vtcode-llm",
     "vtcode-skills",
     "vtcode-session-store",
+    "vtcode-eval",
     "xtask",
 ]
 default-members = [".", "vtcode-core", "vtcode-ui"]
@@ -150,6 +151,7 @@ vtcode-mcp = { path = "vtcode-mcp" }
 vtcode-llm = { path = "vtcode-llm" }
 vtcode-skills = { path = "vtcode-skills" }
 vtcode-session-store = { path = "vtcode-session-store" }
+vtcode-eval = { path = "vtcode-eval" }
 
 [workspace.lints]
 # Rust compiler lints
@@ -236,6 +238,7 @@ vtcode-config = { path = "vtcode-config", version = "0.135.4" }
 vtcode-auth = { path = "vtcode-auth", version = "0.135.4" }
 vtcode-core = { path = "vtcode-core", version = "0.135.4", default-features = false }
 vtcode-session-store = { path = "vtcode-session-store", version = "0.135.4" }
+vtcode-eval = { path = "vtcode-eval", version = "0.135.4" }
 anyhow = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }

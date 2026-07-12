@@ -7324,6 +7324,7 @@ dependencies = [
  "vtcode-commons",
  "vtcode-config",
  "vtcode-core",
+ "vtcode-eval",
  "vtcode-session-store",
  "vtcode-ui",
  "webbrowser",
@@ -7605,6 +7606,18 @@ dependencies = [
  "wiremock",
  "xattr",
  "zip",
+]
+
+[[package]]
+name = "vtcode-eval"
+version = "0.135.4"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

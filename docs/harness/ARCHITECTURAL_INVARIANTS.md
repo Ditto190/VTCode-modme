@@ -291,6 +291,16 @@ Before implementation begins, the generator and evaluator must agree on "what co
 
 ---
 
+## 20. Reward Hacking Prevention in Eval Environments
+
+The eval and sandbox environment must not contain shortcuts the agent can exploit instead of solving the real task. Hidden tests must not be in the container, future commits must not be in `.git/objects`, and production secrets must not be exposed directly.
+
+**Violation**: Eval environment contains hidden tests in the filesystem, future commits in `.git/objects`, or production secrets (API keys, OAuth tokens, SSH keys) exposed directly to the agent.
+
+**Remediation**: Store hidden tests outside the container. Use controlled tool capabilities for secrets — the tool internally checks permissions, limits parameters, and logs audit trails. Verify environment state (files, tests, git clean) not agent output text. See [HARNESS_EVALUATION.md](HARNESS_EVALUATION.md) for the full checklist.
+
+---
+
 ## Enforcement
 
 These invariants should be enforced by:

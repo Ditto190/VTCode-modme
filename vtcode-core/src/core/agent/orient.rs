@@ -36,6 +36,13 @@ pub struct OrientationContext {
     pub loop_decisions: Option<String>,
     /// Compaction summary from previous sessions.
     pub compaction_summary: Option<String>,
+    /// Feature list summary — the persistent artifact the planner creates and
+    /// the evaluator modifies during feedback-driven replanning.
+    pub feature_list_summary: Option<String>,
+    /// Context reset manifest — present when the previous session triggered a
+    /// context reset (stall or compaction). Signals that this session starts
+    /// from a clean context and should reorient from artifacts only.
+    pub context_reset_manifest: Option<String>,
     /// Handoff from a previous agent, if any.
     pub handoff: Option<HandoffRequest>,
 }
@@ -76,6 +83,17 @@ impl OrientationContext {
         }
         if let Some(compaction) = &self.compaction_summary {
             parts.push(format!("### Previous Session Summary\n{compaction}"));
+        }
+        if let Some(feature_list) = &self.feature_list_summary {
+            parts.push(format!("### Feature List\n{feature_list}"));
+        }
+        if let Some(reset) = &self.context_reset_manifest {
+            parts.push(format!(
+                "### Context Reset\n\
+                 This session starts from a clean context. Previous conversation \
+                 history was deliberately discarded to clear noise and bad \
+                 assumptions. Reorient from the artifacts below.\n\n{reset}"
+            ));
         }
         if let Some(handoff) = &self.handoff {
             parts.push(handoff.to_handoff_prompt());
@@ -121,6 +139,7 @@ pub fn gather_orientation(workspace_root: &Path, session_id: &str) -> Orientatio
     let evaluation_summary = harness_artifacts::read_evaluation_summary(workspace_root);
     let outcome_verification_summary =
         harness_artifacts::read_outcome_verification_summary(workspace_root);
+    let feature_list_summary = harness_artifacts::read_feature_list_summary(workspace_root);
 
     let recent_git_log = gather_recent_git_log(workspace_root);
 
@@ -134,6 +153,11 @@ pub fn gather_orientation(workspace_root: &Path, session_id: &str) -> Orientatio
     // sessions can read it."
     let compaction_summary = read_compaction_summary(workspace_root);
 
+    // Read context reset manifest if a reset was triggered by the previous
+    // session. This signals that the current session starts from a clean
+    // context and should reorient from artifacts only.
+    let context_reset_manifest = read_context_reset_manifest(workspace_root);
+
     OrientationContext {
         progress_summary,
         spec_summary,
@@ -145,6 +169,8 @@ pub fn gather_orientation(workspace_root: &Path, session_id: &str) -> Orientatio
         loop_notes,
         loop_decisions,
         compaction_summary,
+        feature_list_summary,
+        context_reset_manifest,
         handoff: None,
     }
 }
@@ -185,6 +211,22 @@ fn read_compaction_summary(workspace_root: &Path) -> Option<String> {
     }
 }
 
+/// Read the context reset manifest if a reset was triggered by the previous
+/// session. Returns the markdown content of the manifest, or `None` if no
+/// reset occurred.
+fn read_context_reset_manifest(workspace_root: &Path) -> Option<String> {
+    let path = workspace_root
+        .join(".vtcode")
+        .join("tasks")
+        .join(super::context_reset::CONTEXT_RESET_FILE);
+    let content = std::fs::read_to_string(&path).ok()?;
+    if content.trim().is_empty() {
+        None
+    } else {
+        Some(content)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +244,8 @@ mod tests {
             loop_notes: None,
             loop_decisions: None,
             compaction_summary: None,
+            feature_list_summary: None,
+            context_reset_manifest: None,
             handoff: None,
         };
         assert!(ctx.to_prompt_section().is_none());
@@ -220,6 +264,8 @@ mod tests {
             loop_notes: None,
             loop_decisions: None,
             compaction_summary: None,
+            feature_list_summary: None,
+            context_reset_manifest: None,
             handoff: None,
         };
         let section = ctx.to_prompt_section().expect("should have section");
@@ -241,13 +287,41 @@ mod tests {
             loop_notes: None,
             loop_decisions: None,
             compaction_summary: None,
+            feature_list_summary: Some("auth, api".to_string()),
+            context_reset_manifest: None,
             handoff: None,
         };
         let section = ctx.to_prompt_section().expect("should have section");
         assert!(section.contains("### Progress"));
         assert!(section.contains("### Spec"));
         assert!(section.contains("### Recent Git Log"));
+        assert!(section.contains("### Feature List"));
         // contract should be absent
         assert!(!section.contains("### Contract"));
+    }
+
+    #[test]
+    fn context_reset_manifest_rendered() {
+        let ctx = OrientationContext {
+            progress_summary: Some("Goal: test | Completion: 50%".to_string()),
+            spec_summary: None,
+            contract_summary: None,
+            sprint_contract_summary: None,
+            evaluation_summary: None,
+            outcome_verification_summary: None,
+            recent_git_log: None,
+            loop_notes: None,
+            loop_decisions: None,
+            compaction_summary: None,
+            feature_list_summary: None,
+            context_reset_manifest: Some(
+                "# Context Reset Manifest\n\n**Trigger:** stall".to_string(),
+            ),
+            handoff: None,
+        };
+        let section = ctx.to_prompt_section().expect("should have section");
+        assert!(section.contains("### Context Reset"));
+        assert!(section.contains("clean context"));
+        assert!(section.contains("**Trigger:** stall"));
     }
 }

@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
-use vtcode_config::core::agent::ContinuationPolicy;
+use vtcode_config::core::agent::{ContextResetMode, ContinuationPolicy};
 
 use crate::core::agent::progress_monitor::{ProgressMonitor, milestone_status_from_str};
 use crate::core::agent::session::AgentSessionState;
@@ -70,6 +70,12 @@ pub(super) struct ContinuationController {
     /// across turns/compaction so long-horizon work can be resumed and stalled
     /// runs detected. `None` when progress tracking is disabled for the session.
     progress: Option<ProgressMonitor>,
+    /// Workspace root for writing context reset manifests.
+    workspace_root: PathBuf,
+    /// Context reset mode from harness config.
+    context_reset_mode: ContextResetMode,
+    /// Stall threshold for context reset.
+    context_reset_stall_threshold: u32,
 }
 
 impl ContinuationController {
@@ -80,10 +86,12 @@ impl ContinuationController {
         full_auto_active: bool,
         planning_active: bool,
         review_like: bool,
+        context_reset_mode: ContextResetMode,
+        context_reset_stall_threshold: u32,
     ) -> Self {
         let inferred_verify_commands = infer_default_verify_commands(workspace_root.as_path());
         Self {
-            tracker_tool: TaskTrackerTool::new(workspace_root, planning_workflow_state),
+            tracker_tool: TaskTrackerTool::new(workspace_root.clone(), planning_workflow_state),
             continuation_policy,
             full_auto_active,
             planning_active,
@@ -91,6 +99,9 @@ impl ContinuationController {
             inferred_verify_commands,
             manages_internal_scaffold: false,
             progress: None,
+            workspace_root,
+            context_reset_mode,
+            context_reset_stall_threshold,
         }
     }
 
@@ -314,9 +325,20 @@ impl ContinuationController {
     }
 
     /// Record a setback/stall (no-op without an attached monitor).
+    /// After recording, checks whether a context reset should be triggered
+    /// based on the configured stall threshold and context reset mode.
     fn note_progress_stall(&mut self) {
         if let Some(monitor) = &mut self.progress {
             monitor.record_stall();
+            // Check if the consecutive stall count has crossed the context
+            // reset threshold. If so, write a reset manifest so the next
+            // session starts from a clean context.
+            crate::core::agent::context_reset::maybe_write_reset_on_stall(
+                &self.workspace_root,
+                monitor.consecutive_stalls(),
+                &self.context_reset_mode,
+                self.context_reset_stall_threshold,
+            );
         }
     }
 
@@ -562,6 +584,8 @@ mod tests {
             full_auto_enabled,
             planning_active,
             review_like,
+            ContextResetMode::default(),
+            2,
         )
     }
 

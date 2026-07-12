@@ -45,6 +45,10 @@ pub enum ExecCommandKind {
     Review {
         spec: ReviewSpec,
     },
+    Eval {
+        suite_path: PathBuf,
+        output_path: Option<PathBuf>,
+    },
 }
 
 pub(super) struct ExecPreparedRun {
@@ -69,6 +73,10 @@ pub(crate) fn resolve_exec_command(
 ) -> Result<ExecCommandKind> {
     match command {
         Some(ExecSubcommand::Resume(resume)) => resolve_resume_command(resume),
+        Some(ExecSubcommand::Eval(eval_args)) => Ok(ExecCommandKind::Eval {
+            suite_path: PathBuf::from(&eval_args.suite),
+            output_path: eval_args.output.map(PathBuf::from),
+        }),
         None => Ok(ExecCommandKind::Run { prompt_arg: prompt }),
     }
 }
@@ -113,6 +121,11 @@ pub(super) async fn prepare_exec_run(
             Some(resolve_resume_listing(options, config).await?),
         ),
         ExecCommandKind::Review { spec } => (build_review_prompt(spec), None),
+        ExecCommandKind::Eval { .. } => {
+            // Eval is handled separately in handle_exec_command_impl before
+            // this function is called. If we reach here, it's a bug.
+            bail!("eval command should be handled before prepare_exec_run");
+        }
     };
 
     let mut run_config = config.clone();

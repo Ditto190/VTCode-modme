@@ -5,6 +5,7 @@ pub mod blocked_handoff;
 pub mod bootstrap;
 pub mod compaction_checkpoint;
 pub mod completion;
+pub mod context_reset;
 pub mod harness_artifacts;
 pub mod harness_kernel;
 
@@ -38,6 +39,7 @@ pub mod types;
 // Re-export main types for convenience
 pub use blocked_handoff::{AsyncApprovalArtifacts, BlockedHandoffArtifacts};
 pub use bootstrap::{AgentComponentBuilder, AgentComponentSet};
+pub use context_reset::{ContextResetDecision, ContextResetManifest};
 pub use evaluator::{DimensionScore, EvaluationResult, EvaluationRubric, ScoringDimension};
 pub use features::{FeatureGate, FeatureSet, FeatureStage, OpenResponsesFeature};
 pub use handoff::{BoundaryItem, BoundaryStatus, HandoffReceipt, HandoffRequest};

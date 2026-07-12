@@ -497,6 +497,27 @@ impl AgentSessionState {
         self.reconcile_token_count();
     }
 
+    /// Clear all conversation history for a context reset.
+    ///
+    /// Following the context engineering pattern: "Context reset uses external
+    /// artifacts as startup material to open a clean new context/session. It
+    /// does not preserve the full conversation history."
+    ///
+    /// This clears `messages`, `conversation`, resets the token count, and
+    /// resets the processed-message cursor. The orient context (injected via
+    /// the system prompt) provides the agent with durable artifact references
+    /// to reorient from. Response continuation chains are also cleared since
+    /// they reference the discarded history.
+    pub fn clear_conversation_history(&mut self) {
+        self.messages.clear();
+        self.conversation.clear();
+        self.cached_total_tokens = 0;
+        self.last_processed_message_idx = 0;
+        self.previous_response_chains.clear();
+        self.progress_hashes.clear();
+        self.stagnant_turns = 0;
+    }
+
     pub fn into_results(
         self,
         summary: String,
@@ -778,5 +799,40 @@ mod tests {
             .map(|m| m.estimate_tokens())
             .sum::<usize>();
         assert_eq!(state.total_tokens(), expected);
+    }
+
+    #[test]
+    fn clear_conversation_history_resets_all_state() {
+        let mut state = AgentSessionState::new("session".to_string(), 4, 4, 16_000);
+        state.messages.push(Message::user("hello".to_string()));
+        state.messages.push(Message::assistant("hi".to_string()));
+        state
+            .conversation
+            .push(crate::llm::providers::gemini::wire::Content {
+                role: "user".to_string(),
+                parts: vec![Part::Text {
+                    text: "hello".to_string(),
+                    thought_signature: None,
+                }],
+            });
+        state.reconcile_token_count();
+        state.last_processed_message_idx = 2;
+        state.progress_hashes.push(123);
+        state.stagnant_turns = 3;
+        state.set_previous_response_chain("openai", "gpt-5", Some("resp_1"), vec![]);
+
+        assert!(!state.messages.is_empty());
+        assert!(!state.conversation.is_empty());
+        assert!(state.total_tokens() > 0);
+
+        state.clear_conversation_history();
+
+        assert!(state.messages.is_empty());
+        assert!(state.conversation.is_empty());
+        assert_eq!(state.total_tokens(), 0);
+        assert_eq!(state.last_processed_message_idx, 0);
+        assert!(state.progress_hashes.is_empty());
+        assert_eq!(state.stagnant_turns, 0);
+        assert!(state.previous_response_chains.is_empty());
     }
 }

@@ -24,6 +24,12 @@ pub(super) struct PlannerResponse {
     pub(super) task_title: Option<String>,
     #[serde(default, alias = "tracker_items")]
     pub(super) items: Vec<PlannerItem>,
+    /// Optional feature list markdown. The planner produces this to enumerate
+    /// the project's features with acceptance criteria, so each session can
+    /// pick up an incremental unit of work. The evaluator may modify this
+    /// during feedback-driven replanning.
+    #[serde(default, alias = "feature_list_markdown")]
+    pub(super) feature_list_markdown: Option<String>,
 }
 
 /// A single item in the planner's tracker.
@@ -76,4 +82,27 @@ where
         serde_json::Value::Null => Ok(None),
         _ => Ok(None),
     }
+}
+
+/// Structured response from the replanner LLM after an evaluator rejection.
+///
+/// Following the long-running harness pattern: "the evaluator takes on part of
+/// the local planner role for feedback-driven replanning." The replanner
+/// receives the current artifacts and evaluator feedback, then produces a
+/// revised feature list, contract addendum, and new tracker items.
+#[derive(Debug, Deserialize)]
+pub(super) struct ReplanResponse {
+    /// Revised feature list markdown, replacing the previous one entirely.
+    #[serde(default, alias = "revised_feature_list")]
+    pub(super) revised_feature_list: Option<String>,
+    /// Addendum to append to the execution contract.
+    #[serde(default, alias = "contract_addendum")]
+    pub(super) contract_addendum: Option<String>,
+    /// New tracker items to add (e.g. new acceptance criteria discovered
+    /// through evaluator testing).
+    #[serde(default, alias = "new_tracker_items")]
+    pub(super) new_tracker_items: Vec<PlannerItem>,
+    /// Why the replanner made these changes.
+    #[serde(default)]
+    pub(super) rationale: String,
 }

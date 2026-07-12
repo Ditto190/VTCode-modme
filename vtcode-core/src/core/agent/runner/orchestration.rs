@@ -1,7 +1,7 @@
 use super::AgentRunner;
 use super::continuation::VerificationResult;
 use super::evaluator_types::EvaluatorResponse;
-use super::planner_types::PlannerResponse;
+use super::planner_types::{PlannerResponse, ReplanResponse};
 use crate::core::agent::events::ExecEventRecorder;
 use crate::core::agent::harness_artifacts;
 use crate::core::agent::session::AgentSessionState;
@@ -20,6 +20,7 @@ pub(super) struct PlannerArtifacts {
     pub spec_path: std::path::PathBuf,
     pub contract_path: std::path::PathBuf,
     pub tracker_path: std::path::PathBuf,
+    pub feature_list_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,11 @@ pub(super) struct EvaluationArtifacts {
     pub evaluation_path: std::path::PathBuf,
     pub passed: bool,
     pub summary: String,
+    /// Tracker updates the evaluator requires (parsed from the LLM response
+    /// but previously dropped). Applied during replanning.
+    pub required_tracker_updates: Vec<String>,
+    /// Contract items the evaluator found unmet.
+    pub unmet_contract_items: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,12 +104,23 @@ impl AgentRunner {
             .context("seed planner task tracker")?;
 
         let tracker_path = harness_artifacts::current_task_path(&self._workspace);
+
+        // Build and write the feature list artifact. The planner may provide
+        // it directly; otherwise we derive a fallback from the tracker items.
+        let feature_list_markdown = planner_response
+            .feature_list_markdown
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| self.fallback_feature_list_markdown(&tracker_items));
+        let feature_list_path =
+            harness_artifacts::write_feature_list(&self._workspace, &feature_list_markdown).await?;
+
         event_recorder.harness_event(
             HarnessEventKind::PlanningCompleted,
             Some(format!(
-                "Planner wrote {}, {}, and seeded {}.",
+                "Planner wrote {}, {}, {}, and seeded {}.",
                 spec_path.display(),
                 contract_path.display(),
+                feature_list_path.display(),
                 tracker_path.display()
             )),
             None,
@@ -117,17 +134,16 @@ impl AgentRunner {
             spec_path,
             contract_path,
             tracker_path,
+            feature_list_path,
         })
     }
 
     /// Re-plan from the current state after an evaluator rejection.
     ///
     /// Appends evaluator feedback to the existing spec and contract files so the
-    /// generator can see what went wrong.  This is intentionally LLM-free —
-    /// the artifacts are updated in-place and the next continuation loop picks
-    /// them up transparently.
-    ///
-    /// TODO: Add an LLM-based planner call here that produces a genuinely
+    /// generator can see what went wrong. Uses an LLM-based replanner when
+    /// available to produce a revised feature list, contract addendum, and new
+    /// tracker items. Falls back to annotation-only if the replanner fails.
     pub(super) async fn run_evaluator_phase(
         &mut self,
         task: &Task,
@@ -160,6 +176,8 @@ impl AgentRunner {
             evaluation_path,
             passed,
             summary,
+            required_tracker_updates: evaluator.required_tracker_updates,
+            unmet_contract_items: evaluator.unmet_contract_items,
         })
     }
 
@@ -249,6 +267,7 @@ impl AgentRunner {
                  The plan has been revised based on evaluator feedback.\n\
                  Updated spec: {}\n\
                  Updated contract: {}\n\
+                 Updated feature list: {}\n\
                  Updated tracker: {}\n\n\
                  Latest evaluation summary:\n{}\n\n\
                  Evaluation artifact: {}\n\n\
@@ -256,6 +275,7 @@ impl AgentRunner {
                 *revision_rounds_used,
                 artifacts.spec_path.display(),
                 artifacts.contract_path.display(),
+                artifacts.feature_list_path.display(),
                 artifacts.tracker_path.display(),
                 evaluation.summary,
                 evaluation.evaluation_path.display(),
@@ -304,9 +324,9 @@ impl AgentRunner {
     }
 
     async fn request_planner_response(&mut self, task: &Task) -> Result<PlannerResponse> {
-        const SYSTEM_PROMPT: &str = "You are the VT Code exec harness planner. Expand the task into a concise execution spec, a concrete execution contract, and a tracker. Return strict JSON only with keys: spec_markdown, contract_markdown, task_title, items. Keep spec_markdown high-level and implementation-agnostic. Use contract_markdown and items to define observable done conditions and verification. Each item must include description, outcome, and verify; files is optional. Keep scope tight to the user request and do not invent speculative work.";
+        const SYSTEM_PROMPT: &str = "You are the VT Code exec harness planner. Expand the task into a concise execution spec, a concrete execution contract, a feature list, and a tracker. Return strict JSON only with keys: spec_markdown, contract_markdown, feature_list_markdown, task_title, items. Keep spec_markdown high-level and implementation-agnostic. Use contract_markdown and items to define observable done conditions and verification. feature_list_markdown should enumerate the project's features with acceptance criteria as a markdown checklist. Each item must include description, outcome, and verify; files is optional. Keep scope tight to the user request and do not invent speculative work.";
         let user_prompt = format!(
-            "Plan this task.\n\nTitle: {}\nDescription: {}\nInstructions: {}\n\nProduce:\n- a concise execution spec\n- a concrete execution contract with observable done signals\n- tracker items with explicit verification commands\n\nReturn JSON only.",
+            "Plan this task.\n\nTitle: {}\nDescription: {}\nInstructions: {}\n\nProduce:\n- a concise execution spec\n- a concrete execution contract with observable done signals\n- a feature list with acceptance criteria as a markdown checklist\n- tracker items with explicit verification commands\n\nReturn JSON only.",
             task.title,
             task.description,
             task.instructions.as_deref().unwrap_or("(none)")
@@ -320,6 +340,79 @@ impl AgentRunner {
             "parse planner response",
         )
         .await
+    }
+
+    /// Build a fallback feature list from tracker items when the planner LLM
+    /// doesn't provide one directly.
+    fn fallback_feature_list_markdown(&self, tracker_items: &[serde_json::Value]) -> String {
+        let mut md = String::from("# Feature List\n\n");
+        for item in tracker_items {
+            if let Some(desc) = item.get("description").and_then(|v| v.as_str()) {
+                let outcome = item
+                    .get("outcome")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(unspecified)");
+                md.push_str(&format!("- [ ] {desc} — acceptance: {outcome}\n"));
+            }
+        }
+        if md.lines().count() <= 1 {
+            md.push_str("(No features derived from tracker.)\n");
+        }
+        md
+    }
+
+    /// Request a structured replan from the LLM after an evaluator rejection.
+    ///
+    /// This addresses the long-running harness pattern: "the evaluator takes on
+    /// part of the local planner role for feedback-driven replanning." The
+    /// replanner receives the current artifacts and evaluator feedback, then
+    /// produces a revised feature list, contract addendum, and new tracker
+    /// items. Falls back to `None` on any error (caller uses annotation-only).
+    pub(super) async fn request_replan_response(
+        &mut self,
+        task: &Task,
+        evaluation: &EvaluationArtifacts,
+        revision_round: usize,
+    ) -> Option<ReplanResponse> {
+        let spec_content =
+            tokio::fs::read_to_string(harness_artifacts::current_spec_path(&self._workspace))
+                .await
+                .unwrap_or_default();
+        let contract_content =
+            tokio::fs::read_to_string(harness_artifacts::current_contract_path(&self._workspace))
+                .await
+                .unwrap_or_default();
+        let feature_list_content = tokio::fs::read_to_string(
+            harness_artifacts::current_feature_list_path(&self._workspace),
+        )
+        .await
+        .unwrap_or_default();
+
+        const SYSTEM_PROMPT: &str = "You are the VT Code exec harness replanner. The evaluator rejected the current implementation. Revise the plan based on evaluator feedback. Return strict JSON only with keys: revised_feature_list, contract_addendum, new_tracker_items, rationale. revised_feature_list should be the complete updated feature list markdown (replacing the old one). contract_addendum should be a short markdown section appended to the contract. new_tracker_items should be an array of {description, outcome, verify} objects for newly discovered acceptance criteria. rationale should explain your changes.";
+
+        let user_prompt = format!(
+            "Replan after evaluator rejection (round {}).\n\nTask: {}\n{}\n\nCurrent spec:\n{}\n\nCurrent contract:\n{}\n\nCurrent feature list:\n{}\n\nEvaluator feedback:\n{}\n\nUnmet contract items:\n{}\n\nRequired tracker updates:\n{}\n\nProduce a revised plan. Return JSON only.",
+            revision_round,
+            task.title,
+            task.description,
+            spec_content,
+            contract_content,
+            feature_list_content,
+            evaluation.summary,
+            evaluation.unmet_contract_items.join("; "),
+            evaluation.required_tracker_updates.join("; "),
+        );
+
+        self.request_json_only(
+            SYSTEM_PROMPT,
+            user_prompt,
+            0.2,
+            4096,
+            "replan request failed",
+            "parse replan response",
+        )
+        .await
+        .ok()
     }
 
     async fn request_evaluator_response(
@@ -340,16 +433,22 @@ impl AgentRunner {
             tokio::fs::read_to_string(harness_artifacts::current_task_path(&self._workspace))
                 .await
                 .unwrap_or_default();
+        let feature_list_content = tokio::fs::read_to_string(
+            harness_artifacts::current_feature_list_path(&self._workspace),
+        )
+        .await
+        .unwrap_or_default();
         let changed_files =
             load_changed_file_snapshots(&self._workspace, &session_state.modified_files).await;
         let verification_summary = format_verification_results(verification_results);
-        const SYSTEM_PROMPT: &str = "You are the VT Code exec harness evaluator. You are not the builder. Judge the candidate skeptically and prefer failing borderline cases. Return strict JSON only with keys verdict, summary, high_severity_findings, scorecard, findings, unmet_contract_items, residual_risks, required_tracker_updates. The scorecard must contain 1-5 scores for contract_fidelity, functionality, code_quality, and verification_integrity. Use verdict=pass only when every provided score is at least 4, the tracker/spec/contract all agree, verification evidence is credible, and there are no high-severity issues.";
+        const SYSTEM_PROMPT: &str = "You are the VT Code exec harness evaluator. You are not the builder. Judge the candidate skeptically and prefer failing borderline cases. Return strict JSON only with keys verdict, summary, high_severity_findings, scorecard, findings, unmet_contract_items, residual_risks, required_tracker_updates. The scorecard must contain 1-5 scores for contract_fidelity, functionality, code_quality, and verification_integrity. Use verdict=pass only when every provided score is at least 4, the tracker/spec/contract all agree, verification evidence is credible, and there are no high-severity issues. If you discover new acceptance criteria through testing, add them to required_tracker_updates so the replanner can update the feature list.";
         let user_prompt = format!(
-            "Evaluate this run against the current execution contract.\n\nTask title: {}\nTask description: {}\n\nCurrent spec:\n{}\n\nCurrent contract:\n{}\n\nCurrent tracker:\n{}\n\nVerification results:\n{}\n\nModified files:\n{}\n\nWarnings:\n{}\n\nScoring guidance:\n- contract_fidelity: Did the implementation satisfy the spec and contract rather than a looser interpretation?\n- functionality: Do the implemented paths actually work beyond stubs and happy-path claims?\n- code_quality: Are the changes coherent, scoped, and consistent with local patterns?\n- verification_integrity: Do the tracker state and verification evidence really justify completion?\n\nReturn JSON only.",
+            "Evaluate this run against the current execution contract.\n\nTask title: {}\nTask description: {}\n\nCurrent spec:\n{}\n\nCurrent contract:\n{}\n\nCurrent feature list:\n{}\n\nCurrent tracker:\n{}\n\nVerification results:\n{}\n\nModified files:\n{}\n\nWarnings:\n{}\n\nScoring guidance:\n- contract_fidelity: Did the implementation satisfy the spec and contract rather than a looser interpretation?\n- functionality: Do the implemented paths actually work beyond stubs and happy-path claims?\n- code_quality: Are the changes coherent, scoped, and consistent with local patterns?\n- verification_integrity: Do the tracker state and verification evidence really justify completion?\n\nIf you find new acceptance criteria that should be tracked, list them in required_tracker_updates.\n\nReturn JSON only.",
             task.title,
             task.description,
             spec_content,
             contract_content,
+            feature_list_content,
             tracker_content,
             verification_summary,
             changed_files,

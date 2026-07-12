@@ -89,6 +89,8 @@ impl ProgressLedgerSink for SessionProgressSink {
 pub struct ProgressMonitor {
     ledger: ProgressLedger,
     sink: Box<dyn ProgressLedgerSink>,
+    /// Consecutive turns with no forward progress. Reset to 0 on advance.
+    consecutive_stalls: u32,
 }
 
 impl ProgressMonitor {
@@ -105,7 +107,11 @@ impl ProgressMonitor {
     /// for testing and custom persistence backends).
     #[must_use]
     pub fn with_sink(ledger: ProgressLedger, sink: Box<dyn ProgressLedgerSink>) -> Self {
-        Self { ledger, sink }
+        Self {
+            ledger,
+            sink,
+            consecutive_stalls: 0,
+        }
     }
 
     /// Create a monitor bound to a workspace, loading any previously persisted
@@ -157,13 +163,22 @@ impl ProgressMonitor {
     /// Record that this turn made forward progress (clears any stall).
     pub fn record_advance(&mut self) {
         self.ledger.note_advance();
+        self.consecutive_stalls = 0;
         self.persist();
     }
 
     /// Record that this turn made no forward progress (may set a stall).
     pub fn record_stall(&mut self) {
         self.ledger.note_stall();
+        self.consecutive_stalls = self.consecutive_stalls.saturating_add(1);
         self.persist();
+    }
+
+    /// Number of consecutive turns with no forward progress.
+    /// Used by the context reset logic to decide when to trigger a reset.
+    #[must_use]
+    pub fn consecutive_stalls(&self) -> u32 {
+        self.consecutive_stalls
     }
 
     fn persist(&self) {
@@ -252,5 +267,24 @@ mod tests {
         }]);
         assert!(!monitor.is_complete());
         assert!((monitor.completion_ratio() - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn consecutive_stalls_increment_and_reset() {
+        let mut monitor = ProgressMonitor::new("s3", "goal");
+        assert_eq!(monitor.consecutive_stalls(), 0);
+
+        monitor.record_stall();
+        assert_eq!(monitor.consecutive_stalls(), 1);
+
+        monitor.record_stall();
+        assert_eq!(monitor.consecutive_stalls(), 2);
+
+        // Advance resets the counter.
+        monitor.record_advance();
+        assert_eq!(monitor.consecutive_stalls(), 0);
+
+        monitor.record_stall();
+        assert_eq!(monitor.consecutive_stalls(), 1);
     }
 }
