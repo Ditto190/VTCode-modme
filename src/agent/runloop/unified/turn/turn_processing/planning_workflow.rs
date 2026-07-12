@@ -75,6 +75,11 @@ pub(crate) fn planning_workflow_interview_ready(
     session_stats: &crate::agent::runloop::unified::state::SessionStats,
     plan_session: &PlanningWorkflowSessionState,
 ) -> bool {
+    // Do NOT allow interview when budget is exhausted — no further LLM calls
+    // are possible and re-forcing would loop forever.
+    if plan_session.is_budget_exhausted() {
+        return false;
+    }
     has_discovery_tool(session_stats)
         && plan_session.turns() >= MIN_PLANNING_WORKFLOW_TURNS_BEFORE_INTERVIEW
 }
@@ -85,6 +90,11 @@ pub(crate) fn should_attempt_dynamic_interview_generation(
     session_stats: &crate::agent::runloop::unified::state::SessionStats,
     plan_session: &PlanningWorkflowSessionState,
 ) -> bool {
+    // Do NOT attempt interview generation when budget is exhausted — no further
+    // LLM calls are possible and the interview would loop forever.
+    if plan_session.is_budget_exhausted() {
+        return false;
+    }
     let response_has_plan = response_text
         .map(|text| text.contains("<proposed_plan>"))
         .unwrap_or(false);
@@ -233,6 +243,11 @@ pub(crate) fn maybe_force_planning_workflow_interview(
     conversation_len: usize,
     synthesized_interview_args: Option<Value>,
 ) -> TurnProcessingResult {
+    // Do NOT force the interview when budget is exhausted — no further LLM
+    // calls are possible and re-forcing would loop forever.
+    if plan_session.is_budget_exhausted() {
+        return processing_result;
+    }
     let allow_interview = planning_workflow_interview_ready(session_stats, plan_session);
     let need_state = interview_need_state(response_text, plan_session);
     let response_has_plan = need_state.response_has_plan;

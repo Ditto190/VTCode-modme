@@ -14,6 +14,10 @@ pub(crate) struct PlanningWorkflowSessionState {
     interview_cycles_completed: usize,
     last_interview_cancelled: bool,
     entry_source: Option<PlanningEntrySource>,
+    /// Set when the session budget is exhausted during planning. Prevents
+    /// the interview from being re-forced on the next turn, which would
+    /// loop forever because no further LLM calls are possible.
+    budget_exhausted: bool,
 }
 
 impl PlanningWorkflowSessionState {
@@ -24,10 +28,12 @@ impl PlanningWorkflowSessionState {
         self.interview_cycles_completed = 0;
         self.last_interview_cancelled = false;
         self.entry_source = Some(entry_source);
+        self.budget_exhausted = false;
     }
 
     pub(crate) fn exit(&mut self) {
         self.entry_source = None;
+        self.budget_exhausted = false;
     }
 
     #[cfg(test)]
@@ -79,6 +85,14 @@ impl PlanningWorkflowSessionState {
 
     pub(crate) fn last_interview_cancelled(&self) -> bool {
         self.last_interview_cancelled
+    }
+
+    pub(crate) fn mark_budget_exhausted(&mut self) {
+        self.budget_exhausted = true;
+    }
+
+    pub(crate) fn is_budget_exhausted(&self) -> bool {
+        self.budget_exhausted
     }
 }
 

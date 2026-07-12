@@ -113,6 +113,11 @@ const RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER: &str = "Recovery synthesis faile
 /// `interview_pending`), so this message tells the user to continue planning
 /// rather than re-state a generic request.
 const PLANNING_RECOVERY_SYNTHESIS_FALLBACK: &str = "Planning research completed, but the final synthesis failed (transient provider error). Your gathered context is preserved and the planning interview will be presented on the next turn — re-state your request or press Enter to continue planning.";
+/// Plan-mode fallback when the session budget is exhausted. Unlike the
+/// transient-error variant, this tells the agent to finalize the plan NOW
+/// from the evidence already gathered — the budget is spent and no further
+/// LLM calls are possible this session.
+const PLANNING_BUDGET_EXHAUSTED_FINALIZE: &str = "Budget exhausted. Finalize the plan NOW from the evidence already gathered in this conversation. Do NOT attempt any more tool calls or LLM requests — synthesize your final answer immediately.";
 /// Reason set on `TurnLoopResult::Blocked` when the model emits tool calls or
 /// textual tool-call markup during a tool-free recovery pass.  Shared between
 /// `result_handler` (producer) and `post_tool_recovery` (consumer).
@@ -738,12 +743,36 @@ pub(crate) async fn run_turn_loop(
                         turn_processing_ctx
                             .context_manager
                             .validate_token_tracking(&response_usage);
-                        result = TurnLoopResult::Blocked {
-                            reason: Some(format!(
-                                "Stopped after reaching budget limit (max: ${max:.4}, spent: ${:.4}, cache-adjusted: ${:.4}).",
-                                estimate.raw_usd, estimate.effective_usd
-                            )),
-                        };
+                        // In planning mode, finalize the plan from gathered evidence
+                        // rather than returning Blocked (which would re-enter planning
+                        // on the next turn and loop forever).
+                        if turn_processing_ctx.is_planning_active() {
+                            turn_processing_ctx.plan_session.mark_budget_exhausted();
+                            // Deactivate planning workflow so mutating tools are
+                            // available on the next turn if the user continues.
+                            turn_processing_ctx.tool_registry.disable_planning();
+                            turn_processing_ctx.plan_session.exit();
+                            let finalize_msg = format!(
+                                "{PLANNING_BUDGET_EXHAUSTED_FINALIZE}\n\n\
+                                 Budget: ${:.4}, spent: ${:.4}.",
+                                max, estimate.raw_usd
+                            );
+                            turn_processing_ctx
+                                .working_history
+                                .push(uni::Message::system(finalize_msg));
+                            let _ = turn_processing_ctx.renderer.line(
+                                MessageStyle::Warning,
+                                "Budget exhausted during planning workflow. Finalizing plan from gathered evidence.",
+                            );
+                            result = TurnLoopResult::Completed;
+                        } else {
+                            result = TurnLoopResult::Blocked {
+                                reason: Some(format!(
+                                    "Stopped after reaching budget limit (max: ${max:.4}, spent: ${:.4}, cache-adjusted: ${:.4}).",
+                                    estimate.raw_usd, estimate.effective_usd
+                                )),
+                            };
+                        }
                         break;
                     }
                     vtcode_core::llm::usage_cost::BudgetStatus::Warning { max, .. }

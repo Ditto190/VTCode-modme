@@ -176,7 +176,36 @@ pub(super) fn complete_turn_after_failed_tool_free_recovery(
     // keep the research already gathered this turn (the files-read list) so
     // nothing useful is lost — the generic dead-end message does this, and
     // plan mode must be at least as informative.
+    //
+    // EXCEPTIONS:
+    // 1. If the budget is exhausted, do NOT mark interview as pending
+    //    because no further LLM calls are possible and re-forcing the interview
+    //    would loop forever. Instead, finalize the plan from gathered evidence.
+    // 2. If the error is transient (retryable), do NOT mark interview as pending
+    //    because the same error will likely occur on the next turn, creating
+    //    an infinite loop. Instead, finalize the plan from gathered evidence.
+    let is_transient_error = err
+        .map(|e| vtcode_commons::classify_anyhow_error(e).is_retryable())
+        .unwrap_or(false);
     if let Some(plan_session) = plan_session {
+        if plan_session.is_budget_exhausted() || is_transient_error {
+            let fallback_msg = if plan_session.is_budget_exhausted() {
+                super::PLANNING_BUDGET_EXHAUSTED_FINALIZE
+            } else {
+                PLANNING_RECOVERY_SYNTHESIS_FALLBACK
+            };
+            let planning_fallback = salvaged_text
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| build_recovery_fallback(working_history, fallback_msg));
+            push_final_answer_if_absent(working_history, &planning_fallback);
+            tracing::warn!(
+                stage = failure_stage,
+                budget_exhausted = plan_session.is_budget_exhausted(),
+                transient_error = is_transient_error,
+                "Plan-mode tool-free recovery failed; finalizing plan from gathered evidence."
+            );
+            return TurnLoopResult::Completed;
+        }
         plan_session.mark_interview_pending();
         let planning_fallback = salvaged_text
             .filter(|text| !text.trim().is_empty())
