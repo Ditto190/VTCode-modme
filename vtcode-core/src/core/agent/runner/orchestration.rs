@@ -1,9 +1,7 @@
 use super::AgentRunner;
 use super::continuation::VerificationResult;
-use super::evaluator_types::{EVALUATOR_SCORE_THRESHOLD, EvaluatorResponse, EvaluatorScorecard};
-use super::planner_types::{
-    PlannerItem, PlannerResponse, deserialize_string_or_object, deserialize_string_or_vec,
-};
+use super::evaluator_types::EvaluatorResponse;
+use super::planner_types::PlannerResponse;
 use crate::core::agent::events::ExecEventRecorder;
 use crate::core::agent::harness_artifacts;
 use crate::core::agent::session::AgentSessionState;
@@ -16,7 +14,6 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 use std::fmt::Write;
-use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub(super) struct PlannerArtifacts {

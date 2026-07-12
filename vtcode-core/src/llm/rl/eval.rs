@@ -50,7 +50,7 @@ mod tests {
         let case = json!({ "grade": "pass", "latency": 1.5, "cost_usd": 0.02 });
         let sig = reward_from_eval_report(&case).expect("signal");
         assert!(sig.success);
-        assert_eq!(sig.latency_secs, 1.5);
+        assert!((sig.latency_secs - 1.5).abs() < f64::EPSILON);
         assert!(sig.score(0.5) > 0.0);
     }
 
@@ -67,6 +67,6 @@ mod tests {
         let case = json!({ "success": true, "usage": { "cost_usd": 0.5 } });
         let sig = reward_from_eval_report(&case).expect("signal");
         assert!(sig.success);
-        assert_eq!(sig.cost_usd, 0.5);
+        assert!((sig.cost_usd - 0.5).abs() < f64::EPSILON);
     }
 }

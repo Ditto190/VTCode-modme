@@ -3,7 +3,6 @@ use super::constants::{LOOP_THROTTLE_BASE_MS, LOOP_THROTTLE_MAX_MS};
 use super::tool_execution_guard::ToolExecutionGuard;
 use super::tool_rejection::{
     emit_failed_tool_outputs_for_completed_invocations, reject_denied_tool, reject_invalid_args,
-    reject_tool_call,
 };
 use super::tool_types::{
     PreparedRunnerToolBatch, PreparedRunnerToolCall, RunnerCallAdmission, ToolCallItemRef,
@@ -12,18 +11,17 @@ use crate::core::agent::events::{
     ExecEventRecorder, tool_invocation_completed_event, tool_output_payload_from_value,
 };
 use crate::core::agent::harness_kernel::{
-    FallbackRecommendation, PreparedToolBatch, PreparedToolBatchKind, PreparedToolCall,
-    reduce_tool_result,
+    FallbackRecommendation, PreparedToolBatch, PreparedToolBatchKind, reduce_tool_result,
 };
 use crate::core::agent::runtime::{AgentRuntime, RuntimeControl};
-use crate::exec::events::{ItemCompletedEvent, ThreadEvent, ThreadItemDetails, ToolCallStatus};
+use crate::exec::events::ToolCallStatus;
 use crate::llm::provider::ToolCall;
 use crate::tools::registry::{ToolErrorType, ToolExecutionError};
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use vtcode_commons::ErrorCategory;
 
 fn snapshot_circuit_diagnostics(

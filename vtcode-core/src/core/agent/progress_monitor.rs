@@ -183,6 +183,17 @@ impl ProgressMonitor {
     }
 }
 
+/// Map a free-form tracker status string onto a [`MilestoneStatus`].
+#[must_use]
+pub fn milestone_status_from_str(status: &str) -> MilestoneStatus {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "done" | "complete" | "completed" | "pass" | "passed" | "success" => MilestoneStatus::Done,
+        "blocked" | "stuck" | "waiting" => MilestoneStatus::Blocked,
+        "in_progress" | "in progress" | "active" | "running" => MilestoneStatus::InProgress,
+        _ => MilestoneStatus::Pending,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,17 +251,6 @@ mod tests {
             status: MilestoneStatus::Pending,
         }]);
         assert!(!monitor.is_complete());
-        assert_eq!(monitor.completion_ratio(), 0.0);
-    }
-}
-
-/// Map a free-form tracker status string onto a [`MilestoneStatus`].
-#[must_use]
-pub fn milestone_status_from_str(status: &str) -> MilestoneStatus {
-    match status.trim().to_ascii_lowercase().as_str() {
-        "done" | "complete" | "completed" | "pass" | "passed" | "success" => MilestoneStatus::Done,
-        "blocked" | "stuck" | "waiting" => MilestoneStatus::Blocked,
-        "in_progress" | "in progress" | "active" | "running" => MilestoneStatus::InProgress,
-        _ => MilestoneStatus::Pending,
+        assert!((monitor.completion_ratio() - 0.0).abs() < f32::EPSILON);
     }
 }

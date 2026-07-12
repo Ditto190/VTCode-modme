@@ -8,8 +8,6 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::llm::provider::ToolDefinition;
-
 /// A single step in a fallback chain.
 #[derive(Debug, Clone)]
 pub struct FallbackStep {

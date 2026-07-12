@@ -58,7 +58,7 @@ pub fn write_compaction_checkpoint(workspace_root: &Path, envelope: &SessionMemo
             envelope
                 .touched_files
                 .iter()
-                .map(|f| format!("- {}", f))
+                .map(|f| format!("- {f}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         },
@@ -86,7 +86,7 @@ pub fn write_compaction_checkpoint(workspace_root: &Path, envelope: &SessionMemo
             envelope
                 .constraints
                 .iter()
-                .map(|c| format!("- {}", c))
+                .map(|c| format!("- {c}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         },
@@ -96,7 +96,7 @@ pub fn write_compaction_checkpoint(workspace_root: &Path, envelope: &SessionMemo
             envelope
                 .open_questions
                 .iter()
-                .map(|q| format!("- {}", q))
+                .map(|q| format!("- {q}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         },
@@ -106,7 +106,7 @@ pub fn write_compaction_checkpoint(workspace_root: &Path, envelope: &SessionMemo
             envelope
                 .verification_todo
                 .iter()
-                .map(|t| format!("- {}", t))
+                .map(|t| format!("- {t}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         },

@@ -1,14 +1,10 @@
-use std::collections::{HashSet, hash_map::DefaultHasher};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
 use serde_json::Value;
 
-use crate::config::types::{ReasoningEffortLevel, VerbosityLevel};
 use crate::core::agent::features::FeatureSet;
-use crate::llm::provider::{LLMRequest, Message, ParallelToolConfig, ToolChoice, ToolDefinition};
+use crate::llm::provider::ToolDefinition;
 use crate::tools::tool_intent;
 use crate::tools::validation::commands;
 
@@ -187,6 +183,7 @@ pub fn command_is_safe(command: &str) -> bool {
 mod tests {
     use super::*;
     use crate::config::constants::tools;
+    use crate::llm::provider::{Message, ToolChoice};
 
     fn function_tool(name: &str) -> ToolDefinition {
         ToolDefinition::function(name.to_string(), name.to_string(), serde_json::json!({}))

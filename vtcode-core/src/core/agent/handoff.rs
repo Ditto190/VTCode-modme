@@ -266,7 +266,7 @@ mod tests {
     fn handoff_prompt_includes_state() {
         let request = minimal_request();
         let prompt = request.to_handoff_prompt();
-        assert!(prompt.contains("Code is ready for review") == false); // not in minimal
+        assert!(!prompt.contains("Code is ready for review")); // not in minimal
         assert!(prompt.contains("src/auth.rs"));
         assert!(prompt.contains("Build authentication system"));
         assert!(prompt.contains("HANDOFF FROM PREVIOUS AGENT"));

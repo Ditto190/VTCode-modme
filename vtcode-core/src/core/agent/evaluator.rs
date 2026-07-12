@@ -307,11 +307,11 @@ mod tests {
             description: "test".to_string(),
         }]);
         let result = rubric.evaluate(&[("test", 1.5, "over max")]);
-        assert_eq!(result.scores[0].score, 1.0);
+        assert!((result.scores[0].score - 1.0).abs() < f32::EPSILON);
         assert!(result.overall_pass);
 
         let result2 = rubric.evaluate(&[("test", -0.5, "under min")]);
-        assert_eq!(result2.scores[0].score, 0.0);
+        assert!((result2.scores[0].score - 0.0).abs() < f32::EPSILON);
         assert!(!result2.overall_pass);
     }
 

@@ -25,8 +25,7 @@ use crate::core::agent::session::AgentSessionState;
 use crate::core::agent::task::{ContextItem, Task, TaskOutcome, TaskResults};
 use crate::exec::events::HarnessEventKind;
 use crate::llm::provider::{
-    FinishReason, Message, ResponsesContinuationState, ToolCall, ToolChoice, ToolDefinition,
-    supports_responses_chaining,
+    Message, ToolCall, ToolChoice, ToolDefinition, supports_responses_chaining,
 };
 use crate::llm::providers::gemini::wire::Part;
 use crate::prompts::{

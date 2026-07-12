@@ -314,7 +314,7 @@ mod tests {
     fn empty_ledger_is_complete() {
         let l = ProgressLedger::new("s", "goal");
         assert!(l.is_complete());
-        assert_eq!(l.completion_ratio(), 1.0);
+        assert!((l.completion_ratio() - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
