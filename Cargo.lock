@@ -7621,7 +7621,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "vtcode-commons",
- "vtcode-core",
  "vtcode-exec-events",
 ]
 
