@@ -77,7 +77,6 @@ pub(super) fn inject_planning_workflow_interview(
     processing_result: TurnProcessingResult,
     plan_session: &mut crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState,
     conversation_len: usize,
-    _response_text: Option<&str>,
     synthesized_interview_args: Option<Value>,
 ) -> TurnProcessingResult {
     use vtcode_core::config::constants::tools;
@@ -215,13 +214,15 @@ pub(super) fn filter_interview_tool_calls(
 
     // Do NOT mark interview as pending when budget is exhausted — no further
     // LLM calls are possible and re-forcing would loop forever. The same
-    // applies when post-tool recovery is exhausted (saturated planning context).
+    // applies when post-tool recovery is exhausted (saturated planning context)
+    // or when the interview is permanently denied (policy/capability failure).
     if needs_interview
         && had_interview
         && (had_non_interview || !allow_interview)
         && !response_has_plan
         && !plan_session.is_budget_exhausted()
         && !plan_session.is_recovery_exhausted()
+        && !plan_session.is_interview_denied()
     {
         plan_session.mark_interview_pending();
     }

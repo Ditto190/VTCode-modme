@@ -113,6 +113,14 @@ const RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER: &str = "Recovery synthesis faile
 /// `interview_pending`), so this message tells the user to continue planning
 /// rather than re-state a generic request.
 const PLANNING_RECOVERY_SYNTHESIS_FALLBACK: &str = "Planning research completed, but the final synthesis failed (transient provider error). Your gathered context is preserved and the planning interview will be presented on the next turn — re-state your request or press Enter to continue planning.";
+/// Variant of [`PLANNING_RECOVERY_SYNTHESIS_FALLBACK`] used once
+/// `request_user_input` has been permanently denied by policy this session
+/// (`PlanningWorkflowSessionState::is_interview_denied`). The transient-error
+/// variant above falsely promises "the planning interview will be presented
+/// on the next turn" — a denial recurs on every attempt, so no interview will
+/// ever be shown again. This tells the user the plan will be finalized from
+/// gathered research instead (checkpoint turn_655/turn_660).
+const PLANNING_RECOVERY_SYNTHESIS_FALLBACK_NO_INTERVIEW: &str = "Planning research completed, but the final synthesis failed (transient provider error). Interactive questions are unavailable in this runtime, so the plan will be finalized from the research already gathered — re-state your request or type `implement` / `keep planning` to continue.";
 /// Plan-mode fallback when the session budget is exhausted. Unlike the
 /// transient-error variant, this tells the agent to finalize the plan NOW
 /// from the evidence already gathered — the budget is spent and no further
@@ -478,7 +486,11 @@ pub(crate) async fn run_turn_loop(
     }
 
     // Optimization: Extract all frequently accessed config values once
-    let turn_config = extract_turn_config(ctx.vt_cfg, ctx.is_planning_active());
+    let turn_config = extract_turn_config(
+        ctx.vt_cfg,
+        ctx.is_planning_active(),
+        ctx.renderer.supports_inline_ui(),
+    );
 
     let mut step_count = 0;
     let mut current_max_tool_loops = turn_config.max_tool_loops;
@@ -994,7 +1006,6 @@ pub(crate) async fn run_turn_loop(
                     turn_processing_ctx.working_history,
                     response.content.as_deref(),
                     turn_processing_ctx.session_stats,
-                    turn_processing_ctx.plan_session,
                     Some(turn_processing_ctx.tool_registry.planning_workflow_state()),
                 )
                 .await

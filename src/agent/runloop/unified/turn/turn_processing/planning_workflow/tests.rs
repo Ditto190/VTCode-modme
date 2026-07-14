@@ -367,13 +367,7 @@ fn inject_planning_workflow_interview_preserves_existing_tool_call_when_appendin
         "Reading first.",
     );
 
-    let result = inject_planning_workflow_interview(
-        processing_result,
-        &mut plan_session,
-        2,
-        Some("Reading first."),
-        None,
-    );
+    let result = inject_planning_workflow_interview(processing_result, &mut plan_session, 2, None);
 
     match result {
         TurnProcessingResult::ToolCalls { tool_calls, .. } => {
@@ -621,6 +615,48 @@ fn maybe_force_planning_workflow_interview_reprompts_after_cancelled_cycle() {
             assert_eq!(name, tools::REQUEST_USER_INPUT);
         }
         _ => panic!("Expected interview to re-open after cancellation"),
+    }
+}
+
+/// Regression test for checkpoint turn_655/turn_660: unlike a user cancelling
+/// the interview modal (which re-opens it, see the test above), a permanent
+/// policy/capability denial must never re-inject `request_user_input` — doing
+/// so just repeats the same denial every turn until an unrelated circuit
+/// breaker (tool wall-clock budget) trips.
+#[test]
+fn maybe_force_planning_workflow_interview_never_reinjects_after_denial() {
+    let mut stats = SessionStats::default();
+    let mut plan_session = PlanningWorkflowSessionState::default();
+    stats.record_tool(tools::READ_FILE);
+    plan_session.increment_turns();
+
+    // Simulate the failure_path.rs handling of a policy-denied
+    // `request_user_input` tool execution.
+    plan_session.mark_interview_denied();
+
+    assert!(!planning_workflow_interview_ready(&stats, &plan_session));
+
+    let processing_result = TurnProcessingResult::TextResponse {
+        text: "Continuing planning.".to_string(),
+        reasoning: Vec::new(),
+        reasoning_details: None,
+        proposed_plan: None,
+    };
+
+    let result = maybe_force_planning_workflow_interview(
+        processing_result,
+        Some("Continuing planning."),
+        &mut stats,
+        &mut plan_session,
+        6,
+        None,
+    );
+
+    match result {
+        TurnProcessingResult::TextResponse { text, .. } => {
+            assert_eq!(text, "Continuing planning.");
+        }
+        _ => panic!("Expected no interview tool call after denial"),
     }
 }
 

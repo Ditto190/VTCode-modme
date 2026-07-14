@@ -257,8 +257,10 @@ pub(crate) async fn run_tool_call_with_args(
         }
     }
 
-    let request_user_input_enabled = FeatureSet::from_config(vt_cfg)
-        .request_user_input_enabled(ctx.tool_registry.is_planning_active(), true);
+    let request_user_input_enabled = FeatureSet::from_config(vt_cfg).request_user_input_enabled(
+        ctx.tool_registry.is_planning_active(),
+        ctx.renderer.supports_inline_ui(),
+    );
     if ctx.tool_registry.is_planning_active() && name == tools::REQUEST_USER_INPUT {
         ctx.tool_registry
             .set_planning_phase(PlanLifecyclePhase::InterviewPending);
