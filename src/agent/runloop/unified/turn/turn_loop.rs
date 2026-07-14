@@ -118,13 +118,18 @@ const PLANNING_RECOVERY_SYNTHESIS_FALLBACK: &str = "Planning research completed,
 /// from the evidence already gathered — the budget is spent and no further
 /// LLM calls are possible this session.
 const PLANNING_BUDGET_EXHAUSTED_FINALIZE: &str = "Budget exhausted. Finalize the plan NOW from the evidence already gathered in this conversation. Do NOT attempt any more tool calls or LLM requests — synthesize your final answer immediately.";
-/// Plan-mode fallback when the post-tool recovery cycle cap is reached. This
-/// happens when the planning context is saturated (too much research for a
-/// tool-free synthesis to succeed) and every recovery attempt fails. Like the
-/// budget-exhausted variant, finalize the plan NOW from the evidence gathered
-/// instead of re-forcing the interview — re-researching the still-huge context
-/// would fail again and loop forever across turns.
-const PLANNING_RECOVERY_EXHAUSTED_FINALIZE: &str = "Planning synthesis failed after repeated recovery attempts — the conversation context is saturated. Finalize the plan NOW from the evidence already gathered in this conversation. Do NOT attempt more tool calls or LLM requests — synthesize your final answer immediately.";
+/// User-facing final answer for the budget-exhausted plan-mode dead end. The
+/// `*_FINALIZE` constant above is a directive addressed to the MODEL (injected
+/// as system messages before a synthesis pass); they must never be shown as the
+/// user-visible final answer — no LLM call follows them in the recovery path,
+/// so the user would see a bare instruction and the turn would silently stop
+/// (observed in checkpoint turn_655). These notices tell the USER how to
+/// continue: the plan draft and research live in the session plan file, and the
+/// planning session stays alive so `implement` / `keep planning` still work.
+const PLANNING_BUDGET_EXHAUSTED_USER_NOTICE: &str = "Budget exhausted before the plan synthesis could complete. The research gathered and the current plan draft are preserved in the session plan file (.vtcode/plans/).";
+/// User-facing final answer for the recovery-exhausted plan-mode dead end.
+/// See [`PLANNING_BUDGET_EXHAUSTED_USER_NOTICE`].
+const PLANNING_RECOVERY_EXHAUSTED_USER_NOTICE: &str = "Plan synthesis failed after repeated recovery attempts (provider errors or saturated context). The research gathered and the current plan draft are preserved in the session plan file (.vtcode/plans/).";
 /// Reason set on `TurnLoopResult::Blocked` when the model emits tool calls or
 /// textual tool-call markup during a tool-free recovery pass.  Shared between
 /// `result_handler` (producer) and `post_tool_recovery` (consumer).

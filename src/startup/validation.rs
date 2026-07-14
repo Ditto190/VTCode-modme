@@ -171,7 +171,10 @@ fn collect_token_overhead_warnings(config: &VTCodeConfig) -> Vec<String> {
         ));
     }
 
-    if matches!(config.agent.system_prompt_mode, SystemPromptMode::Specialized) {
+    if matches!(
+        config.agent.system_prompt_mode,
+        SystemPromptMode::Specialized
+    ) {
         warnings.push(
             "agent.system_prompt_mode = 'specialized' sends a larger base system prompt on every request. Prefer 'minimal' or 'lightweight' (default) to reduce token cost.".to_string(),
         );
@@ -210,8 +213,8 @@ mod tests {
     use super::*;
     use assert_fs::TempDir;
     use std::env;
-    use vtcode_config::McpProviderConfig;
     use vtcode_commons::env_lock;
+    use vtcode_config::McpProviderConfig;
     use vtcode_core::config::loader::ConfigBuilder;
 
     #[test]
@@ -392,9 +395,7 @@ mod tests {
         }
         let warnings = collect_token_overhead_warnings(&config);
         assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("MCP servers")),
+            warnings.iter().any(|w| w.contains("MCP servers")),
             "expected a warning for many MCP servers: {warnings:?}"
         );
     }

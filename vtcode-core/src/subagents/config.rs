@@ -621,7 +621,8 @@ mod tests {
     use crate::config::constants::models;
     use vtcode_config::core::permissions::PermissionDefault;
     use vtcode_config::{
-        AgentMode, IsolationMode, McpProviderConfig, SubagentMcpServer, SubagentSource, SubagentSpec,
+        AgentMode, IsolationMode, McpProviderConfig, SubagentMcpServer, SubagentSource,
+        SubagentSpec,
     };
 
     fn test_subagent_spec() -> SubagentSpec {
@@ -726,4 +727,3 @@ mod tests {
         assert_eq!(providers[0].name, "context7");
     }
 }
-

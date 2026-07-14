@@ -36,7 +36,9 @@ fn extract_command(args: &Value) -> Option<(String, &'static str)> {
         }
     }
     for &key in SHELL_COMMAND_KEYS {
-        let Some(value) = args.get(key).and_then(Value::as_str) else { continue };
+        let Some(value) = args.get(key).and_then(Value::as_str) else {
+            continue;
+        };
         // The `command` key trims before the emptiness check; the others do not,
         // matching historical per-key behavior.
         let (text, ok) = if key == "command" {
@@ -215,10 +217,6 @@ pub(super) fn humanize_key(key: &str) -> String {
     result.push_str(&chars.collect::<String>());
     result
 }
-
-
-
-
 
 pub(super) fn collect_param_details(
     args: &Value,

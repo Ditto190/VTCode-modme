@@ -380,7 +380,8 @@ fn estimate_schema_tokens(entries: &[&ToolCatalogEntry], config: &SessionToolsCo
                 config.documentation_mode,
                 entry.max_description_length,
             );
-            let parameters = compact_parameters(entry.parameters.clone(), config.documentation_mode);
+            let parameters =
+                compact_parameters(entry.parameters.clone(), config.documentation_mode);
             let entry = ToolSchemaEntry {
                 name: entry.public_name.clone(),
                 description,
@@ -1379,7 +1380,8 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
+        let catalog =
+            SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
         let definitions = catalog.model_tools(
             SessionToolsConfig::full_public(
                 SessionSurface::Interactive,
@@ -1416,7 +1418,8 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
+        let catalog =
+            SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
         let definitions = catalog.model_tools(
             SessionToolsConfig::full_public(
                 SessionSurface::Interactive,
@@ -1535,14 +1538,19 @@ mod tests {
         );
 
         assert!(
-            definitions.iter().any(|tool| tool.tool_type == "tool_search"),
+            definitions
+                .iter()
+                .any(|tool| tool.tool_type == "tool_search"),
             "MCP presence should trigger tool search even for a small catalog"
         );
         let mcp_tool = definitions
             .iter()
             .find(|tool| tool.function_name() == "mcp__context7__search")
             .expect("mcp tool should be present");
-        assert_eq!(mcp_tool.defer_loading, None, "always-available tool stays eager");
+        assert_eq!(
+            mcp_tool.defer_loading, None,
+            "always-available tool stays eager"
+        );
 
         let direct_mcp_tool = definitions
             .iter()

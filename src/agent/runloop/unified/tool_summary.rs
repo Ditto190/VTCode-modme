@@ -31,7 +31,6 @@ pub(crate) struct ToolSummaryRenderContext<'a> {
     pub workspace_root: Option<&'a Path>,
 }
 
-
 const RUN_SUMMARY_FIRST_WIDTH: usize = 62;
 const RUN_SUMMARY_CONTINUATION_WIDTH: usize = 58;
 
@@ -456,73 +455,37 @@ pub(crate) fn describe_tool_action(
 
     match actual_tool_name {
         actual_name if actual_name == tool_names::RUN_PTY_CMD => describe_shell_command(args)
-            .map(|(desc, used)| {
-                (
-                    format!("{}{}", mcp_label(is_mcp_tool), desc),
-                    used,
-                )
-            })
-            .unwrap_or_else(|| {
-                (
-                    format!("{}command", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                )
-            }),
+            .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
+            .unwrap_or_else(|| (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new())),
         actual_name if actual_name == tool_names::UNIFIED_EXEC => {
             match tool_intent::unified_exec_action(args).unwrap_or("run") {
                 "run" => describe_shell_command(args)
-                    .map(|(desc, used)| {
-                        (
-                            format!("{}{}", mcp_label(is_mcp_tool), desc),
-                            used,
-                        )
-                    })
+                    .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                     .unwrap_or_else(|| {
-                        (
-                            format!("{}command", mcp_label(is_mcp_tool)),
-                            HashSet::new(),
-                        )
+                        (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new())
                     }),
                 "write" => (
-                    format!(
-                        "{}Send command input",
-                        mcp_label(is_mcp_tool)
-                    ),
+                    format!("{}Send command input", mcp_label(is_mcp_tool)),
                     HashSet::new(),
                 ),
                 "poll" => (
-                    format!(
-                        "{}Read command session",
-                        mcp_label(is_mcp_tool)
-                    ),
+                    format!("{}Read command session", mcp_label(is_mcp_tool)),
                     HashSet::new(),
                 ),
                 "continue" => (
-                    format!(
-                        "{}Continue command session",
-                        mcp_label(is_mcp_tool)
-                    ),
+                    format!("{}Continue command session", mcp_label(is_mcp_tool)),
                     HashSet::new(),
                 ),
                 "inspect" => (
-                    format!(
-                        "{}Inspect command output",
-                        mcp_label(is_mcp_tool)
-                    ),
+                    format!("{}Inspect command output", mcp_label(is_mcp_tool)),
                     HashSet::new(),
                 ),
                 "list" => (
-                    format!(
-                        "{}List command sessions",
-                        mcp_label(is_mcp_tool)
-                    ),
+                    format!("{}List command sessions", mcp_label(is_mcp_tool)),
                     HashSet::new(),
                 ),
                 "close" => (
-                    format!(
-                        "{}Close command session",
-                        mcp_label(is_mcp_tool)
-                    ),
+                    format!("{}Close command session", mcp_label(is_mcp_tool)),
                     HashSet::new(),
                 ),
                 "code" => (
@@ -537,12 +500,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::LIST_FILES => {
             { describe_list_files(args, workspace_root) }
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}List files", mcp_label(is_mcp_tool)),
@@ -552,12 +510,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::GREP_FILE => {
             { describe_grep_file(args, workspace_root) }
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}Search with grep", mcp_label(is_mcp_tool)),
@@ -567,12 +520,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::READ_FILE => {
             describe_path_action(args, "Read file", &["path"], workspace_root)
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}Read file", mcp_label(is_mcp_tool)),
@@ -582,12 +530,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::WRITE_FILE => {
             describe_path_action(args, "Write file", &["path"], workspace_root)
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}Write file", mcp_label(is_mcp_tool)),
@@ -597,12 +540,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::EDIT_FILE => {
             describe_path_action(args, "Edit file", &["path"], workspace_root)
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}Edit file", mcp_label(is_mcp_tool)),
@@ -612,12 +550,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::CREATE_FILE => {
             describe_path_action(args, "Create file", &["path"], workspace_root)
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}Create file", mcp_label(is_mcp_tool)),
@@ -640,12 +573,7 @@ pub(crate) fn describe_tool_action(
             };
 
             describe_path_action(args, verb, keys, workspace_root)
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}{}", mcp_label(is_mcp_tool), verb),
@@ -655,12 +583,7 @@ pub(crate) fn describe_tool_action(
         }
         actual_name if actual_name == tool_names::DELETE_FILE => {
             describe_path_action(args, "Delete file", &["path"], workspace_root)
-                .map(|(desc, used)| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), desc),
-                        used,
-                    )
-                })
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                 .unwrap_or_else(|| {
                     (
                         format!("{}Delete file", mcp_label(is_mcp_tool)),
@@ -680,10 +603,7 @@ pub(crate) fn describe_tool_action(
         }
         "fetch" | tool_names::WEB_FETCH => {
             let (desc, used) = describe_fetch_action(args);
-            (
-                format!("{}{}", mcp_label(is_mcp_tool), desc),
-                used,
-            )
+            (format!("{}{}", mcp_label(is_mcp_tool), desc), used)
         }
         _ => (
             format!(

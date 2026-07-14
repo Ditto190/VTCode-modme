@@ -5,8 +5,8 @@ use super::schemas::{
     TOOL_LIST_FILES_CONTENT_PATTERN_ARG, TOOL_LIST_FILES_NAME_PATTERN_ARG,
     TOOL_LIST_FILES_PATH_ARG, TOOL_READ_FILE_PATH_ARG, TOOL_READ_FILE_URI_ARG,
 };
-use vtcode_core::tools::registry::labels::tool_action_label;
 use vtcode_commons::formatting::truncate_middle;
+use vtcode_core::tools::registry::labels::tool_action_label;
 
 pub(super) fn render_title(
     descriptor: ToolDescriptor,
@@ -58,5 +58,3 @@ pub(super) fn render_title(
         ToolDescriptor::Local => tool_action_label(function_name, args).to_string(),
     }
 }
-
-

@@ -498,14 +498,21 @@ fn plan_mode_recovery_exhausted_finalizes_instead_of_reforcing_interview() {
     assert!(matches!(outcome, TurnLoopResult::Completed));
     // Must NOT re-force the interview — that is what caused the infinite loop.
     assert!(!plan_session.interview_pending());
-    // Must finalize from gathered evidence with the recovery-exhausted message.
+    // Must conclude with the USER-facing recovery-exhausted notice (not the
+    // model-addressed `*_FINALIZE` directive) plus the plan-confirmation hint
+    // so the user can continue with `implement` / `keep planning`.
     let last = history.last().unwrap();
     assert_eq!(last.role, uni::MessageRole::Assistant);
     assert_eq!(last.phase, Some(uni::AssistantPhase::FinalAnswer));
+    let text = last.content.as_text();
+    assert!(text.contains("Plan synthesis failed after repeated recovery attempts"));
     assert!(
-        last.content
-            .as_text()
-            .contains("Planning synthesis failed after repeated recovery attempts",)
+        !text.contains("Do NOT attempt more tool calls"),
+        "model directive must not leak into the user-visible final answer"
+    );
+    assert!(
+        text.contains("`implement`"),
+        "final answer must include the plan-confirmation hint"
     );
 }
 

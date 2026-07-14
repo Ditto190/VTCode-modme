@@ -10,7 +10,9 @@ use super::{
     POST_TOOL_RECOVERY_REASON_PLAN_MODE, POST_TOOL_RESUME_DIRECTIVE,
     RECOVERY_CONTRACT_VIOLATION_REASON, RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER,
 };
-use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState;
+use crate::agent::runloop::unified::planning_workflow_state::{
+    PlanningWorkflowSessionState, short_confirmation_hint_with_fallback,
+};
 use crate::agent::runloop::unified::run_loop_context::HarnessTurnState;
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
 
@@ -225,13 +227,22 @@ pub(super) fn complete_turn_after_failed_tool_free_recovery(
         .unwrap_or(false);
     if let Some(plan_session) = plan_session {
         if plan_session.is_budget_exhausted() || plan_session.is_recovery_exhausted() {
+            // NOTE: use the USER-facing notices here, not the `*_FINALIZE`
+            // model directives. No LLM call follows this path, so a model
+            // directive pushed as the final answer just shows the user a bare
+            // instruction and dead-ends the turn (checkpoint turn_655). The
+            // planning session stays alive, so append the confirmation hint —
+            // the user can type `implement` to execute the drafted plan or
+            // `keep planning` to revise it.
             let finalize_message = if plan_session.is_budget_exhausted() {
-                super::PLANNING_BUDGET_EXHAUSTED_FINALIZE
+                super::PLANNING_BUDGET_EXHAUSTED_USER_NOTICE
             } else {
-                super::PLANNING_RECOVERY_EXHAUSTED_FINALIZE
+                super::PLANNING_RECOVERY_EXHAUSTED_USER_NOTICE
             };
-            let planning_fallback =
+            let mut planning_fallback =
                 plan_mode_recovery_fallback(salvaged_text, finalize_message, working_history);
+            planning_fallback.push_str("\n\n");
+            planning_fallback.push_str(&short_confirmation_hint_with_fallback());
             push_final_answer_if_absent(working_history, &planning_fallback);
             tracing::warn!(
                 stage = failure_stage,

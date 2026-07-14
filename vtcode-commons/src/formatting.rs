@@ -550,5 +550,4 @@ mod tests {
         assert_eq!(truncate_path_middle("foo/bar/baz/qux", 12), "foo…/qux");
         assert_eq!(truncate_path_middle("abc", 0), "");
     }
-
 }

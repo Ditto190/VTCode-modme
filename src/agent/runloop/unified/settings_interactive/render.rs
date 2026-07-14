@@ -199,5 +199,3 @@ pub(super) fn summarize_value(value: &TomlValue) -> String {
         _ => "<unsupported>".to_string(),
     }
 }
-
-
