@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.135.8 - 2026-07-14
+
+### Highlights
+#### Bug Fixes
+
+- Remove unused vtcode-core dep from vtcode-eval so it can publish (0f3b92dd) 
+### Other Changes
 ## 0.135.7 - 2026-07-14
 
 ### Highlights
