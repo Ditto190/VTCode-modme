@@ -369,6 +369,67 @@ impl Session {
         }
     }
 
+    /// Toggle the collapsed/expanded state of the thinking/reasoning block whose
+    /// summary line is at the given viewport row. Returns `true` if a block was
+    /// toggled (and the transcript should be re-rendered).
+    pub(crate) fn toggle_thinking_block_at_row(&mut self, width: u16, row: usize) -> bool {
+        if width == 0 {
+            return false;
+        }
+
+        let line_index = {
+            let cache = self.ensure_reflow_cache(width);
+            if cache.row_offsets.is_empty() {
+                return false;
+            }
+            let idx = match cache.row_offsets.binary_search(&row) {
+                Ok(idx) => idx,
+                Err(0) => return false,
+                Err(pos) => pos.saturating_sub(1),
+            };
+            let start = cache.row_offsets.get(idx).copied().unwrap_or(0);
+            let height = cache
+                .messages
+                .get(idx)
+                .map(|msg| msg.lines.len())
+                .unwrap_or(1);
+            if row < start.saturating_add(height.max(1)) {
+                Some(idx)
+            } else {
+                None
+            }
+        };
+
+        let Some(line_index) = line_index else {
+            return false;
+        };
+
+        // Resolve the start of the contiguous Policy (thinking) run.
+        let mut start = line_index;
+        while start > 0 {
+            let Some(prev) = self.lines.get(start - 1) else {
+                break;
+            };
+            if prev.kind != InlineMessageKind::Policy {
+                break;
+            }
+            start -= 1;
+        }
+        if self.lines.get(start).map(|line| line.kind) != Some(InlineMessageKind::Policy) {
+            return false;
+        }
+
+        let collapsed = self
+            .thinking_block_collapsed
+            .get(&start)
+            .copied()
+            .unwrap_or_else(|| self.appearance.thinking_collapsed_by_default());
+        self.thinking_block_collapsed.insert(start, !collapsed);
+        self.mark_line_dirty(start);
+        self.invalidate_scroll_metrics();
+        true
+    }
+
     /// Append text to the current or new message line
     ///
     /// This method handles appending text efficiently by reusing the last line if possible

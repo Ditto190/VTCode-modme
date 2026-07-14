@@ -208,6 +208,10 @@ pub struct Session {
     // --- Message Management ---
     pub(crate) lines: Vec<MessageLine>,
     collapsed_pastes: Vec<CollapsedPaste>,
+    /// Per-run collapse override for thinking/reasoning blocks, keyed by the
+    /// start line index of each contiguous `Policy` run. Absence means "use the
+    /// config default" (`appearance.thinking_collapsed_by_default()`).
+    thinking_block_collapsed: std::collections::HashMap<usize, bool>,
     pub(crate) theme: InlineTheme,
     pub(crate) styles: SessionStyles,
     pub(crate) appearance: AppearanceConfig,

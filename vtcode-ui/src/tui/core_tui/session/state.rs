@@ -399,6 +399,7 @@ impl Session {
     pub(crate) fn clear_screen(&mut self) {
         self.lines.clear();
         self.collapsed_pastes.clear();
+        self.thinking_block_collapsed.clear();
         self.user_scrolled = false;
         self.scroll_manager.set_offset(0);
         self.invalidate_transcript_cache();

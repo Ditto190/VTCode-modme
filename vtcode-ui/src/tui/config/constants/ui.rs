@@ -53,6 +53,9 @@ pub const INLINE_BLOCK_BODY_LEFT: &str = "│";
 pub const INLINE_BLOCK_BODY_RIGHT: &str = "│";
 pub const INLINE_BLOCK_BOTTOM_LEFT: &str = "╰";
 pub const INLINE_BLOCK_BOTTOM_RIGHT: &str = "╯";
+
+/// Collapsed chevron shown on a collapsed thinking/reasoning block summary line.
+pub const INLINE_THINKING_COLLAPSED_CHEVRON: &str = "▸";
 pub const INLINE_BLOCK_HORIZONTAL: &str = "─";
 pub const INLINE_TOOL_HEADER_LABEL: &str = "Tool";
 pub const INLINE_TOOL_ACTION_PREFIX: &str = "→";
