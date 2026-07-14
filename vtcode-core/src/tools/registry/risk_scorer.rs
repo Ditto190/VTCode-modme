@@ -210,18 +210,20 @@ impl ToolRiskScorer {
     /// Whether a tool name performs outbound network access.
     ///
     /// Centralizes the network-tool set so policy auto-approval, risk scoring,
-    /// and the safety gateway stay in agreement. `unified_search:web` is the
-    /// action-qualified form of `unified_search` used when its `web` action
-    /// performs a fetch. `mcp:connect`/`mcp:disconnect` are the action-qualified
-    /// forms of `mcp` used when its `connect`/`disconnect` actions open or tear
-    /// down a network connection to an MCP server.
+    /// and the safety gateway stay in agreement. Action-qualified names cover
+    /// network-bearing actions on otherwise low-risk dispatch tools.
     pub fn is_network_tool(tool_name: &str) -> bool {
         matches!(
             tool_name,
-            tools::WEB_SEARCH | tools::WEB_FETCH | tools::FETCH_URL | tools::DEFUDDLE_FETCH
+            tools::WEB_SEARCH
+                | tools::WEB_FETCH
+                | tools::FETCH_URL
+                | tools::DEFUDDLE_FETCH
+                | tools::MCP_CONNECT_SERVER
+                | tools::MCP_DISCONNECT_SERVER
         ) || matches!(
             tool_name,
-            "unified_search:web" | "mcp:connect" | "mcp:disconnect"
+            "search_dispatch:web" | "mcp:connect" | "mcp:disconnect"
         )
     }
 
@@ -234,7 +236,11 @@ impl ToolRiskScorer {
     fn base_risk_for_tool(tool_name: &str) -> u32 {
         match tool_name {
             // Read-only tools (base: 0)
-            tools::READ_FILE | tools::UNIFIED_SEARCH | tools::MCP => 0,
+            tools::READ_FILE
+            | tools::UNIFIED_SEARCH
+            | tools::MCP_SEARCH_TOOLS
+            | tools::MCP_GET_TOOL_DETAILS
+            | tools::MCP_LIST_SERVERS => 0,
 
             // Safe metadata tools (base: 5)
             "file_info" | "status" | "logs" => 5,
@@ -251,17 +257,14 @@ impl ToolRiskScorer {
             | tools::SEND_PTY_INPUT
             | tools::UNIFIED_EXEC => 35,
 
-            // Network operations (base: 40). `mcp:connect`/`mcp:disconnect`
-            // are the action-qualified forms evaluated when `mcp` is called
-            // with action='connect'/'disconnect'; they must stay in this
-            // tier (not the base-20 write tier) so they score above Low even
-            // in a trusted workspace and are not silently auto-approved,
-            // which would defeat their Prompt/HITL gate.
+            // Network operations (base: 40)
             tools::WEB_SEARCH
             | tools::WEB_FETCH
             | tools::FETCH_URL
             | tools::DEFUDDLE_FETCH
-            | "unified_search:web"
+            | tools::MCP_CONNECT_SERVER
+            | tools::MCP_DISCONNECT_SERVER
+            | "search_dispatch:web"
             | "mcp:connect"
             | "mcp:disconnect" => 40,
 
@@ -313,11 +316,10 @@ mod tests {
         assert!(ToolRiskScorer::is_network_tool(tools::WEB_SEARCH));
         assert!(ToolRiskScorer::is_network_tool(tools::FETCH_URL));
         assert!(ToolRiskScorer::is_network_tool(tools::DEFUDDLE_FETCH));
-        assert!(ToolRiskScorer::is_network_tool("unified_search:web"));
+        assert!(ToolRiskScorer::is_network_tool("search_dispatch:web"));
         assert!(ToolRiskScorer::is_network_tool("mcp:connect"));
         assert!(ToolRiskScorer::is_network_tool("mcp:disconnect"));
         assert!(!ToolRiskScorer::is_network_tool(tools::UNIFIED_SEARCH));
-        assert!(!ToolRiskScorer::is_network_tool(tools::MCP));
         assert!(!ToolRiskScorer::is_network_tool(tools::READ_FILE));
     }
 
@@ -327,7 +329,7 @@ mod tests {
         // flag. Must stay above Low so HITL approval is required.
         for tool in [
             tools::WEB_FETCH,
-            "unified_search:web",
+            "search_dispatch:web",
             "mcp:connect",
             "mcp:disconnect",
         ] {

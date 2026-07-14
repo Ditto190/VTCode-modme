@@ -1,7 +1,7 @@
 use crate::constants::{defaults, execution, llm_generation, prompt_budget};
 use crate::types::{
-    ReasoningEffortLevel, SystemPromptMode, ToolDocumentationMode, UiSurfacePreference,
-    VerbosityLevel,
+    ReasoningEffortLevel, ShellPromptProfile, SystemPromptMode, ToolDocumentationMode,
+    UiSurfacePreference, VerbosityLevel,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -60,11 +60,17 @@ pub struct AgentConfig {
     #[serde(default)]
     pub tool_documentation_mode: ToolDocumentationMode,
 
+    /// Shell syntax profile used in model-facing command examples.
+    /// This controls prompt wording only; command policy remains in the runtime.
+    /// Values: auto, unix_like, powershell.
+    #[serde(default)]
+    pub shell_prompt_profile: ShellPromptProfile,
+
     /// Enable split tool results for massive token savings (Phase 4)
     /// When enabled, tools return dual-channel output:
     /// - llm_content: Concise summary sent to LLM (token-optimized, 53-95% reduction)
     /// - ui_content: Rich output displayed to user (full details preserved)
-    ///   Applies to: unified_search, unified_file, unified_exec
+    ///   Applies to: exec_command, code_search, apply_patch, and retained internal helpers
     ///   Default: true (opt-out for compatibility), recommended for production use
     #[serde(default = "default_enable_split_tool_results")]
     pub enable_split_tool_results: bool,
@@ -920,6 +926,7 @@ impl Default for AgentConfig {
             system_prompt_budget_warning: default_system_prompt_budget_warning(),
             trim_system_prompt: false,
             tool_documentation_mode: ToolDocumentationMode::default(),
+            shell_prompt_profile: ShellPromptProfile::default(),
             enable_split_tool_results: default_enable_split_tool_results(),
             todo_planning_mode: default_todo_planning_mode(),
             ui_surface: UiSurfacePreference::default(),

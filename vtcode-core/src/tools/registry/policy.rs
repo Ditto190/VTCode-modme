@@ -1,5 +1,6 @@
 use rustc_hash::FxHashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
@@ -7,8 +8,88 @@ use serde_json::{Value, json};
 use crate::config::constants::tools;
 use crate::config::mcp::McpAllowListConfig;
 use crate::tool_policy::{ToolExecutionDecision, ToolPolicy, ToolPolicyManager};
+use crate::tools::handlers::SessionToolsConfig;
 use crate::tools::names::canonical_tool_name;
-use crate::tools::tool_intent::{unified_file_action_is, unified_search_action_is};
+use crate::tools::tool_intent::{file_operation_action_is, search_dispatch_action_is};
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(super) struct PolicyCatalogueTestPause {
+    reached: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl PolicyCatalogueTestPause {
+    pub(super) async fn pause(&self) {
+        self.reached.notify_one();
+        self.resume.notified().await;
+    }
+
+    pub(super) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(super) fn resume(&self) {
+        self.resume.notify_one();
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct PolicyCatalogueTestHooks {
+    before_enable_lifecycle: parking_lot::Mutex<Option<PolicyCatalogueTestPause>>,
+    before_disable_lifecycle: parking_lot::Mutex<Option<PolicyCatalogueTestPause>>,
+    after_enable_snapshot: parking_lot::Mutex<Option<PolicyCatalogueTestPause>>,
+    after_refresh_snapshot: parking_lot::Mutex<Option<PolicyCatalogueTestPause>>,
+}
+
+#[cfg(test)]
+impl PolicyCatalogueTestHooks {
+    pub(super) fn install_before_enable_lifecycle(&self, pause: PolicyCatalogueTestPause) {
+        *self.before_enable_lifecycle.lock() = Some(pause);
+    }
+
+    pub(super) fn install_before_disable_lifecycle(&self, pause: PolicyCatalogueTestPause) {
+        *self.before_disable_lifecycle.lock() = Some(pause);
+    }
+
+    pub(super) fn install_after_enable_snapshot(&self, pause: PolicyCatalogueTestPause) {
+        *self.after_enable_snapshot.lock() = Some(pause);
+    }
+
+    pub(super) fn install_after_refresh_snapshot(&self, pause: PolicyCatalogueTestPause) {
+        *self.after_refresh_snapshot.lock() = Some(pause);
+    }
+
+    pub(super) async fn pause_before_enable_lifecycle(&self) {
+        let pause = self.before_enable_lifecycle.lock().take();
+        if let Some(pause) = pause {
+            pause.pause().await;
+        }
+    }
+
+    pub(super) async fn pause_before_disable_lifecycle(&self) {
+        let pause = self.before_disable_lifecycle.lock().take();
+        if let Some(pause) = pause {
+            pause.pause().await;
+        }
+    }
+
+    pub(super) async fn pause_after_enable_snapshot(&self) {
+        let pause = self.after_enable_snapshot.lock().take();
+        if let Some(pause) = pause {
+            pause.pause().await;
+        }
+    }
+
+    pub(super) async fn pause_after_refresh_snapshot(&self) {
+        let pause = self.after_refresh_snapshot.lock().take();
+        if let Some(pause) = pause {
+            pause.pause().await;
+        }
+    }
+}
 
 use super::ToolPermissionDecision;
 use super::risk_scorer::{RiskLevel, ToolRiskContext, ToolRiskScorer, ToolSource, WorkspaceTrust};
@@ -18,6 +99,11 @@ pub(super) struct ToolPolicyGateway {
     tool_policy: Option<ToolPolicyManager>,
     preapproved_tools: FxHashSet<String>,
     full_auto_allowlist: Option<FxHashSet<String>>,
+    full_auto_catalogue_config: Option<SessionToolsConfig>,
+    /// Serialises full-auto lifecycle changes with catalogue snapshots.
+    full_auto_catalogue_lifecycle: Arc<tokio::sync::Mutex<()>>,
+    #[cfg(test)]
+    full_auto_catalogue_test_hooks: Arc<PolicyCatalogueTestHooks>,
     enforce_safe_mode_prompts: bool,
 }
 
@@ -35,6 +121,10 @@ impl ToolPolicyGateway {
             tool_policy,
             preapproved_tools: FxHashSet::default(),
             full_auto_allowlist: None,
+            full_auto_catalogue_config: None,
+            full_auto_catalogue_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(test)]
+            full_auto_catalogue_test_hooks: Arc::new(PolicyCatalogueTestHooks::default()),
             enforce_safe_mode_prompts: false,
         }
     }
@@ -44,6 +134,10 @@ impl ToolPolicyGateway {
             tool_policy: Some(manager),
             preapproved_tools: FxHashSet::default(),
             full_auto_allowlist: None,
+            full_auto_catalogue_config: None,
+            full_auto_catalogue_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(test)]
+            full_auto_catalogue_test_hooks: Arc::new(PolicyCatalogueTestHooks::default()),
             enforce_safe_mode_prompts: false,
         }
     }
@@ -76,12 +170,12 @@ impl ToolPolicyGateway {
         let mut args = args.clone();
         let canonical = canonical_tool_name(name);
         let normalized = canonical;
-        let unified_file_read =
-            normalized == tools::UNIFIED_FILE && unified_file_action_is(&args, "read");
-        let unified_search_list =
-            normalized == tools::UNIFIED_SEARCH && unified_search_action_is(&args, "list");
-        let unified_search_grep =
-            normalized == tools::UNIFIED_SEARCH && unified_search_action_is(&args, "grep");
+        let file_operation_read =
+            normalized == tools::UNIFIED_FILE && file_operation_action_is(&args, "read");
+        let search_dispatch_list =
+            normalized == tools::UNIFIED_SEARCH && search_dispatch_action_is(&args, "list");
+        let search_dispatch_grep =
+            normalized == tools::UNIFIED_SEARCH && search_dispatch_action_is(&args, "grep");
 
         if let Some(constraints) = self
             .tool_policy
@@ -110,7 +204,7 @@ impl ToolPolicyGateway {
             }
 
             match normalized {
-                n if n == tools::UNIFIED_SEARCH && unified_search_list => {
+                n if n == tools::UNIFIED_SEARCH && search_dispatch_list => {
                     if let Some(cap) = constraints.max_items_per_call {
                         let requested = obj
                             .get("max_items")
@@ -125,7 +219,7 @@ impl ToolPolicyGateway {
                         }
                     }
                 }
-                n if n == tools::UNIFIED_SEARCH && unified_search_grep => {
+                n if n == tools::UNIFIED_SEARCH && search_dispatch_grep => {
                     if let Some(cap) = constraints.max_results_per_call {
                         let requested = obj
                             .get("max_results")
@@ -140,7 +234,7 @@ impl ToolPolicyGateway {
                         }
                     }
                 }
-                n if n == tools::READ_FILE || unified_file_read => {
+                n if n == tools::READ_FILE || file_operation_read => {
                     if let Some(cap) = constraints.max_bytes_per_read {
                         let requested = obj
                             .get("max_bytes")
@@ -240,12 +334,13 @@ impl ToolPolicyGateway {
         &mut self,
         allowed_tools: &[String],
         available_tools: &[String],
+        session_tools_config: SessionToolsConfig,
     ) {
         let mut normalized: FxHashSet<String> = FxHashSet::default();
-        if allowed_tools
+        let wildcard = allowed_tools
             .iter()
-            .any(|tool| tool.trim() == tools::WILDCARD_ALL)
-        {
+            .any(|tool| tool.trim() == tools::WILDCARD_ALL);
+        if wildcard {
             for tool in available_tools {
                 let canonical = canonical_tool_name(tool);
                 normalized.insert(canonical.to_owned());
@@ -261,10 +356,42 @@ impl ToolPolicyGateway {
         }
 
         self.full_auto_allowlist = Some(normalized);
+        self.full_auto_catalogue_config = wildcard.then_some(session_tools_config);
     }
 
     pub fn disable_full_auto_permission(&mut self) {
         self.full_auto_allowlist = None;
+        self.full_auto_catalogue_config = None;
+    }
+
+    pub fn full_auto_catalogue_config(&self) -> Option<SessionToolsConfig> {
+        self.full_auto_catalogue_config.clone()
+    }
+
+    pub fn full_auto_catalogue_lifecycle(&self) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(&self.full_auto_catalogue_lifecycle)
+    }
+
+    #[cfg(test)]
+    pub(super) fn full_auto_catalogue_test_hooks(&self) -> Arc<PolicyCatalogueTestHooks> {
+        Arc::clone(&self.full_auto_catalogue_test_hooks)
+    }
+
+    pub fn refresh_full_auto_catalogue(
+        &mut self,
+        session_tools_config: &SessionToolsConfig,
+        available_tools: &[String],
+    ) {
+        if self.full_auto_catalogue_config.as_ref() != Some(session_tools_config) {
+            return;
+        }
+
+        self.full_auto_allowlist = Some(
+            available_tools
+                .iter()
+                .map(|tool| canonical_tool_name(tool).to_owned())
+                .collect(),
+        );
     }
 
     pub fn current_full_auto_allowlist(&self) -> Option<Vec<String>> {
@@ -306,8 +433,8 @@ impl ToolPolicyGateway {
             return Ok(ToolPermissionDecision::Prompt);
         }
 
-        if let Some(allowlist) = self.full_auto_allowlist.as_ref() {
-            if !allowlist.contains(normalized) {
+        if self.full_auto_allowlist.is_some() {
+            if !self.is_allowed_in_full_auto(normalized) {
                 return Ok(ToolPermissionDecision::Deny);
             }
 
@@ -477,7 +604,7 @@ mod tests {
         // Web fetches must require HITL approval and never be auto-promoted to
         // Allow by the low-risk auto-approval heuristic.
         assert!(!ToolPolicyGateway::should_auto_approve_by_risk(
-            "unified_search:web"
+            "search_dispatch:web"
         ));
         assert!(!ToolPolicyGateway::should_auto_approve_by_risk(
             tools::WEB_FETCH
@@ -506,7 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_policy_constraints_caps_inferred_unified_search_list_calls() {
+    async fn apply_policy_constraints_caps_inferred_search_dispatch_list_calls() {
         let gateway = gateway_with_constraints(
             tools::UNIFIED_SEARCH,
             ToolConstraints {
@@ -535,7 +662,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_policy_constraints_caps_inferred_unified_search_grep_calls() {
+    async fn apply_policy_constraints_caps_inferred_search_dispatch_grep_calls() {
         let gateway = gateway_with_constraints(
             tools::UNIFIED_SEARCH,
             ToolConstraints {

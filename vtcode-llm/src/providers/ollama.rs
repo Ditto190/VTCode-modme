@@ -1342,7 +1342,7 @@ mod tests {
     #[test]
     fn build_payload_minimax_tool_followup_omits_tool_call_id() {
         let provider = test_provider();
-        let tool_call_id = "direct_run_pty_cmd_1".to_string();
+        let tool_call_id = "direct_exec_command_1".to_string();
         let request = LLMRequest {
             model: models::ollama::MINIMAX_M27_CLOUD.to_string(),
             messages: vec![
@@ -1350,7 +1350,7 @@ mod tests {
                     String::new(),
                     vec![ToolCall::function(
                         tool_call_id.clone(),
-                        "run_pty_cmd".to_string(),
+                        "exec_command".to_string(),
                         "{\"command\":\"cargo fmt\"}".to_string(),
                     )],
                 ),
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(payload.messages[1].role, "tool");
         assert_eq!(
             payload.messages[1].tool_name.as_deref(),
-            Some("run_pty_cmd")
+            Some("exec_command")
         );
         assert!(payload.messages[1].tool_call_id.is_none());
         assert!(payload.think.is_none());
@@ -1377,7 +1377,7 @@ mod tests {
     #[test]
     fn build_payload_non_minimax_tool_followup_keeps_tool_call_id() {
         let provider = test_provider();
-        let tool_call_id = "direct_run_pty_cmd_1".to_string();
+        let tool_call_id = "direct_exec_command_1".to_string();
         let request = LLMRequest {
             model: models::ollama::GPT_OSS_20B_CLOUD.to_string(),
             messages: vec![
@@ -1385,7 +1385,7 @@ mod tests {
                     String::new(),
                     vec![ToolCall::function(
                         tool_call_id.clone(),
-                        "run_pty_cmd".to_string(),
+                        "exec_command".to_string(),
                         "{\"command\":\"cargo fmt\"}".to_string(),
                     )],
                 ),
@@ -1403,7 +1403,7 @@ mod tests {
         assert_eq!(payload.messages[1].role, "tool");
         assert_eq!(
             payload.messages[1].tool_name.as_deref(),
-            Some("run_pty_cmd")
+            Some("exec_command")
         );
         assert_eq!(
             payload.messages[1].tool_call_id.as_deref(),
@@ -1503,7 +1503,7 @@ mod tests {
                 String::new(),
                 vec![ToolCall::function(
                     "tool_call_0".to_string(),
-                    "unified_file".to_string(),
+                    "apply_patch".to_string(),
                     "{\"action\":\"read\",\"path\":\"docs/ARCHITECTURE.md\",\"offset\":1,\"limit\":100}{\"action\":\"read\",\"path\":\"README.md\"}"
                         .to_string(),
                 )],

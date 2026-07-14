@@ -10,6 +10,7 @@ use linkme::distributed_slice;
 use crate::config::constants::tools;
 use crate::config::types::CapabilityLevel;
 use crate::tool_policy::ToolPolicy;
+use crate::tools::defuddle::{DEFUDDLE_FETCH_DESCRIPTION, DefuddleTool};
 use crate::tools::handlers::{
     FinishPlanningTool, PlanningWorkflowState, StartPlanningTool, TaskTrackerTool,
 };
@@ -20,9 +21,8 @@ use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool};
 use crate::tools::web_search::{WEB_SEARCH_DESCRIPTION, WebSearchTool};
 use serde_json::json;
 use vtcode_utility_tool_specs::{
-    agent_parameters, apply_patch_parameters, cron_parameters, list_files_parameters,
-    read_file_parameters, unified_exec_parameters, unified_file_parameters,
-    unified_search_parameters,
+    agent_parameters, apply_patch_parameters, code_search_parameters, cron_parameters,
+    exec_command_parameters, list_files_parameters, mcp_parameters, write_stdin_parameters,
 };
 
 use super::distributed::{BUILTIN_TOOLS, tool_config};
@@ -61,8 +61,7 @@ pub(super) fn builtin_tool_registrations(
         .collect();
 
     // Sort so that tools with aliases register before tools without aliases.
-    // This prevents alias conflicts: e.g., `unified_search` has alias "list_files"
-    // which would conflict if the internal tool named "list_files" is registered first.
+    // This prevents alias conflicts when an alias matches another registration name.
     // The linker does not guarantee source order for distributed slices.
     // Secondary sort by name ensures deterministic ordering across builds.
     registrations.sort_by(|a, b| {
@@ -124,7 +123,7 @@ fn register_cron(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistratio
         ToolRegistry::cron_executor,
     )
     .with_description(
-        "Create, list, or delete session-scoped scheduled prompts. Use action='create' to schedule a prompt via a cron expression, fixed interval, or one-shot fire time (exactly one of cron/delay_minutes/run_at); action='list' shows scheduled prompts with ids and status; action='delete' removes one by id. Do NOT schedule per-minute jobs — they exhaust the per-turn tool budget and will be rate-limited. Scheduled prompts are session-scoped; jobs die when the vtcode process exits.",
+        "Create, list, or delete session-scoped scheduled prompts. Use action=create to schedule a prompt, action=list to show scheduled prompts, or action=delete to remove one by id. Do not schedule per-minute jobs because they exhaust the per-turn tool budget. Scheduled prompts end when the vtcode process exits.",
     )
     .with_parameter_schema(cron_parameters())
     .with_aliases([
@@ -217,7 +216,7 @@ fn register_agent(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistrati
         ToolRegistry::agent_executor,
     )
     .with_description(
-        "Spawn and steer delegated child agents. Use action='spawn' to delegate a scoped task (the child inherits the current toolset and returns its agent id); action='spawn_subprocess' to launch a managed background subprocess for long-running daemons (file watchers, dev servers) — do NOT use it for one-shot shell commands, use unified_exec instead; action='send_input' to send follow-up input to a running child (requires id); action='resume' to reopen a completed/closed child from saved context (requires id); action='wait' to block the current foreground turn until one or more children reach a terminal state (requires ids array; do NOT pass an empty ids array; default timeout 300s, pass timeout_ms to extend); action='close' to cancel a child's active work and free its tool budget (requires id; do NOT close a child you still need results from — wait first; a closed subtree needs action='resume' to bring back). Children and subprocesses are session-scoped; they die with the vtcode process.",
+        "Spawn and steer delegated child agents. Use action=spawn to delegate a scoped task, action=spawn_subprocess for a managed background process, action=send_input to continue a child, action=resume to reopen a completed child, action=wait for results, or action=close to cancel a child. Use exec_command for one-shot shell commands.",
     )
     .with_parameter_schema(agent_parameters())
     .with_aliases([
@@ -244,30 +243,18 @@ fn register_agent(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistrati
 // ---------------------------------------------------------------------------
 
 #[distributed_slice(BUILTIN_TOOLS)]
-fn register_unified_search(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
+fn register_code_search(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
     ToolRegistration::new(
-        tools::UNIFIED_SEARCH,
+        tools::CODE_SEARCH,
         CapabilityLevel::CodeSearch,
         false,
-        ToolRegistry::unified_search_executor,
+        ToolRegistry::code_search_executor,
     )
     .with_description(
-        "Search and discover: grep text, list files, structural-search (ast-grep), list tools, list errors, web search, web fetch, and list skills. Use action=grep for regex across files; action=structural for AST-shaped queries; action=list to enumerate files; action=web with query for search or url to fetch. Do NOT use action=list to read file contents — use unified_file action=read instead. Results are capped by max_results; increase only when genuinely needed.",
+        "Search code semantically with ast-grep structural patterns or Tree-sitter outlines. Use action=structural for AST-shaped queries and action=outline for symbol maps. Use exec_command.cmd with rg for plain text search. This tool does not perform web, skill, error, tool discovery, or file-listing actions.",
     )
-    .with_parameter_schema(unified_search_parameters())
+    .with_parameter_schema(code_search_parameters())
     .with_permission(ToolPolicy::Allow)
-    .with_aliases([
-        tools::GREP_FILE,
-        tools::LIST_FILES,
-        "grep",
-        "search text",
-        "structural search",
-        "list files",
-        "list tools",
-        "list errors",
-        "show agent info",
-        "fetch",
-    ])
 }
 
 // ---------------------------------------------------------------------------
@@ -297,12 +284,7 @@ fn register_web_fetch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
             },
             "prompt": {
                 "type": "string",
-                "description": "Question or instruction for analyzing the fetched content. Omit for a default summary. Ignored when format='markdown'."
-            },
-            "format": {
-                "type": "string",
-                "enum": ["summary", "markdown"],
-                "description": "Output format. 'summary' (default) returns an analyzed summary plus a temp_file with full content. 'markdown' returns the page as cleaned markdown via the defuddle.md service — rate-limited to ONE call per session; remote http(s) URLs only."
+                "description": "Question or instruction for analyzing the fetched content. Omit for a default summary."
             },
             "max_bytes": {
                 "type": "integer",
@@ -317,13 +299,7 @@ fn register_web_fetch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
         "additionalProperties": false
     }))
     .with_permission(ToolPolicy::Prompt)
-    .with_aliases([
-        "fetch_url",
-        "web",
-        tools::DEFUDDLE_FETCH,
-        "defuddle",
-        "extract_markdown",
-    ])
+    .with_aliases(["fetch_url", "web"])
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +327,7 @@ fn register_web_search(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegis
                 },
                 "pattern": {
                     "type": "string",
-                    "description": "Alias for 'query' (used by the unified_search tool)."
+                    "description": "Alias for 'query'."
                 },
                 "max_results": {
                     "type": "integer",
@@ -365,6 +341,44 @@ fn register_web_search(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegis
         .with_aliases(["search_web", "websearch"])
 }
 
+// ---------------------------------------------------------------------------
+// DEFUDDLE FETCH (built-in, one-shot markdown extraction via defuddle.md)
+// ---------------------------------------------------------------------------
+
+#[distributed_slice(BUILTIN_TOOLS)]
+fn register_defuddle_fetch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
+    let defuddle = DefuddleTool::new();
+    let defuddle_for_factory = defuddle.clone();
+    let defuddle_factory = native_cgp_tool_factory(move || defuddle_for_factory.clone());
+    ToolRegistration::from_tool_instance(
+        tools::DEFUDDLE_FETCH,
+        CapabilityLevel::Basic,
+        defuddle,
+    )
+    .with_native_cgp_factory(defuddle_factory)
+    .with_description(DEFUDDLE_FETCH_DESCRIPTION)
+    .with_parameter_schema(json!({
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https?://",
+                "description": "REMOTE web page URL (http:// or https:// ONLY). Do NOT use for local file paths."
+            },
+            "max_bytes": {
+                "type": "integer",
+                "description": "Hard cap on the returned markdown size in bytes (default: 262144, max: 262144)."
+            }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+    }))
+    .with_permission(ToolPolicy::Prompt)
+    .with_aliases(["defuddle", "extract_markdown"])
+    .with_llm_visibility(false)
+}
+
 #[distributed_slice(BUILTIN_TOOLS)]
 fn register_mcp(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
     ToolRegistration::new(
@@ -374,7 +388,7 @@ fn register_mcp(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration
         ToolRegistry::mcp_executor,
     )
     .with_description(
-        "Discover and manage Model Context Protocol capabilities. Use action='search_tools' to find MCP tools by natural-language query (progressive detail_level: name, name_description, full); action='get_tool_details' to fetch the full input schema for one MCP tool name; action='list_servers' to list configured servers and their connection state; action='connect' to connect one configured server by name when its tools are referenced but not yet initialized (requires user confirmation via ToolPolicy::Prompt); action='disconnect' to free resources or reset a misbehaving server connection (requires user confirmation; do NOT disconnect mid-task — in-flight calls from that server will fail). Do NOT call list_servers every turn — server state changes rarely.",
+        "Discover and manage Model Context Protocol capabilities. Use action=search_tools to find tools, action=get_tool_details to fetch one schema, action=list_servers to inspect configured servers, or action=connect and action=disconnect to manage a named server. Do not disconnect a server while one of its tool calls is active.",
     )
     .with_parameter_schema(mcp_parameters())
     .with_permission(ToolPolicy::Allow)
@@ -394,57 +408,37 @@ fn register_mcp(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration
 // ---------------------------------------------------------------------------
 
 #[distributed_slice(BUILTIN_TOOLS)]
-fn register_unified_exec(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
+fn register_exec_command(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
     ToolRegistration::new(
-        tools::UNIFIED_EXEC,
+        tools::EXEC_COMMAND,
         CapabilityLevel::Bash,
         false,
-        ToolRegistry::unified_exec_executor,
+        ToolRegistry::exec_command_executor,
     )
     .with_description(
-        "Execute shell commands and code: actions run, write, poll, continue, inspect, list, close, code. Use action=run for one-shot commands; action=write + action=poll for interactive shells. For action=code, write Python/JavaScript that filters, aggregates, or loops over data in-process — connected MCP tools are callable as library functions from the snippet, so prefer computing over fetching and return only small summaries instead of dumping large output into context (spooled tool results are plain files you can read/grep from code). Do NOT use action=write without a follow-up poll/close — the session leaks. Default timeout 180s (max 1800s). All shell calls run through the active sandbox policy. Requires Prompt confirmation.",
+        "Use this to execute a shell command through the active sandbox policy and permission checks. Put normal shell tools such as ls, rg, find, cat, sed, awk, build tools, and test tools in cmd. Returns output, exit status, and a reusable session id when the command is still running.",
     )
-    .with_parameter_schema(unified_exec_parameters())
-    .with_aliases([
-        tools::EXEC_COMMAND,
-        tools::WRITE_STDIN,
-        tools::RUN_PTY_CMD,
-        tools::EXECUTE_CODE,
-        "bash",
-        "exec code",
-        "run command",
-    ])
+    .with_parameter_schema(exec_command_parameters())
+    .with_permission(ToolPolicy::Allow)
 }
-
-// ---------------------------------------------------------------------------
-// FILE OPERATIONS
-// ---------------------------------------------------------------------------
 
 #[distributed_slice(BUILTIN_TOOLS)]
-fn register_unified_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
+fn register_write_stdin(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
     ToolRegistration::new(
-        tools::UNIFIED_FILE,
-        CapabilityLevel::Editing,
+        tools::WRITE_STDIN,
+        CapabilityLevel::Bash,
         false,
-        ToolRegistry::unified_file_executor,
+        ToolRegistry::write_stdin_executor,
     )
     .with_description(
-        "Read, write, edit, patch, delete, move, or copy a single file. Use action=read to load file contents (with optional range); action=edit for surgical text replacements (exact old_str, max 800 chars/40 lines per side); action=patch for larger or multi-hunk changes; action=write for new files or full replacement; action=delete to remove a file; action=move to rename; action=copy to duplicate. Do NOT mix action=edit with action=patch in the same call. Requires Prompt confirmation for write/edit/patch/delete/move/copy.",
+        "Write characters to an active exec_command session stdin, then poll for fresh output.",
     )
-    .with_parameter_schema(unified_file_parameters())
-    .with_aliases([
-        tools::READ_FILE,
-        tools::WRITE_FILE,
-        tools::EDIT_FILE,
-        tools::DELETE_FILE,
-        tools::CREATE_FILE,
-        "repo_browser.read_file",
-        "repo_browser.write_file",
-    ])
+    .with_parameter_schema(write_stdin_parameters())
+    .with_permission(ToolPolicy::Allow)
 }
 
 // ---------------------------------------------------------------------------
-// INTERNAL TOOLS (Hidden from LLM, used by unified tools)
+// INTERNAL TOOLS (Hidden from LLM, reused by public tools and harnesses)
 // ---------------------------------------------------------------------------
 
 #[distributed_slice(BUILTIN_TOOLS)]
@@ -458,7 +452,6 @@ fn register_read_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
     .with_description(
         "Read file contents with chunked ranges or indentation-aware block selection. Exposed as a first-class browse tool for the harness surface.",
     )
-    .with_parameter_schema(read_file_parameters())
     .with_permission(ToolPolicy::Allow)
     .with_llm_visibility(false)
 }
@@ -487,7 +480,7 @@ fn register_write_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegis
         false,
         ToolRegistry::write_file_executor,
     )
-    .with_description("Write or overwrite a file with new content. Internal — use unified_file action=write instead.")
+    .with_description("Write or overwrite a file with new content. Internal file helper.")
     .with_llm_visibility(false)
 }
 
@@ -499,7 +492,7 @@ fn register_edit_file(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
         false,
         ToolRegistry::edit_file_executor,
     )
-    .with_description("Apply a surgical text replacement in a file. Internal — use unified_file action=edit instead.")
+    .with_description("Apply a surgical text replacement in a file. Internal file helper.")
     .with_llm_visibility(false)
 }
 
@@ -511,7 +504,7 @@ fn register_run_pty_cmd(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
         false,
         ToolRegistry::run_pty_cmd_executor,
     )
-    .with_description("Run a one-shot PTY command. Internal — use unified_exec action=run instead.")
+    .with_description("Run a one-shot PTY command. Internal execution helper.")
     .with_llm_visibility(false)
 }
 
@@ -523,9 +516,7 @@ fn register_send_pty_input(_plan_state: Option<&PlanningWorkflowState>) -> ToolR
         false,
         ToolRegistry::send_pty_input_executor,
     )
-    .with_description(
-        "Send stdin to an active PTY session. Internal — use unified_exec action=write instead.",
-    )
+    .with_description("Send stdin to an active PTY session. Internal execution helper.")
     .with_llm_visibility(false)
 }
 
@@ -537,9 +528,7 @@ fn register_read_pty_session(_plan_state: Option<&PlanningWorkflowState>) -> Too
         false,
         ToolRegistry::read_pty_session_executor,
     )
-    .with_description(
-        "Read buffered output from a PTY session. Internal — use unified_exec action=poll instead.",
-    )
+    .with_description("Read buffered output from a PTY session. Internal execution helper.")
     .with_llm_visibility(false)
 }
 
@@ -551,7 +540,7 @@ fn register_create_pty_session(_plan_state: Option<&PlanningWorkflowState>) -> T
         false,
         ToolRegistry::create_pty_session_executor,
     )
-    .with_description("Create an interactive PTY session. Internal — managed by unified_exec.")
+    .with_description("Create an interactive PTY session. Internal execution helper.")
     .with_llm_visibility(false)
 }
 
@@ -563,7 +552,7 @@ fn register_list_pty_sessions(_plan_state: Option<&PlanningWorkflowState>) -> To
         false,
         ToolRegistry::list_pty_sessions_executor,
     )
-    .with_description("List all active PTY sessions. Internal — managed by unified_exec.")
+    .with_description("List all active PTY sessions. Internal execution helper.")
     .with_llm_visibility(false)
 }
 
@@ -575,7 +564,7 @@ fn register_close_pty_session(_plan_state: Option<&PlanningWorkflowState>) -> To
         false,
         ToolRegistry::close_pty_session_executor,
     )
-    .with_description("Close a PTY session by ID. Internal — managed by unified_exec.")
+    .with_description("Close a PTY session by ID. Internal execution helper.")
     .with_llm_visibility(false)
 }
 
@@ -600,11 +589,10 @@ fn register_apply_patch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
         ToolRegistry::apply_patch_executor,
     )
     .with_description(crate::tools::apply_patch::with_semantic_anchor_guidance(
-        "Apply patches to files. IMPORTANT: Use VT Code patch format (*** Begin Patch, *** Update File: path, @@ hunks with -/+ lines, *** End Patch), NOT standard unified diff (---/+++ format)."
+        "Apply patches to files after permission checks. IMPORTANT: Use VT Code patch format (*** Begin Patch, *** Update File: path, @@ hunks with -/+ lines, *** End Patch), NOT standard unified diff (---/+++ format)."
     ))
     .with_parameter_schema(apply_patch_parameters())
     .with_permission(ToolPolicy::Prompt)
-    .with_llm_visibility(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -619,40 +607,6 @@ fn register_apply_patch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
 // - list_skills
 // - load_skill
 // - load_skill_resource
-
-fn mcp_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "required": ["action"],
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["search_tools", "get_tool_details", "list_servers", "connect", "disconnect"],
-                "description": "search_tools: find MCP tools by natural-language query. get_tool_details: fetch the full input schema for one MCP tool name. list_servers: list configured servers and their connection state. connect: connect one configured MCP server by name (requires name; requires Prompt confirmation). disconnect: disconnect one active MCP server by name (requires name; requires Prompt confirmation)."
-            },
-            "query": {
-                "type": "string",
-                "description": "search_tools: natural language query describing the MCP capability to find."
-            },
-            "detail_level": {
-                "type": "string",
-                "enum": ["name", "name_description", "full"],
-                "description": "search_tools: response detail level (names only, names with descriptions, or full schema excerpts)."
-            },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 25,
-                "description": "search_tools: maximum number of results to return."
-            },
-            "name": {
-                "type": "string",
-                "description": "get_tool_details: exact MCP tool name to inspect. connect/disconnect: configured MCP server name."
-            }
-        },
-        "additionalProperties": false
-    })
-}
 
 fn with_builtin_behavior(registration: ToolRegistration) -> ToolRegistration {
     if let Some(behavior) = builtin_tool_behavior(registration.name()) {
@@ -669,42 +623,12 @@ mod tests {
     #[test]
     fn distributed_slice_contains_all_builtin_tools() {
         use crate::tools::registry::distributed::BUILTIN_TOOLS;
-        // The distributed slice should contain at least 28 tool factories.
+        // Consolidated action tools keep the factory count bounded.
         // This catches accidentally missing #[distributed_slice] annotations.
-        // (Consolidation via action-param tools — web/cron/agent/mcp merges —
-        // intentionally reduces this count; the `llm_visible_builtin_tool_count_stays_bounded`
-        // test guards the user-visible tool budget.)
         assert!(
             BUILTIN_TOOLS.len() >= 24,
             "expected at least 24 distributed tool factories, found {}",
             BUILTIN_TOOLS.len()
-        );
-    }
-
-    /// Cap regression for tool-count creep.
-    ///
-    /// Every new #[distributed_slice(BUILTIN_TOOLS)] declaration the model can
-    /// see costs the model attention at choice time. This asserts the number
-    /// of LLM-visible builtin tools stays bounded. If a legitimate feature
-    /// needs a new primary tool, consolidate, defer (behind the deferred-load
-    /// path), or deliberately raise `MAX_LLM_VISIBLE_BUILTIN_TOOLS` in review.
-    ///
-    /// Hidden/internal tools (e.g. `read_file`, PTY session tools) set
-    /// `expose_in_llm(false)` and are intentionally excluded from this count.
-    #[test]
-    fn llm_visible_builtin_tool_count_stays_bounded() {
-        const MAX_LLM_VISIBLE_BUILTIN_TOOLS: usize = 15;
-
-        let registrations = builtin_tool_registrations(None);
-        let visible = registrations
-            .iter()
-            .filter(|registration| registration.expose_in_llm())
-            .count();
-
-        assert!(
-            visible <= MAX_LLM_VISIBLE_BUILTIN_TOOLS,
-            "LLM-visible builtin tool count is {visible}, exceeding the cap of {MAX_LLM_VISIBLE_BUILTIN_TOOLS}. \
-             Consolidate, defer, or deliberately raise the cap in review."
         );
     }
 
@@ -729,62 +653,73 @@ mod tests {
             );
         }
 
-        let unified_search = registrations
-            .iter()
-            .find(|registration| registration.name() == tools::UNIFIED_SEARCH)
-            .expect("unified_search registration should exist");
-        assert!(unified_search.native_cgp_factory().is_none());
+        assert!(
+            registrations
+                .iter()
+                .all(|registration| registration.name() != tools::UNIFIED_SEARCH
+                    && registration.name() != tools::UNIFIED_FILE
+                    && registration.name() != tools::UNIFIED_EXEC),
+            "removed unified tools must not have builtin registrations"
+        );
     }
 
     #[test]
-    fn unified_builtins_preserve_public_aliases() {
+    fn codex_baseline_builtins_are_canonical_public_tools() {
         let plan_state = PlanningWorkflowState::new(PathBuf::from("/workspace"));
         let registrations = builtin_tool_registrations(Some(&plan_state));
-        let unified_search = registrations
-            .iter()
-            .find(|registration| registration.name() == tools::UNIFIED_SEARCH)
-            .expect("unified_search registration should exist");
-        assert!(unified_search.expose_in_llm());
-        for alias in [tools::GREP_FILE, tools::LIST_FILES, "structural search"] {
+
+        for tool_name in [tools::EXEC_COMMAND, tools::WRITE_STDIN] {
+            let registration = registrations
+                .iter()
+                .find(|registration| registration.name() == tool_name)
+                .expect("canonical public registration should exist");
+            assert!(registration.expose_in_llm(), "{tool_name} should be public");
             assert!(
-                unified_search
-                    .metadata()
-                    .aliases()
-                    .iter()
-                    .any(|item| item == alias),
-                "expected unified_search alias {alias}"
+                registration.metadata().aliases().is_empty(),
+                "{tool_name} should not rely on aliases"
             );
         }
 
-        let unified_exec = registrations
+        let code_search = registrations
             .iter()
-            .find(|registration| registration.name() == tools::UNIFIED_EXEC)
-            .expect("unified_exec registration should exist");
-        assert!(unified_exec.expose_in_llm());
-        for alias in [tools::EXEC_COMMAND, tools::WRITE_STDIN, tools::RUN_PTY_CMD] {
-            assert!(
-                unified_exec
-                    .metadata()
-                    .aliases()
-                    .iter()
-                    .any(|item| item == alias),
-                "expected unified_exec alias {alias}"
-            );
-        }
+            .find(|registration| registration.name() == tools::CODE_SEARCH)
+            .expect("advanced public code_search registration should exist");
+        assert!(code_search.expose_in_llm(), "code_search should be public");
+        assert!(
+            code_search.metadata().aliases().is_empty(),
+            "code_search should not rely on aliases"
+        );
+        assert!(
+            code_search
+                .metadata()
+                .parameter_schema()
+                .expect("code_search schema")["properties"]["action"]["enum"]
+                .as_array()
+                .expect("action enum")
+                .iter()
+                .any(|value| value == "structural")
+        );
+        assert!(
+            !code_search
+                .metadata()
+                .parameter_schema()
+                .expect("code_search schema")["properties"]["action"]["enum"]
+                .as_array()
+                .expect("action enum")
+                .iter()
+                .any(|value| value == "grep")
+        );
 
-        let unified_file = registrations
-            .iter()
-            .find(|registration| registration.name() == tools::UNIFIED_FILE)
-            .expect("unified_file registration should exist");
-        assert!(unified_file.expose_in_llm());
-        for alias in [tools::READ_FILE, tools::WRITE_FILE, tools::EDIT_FILE] {
+        for tool_name in [
+            tools::UNIFIED_SEARCH,
+            tools::UNIFIED_EXEC,
+            tools::UNIFIED_FILE,
+        ] {
             assert!(
-                unified_file
-                    .metadata()
-                    .aliases()
+                registrations
                     .iter()
-                    .any(|item| item == alias),
-                "expected unified_file alias {alias}"
+                    .all(|registration| registration.name() != tool_name),
+                "{tool_name} must not have a builtin registration"
             );
         }
     }
@@ -798,13 +733,14 @@ mod tests {
             .iter()
             .find(|registration| registration.name() == tools::AGENT)
             .expect("agent registration should exist");
-        let agent_description = agent.metadata().description().expect("agent description");
-        assert!(agent_description.contains("inherits the current toolset"));
-        assert!(agent_description.contains("follow-up input"));
-        assert!(agent_description.contains("long-running daemons"));
-        assert!(agent_description.contains("terminal state"));
-        let agent_aliases = agent.metadata().aliases();
-        for legacy in [
+        assert!(
+            agent
+                .metadata()
+                .description()
+                .expect("agent description")
+                .contains("delegated child agents")
+        );
+        for alias in [
             tools::SPAWN_AGENT,
             tools::SPAWN_BACKGROUND_SUBPROCESS,
             tools::SEND_INPUT,
@@ -813,20 +749,13 @@ mod tests {
             tools::CLOSE_AGENT,
         ] {
             assert!(
-                agent_aliases.iter().any(|alias| alias == legacy),
-                "agent should keep legacy alias {legacy}"
+                agent
+                    .metadata()
+                    .aliases()
+                    .iter()
+                    .any(|candidate| candidate == alias)
             );
         }
-
-        // wait_agent / close_agent no longer register standalone tools; they
-        // are folded into `agent` (action='wait' / action='close') and kept
-        // only as aliases.
-        assert!(
-            registrations
-                .iter()
-                .all(|registration| registration.name() != tools::WAIT_AGENT
-                    && registration.name() != tools::CLOSE_AGENT)
-        );
     }
 
     #[test]
@@ -967,6 +896,7 @@ mod tests {
             tools::TASK_TRACKER,
             tools::FINISH_PLANNING,
             tools::START_PLANNING,
+            tools::CODE_SEARCH,
         ];
 
         for registration in &registrations {
@@ -1007,7 +937,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn default_config_exposed_tool_count_within_cap() {
         // Regression guard for the tool-consolidation work: the number of

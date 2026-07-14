@@ -78,8 +78,8 @@ pub use core::{
     ProviderOverrideConfig, ProviderPromptCachingConfig, ResourceLimitsConfig,
     ResourceLimitsPreset, SandboxConfig, SandboxPolicy, SeccompConfig, SeccompProfilePreset,
     SecurityConfig, SensitivePathsConfig, SkillsConfig, SkillsRenderMode, ThinkingDisplayMode,
-    ToolPolicy, ToolSearchAlgorithm, ToolsConfig, WebFetchConfig, WebFetchMode, WebSearchConfig,
-    WebSearchProvider,
+    ToolPolicy, ToolProfile, ToolSearchAlgorithm, ToolsConfig, WebFetchConfig, WebFetchMode,
+    WebSearchConfig, WebSearchProvider,
 };
 pub use debug::{DebugConfig, TraceLevel};
 pub use defaults::{
@@ -137,8 +137,8 @@ pub use telemetry::TelemetryConfig;
 pub use terminal_title::{DEFAULT_TERMINAL_TITLE_ITEMS, TerminalTitleConfig};
 pub use timeouts::{TimeoutsConfig, resolve_timeout};
 pub use types::{
-    ReasoningEffortLevel, SystemPromptMode, ToolDocumentationMode, UiSurfacePreference,
-    VerbosityLevel,
+    ReasoningEffortLevel, ResolvedShellPromptProfile, ShellProfilePlatform, ShellPromptProfile,
+    SystemPromptMode, ToolDocumentationMode, UiSurfacePreference, VerbosityLevel,
 };
 pub use vtcode_commons::ui_protocol::ThinkingBlockState;
 pub use workspace_env::{

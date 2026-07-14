@@ -165,8 +165,8 @@ pub(super) async fn build_turn_request(
             None
         } else if turn_snapshot.client_local_tool_deferral {
             // No hosted tool search for this provider: deferred tools are
-            // not sent eagerly. The model discovers them via the local
-            // `unified_search action="tools"` (see `[Deferred Tools]` in
+            // not sent eagerly. The model discovers them through the relevant
+            // local discovery tool (see `[Deferred Tools]` in
             // the system prompt, appended in `build_prompt_output`).
             client_local_wire_tools(prompt_output.tool_snapshot.snapshot.clone())
         } else {
@@ -218,7 +218,7 @@ mod tests {
             name: name.to_string(),
             description: format!("{name} description"),
             prompt: prompt.to_string(),
-            tools: Some(vec!["unified_search".to_string()]),
+            tools: Some(vec!["code_search".to_string()]),
             disallowed_tools: vec!["shell".to_string()],
             model: None,
             color: None,
@@ -287,7 +287,7 @@ mod tests {
         );
         backing
             .add_tool_definition(ToolDefinition::function(
-                "unified_search".to_string(),
+                "code_search".to_string(),
                 "Search project files".to_string(),
                 json!({
                     "type": "object",
@@ -355,7 +355,7 @@ mod tests {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         backing
             .add_tool_definition(ToolDefinition::function(
-                "unified_search".to_string(),
+                "code_search".to_string(),
                 "Search project files".to_string(),
                 json!({
                     "type": "object",
@@ -393,7 +393,7 @@ mod tests {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         backing
             .add_tool_definition(ToolDefinition::function(
-                "unified_search".to_string(),
+                "code_search".to_string(),
                 "Search project files".to_string(),
                 json!({
                     "type": "object",
@@ -701,7 +701,7 @@ mod tests {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         backing
             .add_tool_definition(ToolDefinition::function(
-                "unified_search".to_string(),
+                "code_search".to_string(),
                 "Search project files".to_string(),
                 json!({
                     "type": "object",
@@ -737,7 +737,7 @@ mod tests {
             .as_str();
         assert!(runtime_context.contains("## Active Primary Agent Runtime State"));
         assert!(runtime_context.contains("- Active agent: planner"));
-        assert!(runtime_context.contains("- Effective request tools: unified_search"));
+        assert!(runtime_context.contains("- Effective request tools: code_search"));
         assert!(runtime_context.contains(
             "- Session state: planning_workflow=false, auto_permission=false, full_auto=false"
         ));
@@ -796,18 +796,14 @@ mod tests {
     #[tokio::test]
     async fn active_primary_agent_missing_memory_is_noop_and_does_not_expand_tools() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
-        backing
-            .add_tool_definition(named_tool("unified_search"))
-            .await;
-        backing
-            .add_tool_definition(named_tool("unified_file"))
-            .await;
+        backing.add_tool_definition(named_tool("code_search")).await;
+        backing.add_tool_definition(named_tool("apply_patch")).await;
         let workspace = backing.workspace_path().to_path_buf();
         let memory_dir = workspace.join(".vtcode/agent-memory/planner");
 
         let mut spec = test_primary_agent_spec("planner", "Plan carefully.");
         spec.memory = Some(SubagentMemoryScope::Project);
-        spec.tools = Some(vec!["unified_search".to_string()]);
+        spec.tools = Some(vec!["code_search".to_string()]);
         spec.disallowed_tools = Vec::new();
         backing.select_primary_agent_from_specs(&[spec], "planner");
 
@@ -825,7 +821,7 @@ mod tests {
         assert!(!runtime_context.contains("### Memory Appendix"));
         assert!(!runtime_context.contains("Create or update `MEMORY.md`"));
         assert!(!memory_dir.exists());
-        assert_eq!(request_tool_names(&built.request), vec!["unified_search"]);
+        assert_eq!(request_tool_names(&built.request), vec!["code_search"]);
     }
 
     #[tokio::test]
@@ -880,20 +876,13 @@ mod tests {
     #[tokio::test]
     async fn active_primary_agent_tool_allow_list_intersects_baseline_tools() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.add_tool_definition(named_tool("code_search")).await;
+        backing.add_tool_definition(named_tool("apply_patch")).await;
         backing
-            .add_tool_definition(named_tool("unified_search"))
-            .await;
-        backing
-            .add_tool_definition(named_tool("unified_file"))
-            .await;
-        backing
-            .add_tool_definition(named_tool("unified_exec"))
+            .add_tool_definition(named_tool("exec_command"))
             .await;
         let mut spec = test_primary_agent_spec("planner", "Use limited tools.");
-        spec.tools = Some(vec![
-            "unified_search".to_string(),
-            "missing_tool".to_string(),
-        ]);
+        spec.tools = Some(vec!["code_search".to_string(), "missing_tool".to_string()]);
         spec.disallowed_tools = Vec::new();
         backing.select_primary_agent_from_specs(&[spec], "planner");
 
@@ -907,25 +896,18 @@ mod tests {
                 .expect("request should build")
         };
 
-        assert_eq!(request_tool_names(&built.request), vec!["unified_search"]);
+        assert_eq!(request_tool_names(&built.request), vec!["code_search"]);
         assert!(built.has_tools);
     }
 
     #[tokio::test]
     async fn active_primary_agent_deny_list_applies_after_allow_list() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
-        backing
-            .add_tool_definition(named_tool("unified_search"))
-            .await;
-        backing
-            .add_tool_definition(named_tool("unified_file"))
-            .await;
+        backing.add_tool_definition(named_tool("code_search")).await;
+        backing.add_tool_definition(named_tool("apply_patch")).await;
         let mut spec = test_primary_agent_spec("planner", "Use deterministic tools.");
-        spec.tools = Some(vec![
-            "unified_search".to_string(),
-            "unified_file".to_string(),
-        ]);
-        spec.disallowed_tools = vec!["unified_search".to_string()];
+        spec.tools = Some(vec!["code_search".to_string(), "apply_patch".to_string()]);
+        spec.disallowed_tools = vec!["code_search".to_string()];
         backing.select_primary_agent_from_specs(&[spec], "planner");
 
         let built = {
@@ -938,9 +920,9 @@ mod tests {
                 .expect("request should build")
         };
 
-        assert_eq!(request_tool_names(&built.request), vec!["unified_file"]);
+        assert_eq!(request_tool_names(&built.request), vec!["apply_patch"]);
         assert!(
-            system_prompt_text(&built.request).contains("- Effective request tools: unified_file")
+            system_prompt_text(&built.request).contains("- Effective request tools: apply_patch")
         );
     }
 
@@ -951,12 +933,8 @@ mod tests {
             &[vtcode_config::builtin_primary_build_agent()],
             "build",
         );
-        backing
-            .add_tool_definition(named_tool("unified_search"))
-            .await;
-        backing
-            .add_tool_definition(named_tool("unified_file"))
-            .await;
+        backing.add_tool_definition(named_tool("code_search")).await;
+        backing.add_tool_definition(named_tool("apply_patch")).await;
 
         let built = {
             let mut ctx = backing.turn_processing_context();
@@ -970,7 +948,7 @@ mod tests {
 
         assert_eq!(
             request_tool_names(&built.request),
-            vec!["unified_search", "unified_file"]
+            vec!["code_search", "apply_patch"]
         );
         assert_eq!(
             built.continuation_messages,

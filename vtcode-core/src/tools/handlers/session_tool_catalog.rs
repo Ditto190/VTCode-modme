@@ -19,6 +19,7 @@ use vtcode_utility_tool_specs::parse_tool_input_schema;
 
 use super::tool_handler::{ConfiguredToolSpec, ResponsesApiTool, ToolSpec};
 
+pub use crate::config::ToolProfile;
 pub use crate::tools::registry::ToolCatalogSource;
 
 /// The surface (execution context) where tools are exposed.
@@ -60,12 +61,10 @@ pub enum DeferredToolSearchKind {
     Anthropic(ToolSearchAlgorithm),
     /// OpenAI's hosted tool search.
     OpenAIHosted,
-    /// Client-local tool search (`unified_search action="tools"`) for
-    /// providers with no hosted tool search. Unlike the hosted variants,
-    /// this does not add a wire-level tool: `unified_search` is already a
-    /// core tool that is always present. Deferred tool definitions are
-    /// omitted from the request payload entirely (see request assembly)
-    /// rather than sent with `defer_loading: true`.
+    /// Client-local MCP tool search for providers with no hosted tool search.
+    /// `mcp_search_tools` remains available while matched MCP definitions are
+    /// expanded into the next request. Deferred definitions are omitted from
+    /// the current wire payload rather than sent with `defer_loading: true`.
     ClientLocal,
 }
 
@@ -268,10 +267,12 @@ pub struct SessionToolsConfig {
     pub deferred_tool_policy: DeferredToolPolicy,
     /// Whether Anthropic native memory is enabled.
     pub anthropic_native_memory_enabled: bool,
+    /// Model-facing tool profile.
+    pub tool_profile: ToolProfile,
 }
 
 impl SessionToolsConfig {
-    /// Creates a full public configuration with all tools visible.
+    /// Creates a public configuration for a session outside the planning workflow.
     pub fn full_public(
         surface: SessionSurface,
         capability_level: CapabilityLevel,
@@ -282,12 +283,20 @@ impl SessionToolsConfig {
             surface,
             capability_level,
             documentation_mode,
-            planning_active: true,
+            planning_active: false,
             request_user_input_enabled: true,
             model_capabilities,
             deferred_tool_policy: DeferredToolPolicy::default(),
             anthropic_native_memory_enabled: false,
+            tool_profile: ToolProfile::CodexDefault,
         }
+    }
+
+    /// Marks whether the planning workflow is active.
+    #[must_use]
+    pub fn with_planning_active(mut self, planning_active: bool) -> Self {
+        self.planning_active = planning_active;
+        self
     }
 
     /// Sets the deferred tool policy.
@@ -301,6 +310,13 @@ impl SessionToolsConfig {
     #[must_use]
     pub fn with_anthropic_native_memory_enabled(mut self, enabled: bool) -> Self {
         self.anthropic_native_memory_enabled = enabled;
+        self
+    }
+
+    /// Selects the model-facing tool profile.
+    #[must_use]
+    pub fn with_tool_profile(mut self, tool_profile: ToolProfile) -> Self {
+        self.tool_profile = tool_profile;
         self
     }
 }
@@ -405,9 +421,6 @@ impl SessionToolCatalog {
         let mut entries = Vec::new();
         for registration in registrations {
             if let Some(entry) = ToolCatalogEntry::from_registration(&registration) {
-                entries.push(entry);
-            }
-            if let Some(entry) = ToolCatalogEntry::agent_runner_legacy_entry(&registration) {
                 entries.push(entry);
             }
         }
@@ -636,38 +649,6 @@ impl ToolCatalogEntry {
         ))
     }
 
-    fn agent_runner_legacy_entry(registration: &ToolRegistration) -> Option<Self> {
-        let public_name = match registration.name() {
-            tools::READ_FILE | tools::LIST_FILES => registration.name(),
-            _ => return None,
-        };
-
-        let metadata = registration.metadata();
-        let description = metadata.description()?.to_string();
-        let parameters = metadata
-            .parameter_schema()
-            .cloned()
-            .unwrap_or_else(default_parameter_schema);
-        let default_permission = metadata.default_permission().unwrap_or(ToolPolicy::Prompt);
-        let supports_parallel_tool_calls = registration_supports_parallel_tool_calls(registration);
-        let aliases = metadata.aliases().to_vec();
-        let kind = registration_catalog_kind(registration);
-        let source = registration_catalog_source(registration, kind);
-
-        Some(Self::new(
-            public_name.to_string(),
-            registration.name().to_string(),
-            description,
-            parameters,
-            aliases,
-            registration.capability(),
-            default_permission,
-            supports_parallel_tool_calls,
-            source,
-            kind,
-        ))
-    }
-
     #[expect(clippy::too_many_arguments)]
     fn new(
         public_name: String,
@@ -713,6 +694,14 @@ impl ToolCatalogEntry {
             return false;
         }
 
+        if !profile_allows_tool(
+            config.tool_profile,
+            self.public_name.as_str(),
+            config.planning_active,
+        ) {
+            return false;
+        }
+
         if !surface_allows_tool(config.surface, self.public_name.as_str()) {
             return false;
         }
@@ -722,6 +711,34 @@ impl ToolCatalogEntry {
             tools::REQUEST_USER_INPUT => config.request_user_input_enabled,
             _ => true,
         }
+    }
+}
+
+fn profile_allows_tool(profile: ToolProfile, tool_name: &str, planning_active: bool) -> bool {
+    match profile {
+        ToolProfile::CodexDefault => {
+            matches!(
+                tool_name,
+                tools::EXEC_COMMAND | tools::WRITE_STDIN | tools::APPLY_PATCH
+            ) || (planning_active
+                && matches!(tool_name, tools::CODE_SEARCH | tools::REQUEST_USER_INPUT))
+        }
+        ToolProfile::AdvancedVtCode => !matches!(
+            tool_name,
+            tools::UNIFIED_EXEC
+                | tools::UNIFIED_FILE
+                | tools::UNIFIED_SEARCH
+                | tools::LIST_FILES
+                | tools::READ_FILE
+                | tools::WRITE_FILE
+                | tools::EDIT_FILE
+                | tools::CREATE_FILE
+                | tools::DELETE_FILE
+                | tools::MOVE_FILE
+                | tools::COPY_FILE
+                | tools::SEARCH_REPLACE
+                | tools::FILE_OP
+        ),
     }
 }
 
@@ -750,6 +767,10 @@ fn should_defer_tool_loading(entry: &ToolCatalogEntry, config: &SessionToolsConf
         return false;
     }
 
+    if config.deferred_tool_policy.is_client_local() {
+        return matches!(entry.source, ToolCatalogSource::Mcp);
+    }
+
     matches!(
         entry.source,
         ToolCatalogSource::Builtin | ToolCatalogSource::Mcp
@@ -762,9 +783,8 @@ fn is_core_tool_entry(entry: &ToolCatalogEntry, config: &SessionToolsConfig) -> 
     // resume_agent/close_agent all route to the single `agent` registration),
     // so only the canonical name needs to be matched here.
     match entry.public_name.as_str() {
-        tools::UNIFIED_SEARCH
-        | tools::UNIFIED_FILE
-        | tools::UNIFIED_EXEC
+        tools::EXEC_COMMAND
+        | tools::WRITE_STDIN
         | tools::TASK_TRACKER
         | tools::START_PLANNING
         | tools::FINISH_PLANNING
@@ -772,10 +792,10 @@ fn is_core_tool_entry(entry: &ToolCatalogEntry, config: &SessionToolsConfig) -> 
         | tools::LIST_SKILLS
         | tools::LOAD_SKILL
         | tools::LOAD_SKILL_RESOURCE => true,
-        tools::MEMORY => config.anthropic_native_memory_enabled,
-        tools::READ_FILE | tools::LIST_FILES if config.surface == SessionSurface::AgentRunner => {
-            true
+        tools::MCP_SEARCH_TOOLS | tools::MCP_GET_TOOL_DETAILS | tools::MCP_LIST_SERVERS => {
+            config.deferred_tool_policy.is_client_local()
         }
+        tools::MEMORY => config.anthropic_native_memory_enabled,
         tools::REQUEST_USER_INPUT => config.request_user_input_enabled,
         tools::APPLY_PATCH => config.model_capabilities.supports_apply_patch_tool,
         _ => false,
@@ -788,7 +808,7 @@ fn surface_allows_tool(surface: SessionSurface, tool_name: &str) -> bool {
         SessionSurface::AgentRunner => true,
         SessionSurface::Acp => matches!(
             tool_name,
-            tools::UNIFIED_SEARCH | tools::UNIFIED_FILE | tools::UNIFIED_EXEC
+            tools::EXEC_COMMAND | tools::WRITE_STDIN | tools::APPLY_PATCH | tools::CODE_SEARCH
         ),
     }
 }
@@ -897,8 +917,7 @@ fn remove_schema_descriptions_impl(value: &mut Value, inside_properties_map: boo
 
 #[cfg(test)]
 pub(crate) use vtcode_utility_tool_specs::{
-    apply_patch_parameters, list_files_parameters, read_file_parameters, unified_file_parameters,
-    unified_search_parameters,
+    apply_patch_parameters, exec_command_parameters, list_files_parameters,
 };
 
 #[cfg(test)]
@@ -919,6 +938,321 @@ mod tests {
     }
 
     #[test]
+    fn default_profile_exposes_only_codex_baseline_tools() {
+        let registrations = vec![
+            registration(tools::EXEC_COMMAND)
+                .with_description("Run command")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::WRITE_STDIN)
+                .with_description("Write stdin")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::APPLY_PATCH)
+                .with_llm_visibility(false)
+                .with_description("Apply patch")
+                .with_parameter_schema(apply_patch_parameters())
+                .with_behavior(ToolBehavior::apply_patch(
+                    ToolMutationModel::Mutating,
+                    false,
+                    true,
+                )),
+            registration(tools::CODE_SEARCH)
+                .with_description("Search code")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::READ_FILE)
+                .with_llm_visibility(false)
+                .with_description("Read file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::WRITE_FILE)
+                .with_llm_visibility(false)
+                .with_description("Write file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::DELETE_FILE)
+                .with_description("Delete file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::MOVE_FILE)
+                .with_description("Move file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::COPY_FILE)
+                .with_description("Copy file")
+                .with_parameter_schema(empty_object_schema()),
+            registration("ls")
+                .with_description("List directory")
+                .with_parameter_schema(empty_object_schema()),
+            registration("rg")
+                .with_description("Search text")
+                .with_parameter_schema(empty_object_schema()),
+            registration("find")
+                .with_description("Find files")
+                .with_parameter_schema(empty_object_schema()),
+            registration("cat")
+                .with_description("Print file")
+                .with_parameter_schema(empty_object_schema()),
+            registration("sed")
+                .with_description("Stream edit")
+                .with_parameter_schema(empty_object_schema()),
+            registration("awk")
+                .with_description("Process text")
+                .with_parameter_schema(empty_object_schema()),
+        ];
+
+        let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+        let mut config = SessionToolsConfig::full_public(
+            SessionSurface::AgentRunner,
+            CapabilityLevel::CodeSearch,
+            ToolDocumentationMode::Full,
+            ToolModelCapabilities::default(),
+        );
+        config.planning_active = false;
+        let names = catalog.public_tool_names(config);
+
+        assert_eq!(
+            names,
+            vec![
+                tools::EXEC_COMMAND.to_string(),
+                tools::WRITE_STDIN.to_string(),
+                tools::APPLY_PATCH.to_string(),
+            ]
+        );
+        for command in ["ls", "rg", "find", "cat", "sed", "awk"] {
+            assert!(
+                !names.contains(&command.to_string()),
+                "{command} must stay an exec_command.cmd example, not a default tool"
+            );
+        }
+        for file_tool in [
+            tools::READ_FILE,
+            tools::WRITE_FILE,
+            tools::DELETE_FILE,
+            tools::MOVE_FILE,
+            tools::COPY_FILE,
+            tools::UNIFIED_FILE,
+        ] {
+            assert!(
+                !names.contains(&file_tool.to_string()),
+                "{file_tool} must stay out of the default file surface"
+            );
+        }
+    }
+
+    #[test]
+    fn default_profile_exposes_planning_tools_during_planning() {
+        let registrations = vec![
+            registration(tools::CODE_SEARCH)
+                .with_description("Search code")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::REQUEST_USER_INPUT)
+                .with_description("Ask the user")
+                .with_parameter_schema(empty_object_schema()),
+        ];
+
+        let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+        let names = catalog.public_tool_names(
+            SessionToolsConfig::full_public(
+                SessionSurface::Interactive,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Full,
+                ToolModelCapabilities::default(),
+            )
+            .with_planning_active(true),
+        );
+
+        assert_eq!(
+            names,
+            vec![
+                tools::CODE_SEARCH.to_string(),
+                tools::REQUEST_USER_INPUT.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn exec_command_schema_models_unix_tools_as_cmd_examples() {
+        let registration = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
+            .with_parameter_schema(exec_command_parameters());
+        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![registration]);
+        let entries = catalog.schema_entries(SessionToolsConfig::full_public(
+            SessionSurface::AgentRunner,
+            CapabilityLevel::CodeSearch,
+            ToolDocumentationMode::Full,
+            ToolModelCapabilities::default(),
+        ));
+        let entry = entries
+            .iter()
+            .find(|entry| entry.name == tools::EXEC_COMMAND)
+            .expect("exec_command schema entry");
+        let properties = &entry.parameters["properties"];
+
+        assert_eq!(entry.parameters["required"], json!(["cmd"]));
+        assert!(
+            properties["cmd"]["description"]
+                .as_str()
+                .is_some_and(|text| {
+                    ["ls", "rg", "find", "cat", "sed", "awk"]
+                        .iter()
+                        .all(|command| text.contains(command))
+                })
+        );
+        assert_eq!(properties["tty"]["type"], "boolean");
+        for command in ["ls", "rg", "find", "cat", "sed", "awk"] {
+            assert!(
+                properties.get(command).is_none(),
+                "{command} must not be modelled as a separate schema property"
+            );
+        }
+    }
+
+    #[test]
+    fn advanced_profile_exposes_code_search_without_internal_search_names() {
+        let registrations = vec![
+            registration(tools::CODE_SEARCH)
+                .with_description("Search code")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::LIST_FILES)
+                .with_llm_visibility(false)
+                .with_description("List files")
+                .with_parameter_schema(list_files_parameters()),
+            registration(tools::READ_FILE)
+                .with_llm_visibility(false)
+                .with_description("Read file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::WRITE_FILE)
+                .with_llm_visibility(false)
+                .with_description("Write file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::DELETE_FILE)
+                .with_description("Delete file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::MOVE_FILE)
+                .with_description("Move file")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::COPY_FILE)
+                .with_description("Copy file")
+                .with_parameter_schema(empty_object_schema()),
+        ];
+
+        let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+        let names = catalog.public_tool_names(
+            SessionToolsConfig::full_public(
+                SessionSurface::AgentRunner,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Full,
+                ToolModelCapabilities::default(),
+            )
+            .with_tool_profile(ToolProfile::AdvancedVtCode),
+        );
+
+        assert_eq!(names, vec![tools::CODE_SEARCH.to_string()]);
+    }
+
+    #[test]
+    fn advanced_profile_retains_eligible_specialised_and_dynamic_tools() {
+        let registrations = vec![
+            registration(tools::CODE_SEARCH)
+                .with_description("Search code")
+                .with_parameter_schema(empty_object_schema()),
+            registration("mcp::context7::search")
+                .with_catalog_source(ToolCatalogSource::Mcp)
+                .with_llm_visibility(false)
+                .with_description("Search documentation")
+                .with_parameter_schema(empty_object_schema())
+                .with_aliases(["mcp__context7__search"]),
+            registration(tools::LOAD_SKILL)
+                .with_catalog_source(ToolCatalogSource::Builtin)
+                .with_description("Load a skill")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::START_PLANNING)
+                .with_catalog_source(ToolCatalogSource::Builtin)
+                .with_description("Start planning")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::SPAWN_AGENT)
+                .with_catalog_source(ToolCatalogSource::Builtin)
+                .with_description("Spawn an agent")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::CRON_CREATE)
+                .with_catalog_source(ToolCatalogSource::Builtin)
+                .with_description("Create a scheduled prompt")
+                .with_parameter_schema(empty_object_schema()),
+            registration("dynamic_plugin_tool")
+                .with_catalog_source(ToolCatalogSource::Dynamic)
+                .with_description("Run a dynamic plugin tool")
+                .with_parameter_schema(empty_object_schema()),
+        ];
+
+        let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+        let names = catalog.public_tool_names(
+            SessionToolsConfig::full_public(
+                SessionSurface::Interactive,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Full,
+                ToolModelCapabilities::default(),
+            )
+            .with_tool_profile(ToolProfile::AdvancedVtCode),
+        );
+
+        assert_eq!(
+            names,
+            vec![
+                tools::CODE_SEARCH.to_string(),
+                "mcp__context7__search".to_string(),
+                tools::LOAD_SKILL.to_string(),
+                tools::START_PLANNING.to_string(),
+                tools::SPAWN_AGENT.to_string(),
+                tools::CRON_CREATE.to_string(),
+                "dynamic_plugin_tool".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn acp_surface_exposes_code_search_with_advanced_profile() {
+        let registrations = vec![
+            registration(tools::EXEC_COMMAND)
+                .with_description("Run command")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::WRITE_STDIN)
+                .with_description("Write stdin")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::APPLY_PATCH)
+                .with_llm_visibility(false)
+                .with_description("Apply patch")
+                .with_parameter_schema(apply_patch_parameters())
+                .with_behavior(ToolBehavior::apply_patch(
+                    ToolMutationModel::Mutating,
+                    false,
+                    true,
+                )),
+            registration(tools::CODE_SEARCH)
+                .with_description("Search code")
+                .with_parameter_schema(empty_object_schema()),
+            registration(tools::LOAD_SKILL)
+                .with_description("Load a skill")
+                .with_parameter_schema(empty_object_schema()),
+        ];
+
+        let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+        let names = catalog.public_tool_names(
+            SessionToolsConfig::full_public(
+                SessionSurface::Acp,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Full,
+                ToolModelCapabilities::default(),
+            )
+            .with_tool_profile(ToolProfile::AdvancedVtCode),
+        );
+
+        assert_eq!(
+            names,
+            vec![
+                tools::EXEC_COMMAND.to_string(),
+                tools::WRITE_STDIN.to_string(),
+                tools::APPLY_PATCH.to_string(),
+                tools::CODE_SEARCH.to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn rebuild_catalog_uses_public_mcp_alias() {
         let registration = registration("mcp::context7::search")
             .with_catalog_source(ToolCatalogSource::Mcp)
@@ -928,12 +1262,15 @@ mod tests {
             .with_aliases(["mcp__context7__search"]);
 
         let catalog = SessionToolCatalog::rebuild_from_registrations(vec![registration]);
-        let names = catalog.public_tool_names(SessionToolsConfig::full_public(
-            SessionSurface::Interactive,
-            CapabilityLevel::CodeSearch,
-            ToolDocumentationMode::Full,
-            ToolModelCapabilities::default(),
-        ));
+        let names = catalog.public_tool_names(
+            SessionToolsConfig::full_public(
+                SessionSurface::Interactive,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Full,
+                ToolModelCapabilities::default(),
+            )
+            .with_tool_profile(ToolProfile::AdvancedVtCode),
+        );
 
         assert_eq!(names, vec!["mcp__context7__search".to_string()]);
     }
@@ -954,6 +1291,7 @@ mod tests {
             model_capabilities: ToolModelCapabilities::default(),
             deferred_tool_policy: DeferredToolPolicy::default(),
             anthropic_native_memory_enabled: false,
+            tool_profile: ToolProfile::CodexDefault,
         });
 
         assert!(names.is_empty());
@@ -975,6 +1313,7 @@ mod tests {
             model_capabilities: ToolModelCapabilities::default(),
             deferred_tool_policy: DeferredToolPolicy::default(),
             anthropic_native_memory_enabled: false,
+            tool_profile: ToolProfile::AdvancedVtCode,
         });
 
         assert_eq!(names, vec![tools::TASK_TRACKER.to_string()]);
@@ -1002,6 +1341,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_anthropic_native_memory_enabled(true),
         );
         assert_eq!(visible, vec![tools::MEMORY.to_string()]);
@@ -1021,6 +1361,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_anthropic_native_memory_enabled(true),
         );
 
@@ -1080,28 +1421,16 @@ mod tests {
     }
 
     #[test]
-    fn agent_runner_exposes_read_and_list_legacy_browse_tools() {
+    fn agent_runner_default_hides_legacy_browse_tools() {
         let read_file = registration(tools::READ_FILE)
             .with_llm_visibility(false)
             .with_description("Read file contents in chunks")
-            .with_parameter_schema(read_file_parameters());
+            .with_parameter_schema(empty_object_schema());
         let list_files = registration(tools::LIST_FILES)
             .with_llm_visibility(false)
             .with_description("List files with pagination")
             .with_parameter_schema(list_files_parameters());
-        let unified_file = registration(tools::UNIFIED_FILE)
-            .with_description("Unified file ops")
-            .with_parameter_schema(unified_file_parameters());
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Unified search")
-            .with_parameter_schema(unified_search_parameters());
-
-        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![
-            read_file,
-            list_files,
-            unified_file,
-            unified_search,
-        ]);
+        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![read_file, list_files]);
 
         let interactive_names = catalog.public_tool_names(SessionToolsConfig::full_public(
             SessionSurface::Interactive,
@@ -1118,8 +1447,8 @@ mod tests {
             ToolDocumentationMode::Full,
             ToolModelCapabilities::default(),
         ));
-        assert!(agent_runner_names.contains(&tools::READ_FILE.to_string()));
-        assert!(agent_runner_names.contains(&tools::LIST_FILES.to_string()));
+        assert!(!agent_runner_names.contains(&tools::READ_FILE.to_string()));
+        assert!(!agent_runner_names.contains(&tools::LIST_FILES.to_string()));
     }
 
     #[test]
@@ -1186,8 +1515,8 @@ mod tests {
 
     #[test]
     fn anthropic_policy_injects_tool_search_and_defers_non_core_tools() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
             .with_parameter_schema(empty_object_schema());
         let apply_patch = registration(tools::APPLY_PATCH)
             .with_llm_visibility(false)
@@ -1205,7 +1534,7 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let mut registrations = vec![unified_search, apply_patch, mcp_tool];
+        let mut registrations = vec![exec_command, apply_patch, mcp_tool];
         for index in 0..DIRECT_TOOL_EXPOSURE_THRESHOLD {
             let name: &'static str =
                 Box::leak(format!("mcp::context7::resolve_{index}").into_boxed_str());
@@ -1228,6 +1557,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::anthropic(
                 ToolSearchAlgorithm::Regex,
                 Vec::new(),
@@ -1240,11 +1570,11 @@ mod tests {
                 .any(|tool| tool.tool_type == "tool_search_tool_regex_20251119"),
             "anthropic tool search should be injected when deferred tools exist"
         );
-        let search_tool = definitions
+        let exec_tool = definitions
             .iter()
-            .find(|tool| tool.function_name() == tools::UNIFIED_SEARCH)
-            .expect("unified_search should be present");
-        assert_eq!(search_tool.defer_loading, None);
+            .find(|tool| tool.function_name() == tools::EXEC_COMMAND)
+            .expect("exec_command should be present");
+        assert_eq!(exec_tool.defer_loading, None);
 
         let apply_patch = definitions
             .iter()
@@ -1288,15 +1618,15 @@ mod tests {
 
     #[test]
     fn core_tool_registration_has_no_namespace() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
             .with_parameter_schema(empty_object_schema());
 
-        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![unified_search]);
+        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![exec_command]);
         let entry = catalog
             .entries()
             .iter()
-            .find(|entry| entry.public_name == tools::UNIFIED_SEARCH)
+            .find(|entry| entry.public_name == tools::EXEC_COMMAND)
             .expect("core tool entry should be present");
 
         assert!(
@@ -1307,8 +1637,8 @@ mod tests {
 
     #[test]
     fn model_tools_attach_namespace_only_to_deferred_mcp_tools() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
             .with_parameter_schema(empty_object_schema());
         let mcp_tool = registration("mcp::context7::search")
             .with_catalog_source(ToolCatalogSource::Mcp)
@@ -1317,7 +1647,7 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let mut registrations = vec![unified_search, mcp_tool];
+        let mut registrations = vec![exec_command, mcp_tool];
         for index in 0..DIRECT_TOOL_EXPOSURE_THRESHOLD {
             let name: &'static str =
                 Box::leak(format!("mcp::context7::resolve_{index}").into_boxed_str());
@@ -1340,6 +1670,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::anthropic(
                 ToolSearchAlgorithm::Regex,
                 Vec::new(),
@@ -1348,8 +1679,8 @@ mod tests {
 
         let core_tool = definitions
             .iter()
-            .find(|tool| tool.function_name() == tools::UNIFIED_SEARCH)
-            .expect("unified_search should be present");
+            .find(|tool| tool.function_name() == tools::EXEC_COMMAND)
+            .expect("exec_command should be present");
         assert_eq!(core_tool.defer_loading, None);
         assert!(
             core_tool.namespace.is_none(),
@@ -1370,8 +1701,8 @@ mod tests {
 
     #[test]
     fn small_mcp_catalog_is_deferred_despite_low_tool_count() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
             .with_parameter_schema(empty_object_schema());
         let mcp_tool = registration("mcp::context7::search")
             .with_catalog_source(ToolCatalogSource::Mcp)
@@ -1380,8 +1711,7 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let catalog =
-            SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
+        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![exec_command, mcp_tool]);
         let definitions = catalog.model_tools(
             SessionToolsConfig::full_public(
                 SessionSurface::Interactive,
@@ -1389,6 +1719,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::anthropic(
                 ToolSearchAlgorithm::Regex,
                 Vec::new(),
@@ -1408,8 +1739,11 @@ mod tests {
 
     #[test]
     fn client_local_policy_deferred_for_small_mcp_catalog() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
+            .with_parameter_schema(empty_object_schema());
+        let mcp_search_tools = registration(tools::MCP_SEARCH_TOOLS)
+            .with_description("Search MCP tools")
             .with_parameter_schema(empty_object_schema());
         let mcp_tool = registration("mcp::context7::search")
             .with_catalog_source(ToolCatalogSource::Mcp)
@@ -1418,8 +1752,11 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let catalog =
-            SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
+        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![
+            exec_command,
+            mcp_search_tools,
+            mcp_tool,
+        ]);
         let definitions = catalog.model_tools(
             SessionToolsConfig::full_public(
                 SessionSurface::Interactive,
@@ -1427,6 +1764,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::client_local(Vec::new())),
         );
 
@@ -1445,12 +1783,17 @@ mod tests {
             Some(true),
             "client-local deferral should also apply to small MCP catalogs"
         );
+        let search_definition = definitions
+            .iter()
+            .find(|tool| tool.function_name() == tools::MCP_SEARCH_TOOLS)
+            .expect("client-local MCP search should remain available");
+        assert_eq!(search_definition.defer_loading, None);
     }
 
     #[test]
-    fn openai_policy_injects_tool_search_and_defers_non_core_tools() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+    fn openai_policy_injects_tool_search_for_large_catalogs() {
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
             .with_parameter_schema(empty_object_schema());
         let mcp_tool = registration("mcp::context7::search")
             .with_catalog_source(ToolCatalogSource::Mcp)
@@ -1459,7 +1802,7 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let mut registrations = vec![unified_search, mcp_tool];
+        let mut registrations = vec![exec_command, mcp_tool];
         for index in 0..DIRECT_TOOL_EXPOSURE_THRESHOLD {
             let name: &'static str =
                 Box::leak(format!("mcp::context7::resolve_{index}").into_boxed_str());
@@ -1484,6 +1827,7 @@ mod tests {
                     supports_apply_patch_tool: true,
                 },
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::openai_hosted(vec![
                 "mcp__context7__search".to_string(),
             ])),
@@ -1532,6 +1876,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::openai_hosted(vec![
                 "mcp__context7__search".to_string(),
             ])),
@@ -1583,6 +1928,7 @@ mod tests {
                 ToolDocumentationMode::Full,
                 ToolModelCapabilities::default(),
             )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
             .with_deferred_tool_policy(DeferredToolPolicy::openai_hosted(vec![
                 "mcp::context7::search".to_string(),
                 "dynamic_skill_tool".to_string(),
@@ -1604,8 +1950,8 @@ mod tests {
 
     #[test]
     fn unsupported_providers_keep_catalog_eager() {
-        let unified_search = registration(tools::UNIFIED_SEARCH)
-            .with_description("Search")
+        let exec_command = registration(tools::EXEC_COMMAND)
+            .with_description("Run command")
             .with_parameter_schema(empty_object_schema());
         let mcp_tool = registration("mcp::context7::search")
             .with_catalog_source(ToolCatalogSource::Mcp)
@@ -1614,14 +1960,16 @@ mod tests {
             .with_parameter_schema(empty_object_schema())
             .with_aliases(["mcp__context7__search"]);
 
-        let catalog =
-            SessionToolCatalog::rebuild_from_registrations(vec![unified_search, mcp_tool]);
-        let definitions = catalog.model_tools(SessionToolsConfig::full_public(
-            SessionSurface::Interactive,
-            CapabilityLevel::CodeSearch,
-            ToolDocumentationMode::Full,
-            ToolModelCapabilities::default(),
-        ));
+        let catalog = SessionToolCatalog::rebuild_from_registrations(vec![exec_command, mcp_tool]);
+        let definitions = catalog.model_tools(
+            SessionToolsConfig::full_public(
+                SessionSurface::Interactive,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Full,
+                ToolModelCapabilities::default(),
+            )
+            .with_tool_profile(ToolProfile::AdvancedVtCode),
+        );
 
         assert!(!definitions.iter().any(|tool| tool.is_tool_search()));
         assert!(

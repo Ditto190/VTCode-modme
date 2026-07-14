@@ -15,7 +15,7 @@ use vtcode_core::config::tool_call_delay_for_rate;
 use vtcode_core::config::types::{
     AgentConfig as CoreAgentConfig, ModelSelectionSource, ReasoningEffortLevel, UiSurfacePreference,
 };
-use vtcode_core::config::{AgentClientProtocolZedConfig, CommandsConfig, ToolsConfig};
+use vtcode_core::config::{AgentClientProtocolZedConfig, CommandsConfig, ToolProfile, ToolsConfig};
 use vtcode_core::core::agent::snapshots::{
     DEFAULT_CHECKPOINTS_ENABLED, DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_SNAPSHOTS,
 };
@@ -266,9 +266,26 @@ async fn read_only_primary_agents_hide_local_tools() {
     let removed_tool = format!("switch_{}", "mode");
     assert!(!build_names.contains(&removed_tool));
     assert!(build_names.contains(&tools::LIST_FILES.to_string()));
-    assert!(build_names.contains(&"unified_search".to_string()));
-    assert!(build_names.contains(&"unified_file".to_string()));
-    assert!(build_names.contains(&"unified_exec".to_string()));
+    assert!(build_names.contains(&tools::EXEC_COMMAND.to_string()));
+    assert!(build_names.contains(&tools::WRITE_STDIN.to_string()));
+    assert!(build_names.contains(&tools::APPLY_PATCH.to_string()));
+    assert!(!build_names.contains(&tools::CODE_SEARCH.to_string()));
+}
+
+#[tokio::test]
+async fn advanced_global_profile_expands_acp_local_catalogue() {
+    let temp = TempDir::new().unwrap();
+    let tools_config = ToolsConfig {
+        profile: ToolProfile::AdvancedVtCode,
+        ..ToolsConfig::default()
+    };
+    let agent = build_agent_with_tools_config(temp.path(), tools_config).await;
+    let local_names = definition_names(agent.acp_tool_registry.definitions_for(&[], true));
+
+    assert!(local_names.contains(&tools::EXEC_COMMAND.to_string()));
+    assert!(local_names.contains(&tools::WRITE_STDIN.to_string()));
+    assert!(local_names.contains(&tools::APPLY_PATCH.to_string()));
+    assert!(local_names.contains(&tools::CODE_SEARCH.to_string()));
 }
 
 #[tokio::test]
@@ -284,7 +301,7 @@ mode: primary
 permissions:
   default: deny
   allow:
-    - unified_exec
+    - exec_command
 ---
 Shell prompt."#,
     )
@@ -322,10 +339,10 @@ Reader prompt."#,
             .unwrap(),
     );
 
-    assert!(sheller_names.contains(&"unified_exec".to_string()));
-    assert!(sheller_names.contains(&"unified_file".to_string()));
-    assert!(!reader_names.contains(&"unified_exec".to_string()));
-    assert!(!reader_names.contains(&"unified_file".to_string()));
+    assert!(sheller_names.contains(&tools::EXEC_COMMAND.to_string()));
+    assert!(!sheller_names.contains(&tools::APPLY_PATCH.to_string()));
+    assert!(!reader_names.contains(&tools::EXEC_COMMAND.to_string()));
+    assert!(!reader_names.contains(&tools::APPLY_PATCH.to_string()));
 }
 
 #[tokio::test]
@@ -337,10 +354,9 @@ async fn local_tool_execution_uses_registry_request_path() {
 
     let report = agent
         .execute_local_tool(
-            tools::UNIFIED_SEARCH,
+            tools::EXEC_COMMAND,
             &json!({
-                "action": "list",
-                "path": "src",
+                "cmd": "printf sample.txt",
             }),
             "call-local-list",
         )
@@ -349,7 +365,7 @@ async fn local_tool_execution_uses_registry_request_path() {
     assert_eq!(report.status, crate::acp::ToolCallStatus::Completed);
     let payload = report.raw_output.expect("successful tool output");
     assert_eq!(payload["status"], "success");
-    assert_eq!(payload["tool"], tools::UNIFIED_SEARCH);
+    assert_eq!(payload["tool"], tools::EXEC_COMMAND);
     assert!(payload["result"].to_string().contains("sample.txt"));
 }
 
@@ -371,27 +387,18 @@ async fn local_tool_metadata_uses_core_action_labels_and_kinds() {
     let temp = TempDir::new().unwrap();
     let agent = build_agent(temp.path()).await;
     let exec_args = json!({
-        "action": "run",
-        "command": "cargo check",
+        "cmd": "cargo check",
     });
     let search_args = json!({
-        "action": "list",
-        "path": "src",
-    });
-    let read_args = json!({
-        "action": "read",
+        "action": "outline",
         "path": "src/lib.rs",
     });
-    let write_args = json!({
-        "action": "write",
-        "path": "src/lib.rs",
-        "content": "updated",
-    });
+    let patch_args = json!({});
 
     assert_eq!(
         agent.acp_tool_registry.render_title(
             ToolDescriptor::Local,
-            tools::UNIFIED_EXEC,
+            tools::EXEC_COMMAND,
             &exec_args
         ),
         "Run command"
@@ -399,49 +406,35 @@ async fn local_tool_metadata_uses_core_action_labels_and_kinds() {
     assert_eq!(
         agent
             .acp_tool_registry
-            .tool_kind_for_call(tools::UNIFIED_EXEC, Some(&exec_args)),
+            .tool_kind_for_call(tools::EXEC_COMMAND, Some(&exec_args)),
         crate::acp::ToolKind::Execute
     );
     assert_eq!(
         agent.acp_tool_registry.render_title(
             ToolDescriptor::Local,
-            tools::UNIFIED_SEARCH,
+            tools::CODE_SEARCH,
             &search_args
         ),
-        "List files"
+        "Outline symbols"
     );
     assert_eq!(
         agent
             .acp_tool_registry
-            .tool_kind_for_call(tools::UNIFIED_SEARCH, Some(&search_args)),
+            .tool_kind_for_call(tools::CODE_SEARCH, Some(&search_args)),
         crate::acp::ToolKind::Search
     );
     assert_eq!(
         agent.acp_tool_registry.render_title(
             ToolDescriptor::Local,
-            tools::UNIFIED_FILE,
-            &read_args
+            tools::APPLY_PATCH,
+            &patch_args
         ),
-        "Read file"
+        "Apply patch"
     );
     assert_eq!(
         agent
             .acp_tool_registry
-            .tool_kind_for_call(tools::UNIFIED_FILE, Some(&read_args)),
-        crate::acp::ToolKind::Read
-    );
-    assert_eq!(
-        agent.acp_tool_registry.render_title(
-            ToolDescriptor::Local,
-            tools::UNIFIED_FILE,
-            &write_args
-        ),
-        "Write file"
-    );
-    assert_eq!(
-        agent
-            .acp_tool_registry
-            .tool_kind_for_call(tools::UNIFIED_FILE, Some(&write_args)),
+            .tool_kind_for_call(tools::APPLY_PATCH, Some(&patch_args)),
         crate::acp::ToolKind::Edit
     );
 }

@@ -62,9 +62,9 @@ let deferred_tool = ToolDefinition::function(
 
 // Create a non-deferred tool (always available)
 let core_tool = ToolDefinition::function(
-    "unified_file".to_string(),
-    "Read, write, or edit a file".to_string(),
-    json!({"type": "object", "properties": {"action": {"type": "string"}, "path": {"type": "string"}}, "required": ["action", "path"]}),
+    "apply_patch".to_string(),
+    "Apply a workspace-bound patch".to_string(),
+    json!({"type": "object", "properties": {"input": {"type": "string"}}, "required": ["input"]}),
 );
 ```
 
@@ -79,13 +79,13 @@ Current VT Code scope for OpenAI:
 - Supported in the Responses parser: OpenAI function-call namespaces and `tool_search_output` tool references
 - Not yet modeled in shared tool definitions: MCP-server search surfaces
 
-VT Code keeps small deferred catalogs eager and skips hosted tool search until the deferable tool set reaches 100 entries. This avoids paying the search-tool overhead when direct exposure is cheaper and simpler.
+VT Code defers any MCP catalogue. For non-MCP catalogues, hosted search starts when at least 15 tools are deferable or their combined schema estimate exceeds about 4,000 tokens.
 
 ### When are tools deferred?
 
 Deferral is decided per-catalog by `SessionToolCatalog::model_tools`. A tool is flagged `defer_loading = true` when **all** of the following hold:
 
-1. The tool is not a core builtin (e.g. `unified_search`, `unified_file`, `unified_exec`) and is not listed in `always_available_tools`.
+1. The tool is not a core builtin (e.g. `exec_command`, `write_stdin`, or the active discovery tools) and is not listed in `always_available_tools`.
 2. The session is not running under the always-eager TUI surface.
 3. A deferral policy is active for the runtime (see below).
 
@@ -93,7 +93,7 @@ The deferral policy is active when **any** of these is true:
 
 - **Anthropic** with `defer_by_default = true` (default): every non-core tool is deferred, including MCP tools.
 - **OpenAI** Responses (`model_supports_responses_compaction`): hosted `tool_search` is injected and non-core tools are deferred.
-- **Any provider** when `tools.client_tool_search = true` (default): client-local deferral is enabled. Deferred tool schemas are omitted from the request payload and replaced by a compact discoverability summary in the system prompt; the model loads the real schema via `unified_search action="tools"`.
+- **Any provider** when `tools.client_tool_search = true` (default): client-local MCP deferral is enabled. Deferred MCP schemas are omitted from the request payload and replaced by a compact discoverability summary in the system prompt; `mcp_search_tools` expands matched schemas into the next request.
 
 Key changes from earlier behavior:
 
@@ -107,7 +107,7 @@ When `tools.client_tool_search` is enabled and no provider-hosted search is avai
 
 1. Omits `defer_loading: true` tools from the wire payload.
 2. Appends a compact, cache-stable summary of discoverable tools to the system prompt (names + one-line purpose).
-3. Lets the model load a tool's full schema on demand via `unified_search action="tools" namespace=<server>`.
+3. Keeps `mcp_search_tools` available so a search match expands the tool's full schema into the next request.
 
 Set `tools.client_tool_search = false` to restore the eager catalog for unsupported providers.
 

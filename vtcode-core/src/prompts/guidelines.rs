@@ -2,15 +2,15 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use crate::config::constants::tools;
-use crate::config::types::CapabilityLevel;
+use crate::config::types::{CapabilityLevel, ResolvedShellPromptProfile, ShellPromptProfile};
 use crate::core::agent::harness_kernel::SessionToolCatalogSnapshot;
 use crate::llm::provider::ToolDefinition;
 use crate::prompts::sections::SectionBoundaryMode;
 use crate::tools::registry::tool_groups;
 
-const TOOL_UNIFIED_EXEC: &str = tools::UNIFIED_EXEC;
-const TOOL_UNIFIED_FILE: &str = tools::UNIFIED_FILE;
-const TOOL_UNIFIED_SEARCH: &str = tools::UNIFIED_SEARCH;
+const TOOL_EXEC_COMMAND: &str = tools::EXEC_COMMAND;
+const TOOL_WRITE_STDIN: &str = tools::WRITE_STDIN;
+const TOOL_CODE_SEARCH: &str = tools::CODE_SEARCH;
 const TOOL_READ_FILE: &str = tools::READ_FILE;
 const TOOL_LIST_FILES: &str = tools::LIST_FILES;
 const TOOL_APPLY_PATCH: &str = tools::APPLY_PATCH;
@@ -22,57 +22,66 @@ pub fn generate_tool_guidelines(
     available_tools: &[String],
     capability_level: Option<CapabilityLevel>,
 ) -> String {
-    let has_exec = available_tools.iter().any(|tool| tool == TOOL_UNIFIED_EXEC);
-    let has_file = available_tools.iter().any(|tool| tool == TOOL_UNIFIED_FILE);
-    let has_search = available_tools
-        .iter()
-        .any(|tool| tool == TOOL_UNIFIED_SEARCH);
+    generate_tool_guidelines_for_profile(
+        available_tools,
+        capability_level,
+        ShellPromptProfile::Auto.resolve_for_current_platform(),
+    )
+}
+
+/// Generate compact cross-tool guidance with an explicit shell prompt profile.
+pub fn generate_tool_guidelines_for_profile(
+    available_tools: &[String],
+    capability_level: Option<CapabilityLevel>,
+    shell_profile: ResolvedShellPromptProfile,
+) -> String {
+    let has_exec = available_tools.iter().any(|tool| tool == TOOL_EXEC_COMMAND);
+    let has_stdin = available_tools.iter().any(|tool| tool == TOOL_WRITE_STDIN);
+    let has_search = available_tools.iter().any(|tool| tool == TOOL_CODE_SEARCH);
     let has_read_file = available_tools.iter().any(|tool| tool == TOOL_READ_FILE);
     let has_list_files = available_tools.iter().any(|tool| tool == TOOL_LIST_FILES);
     let has_apply_patch = available_tools.iter().any(|tool| tool == TOOL_APPLY_PATCH);
 
     let mut lines = Vec::new();
-    if let Some(mode_line) = capability_mode_line(capability_level, has_exec, has_file) {
+    if let Some(mode_line) = capability_mode_line(capability_level, has_exec, has_apply_patch) {
         lines.push(mode_line.to_string());
     }
-    if let Some(browse_guidance) =
-        browse_tool_guidance(has_search, has_file, has_list_files, has_read_file)
-    {
+    if let Some(browse_guidance) = browse_tool_guidance(
+        has_exec,
+        has_search,
+        has_list_files,
+        has_read_file,
+        shell_profile,
+    ) {
         lines.push(browse_guidance);
     }
-    if has_file || has_apply_patch {
-        lines.push("- Read before edit; patches small.".to_string());
+    if has_apply_patch {
+        lines.push(
+            "- Use `apply_patch` for file edits after inspection; keep patches small.".to_string(),
+        );
     }
     if has_exec {
-        lines.push(
-            "- Use `unified_exec` for verification, `git diff -- <path>`, and shell-only tasks."
-                .to_string(),
-        );
+        lines.push(shell_task_guidance(shell_profile).to_string());
     }
-    if has_exec || has_file || has_apply_patch {
-        lines.push(
-            "- Completion is a checkpoint: keep `task_tracker` current; verification resolved."
-                .to_string(),
-        );
+    if has_stdin {
+        lines.push("- Use `write_stdin` only with an active exec_command session.".to_string());
+    }
+    if has_exec || has_apply_patch {
+        lines.push("- Completion is a checkpoint: keep verification resolved.".to_string());
     }
     if has_search && has_exec {
-        lines.push("- Prefer search over shell for exploration.".to_string());
-        lines.push(
-            "- `action=outline` for \"what's here?\" (symbol map, no pattern needed); `action=structural` for code shape; `action=grep` for text. Set `lang` for structural/outline."
-                .to_string(),
-        );
+        lines.push(semantic_search_guidance(shell_profile).to_string());
     } else if has_search {
-        lines.push(
-            "- `action=outline` for \"what's here?\" (symbol map); `action=list` for file listing (paginated)."
-                .to_string(),
-        );
+        lines
+            .push("- Use `code_search` for semantic structural searches and outlines.".to_string());
     }
-    if has_file || has_apply_patch || has_exec {
+    if has_apply_patch || has_exec {
         lines.push("- If calls repeat, re-plan instead of retrying.".to_string());
     }
-    if has_search || has_file || has_exec {
+    if has_search || has_exec {
         lines.push(
-            "- Run independent tools in parallel (read files or commands at once).".to_string(),
+            "- Run independent tools in parallel when their inputs do not depend on each other."
+                .to_string(),
         );
     }
 
@@ -88,6 +97,20 @@ pub fn append_runtime_tool_prompt_sections(
     tool_snapshot: &SessionToolCatalogSnapshot,
     include_catalog_metadata: bool,
 ) {
+    append_runtime_tool_prompt_sections_for_profile(
+        prompt,
+        tool_snapshot,
+        include_catalog_metadata,
+        ShellPromptProfile::Auto.resolve_for_current_platform(),
+    );
+}
+
+pub fn append_runtime_tool_prompt_sections_for_profile(
+    prompt: &mut String,
+    tool_snapshot: &SessionToolCatalogSnapshot,
+    include_catalog_metadata: bool,
+    shell_profile: ResolvedShellPromptProfile,
+) {
     remove_prompt_section(prompt, "## Active Tools");
     remove_prompt_section(prompt, "[Runtime Tool Catalog]");
     while prompt.ends_with('\n') {
@@ -95,8 +118,11 @@ pub fn append_runtime_tool_prompt_sections(
     }
 
     let available_tools = snapshot_tool_names(tool_snapshot);
-    let guidelines =
-        generate_runtime_tool_guidelines(&available_tools, tool_snapshot.planning_active);
+    let guidelines = generate_runtime_tool_guidelines_for_profile(
+        &available_tools,
+        tool_snapshot.planning_active,
+        shell_profile,
+    );
     if !guidelines.is_empty() {
         append_prompt_block(prompt, guidelines.trim_start_matches('\n'));
     }
@@ -120,23 +146,7 @@ pub fn append_runtime_tool_prompt_sections(
     }
 }
 
-/// Builds and appends the `[Deferred Tools]` summary section for
-/// client-local tool deferral (`client_tool_search`). Emitted only when at
-/// least one tool was actually omitted from the wire payload, so providers
-/// with the flag off (or with nothing currently deferred) see no change to
-/// the prompt.
-///
-/// Namespaced groups (MCP servers) get one line each via
-/// [`tool_groups`]'s `deferred_count`; un-namespaced deferred tools (which
-/// carry no group metadata) are rolled up into a single trailing count line.
-/// Group order comes from `tool_groups`'s `BTreeMap`, which is sorted by
-/// name -- this keeps the section deterministic across calls with the same
-/// tool set, which matters for prompt-cache stability.
-///
-/// Idempotent: removes any previously appended `[Deferred Tools]` section
-/// before appending a fresh one, matching the pattern used by
-/// [`append_runtime_tool_prompt_sections`] so this survives the
-/// prompt-rebuild-on-alignment-mismatch retry path without duplicating.
+/// Append a compact summary of tools omitted from a client-local wire payload.
 pub fn append_deferred_tools_prompt_section(prompt: &mut String, tools: &[ToolDefinition]) {
     remove_prompt_section(prompt, "[Deferred Tools]");
 
@@ -168,7 +178,7 @@ pub fn append_deferred_tools_prompt_section(prompt: &mut String, tools: &[ToolDe
     }
 
     let section = format!(
-        "[Deferred Tools]\n{}\nUse unified_search with action=\"tools\" and a keyword to load any of these before calling them.",
+        "[Deferred Tools]\n{}\nUse the relevant discovery tool to load a deferred capability before calling it.",
         lines.join("\n")
     );
     append_prompt_block(prompt, &section);
@@ -202,16 +212,17 @@ fn find_prompt_section_bounds(prompt: &str, section_header: &str) -> Option<(usi
     )
 }
 
-fn generate_runtime_tool_guidelines(available_tools: &[String], planning_active: bool) -> String {
+fn generate_runtime_tool_guidelines_for_profile(
+    available_tools: &[String],
+    planning_active: bool,
+    shell_profile: ResolvedShellPromptProfile,
+) -> String {
     if !planning_active {
-        return generate_tool_guidelines(available_tools, None);
+        return generate_tool_guidelines_for_profile(available_tools, None, shell_profile);
     }
 
-    let has_exec = available_tools.iter().any(|tool| tool == TOOL_UNIFIED_EXEC);
-    let has_file = available_tools.iter().any(|tool| tool == TOOL_UNIFIED_FILE);
-    let has_search = available_tools
-        .iter()
-        .any(|tool| tool == TOOL_UNIFIED_SEARCH);
+    let has_exec = available_tools.iter().any(|tool| tool == TOOL_EXEC_COMMAND);
+    let has_search = available_tools.iter().any(|tool| tool == TOOL_CODE_SEARCH);
     let has_read_file = available_tools.iter().any(|tool| tool == TOOL_READ_FILE);
     let has_list_files = available_tools.iter().any(|tool| tool == TOOL_LIST_FILES);
     let has_request_user_input = available_tools
@@ -223,19 +234,18 @@ fn generate_runtime_tool_guidelines(available_tools: &[String], planning_active:
 
     let mut lines =
         vec!["- Planning workflow active: stay within the read-safe tool list.".to_string()];
-    if let Some(browse_guidance) =
-        browse_tool_guidance(has_search, has_file, has_list_files, has_read_file)
-    {
+    if let Some(browse_guidance) = browse_tool_guidance(
+        has_exec,
+        has_search,
+        has_list_files,
+        has_read_file,
+        shell_profile,
+    ) {
         lines.push(browse_guidance);
-    }
-    if has_file {
-        lines.push(
-            "- In Planning workflow, use `unified_file` only for read-style access.".to_string(),
-        );
     }
     if has_exec {
         lines.push(
-            "- In Planning workflow, use `unified_exec` only for read-only verification, poll, or inspect actions."
+            "- In Planning workflow, use `exec_command` only for read-only verification."
                 .to_string(),
         );
     }
@@ -251,7 +261,7 @@ fn generate_runtime_tool_guidelines(available_tools: &[String], planning_active:
                 .to_string(),
         );
     }
-    if has_search || has_file || has_exec {
+    if has_search || has_exec {
         lines.push(
             "- If calls repeat without progress, tighten the plan instead of retrying identically."
                 .to_string(),
@@ -272,30 +282,67 @@ fn snapshot_tool_names(tool_snapshot: &SessionToolCatalogSnapshot) -> Vec<String
 }
 
 fn browse_tool_guidance(
+    has_exec: bool,
     has_search: bool,
-    has_file: bool,
     has_list_files: bool,
     has_read_file: bool,
+    shell_profile: ResolvedShellPromptProfile,
 ) -> Option<String> {
-    let mut tool_names = Vec::new();
-    if has_search {
-        tool_names.push("`unified_search`");
-    } else if has_list_files {
-        tool_names.push("`list_files`");
+    if has_exec {
+        return Some(shell_browse_guidance(shell_profile).to_string());
     }
-    if has_file {
-        tool_names.push("`unified_file`");
-    } else if has_read_file {
-        tool_names.push("`read_file`");
-    }
-    if tool_names.is_empty() {
+
+    if !(has_search || has_list_files || has_read_file) {
         return None;
     }
 
-    Some(format!(
-        "- Prefer {} over shell browsing.",
-        tool_names.join(" and ")
-    ))
+    Some(
+        "- Use available read-only repository tools for browsing; do not modify files.".to_string(),
+    )
+}
+
+pub fn render_shell_profile_guidance(shell_profile: ResolvedShellPromptProfile) -> String {
+    match shell_profile {
+        ResolvedShellPromptProfile::UnixLike => {
+            "## Shell Profile\n- Active shell profile: `unix_like`. Use Unix-like command syntax in `exec_command.cmd`, for example `ls`, `rg`, `find`, `cat`, `sed`, and `awk`.\n- On macOS, write BSD-compatible flags for BSD tools. VT Code does not rewrite GNU flags for macOS BSD tools.\n- The shell profile controls prompt examples and expected command syntax only; command policy, sandboxing, and approvals remain separate runtime checks.\n- VT Code does not translate GNU-to-BSD, BSD-to-GNU, Unix-to-PowerShell, or PowerShell-to-Unix command flags.".to_string()
+        }
+        ResolvedShellPromptProfile::PowerShell => {
+            "## Shell Profile\n- Active shell profile: `powershell`. Use native PowerShell syntax in `exec_command.cmd`, for example `Get-ChildItem`, `Select-String`, `Get-Content`, and `Where-Object`.\n- On native Windows, use WSL when you need Unix-like workflows or Unix command examples.\n- The shell profile controls prompt examples and expected command syntax only; command policy, sandboxing, and approvals remain separate runtime checks.\n- VT Code does not translate GNU-to-BSD, BSD-to-GNU, Unix-to-PowerShell, or PowerShell-to-Unix command flags.".to_string()
+        }
+    }
+}
+
+fn shell_browse_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static str {
+    match shell_profile {
+        ResolvedShellPromptProfile::UnixLike => {
+            "- Use `exec_command.cmd` with `ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing."
+        }
+        ResolvedShellPromptProfile::PowerShell => {
+            "- Use `exec_command.cmd` with native PowerShell commands such as `Get-ChildItem`, `Select-String`, `Get-Content`, and `Where-Object` for repository browsing."
+        }
+    }
+}
+
+fn shell_task_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static str {
+    match shell_profile {
+        ResolvedShellPromptProfile::UnixLike => {
+            "- Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks."
+        }
+        ResolvedShellPromptProfile::PowerShell => {
+            "- Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks using native PowerShell syntax."
+        }
+    }
+}
+
+fn semantic_search_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static str {
+    match shell_profile {
+        ResolvedShellPromptProfile::UnixLike => {
+            "- Use `code_search` only for semantic structural searches or outlines; use `exec_command.cmd` with `rg` for text search."
+        }
+        ResolvedShellPromptProfile::PowerShell => {
+            "- Use `code_search` only for semantic structural searches or outlines; use `exec_command.cmd` with `rg` if installed, or `Select-String` for native PowerShell text search."
+        }
+    }
 }
 
 fn capability_mode_line(
@@ -319,11 +366,11 @@ fn capability_mode_line(
 
 /// Infer capability level from available tools.
 pub fn infer_capability_level(available_tools: &[String]) -> CapabilityLevel {
-    let has_search = available_tools.iter().any(|t| t == TOOL_UNIFIED_SEARCH);
-    let has_edit = available_tools.iter().any(|t| t == TOOL_UNIFIED_FILE);
+    let has_search = available_tools.iter().any(|t| t == TOOL_CODE_SEARCH);
+    let has_edit = available_tools.iter().any(|t| t == TOOL_APPLY_PATCH);
     let has_read = has_edit || available_tools.iter().any(|t| t == TOOL_READ_FILE);
     let has_list = has_search || available_tools.iter().any(|t| t == TOOL_LIST_FILES);
-    let has_exec = available_tools.iter().any(|t| t == TOOL_UNIFIED_EXEC);
+    let has_exec = available_tools.iter().any(|t| t == TOOL_EXEC_COMMAND);
 
     if has_search {
         CapabilityLevel::CodeSearch
@@ -346,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_read_only_capability_detection() {
-        let tools = vec!["unified_search".to_string()];
+        let tools = vec![TOOL_CODE_SEARCH.to_string()];
         let guidelines = generate_tool_guidelines(&tools, None);
         assert!(guidelines.contains("Capabilities: read-only"));
         assert!(guidelines.contains("do not modify files"));
@@ -354,30 +401,99 @@ mod tests {
 
     #[test]
     fn test_tool_preference_guidance() {
-        let tools = vec!["unified_exec".to_string(), "unified_search".to_string()];
-        let guidelines = generate_tool_guidelines(&tools, None);
-        assert!(guidelines.contains("Prefer search over shell"));
-        assert!(guidelines.contains("action=structural"));
-        assert!(guidelines.contains("action=outline"));
-        assert!(guidelines.contains("action=grep"));
+        let tools = vec![TOOL_EXEC_COMMAND.to_string(), TOOL_CODE_SEARCH.to_string()];
+        let guidelines = generate_tool_guidelines_for_profile(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+        );
+        assert!(guidelines.contains("semantic structural searches or outlines"));
+        assert!(guidelines.contains("`exec_command.cmd` with `rg`"));
         assert!(guidelines.contains("git diff -- <path>"));
+        assert!(guidelines.contains("build tools"));
+        assert!(guidelines.contains("test tools"));
         assert!(guidelines.contains("Completion is a checkpoint"));
     }
 
     #[test]
     fn test_edit_workflow_guidance() {
-        let tools = vec!["unified_file".to_string()];
+        let tools = vec![TOOL_APPLY_PATCH.to_string()];
         let guidelines = generate_tool_guidelines(&tools, None);
-        assert!(guidelines.contains("Read before edit"));
+        assert!(guidelines.contains("Use `apply_patch`"));
         assert!(guidelines.contains("patches small"));
         assert!(guidelines.contains("verification resolved"));
+    }
+
+    #[test]
+    fn test_codex_default_guidance_omits_task_tracker() {
+        let tools = vec![
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_WRITE_STDIN.to_string(),
+            TOOL_APPLY_PATCH.to_string(),
+        ];
+        let guidelines = generate_tool_guidelines_for_profile(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+        );
+
+        assert!(guidelines.contains("exec_command.cmd"));
+        for command in ["ls", "rg", "find", "cat", "sed", "awk"] {
+            assert!(
+                guidelines.contains(&format!("`{command}`")),
+                "{command} should be shown as an exec_command.cmd example"
+            );
+        }
+        assert!(guidelines.contains("`write_stdin`"));
+        assert!(guidelines.contains("`apply_patch`"));
+        assert!(!guidelines.contains("task_tracker"));
+        assert!(!guidelines.contains("list_files"));
+        assert!(!guidelines.contains("read_file"));
+    }
+
+    #[test]
+    fn powershell_guidance_uses_native_command_examples() {
+        let tools = vec![
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
+            TOOL_APPLY_PATCH.to_string(),
+        ];
+        let guidelines = generate_tool_guidelines_for_profile(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::PowerShell,
+        );
+
+        assert!(guidelines.contains("native PowerShell commands"));
+        assert!(guidelines.contains("`Get-ChildItem`"));
+        assert!(guidelines.contains("`Select-String`"));
+        assert!(guidelines.contains("native PowerShell syntax"));
+        assert!(guidelines.contains("`code_search` only for semantic"));
+        assert!(!guidelines.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+    }
+
+    #[test]
+    fn shell_profile_prompt_keeps_policy_and_syntax_separate() {
+        let unix = render_shell_profile_guidance(ResolvedShellPromptProfile::UnixLike);
+        assert!(unix.contains("Active shell profile: `unix_like`"));
+        assert!(unix.contains("does not rewrite GNU flags for macOS BSD tools"));
+        assert!(unix.contains("controls prompt examples and expected command syntax only"));
+        assert!(unix.contains("does not translate GNU-to-BSD"));
+
+        let powershell = render_shell_profile_guidance(ResolvedShellPromptProfile::PowerShell);
+        assert!(powershell.contains("Active shell profile: `powershell`"));
+        assert!(powershell.contains("WSL"));
+        assert!(powershell.contains("Unix-like workflows"));
+        assert!(powershell.contains("PowerShell-to-Unix"));
     }
 
     #[test]
     fn test_harness_browse_tool_guidance() {
         let tools = vec![TOOL_LIST_FILES.to_string(), TOOL_READ_FILE.to_string()];
         let guidelines = generate_tool_guidelines(&tools, None);
-        assert!(guidelines.contains("Prefer `list_files` and `read_file`"));
+        assert!(guidelines.contains("available read-only repository tools"));
+        assert!(!guidelines.contains("read_file"));
+        assert!(!guidelines.contains("list_files"));
         assert!(!guidelines.contains("offset"));
         assert!(!guidelines.contains("per_page"));
     }
@@ -385,14 +501,14 @@ mod tests {
     #[test]
     fn test_canonical_browse_tool_guidance_prefers_public_tools() {
         let tools = vec![
-            "unified_search".to_string(),
-            "unified_file".to_string(),
+            TOOL_CODE_SEARCH.to_string(),
             TOOL_LIST_FILES.to_string(),
             "read_file".to_string(),
         ];
         let guidelines = generate_tool_guidelines(&tools, None);
-        assert!(guidelines.contains("Prefer `unified_search` and `unified_file`"));
-        assert!(!guidelines.contains("Prefer `list_files` and `read_file`"));
+        assert!(guidelines.contains("available read-only repository tools"));
+        assert!(guidelines.contains("code_search"));
+        assert!(!guidelines.contains("read_file"));
     }
 
     #[test]
@@ -405,7 +521,7 @@ mod tests {
 
     #[test]
     fn test_capability_file_reading_guidance() {
-        let tools = vec!["unified_file".to_string()];
+        let tools = vec![TOOL_APPLY_PATCH.to_string()];
         let guidelines = generate_tool_guidelines(&tools, Some(CapabilityLevel::FileReading));
         assert!(guidelines.contains("Capabilities: read-only"));
         assert!(guidelines.contains("do not modify"));
@@ -414,11 +530,15 @@ mod tests {
     #[test]
     fn test_full_capabilities_no_special_guidance() {
         let tools = vec![
-            "unified_file".to_string(),
-            "unified_exec".to_string(),
-            "unified_search".to_string(),
+            TOOL_APPLY_PATCH.to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
         ];
-        let guidelines = generate_tool_guidelines(&tools, Some(CapabilityLevel::Editing));
+        let guidelines = generate_tool_guidelines_for_profile(
+            &tools,
+            Some(CapabilityLevel::Editing),
+            ResolvedShellPromptProfile::UnixLike,
+        );
 
         assert!(!guidelines.contains("Capabilities: limited"));
         assert!(!guidelines.contains("Capabilities: read-only"));
@@ -434,33 +554,37 @@ mod tests {
     #[test]
     fn test_planning_workflow_guidance_keeps_verification_open() {
         let tools = vec![
-            TOOL_UNIFIED_EXEC.to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
             TOOL_TASK_TRACKER.to_string(),
-            TOOL_UNIFIED_SEARCH.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
         ];
-        let guidelines = generate_runtime_tool_guidelines(&tools, true);
+        let guidelines = generate_runtime_tool_guidelines_for_profile(
+            &tools,
+            true,
+            ResolvedShellPromptProfile::UnixLike,
+        );
         assert!(guidelines.contains("Keep `task_tracker` updated"));
         assert!(guidelines.contains("blockers and verification open"));
     }
 
     #[test]
     fn test_capability_inference_precedence() {
-        let tools = vec!["unified_file".to_string(), "unified_search".to_string()];
+        let tools = vec![TOOL_APPLY_PATCH.to_string(), TOOL_CODE_SEARCH.to_string()];
         assert_eq!(infer_capability_level(&tools), CapabilityLevel::CodeSearch);
 
-        let tools = vec!["unified_exec".to_string(), "unified_file".to_string()];
+        let tools = vec![TOOL_EXEC_COMMAND.to_string(), TOOL_APPLY_PATCH.to_string()];
         assert_eq!(infer_capability_level(&tools), CapabilityLevel::Editing);
     }
 
     #[test]
     fn test_capability_inference_variants() {
-        let tools = vec!["unified_file".to_string()];
+        let tools = vec![TOOL_APPLY_PATCH.to_string()];
         assert_eq!(infer_capability_level(&tools), CapabilityLevel::Editing);
 
-        let tools = vec!["unified_exec".to_string()];
+        let tools = vec![TOOL_EXEC_COMMAND.to_string()];
         assert_eq!(infer_capability_level(&tools), CapabilityLevel::Bash);
 
-        let tools = vec!["unified_search".to_string()];
+        let tools = vec![TOOL_CODE_SEARCH.to_string()];
         assert_eq!(infer_capability_level(&tools), CapabilityLevel::CodeSearch);
 
         let tools = vec![TOOL_LIST_FILES.to_string()];
@@ -476,14 +600,20 @@ mod tests {
     #[test]
     fn test_guidelines_stay_compact() {
         let tools = vec![
-            "unified_exec".to_string(),
-            "unified_search".to_string(),
-            "unified_file".to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
             "read_file".to_string(),
             TOOL_LIST_FILES.to_string(),
             "apply_patch".to_string(),
         ];
-        let guidelines = generate_tool_guidelines(&tools, None);
+        let guidelines = generate_tool_guidelines_for_profile(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+        );
+        assert!(!guidelines.contains("read_file"));
+        assert!(!guidelines.contains("list_files"));
+        assert!(guidelines.contains("code_search"));
         let approx_tokens = guidelines.len() / 4;
         assert!(approx_tokens < 160, "got ~{approx_tokens} tokens");
     }
@@ -491,34 +621,129 @@ mod tests {
     #[test]
     fn test_parallel_tool_call_guidance() {
         let tools = vec![
-            "unified_exec".to_string(),
-            "unified_search".to_string(),
-            "unified_file".to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
+            TOOL_APPLY_PATCH.to_string(),
         ];
-        let guidelines = generate_tool_guidelines(&tools, None);
+        let guidelines = generate_tool_guidelines_for_profile(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+        );
         assert!(
             guidelines.contains("parallel"),
             "Should include parallel tool call guidance"
         );
         assert!(
-            guidelines.contains("read files"),
-            "Should mention reading files in parallel"
+            guidelines.contains("inputs do not depend"),
+            "Should mention independent inputs"
         );
     }
 
     #[test]
-    fn planning_workflow_runtime_guidance_keeps_unified_file_read_only() {
+    fn planning_workflow_runtime_guidance_keeps_exec_read_only() {
         let tools = vec![
-            TOOL_UNIFIED_FILE.to_string(),
-            TOOL_UNIFIED_EXEC.to_string(),
-            TOOL_UNIFIED_SEARCH.to_string(),
+            TOOL_APPLY_PATCH.to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
         ];
-        let guidelines = generate_runtime_tool_guidelines(&tools, true);
+        let guidelines = generate_runtime_tool_guidelines_for_profile(
+            &tools,
+            true,
+            ResolvedShellPromptProfile::UnixLike,
+        );
 
         assert!(guidelines.contains("Planning workflow active"));
-        assert!(guidelines.contains("`unified_file` only for read-style access"));
-        assert!(guidelines.contains("`unified_exec` only for read-only verification"));
-        assert!(!guidelines.contains("Read before edit"));
+        assert!(guidelines.contains("`exec_command` only for read-only verification"));
+        assert!(!guidelines.contains("Inspect before edit"));
+    }
+
+    #[test]
+    fn runtime_tool_guidance_uses_explicit_powershell_profile() {
+        let tools = vec![
+            TOOL_APPLY_PATCH.to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
+        ];
+        let guidelines = generate_runtime_tool_guidelines_for_profile(
+            &tools,
+            false,
+            ResolvedShellPromptProfile::PowerShell,
+        );
+
+        assert!(guidelines.contains("native PowerShell commands"));
+        assert!(guidelines.contains("`Get-ChildItem`"));
+        assert!(guidelines.contains("`Select-String`"));
+        assert!(guidelines.contains("native PowerShell syntax"));
+        assert!(!guidelines.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+    }
+
+    #[test]
+    fn runtime_tool_guidance_uses_explicit_unix_like_profile() {
+        let tools = vec![
+            TOOL_APPLY_PATCH.to_string(),
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
+        ];
+        let guidelines = generate_runtime_tool_guidelines_for_profile(
+            &tools,
+            false,
+            ResolvedShellPromptProfile::UnixLike,
+        );
+
+        assert!(guidelines.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+        assert!(guidelines.contains("`exec_command.cmd` with `rg`"));
+        assert!(guidelines.contains("shell-only tasks"));
+        assert!(!guidelines.contains("native PowerShell commands"));
+        assert!(!guidelines.contains("`Get-ChildItem`"));
+    }
+
+    #[test]
+    fn runtime_tool_prompt_sections_use_explicit_profile_for_active_tools() {
+        let mut powershell_prompt = "Base prompt".to_string();
+        let mut unix_prompt = "Base prompt".to_string();
+        let snapshot = SessionToolCatalogSnapshot::new(
+            7,
+            9,
+            false,
+            false,
+            Some(std::sync::Arc::new(vec![
+                ToolDefinition::function(
+                    TOOL_EXEC_COMMAND.to_string(),
+                    "Shell".to_string(),
+                    serde_json::json!({"type": "object"}),
+                ),
+                ToolDefinition::function(
+                    TOOL_CODE_SEARCH.to_string(),
+                    "Semantic search".to_string(),
+                    serde_json::json!({"type": "object"}),
+                ),
+            ])),
+            false,
+        );
+
+        append_runtime_tool_prompt_sections_for_profile(
+            &mut powershell_prompt,
+            &snapshot,
+            false,
+            ResolvedShellPromptProfile::PowerShell,
+        );
+        append_runtime_tool_prompt_sections_for_profile(
+            &mut unix_prompt,
+            &snapshot,
+            false,
+            ResolvedShellPromptProfile::UnixLike,
+        );
+
+        assert!(powershell_prompt.contains("## Active Tools"));
+        assert!(powershell_prompt.contains("`Get-ChildItem`"));
+        assert!(powershell_prompt.contains("`Select-String`"));
+        assert!(!powershell_prompt.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+
+        assert!(unix_prompt.contains("## Active Tools"));
+        assert!(unix_prompt.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+        assert!(unix_prompt.contains("`exec_command.cmd` with `rg`"));
+        assert!(!unix_prompt.contains("`Get-ChildItem`"));
     }
 
     #[test]
@@ -531,12 +756,12 @@ mod tests {
             false,
             Some(std::sync::Arc::new(vec![
                 ToolDefinition::function(
-                    TOOL_UNIFIED_SEARCH.to_string(),
+                    TOOL_EXEC_COMMAND.to_string(),
                     "Search".to_string(),
                     serde_json::json!({"type": "object"}),
                 ),
                 ToolDefinition::function(
-                    TOOL_UNIFIED_FILE.to_string(),
+                    TOOL_APPLY_PATCH.to_string(),
                     "File".to_string(),
                     serde_json::json!({"type": "object"}),
                 ),
@@ -549,7 +774,7 @@ mod tests {
         assert!(prompt.contains("## Active Tools"));
         assert!(prompt.contains("[Runtime Tool Catalog]"));
         assert!(prompt.contains("catalog_tools: 2"));
-        assert!(prompt.contains("currently_available_tools: unified_search, unified_file"));
+        assert!(prompt.contains("currently_available_tools: exec_command, apply_patch"));
         assert!(prompt.contains("request_user_input_enabled: false"));
     }
 
@@ -562,7 +787,7 @@ mod tests {
             false,
             false,
             Some(std::sync::Arc::new(vec![ToolDefinition::function(
-                TOOL_UNIFIED_SEARCH.to_string(),
+                TOOL_EXEC_COMMAND.to_string(),
                 "Search".to_string(),
                 serde_json::json!({"type": "object"}),
             )])),
@@ -574,7 +799,7 @@ mod tests {
             true,
             true,
             Some(std::sync::Arc::new(vec![ToolDefinition::function(
-                TOOL_UNIFIED_FILE.to_string(),
+                TOOL_APPLY_PATCH.to_string(),
                 "File".to_string(),
                 serde_json::json!({"type": "object"}),
             )])),
@@ -590,126 +815,5 @@ mod tests {
         assert!(!prompt.contains("version: 1"));
         assert!(prompt.contains("request_user_input_enabled: true"));
         assert!(!prompt.contains("request_user_input_enabled: false"));
-    }
-
-    #[test]
-    fn deferred_tools_prompt_section_matches_documented_format_and_sorts_groups() {
-        use crate::llm::provider::ToolNamespace;
-
-        let mut docs_search = ToolDefinition::function(
-            "docs_search".to_string(),
-            "Search the docs server".to_string(),
-            serde_json::json!({"type": "object"}),
-        );
-        docs_search.namespace = Some(ToolNamespace {
-            name: "docs".to_string(),
-            description: "Tools provided by MCP server 'docs'".to_string(),
-        });
-        docs_search.defer_loading = Some(true);
-
-        let mut context7_lookup = ToolDefinition::function(
-            "context7_lookup".to_string(),
-            "Look up documentation".to_string(),
-            serde_json::json!({"type": "object"}),
-        );
-        context7_lookup.namespace = Some(ToolNamespace {
-            name: "context7".to_string(),
-            description: "Tools provided by MCP server 'context7'".to_string(),
-        });
-        context7_lookup.defer_loading = Some(true);
-
-        // A second `context7` tool that is not currently deferred -- it
-        // should count toward the group's `tool_count` (via `tool_groups`)
-        // but not its `deferred_count`, matching the group struct's own
-        // invariant that `tool_count` can exceed `deferred_count`.
-        let mut context7_resolve = ToolDefinition::function(
-            "context7_resolve".to_string(),
-            "Resolve a library id".to_string(),
-            serde_json::json!({"type": "object"}),
-        );
-        context7_resolve.namespace = Some(ToolNamespace {
-            name: "context7".to_string(),
-            description: "Tools provided by MCP server 'context7'".to_string(),
-        });
-
-        let mut standalone_deferred = ToolDefinition::function(
-            "grimoire_incantation".to_string(),
-            "Cast a rare arcane incantation".to_string(),
-            serde_json::json!({"type": "object"}),
-        );
-        standalone_deferred.defer_loading = Some(true);
-
-        let core_tool = ToolDefinition::function(
-            TOOL_UNIFIED_SEARCH.to_string(),
-            "Search".to_string(),
-            serde_json::json!({"type": "object"}),
-        );
-
-        let tools = vec![
-            docs_search,
-            context7_lookup,
-            context7_resolve,
-            standalone_deferred,
-            core_tool,
-        ];
-
-        let mut prompt = "Base prompt".to_string();
-        append_deferred_tools_prompt_section(&mut prompt, &tools);
-
-        assert!(prompt.contains("[Deferred Tools]"));
-        // `context7` sorts before `docs` alphabetically (BTreeMap ordering
-        // from `tool_groups`); this is the deterministic order the section
-        // must preserve across calls with the same tool set.
-        let context7_pos = prompt.find("context7 (1 tools)").expect("context7 line");
-        let docs_pos = prompt.find("docs (1 tools)").expect("docs line");
-        assert!(
-            context7_pos < docs_pos,
-            "context7 group should be listed before docs"
-        );
-        assert!(prompt.contains("- context7 (1 tools): Tools provided by MCP server 'context7'"));
-        assert!(prompt.contains("- docs (1 tools): Tools provided by MCP server 'docs'"));
-        assert!(prompt.contains("- 1 additional deferred tools"));
-        assert!(prompt.contains(
-            "Use unified_search with action=\"tools\" and a keyword to load any of these before calling them."
-        ));
-        // The non-deferred `context7_resolve` tool bumps the group's total
-        // tool count but must not appear in the deferred-count line.
-        assert!(!prompt.contains("(2 tools)"));
-    }
-
-    #[test]
-    fn deferred_tools_prompt_section_absent_when_nothing_deferred() {
-        let tools = vec![ToolDefinition::function(
-            TOOL_UNIFIED_SEARCH.to_string(),
-            "Search".to_string(),
-            serde_json::json!({"type": "object"}),
-        )];
-
-        let mut prompt = "Base prompt".to_string();
-        append_deferred_tools_prompt_section(&mut prompt, &tools);
-
-        assert_eq!(prompt, "Base prompt");
-        assert!(!prompt.contains("[Deferred Tools]"));
-    }
-
-    #[test]
-    fn deferred_tools_prompt_section_is_idempotent_on_rebuild() {
-        let deferred = {
-            let mut tool = ToolDefinition::function(
-                "grimoire_incantation".to_string(),
-                "Cast a rare arcane incantation".to_string(),
-                serde_json::json!({"type": "object"}),
-            );
-            tool.defer_loading = Some(true);
-            tool
-        };
-        let tools = vec![deferred];
-
-        let mut prompt = "Base prompt".to_string();
-        append_deferred_tools_prompt_section(&mut prompt, &tools);
-        append_deferred_tools_prompt_section(&mut prompt, &tools);
-
-        assert_eq!(prompt.matches("[Deferred Tools]").count(), 1);
-        assert_eq!(prompt.matches("additional deferred tools").count(), 1);
     }
 }

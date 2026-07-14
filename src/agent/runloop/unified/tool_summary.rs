@@ -34,11 +34,11 @@ pub(crate) struct ToolSummaryRenderContext<'a> {
 const RUN_SUMMARY_FIRST_WIDTH: usize = 62;
 const RUN_SUMMARY_CONTINUATION_WIDTH: usize = 58;
 
-/// Infer the action string for a `unified_file` tool call from its arguments.
+/// Infer the action string for an internal file-operation call from its arguments.
 /// This is the single source of truth for action inference — all three call sites
 /// (`render_file_operation_indicator`, `is_file_modification_tool`, `describe_tool_action`)
 /// must use this function to stay consistent.
-fn unified_file_action(args: &Value) -> &'static str {
+fn file_operation_action(args: &Value) -> &'static str {
     if let Some(action) = args.get("action").and_then(Value::as_str) {
         return match action {
             "write" | "create" => "write",
@@ -82,7 +82,7 @@ pub(crate) fn render_file_operation_indicator(
         name if name == tool_names::SEARCH_REPLACE => ("❋", "Search/replace in"),
         name if name == tool_names::DELETE_FILE => ("❋", "Deleting"),
         name if name == tool_names::UNIFIED_FILE => {
-            let action = unified_file_action(args);
+            let action = file_operation_action(args);
 
             match action {
                 "write" | "create" => ("❋", "Writing"),
@@ -144,7 +144,7 @@ pub(crate) fn is_file_modification_tool(tool_name: &str, args: &Value) -> bool {
             true
         }
         name if name == tool_names::UNIFIED_FILE => {
-            let action = unified_file_action(args);
+            let action = file_operation_action(args);
 
             matches!(
                 action,
@@ -458,7 +458,7 @@ pub(crate) fn describe_tool_action(
             .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
             .unwrap_or_else(|| (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new())),
         actual_name if actual_name == tool_names::UNIFIED_EXEC => {
-            match tool_intent::unified_exec_action(args).unwrap_or("run") {
+            match tool_intent::command_session_action(args).unwrap_or("run") {
                 "run" => describe_shell_command(args)
                     .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
                     .unwrap_or_else(|| {
@@ -493,7 +493,7 @@ pub(crate) fn describe_tool_action(
                     HashSet::new(),
                 ),
                 _ => (
-                    format!("{}unified_exec", mcp_label(is_mcp_tool)),
+                    format!("{}exec_command", if is_mcp_tool { "MCP " } else { "" }),
                     HashSet::new(),
                 ),
             }
@@ -559,7 +559,7 @@ pub(crate) fn describe_tool_action(
                 })
         }
         actual_name if actual_name == tool_names::UNIFIED_FILE => {
-            let action = unified_file_action(args);
+            let action = file_operation_action(args);
 
             let (verb, keys): (&str, &[&str]) = match action {
                 "read" => ("Read file", &["path", "file_path", "target_path"]),

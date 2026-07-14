@@ -27,6 +27,21 @@ const SPOOL_CHUNK_INLINE_MAX_BYTES: usize = 32 * 1024;
 const SPOOL_CHUNK_INLINE_HEAD_BYTES: usize = 8 * 1024;
 const SPOOL_CHUNK_INLINE_TAIL_BYTES: usize = 8 * 1024;
 
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn public_spool_grep_args(path: &str, pattern: &str) -> Value {
+    json!({
+        "cmd": format!(
+            "rg --line-number --column --color=never {} {}",
+            shell_single_quote(pattern),
+            shell_single_quote(path)
+        ),
+        "max_output_tokens": 4000
+    })
+}
+
 /// Read a spool file's content for inline embedding when the spool-chunk
 /// guard trips. Returns `None` if the file is missing, empty, or unreadable.
 fn read_spool_preview_for_guard(path: &str) -> Option<String> {
@@ -74,10 +89,11 @@ fn derive_spool_fallback(path: &str) -> Option<(String, Value)> {
         .and_then(|stem| stem.strip_prefix("run-"))
     {
         return Some((
-            tool_names::UNIFIED_EXEC.to_string(),
+            tool_names::WRITE_STDIN.to_string(),
             json!({
-                "action": "poll",
                 "session_id": sid,
+                "chars": "",
+                "yield_time_ms": 1000,
             }),
         ));
     }
@@ -86,13 +102,8 @@ fn derive_spool_fallback(path: &str) -> Option<(String, Value)> {
     let prefix = stem.split('_').next()?;
     match prefix {
         "unified" | "outline" | "search" => Some((
-            tool_names::UNIFIED_SEARCH.to_string(),
-            json!({
-                "action": "grep",
-                "path": path,
-                "pattern": ".",
-                "max_results": 200,
-            }),
+            tool_names::EXEC_COMMAND.to_string(),
+            public_spool_grep_args(path, "."),
         )),
         _ => None,
     }
@@ -110,13 +121,7 @@ fn max_sequential_spool_chunk_reads_per_turn(ctx: &TurnProcessingContext<'_>) ->
 fn spool_chunk_guard_fallback_args(path: &str) -> Value {
     derive_spool_fallback(path)
         .map(|(_, args)| args)
-        .unwrap_or_else(|| {
-            json!({
-                "action": "grep",
-                "path": path,
-                "pattern": SPOOL_CHUNK_GREP_PATTERN
-            })
-        })
+        .unwrap_or_else(|| public_spool_grep_args(path, SPOOL_CHUNK_GREP_PATTERN))
 }
 
 /// Build fallback tool for spool chunk guard.
@@ -124,7 +129,7 @@ fn spool_chunk_guard_fallback_tool(path: &str) -> Option<String> {
     if let Some((tool, _)) = derive_spool_fallback(path) {
         Some(tool)
     } else {
-        Some(tool_names::UNIFIED_SEARCH.to_string())
+        Some(tool_names::EXEC_COMMAND.to_string())
     }
 }
 
@@ -150,9 +155,11 @@ fn build_spool_chunk_guard_error_content(path: &str, max_reads_per_turn: usize) 
         obj.insert(
             "next_action".to_string(),
             Value::String(
-                "STOP calling read_file/unified_file on this spool. The full \
-                 content is in `inline_content` below. Synthesize your final \
-                 answer from the existing conversation history."
+                "STOP requesting this spool. Use the `inline_content` below \
+                 and the existing conversation history to synthesise your final \
+                 answer. If additional inspection is still required, use \
+                 `exec_command` for targeted shell inspection, `write_stdin` \
+                 for session continuation, or `apply_patch` for edits."
                     .to_string(),
             ),
         );
@@ -274,10 +281,10 @@ mod tests {
 
         assert_eq!(
             parsed.get("fallback_tool").and_then(Value::as_str),
-            Some(tool_names::UNIFIED_EXEC)
+            Some(tool_names::WRITE_STDIN)
         );
-        assert_eq!(parsed["fallback_tool_args"]["action"], "poll");
         assert_eq!(parsed["fallback_tool_args"]["session_id"], "1");
+        assert_eq!(parsed["fallback_tool_args"]["chars"], "");
         assert!(parsed.get("next_action").and_then(Value::as_str).is_some());
         assert_eq!(
             parsed.get("loop_detected").and_then(Value::as_bool),
@@ -300,12 +307,12 @@ mod tests {
 
         assert_eq!(
             parsed.get("fallback_tool").and_then(Value::as_str),
-            Some(tool_names::UNIFIED_SEARCH)
+            Some(tool_names::EXEC_COMMAND)
         );
-        assert_eq!(parsed["fallback_tool_args"]["action"], "grep");
-        assert_eq!(
-            parsed["fallback_tool_args"]["path"],
-            ".vtcode/context/tool_outputs/unified_search_1782625284532136.txt"
+        assert!(
+            parsed["fallback_tool_args"]["cmd"]
+                .as_str()
+                .is_some_and(|cmd| cmd.contains("unified_search_1782625284532136.txt"))
         );
         assert_eq!(
             parsed.get("loop_detected").and_then(Value::as_bool),
@@ -328,12 +335,12 @@ mod tests {
 
         assert_eq!(
             parsed.get("fallback_tool").and_then(Value::as_str),
-            Some(tool_names::UNIFIED_SEARCH)
+            Some(tool_names::EXEC_COMMAND)
         );
-        assert_eq!(parsed["fallback_tool_args"]["action"], "grep");
-        assert_eq!(
-            parsed["fallback_tool_args"]["pattern"],
-            SPOOL_CHUNK_GREP_PATTERN
+        assert!(
+            parsed["fallback_tool_args"]["cmd"]
+                .as_str()
+                .is_some_and(|cmd| cmd.contains(SPOOL_CHUNK_GREP_PATTERN))
         );
     }
 
@@ -341,8 +348,8 @@ mod tests {
     fn derive_spool_fallback_recognizes_pty_session_id() {
         let (tool, args) = derive_spool_fallback(".vtcode/context/tool_outputs/run-abc123.txt")
             .expect("pty session spool should resolve to a fallback");
-        assert_eq!(tool, tool_names::UNIFIED_EXEC);
-        assert_eq!(args["action"], "poll");
+        assert_eq!(tool, tool_names::WRITE_STDIN);
         assert_eq!(args["session_id"], "abc123");
+        assert_eq!(args["chars"], "");
     }
 }

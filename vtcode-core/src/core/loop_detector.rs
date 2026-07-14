@@ -14,7 +14,7 @@ use std::time::Instant;
 // Separate limits for different operation types to reduce false positives
 const MAX_READONLY_TOOL_CALLS: usize = 10; // read_file, grep_file, list_files
 const MAX_WRITE_TOOL_CALLS: usize = 3; // write_file, edit_file, apply_patch
-const MAX_COMMAND_TOOL_CALLS: usize = 8; // shell, unified_exec (raised: verification commands are legitimate)
+const MAX_COMMAND_TOOL_CALLS: usize = 8; // shell, command_session (raised: verification commands are legitimate)
 const MAX_OTHER_TOOL_CALLS: usize = 3; // Other tools (default)
 const DETECTION_WINDOW: usize = 20; // Raised from 10 to catch cross-batch duplicates
 const HARD_LIMIT_MULTIPLIER: usize = 2; // Hard stop at 2x soft limit
@@ -58,7 +58,7 @@ fn base_tool_name(tool_name: &str) -> &str {
 
 #[inline]
 fn is_command_tool_name(tool_name: &str) -> bool {
-    tool_intent::canonical_unified_exec_tool_name(tool_name).is_some()
+    tool_intent::canonical_command_session_tool_name(tool_name).is_some()
 }
 
 /// Canonicalize shell commands for loop detection.
@@ -601,7 +601,7 @@ impl LoopDetector {
 
         // --- Global read-only budget ---
         // Prevents the agent from alternating between different read-only tools
-        // (e.g., unified_search and unified_file) to evade per-tool limits.
+        // (e.g., search_dispatch and file_operation) to evade per-tool limits.
         let readonly_budget = self.effective_readonly_budget();
         if self.total_readonly_calls >= readonly_budget {
             let hard_limit = self.get_limit_for_tool(tool_name) * HARD_LIMIT_MULTIPLIER;
@@ -634,8 +634,8 @@ impl LoopDetector {
                  **Synthesis Required**: You have collected sufficient information from previous tool outputs. \
                  Review your conversation history and produce a concrete answer or implementation. \
                  Do NOT re-read files or re-run searches you have already performed. \
-                 If a tool output was truncated, use offset/limit to read the specific omitted range, \
-                 or use `cat` via unified_exec for full content.",
+                 If a tool output was truncated, use the exact continuation range, \
+                 or use `exec_command.cmd` with `cat` for full content.",
                 self.readonly_streak
             );
             let now = Instant::now();
@@ -743,7 +743,7 @@ impl LoopDetector {
         let base_name = base_tool_name(tool_name);
         // The current call's record was already pushed into `recent_calls` with
         // `read_target` populated by `read_target_for_tool_call` (which now
-        // handles `unified_file` with `action: "read"` and command tools with
+        // handles `file_operation` with `action: "read"` and command tools with
         // `__read__:path` normalization). Use that field as the authoritative
         // indicator instead of checking for a `::read` suffix.
         let current_has_read_target = self
@@ -802,8 +802,8 @@ impl LoopDetector {
             return Some(format!(
                 "HARD STOP: Repeated '{}' calls for '{}' with minimal argument variation ({}-call streak, {} variants). \
                  You are stuck in a read loop. Review the tool outputs already in your conversation history — \
-                 you likely have the information needed. If a read was truncated, use `unified_exec` with \
-                 `cat {}` for full content, or use offset/limit to read the exact omitted range. \
+                 you likely have the information needed. If a read was truncated, use `exec_command.cmd` with \
+                 `cat {}` for full content, or use the exact continuation range. \
                  Do NOT re-read the same file with the same parameters.",
                 tool_name,
                 current_target,
@@ -846,32 +846,32 @@ impl LoopDetector {
         match tool_name {
             LEGACY_LIST_FILES => Some(
                 "Instead of listing files repeatedly:\n\
-                 • Use unified_search with action='structural' plus lang for code patterns\n\
-                 • Use unified_search with action='grep' for raw text, docs, or logs\n\
+                 • Use code_search with action='structural' plus lang for code patterns\n\
+                 • Use exec_command.cmd with rg for raw text, docs, or logs\n\
                  • Target specific subdirectories (e.g., 'src/', 'tests/')\n\
-                 • Use unified_file with action='read' if you know the exact file path"
+                 • Use exec_command.cmd with sed or cat if you know the exact file path"
                     .to_string(),
             ),
             LEGACY_GREP_FILE => Some(
                 "Instead of grepping repeatedly:\n\
-                 • If syntax matters, switch to unified_search with action='structural' and set lang\n\
+                 • If syntax matters, switch to code_search with action='structural' and set lang\n\
                  • Refine your text pattern or narrow the path when grep is the right tool\n\
-                 • Use unified_file with action='read' to examine specific files\n\
-                 • Consider using unified_exec with action='code' for complex filtering"
+                 • Use exec_command.cmd with sed or cat to examine specific files\n\
+                 • Consider a small script through exec_command.cmd for complex filtering"
                     .to_string(),
             ),
             tools::READ_FILE => Some(
                 "Instead of reading files repeatedly:\n\
-                 • Use unified_search with action='structural' plus lang for code lookups\n\
-                 • Use unified_search with action='grep' to find specific content first\n\
-                 • Read specific line ranges with unified_file offset/limit parameters\n\
+                 • Use code_search with action='structural' plus lang for code lookups\n\
+                 • Use exec_command.cmd with rg to find specific content first\n\
+                 • Read specific line ranges with sed through exec_command.cmd\n\
                  • Consider if you already have the information needed"
                     .to_string(),
             ),
             LEGACY_SEARCH_TOOLS => Some(
                 "Instead of searching tools repeatedly:\n\
                  • Review the tools you've already discovered\n\
-                 • Use unified_search with action='tools' to inspect available tools\n\
+                 • Use the dedicated MCP or deferred discovery affordance when available\n\
                  • Check if you need a different approach to the task"
                     .to_string(),
             ),
@@ -974,26 +974,26 @@ impl LoopDetector {
     fn suggest_alternative_for_tool(tool_name: &str) -> String {
         match base_tool_name(tool_name) {
             LEGACY_LIST_FILES => "Instead of listing repeatedly:\n\
-                 • Use unified_search with action='structural' plus lang for code patterns\n\
-                 • Use unified_search with action='grep' for raw text, docs, or logs\n\
+                 • Use code_search with action='structural' plus lang for code patterns\n\
+                 • Use exec_command.cmd with rg for raw text, docs, or logs\n\
                  • Target specific subdirectories (e.g., 'src/', 'tests/')\n\
-                 • Use unified_file with action='read' if you know the exact file path"
+                 • Use exec_command.cmd with sed or cat if you know the exact file path"
                 .to_string(),
             LEGACY_GREP_FILE => "Instead of grepping repeatedly:\n\
-                 • If syntax matters, switch to unified_search with action='structural' and set lang\n\
+                 • If syntax matters, switch to code_search with action='structural' and set lang\n\
                  • Refine your text pattern or narrow the path when grep is the right tool\n\
-                 • Use unified_file with action='read' to examine specific files\n\
-                 • Consider using unified_exec with action='code' for complex filtering"
+                 • Use exec_command.cmd with sed or cat to examine specific files\n\
+                 • Consider a small script through exec_command.cmd for complex filtering"
                 .to_string(),
             tools::READ_FILE => "Instead of reading files repeatedly:\n\
-                 • Use unified_search with action='structural' plus lang for code lookups\n\
-                 • Use unified_search with action='grep' to find specific content first\n\
-                 • Read specific line ranges with unified_file offset/limit parameters\n\
+                 • Use code_search with action='structural' plus lang for code lookups\n\
+                 • Use exec_command.cmd with rg to find specific content first\n\
+                 • Read specific line ranges with sed through exec_command.cmd\n\
                  • Consider if you already have the information needed"
                 .to_string(),
             LEGACY_SEARCH_TOOLS => "Instead of searching tools repeatedly:\n\
                  • Review the tools you've already discovered\n\
-                 • Use unified_search with action='tools' to inspect available tools\n\
+                 • Use the dedicated MCP or deferred discovery affordance when available\n\
                  • Check if you need a different approach to the task"
                 .to_string(),
             _ => "Shift focus to ROOT CAUSE analysis rather than patching symptoms. Re-evaluate planning assumptions specifically regarding environmental constraints. Consider:\n\
@@ -1089,8 +1089,8 @@ fn read_target_for_tool_call(tool_name: &str, args: &serde_json::Value) -> Optio
     }
 
     let read_tool = base_name == tools::READ_FILE
-        || (base_name == tools::UNIFIED_FILE && is_unified_file_read(tool_name, args))
-        || (base_name == tools::UNIFIED_SEARCH && is_unified_search_outline(args));
+        || (base_name == tools::UNIFIED_FILE && is_file_operation_read(tool_name, args))
+        || (base_name == tools::UNIFIED_SEARCH && is_search_dispatch_outline(args));
     if !read_tool {
         return None;
     }
@@ -1114,21 +1114,21 @@ fn read_target_for_tool_call(tool_name: &str, args: &serde_json::Value) -> Optio
     None
 }
 
-/// Returns `true` when `args` represent a `unified_search` outline
+/// Returns `true` when `args` represent a `search_dispatch` outline
 /// invocation — `action: "outline"`.  Outline is a read-only symbol-map
 /// query; treating it as a read target lets the loop detector catch
 /// duplicate outline calls on the same path (checkpoint turn_597:
 /// 6 outline calls on the same directory).
-fn is_unified_search_outline(args: &serde_json::Value) -> bool {
+fn is_search_dispatch_outline(args: &serde_json::Value) -> bool {
     args.get("action")
         .and_then(|v| v.as_str())
         .is_some_and(|a| a.eq_ignore_ascii_case("outline"))
 }
 
-/// Returns `true` when `(tool_name, args)` represent a `unified_file` read
+/// Returns `true` when `(tool_name, args)` represent a `file_operation` read
 /// invocation — either via the legacy `::read` suffix or the modern
 /// `action: "read"` argument.
-fn is_unified_file_read(tool_name: &str, args: &serde_json::Value) -> bool {
+fn is_file_operation_read(tool_name: &str, args: &serde_json::Value) -> bool {
     tool_name.ends_with("::read")
         || matches!(args.get("action").and_then(|v| v.as_str()), Some("read"))
 }
@@ -1323,7 +1323,7 @@ mod tests {
 
         assert!(suggestion.is_some());
         let msg = suggestion.unwrap();
-        assert!(msg.contains("unified_search"));
+        assert!(msg.contains("code_search"));
         assert!(msg.contains("action='structural'"));
         assert!(msg.contains("subdirectories"));
     }
@@ -1335,7 +1335,7 @@ mod tests {
 
         assert!(suggestion.is_some());
         let msg = suggestion.unwrap();
-        assert!(msg.contains("unified_file"));
+        assert!(msg.contains("exec_command.cmd"));
         assert!(msg.contains("set lang"));
         assert!(msg.contains("pattern"));
     }
@@ -1369,7 +1369,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_file_action_suffix_uses_action_specific_limit() {
+    fn test_file_operation_action_suffix_uses_action_specific_limit() {
         let mut detector = LoopDetector::with_max_repeated_calls(100);
         let tool_key = format!("{}::read", tools::UNIFIED_FILE);
 
@@ -1383,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_file_write_suffix_uses_write_limit() {
+    fn test_file_operation_write_suffix_uses_write_limit() {
         let mut detector = LoopDetector::with_max_repeated_calls(100);
         let tool_key = format!("{}::write", tools::UNIFIED_FILE);
 
@@ -1396,7 +1396,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_exec_action_suffix_skips_identical_limit() {
+    fn test_command_session_action_suffix_skips_identical_limit() {
         let mut detector = LoopDetector::with_max_repeated_calls(3);
         let tool_key = format!("{}::run", tools::UNIFIED_EXEC);
         let args = json!({"command": "cargo check"});
@@ -1663,35 +1663,36 @@ mod tests {
         let msg = r.unwrap();
         assert!(msg.contains("HARD STOP"), "Expected HARD STOP, got: {msg}");
         assert!(msg.contains("Cargo.lock"));
-        assert!(msg.contains("offset/limit"));
+        assert!(msg.contains("exact continuation range"));
         assert!(detector.is_hard_limit_exceeded(&read_tool));
     }
 
-    // --- unified_file read-action tests ---
+    // --- file_operation read-action tests ---
 
     #[test]
-    fn read_target_extracted_for_unified_file_read_action() {
+    fn read_target_extracted_for_file_operation_read_action() {
         let args = json!({"action": "read", "path": "src/lib.rs"});
-        let target = read_target_for_tool_call("unified_file", &args);
+        let target = read_target_for_tool_call(tools::UNIFIED_FILE, &args);
         assert_eq!(target.as_deref(), Some("src/lib.rs"));
     }
 
     #[test]
-    fn read_target_none_for_unified_file_write_action() {
+    fn read_target_none_for_file_operation_write_action() {
         let args = json!({"action": "write", "path": "src/lib.rs", "content": "fn main() {}"});
-        let target = read_target_for_tool_call("unified_file", &args);
+        let target = read_target_for_tool_call(tools::UNIFIED_FILE, &args);
         assert!(target.is_none());
     }
 
     #[test]
-    fn read_target_extracted_for_unified_file_with_read_suffix() {
+    fn read_target_extracted_for_file_operation_with_read_suffix() {
         let args = json!({"path": "src/main.rs"});
-        let target = read_target_for_tool_call("unified_file::read", &args);
+        let read_tool = format!("{}::read", tools::UNIFIED_FILE);
+        let target = read_target_for_tool_call(&read_tool, &args);
         assert_eq!(target.as_deref(), Some("src/main.rs"));
     }
 
     #[test]
-    fn repetitive_read_target_fires_for_unified_file_read_action() {
+    fn repetitive_read_target_fires_for_file_operation_read_action() {
         let mut detector = LoopDetector::new();
 
         // Use only 2 different offsets so variants stays <= MAX_SIMILAR_READ_TARGET_VARIANTS.
@@ -1700,7 +1701,7 @@ mod tests {
         let offsets = [0, 100, 0, 100];
         for (i, offset) in offsets.iter().enumerate() {
             let result = detector.record_call(
-                "unified_file",
+                tools::UNIFIED_FILE,
                 &json!({"action": "read", "path": "src/lib.rs", "offset": offset}),
             );
             if i < offsets.len() - 1 {
@@ -1744,7 +1745,7 @@ mod tests {
         let mut detector = LoopDetector::with_max_repeated_calls(100);
         let mut hard_stop_count = 0;
 
-        // Alternate between unified_search and unified_file to evade per-tool limits
+        // Alternate between search_dispatch and file_operation to evade per-tool limits
         for i in 0..MAX_TOTAL_READONLY_CALLS + 5 {
             if i % 2 == 0 {
                 let args = json!({"pattern": format!("p_{i}"), "path": "src/"});

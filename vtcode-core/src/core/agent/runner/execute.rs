@@ -30,7 +30,7 @@ use crate::llm::provider::{
 use crate::llm::providers::gemini::wire::Part;
 use crate::prompts::{
     PromptContext, RuntimePromptContract, append_runtime_mode_sections,
-    append_runtime_tool_prompt_sections, upsert_harness_limits_section,
+    append_runtime_tool_prompt_sections_for_profile, upsert_harness_limits_section,
 };
 use crate::utils::colors::style;
 use anyhow::Result;
@@ -138,7 +138,17 @@ impl AgentRunner {
             self.config().agent.harness.max_tool_wall_clock_secs,
             self.config().agent.harness.max_tool_retries,
         );
-        append_runtime_tool_prompt_sections(&mut system_prompt, &tool_snapshot, true);
+        let shell_profile = self
+            .config()
+            .agent
+            .shell_prompt_profile
+            .resolve_for_current_platform();
+        append_runtime_tool_prompt_sections_for_profile(
+            &mut system_prompt,
+            &tool_snapshot,
+            true,
+            shell_profile,
+        );
 
         let tool_def_tokens = request_tools
             .as_deref()
@@ -371,7 +381,7 @@ impl AgentRunner {
             });
             let result = self
                 .tool_registry
-                .execute_harness_unified_exec(payload)
+                .execute_harness_command_session(payload)
                 .await?;
             let exit_code = result
                 .get("exit_code")
@@ -882,7 +892,7 @@ impl AgentRunner {
                 {
                     effective_tool_calls = Some(vec![ToolCall::function(
                         format!("call_text_{turn}"),
-                        tools::UNIFIED_EXEC.to_string(),
+                        tools::EXEC_COMMAND.to_string(),
                         args_value.to_string(),
                     )]);
                 }

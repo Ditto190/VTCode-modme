@@ -5,7 +5,7 @@ use crate::tools::command_args::{interactive_input_text, is_readonly_command_str
 use crate::tools::names::canonical_tool_name;
 
 /// Valid list modes accepted by `FileOpsTool`.  Used by the `format`→`mode`
-/// cross-mapping in `normalize_unified_search_args` to decide whether a
+/// cross-mapping in `normalize_search_dispatch_args` to decide whether a
 /// `format` value should be mapped to `mode`.  This must stay in sync with
 /// the `mode` enum in `list_files_parameters()` (vtcode-utility-tool-specs)
 /// and `FileOpsTool::normalize_list_mode` (file_ops/tool.rs).
@@ -93,7 +93,7 @@ pub struct ToolIntent {
     pub mutating: bool,
     /// Whether the tool performs potentially destructive operations.
     pub destructive: bool,
-    /// Whether the tool is a read-only unified action (e.g. `unified_file` read).
+    /// Whether the tool is a read-only unified action (e.g. `file_operation` read).
     pub readonly_unified_action: bool,
     /// Whether the tool call is safe to retry on failure.
     pub retry_safe: bool,
@@ -149,18 +149,33 @@ pub fn builtin_tool_behavior(tool_name: &str) -> Option<ToolBehavior> {
 
 fn builtin_tool_behavior_canonical(tool: &str) -> Option<ToolBehavior> {
     match tool {
+        tools::CODE_SEARCH => Some(ToolBehavior::function(
+            ToolMutationModel::ReadOnly,
+            true,
+            false,
+        )),
         tools::UNIFIED_SEARCH => Some(ToolBehavior::function(
             ToolMutationModel::ReadOnly,
             true,
             false,
         )),
         tools::UNIFIED_EXEC => Some(ToolBehavior::function(
-            ToolMutationModel::ByArgs(unified_exec_intent),
+            ToolMutationModel::ByArgs(command_session_intent),
+            false,
+            true,
+        )),
+        tools::EXEC_COMMAND => Some(ToolBehavior::function(
+            ToolMutationModel::ByArgs(exec_command_intent),
+            false,
+            true,
+        )),
+        tools::WRITE_STDIN => Some(ToolBehavior::function(
+            ToolMutationModel::ByArgs(write_stdin_intent),
             false,
             true,
         )),
         tools::UNIFIED_FILE => Some(ToolBehavior::function(
-            ToolMutationModel::ByArgs(unified_file_intent),
+            ToolMutationModel::ByArgs(file_operation_intent),
             false,
             false,
         )),
@@ -179,7 +194,9 @@ fn builtin_tool_behavior_canonical(tool: &str) -> Option<ToolBehavior> {
         | tools::TASK_TRACKER
         | tools::GET_ERRORS
         | tools::SEARCH_TOOLS
-        | tools::MCP
+        | tools::MCP_SEARCH_TOOLS
+        | tools::MCP_GET_TOOL_DETAILS
+        | tools::MCP_LIST_SERVERS
         | tools::THINK => Some(ToolBehavior::function(
             if tool == tools::MEMORY {
                 ToolMutationModel::ByArgs(memory_tool_intent)
@@ -241,18 +258,18 @@ pub fn is_edited_file_conflict_guarded_call(tool_name: &str, args: &Value) -> bo
     let canonical = canonical_tool_name(tool_name);
     match canonical {
         tools::WRITE_FILE | tools::CREATE_FILE | tools::EDIT_FILE | tools::APPLY_PATCH => true,
-        tools::UNIFIED_FILE => unified_file_action(args)
-            .map(is_edited_file_conflict_guarded_unified_file_action)
+        tools::UNIFIED_FILE => file_operation_action(args)
+            .map(is_edited_file_conflict_guarded_file_operation_action)
             .unwrap_or(false),
         _ => false,
     }
 }
 
-fn is_edited_file_conflict_guarded_unified_file_action(action: &str) -> bool {
+fn is_edited_file_conflict_guarded_file_operation_action(action: &str) -> bool {
     action_matches_any(Some(action), &["write", "create", "edit", "patch"])
 }
 
-pub fn canonical_unified_exec_tool_name(tool_name: &str) -> Option<&'static str> {
+pub fn canonical_command_session_tool_name(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         tools::UNIFIED_EXEC
         | tools::RUN_PTY_CMD
@@ -290,7 +307,7 @@ pub fn should_use_spool_reference_only(tool_name: Option<&str>, output: &Value) 
         return false;
     }
 
-    if tool_name.is_some_and(|name| canonical_unified_exec_tool_name(name).is_some()) {
+    if tool_name.is_some_and(|name| canonical_command_session_tool_name(name).is_some()) {
         return true;
     }
 
@@ -298,7 +315,7 @@ pub fn should_use_spool_reference_only(tool_name: Option<&str>, output: &Value) 
         return true;
     }
 
-    if looks_like_unified_search_output(obj) {
+    if looks_like_search_dispatch_output(obj) {
         return true;
     }
 
@@ -322,7 +339,7 @@ pub fn should_use_spool_reference_only(tool_name: Option<&str>, output: &Value) 
     .any(|key| obj.contains_key(*key))
 }
 
-fn looks_like_unified_search_output(obj: &serde_json::Map<String, Value>) -> bool {
+fn looks_like_search_dispatch_output(obj: &serde_json::Map<String, Value>) -> bool {
     ["matches", "results", "files", "entries"]
         .iter()
         .any(|key| obj.contains_key(*key))
@@ -341,22 +358,24 @@ fn looks_like_unified_search_output(obj: &serde_json::Map<String, Value>) -> boo
 pub fn is_command_tool(tool_name: &str) -> bool {
     tool_name == tools::CREATE_PTY_SESSION
         || tool_name == tools::SEND_PTY_INPUT
-        || canonical_unified_exec_tool_name(tool_name).is_some()
+        || canonical_command_session_tool_name(tool_name).is_some()
 }
 
 pub fn is_command_run_tool_call(tool_name: &str, args: &Value) -> bool {
     match tool_name {
         tools::RUN_PTY_CMD | tools::CREATE_PTY_SESSION | tools::SHELL | "bash" => true,
-        tools::UNIFIED_EXEC
-        | tools::EXEC_PTY_CMD
-        | tools::EXEC_COMMAND
-        | "exec"
-        | "container.exec" => unified_exec_action_is(args, "run"),
+        tools::EXEC_COMMAND => crate::tools::command_args::command_text(args)
+            .ok()
+            .flatten()
+            .is_some(),
+        tools::UNIFIED_EXEC | tools::EXEC_PTY_CMD | "exec" | "container.exec" => {
+            command_session_action_is(args, "run")
+        }
         _ => false,
     }
 }
 
-pub fn remap_unified_file_command_args_to_unified_exec(args: &Value) -> Option<Value> {
+pub fn remap_file_operation_command_args_to_command_session(args: &Value) -> Option<Value> {
     let obj = args.as_object()?;
     let command = obj
         .get("command")
@@ -399,27 +418,44 @@ pub fn remap_unified_file_command_args_to_unified_exec(args: &Value) -> Option<V
     Some(Value::Object(mapped))
 }
 
-fn unified_file_intent(args: &Value) -> ToolIntent {
-    if unified_file_action_is(args, "read") {
+fn file_operation_intent(args: &Value) -> ToolIntent {
+    if file_operation_action_is(args, "read") {
         ToolIntent::read_only_unified_action()
     } else {
         ToolIntent::mutating()
     }
 }
 
-fn unified_exec_intent(args: &Value) -> ToolIntent {
-    let has_exec_input = unified_exec_has_input(args);
-    let readonly_unified_action = if unified_exec_action_is(args, "run") {
-        is_readonly_unified_exec_command(args)
+fn command_session_intent(args: &Value) -> ToolIntent {
+    let has_exec_input = command_session_has_input(args);
+    let readonly_unified_action = if command_session_action_is(args, "run") {
+        is_readonly_command_session_command(args)
     } else {
-        unified_exec_action_in(args, &["poll", "list", "inspect"])
-            || (unified_exec_action_is(args, "continue") && !has_exec_input)
+        command_session_action_in(args, &["poll", "list", "inspect"])
+            || (command_session_action_is(args, "continue") && !has_exec_input)
     };
 
     if readonly_unified_action {
         ToolIntent::read_only_unified_action()
     } else {
         ToolIntent::mutating()
+    }
+}
+
+fn exec_command_intent(args: &Value) -> ToolIntent {
+    if is_readonly_command_session_command(args) {
+        ToolIntent::read_only_unified_action()
+    } else {
+        ToolIntent::mutating()
+    }
+}
+
+fn write_stdin_intent(args: &Value) -> ToolIntent {
+    match crate::tools::command_args::write_stdin_dispatch(args) {
+        Ok(crate::tools::command_args::WriteStdinDispatch::Poll) => ToolIntent::read_only(),
+        Ok(crate::tools::command_args::WriteStdinDispatch::Write) | Err(_) => {
+            ToolIntent::mutating()
+        }
     }
 }
 
@@ -437,7 +473,7 @@ fn memory_tool_intent(args: &Value) -> ToolIntent {
 }
 
 /// Conservative allow-list of read-only inspection commands used by
-/// `unified_exec`. Any command that could write, move, or delete must be
+/// `command_session`. Any command that could write, move, or delete must be
 /// rejected so it is not cached or parallelized as read-only.
 const READONLY_UNIFIED_EXEC_COMMANDS: &[&str] = &[
     "rg", "ls", "cat", "diff", "find", "wc", "grep", "egrep", "fgrep", "head", "tail", "sort",
@@ -448,7 +484,7 @@ fn is_readonly_base_command(command: &str) -> bool {
     READONLY_UNIFIED_EXEC_COMMANDS.contains(&command)
 }
 
-fn is_readonly_unified_exec_command(args: &Value) -> bool {
+fn is_readonly_command_session_command(args: &Value) -> bool {
     let Ok(Some(parts)) = crate::tools::command_args::command_words(args) else {
         return false;
     };
@@ -515,11 +551,9 @@ fn is_readonly_pipeline_segments(args: &Value) -> bool {
     true
 }
 
-/// Determine the action for unified_file tool based on args.
+/// Determine the action for file_operation tool based on args.
 /// Returns the action string or a default if inference is possible.
-pub fn unified_file_action(args: &Value) -> Option<&str> {
-    use crate::tools::editing::looks_like_vte_patch;
-
+pub fn file_operation_action(args: &Value) -> Option<&str> {
     args.get("action").and_then(|v| v.as_str()).or_else(|| {
         let has_read_path = args.get("path").is_some()
             || args.get("file_path").is_some()
@@ -527,16 +561,9 @@ pub fn unified_file_action(args: &Value) -> Option<&str> {
             || args.get("target_path").is_some()
             || args.get("file").is_some()
             || args.get("p").is_some();
-        let patch_in_input = args
-            .get("input")
-            .and_then(|v| v.as_str())
-            .is_some_and(looks_like_vte_patch);
-        let raw_patch = args.as_str().is_some_and(looks_like_vte_patch);
 
         if args.get("old_str").is_some() {
             Some("edit")
-        } else if args.get("patch").is_some() || patch_in_input || raw_patch {
-            Some("patch")
         } else if args.get("content").is_some() {
             Some("write")
         } else if args.get("destination").is_some() {
@@ -549,9 +576,9 @@ pub fn unified_file_action(args: &Value) -> Option<&str> {
     })
 }
 
-/// Determine the action for unified_exec tool based on args.
+/// Determine the action for command_session tool based on args.
 /// Returns the action string or None if no inference is possible.
-pub fn unified_exec_action(args: &Value) -> Option<&str> {
+pub fn command_session_action(args: &Value) -> Option<&str> {
     args.get("action").and_then(|v| v.as_str()).or_else(|| {
         // Check for standard command fields
         if args.get("command").is_some()
@@ -595,51 +622,46 @@ fn action_matches_any(action: Option<&str>, expected: &[&str]) -> bool {
     })
 }
 
-pub fn unified_file_action_is(args: &Value, expected: &str) -> bool {
-    action_matches(unified_file_action(args), expected)
+pub fn file_operation_action_is(args: &Value, expected: &str) -> bool {
+    action_matches(file_operation_action(args), expected)
 }
 
-pub fn unified_file_action_in(args: &Value, expected: &[&str]) -> bool {
-    action_matches_any(unified_file_action(args), expected)
+pub fn file_operation_action_in(args: &Value, expected: &[&str]) -> bool {
+    action_matches_any(file_operation_action(args), expected)
 }
 
-pub fn unified_exec_action_is(args: &Value, expected: &str) -> bool {
-    action_matches(unified_exec_action(args), expected)
+pub fn command_session_action_is(args: &Value, expected: &str) -> bool {
+    action_matches(command_session_action(args), expected)
 }
 
-pub fn unified_exec_action_in(args: &Value, expected: &[&str]) -> bool {
-    action_matches_any(unified_exec_action(args), expected)
+pub fn command_session_action_in(args: &Value, expected: &[&str]) -> bool {
+    action_matches_any(command_session_action(args), expected)
 }
 
-pub fn unified_search_action_is(args: &Value, expected: &str) -> bool {
-    action_matches(unified_search_action(args), expected)
+pub fn search_dispatch_action_is(args: &Value, expected: &str) -> bool {
+    action_matches(search_dispatch_action(args), expected)
 }
 
-pub fn unified_search_action_in(args: &Value, expected: &[&str]) -> bool {
-    action_matches_any(unified_search_action(args), expected)
+pub fn search_dispatch_action_in(args: &Value, expected: &[&str]) -> bool {
+    action_matches_any(search_dispatch_action(args), expected)
 }
 
-/// Determine the action for the `mcp` tool based on args. Unlike
-/// `unified_search`/`unified_file`, the `mcp` schema marks `action` as
-/// required, so no shape-based inference is needed here.
+/// Return the explicit action requested through the consolidated MCP tool.
 pub fn mcp_action(args: &Value) -> Option<&str> {
-    args.get("action").and_then(|v| v.as_str())
+    args.get("action").and_then(Value::as_str)
 }
 
 pub fn mcp_action_is(args: &Value, expected: &str) -> bool {
     action_matches(mcp_action(args), expected)
 }
 
-/// Single source of truth for the action-qualified policy/risk identity of a
-/// (tool, args) pair. Returns None when the tool is evaluated under its bare
-/// name. Both the policy-evaluation path (policy_evaluation_name) and the
-/// risk-scoring path (build_risk_context) MUST route through this so the two
-/// decisions cannot drift out of lockstep.
+/// Return the policy identity for actions whose risk differs from their
+/// otherwise low-risk parent tool.
 pub fn action_qualified_policy_name(tool_name: &str, args: Option<&Value>) -> Option<&'static str> {
     if tool_name == tools::UNIFIED_SEARCH
-        && args.is_some_and(|args| unified_search_action_is(args, "web"))
+        && args.is_some_and(|args| search_dispatch_action_is(args, "web"))
     {
-        return Some("unified_search:web");
+        return Some("search_dispatch:web");
     }
 
     if tool_name == tools::MCP_CONNECT_SERVER
@@ -657,7 +679,7 @@ pub fn action_qualified_policy_name(tool_name: &str, args: Option<&Value>) -> Op
     None
 }
 
-fn unified_exec_has_input(args: &Value) -> bool {
+fn command_session_has_input(args: &Value) -> bool {
     interactive_input_text(args).is_some()
 }
 
@@ -703,7 +725,7 @@ fn looks_like_list_glob_pattern(args: &serde_json::Map<String, Value>) -> bool {
         || pattern.contains("*.")
 }
 
-fn unified_search_action_from_object(args: &serde_json::Map<String, Value>) -> Option<&str> {
+fn search_dispatch_action_from_object(args: &serde_json::Map<String, Value>) -> Option<&str> {
     get_field_case_insensitive(args, "action")
         .and_then(|value| value.as_str())
         .or_else(|| {
@@ -749,7 +771,7 @@ fn unified_search_action_from_object(args: &serde_json::Map<String, Value>) -> O
         })
 }
 
-fn is_unified_search_arg_key(key: &str) -> bool {
+fn is_search_dispatch_arg_key(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
         "action"
@@ -775,8 +797,8 @@ fn is_unified_search_arg_key(key: &str) -> bool {
     )
 }
 
-fn object_has_unified_search_signal(args: &serde_json::Map<String, Value>) -> bool {
-    args.keys().any(|key| is_unified_search_arg_key(key))
+fn object_has_search_dispatch_signal(args: &serde_json::Map<String, Value>) -> bool {
+    args.keys().any(|key| is_search_dispatch_arg_key(key))
 }
 
 fn parse_object_json_string(payload: &str) -> Option<serde_json::Map<String, Value>> {
@@ -784,10 +806,10 @@ fn parse_object_json_string(payload: &str) -> Option<serde_json::Map<String, Val
     parsed.as_object().cloned()
 }
 
-fn extract_unified_search_args_object(args: &Value) -> Option<serde_json::Map<String, Value>> {
+fn extract_search_dispatch_args_object(args: &Value) -> Option<serde_json::Map<String, Value>> {
     match args {
         Value::Object(args_obj) => {
-            if object_has_unified_search_signal(args_obj) {
+            if object_has_search_dispatch_signal(args_obj) {
                 return Some(args_obj.clone());
             }
 
@@ -813,14 +835,14 @@ fn extract_unified_search_args_object(args: &Value) -> Option<serde_json::Map<St
     }
 }
 
-/// Determine the action for unified_search tool based on args.
+/// Determine the action for search_dispatch tool based on args.
 /// Returns the action string or None if no inference is possible.
-pub fn unified_search_action(args: &Value) -> Option<&str> {
+pub fn search_dispatch_action(args: &Value) -> Option<&str> {
     let args_obj = args.as_object()?;
-    unified_search_action_from_object(args_obj)
+    search_dispatch_action_from_object(args_obj)
 }
 
-/// Cross-map `unified_search`-specific fields to `ListInput`-compatible
+/// Cross-map `search_dispatch`-specific fields to `ListInput`-compatible
 /// names for `action=list`.  The schema defines `max_results`, `globs`, and
 /// `format`, but `ListInput` only knows `max_items`/`per_page`/`glob_pattern`/
 /// `mode`.  Without this mapping these fields are silently dropped by serde.
@@ -895,9 +917,9 @@ fn apply_list_cross_mappings(normalized: &mut serde_json::Map<String, Value>) {
     }
 }
 
-/// Normalize unified_search args so case/shape variants still pass schema checks.
-pub fn normalize_unified_search_args(args: &Value) -> Value {
-    let Some(args_obj) = extract_unified_search_args_object(args) else {
+/// Normalize search_dispatch args so case/shape variants still pass schema checks.
+pub fn normalize_search_dispatch_args(args: &Value) -> Value {
+    let Some(args_obj) = extract_search_dispatch_args_object(args) else {
         return args.clone();
     };
 
@@ -964,7 +986,7 @@ pub fn normalize_unified_search_args(args: &Value) -> Value {
             .or_insert_with(|| value.clone());
     }
 
-    let inferred_action = unified_search_action_from_object(&normalized).map(|a| a.to_string());
+    let inferred_action = search_dispatch_action_from_object(&normalized).map(|a| a.to_string());
     if let Some(action) = inferred_action {
         normalized
             .entry("action".to_string())
@@ -998,30 +1020,12 @@ pub fn normalize_unified_search_args(args: &Value) -> Value {
         })
         .or_else(|| keyword_alias.clone());
 
-    if action.eq_ignore_ascii_case("grep") {
-        // Map `match` -> `pattern` for grep action.  The `match` field is
-        // only valid for `outline` action, but the model sometimes uses it
-        // with grep instead of `pattern`.
-        if !normalized.contains_key("pattern") {
-            let match_value = normalized
-                .get("match")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(|v| v.to_string());
-            if let Some(match_val) = match_value {
-                normalized
-                    .entry("pattern".to_string())
-                    .or_insert_with(|| Value::String(match_val));
-                normalized.remove("match");
-            }
-        }
-
-        if let Some(pattern) = pattern_alias.clone() {
-            normalized
-                .entry("pattern".to_string())
-                .or_insert_with(|| Value::String(pattern));
-        }
+    if action.eq_ignore_ascii_case("grep")
+        && let Some(pattern) = pattern_alias.clone()
+    {
+        normalized
+            .entry("pattern".to_string())
+            .or_insert_with(|| Value::String(pattern));
     }
 
     if action.eq_ignore_ascii_case("list")
@@ -1053,8 +1057,8 @@ pub fn normalize_unified_search_args(args: &Value) -> Value {
         }
     }
 
-    // Cross-map unified_search-specific fields to ListInput-compatible
-    // field names for action=list.  The unified_search schema defines
+    // Cross-map search_dispatch-specific fields to ListInput-compatible
+    // field names for action=list.  The search_dispatch schema defines
     // `max_results`, `globs`, and `format`, but `ListInput` only knows
     // `max_items`/`per_page`/`glob_pattern`/`mode`.  Without this
     // mapping these fields are silently dropped by serde, the listing
@@ -1066,39 +1070,22 @@ pub fn normalize_unified_search_args(args: &Value) -> Value {
         apply_list_cross_mappings(&mut normalized);
     }
 
-    // For grep action: the `format` field is only valid for structural
-    // workflow (workflow="scan").  When the model passes `format` with
-    // action=grep, it's often an invalid value like "content" that
-    // causes schema validation to fail.  Remove it to prevent blocked
-    // tool call loops (checkpoint turn_635: 8 consecutive blocked calls).
-    if action.eq_ignore_ascii_case("grep") {
-        if let Some(format_val) = normalized.get("format").and_then(Value::as_str) {
-            let valid_grep_formats = ["files_with_matches", "count"];
-            if !valid_grep_formats
-                .iter()
-                .any(|f| f.eq_ignore_ascii_case(format_val))
-            {
-                normalized.remove("format");
-            }
-        }
-    }
-
     Value::Object(normalized)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        action_qualified_policy_name, canonical_unified_exec_tool_name, classify_tool_intent,
+        canonical_command_session_tool_name, classify_tool_intent, file_operation_action,
         is_command_run_tool_call, is_edited_file_conflict_guarded_call, is_parallel_safe_call,
-        normalize_unified_search_args, remap_unified_file_command_args_to_unified_exec,
-        should_use_spool_reference_only, unified_file_action,
+        normalize_search_dispatch_args, remap_file_operation_command_args_to_command_session,
+        should_use_spool_reference_only,
     };
     use crate::config::constants::tools;
     use serde_json::json;
 
     #[test]
-    fn unified_file_read_is_retry_safe() {
+    fn file_operation_read_is_retry_safe() {
         let intent = classify_tool_intent(
             tools::UNIFIED_FILE,
             &json!({"action": "read", "path": "README.md"}),
@@ -1109,7 +1096,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_poll_is_retry_safe() {
+    fn command_session_poll_is_retry_safe() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "poll", "session_id": 1}),
@@ -1120,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_inspect_is_retry_safe() {
+    fn command_session_inspect_is_retry_safe() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "inspect", "spool_path": ".vtcode/context/tool_outputs/run-1.txt"}),
@@ -1131,7 +1118,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_continue_without_input_is_retry_safe() {
+    fn command_session_continue_without_input_is_retry_safe() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "continue", "session_id": "run-1"}),
@@ -1142,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_continue_with_input_is_mutating_and_destructive() {
+    fn command_session_continue_with_input_is_mutating_and_destructive() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "continue", "session_id": "run-1", "input": "q"}),
@@ -1154,7 +1141,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_continue_with_empty_input_stays_retry_safe() {
+    fn command_session_continue_with_empty_input_stays_retry_safe() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "continue", "session_id": "run-1", "input": ""}),
@@ -1165,7 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_is_mutating_and_destructive() {
+    fn command_session_run_is_mutating_and_destructive() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "run", "command": "echo hi"}),
@@ -1176,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_diff_is_read_only() {
+    fn command_session_run_diff_is_read_only() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "run", "command": "diff a.rs b.rs"}),
@@ -1187,7 +1174,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_find_is_read_only() {
+    fn command_session_run_find_is_read_only() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "run", "command": "find . -type f -name '*.rs' -not -path '*/target/*'"}),
@@ -1198,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_grep_wc_head_are_read_only() {
+    fn command_session_run_grep_wc_head_are_read_only() {
         for cmd in [
             "grep -rn 'todo' src",
             "wc -l src/main.rs",
@@ -1220,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_with_redirection_is_mutating() {
+    fn command_session_run_with_redirection_is_mutating() {
         for cmd in [
             "cat a.txt > b.txt",
             "grep x src > out.txt",
@@ -1239,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_find_with_destructive_flags_is_mutating() {
+    fn command_session_run_find_with_destructive_flags_is_mutating() {
         for cmd in [
             "find . -type f -delete",
             "find . -name '*.tmp' -exec rm {} \\;",
@@ -1257,7 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_pipelines_with_unsafe_segments_are_mutating() {
+    fn command_session_run_pipelines_with_unsafe_segments_are_mutating() {
         for cmd in [
             "cat a.txt | tee b.txt",
             "echo hi | cat",
@@ -1275,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_allowlisted_is_read_only() {
+    fn command_session_run_allowlisted_is_read_only() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "run", "command": "rg planning_active src"}),
@@ -1286,7 +1273,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_run_dry_run_is_read_only() {
+    fn command_session_run_dry_run_is_read_only() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"action": "run", "command": "npm install --dry-run"}),
@@ -1314,7 +1301,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_cmd_alias_infers_run() {
+    fn command_session_cmd_alias_infers_run() {
         let intent = classify_tool_intent(tools::UNIFIED_EXEC, &json!({"cmd": "echo hi"}));
         assert!(intent.mutating);
         assert!(intent.destructive);
@@ -1322,7 +1309,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_chars_alias_infers_write() {
+    fn command_session_chars_alias_infers_write() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"session_id": "abc123", "chars": "status\n"}),
@@ -1333,7 +1320,33 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_text_alias_infers_write() {
+    fn write_stdin_empty_chars_is_read_only_and_retry_safe() {
+        let intent = classify_tool_intent(
+            tools::WRITE_STDIN,
+            &json!({"session_id": "abc123", "chars": ""}),
+        );
+
+        assert!(!intent.mutating);
+        assert!(!intent.destructive);
+        assert!(!intent.readonly_unified_action);
+        assert!(intent.retry_safe);
+    }
+
+    #[test]
+    fn write_stdin_non_empty_chars_is_mutating() {
+        let intent = classify_tool_intent(
+            tools::WRITE_STDIN,
+            &json!({"session_id": "abc123", "chars": "  status\n"}),
+        );
+
+        assert!(intent.mutating);
+        assert!(intent.destructive);
+        assert!(!intent.readonly_unified_action);
+        assert!(!intent.retry_safe);
+    }
+
+    #[test]
+    fn command_session_text_alias_infers_write() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"session_id": "abc123", "text": "status\n"}),
@@ -1344,7 +1357,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_spool_path_alias_infers_inspect() {
+    fn command_session_spool_path_alias_infers_inspect() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,
             &json!({"spool_path": ".vtcode/context/tool_outputs/run-1.txt"}),
@@ -1355,7 +1368,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_exec_compact_session_alias_infers_poll() {
+    fn command_session_compact_session_alias_infers_poll() {
         let intent = classify_tool_intent(tools::UNIFIED_EXEC, &json!({"s": "run-1"}));
         assert!(!intent.mutating);
         assert!(!intent.destructive);
@@ -1363,42 +1376,26 @@ mod tests {
     }
 
     #[test]
-    fn unified_file_input_patch_infers_patch() {
-        let args = json!({
-            "input": "*** Begin Patch\n*** End Patch\n"
-        });
-        let action = unified_file_action(&args);
-        assert_eq!(action, Some("patch"));
-    }
-
-    #[test]
-    fn unified_file_raw_patch_infers_patch() {
-        let args = json!("*** Begin Patch\n*** Update File: src/main.rs\n*** End Patch\n");
-        let action = unified_file_action(&args);
-        assert_eq!(action, Some("patch"));
-    }
-
-    #[test]
-    fn unified_file_unknown_args_require_action() {
+    fn file_operation_unknown_args_require_action() {
         let args = json!({
             "unexpected": true
         });
-        let action = unified_file_action(&args);
+        let action = file_operation_action(&args);
         assert_eq!(action, None);
     }
 
     #[test]
-    fn unified_file_compact_path_alias_infers_read() {
+    fn file_operation_compact_path_alias_infers_read() {
         let args = json!({
             "p": "README.md"
         });
-        let action = unified_file_action(&args);
+        let action = file_operation_action(&args);
         assert_eq!(action, Some("read"));
     }
 
     #[test]
-    fn remap_unified_file_command_args_maps_command_payload_to_unified_exec() {
-        let remapped = remap_unified_file_command_args_to_unified_exec(&json!({
+    fn remap_file_operation_command_args_maps_command_payload_to_command_session() {
+        let remapped = remap_file_operation_command_args_to_command_session(&json!({
             "command": "cargo check",
             "cwd": ".",
             "timeout_ms": 1000
@@ -1412,8 +1409,8 @@ mod tests {
     }
 
     #[test]
-    fn remap_unified_file_command_args_accepts_exec_action_aliases() {
-        let remapped = remap_unified_file_command_args_to_unified_exec(&json!({
+    fn remap_file_operation_command_args_accepts_exec_action_aliases() {
+        let remapped = remap_file_operation_command_args_to_command_session(&json!({
             "action": "shell",
             "cmd": "echo ok"
         }))
@@ -1424,8 +1421,8 @@ mod tests {
     }
 
     #[test]
-    fn remap_unified_file_command_args_rejects_non_command_actions() {
-        let remapped = remap_unified_file_command_args_to_unified_exec(&json!({
+    fn remap_file_operation_command_args_rejects_non_command_actions() {
+        let remapped = remap_file_operation_command_args_to_command_session(&json!({
             "action": "read",
             "command": "echo ok"
         }));
@@ -1459,10 +1456,6 @@ mod tests {
             tools::UNIFIED_FILE,
             &json!({"action": "create", "path": "README.md", "content": "agent"})
         ));
-        assert!(is_edited_file_conflict_guarded_call(
-            tools::UNIFIED_FILE,
-            &json!({"patch": "*** Begin Patch\n*** End Patch\n"})
-        ));
     }
 
     #[test]
@@ -1494,8 +1487,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_canonicalizes_case_and_infers_action() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_canonicalizes_case_and_infers_action() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "Pattern": "needle",
             "Path": "."
         }));
@@ -1506,8 +1499,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_infers_list_for_glob_patterns() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_infers_list_for_glob_patterns() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "Pattern": "**/*.rs",
             "Path": "src"
         }));
@@ -1518,8 +1511,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_unwraps_arguments_object() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_unwraps_arguments_object() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "arguments": {
                 "Pattern": "needle",
                 "Path": "."
@@ -1532,8 +1525,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_parses_arguments_json_string() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_parses_arguments_json_string() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "args": "{\"Pattern\":\"needle\",\"Path\":\".\"}"
         }));
 
@@ -1543,8 +1536,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_keeps_structural_action_explicit() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_keeps_structural_action_explicit() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "Action": "structural",
             "Pattern": "fn $NAME() {}",
             "Lang": "rust",
@@ -1560,8 +1553,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_infers_structural_from_pattern_and_lang() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_infers_structural_from_pattern_and_lang() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "Pattern": "fn $NAME($$$ARGS) { $$$BODY }",
             "Lang": "rust",
             "Path": "."
@@ -1573,8 +1566,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_canonicalizes_structural_workflow_fields() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_canonicalizes_structural_workflow_fields() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "Workflow": "scan",
             "Config-Path": "config/sgconfig.yml",
             "Filter": "rust/no-iterator-for-each",
@@ -1589,8 +1582,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_maps_keyword_to_pattern_for_grep() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_maps_keyword_to_pattern_for_grep() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "action": "grep",
             "keyword": "system prompt",
             "path": "src"
@@ -1602,8 +1595,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_maps_keyword_to_name_pattern_for_list() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_maps_keyword_to_name_pattern_for_list() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "action": "list",
             "keyword": "agent",
             "path": "vtcode-core/src",
@@ -1617,8 +1610,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_unified_search_args_maps_query_to_pattern_for_grep() {
-        let normalized = normalize_unified_search_args(&json!({
+    fn normalize_search_dispatch_args_maps_query_to_pattern_for_grep() {
+        let normalized = normalize_search_dispatch_args(&json!({
             "action": "grep",
             "query": "Result<",
             "path": "vtcode-core/src"
@@ -1627,53 +1620,6 @@ mod tests {
         assert_eq!(normalized["action"], "grep");
         assert_eq!(normalized["pattern"], "Result<");
         assert_eq!(normalized["path"], "vtcode-core/src");
-    }
-
-    #[test]
-    fn normalize_unified_search_args_removes_invalid_format_for_grep() {
-        // "content" is not a valid format value for grep action.
-        // Valid values are: "files_with_matches", "count".
-        // The normalization should remove invalid values to prevent
-        // schema validation failures and blocked tool call loops.
-        let normalized = normalize_unified_search_args(&json!({
-            "action": "grep",
-            "pattern": "doctor",
-            "path": ".",
-            "format": "content"
-        }));
-
-        assert_eq!(normalized["action"], "grep");
-        assert_eq!(normalized["pattern"], "doctor");
-        assert!(!normalized.as_object().unwrap().contains_key("format"));
-    }
-
-    #[test]
-    fn normalize_unified_search_args_keeps_valid_format_for_grep() {
-        // "files_with_matches" is a valid format value for grep action.
-        let normalized = normalize_unified_search_args(&json!({
-            "action": "grep",
-            "pattern": "doctor",
-            "path": ".",
-            "format": "files_with_matches"
-        }));
-
-        assert_eq!(normalized["action"], "grep");
-        assert_eq!(normalized["format"], "files_with_matches");
-    }
-
-    #[test]
-    fn normalize_unified_search_args_maps_match_to_pattern_for_grep() {
-        // "match" is only valid for outline action, not grep.
-        // The normalization should map it to "pattern" for grep.
-        let normalized = normalize_unified_search_args(&json!({
-            "action": "grep",
-            "match": "doctor",
-            "path": "."
-        }));
-
-        assert_eq!(normalized["action"], "grep");
-        assert_eq!(normalized["pattern"], "doctor");
-        assert!(!normalized.as_object().unwrap().contains_key("match"));
     }
 
     #[test]
@@ -1689,7 +1635,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_unified_exec_tool_name_normalizes_exec_aliases() {
+    fn canonical_command_session_tool_name_normalizes_exec_aliases() {
         for alias in [
             tools::UNIFIED_EXEC,
             tools::RUN_PTY_CMD,
@@ -1707,7 +1653,7 @@ mod tests {
             "container.exec",
         ] {
             assert_eq!(
-                canonical_unified_exec_tool_name(alias),
+                canonical_command_session_tool_name(alias),
                 Some(tools::UNIFIED_EXEC)
             );
         }
@@ -1722,22 +1668,22 @@ mod tests {
     }
 
     #[test]
-    fn spool_reference_only_detects_unified_search_payloads() {
+    fn spool_reference_only_detects_search_dispatch_payloads() {
         assert!(should_use_spool_reference_only(
             Some(tools::UNIFIED_SEARCH),
             &json!({
-                "spool_path": ".vtcode/context/tool_outputs/unified_search_1.txt",
+                "spool_path": ".vtcode/context/tool_outputs/search_dispatch_1.txt",
                 "matches": []
             })
         ));
     }
 
     #[test]
-    fn spool_reference_only_detects_unified_search_payload_without_tool_name() {
+    fn spool_reference_only_detects_search_dispatch_payload_without_tool_name() {
         assert!(should_use_spool_reference_only(
             None,
             &json!({
-                "spool_path": ".vtcode/context/tool_outputs/unified_search_1.txt",
+                "spool_path": ".vtcode/context/tool_outputs/search_dispatch_1.txt",
                 "matches": []
             })
         ));
@@ -1791,16 +1737,16 @@ mod tests {
         ));
     }
 
-    // ── normalize_unified_search_args: list-action cross-mapping ──────────
+    // ── normalize_search_dispatch_args: list-action cross-mapping ──────────
     //
-    // The unified_search schema defines `max_results`, `globs`, and `format`,
+    // The search_dispatch schema defines `max_results`, `globs`, and `format`,
     // but ListInput only knows `max_items`/`per_page`/`glob_pattern`/`mode`.
     // Without cross-mapping these fields are silently dropped and the agent
     // loops (checkpoint turn_606: 37-message loop on "what's in this repo?").
 
     #[test]
     fn normalize_list_maps_max_results_to_per_page_and_max_items() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "max_results": 1000
@@ -1817,7 +1763,7 @@ mod tests {
 
     #[test]
     fn normalize_list_preserves_explicit_per_page_over_max_results() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "max_results": 1000,
@@ -1835,7 +1781,7 @@ mod tests {
 
     #[test]
     fn normalize_list_maps_globs_string_to_pattern() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "globs": "**/*.rs"
@@ -1848,7 +1794,7 @@ mod tests {
 
     #[test]
     fn normalize_list_maps_globs_array_first_element_to_pattern() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "globs": ["**/*.rs", "**/*.toml"]
@@ -1861,7 +1807,7 @@ mod tests {
 
     #[test]
     fn normalize_list_preserves_explicit_pattern_over_globs() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "pattern": "src/**/*.rs",
@@ -1875,7 +1821,7 @@ mod tests {
 
     #[test]
     fn normalize_list_maps_format_tree_to_mode() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "format": "tree"
@@ -1888,7 +1834,7 @@ mod tests {
 
     #[test]
     fn normalize_list_maps_format_recursive_to_mode() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "format": "recursive"
@@ -1901,7 +1847,7 @@ mod tests {
 
     #[test]
     fn normalize_list_does_not_map_format_github_to_mode() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "format": "github"
@@ -1914,7 +1860,7 @@ mod tests {
 
     #[test]
     fn normalize_list_preserves_explicit_mode_over_format() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": ".",
             "mode": "largest",
@@ -1930,7 +1876,7 @@ mod tests {
     fn normalize_list_full_cross_mapping() {
         // Reproduces the exact args pattern from checkpoint turn_606 that
         // caused the 37-message loop: all three dropped fields in one call.
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "list",
             "path": "/Users/example/vtcode",
             "globs": "**/*",
@@ -1945,7 +1891,7 @@ mod tests {
 
     #[test]
     fn normalize_non_list_action_does_not_cross_map() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "grep",
             "pattern": "TODO",
             "max_results": 100
@@ -1960,11 +1906,11 @@ mod tests {
         );
     }
 
-    // ── normalize_unified_search_args: outline pattern→path mapping ──────
+    // ── normalize_search_dispatch_args: outline pattern→path mapping ──────
 
     #[test]
     fn normalize_outline_maps_pattern_to_path() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "outline",
             "pattern": "vtcode-core/src/tools/registry.rs"
         }));
@@ -1976,7 +1922,7 @@ mod tests {
 
     #[test]
     fn normalize_outline_preserves_explicit_path_over_pattern() {
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "outline",
             "path": "src/main.rs",
             "pattern": "wrong/path.rs"
@@ -1990,77 +1936,13 @@ mod tests {
     #[test]
     fn normalize_outline_without_pattern_or_path_defaults() {
         // No pattern, no path → outline will default to "." in from_args
-        let result = normalize_unified_search_args(&json!({
+        let result = normalize_search_dispatch_args(&json!({
             "action": "outline",
             "view": "names"
         }));
         assert!(
             result.get("path").is_none(),
             "no path should be injected when neither pattern nor path is present"
-        );
-    }
-
-    // ── action_qualified_policy_name: single source of truth for the
-    // policy-evaluation and risk-scoring gates ─────────────────────────
-
-    #[test]
-    fn action_qualified_policy_name_matches_unified_search_web_action() {
-        assert_eq!(
-            action_qualified_policy_name(tools::UNIFIED_SEARCH, Some(&json!({"action": "web"}))),
-            Some("unified_search:web")
-        );
-    }
-
-    #[test]
-    fn action_qualified_policy_name_leaves_bare_unified_search_unqualified() {
-        assert_eq!(
-            action_qualified_policy_name(tools::UNIFIED_SEARCH, Some(&json!({"action": "grep"}))),
-            None
-        );
-        assert_eq!(
-            action_qualified_policy_name(tools::UNIFIED_SEARCH, None),
-            None
-        );
-    }
-
-    #[test]
-    fn action_qualified_policy_name_matches_mcp_connect_via_action() {
-        assert_eq!(
-            action_qualified_policy_name(tools::MCP, Some(&json!({"action": "connect"}))),
-            Some("mcp:connect")
-        );
-    }
-
-    #[test]
-    fn action_qualified_policy_name_matches_mcp_connect_via_legacy_alias_without_args() {
-        assert_eq!(
-            action_qualified_policy_name(tools::MCP_CONNECT_SERVER, None),
-            Some("mcp:connect")
-        );
-    }
-
-    #[test]
-    fn action_qualified_policy_name_matches_mcp_disconnect_via_action() {
-        assert_eq!(
-            action_qualified_policy_name(tools::MCP, Some(&json!({"action": "disconnect"}))),
-            Some("mcp:disconnect")
-        );
-    }
-
-    #[test]
-    fn action_qualified_policy_name_matches_mcp_disconnect_via_legacy_alias_without_args() {
-        assert_eq!(
-            action_qualified_policy_name(tools::MCP_DISCONNECT_SERVER, None),
-            Some("mcp:disconnect")
-        );
-    }
-
-    #[test]
-    fn action_qualified_policy_name_returns_none_for_unknown_tool() {
-        assert_eq!(action_qualified_policy_name(tools::READ_FILE, None), None);
-        assert_eq!(
-            action_qualified_policy_name(tools::MCP, Some(&json!({"action": "list_tools"}))),
-            None
         );
     }
 }

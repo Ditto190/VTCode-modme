@@ -27,7 +27,8 @@ pub use few_shot::{
 };
 pub use guidelines::{
     append_deferred_tools_prompt_section, append_runtime_tool_prompt_sections,
-    generate_tool_guidelines, infer_capability_level,
+    append_runtime_tool_prompt_sections_for_profile, generate_tool_guidelines,
+    infer_capability_level,
 };
 pub use harness_limits::upsert_harness_limits_section;
 pub use resources::{

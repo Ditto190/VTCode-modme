@@ -568,19 +568,26 @@ impl ToolRegistry {
         Some(structured)
     }
 
-    async fn should_skip_loop_detection_for_active_exec_continuation(
+    async fn should_skip_loop_detection_for_exec_continuation(
         &self,
         tool_name: &str,
         args: &Value,
     ) -> bool {
+        if tool_name == tools::WRITE_STDIN {
+            return matches!(
+                crate::tools::command_args::write_stdin_dispatch(args),
+                Ok(crate::tools::command_args::WriteStdinDispatch::Poll)
+            );
+        }
+
         if tool_name != tools::UNIFIED_EXEC {
             return false;
         }
 
-        if !crate::tools::tool_intent::unified_exec_action_in(args, &["poll", "continue"]) {
+        if !crate::tools::tool_intent::command_session_action_in(args, &["poll", "continue"]) {
             return false;
         }
-        if crate::tools::tool_intent::unified_exec_action_is(args, "continue")
+        if crate::tools::tool_intent::command_session_action_is(args, "continue")
             && crate::tools::command_args::interactive_input_text(args).is_some()
         {
             return false;
@@ -735,11 +742,14 @@ impl ToolRegistry {
             .resolve_public_tool(name)
             .map(|resolution| resolution.registration_name().to_string())
             .map_err(|error| anyhow!(error.to_string()))?;
-        let effective_args = execution_kernel::remap_public_unified_file_alias_args(
+        let effective_args = execution_kernel::remap_public_file_operation_alias_args(
             name,
             routed_name.as_str(),
             args,
-        );
+        )
+        .or_else(|| {
+            execution_kernel::remap_consolidated_action_alias_args(name, routed_name.as_str(), args)
+        });
         self.execute_tool_ref_internal(
             routed_name.as_str(),
             effective_args.as_ref().unwrap_or(args),
@@ -1074,12 +1084,12 @@ impl ToolRegistry {
         }
 
         let skip_loop_detection = self
-            .should_skip_loop_detection_for_active_exec_continuation(&tool_name, args)
+            .should_skip_loop_detection_for_exec_continuation(&tool_name, args)
             .await;
         if skip_loop_detection {
             trace!(
                 tool = %tool_name,
-                "Skipping identical-call loop detection for active exec continuation"
+                "Skipping identical-call loop detection for stateful exec continuation"
             );
         }
 
@@ -1588,17 +1598,43 @@ impl ToolRegistry {
                     .context("MCP tool routing inconsistency: resolved MCP tool name missing")?;
                 self.execute_mcp_tool(mcp_name, args).await
             } else if exec_settlement_mode.settle_noninteractive()
-                && tool_name == tools::UNIFIED_EXEC
+                && matches!(
+                    tool_name.as_str(),
+                    tools::UNIFIED_EXEC | tools::EXEC_COMMAND
+                )
             {
+                let exec_args = if tool_name == tools::EXEC_COMMAND {
+                    super::executors::normalize_command_session_run_alias_args(&args, false)?
+                } else {
+                    args.clone()
+                };
                 if self.optimization_config.memory_pool.enabled {
                     let _execution_guard = self.memory_pool.get_value();
                     let _string_guard = self.memory_pool.get_string();
                     let _vec_guard = self.memory_pool.get_vec();
-                    self.execute_unified_exec_internal(args, exec_settlement_mode)
+                    self.execute_command_session_internal(exec_args, exec_settlement_mode)
                         .await
                 } else {
-                    self.execute_unified_exec_internal(args, exec_settlement_mode)
+                    self.execute_command_session_internal(exec_args, exec_settlement_mode)
                         .await
+                }
+            } else if exec_settlement_mode.settle_noninteractive()
+                && tool_name == tools::WRITE_STDIN
+            {
+                let (exec_args, dispatch) = super::executors::normalize_write_stdin_args(&args)?;
+                match dispatch {
+                    crate::tools::command_args::WriteStdinDispatch::Write => {
+                        self.execute_command_session_write_for_tool(exec_args, tools::WRITE_STDIN)
+                            .await
+                    }
+                    crate::tools::command_args::WriteStdinDispatch::Poll => {
+                        self.execute_command_session_poll_for_tool(
+                            exec_args,
+                            exec_settlement_mode,
+                            tools::WRITE_STDIN,
+                        )
+                        .await
+                    }
                 }
             } else if let Some(registration) = self.inventory.registration_for(&tool_name) {
                 // Log deprecation warning if tool is deprecated
@@ -1736,13 +1772,13 @@ impl ToolRegistry {
                     if tool_name_owned == tools::UNIFIED_EXEC {
                         timeout_error.recovery_suggestions = vec![
                             Cow::Borrowed(
-                                "Use unified_exec with action='poll' to check command progress",
+                                "Use write_stdin with empty chars to poll command progress",
                             ),
                             Cow::Borrowed(
-                                "Use unified_exec with action='list' to find active sessions",
+                                "Use exec_command with a fresh command if the original session is stale",
                             ),
                             Cow::Borrowed(
-                                "Use unified_exec with action='close' if a stale session is still active",
+                                "Ask for manual cleanup if a stale session is still active",
                             ),
                         ];
                     }

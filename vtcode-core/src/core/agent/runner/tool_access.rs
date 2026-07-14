@@ -48,16 +48,10 @@ fn restore_exact_file_read_output(mut output: Value) -> Value {
 }
 
 impl AgentRunner {
-    #[inline]
-    fn canonical_exec_request_name(tool_name: &str) -> &str {
-        tool_intent::canonical_unified_exec_tool_name(tool_name).unwrap_or(tool_name)
-    }
-
     pub(super) async fn resolve_executable_tool_name(&self, tool_name: &str) -> Option<String> {
-        let requested_name = Self::canonical_exec_request_name(tool_name);
         let canonical_name = self
             .tool_registry
-            .resolve_public_tool_name(requested_name)
+            .resolve_public_tool_name(tool_name)
             .ok()?;
 
         self.is_tool_exposed(&canonical_name)
@@ -73,10 +67,8 @@ impl AgentRunner {
     ) -> Result<PreparedToolCall> {
         let normalized_args = self.normalize_tool_args(tool_name, args, session_state);
         self.ensure_active_primary_agent_allows_tool_call(tool_name, &normalized_args)?;
-        self.tool_registry.admit_public_tool_call(
-            Self::canonical_exec_request_name(tool_name),
-            &normalized_args,
-        )
+        self.tool_registry
+            .admit_public_tool_call(tool_name, &normalized_args)
     }
 
     fn ensure_active_primary_agent_allows_tool_call(
@@ -88,11 +80,10 @@ impl AgentRunner {
             return Ok(());
         };
 
-        let requested_name = Self::canonical_exec_request_name(tool_name);
         let normalized_tool_name = self
             .tool_registry
-            .resolve_public_tool_name(requested_name)
-            .unwrap_or_else(|_| requested_name.to_string());
+            .resolve_public_tool_name(tool_name)
+            .unwrap_or_else(|_| tool_name.to_string());
 
         if !primary_agent_allows_tool(active_primary_agent, &normalized_tool_name) {
             bail!(
@@ -147,6 +138,11 @@ impl AgentRunner {
             return false;
         }
 
+        self.is_tool_permitted_for_advertisement(tool_name).await
+    }
+
+    /// Check policy and permission gates without applying runtime mode filtering.
+    pub(super) async fn is_tool_permitted_for_advertisement(&self, tool_name: &str) -> bool {
         if let Some(active_primary_agent) = self.active_primary_agent.as_ref()
             && !primary_agent_allows_tool(active_primary_agent, tool_name)
         {
@@ -154,8 +150,41 @@ impl AgentRunner {
         }
 
         let current_dir = std::env::current_dir().unwrap_or_else(|_| self._workspace.clone());
-        let advertised_requests =
-            build_advertised_permission_requests(&self._workspace, &current_dir, tool_name);
+        if tool_name == tools::EXEC_COMMAND {
+            let bash_probe_args = serde_json::json!({ "cmd": "true" });
+            let bash_probe = build_permission_request(
+                &self._workspace,
+                &current_dir,
+                tool_name,
+                Some(&bash_probe_args),
+            );
+            if evaluate_permissions(
+                &self.config().permissions,
+                &self._workspace,
+                &current_dir,
+                &bash_probe,
+            )
+            .deny
+            {
+                return false;
+            }
+            if let Some(active_primary_agent) = self.active_primary_agent.as_ref()
+                && evaluate_effective_permissions(
+                    &self.config().permissions,
+                    &active_primary_agent.permissions,
+                    &self._workspace,
+                    &current_dir,
+                    &bash_probe,
+                ) == ResolvedPermissionDecision::Deny
+            {
+                return false;
+            }
+        }
+        let advertised_requests = if tool_name == tools::EXEC_COMMAND {
+            Vec::new()
+        } else {
+            build_advertised_permission_requests(&self._workspace, &current_dir, tool_name)
+        };
         if advertised_requests.iter().any(|request| {
             evaluate_permissions(
                 &self.config().permissions,
@@ -213,7 +242,7 @@ impl AgentRunner {
         let args = &prepared.effective_args;
         let shell_command = if tool_intent::is_command_run_tool_call(resolved_tool_name, args)
             || (resolved_tool_name == tools::UNIFIED_EXEC
-                && tool_intent::unified_exec_action(args).is_none())
+                && tool_intent::command_session_action(args).is_none())
         {
             command_args::command_text(args).ok().flatten()
         } else {
@@ -316,10 +345,10 @@ impl AgentRunner {
     ) -> std::result::Result<Value, ToolExecutionError> {
         let prepared = self
             .tool_registry
-            .admit_public_tool_call(Self::canonical_exec_request_name(tool_name), args)
+            .admit_public_tool_call(tool_name, args)
             .map_err(|error| {
                 ToolExecutionError::from_anyhow(
-                    Self::canonical_exec_request_name(tool_name),
+                    tool_name,
                     &error,
                     0,
                     false,

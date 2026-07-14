@@ -16,6 +16,7 @@ Entry point for VT Code contributor workflows.
 - [Process Hardening](./PROCESS_HARDENING.md) - Runtime hardening controls.
 - [Execution Policy](./EXECUTION_POLICY.md) - Command policy model.
 - [Command Security Model](./COMMAND_SECURITY_MODEL.md) - Command validation and threat model.
+- [AI Tool Surface Migration](./ai-tool-surface-migration.md) - Breaking-change notes for the Codex-style default tools.
 
 ## Performance and Reliability
 
@@ -31,6 +32,7 @@ Entry point for VT Code contributor workflows.
 ## Maintenance Workflows
 
 - [Asset Synchronization](./asset-synchronization.md) - Embedded asset maintenance.
+- [AI Tool Surface Eval Report](./ai-tool-surface-eval-report.md) - Codex-like tool surface task set, telemetry counters, and baseline comparison format.
 - [Changelog Generation](./CHANGELOG_GENERATION.md) - `git-cliff`-based changelog updates.
 - [Desire Paths](./DESIRE_PATHS.md) - Known architecture pressure points.
 - [TUI-Only Refactoring Notes](./TUI_ONLY_REFACTORING.md) - Historical refactor details.

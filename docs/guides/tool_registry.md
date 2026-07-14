@@ -30,18 +30,29 @@ internal index as well as the policy manager. Built-in registrations live in
 `ToolRegistry::builtin_tool_registrations`, so the registry can initialise its
 state from a single source of truth.
 
-The canonical public surface is `unified_search`, `unified_exec`,
-`unified_file`, `request_user_input`, and `apply_patch`. Legacy names such as
-`read_file`, `write_file`, `edit_file`, `grep_file`, and PTY helper names remain
-compatibility aliases or internal registrations; do not add a second public
-declaration path for them.
+The canonical default public surface is `exec_command`, `write_stdin`, and
+`apply_patch`. Advanced VT Code profiles may also expose `code_search` for
+semantic code search. Plain text search belongs in `exec_command.cmd` with
+`rg`; `code_search` is reserved for ast-grep structural queries and
+Tree-sitter outlines. Legacy internal dispatcher and file helper names must not
+gain a second public declaration path.
 
-Future migration note: the main legacy cleanup candidates are the file aliases
-(`read_file`, `write_file`, `edit_file`, `grep_file`) and PTY-oriented helper
-names (`run_pty_cmd`, `send_pty_input`, `read_pty_session`,
-`list_pty_sessions`, `close_pty_session`, `execute_code`). Keep them working as
-compatibility routes for now, but treat the unified trio plus `apply_patch` as
-the long-term surface to preserve.
+## Shell prompt profiles
+
+VT Code selects a shell prompt profile for model-facing command examples:
+
+| Platform | Default prompt profile | Notes |
+|---|---|---|
+| Linux | `unix_like` | Use Unix-like command syntax in `exec_command.cmd`. |
+| macOS | `unix_like` | Use BSD-compatible flags for BSD tools. VT Code does not rewrite GNU flags. |
+| WSL | `unix_like` | WSL is the recommended route for Unix-like workflows on Windows. |
+| Native Windows | `powershell` | Use native PowerShell syntax such as `Get-ChildItem`, `Select-String`, and `Get-Content`. |
+
+Set `agent.shell_prompt_profile` to `auto`, `unix_like`, or `powershell` to
+override the prompt profile. This setting controls prompt examples and expected
+command syntax only. Command approval, sandboxing, and allow-list policy remain
+runtime checks. VT Code does not translate GNU-to-BSD, BSD-to-GNU,
+Unix-to-PowerShell, or PowerShell-to-Unix command flags.
 
 ## Adding a new tool
 
@@ -92,13 +103,12 @@ output to guide self-diagnostic and self-fix logic.
 ## Safety guidelines
 
 -   Prefer the canonical public tools in prompts and docs:
-    `unified_search`, `unified_exec`, `unified_file`, `request_user_input`, and
-    `apply_patch`.
+    `exec_command`, `write_stdin`, `apply_patch`, and advanced `code_search`
+    where the profile exposes it.
 -   Prefer MCP or manifest-driven extension for third-party capabilities before
     expanding VT Code's compile-time tool surface.
--   For file edits, prefer `unified_file` for read/write/edit flows and reserve
-    `apply_patch` for patch payloads that benefit from first-class patch
-    handling.
+-   For file inspection, prefer shell commands through `exec_command.cmd`.
+    For file edits, prefer `apply_patch`.
 -   Tune the `[timeouts]` table in `vtcode.toml` when integrating long-running
     tooling. VT Code raises an inline warning once execution crosses the
     `warning_threshold_percent` so you can cancel runaway commands before they
@@ -110,8 +120,8 @@ After modifying registrations or adding new tools run the following commands
 from the repository root:
 
 -   `cargo fmt`
--   `cargo clippy`
--   `cargo test`
+-   `cargo check --locked`
+-   `cargo nextest run` when nextest is available
 
 These checks validate formatting, lint rules, and runtime behaviour of the new
 registry entries.

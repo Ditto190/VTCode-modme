@@ -34,8 +34,8 @@ use crate::tools::registry::{
     RiskLevel, ToolRiskContext, ToolRiskScorer, ToolSource, WorkspaceTrust,
 };
 use crate::tools::tool_intent::{
-    action_qualified_policy_name, classify_tool_intent, unified_exec_action_in,
-    unified_exec_action_is, unified_file_action_is,
+    action_qualified_policy_name, classify_tool_intent, command_session_action_in,
+    command_session_action_is, file_operation_action_is,
 };
 use vtcode_config::core::DotfileProtectionConfig;
 
@@ -253,18 +253,24 @@ fn push_file_access_target(
 
 fn command_text_for_tool(tool_name: &str, args: &Value) -> Option<String> {
     match tool_name {
+        tools::EXEC_COMMAND => crate::tools::command_args::command_text(args)
+            .ok()
+            .flatten(),
+        tools::WRITE_STDIN => {
+            crate::tools::command_args::interactive_input_text(args).map(str::to_owned)
+        }
         tools::SHELL | tools::RUN_PTY_CMD => crate::tools::command_args::command_text(args)
             .ok()
             .flatten(),
         tools::SEND_PTY_INPUT => {
             crate::tools::command_args::interactive_input_text(args).map(str::to_owned)
         }
-        tools::UNIFIED_EXEC if unified_exec_action_is(args, "run") => {
+        tools::UNIFIED_EXEC if command_session_action_is(args, "run") => {
             crate::tools::command_args::command_text(args)
                 .ok()
                 .flatten()
         }
-        tools::UNIFIED_EXEC if unified_exec_action_in(args, &["write", "continue"]) => {
+        tools::UNIFIED_EXEC if command_session_action_in(args, &["write", "continue"]) => {
             crate::tools::command_args::interactive_input_text(args).map(str::to_owned)
         }
         _ => None,
@@ -337,22 +343,22 @@ fn file_access_targets(tool_name: &str, args: &Value) -> Vec<FileAccessTarget> {
         tools::APPLY_PATCH => {
             targets.extend(patch_file_access_targets(args));
         }
-        tools::UNIFIED_FILE if unified_file_action_is(args, "write") => {
+        tools::UNIFIED_FILE if file_operation_action_is(args, "write") => {
             if let Some(path) = primary_path_arg(args) {
                 push_file_access_target(&mut targets, path, AccessType::Write);
             }
         }
-        tools::UNIFIED_FILE if unified_file_action_is(args, "edit") => {
+        tools::UNIFIED_FILE if file_operation_action_is(args, "edit") => {
             if let Some(path) = primary_path_arg(args) {
                 push_file_access_target(&mut targets, path, AccessType::Modify);
             }
         }
-        tools::UNIFIED_FILE if unified_file_action_is(args, "delete") => {
+        tools::UNIFIED_FILE if file_operation_action_is(args, "delete") => {
             if let Some(path) = primary_path_arg(args) {
                 push_file_access_target(&mut targets, path, AccessType::Delete);
             }
         }
-        tools::UNIFIED_FILE if unified_file_action_is(args, "move") => {
+        tools::UNIFIED_FILE if file_operation_action_is(args, "move") => {
             if let Some(path) = primary_path_arg(args) {
                 push_file_access_target(&mut targets, path, AccessType::Modify);
             }
@@ -360,13 +366,10 @@ fn file_access_targets(tool_name: &str, args: &Value) -> Vec<FileAccessTarget> {
                 push_file_access_target(&mut targets, path, AccessType::Write);
             }
         }
-        tools::UNIFIED_FILE if unified_file_action_is(args, "copy") => {
+        tools::UNIFIED_FILE if file_operation_action_is(args, "copy") => {
             if let Some(path) = destination_path_arg(args) {
                 push_file_access_target(&mut targets, path, AccessType::Write);
             }
-        }
-        tools::UNIFIED_FILE if unified_file_action_is(args, "patch") => {
-            targets.extend(patch_file_access_targets(args));
         }
         _ => {}
     }
@@ -951,15 +954,6 @@ impl SafetyGateway {
             ToolSource::Internal
         };
 
-        // `unified_search`'s `web` action and `mcp`'s `connect`/`disconnect`
-        // actions must be scored/gated under their action-qualified names
-        // (`unified_search:web`, `mcp:connect`, `mcp:disconnect`) rather than
-        // their low-risk bare names. `action_qualified_policy_name` is the
-        // single source of truth shared with the policy-evaluation path
-        // (`policy_evaluation_name`) so the two decisions cannot drift out of
-        // lockstep; see its doc comment for the exact matching rules,
-        // including the legacy `mcp_connect_server`/`mcp_disconnect_server`
-        // alias handling.
         let risk_tool_name =
             action_qualified_policy_name(tool_name, Some(args)).unwrap_or(tool_name);
 
@@ -977,10 +971,6 @@ impl SafetyGateway {
             ctx = ctx.as_destructive();
         }
 
-        // Check for network access. `risk_tool_name` is already the
-        // action-qualified form (e.g. `unified_search:web`, `mcp:connect`)
-        // when applicable, so a single check against it covers both the
-        // base network tools and the action-qualified ones.
         if ToolRiskScorer::is_network_tool(risk_tool_name) {
             ctx = ctx.accesses_network();
         }
@@ -1215,7 +1205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unified_exec_command_policy_enforcement_with_indexed_args() {
+    async fn test_command_session_command_policy_enforcement_with_indexed_args() {
         let mut commands_config = CommandsConfig::default();
         commands_config.deny_list.push("rm".to_string());
 
@@ -1238,7 +1228,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unified_exec_continue_command_policy_enforcement_with_input() {
+    async fn test_command_session_continue_command_policy_enforcement_with_input() {
         let mut commands_config = CommandsConfig::default();
         commands_config.deny_list.push("rm".to_string());
 
@@ -1283,7 +1273,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_apply_patch_dotfile_protection_requires_approval() {
+    async fn test_apply_patch_dotfile_input_dotfile_protection_requires_approval() {
         let guardian = Arc::new(
             DotfileGuardian::new(DotfileProtectionConfig {
                 audit_logging_enabled: false,
@@ -1328,7 +1318,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unified_file_patch_dotfile_protection_requires_approval() {
+    async fn test_apply_patch_patch_field_dotfile_protection_requires_approval() {
         let guardian = Arc::new(
             DotfileGuardian::new(DotfileProtectionConfig {
                 audit_logging_enabled: false,
@@ -1344,9 +1334,8 @@ mod tests {
         let decision = gateway
             .check_safety(
                 &ctx,
-                tools::UNIFIED_FILE,
+                tools::APPLY_PATCH,
                 &serde_json::json!({
-                    "action": "patch",
                     "patch": "*** Begin Patch\n*** Update File: .gitignore\n@@\n-old\n+new\n*** End Patch\n"
                 }),
             )

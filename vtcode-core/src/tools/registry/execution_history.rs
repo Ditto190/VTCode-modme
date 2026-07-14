@@ -3,7 +3,7 @@
 //! This module provides thread-safe recording and querying of tool executions,
 //! including loop detection and rate limiting.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -71,6 +71,58 @@ pub struct ToolExecutionRecord {
     pub attempt: u32,
     pub retry_after_ms: Option<u64>,
     pub circuit_breaker_state: Option<String>,
+}
+
+/// Aggregated tool-use telemetry for one repository task.
+///
+/// The public label maps internal legacy implementation names onto the current
+/// model-facing tool surface so exported metrics do not reintroduce removed
+/// tool names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolTaskTelemetrySnapshot {
+    pub task_id: Option<String>,
+    pub total_tool_calls: usize,
+    pub repeated_equivalent_calls: usize,
+    pub failed_tool_calls: usize,
+    pub spooled_outputs: usize,
+    pub fallback_calls: usize,
+    pub read_after_spool_calls: usize,
+    pub command_approval_prompts: usize,
+    pub task_completed_successfully: Option<bool>,
+    pub calls_by_tool: BTreeMap<String, usize>,
+}
+
+impl ToolTaskTelemetrySnapshot {
+    fn empty(task_id: Option<String>, task_completed_successfully: Option<bool>) -> Self {
+        Self {
+            task_id,
+            total_tool_calls: 0,
+            repeated_equivalent_calls: 0,
+            failed_tool_calls: 0,
+            spooled_outputs: 0,
+            fallback_calls: 0,
+            read_after_spool_calls: 0,
+            command_approval_prompts: 0,
+            task_completed_successfully,
+            calls_by_tool: BTreeMap::new(),
+        }
+    }
+
+    /// Export the snapshot as stable JSON for eval reports and trace fixtures.
+    pub fn to_json(&self) -> Value {
+        json!({
+            "task_id": self.task_id,
+            "total_tool_calls": self.total_tool_calls,
+            "repeated_equivalent_calls": self.repeated_equivalent_calls,
+            "failed_tool_calls": self.failed_tool_calls,
+            "spooled_outputs": self.spooled_outputs,
+            "fallback_calls": self.fallback_calls,
+            "read_after_spool_calls": self.read_after_spool_calls,
+            "command_approval_prompts": self.command_approval_prompts,
+            "task_completed_successfully": self.task_completed_successfully,
+            "calls_by_tool": self.calls_by_tool,
+        })
+    }
 }
 
 impl ToolExecutionRecord {
@@ -242,7 +294,7 @@ fn read_file_path_from_args(args: &Value) -> Option<&str> {
 
 fn normalize_tool_name_for_match(name: &str) -> String {
     let normalized = name.trim().to_ascii_lowercase().replace(' ', "_");
-    tool_intent::canonical_unified_exec_tool_name(&normalized)
+    tool_intent::canonical_command_session_tool_name(&normalized)
         .unwrap_or(&normalized)
         .to_string()
 }
@@ -252,9 +304,9 @@ fn is_read_file_tool_name(name: &str) -> bool {
     normalized == tools::READ_FILE || normalized.ends_with(".read_file")
 }
 
-fn is_unified_file_tool_name(name: &str) -> bool {
+fn is_file_operation_tool_name(name: &str) -> bool {
     let normalized = normalize_tool_name_for_match(name);
-    normalized == tools::UNIFIED_FILE || normalized.ends_with(".unified_file")
+    normalized == tools::UNIFIED_FILE || normalized.ends_with(".file_operation")
 }
 
 fn tool_name_matches(name: &str, expected: &str) -> bool {
@@ -266,8 +318,8 @@ fn is_read_style_tool_call(tool_name: &str, args: &Value) -> bool {
     if tool_name_matches(tool_name, tools::READ_FILE) {
         return true;
     }
-    if is_unified_file_tool_name(tool_name) {
-        return tool_intent::unified_file_action_is(args, "read");
+    if is_file_operation_tool_name(tool_name) {
+        return tool_intent::file_operation_action_is(args, "read");
     }
     false
 }
@@ -315,11 +367,85 @@ fn is_read_file_style_record(record: &ToolExecutionRecord) -> bool {
         return true;
     }
 
-    if !is_unified_file_tool_name(&record.tool_name) {
+    if !is_file_operation_tool_name(&record.tool_name) {
         return false;
     }
 
-    tool_intent::unified_file_action_is(&record.args, "read")
+    tool_intent::file_operation_action_is(&record.args, "read")
+}
+
+fn public_tool_telemetry_label(tool_name: &str) -> String {
+    match tool_name {
+        tools::UNIFIED_EXEC => tools::EXEC_COMMAND.to_string(),
+        tools::UNIFIED_SEARCH => tools::CODE_SEARCH.to_string(),
+        tools::UNIFIED_FILE => "file_operation".to_string(),
+        _ => tool_name.to_string(),
+    }
+}
+
+fn result_spool_path(record: &ToolExecutionRecord) -> Option<String> {
+    record
+        .result
+        .as_ref()
+        .ok()
+        .and_then(|value| value.get("spool_path"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn arg_spool_path(record: &ToolExecutionRecord) -> Option<String> {
+    record
+        .args
+        .get("spool_path")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn has_fallback_marker(record: &ToolExecutionRecord) -> bool {
+    let Ok(result) = &record.result else {
+        return false;
+    };
+    result.get("fallback_from").is_some()
+        || result.get("fallback_to").is_some()
+        || result.get("fallback_note").is_some()
+}
+
+fn command_requested_approval(record: &ToolExecutionRecord) -> bool {
+    let label = public_tool_telemetry_label(&record.tool_name);
+    if label != tools::EXEC_COMMAND {
+        return false;
+    }
+    if let Ok(result) = &record.result
+        && (result
+            .get("approval_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || result
+                .get("requires_approval")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            || result
+                .get("approval_reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| !reason.trim().is_empty()))
+    {
+        return true;
+    }
+    let permissions = record
+        .args
+        .get("sandbox_permissions")
+        .and_then(Value::as_str)
+        .unwrap_or("use_default");
+    matches!(
+        permissions,
+        "require_escalated" | "with_additional_permissions"
+    )
+}
+
+fn equivalent_call_key(record: &ToolExecutionRecord) -> String {
+    let label = public_tool_telemetry_label(&record.tool_name);
+    let args = serde_json::to_string(&record.args).unwrap_or_else(|_| "<non-json>".to_string());
+    format!("{label}\0{args}")
 }
 
 /// Thread-safe execution history for recording tool executions.
@@ -401,6 +527,73 @@ impl ToolExecutionHistory {
             .collect();
         failures.reverse();
         failures
+    }
+
+    /// Aggregate representative task telemetry from recorded tool calls.
+    ///
+    /// When `task_id` is `Some`, only records with the same harness task id are
+    /// included. When `None`, the snapshot covers all stored records.
+    pub fn task_telemetry_snapshot(
+        &self,
+        task_id: Option<&str>,
+        task_completed_successfully: Option<bool>,
+    ) -> ToolTaskTelemetrySnapshot {
+        let snapshot_task_id = task_id.map(str::to_string);
+        let mut snapshot =
+            ToolTaskTelemetrySnapshot::empty(snapshot_task_id, task_completed_successfully);
+        let Ok(records) = self.records.read() else {
+            return snapshot;
+        };
+
+        let mut equivalent_calls_by_key: HashMap<String, usize> = HashMap::new();
+        let mut seen_spool_paths: HashMap<String, usize> = HashMap::new();
+
+        for record in records.iter().filter(|record| {
+            task_id.is_none_or(|expected| record.context.task_id.as_deref() == Some(expected))
+        }) {
+            snapshot.total_tool_calls += 1;
+            let label = public_tool_telemetry_label(&record.tool_name);
+            *snapshot.calls_by_tool.entry(label).or_default() += 1;
+
+            if !record.success {
+                snapshot.failed_tool_calls += 1;
+            }
+            let arg_spool_path = arg_spool_path(record);
+            let result_spool_path = result_spool_path(record);
+            if result_spool_path
+                .as_deref()
+                .is_some_and(|spool_path| arg_spool_path.as_deref() != Some(spool_path))
+            {
+                snapshot.spooled_outputs += 1;
+            }
+            if has_fallback_marker(record) {
+                snapshot.fallback_calls += 1;
+            }
+            if command_requested_approval(record) {
+                snapshot.command_approval_prompts += 1;
+            }
+
+            if let Some(spool_path) = arg_spool_path.as_ref()
+                && seen_spool_paths.contains_key(spool_path)
+            {
+                snapshot.read_after_spool_calls += 1;
+            }
+            if let Some(spool_path) = result_spool_path
+                && arg_spool_path.as_deref() != Some(spool_path.as_str())
+            {
+                *seen_spool_paths.entry(spool_path).or_default() += 1;
+            }
+
+            let count = equivalent_calls_by_key
+                .entry(equivalent_call_key(record))
+                .or_default();
+            if *count > 0 {
+                snapshot.repeated_equivalent_calls += 1;
+            }
+            *count += 1;
+        }
+
+        snapshot
     }
 
     /// Find the most recent spooled output for a tool call with identical args.
@@ -584,7 +777,7 @@ impl ToolExecutionHistory {
     /// Extract the read target from tool args for path-based matching.
     /// Returns `None` for non-read-only tools or when no path is found.
     ///
-    /// For `unified_search` and `grep_file`, the key includes action+pattern
+    /// For `search_dispatch` and `grep_file`, the key includes action+pattern
     /// so that two greps with different patterns on the same directory are NOT
     /// treated as duplicates.
     fn extract_read_target(tool_name: &str, args: &Value) -> Option<String> {
@@ -623,7 +816,7 @@ impl ToolExecutionHistory {
         None
     }
     ///
-    /// Supports both `read_file` and `unified_file` read action records.
+    /// Supports both `read_file` and `file_operation` read action records.
     ///
     /// Returns `(next_offset, chunk_limit)` when the recent call indicates more chunks are
     /// available (`spool_chunked=true`, `has_more=true`).
@@ -812,6 +1005,10 @@ mod tests {
         HarnessContextSnapshot::new("session_test".to_string(), None)
     }
 
+    fn make_task_snapshot(task_id: &str) -> HarnessContextSnapshot {
+        HarnessContextSnapshot::new("session_test".to_string(), Some(task_id.to_string()))
+    }
+
     #[test]
     fn finds_recent_spooled_result() {
         let history = ToolExecutionHistory::new(10);
@@ -842,6 +1039,111 @@ mod tests {
         let found =
             history.find_recent_spooled_result("run_pty_cmd", &args, Duration::from_secs(60));
         assert_eq!(found, Some(result));
+    }
+
+    #[test]
+    fn task_telemetry_snapshot_counts_tool_surface_metrics() {
+        let history = ToolExecutionHistory::new(10);
+        let task = "repo_task_1";
+        let command_args = json!({
+            "cmd": "rg ToolTaskTelemetrySnapshot vtcode-core/src",
+            "sandbox_permissions": "require_escalated",
+        });
+        let spool_path = "/tmp/vtcode-spool-1.txt";
+
+        history.add_record(ToolExecutionRecord::success(
+            tools::UNIFIED_EXEC.to_string(),
+            tools::EXEC_COMMAND.to_string(),
+            false,
+            None,
+            command_args.clone(),
+            json!({"spool_path": spool_path}),
+            make_task_snapshot(task),
+            None,
+            None,
+            None,
+            None,
+            false,
+        ));
+        history.add_record(ToolExecutionRecord::success(
+            tools::UNIFIED_EXEC.to_string(),
+            tools::EXEC_COMMAND.to_string(),
+            false,
+            None,
+            command_args,
+            json!({"status": "ok"}),
+            make_task_snapshot(task),
+            None,
+            None,
+            None,
+            None,
+            false,
+        ));
+        history.add_record(ToolExecutionRecord::success(
+            tools::UNIFIED_EXEC.to_string(),
+            tools::EXEC_COMMAND.to_string(),
+            false,
+            None,
+            json!({"spool_path": spool_path, "query": "warning"}),
+            json!({"spool_path": spool_path, "matches": []}),
+            make_task_snapshot(task),
+            None,
+            None,
+            None,
+            None,
+            false,
+        ));
+        history.add_record(ToolExecutionRecord::success(
+            tools::UNIFIED_SEARCH.to_string(),
+            tools::CODE_SEARCH.to_string(),
+            false,
+            None,
+            json!({"action": "structural", "pattern": "fn $NAME($$$)"}),
+            json!({"fallback_from": "structural", "matches": []}),
+            make_task_snapshot(task),
+            None,
+            None,
+            None,
+            None,
+            false,
+        ));
+        history.add_record(ToolExecutionRecord::failure(
+            tools::UNIFIED_FILE.to_string(),
+            "file_operation".to_string(),
+            false,
+            None,
+            json!({"input": "*** Begin Patch\n*** End Patch\n"}),
+            "invalid patch".to_string(),
+            make_task_snapshot(task),
+            None,
+            None,
+            None,
+            None,
+            false,
+        ));
+
+        let snapshot = history.task_telemetry_snapshot(Some(task), Some(false));
+        assert_eq!(snapshot.total_tool_calls, 5);
+        assert_eq!(snapshot.repeated_equivalent_calls, 1);
+        assert_eq!(snapshot.failed_tool_calls, 1);
+        assert_eq!(snapshot.spooled_outputs, 1);
+        assert_eq!(snapshot.fallback_calls, 1);
+        assert_eq!(snapshot.read_after_spool_calls, 1);
+        assert_eq!(snapshot.command_approval_prompts, 2);
+        assert_eq!(snapshot.task_completed_successfully, Some(false));
+        assert_eq!(snapshot.calls_by_tool.get(tools::EXEC_COMMAND), Some(&3));
+        assert_eq!(snapshot.calls_by_tool.get(tools::CODE_SEARCH), Some(&1));
+        assert_eq!(snapshot.calls_by_tool.get("file_operation"), Some(&1));
+        assert!(
+            !snapshot
+                .calls_by_tool
+                .keys()
+                .any(|label| label.contains("unified_"))
+        );
+
+        let json = snapshot.to_json();
+        assert_eq!(json["total_tool_calls"], 5);
+        assert_eq!(json["task_completed_successfully"], false);
     }
 
     #[test]
@@ -962,13 +1264,13 @@ mod tests {
     #[test]
     fn finds_recent_read_file_spool_progress() {
         let history = ToolExecutionHistory::new(10);
-        let args = json!({"path": ".vtcode/context/tool_outputs/unified_exec_123.txt"});
+        let args = json!({"path": ".vtcode/context/tool_outputs/command_session_123.txt"});
         let result = json!({
             "success": true,
             "spool_chunked": true,
             "has_more": true,
             "next_read_args": {
-                "path": ".vtcode/context/tool_outputs/unified_exec_123.txt",
+                "path": ".vtcode/context/tool_outputs/command_session_123.txt",
                 "offset": 41,
                 "limit": 40
             }
@@ -990,33 +1292,33 @@ mod tests {
         ));
 
         let found = history.find_recent_read_file_spool_progress(
-            ".vtcode/context/tool_outputs/unified_exec_123.txt",
+            ".vtcode/context/tool_outputs/command_session_123.txt",
             Duration::from_secs(60),
         );
         assert_eq!(found, Some((41, 40)));
     }
 
     #[test]
-    fn finds_recent_unified_file_read_spool_progress() {
+    fn finds_recent_file_operation_read_spool_progress() {
         let history = ToolExecutionHistory::new(10);
         let args = json!({
             "action": "read",
-            "path": ".vtcode/context/tool_outputs/unified_exec_456.txt"
+            "path": ".vtcode/context/tool_outputs/command_session_456.txt"
         });
         let result = json!({
             "success": true,
             "spool_chunked": true,
             "has_more": true,
             "next_read_args": {
-                "path": ".vtcode/context/tool_outputs/unified_exec_456.txt",
+                "path": ".vtcode/context/tool_outputs/command_session_456.txt",
                 "offset": 81,
                 "limit": 40
             }
         });
 
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             args,
@@ -1030,7 +1332,7 @@ mod tests {
         ));
 
         let found = history.find_recent_read_file_spool_progress(
-            ".vtcode/context/tool_outputs/unified_exec_456.txt",
+            ".vtcode/context/tool_outputs/command_session_456.txt",
             Duration::from_secs(60),
         );
         assert_eq!(found, Some((81, 40)));
@@ -1039,7 +1341,7 @@ mod tests {
     #[test]
     fn matches_read_file_alias_name_and_abs_relative_spool_path() {
         let history = ToolExecutionHistory::new(10);
-        let rel_path = ".vtcode/context/tool_outputs/unified_exec_789.txt";
+        let rel_path = ".vtcode/context/tool_outputs/command_session_789.txt";
         let abs_path = env::current_dir().unwrap().join(rel_path);
         let args = json!({
             "path": abs_path,
@@ -1079,7 +1381,7 @@ mod tests {
     #[test]
     fn matches_prefixed_read_file_tool_name() {
         let history = ToolExecutionHistory::new(10);
-        let path = ".vtcode/context/tool_outputs/unified_exec_prefixed.txt";
+        let path = ".vtcode/context/tool_outputs/command_session_prefixed.txt";
         let args = json!({ "path": path });
         let result = json!({
             "success": true,
@@ -1114,7 +1416,7 @@ mod tests {
     #[test]
     fn ignores_read_file_spool_progress_without_canonical_args() {
         let history = ToolExecutionHistory::new(10);
-        let path = ".vtcode/context/tool_outputs/unified_exec_legacy.txt";
+        let path = ".vtcode/context/tool_outputs/command_session_legacy.txt";
         let args = json!({"path": path});
         let result = json!({
             "success": true,
@@ -1144,7 +1446,7 @@ mod tests {
     }
 
     #[test]
-    fn readonly_unified_file_calls_use_lower_identical_limit() {
+    fn readonly_file_operation_calls_use_lower_identical_limit() {
         let history = ToolExecutionHistory::new(10);
         history.set_loop_detection_limits(5, 2);
 
@@ -1155,11 +1457,11 @@ mod tests {
 
         // The effective limit is max(base_limit, MIN_READONLY_IDENTICAL_LIMIT).
         // With MIN_READONLY_IDENTICAL_LIMIT=2, the limit matches the base.
-        assert_eq!(history.loop_limit_for("unified_file", &args), 2);
+        assert_eq!(history.loop_limit_for(tools::UNIFIED_FILE, &args), 2);
     }
 
     #[test]
-    fn unified_search_exact_repeat_is_detected_after_two_successes() {
+    fn search_dispatch_exact_repeat_is_detected_after_two_successes() {
         let history = ToolExecutionHistory::new(10);
         history.set_loop_detection_limits(5, 2);
 
@@ -1173,8 +1475,8 @@ mod tests {
         // are enough to trigger loop detection.
         for _ in 0..2 {
             history.add_record(ToolExecutionRecord::success(
-                "unified_search".to_string(),
-                "unified_search".to_string(),
+                "search_dispatch".to_string(),
+                "search_dispatch".to_string(),
                 false,
                 None,
                 args.clone(),
@@ -1188,7 +1490,7 @@ mod tests {
             ));
         }
 
-        let loop_result = history.detect_loop("unified_search", &args);
+        let loop_result = history.detect_loop("search_dispatch", &args);
         assert!(
             loop_result.detected,
             "two identical calls should trigger loop detection with MIN_READONLY_IDENTICAL_LIMIT=2"
@@ -1196,8 +1498,8 @@ mod tests {
 
         // A third identical call crosses the threshold.
         history.add_record(ToolExecutionRecord::success(
-            "unified_search".to_string(),
-            "unified_search".to_string(),
+            "search_dispatch".to_string(),
+            "search_dispatch".to_string(),
             false,
             None,
             args.clone(),
@@ -1210,10 +1512,10 @@ mod tests {
             false,
         ));
 
-        let loop_result = history.detect_loop("unified_search", &args);
+        let loop_result = history.detect_loop("search_dispatch", &args);
         assert!(loop_result.detected);
         assert_eq!(loop_result.repeat_count, 3);
-        assert_eq!(loop_result.tool_name, "unified_search");
+        assert_eq!(loop_result.tool_name, "search_dispatch");
     }
 
     #[test]
@@ -1222,8 +1524,8 @@ mod tests {
 
         // Record 1: read src/lib.rs with offset=0
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             json!({"action":"read","path":"src/lib.rs","offset":0,"limit":100}),
@@ -1238,8 +1540,8 @@ mod tests {
 
         // Record 2: read src/main.rs (different file)
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             json!({"action":"read","path":"src/main.rs","offset":0,"limit":100}),
@@ -1256,7 +1558,7 @@ mod tests {
         // a different offset means the model is asking for a different slice
         // of the file, so it needs fresh content, not a cached stub).
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"src/lib.rs","offset":500,"limit":200}),
             Duration::from_secs(600),
         );
@@ -1267,7 +1569,7 @@ mod tests {
 
         // Query: different path, same pagination — should match record 2
         let result2 = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"src/main.rs","offset":0,"limit":100}),
             Duration::from_secs(600),
         );
@@ -1276,7 +1578,7 @@ mod tests {
 
         // Query: non-existent path — should return None
         let result3 = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"src/missing.rs"}),
             Duration::from_secs(600),
         );
@@ -1284,7 +1586,7 @@ mod tests {
 
         // Query: write action — should return None (not read-only)
         let result4 = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"write","path":"src/lib.rs","content":"new"}),
             Duration::from_secs(600),
         );
@@ -1300,8 +1602,8 @@ mod tests {
 
         // Record: read AGENTS.md, offset=0, limit=200
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             json!({"action":"read","path":"AGENTS.md","offset":0,"limit":200}),
@@ -1317,7 +1619,7 @@ mod tests {
         // Query: same path, same offset, larger limit → should NOT match
         // (issue #680: the model asked for more lines than the cache has)
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md","offset":0,"limit":220}),
             Duration::from_secs(600),
         );
@@ -1325,7 +1627,7 @@ mod tests {
 
         // Query: same path, same offset, same limit → should match (genuine repeat)
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md","offset":0,"limit":200}),
             Duration::from_secs(600),
         );
@@ -1333,7 +1635,7 @@ mod tests {
 
         // Query: same path, same offset, smaller limit → should match (subset)
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md","offset":0,"limit":100}),
             Duration::from_secs(600),
         );
@@ -1349,8 +1651,8 @@ mod tests {
 
         // Record: read AGENTS.md with no explicit limit or offset (defaults)
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             json!({"action":"read","path":"AGENTS.md"}),
@@ -1365,7 +1667,7 @@ mod tests {
 
         // Query: same path, also no explicit limit/offset → should match (both use defaults)
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md"}),
             Duration::from_secs(600),
         );
@@ -1377,7 +1679,7 @@ mod tests {
         // Query: same path, default offset but explicit limit → should NOT match
         // (one has explicit pagination, other doesn't — can't compare)
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md","limit":200}),
             Duration::from_secs(600),
         );
@@ -1394,8 +1696,8 @@ mod tests {
         // Record: non-raw read can be summarized for the model, so it must not
         // satisfy a later raw=true query that asks for exact content.
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             json!({"action":"read","path":"AGENTS.md","offset":0,"limit":200}),
@@ -1409,7 +1711,7 @@ mod tests {
         ));
 
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md","offset":0,"limit":200,"raw":true}),
             Duration::from_secs(600),
         );
@@ -1420,8 +1722,8 @@ mod tests {
 
         // Record: raw=true read can satisfy the same raw=true shape.
         history.add_record(ToolExecutionRecord::success(
-            "unified_file".to_string(),
-            "unified_file".to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
             false,
             None,
             json!({"action":"read","path":"AGENTS.md","offset":0,"limit":200,"raw":true}),
@@ -1435,7 +1737,7 @@ mod tests {
         ));
 
         let result = history.find_recent_successful_by_read_target(
-            "unified_file",
+            tools::UNIFIED_FILE,
             &json!({"action":"read","path":"AGENTS.md","offset":0,"limit":200,"raw":true}),
             Duration::from_secs(600),
         );

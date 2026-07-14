@@ -50,7 +50,7 @@ fn normalized_shell_command_arg(args: &Value, max_chars: usize) -> Option<String
         .filter(|command| !command.is_empty())
 }
 
-fn unified_search_globs_arg(args: &Value) -> Option<String> {
+fn search_dispatch_globs_arg(args: &Value) -> Option<String> {
     let globs = args.get("globs")?;
     match globs {
         Value::String(value) => {
@@ -255,7 +255,7 @@ pub(crate) fn low_signal_family_key(canonical_tool_name: &str, args: &Value) -> 
             )
         }),
         tool_names::UNIFIED_FILE => {
-            let action = tool_intent::unified_file_action(args).unwrap_or("read");
+            let action = tool_intent::file_operation_action(args).unwrap_or("read");
             if !action.eq_ignore_ascii_case("read") {
                 return None;
             }
@@ -270,8 +270,8 @@ pub(crate) fn low_signal_family_key(canonical_tool_name: &str, args: &Value) -> 
         tool_names::UNIFIED_EXEC => normalized_shell_command_arg(args, 160)
             .map(|command| format!("{canonical_tool_name}::run::{command}")),
         tool_names::UNIFIED_SEARCH => {
-            let normalized = tool_intent::normalize_unified_search_args(args);
-            let action = tool_intent::unified_search_action(&normalized).unwrap_or("grep");
+            let normalized = tool_intent::normalize_search_dispatch_args(args);
+            let action = tool_intent::search_dispatch_action(&normalized).unwrap_or("grep");
             let mut key = format!("{canonical_tool_name}::{action}");
             // Include pattern for grep/structural so different searches on the same
             // path are tracked separately (avoids false-positive family cap violations).
@@ -286,7 +286,7 @@ pub(crate) fn low_signal_family_key(canonical_tool_name: &str, args: &Value) -> 
                     key.push_str(&pattern);
                 }
             }
-            if let Some(globs) = unified_search_globs_arg(&normalized) {
+            if let Some(globs) = search_dispatch_globs_arg(&normalized) {
                 key.push_str("::globs=");
                 key.push_str(&globs);
             } else {

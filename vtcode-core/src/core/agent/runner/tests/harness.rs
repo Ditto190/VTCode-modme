@@ -194,6 +194,102 @@ async fn review_runs_skip_continuation_and_finish_single_pass() {
 }
 
 #[tokio::test]
+async fn review_non_openai_request_exposes_only_read_only_inspection_tools() {
+    let temp = TempDir::new().expect("tempdir");
+    let request = record_review_request(
+        &temp,
+        ModelId::default(),
+        "queued-test-provider",
+        "thread-review-non-openai-tools",
+    )
+    .await;
+    assert_review_request_exposes_only_code_search(&request);
+    assert!(request.tool_choice.is_none());
+}
+
+#[tokio::test]
+async fn review_openai_compatible_request_filters_inactive_tools() {
+    let temp = TempDir::new().expect("tempdir");
+    let request = record_review_request(
+        &temp,
+        ModelId::GPT53Codex,
+        "openai",
+        "thread-review-openai-compatible",
+    )
+    .await;
+    assert_review_request_exposes_only_code_search(&request);
+}
+
+#[tokio::test]
+async fn review_openai_non_responses_request_filters_inactive_tools() {
+    let temp = TempDir::new().expect("tempdir");
+    let model = ModelId::OpenAIGptOss20b;
+    let expected_model = model.as_str().into_owned();
+    let request =
+        record_review_request(&temp, model, "openai", "thread-review-openai-non-responses").await;
+    assert_eq!(request.model, expected_model);
+    assert_review_request_exposes_only_code_search(&request);
+}
+
+fn assert_review_request_exposes_only_code_search(request: &LLMRequest) {
+    let tool_names = request
+        .tools
+        .as_deref()
+        .map(|definitions| {
+            definitions
+                .iter()
+                .map(|tool| tool.function_name())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assert!(tool_names.contains(&tools::CODE_SEARCH));
+    for mutating_tool in [tools::EXEC_COMMAND, tools::APPLY_PATCH] {
+        assert!(
+            !tool_names.contains(&mutating_tool),
+            "review request must hide {mutating_tool}; got {tool_names:?}"
+        );
+    }
+}
+
+async fn record_review_request(
+    temp: &TempDir,
+    model: ModelId,
+    provider_name: &'static str,
+    session_id: &str,
+) -> LLMRequest {
+    let mut runner = Box::pin(make_runner_for_model(
+        temp,
+        VTCodeConfig::default(),
+        session_id,
+        model,
+    ))
+    .await;
+    let allowlist = runner
+        .review_tool_allowlist(&[tools::WILDCARD_ALL.to_string()])
+        .await;
+    runner.enable_full_auto(&allowlist).await;
+
+    let provider = RecordingQueuedProvider::with_name(
+        provider_name,
+        vec![
+            text_response("The review is complete."),
+            text_response("The review is complete."),
+        ],
+    );
+    let recorded = provider.clone();
+    runner.provider_client = Box::new(provider);
+    let _result = Box::pin(runner.execute_task(&task("Review task", "review-task"), &[]))
+        .await
+        .expect("task result");
+
+    recorded
+        .recorded_requests()
+        .into_iter()
+        .next()
+        .expect("review provider request")
+}
+
+#[tokio::test]
 async fn planning_workflow_runs_skip_continuation_and_finish_single_pass() {
     let temp = TempDir::new().expect("tempdir");
     let mut runner = Box::pin(make_runner(

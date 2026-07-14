@@ -17,7 +17,7 @@ use crate::tools::tool_intent;
 /// Dispatches to the appropriate reducer based on the tool name.
 pub fn reduce_tool_result(tool_name: &str, result: Value) -> Value {
     let canonical_tool_name =
-        tool_intent::canonical_unified_exec_tool_name(tool_name).unwrap_or(tool_name);
+        tool_intent::canonical_command_session_tool_name(tool_name).unwrap_or(tool_name);
     match canonical_tool_name {
         tools::UNIFIED_SEARCH => reduce_search_result(result),
         tools::READ_FILE => reduce_read_file_result(result),
@@ -92,7 +92,7 @@ fn reduce_search_result(result: Value) -> Value {
     serde_json::json!({
         "total_files": files.len(),
         "sample": files.iter().take(5).cloned().collect::<Vec<_>>(),
-        "note": format!("Showing 5 of {} files. Use unified_search for specific patterns.", files.len())
+        "note": format!("Showing 5 of {} files. Use exec_command or code_search for specific patterns.", files.len())
     })
 }
 

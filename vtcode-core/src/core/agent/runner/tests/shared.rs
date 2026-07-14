@@ -35,6 +35,7 @@ pub use std::path::{Path, PathBuf};
 pub use std::sync::Arc;
 pub use std::time::{Duration, Instant};
 pub use tempfile::TempDir;
+pub use vtcode_config::ToolProfile;
 pub use vtcode_config::core::permissions::{AgentPermissionsConfig, PermissionDefault};
 
 pub fn provider_tool_names(snapshot: &SessionToolCatalogSnapshot) -> Vec<&str> {
@@ -65,6 +66,24 @@ pub fn assert_provider_hides_tool(snapshot: &SessionToolCatalogSnapshot, tool_na
     assert!(
         !names.contains(&tool_name),
         "provider-facing snapshot should hide {tool_name}; got {names:?}"
+    );
+    assert!(
+        !snapshot
+            .active_tool_names
+            .iter()
+            .any(|active_name| active_name == tool_name),
+        "active tool names should hide {tool_name}"
+    );
+}
+
+pub fn assert_provider_catalogues_inactive_tool(
+    snapshot: &SessionToolCatalogSnapshot,
+    tool_name: &str,
+) {
+    let names = provider_tool_names(snapshot);
+    assert!(
+        names.contains(&tool_name),
+        "stable provider catalogue should include {tool_name}; got {names:?}"
     );
     assert!(
         !snapshot
@@ -106,6 +125,71 @@ impl LLMProvider for QueuedProvider {
 
     fn supported_models(&self) -> Vec<String> {
         vec!["gpt-5.3-codex".to_string()]
+    }
+
+    fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct RecordingQueuedProvider {
+    name: &'static str,
+    supports_native_allowed_tools: bool,
+    responses: Arc<Mutex<VecDeque<LLMResponse>>>,
+    requests: Arc<Mutex<Vec<LLMRequest>>>,
+}
+
+impl RecordingQueuedProvider {
+    pub fn new(responses: Vec<LLMResponse>) -> Self {
+        Self::with_native_allowed_tools("openai", true, responses)
+    }
+
+    pub fn with_name(name: &'static str, responses: Vec<LLMResponse>) -> Self {
+        Self::with_native_allowed_tools(name, false, responses)
+    }
+
+    fn with_native_allowed_tools(
+        name: &'static str,
+        supports_native_allowed_tools: bool,
+        responses: Vec<LLMResponse>,
+    ) -> Self {
+        Self {
+            name,
+            supports_native_allowed_tools,
+            responses: Arc::new(Mutex::new(responses.into())),
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn recorded_requests(&self) -> Vec<LLMRequest> {
+        self.requests.lock().clone()
+    }
+}
+
+#[async_trait]
+impl LLMProvider for RecordingQueuedProvider {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        self.requests.lock().push(request);
+        self.responses
+            .lock()
+            .pop_front()
+            .ok_or(LLMError::InvalidRequest {
+                message: "RecordingQueuedProvider has no queued responses".to_string(),
+                metadata: None,
+            })
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        vec!["gpt-5.3-codex".to_string()]
+    }
+
+    fn supports_native_allowed_tools(&self, _model: &str) -> bool {
+        self.supports_native_allowed_tools
     }
 
     fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
@@ -346,9 +430,18 @@ pub fn workspace_root(temp: &TempDir) -> PathBuf {
 }
 
 pub async fn make_runner(temp: &TempDir, vt_cfg: VTCodeConfig, session_id: &str) -> AgentRunner {
+    make_runner_for_model(temp, vt_cfg, session_id, ModelId::default()).await
+}
+
+pub async fn make_runner_for_model(
+    temp: &TempDir,
+    vt_cfg: VTCodeConfig,
+    session_id: &str,
+    model: ModelId,
+) -> AgentRunner {
     let mut runner = Box::pin(AgentRunner::new_with_bootstrap(
         AgentType::Single,
-        ModelId::default(),
+        model,
         "test-key".to_string(),
         workspace_root(temp),
         session_id.to_string(),

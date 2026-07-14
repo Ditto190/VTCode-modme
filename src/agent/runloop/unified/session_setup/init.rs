@@ -192,18 +192,6 @@ pub(crate) async fn initialize_session(
             warn!("Failed to apply tool policies from config: {}", err);
         }
         maybe_attach_mcp_client(&mut tool_registry, cfg, async_mcp_manager.as_ref()).await;
-        if full_auto {
-            let automation_cfg = cfg.automation.full_auto.clone();
-            tool_registry
-                .enable_full_auto_permission(&automation_cfg.allowed_tools)
-                .await;
-            full_auto_allowlist = Some(
-                tool_registry
-                    .current_full_auto_allowlist()
-                    .await
-                    .unwrap_or_default(),
-            );
-        }
     }
 
     let workspace_trust_level = match session_bootstrap.acp_workspace_trust {
@@ -274,16 +262,13 @@ pub(crate) async fn initialize_session(
 
     let tools = Arc::new(RwLock::new(
         tool_registry
-            .model_tools(
-                SessionToolsConfig::full_public(
-                    SessionSurface::Interactive,
-                    vtcode_core::config::types::CapabilityLevel::CodeSearch,
-                    tool_documentation_mode,
-                    ToolModelCapabilities::for_model_name(&config.model),
-                )
-                .with_deferred_tool_policy(deferred_tool_policy.clone())
-                .with_anthropic_native_memory_enabled(anthropic_native_memory_enabled),
-            )
+            .model_tools(interactive_session_base_tools_config(
+                &config.model,
+                vt_cfg,
+                tool_documentation_mode,
+                deferred_tool_policy.clone(),
+                anthropic_native_memory_enabled,
+            ))
             .await,
     ));
     tool_registry.attach_session_model_tools(tools.clone());
@@ -309,6 +294,29 @@ pub(crate) async fn initialize_session(
         &deferred_tool_policy,
     )
     .await;
+
+    if full_auto && let Some(cfg) = vt_cfg {
+        let session_tools_config = interactive_session_tools_config(
+            &config.model,
+            vt_cfg,
+            tool_documentation_mode,
+            deferred_tool_policy.clone(),
+            anthropic_native_memory_enabled,
+            tool_registry.is_planning_active(),
+        );
+        tool_registry
+            .enable_full_auto_permission_for_session(
+                &cfg.automation.full_auto.allowed_tools,
+                session_tools_config,
+            )
+            .await;
+        full_auto_allowlist = Some(
+            tool_registry
+                .current_full_auto_allowlist()
+                .await
+                .unwrap_or_default(),
+        );
+    }
 
     let trajectory = build_trajectory_logger(&config.workspace, vt_cfg);
     let available_subagents = if let Some(controller) = subagent_controller.as_ref() {
@@ -632,18 +640,54 @@ pub(crate) async fn refresh_tool_snapshot(
         vt_cfg,
     );
     let next = tool_registry
-        .model_tools(
-            SessionToolsConfig::full_public(
-                SessionSurface::Interactive,
-                vtcode_core::config::types::CapabilityLevel::CodeSearch,
-                tool_documentation_mode,
-                ToolModelCapabilities::for_model_name(&config.model),
-            )
-            .with_deferred_tool_policy(deferred_tool_policy.clone())
-            .with_anthropic_native_memory_enabled(anthropic_native_memory_enabled),
-        )
+        .model_tools(interactive_session_base_tools_config(
+            &config.model,
+            vt_cfg,
+            tool_documentation_mode,
+            deferred_tool_policy.clone(),
+            anthropic_native_memory_enabled,
+        ))
         .await;
     *tools.write().await = next;
+}
+
+fn interactive_session_tools_config(
+    model: &str,
+    vt_cfg: Option<&VTCodeConfig>,
+    tool_documentation_mode: vtcode_core::config::ToolDocumentationMode,
+    deferred_tool_policy: DeferredToolPolicy,
+    anthropic_native_memory_enabled: bool,
+    planning_active: bool,
+) -> SessionToolsConfig {
+    SessionToolsConfig::full_public(
+        SessionSurface::Interactive,
+        vtcode_core::config::types::CapabilityLevel::CodeSearch,
+        tool_documentation_mode,
+        ToolModelCapabilities::for_model_name(model),
+    )
+    .with_planning_active(planning_active)
+    .with_deferred_tool_policy(deferred_tool_policy)
+    .with_anthropic_native_memory_enabled(anthropic_native_memory_enabled)
+    .with_tool_profile(vt_cfg.map(|cfg| cfg.tools.profile).unwrap_or_default())
+}
+
+fn interactive_session_base_tools_config(
+    model: &str,
+    vt_cfg: Option<&VTCodeConfig>,
+    tool_documentation_mode: vtcode_core::config::ToolDocumentationMode,
+    deferred_tool_policy: DeferredToolPolicy,
+    anthropic_native_memory_enabled: bool,
+) -> SessionToolsConfig {
+    // The attached list is a stable superset. Each turn filters it with the
+    // registry's current planning state before exposing tools to the model.
+    interactive_session_tools_config(
+        model,
+        vt_cfg,
+        tool_documentation_mode,
+        deferred_tool_policy,
+        anthropic_native_memory_enabled,
+        true,
+    )
 }
 
 async fn maybe_attach_mcp_client(
@@ -688,13 +732,142 @@ async fn apply_workspace_trust_prompt_policy(
 mod tests {
     use std::collections::BTreeMap;
 
+    use clap::Parser;
     use serde_json::json;
+    use tempfile::TempDir;
     use vtcode_config::{
-        AgentMode, SubagentMcpServer, SubagentSource, SubagentSpec,
+        AgentMode, SubagentMcpServer, SubagentSource, SubagentSpec, ToolProfile,
         core::permissions::{AgentPermissionsConfig, PermissionDefault},
     };
+    use vtcode_core::cli::args::Cli;
+    use vtcode_core::config::constants::tools;
+    use vtcode_core::config::types::ModelSelectionSource;
+    use vtcode_core::core::agent::config::{RuntimeModelSelection, build_runtime_agent_config};
 
     use super::*;
+
+    #[tokio::test]
+    async fn interactive_catalogue_uses_configured_tool_profile() {
+        let temp = TempDir::new().expect("temp dir");
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+        let mut advanced = VTCodeConfig::default();
+        advanced.tools.profile = ToolProfile::AdvancedVtCode;
+
+        let advanced_tools = registry
+            .model_tools(interactive_session_tools_config(
+                "gpt-5",
+                Some(&advanced),
+                vtcode_core::config::ToolDocumentationMode::default(),
+                DeferredToolPolicy::default(),
+                false,
+                registry.is_planning_active(),
+            ))
+            .await;
+        let default_tools = registry
+            .model_tools(interactive_session_tools_config(
+                "gpt-5",
+                None,
+                vtcode_core::config::ToolDocumentationMode::default(),
+                DeferredToolPolicy::default(),
+                false,
+                registry.is_planning_active(),
+            ))
+            .await;
+
+        assert!(
+            advanced_tools
+                .iter()
+                .any(|tool| tool.function_name() == tools::CODE_SEARCH)
+        );
+        assert!(
+            default_tools
+                .iter()
+                .all(|tool| tool.function_name() != tools::CODE_SEARCH)
+        );
+    }
+
+    #[tokio::test]
+    async fn planning_transition_exposes_planning_tools_from_attached_base() {
+        let temp = TempDir::new().expect("temp dir");
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+        let base_tools = Arc::new(RwLock::new(
+            registry
+                .model_tools(interactive_session_base_tools_config(
+                    "gpt-5",
+                    None,
+                    vtcode_core::config::ToolDocumentationMode::default(),
+                    DeferredToolPolicy::default(),
+                    false,
+                ))
+                .await,
+        ));
+        let tool_catalog = registry.tool_catalog_state();
+
+        let inactive = tool_catalog
+            .filtered_snapshot_with_stats(&base_tools, registry.is_planning_active(), false)
+            .await;
+        let inactive_names = inactive.active_tool_names.as_ref();
+        assert!(!inactive_names.iter().any(|name| name == tools::CODE_SEARCH));
+        assert!(
+            !inactive_names
+                .iter()
+                .any(|name| name == tools::REQUEST_USER_INPUT)
+        );
+
+        registry.enable_planning();
+        let active = tool_catalog
+            .filtered_snapshot_with_stats(&base_tools, registry.is_planning_active(), true)
+            .await;
+        let active_names = active.active_tool_names.as_ref();
+        assert!(active_names.iter().any(|name| name == tools::CODE_SEARCH));
+        assert!(
+            active_names
+                .iter()
+                .any(|name| name == tools::REQUEST_USER_INPUT)
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_refresh_route_retains_configured_tool_profile() {
+        let temp = TempDir::new().expect("temp dir");
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+        let tool_catalog = registry.tool_catalog_state();
+        let active_tools = Arc::new(RwLock::new(Vec::new()));
+        let mut advanced = VTCodeConfig::default();
+        advanced.tools.profile = ToolProfile::AdvancedVtCode;
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &advanced,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        refresh_tool_snapshot(
+            &registry,
+            &active_tools,
+            tool_catalog.as_ref(),
+            &runtime_config,
+            Some(&advanced),
+            vtcode_core::config::ToolDocumentationMode::default(),
+            &DeferredToolPolicy::default(),
+        )
+        .await;
+
+        assert!(
+            active_tools
+                .read()
+                .await
+                .iter()
+                .any(|tool| tool.function_name() == tools::CODE_SEARCH)
+        );
+    }
 
     #[test]
     fn async_mcp_manager_uses_primary_agent_merged_mcp_config() {

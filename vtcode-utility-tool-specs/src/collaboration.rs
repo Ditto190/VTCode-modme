@@ -11,22 +11,22 @@ pub fn agent_parameters() -> Value {
             "action": {
                 "type": "string",
                 "enum": ["spawn", "spawn_subprocess", "send_input", "resume", "wait", "close"],
-                "description": "spawn: delegate a scoped task to a child agent (requires message). spawn_subprocess: launch a managed background subprocess for long-running daemons (requires message). send_input: send follow-up input to a running child (requires id + message or items). resume: reopen a completed/closed child from saved context (requires id). wait: block the current foreground turn until one or more children reach a terminal state (requires ids). close: cancel and free a child's tool budget (requires id)."
+                "description": "spawn: delegate a scoped task to a child agent (requires message). spawn_subprocess: launch a managed background subprocess for long-running daemons (requires message). send_input: send follow-up input to a running child (requires id + message or items). resume: reopen a completed or closed child from saved context (requires id). wait: block the current foreground turn until one or more children reach a terminal state (requires ids). close: cancel and free a child's tool budget (requires id)."
             },
-            "agent_type": {"type": "string", "description": "spawn/spawn_subprocess: subagent type or name to run."},
-            "message": {"type": "string", "description": "spawn/spawn_subprocess: task prompt. send_input: follow-up prompt for the child."},
+            "agent_type": {"type": "string", "description": "spawn or spawn_subprocess: subagent type or name to run."},
+            "message": {"type": "string", "description": "spawn or spawn_subprocess: task prompt. send_input: follow-up prompt for the child."},
             "items": {
                 "type": "array",
                 "description": "Structured context items for the child.",
                 "items": collaboration_input_item_schema()
             },
             "fork_context": {"type": "boolean", "description": "spawn: seed the child with the current thread history.", "default": false},
-            "model": {"type": "string", "description": "spawn/spawn_subprocess: model override. Omit to use parent model."},
-            "reasoning_effort": {"type": "string", "description": "spawn/spawn_subprocess: reasoning effort override."},
+            "model": {"type": "string", "description": "spawn or spawn_subprocess: model override. Omit to use parent model."},
+            "reasoning_effort": {"type": "string", "description": "spawn or spawn_subprocess: reasoning effort override."},
             "background": {"type": "boolean", "description": "spawn: run the child agent in background and return immediately.", "default": false},
-            "max_turns": {"type": "integer", "description": "spawn/spawn_subprocess: optional turn limit for the child."},
-            "id": {"type": "string", "description": "send_input/resume/close: child agent id."},
-            "interrupt": {"type": "boolean", "description": "send_input: abort current child work and restart with this input; false (default) queues it.", "default": false},
+            "max_turns": {"type": "integer", "description": "spawn or spawn_subprocess: optional turn limit for the child."},
+            "id": {"type": "string", "description": "send_input, resume, or close: child agent id."},
+            "interrupt": {"type": "boolean", "description": "send_input: abort current child work and restart with this input; false queues it.", "default": false},
             "ids": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -36,6 +36,121 @@ pub fn agent_parameters() -> Value {
                 "type": "integer",
                 "description": "wait: optional wait timeout in milliseconds. Uses the session default timeout when omitted."
             }
+        }
+    })
+}
+
+#[must_use]
+pub fn spawn_agent_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "agent_type": {"type": "string", "description": "Subagent type or name to run."},
+            "message": {"type": "string", "description": "Task prompt for the child agent."},
+            "items": {
+                "type": "array",
+                "description": "Structured context items for the child agent.",
+                "items": collaboration_input_item_schema()
+            },
+            "fork_context": {"type": "boolean", "description": "Seed the child with the current thread history.", "default": false},
+            "model": {
+                "type": "string",
+                "description": "Model override. Omit to use parent model."
+            },
+            "reasoning_effort": {"type": "string", "description": "Reasoning effort override."},
+            "background": {
+                "type": "boolean",
+                "description": "Run agent in background. Returns immediately.",
+                "default": false
+            },
+            "max_turns": {
+                "type": "integer",
+                "description": "Optional turn limit for this child. Values below 2 are promoted to 2 so the child can recover from an initial blocked or denied tool call."
+            }
+        }
+    })
+}
+
+#[must_use]
+pub fn spawn_background_subprocess_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "agent_type": {"type": "string", "description": "Background-enabled subagent type or name to run."},
+            "message": {"type": "string", "description": "Task prompt for the background subprocess."},
+            "items": {
+                "type": "array",
+                "description": "Structured context items for the background subprocess.",
+                "items": collaboration_input_item_schema()
+            },
+            "model": {
+                "type": "string",
+                "description": "Model override. Omit to use parent model."
+            },
+            "reasoning_effort": {"type": "string", "description": "Reasoning effort override."},
+            "max_turns": {
+                "type": "integer",
+                "description": "Optional turn limit for the launched background subprocess task before it reports readiness. Values below 4 are promoted to 4 for background launches."
+            }
+        }
+    })
+}
+
+#[must_use]
+pub fn send_input_parameters() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+            "id": {"type": "string", "description": "Child agent id to message."},
+            "message": {"type": "string", "description": "Follow-up prompt for the child."},
+            "items": {
+                "type": "array",
+                "description": "Structured follow-up items.",
+                "items": collaboration_input_item_schema()
+            },
+            "interrupt": {"type": "boolean", "description": "When true, abort current child work and restart with this input. When false (default), queue the input; if the child is already running, it starts the child's next turn after the current turn completes.", "default": false}
+        }
+    })
+}
+
+#[must_use]
+pub fn wait_agent_parameters() -> Value {
+    json!({
+        "type": "object",
+        "required": ["ids"],
+        "properties": {
+            "ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Child agent ids to wait for. This blocks the current foreground turn until one target reaches a terminal state or the wait times out."
+            },
+            "timeout_ms": {
+                "type": "integer",
+                "description": "Optional wait timeout in milliseconds. Uses the session default timeout when omitted."
+            }
+        }
+    })
+}
+
+#[must_use]
+pub fn resume_agent_parameters() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+            "id": {"type": "string", "description": "Child agent id to resume."}
+        }
+    })
+}
+
+#[must_use]
+pub fn close_agent_parameters() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+            "id": {"type": "string", "description": "Child agent id to close."}
         }
     })
 }
@@ -135,52 +250,49 @@ mod tests {
 
     #[test]
     fn collaboration_schemas_keep_structured_items_consistent() {
-        let schema = agent_parameters();
-        let items = &schema["properties"]["items"]["items"];
+        let spawn_items = &spawn_agent_parameters()["properties"]["items"]["items"];
+        let send_items = &send_input_parameters()["properties"]["items"]["items"];
 
-        assert_eq!(items["additionalProperties"], json!(false));
-        assert_eq!(items["properties"]["image_url"]["type"], json!("string"));
+        assert_eq!(spawn_items, send_items);
+        assert_eq!(spawn_items["additionalProperties"], json!(false));
+        assert_eq!(
+            spawn_items["properties"]["image_url"]["type"],
+            json!("string")
+        );
     }
-
     #[test]
     fn collaboration_schemas_expose_updated_agent_description_text() {
-        let schema = agent_parameters();
+        let spawn = spawn_agent_parameters();
+        let spawn_background = spawn_background_subprocess_parameters();
+        let send = send_input_parameters();
+        let wait = wait_agent_parameters();
 
         assert_eq!(
-            schema["properties"]["action"]["enum"],
-            json!([
-                "spawn",
-                "spawn_subprocess",
-                "send_input",
-                "resume",
-                "wait",
-                "close"
-            ])
+            spawn["properties"]["message"]["description"],
+            json!("Task prompt for the child agent.")
         );
         assert_eq!(
-            schema["properties"]["message"]["description"],
+            send["properties"]["id"]["description"],
+            json!("Child agent id to message.")
+        );
+        assert_eq!(
+            spawn["properties"]["background"]["description"],
+            json!("Run agent in background. Returns immediately.")
+        );
+        assert_eq!(
+            spawn_background["properties"]["message"]["description"],
+            json!("Task prompt for the background subprocess.")
+        );
+        assert_eq!(
+            wait["properties"]["ids"]["description"],
             json!(
-                "spawn/spawn_subprocess: task prompt. send_input: follow-up prompt for the child."
+                "Child agent ids to wait for. This blocks the current foreground turn until one target reaches a terminal state or the wait times out."
             )
         );
         assert_eq!(
-            schema["properties"]["id"]["description"],
-            json!("send_input/resume/close: child agent id.")
-        );
-        assert_eq!(
-            schema["properties"]["background"]["description"],
-            json!("spawn: run the child agent in background and return immediately.")
-        );
-        assert_eq!(
-            schema["properties"]["ids"]["description"],
+            wait["properties"]["timeout_ms"]["description"],
             json!(
-                "wait: child agent ids to wait for. Blocks the current foreground turn until one target reaches a terminal state or the wait times out."
-            )
-        );
-        assert_eq!(
-            schema["properties"]["timeout_ms"]["description"],
-            json!(
-                "wait: optional wait timeout in milliseconds. Uses the session default timeout when omitted."
+                "Optional wait timeout in milliseconds. Uses the session default timeout when omitted."
             )
         );
     }

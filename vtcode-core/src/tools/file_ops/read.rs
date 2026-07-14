@@ -377,8 +377,8 @@ impl FileOpsTool {
             if looks_like_patch_payload(&args) {
                 return anyhow!(
                     "Error: Patch content was sent to read_file.\n\
-                    Use the patch path instead: unified_file with {{\"action\":\"patch\",\"patch\":\"...\"}} \
-                    (or {{\"action\":\"patch\",\"input\":\"...\"}}).\n\
+                    Use apply_patch with {{\"patch\":\"...\"}} \
+                    (or {{\"input\":\"...\"}}).\n\
                     read_file requires a path parameter."
                 );
             }
@@ -518,7 +518,7 @@ impl FileOpsTool {
                                 builder = builder.field(
                                     "next_action",
                                     json!(
-                                        "Use the `next_read_args` field above to continue, or `unified_search action=grep` with a SPECIFIC pattern. Do NOT re-read the same offset — the per-turn spool chunk cap will block you."
+                                        "Use the `next_read_args` field above to continue, or `exec_command.cmd` with `rg` and a specific pattern. Do NOT re-read the same offset; the per-turn spool chunk cap will block you."
                                     ),
                                 );
                             }
@@ -686,7 +686,7 @@ impl FileOpsTool {
         if let Some(spool_path) = missing_spool_candidate {
             if let Some(session_id) = pty_session_id_from_tool_output_path(&spool_path) {
                 return Err(anyhow!(
-                    "Error: Session output file not found: {}. This looks like a command session id. Use unified_exec with session_id=\"{}\" instead of read_file.",
+                    "Error: Session output file not found: {}. This looks like command session output. Use write_stdin with session_id=\"{}\" to poll or continue the active session.",
                     self.workspace_relative_display(&spool_path),
                     session_id,
                 ));
@@ -700,7 +700,7 @@ impl FileOpsTool {
         if let Some(directory_path) = directory_candidate {
             let display_path = self.workspace_relative_display(&directory_path);
             return Err(anyhow!(
-                "Error: Path '{display_path}' is a directory, not a file. Use unified_search with action=\"list\" and path=\"{display_path}\" to inspect it, or set mode=\"recursive\" for nested discovery.",
+                "Error: Path '{display_path}' is a directory, not a file. Use `exec_command.cmd` with `find` or `ls` to inspect it.",
             ));
         }
 
@@ -712,7 +712,7 @@ impl FileOpsTool {
             .missing_path_suggestion_suffix(path_str, PathSuggestionKind::File)
             .await;
         Err(anyhow!(
-            "Error: File not found: {}. Tried paths: {}.{} Use unified_search action=list path=\"{}\" to discover available files.",
+            "Error: File not found: {}. Tried paths: {}.{} Use `exec_command.cmd` with `find {}` to discover available files.",
             path_str,
             potential_paths
                 .iter()
@@ -768,7 +768,7 @@ mod read_tests {
         );
         assert_eq!(
             pty_session_id_from_tool_output_path(Path::new(
-                ".vtcode/context/tool_outputs/unified_exec_123.txt"
+                ".vtcode/context/tool_outputs/command_session_123.txt"
             )),
             None
         );
@@ -1179,7 +1179,8 @@ mod read_tests {
         let err = file_ops.read_file(args).await.unwrap_err().to_string();
 
         assert!(err.contains("Patch content was sent to read_file"));
-        assert!(err.contains("\"action\":\"patch\""));
+        assert!(err.contains("apply_patch"));
+        assert!(err.contains("\"patch\":\"...\""));
     }
 
     #[tokio::test]
@@ -1190,7 +1191,7 @@ mod read_tests {
         let file_ops = FileOpsTool::new(workspace_root, grep_manager);
 
         let args = json!({
-            "path": ".vtcode/context/tool_outputs/unified_exec_123.txt"
+            "path": ".vtcode/context/tool_outputs/command_session_123.txt"
         });
         let err = file_ops.read_file(args).await.unwrap_err().to_string();
 
@@ -1199,7 +1200,7 @@ mod read_tests {
     }
 
     #[tokio::test]
-    async fn test_missing_run_session_file_suggests_unified_exec() {
+    async fn test_missing_run_session_file_suggests_write_stdin() {
         let temp_dir = TempDir::new().unwrap();
         let workspace_root = temp_dir.path().to_path_buf();
         let grep_manager = std::sync::Arc::new(GrepSearchManager::new(workspace_root.clone()));
@@ -1211,7 +1212,7 @@ mod read_tests {
         let err = file_ops.read_file(args).await.unwrap_err().to_string();
 
         assert!(err.contains("Session output file not found"));
-        assert!(err.contains("unified_exec"));
+        assert!(err.contains("write_stdin"));
         assert!(err.contains("run-123abc"));
     }
 
@@ -1247,8 +1248,9 @@ mod read_tests {
         let err = file_ops.read_file(args).await.unwrap_err().to_string();
 
         assert!(err.contains("is a directory, not a file"));
-        assert!(err.contains("action=\"list\""));
-        assert!(err.contains("path=\"src\""));
+        assert!(err.contains("exec_command.cmd"));
+        assert!(err.contains("find"));
+        assert!(err.contains("ls"));
     }
 
     #[tokio::test]
@@ -1257,7 +1259,7 @@ mod read_tests {
         let workspace_root = temp_dir.path().to_path_buf();
         let spool_dir = workspace_root.join(".vtcode/context/tool_outputs");
         fs::create_dir_all(&spool_dir).unwrap();
-        let spool_file = spool_dir.join("unified_exec_123.txt");
+        let spool_file = spool_dir.join("command_session_123.txt");
         let spool_content = (1..=120)
             .map(|i| format!("line{i}"))
             .collect::<Vec<_>>()
@@ -1268,7 +1270,7 @@ mod read_tests {
         let file_ops = FileOpsTool::new(workspace_root, grep_manager);
 
         let args = json!({
-            "path": ".vtcode/context/tool_outputs/unified_exec_123.txt"
+            "path": ".vtcode/context/tool_outputs/command_session_123.txt"
         });
 
         let result = file_ops.read_file(args).await.unwrap();
@@ -1279,7 +1281,7 @@ mod read_tests {
         assert_eq!(
             result["next_read_args"],
             json!({
-                "path": ".vtcode/context/tool_outputs/unified_exec_123.txt",
+                "path": ".vtcode/context/tool_outputs/command_session_123.txt",
                 "offset": SPOOL_CHUNK_DEFAULT_LIMIT_LINES + 1,
                 "limit": SPOOL_CHUNK_DEFAULT_LIMIT_LINES
             })
@@ -1296,7 +1298,7 @@ mod read_tests {
         let workspace_root = temp_dir.path().to_path_buf();
         let spool_dir = workspace_root.join(".vtcode/context/tool_outputs");
         fs::create_dir_all(&spool_dir).unwrap();
-        let spool_file = spool_dir.join("unified_exec_999.txt");
+        let spool_file = spool_dir.join("command_session_999.txt");
         let spool_content = (1..=5)
             .map(|i| format!("line{i}"))
             .collect::<Vec<_>>()
@@ -1307,7 +1309,7 @@ mod read_tests {
         let file_ops = FileOpsTool::new(workspace_root, grep_manager);
 
         let args = json!({
-            "path": ".vtcode/context/tool_outputs/unified_exec_999.txt"
+            "path": ".vtcode/context/tool_outputs/command_session_999.txt"
         });
 
         let result = file_ops.read_file(args).await.unwrap();
@@ -1328,7 +1330,7 @@ mod read_tests {
         let workspace_root = temp_dir.path().to_path_buf();
         let spool_dir = workspace_root.join(".vtcode/context/tool_outputs");
         fs::create_dir_all(&spool_dir).unwrap();
-        let spool_file = spool_dir.join("unified_exec_exact.txt");
+        let spool_file = spool_dir.join("command_session_exact.txt");
         let spool_content = (1..=SPOOL_CHUNK_DEFAULT_LIMIT_LINES)
             .map(|i| format!("line{i}"))
             .collect::<Vec<_>>()
@@ -1340,7 +1342,7 @@ mod read_tests {
 
         let result = file_ops
             .read_file(json!({
-                "path": ".vtcode/context/tool_outputs/unified_exec_exact.txt"
+                "path": ".vtcode/context/tool_outputs/command_session_exact.txt"
             }))
             .await
             .unwrap();
@@ -1451,7 +1453,7 @@ mod read_tests {
         let workspace_root = temp_dir.path().to_path_buf();
         let spool_dir = workspace_root.join(".vtcode/context/tool_outputs");
         fs::create_dir_all(&spool_dir).unwrap();
-        let spool_file = spool_dir.join("unified_exec_456.txt");
+        let spool_file = spool_dir.join("command_session_456.txt");
         let spool_content = (1..=120)
             .map(|i| format!("line{i}"))
             .collect::<Vec<_>>()
@@ -1463,7 +1465,7 @@ mod read_tests {
 
         let result = file_ops
             .read_file(json!({
-                "p": ".vtcode/context/tool_outputs/unified_exec_456.txt",
+                "p": ".vtcode/context/tool_outputs/command_session_456.txt",
                 "o": 81,
                 "l": 40
             }))
@@ -1473,7 +1475,7 @@ mod read_tests {
         assert_eq!(result["success"], true);
         assert_eq!(
             result["path"],
-            ".vtcode/context/tool_outputs/unified_exec_456.txt"
+            ".vtcode/context/tool_outputs/command_session_456.txt"
         );
         assert_eq!(result["spool_chunked"], true);
         assert_eq!(result["lines_returned"], 40);

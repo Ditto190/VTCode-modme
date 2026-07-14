@@ -94,7 +94,7 @@ fn write_test_background_subagent(workspace_root: &std::path::Path) {
 name: background-demo
 description: Minimal demo agent for the managed background subprocess flow.
 tools:
-  - unified_exec
+  - command_session
 background: true
 maxTurns: 2
 initialPrompt: Report readiness once.
@@ -134,7 +134,7 @@ fn write_test_read_only_subagent(workspace_root: &std::path::Path) {
 name: readonly-demo
 description: Read-only test child agent.
 tools:
-  - read_file
+  - code_search
 permissions:
   default: ask
 ---
@@ -501,7 +501,7 @@ fn read_only_test_spec(name: &str) -> SubagentSpec {
 }
 
 #[test]
-fn filter_child_tools_removes_subagent_tools_in_children() {
+fn filter_child_tools_keeps_public_read_tools_and_removes_mutation_tools() {
     let defs = vec![
         ToolDefinition::function(
             tools::SPAWN_AGENT.to_string(),
@@ -509,13 +509,23 @@ fn filter_child_tools_removes_subagent_tools_in_children() {
             serde_json::json!({"type": "object"}),
         ),
         ToolDefinition::function(
-            tools::UNIFIED_SEARCH.to_string(),
+            tools::CODE_SEARCH.to_string(),
             "Search".to_string(),
             serde_json::json!({"type": "object"}),
         ),
         ToolDefinition::function(
-            tools::LIST_FILES.to_string(),
-            "List".to_string(),
+            tools::EXEC_COMMAND.to_string(),
+            "Exec".to_string(),
+            serde_json::json!({"type": "object"}),
+        ),
+        ToolDefinition::function(
+            tools::APPLY_PATCH.to_string(),
+            "Patch".to_string(),
+            serde_json::json!({"type": "object"}),
+        ),
+        ToolDefinition::function(
+            tools::WRITE_STDIN.to_string(),
+            "Continue".to_string(),
             serde_json::json!({"type": "object"}),
         ),
         ToolDefinition::function(
@@ -529,12 +539,15 @@ fn filter_child_tools_removes_subagent_tools_in_children() {
         .find(|spec| spec.name == "explorer")
         .expect("explorer");
     let filtered = filter_child_tools(&spec, defs, true);
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].function_name(), tools::UNIFIED_SEARCH);
+    let names = filtered
+        .iter()
+        .map(ToolDefinition::function_name)
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec![tools::CODE_SEARCH]);
 }
 
 #[test]
-fn filter_child_tools_keeps_unified_exec_for_shell_capable_agents() {
+fn filter_child_tools_keeps_command_session_for_shell_capable_agents() {
     let defs = vec![
         ToolDefinition::function(
             tools::UNIFIED_EXEC.to_string(),
