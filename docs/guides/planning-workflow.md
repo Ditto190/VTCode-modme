@@ -173,6 +173,20 @@ possible). Instead it finalizes the current plan draft and presents it via the
 review gate, so you can approve or revise what was produced rather than the
 turn hanging.
 
+## Plan File Persistence
+
+The draft is the single source of truth and always lives on disk under
+`.vtcode/plans/<plan>.md`, not only in chat history. Even when the final
+synthesis fails and the runloop enters the tool-free recovery pass (where all
+tools — including `apply_patch` and `task_tracker` — are disabled), any
+`<proposed_plan>` the model emitted inline is extracted and written to the
+session plan file before the turn ends. This is why the budget/recovery
+exhaustion notices can promise the draft is "preserved in the session plan
+file": the recovery path persists it rather than leaving `.vtcode/plans/` at its
+`start_planning` template. If you ever see an empty plan dir after planning,
+treat it as a regression in this persistence path, not a permissions or
+directory-creation problem.
+
 ## Best Practices
 
 1. Be specific about files, functions, constraints, and desired behaviour.

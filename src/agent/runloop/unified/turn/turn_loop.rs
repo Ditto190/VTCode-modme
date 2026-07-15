@@ -691,12 +691,16 @@ pub(crate) async fn run_turn_loop(
                     working_history: &mut *turn_processing_ctx.working_history,
                     harness_state: &mut *turn_processing_ctx.harness_state,
                     plan_session: planning.then_some(&mut *turn_processing_ctx.plan_session),
+                    plan_state: planning
+                        .then_some(&turn_processing_ctx.tool_registry.planning_workflow_state()),
                     err: &err,
                     step_count,
                     turn_history_start_len,
                     stage: "execute_llm_request",
                     tool_free_recovery,
-                })? {
+                })
+                .await?
+                {
                     PostToolFailureAction::Continue => continue,
                     PostToolFailureAction::Break(r) => {
                         result = r;
@@ -945,12 +949,16 @@ pub(crate) async fn run_turn_loop(
                     working_history: &mut *turn_processing_ctx.working_history,
                     harness_state: &mut *turn_processing_ctx.harness_state,
                     plan_session: planning.then_some(&mut *turn_processing_ctx.plan_session),
+                    plan_state: planning
+                        .then_some(&turn_processing_ctx.tool_registry.planning_workflow_state()),
                     err: &err,
                     step_count,
                     turn_history_start_len,
                     stage: "process_llm_response",
                     tool_free_recovery,
-                })? {
+                })
+                .await?
+                {
                     PostToolFailureAction::Continue => continue,
                     PostToolFailureAction::Break(r) => {
                         result = r;
@@ -1043,12 +1051,15 @@ pub(crate) async fn run_turn_loop(
                     working_history: &mut *working_history,
                     harness_state: &mut *ctx.harness_state,
                     plan_session: planning.then_some(&mut *ctx.plan_session),
+                    plan_state: planning.then_some(&ctx.tool_registry.planning_workflow_state()),
                     err: &err,
                     step_count,
                     turn_history_start_len,
                     stage: "handle_turn_processing_result",
                     tool_free_recovery,
-                })? {
+                })
+                .await?
+                {
                     PostToolFailureAction::Continue => continue,
                     PostToolFailureAction::Break(r) => {
                         result = r;
@@ -1118,13 +1129,19 @@ pub(crate) async fn run_turn_loop(
                     ctx.plan_session.mark_recovery_exhausted();
                 }
                 let salvaged = ctx.harness_state.take_recovery_rejected_synthesis();
+                let planning = ctx.is_planning_active();
+                let plan_session_opt = planning.then_some(&mut *ctx.plan_session);
+                let plan_state = ctx.tool_registry.planning_workflow_state();
+                let plan_state_opt = planning.then_some(&plan_state);
                 result = normalize_tool_free_recovery_break_outcome(
                     working_history,
                     outcome_result,
                     tool_free_recovery,
                     salvaged,
-                    ctx.is_planning_active().then_some(&mut *ctx.plan_session),
-                );
+                    plan_session_opt,
+                    plan_state_opt,
+                )
+                .await;
                 break;
             }
         }

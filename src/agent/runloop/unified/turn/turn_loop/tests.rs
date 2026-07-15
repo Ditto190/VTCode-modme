@@ -319,8 +319,8 @@ fn post_tool_follow_up_failure_chain_consumes_tool_free_recovery_pass() {
     assert!(state.recovery_is_tool_free());
 }
 
-#[test]
-fn complete_turn_after_failed_tool_free_recovery_appends_fallback_once() {
+#[tokio::test]
+async fn complete_turn_after_failed_tool_free_recovery_appends_fallback_once() {
     let mut history = vec![uni::Message::user("summarize".to_string())];
     let outcome = complete_turn_after_failed_tool_free_recovery(
         &mut history,
@@ -328,7 +328,9 @@ fn complete_turn_after_failed_tool_free_recovery_appends_fallback_once() {
         Some(&anyhow!("Network error")),
         None,
         None,
-    );
+        None,
+    )
+    .await;
     assert!(matches!(outcome, TurnLoopResult::Completed));
     let fallback_count = history
         .iter()
@@ -340,8 +342,15 @@ fn complete_turn_after_failed_tool_free_recovery_appends_fallback_once() {
         .count();
     assert_eq!(fallback_count, 1);
 
-    let outcome_again =
-        complete_turn_after_failed_tool_free_recovery(&mut history, "test.stage", None, None, None);
+    let outcome_again = complete_turn_after_failed_tool_free_recovery(
+        &mut history,
+        "test.stage",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
     assert!(matches!(outcome_again, TurnLoopResult::Completed));
     let fallback_count_again = history
         .iter()
@@ -354,8 +363,8 @@ fn complete_turn_after_failed_tool_free_recovery_appends_fallback_once() {
     assert_eq!(fallback_count_again, 1);
 }
 
-#[test]
-fn complete_turn_after_failed_tool_free_recovery_prefers_salvaged_prose() {
+#[tokio::test]
+async fn complete_turn_after_failed_tool_free_recovery_prefers_salvaged_prose() {
     let mut history = vec![uni::Message::user("summarize".to_string())];
     let outcome = complete_turn_after_failed_tool_free_recovery(
         &mut history,
@@ -363,7 +372,9 @@ fn complete_turn_after_failed_tool_free_recovery_prefers_salvaged_prose() {
         None,
         Some("Here is the launch-time plan: reduce config IO.".to_string()),
         None,
-    );
+        None,
+    )
+    .await;
     assert!(matches!(outcome, TurnLoopResult::Completed));
     let last = history.last().unwrap();
     assert_eq!(last.role, uni::MessageRole::Assistant);
@@ -380,7 +391,9 @@ fn complete_turn_after_failed_tool_free_recovery_prefers_salvaged_prose() {
         None,
         Some("   \n".to_string()),
         None,
-    );
+        None,
+    )
+    .await;
     assert!(matches!(outcome, TurnLoopResult::Completed));
     assert_eq!(
         history.last().unwrap().content.as_text(),
@@ -388,8 +401,8 @@ fn complete_turn_after_failed_tool_free_recovery_prefers_salvaged_prose() {
     );
 }
 
-#[test]
-fn normalize_tool_free_recovery_break_outcome_converts_contract_violation_to_completed() {
+#[tokio::test]
+async fn normalize_tool_free_recovery_break_outcome_converts_contract_violation_to_completed() {
     let mut history = vec![uni::Message::user("summarize".to_string())];
     let outcome = normalize_tool_free_recovery_break_outcome(
         &mut history,
@@ -399,7 +412,9 @@ fn normalize_tool_free_recovery_break_outcome_converts_contract_violation_to_com
         true,
         None,
         None,
-    );
+        None,
+    )
+    .await;
 
     assert!(matches!(outcome, TurnLoopResult::Completed));
     assert!(history.iter().any(|message| {
@@ -409,8 +424,8 @@ fn normalize_tool_free_recovery_break_outcome_converts_contract_violation_to_com
     }));
 }
 
-#[test]
-fn normalize_tool_free_recovery_break_outcome_keeps_non_recovery_blocked_result() {
+#[tokio::test]
+async fn normalize_tool_free_recovery_break_outcome_keeps_non_recovery_blocked_result() {
     let mut history = vec![uni::Message::user("summarize".to_string())];
     let outcome = normalize_tool_free_recovery_break_outcome(
         &mut history,
@@ -420,7 +435,9 @@ fn normalize_tool_free_recovery_break_outcome_keeps_non_recovery_blocked_result(
         true,
         None,
         None,
-    );
+        None,
+    )
+    .await;
 
     assert!(matches!(
         outcome,
@@ -435,8 +452,8 @@ fn normalize_tool_free_recovery_break_outcome_keeps_non_recovery_blocked_result(
     }));
 }
 
-#[test]
-fn plan_mode_recovery_fallback_marks_interview_pending_and_preserves_research() {
+#[tokio::test]
+async fn plan_mode_recovery_fallback_marks_interview_pending_and_preserves_research() {
     use vtcode_core::core::interfaces::session::PlanningEntrySource;
 
     let mut plan_session = PlanningWorkflowSessionState::default();
@@ -452,7 +469,9 @@ fn plan_mode_recovery_fallback_marks_interview_pending_and_preserves_research() 
         Some(&anyhow!("Network error")),
         None,
         Some(&mut plan_session),
-    );
+        None,
+    )
+    .await;
 
     assert!(matches!(outcome, TurnLoopResult::Completed));
     // Planning session must survive the failed recovery so the next turn
@@ -471,8 +490,8 @@ fn plan_mode_recovery_fallback_marks_interview_pending_and_preserves_research() 
     }));
 }
 
-#[test]
-fn plan_mode_recovery_exhausted_finalizes_instead_of_reforcing_interview() {
+#[tokio::test]
+async fn plan_mode_recovery_exhausted_finalizes_instead_of_reforcing_interview() {
     use vtcode_core::core::interfaces::session::PlanningEntrySource;
 
     let mut plan_session = PlanningWorkflowSessionState::default();
@@ -493,7 +512,9 @@ fn plan_mode_recovery_exhausted_finalizes_instead_of_reforcing_interview() {
         Some(&anyhow!("context length exceeded")),
         None,
         Some(&mut plan_session),
-    );
+        None,
+    )
+    .await;
 
     assert!(matches!(outcome, TurnLoopResult::Completed));
     // Must NOT re-force the interview — that is what caused the infinite loop.
@@ -516,8 +537,8 @@ fn plan_mode_recovery_exhausted_finalizes_instead_of_reforcing_interview() {
     );
 }
 
-#[test]
-fn plan_mode_recovery_rejects_non_plan_salvage() {
+#[tokio::test]
+async fn plan_mode_recovery_rejects_non_plan_salvage() {
     use vtcode_core::core::interfaces::session::PlanningEntrySource;
 
     let mut plan_session = PlanningWorkflowSessionState::default();
@@ -533,7 +554,9 @@ fn plan_mode_recovery_rejects_non_plan_salvage() {
         // Salvage that is prose, not a real `<proposed_plan>`.
         Some("Partial plan: batch config reads.".to_string()),
         Some(&mut plan_session),
-    );
+        None,
+    )
+    .await;
 
     assert!(matches!(outcome, TurnLoopResult::Completed));
     assert!(plan_session.interview_pending());
@@ -544,8 +567,8 @@ fn plan_mode_recovery_rejects_non_plan_salvage() {
     assert!(!last.content.as_text().contains("batch config reads"));
 }
 
-#[test]
-fn plan_mode_recovery_fallback_lists_files_read_when_present() {
+#[tokio::test]
+async fn plan_mode_recovery_fallback_lists_files_read_when_present() {
     use vtcode_core::core::interfaces::session::PlanningEntrySource;
 
     let mut plan_session = PlanningWorkflowSessionState::default();
@@ -570,7 +593,9 @@ fn plan_mode_recovery_fallback_lists_files_read_when_present() {
         Some(&anyhow!("Network error")),
         None,
         Some(&mut plan_session),
-    );
+        None,
+    )
+    .await;
 
     assert!(matches!(outcome, TurnLoopResult::Completed));
     assert!(plan_session.interview_pending());
