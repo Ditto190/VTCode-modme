@@ -2,6 +2,54 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.135.10 - 2026-07-17
+
+### Highlights
+
+#### Features
+
+- add Moonshot models, update model presets, fix blocks reflow (95ae2bcf3) (@vinhnx)
+- show visual TUI feedback for every /config change (eb42b19fe) (@vinhnx)
+
+#### Bug Fixes
+
+- remove trailing empty Policy line from streaming reasoning blocks (be920c5a0) (@vinhnx)
+- restore PTY/command tool-call display and register exec_pty_cmd (225c5c1ae) (@vinhnx)
+- persist salvaged plan to session file during plan-mode recovery (c5dcc9f6a) (@vinhnx)
+
+#### Documentation
+
+- note plan-mode investigation in TODO (92298523b) (@vinhnx)
+
+### Other Changes
+
+#### Performance
+
+- share conversation history via Arc to eliminate per-turn O(history) clones (7faf732c5) (@vinhnx)
+- cut blocking IO and redundant work on tool/event hot paths (cb012b255) (@vinhnx)
+- cut per-turn and streaming overhead across hot paths (e310ec8cb) (@vinhnx)
+- eliminate repeated work in search hot paths (669d5b9e8) (@vinhnx)
+
+#### Refactors
+
+- extract ColorContext, simplify thinking header, fix PTY completion line (124629ffd) (@vinhnx)
+- consolidate PTY styles, deduplicate prefix-building, relativize paths in headers (23c75549d) (@vinhnx)
+- harden public/harness tool dispatch and bump Rig to 0.40 (4619b1cb2) (@vinhnx)
+- lazy flat file palette with on-demand listing (8ca10317c) (@vinhnx)
+- harden native_plugin FFI and document field lifetimes (7c5a77bcd) (@vinhnx)
+
+#### Other
+
+- Update TODO (b6274d124) (@vinhnx)
+- Update note (e7b5878e8) (@vinhnx)
+- Refine plan mode (4a7a76f21) (@vinhnx)
+- Update TODO (cfc90d6b0) (@vinhnx)
+- Feat/simplify search (#702) (d7232ef41) (@2789734+kernitus)
+
+### Contributors
+
+@vinhnx, @2789734+kernitus
+
 ## 0.135.9 - 2026-07-14
 
 ### Highlights
