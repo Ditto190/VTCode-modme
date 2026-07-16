@@ -320,6 +320,19 @@ pub fn is_command_tool(tool_name: &str) -> bool {
         || canonical_command_session_tool_name(tool_name).is_some()
 }
 
+/// Returns `true` if `tool_name` is a direct command-run tool whose output is
+/// rendered inline as a terminal panel and whose raw process output (including
+/// ANSI) should be preserved rather than stripped/line-styled.
+///
+/// This is the stable set shared by the TUI display gates (terminal-panel
+/// dispatch, ANSI preservation, and command-text summary). New command-run
+/// tools MUST be added here so the display stays in sync; the args-aware
+/// [`is_command_run_tool_call`] covers call-site routing.
+#[must_use]
+pub fn is_command_run_tool(tool_name: &str) -> bool {
+    matches!(tool_name, tools::RUN_PTY_CMD | tools::EXEC_COMMAND)
+}
+
 pub fn is_command_run_tool_call(tool_name: &str, args: &Value) -> bool {
     match tool_name {
         tools::RUN_PTY_CMD | tools::CREATE_PTY_SESSION | tools::SHELL | "bash" => true,

@@ -47,6 +47,39 @@ async fn run_command_uses_pty_backend() -> Result<()> {
 }
 
 #[tokio::test]
+async fn exec_pty_cmd_resolves_and_runs_in_registry() -> Result<()> {
+    let harness = TestHarness::new()?;
+    harness.write_file("sample_pty.txt", "hello")?;
+    let registry = harness.registry().await;
+
+    // EXEC_PTY_CMD is offered to the model but must also resolve to a real
+    // executor; otherwise the call fails with "not found in registry".
+    let response = registry
+        .execute_tool(
+            tools::EXEC_PTY_CMD,
+            json!({
+                "cmd": "ls",
+                "workdir": "."
+            }),
+        )
+        .await?;
+
+    assert_eq!(
+        response["success"], true,
+        "exec_pty_cmd must execute; response was {response:?}"
+    );
+    let output = response["output"].as_str().unwrap_or_default();
+    let stdout = response["stdout"].as_str().unwrap_or_default();
+    let combined_output = format!("{output} {stdout}");
+    assert!(
+        combined_output.contains("sample_pty.txt"),
+        "Output should contain sample_pty.txt. output='{output}', stdout='{stdout}'"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn run_command_accepts_indexed_arguments_zero_based() -> Result<()> {
     let harness = TestHarness::new()?;
     harness.write_file("sample.txt", "hello")?;

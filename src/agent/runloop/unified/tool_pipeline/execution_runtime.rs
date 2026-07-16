@@ -282,7 +282,11 @@ async fn execute_with_cache_and_streaming_inner(
 
     let should_stream_pty = matches!(
         name,
-        tools::RUN_PTY_CMD | tools::UNIFIED_EXEC | tools::SEND_PTY_INPUT
+        tools::RUN_PTY_CMD
+            | tools::UNIFIED_EXEC
+            | tools::SEND_PTY_INPUT
+            | tools::EXEC_COMMAND
+            | tools::EXEC_PTY_CMD
     );
     debug_assert!(
         show_loading_ui || !should_stream_pty,

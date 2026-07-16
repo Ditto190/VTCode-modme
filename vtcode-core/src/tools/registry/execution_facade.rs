@@ -1654,13 +1654,17 @@ impl ToolRegistry {
             } else if exec_settlement_mode.settle_noninteractive()
                 && matches!(
                     tool_name.as_str(),
-                    tools::UNIFIED_EXEC | tools::EXEC_COMMAND
+                    tools::UNIFIED_EXEC | tools::EXEC_COMMAND | tools::EXEC_PTY_CMD
                 )
             {
-                let exec_args = if tool_name == tools::EXEC_COMMAND {
-                    super::executors::normalize_command_session_run_alias_args(&args, false)?
-                } else {
-                    args.clone()
+                let exec_args = match tool_name.as_str() {
+                    tools::EXEC_COMMAND => {
+                        super::executors::normalize_command_session_run_alias_args(&args, false)?
+                    }
+                    tools::EXEC_PTY_CMD => {
+                        super::executors::normalize_command_session_run_alias_args(&args, true)?
+                    }
+                    _ => args.clone(),
                 };
                 if self.optimization_config.memory_pool.enabled {
                     let _execution_guard = self.memory_pool.get_value();

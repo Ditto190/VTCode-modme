@@ -56,6 +56,7 @@ use vtcode_commons::preview::{
 };
 use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::loader::VTCodeConfig;
+use vtcode_core::tools::tool_intent;
 use vtcode_core::ui::markdown;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
@@ -459,11 +460,11 @@ pub(crate) async fn render_stream_section(
 ) -> Result<()> {
     use std::fmt::Write as FmtWrite;
 
-    let is_run_command = matches!(
-        tool_name,
-        Some(vtcode_core::config::constants::tools::RUN_PTY_CMD)
-            | Some(vtcode_core::config::constants::tools::UNIFIED_EXEC)
-    );
+    let is_run_command = tool_name.is_some_and(|name| {
+        tool_intent::is_command_run_tool(name)
+            || name == vtcode_core::config::constants::tools::UNIFIED_EXEC
+            || name == vtcode_core::config::constants::tools::EXEC_PTY_CMD
+    });
     let allow_ansi_for_tool = allow_ansi && !is_run_command;
     let apply_line_styles = !is_run_command;
 

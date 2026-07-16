@@ -199,7 +199,9 @@ pub(crate) async fn render_tool_output(
         | Some(tools::SEND_PTY_INPUT)
         | Some(tools::CLOSE_PTY_SESSION)
         | Some(tools::RESIZE_PTY_SESSION)
-        | Some(tools::LIST_PTY_SESSIONS) => {
+        | Some(tools::LIST_PTY_SESSIONS)
+        | Some(tools::EXEC_COMMAND)
+        | Some(tools::EXEC_PTY_CMD) => {
             return render_terminal_tool_output(renderer, val, vt_config, allow_tool_ansi).await;
         }
         Some(tools::UNIFIED_EXEC)
@@ -798,6 +800,69 @@ mod tests {
         assert!(inline_output.contains("cat, sed, or rg"));
         assert!(!inline_output.contains("read_file/grep_file"));
         assert!(inline_output.contains("Reuse `next_continue_args`."));
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_exec_command_renders_terminal_panel_with_output() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer =
+            AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "command": "cargo check",
+            "output": "Compiling vtcode v0.135.9",
+            "stdout": "Compiling vtcode v0.135.9",
+            "stderr": "",
+            "is_exited": true,
+            "exit_code": 0
+        });
+
+        render_tool_output(
+            &mut renderer,
+            Some(vtcode_core::config::constants::tools::EXEC_COMMAND),
+            &payload,
+            None,
+        )
+        .await
+        .expect("exec_command payload should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(
+            inline_output.contains("Compiling vtcode v0.135.9"),
+            "exec_command output must be rendered in the terminal panel, got: {inline_output}"
+        );
+        assert!(
+            !inline_output.contains("(no output)"),
+            "exec_command output must not fall through to the no-output status renderer"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_exec_pty_cmd_renders_terminal_panel_with_output() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer =
+            AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "command": "ls -la",
+            "output": "total 0",
+            "session_id": "run-456",
+            "is_exited": true,
+            "exit_code": 0
+        });
+
+        render_tool_output(
+            &mut renderer,
+            Some(vtcode_core::config::constants::tools::EXEC_PTY_CMD),
+            &payload,
+            None,
+        )
+        .await
+        .expect("exec_pty_cmd payload should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(
+            inline_output.contains("total") && inline_output.contains("✓ exit 0"),
+            "exec_pty_cmd output must be rendered in the terminal panel, got: {inline_output}"
+        );
     }
 
     #[tokio::test]

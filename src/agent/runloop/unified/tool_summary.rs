@@ -454,9 +454,11 @@ pub(crate) fn describe_tool_action(
     };
 
     match actual_tool_name {
-        actual_name if actual_name == tool_names::RUN_PTY_CMD => describe_shell_command(args)
-            .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-            .unwrap_or_else(|| (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new())),
+        actual_name if tool_intent::is_command_run_tool(actual_name) => {
+            describe_shell_command(args)
+                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
+                .unwrap_or_else(|| (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new()))
+        }
         actual_name if actual_name == tool_names::UNIFIED_EXEC => {
             match tool_intent::command_session_action(args).unwrap_or("run") {
                 "run" => describe_shell_command(args)

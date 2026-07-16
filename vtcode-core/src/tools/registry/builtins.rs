@@ -419,6 +419,25 @@ fn register_exec_command(_plan_state: Option<&PlanningWorkflowState>) -> ToolReg
 }
 
 #[distributed_slice(BUILTIN_TOOLS)]
+fn register_exec_pty_cmd(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
+    ToolRegistration::new(
+        tools::EXEC_PTY_CMD,
+        CapabilityLevel::Bash,
+        false,
+        ToolRegistry::run_pty_cmd_executor,
+    )
+    .with_description(
+        "Execute a shell command attached to a PTY (pseudo-terminal) so interactive and \
+         TTY-aware programs behave as in a real terminal. Use this when the command needs a \
+         controlling terminal (e.g. pagers, prompts, curses UIs). Returns output, exit status, \
+         and a reusable session id when the command is still running.",
+    )
+    .with_parameter_schema(exec_command_parameters())
+    .with_permission(ToolPolicy::Allow)
+    .with_llm_visibility(false)
+}
+
+#[distributed_slice(BUILTIN_TOOLS)]
 fn register_write_stdin(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
     ToolRegistration::new(
         tools::WRITE_STDIN,
