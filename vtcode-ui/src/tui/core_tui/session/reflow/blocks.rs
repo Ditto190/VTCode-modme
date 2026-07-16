@@ -2,7 +2,7 @@ use ratatui::prelude::*;
 use unicode_width::UnicodeWidthStr;
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line};
 
-use super::super::super::style::ratatui_pty_style_from_inline;
+use super::super::super::style::{ratatui_pty_style_from_inline, ratatui_style_from_inline};
 use super::super::super::types::{InlineLinkRange, InlineMessageKind};
 use super::super::message::RenderedTranscriptLink;
 use super::super::{Session, TranscriptLine, render, text_utils};
@@ -404,10 +404,19 @@ impl Session {
         let pty_fallback = self
             .text_fallback(InlineMessageKind::Pty)
             .or(self.theme.foreground);
+
+        // Command header lines ("• Ran ...") use full-brightness styling so
+        // the command name and arguments are visually distinct.
+        let is_command_header = is_start && combined.starts_with("• Ran ");
+
         let mut body_spans = Vec::new();
         for segment in &line.segments {
             let stripped_text = render::strip_ansi_codes(&segment.text);
-            let style = ratatui_pty_style_from_inline(&segment.style, pty_fallback);
+            let style = if is_command_header {
+                ratatui_style_from_inline(&segment.style, pty_fallback)
+            } else {
+                ratatui_pty_style_from_inline(&segment.style, pty_fallback)
+            };
             body_spans.push(Span::styled(stripped_text.into_owned(), style));
         }
 

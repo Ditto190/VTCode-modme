@@ -16,6 +16,7 @@ impl ModelId {
         }
         match self {
             // OpenRouter models without generated metadata
+            ModelId::OpenRouterMoonshotaiKimiK3 => Cow::Borrowed("Kimi K3 (OpenRouter)"),
             ModelId::OpenRouterMoonshotaiKimiK26 => Cow::Borrowed("Kimi K2.6 (OpenRouter)"),
             ModelId::OpenRouterMoonshotaiKimiK27Code => {
                 Cow::Borrowed("Kimi K2.7 Code (OpenRouter)")

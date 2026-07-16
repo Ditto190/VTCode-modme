@@ -68,6 +68,7 @@ impl FromStr for ModelId {
 
         match trimmed {
             // OpenRouter models without generated metadata
+            "moonshotai/kimi-k3" => Ok(ModelId::OpenRouterMoonshotaiKimiK3),
             "moonshotai/kimi-k2.6" => Ok(ModelId::OpenRouterMoonshotaiKimiK26),
             "moonshotai/kimi-k2.7-code" => Ok(ModelId::OpenRouterMoonshotaiKimiK27Code),
             "z-ai/glm-5.1" => Ok(ModelId::OpenRouterZaiGlm51),

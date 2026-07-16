@@ -155,6 +155,8 @@ pub enum ModelId {
     MiMoV25,
 
     // Moonshot models
+    /// Kimi K3 - Moonshot.ai's 2.8T parameter flagship with Delta Attention, native vision, 1M context
+    MoonshotKimiK3,
     /// Kimi K2.7 Code - Moonshot.ai's most capable coding model with long-horizon coding breakthrough
     MoonshotKimiK27Code,
     /// Kimi K2.6 - Moonshot.ai's 1T MoE flagship (32B active, MLA, MoonViT vision)
@@ -289,6 +291,8 @@ pub enum ModelId {
     OpenRouterZaiGlm51,
     /// GLM-5.2 - Z.AI GLM-5.2 flagship model for long-horizon tasks via OpenRouter
     OpenRouterZaiGlm52,
+    /// Kimi K3 - Moonshot AI's 2.8T parameter flagship via OpenRouter
+    OpenRouterMoonshotaiKimiK3,
     /// Kimi K2.6 - Moonshot AI's next-generation multimodal model via OpenRouter
     OpenRouterMoonshotaiKimiK26,
     /// Kimi K2.7 Code - Moonshot AI's most capable coding model via OpenRouter

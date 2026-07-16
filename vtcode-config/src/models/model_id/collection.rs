@@ -56,6 +56,7 @@ impl ModelId {
             ModelId::MiMoV25Pro,
             ModelId::MiMoV25,
             // Moonshot models
+            ModelId::MoonshotKimiK3,
             ModelId::MoonshotKimiK27Code,
             ModelId::MoonshotKimiK26,
             // OpenCode Zen models
@@ -128,6 +129,7 @@ impl ModelId {
             ModelId::EvolinkClaudeSonnet46,
             ModelId::EvolinkClaudeOpus48,
             ModelId::EvolinkClaudeHaiku45,
+            ModelId::OpenRouterMoonshotaiKimiK3,
             ModelId::OpenRouterMoonshotaiKimiK26,
             ModelId::OpenRouterMoonshotaiKimiK27Code,
             ModelId::OpenRouterZaiGlm51,

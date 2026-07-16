@@ -9,7 +9,7 @@ use crate::provider::{LLMError, LLMRequest};
 pub struct MoonshotSpec;
 
 fn is_thinking_model(model: &str) -> bool {
-    model.contains("k2-thinking") || model.contains("kimi-k2-thinking")
+    model.contains("kimi-k3") || model.contains("k2-thinking") || model.contains("kimi-k2-thinking")
 }
 
 impl OpenAiCompatSpec for MoonshotSpec {

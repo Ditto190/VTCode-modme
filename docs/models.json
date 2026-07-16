@@ -2708,6 +2708,40 @@
           "doc_comment": "DeepSeek V3.1 Nex N1 - Nex AGI DeepSeek V3.1 Nex N1 model via OpenRouter"
         }
       },
+      "moonshotai/kimi-k3": {
+        "id": "moonshotai/kimi-k3",
+        "name": "MoonshotAI: Kimi K3",
+        "description": "Kimi K3 is Kimi's most capable model to date, with 2.8 trillion parameters. Built on Kimi Delta Attention, a hybrid linear attention mechanism, and Attention Residuals, it offers native visual understanding and a 1M-token context window for frontier intelligence scenarios such as software engineering, knowledge work, and deep reasoning.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "max_output_tokens": 131072,
+        "cost": {
+          "input": 3e-06,
+          "output": 1.5e-05,
+          "cache_read": 3e-07
+        },
+        "vtcode": {
+          "variant": "OpenRouterMoonshotaiKimiK3",
+          "constant": "MOONSHOTAI_KIMI_K3",
+          "vendor": "moonshotai",
+          "display": "Kimi K3",
+          "description": "Kimi K3 2.8T parameter flagship with 1M context, native vision, and deep reasoning via OpenRouter",
+          "efficient": false,
+          "top_tier": true,
+          "generation": "K3",
+          "doc_comment": "Kimi K3 - Moonshot AI's 2.8T parameter flagship model via OpenRouter"
+        }
+      },
       "moonshotai/kimi-k2.6": {
         "id": "moonshotai/kimi-k2.6",
         "name": "MoonshotAI: Kimi K2.6",

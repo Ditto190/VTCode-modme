@@ -1093,6 +1093,23 @@ fn openrouter_presets() -> Vec<ModelPreset> {
             context_window: Some(128_000),
         },
         ModelPreset {
+            id: "openrouter/moonshotai/kimi-k3".to_string(),
+            model: "moonshotai/kimi-k3".to_string(),
+            display_name: "Kimi K3 (OpenRouter)".to_string(),
+            description: "Kimi K3 2.8T parameter flagship with 1M context, native vision, and always-on deep reasoning via OpenRouter".to_string(),
+            provider: Provider::OpenRouter,
+            default_reasoning_effort: ReasoningEffortLevel::Max,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Max,
+                description: "Maximum (only supported level)".to_string(),
+            }],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_048_576),
+        },
+        ModelPreset {
             id: "openrouter/moonshotai/kimi-k2.6".to_string(),
             model: "moonshotai/kimi-k2.6".to_string(),
             display_name: "Kimi K2.6 (OpenRouter)".to_string(),
@@ -2147,6 +2164,25 @@ fn evolink_presets() -> Vec<ModelPreset> {
 fn moonshot_presets() -> Vec<ModelPreset> {
     vec![
         ModelPreset {
+            id: "kimi-k3".to_string(),
+            model: "kimi-k3".to_string(),
+            display_name: "Kimi K3 (Moonshot)".to_string(),
+            description:
+                "Moonshot's 2.8T parameter flagship with 1M context, native vision, and always-on deep reasoning."
+                    .to_string(),
+            provider: Provider::Moonshot,
+            default_reasoning_effort: ReasoningEffortLevel::Max,
+            supported_reasoning_efforts: vec![reasoning_preset(
+                ReasoningEffortLevel::Max,
+                "Maximum (only supported level)",
+            )],
+            is_default: true,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_048_576),
+        },
+        ModelPreset {
             id: "kimi-k2.7-code".to_string(),
             model: "kimi-k2.7-code".to_string(),
             display_name: "Kimi K2.7 Code (Moonshot)".to_string(),
@@ -2159,7 +2195,7 @@ fn moonshot_presets() -> Vec<ModelPreset> {
                 ReasoningEffortLevel::Medium,
                 "Balanced",
             )],
-            is_default: true,
+            is_default: false,
             upgrade: None,
             show_in_picker: true,
             supported_in_api: true,
@@ -2360,15 +2396,15 @@ mod tests {
     }
 
     #[test]
-    fn moonshot_presets_exist_and_default_to_kimi_k27_code() {
+    fn moonshot_presets_exist_and_default_to_kimi_k3() {
         let presets = moonshot_presets();
-        assert_eq!(presets.len(), 2);
+        assert_eq!(presets.len(), 3);
 
         let default = presets
             .iter()
             .find(|preset| preset.is_default)
             .expect("moonshot default preset");
-        assert_eq!(default.id, "kimi-k2.7-code");
+        assert_eq!(default.id, "kimi-k3");
         assert_eq!(default.provider, Provider::Moonshot);
     }
 }

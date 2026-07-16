@@ -16,6 +16,9 @@ impl ModelId {
         }
         match self {
             // OpenRouter models without generated metadata
+            ModelId::OpenRouterMoonshotaiKimiK3 => Cow::Borrowed(
+                "Kimi K3 2.8T parameter flagship with 1M context, native vision, and always-on deep reasoning via OpenRouter",
+            ),
             ModelId::OpenRouterMoonshotaiKimiK26 => Cow::Borrowed(
                 "Kimi K2.6 multimodal agentic model for long-horizon coding and design via OpenRouter",
             ),

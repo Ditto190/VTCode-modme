@@ -498,6 +498,13 @@ model_id_table! {
         description: "Xiaomi's omni-modal model with full-modal understanding and 1M context",
     },
     // Moonshot models
+    MoonshotKimiK3 {
+        provider: Moonshot,
+        id: models::moonshot::KIMI_K3,
+        parse: [models::moonshot::KIMI_K3],
+        display: "Kimi K3 (Moonshot)",
+        description: "Kimi K3 - Moonshot.ai's 2.8T parameter flagship with Delta Attention, native vision, 1M context, and always-on deep reasoning",
+    },
     MoonshotKimiK27Code {
         provider: Moonshot,
         id: models::moonshot::KIMI_K2_7_CODE,

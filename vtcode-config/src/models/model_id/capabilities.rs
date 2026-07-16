@@ -329,8 +329,10 @@ impl ModelId {
                 | ModelId::HuggingFaceMinimaxM27Novita
                 | ModelId::HuggingFaceMinimaxM3Novita
                 | ModelId::HuggingFaceDeepseekV4ProNovita
+                | ModelId::OpenRouterMoonshotaiKimiK3
                 | ModelId::OpenRouterMoonshotaiKimiK26
                 | ModelId::OpenRouterMoonshotaiKimiK27Code
+                | ModelId::MoonshotKimiK3
                 | ModelId::MoonshotKimiK27Code
                 | ModelId::PoolsideLagunaM1
         )
@@ -406,8 +408,10 @@ impl ModelId {
                 | ModelId::HuggingFaceMinimaxM27Novita
                 | ModelId::HuggingFaceMinimaxM3Novita
                 | ModelId::HuggingFaceDeepseekV4ProNovita
+                | ModelId::OpenRouterMoonshotaiKimiK3
                 | ModelId::OpenRouterMoonshotaiKimiK26
                 | ModelId::OpenRouterMoonshotaiKimiK27Code
+                | ModelId::MoonshotKimiK3
                 | ModelId::MoonshotKimiK27Code
                 | ModelId::PoolsideLagunaM1
                 | ModelId::OllamaGlm52Cloud
@@ -501,6 +505,7 @@ impl ModelId {
             ModelId::MinimaxM3 => "M3",
             ModelId::MinimaxM27 => "M2.7",
             // Moonshot models
+            ModelId::MoonshotKimiK3 => "k3",
             ModelId::MoonshotKimiK27Code => "k2.7",
             ModelId::MoonshotKimiK26 => "k2.6",
             // Hugging Face generations
