@@ -120,7 +120,7 @@ pub(crate) async fn render_terminal_command_panel(
     // Once completed, always render the final captured output.
     let inline_streaming = is_pty_session && renderer.prefers_untruncated_output() && !is_completed;
     let render_spool_reference_only =
-        is_completed && tool_intent::should_use_spool_reference_only(None, &unwrapped_payload);
+        is_completed && tool_intent::should_use_spool_reference_only(None, unwrapped_payload);
 
     if !render_spool_reference_only
         && stdout.trim().is_empty()
@@ -215,7 +215,7 @@ pub(crate) async fn render_terminal_command_panel(
 
     render_tool_follow_up_hints(
         renderer,
-        &unwrapped_payload,
+        unwrapped_payload,
         rendered_follow_up_body.as_deref(),
     )?;
 

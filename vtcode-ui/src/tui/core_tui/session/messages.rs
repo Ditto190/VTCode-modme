@@ -184,6 +184,18 @@ impl Session {
         } else if self.prev_pushed_line_kind() == Some(InlineMessageKind::Policy) {
             // A non-reasoning line ends the active reasoning run.
             self.thinking_runs.end_run();
+            // Clean up the trailing empty Policy line created by the streaming
+            // `\n` suffix in `append_inline`. It sits right before the new line.
+            if self.lines.len() >= 2 {
+                let idx = self.lines.len() - 2;
+                if self.lines[idx].kind == InlineMessageKind::Policy
+                    && self.lines[idx].segments.is_empty()
+                {
+                    let notify = idx;
+                    self.lines.remove(idx);
+                    self.mark_line_dirty(notify);
+                }
+            }
         }
     }
 
@@ -595,6 +607,23 @@ impl Session {
         // fires and the reflow cache keeps the stale pre-append output.
         if kind == InlineMessageKind::Policy && self.thinking_runs.active_start().is_none() {
             self.thinking_runs.begin_run(index);
+        }
+
+        // Clean up the trailing empty Policy line created by the streaming
+        // `\n` suffix in `append_inline`. This covers the `append_inline`
+        // → `append_text` path (the most common reasoning→agent transition).
+        if kind != InlineMessageKind::Policy
+            && let Some(prev_idx) = index.checked_sub(1)
+            && self
+                .lines
+                .get(prev_idx)
+                .is_some_and(|l| l.kind == InlineMessageKind::Policy && l.segments.is_empty())
+        {
+            self.lines.remove(prev_idx);
+            self.mark_line_dirty(prev_idx);
+            self.thinking_runs.end_run();
+            self.invalidate_scroll_metrics();
+            return;
         }
 
         self.mark_line_dirty(index);

@@ -102,10 +102,10 @@ impl Session {
             };
 
             for idx in start..start + run_len {
-                let spans = render::render_message_spans(self, idx);
-                if spans.iter().all(|span| span.content.is_empty()) {
+                if self.lines[idx].segments.is_empty() {
                     continue;
                 }
+                let spans = render::render_message_spans(self, idx);
                 let dimmed: Vec<Span<'static>> = spans
                     .into_iter()
                     .map(|mut span| {

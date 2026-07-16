@@ -304,6 +304,123 @@ fn display_width(line: &str) -> usize {
 }
 
 #[test]
+fn trailing_empty_policy_line_removed_when_non_policy_arrives_via_append_inline() {
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.transcript_width = 100;
+
+    // Simulate streaming reasoning: each line + trailing \n creates an empty
+    // Policy line that subsequent content fills. The final \n leaves a dangling
+    // empty Policy line behind.
+    session.append_inline(
+        InlineMessageKind::Policy,
+        InlineSegment {
+            text: "first reasoning\n".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        },
+    );
+    session.append_inline(
+        InlineMessageKind::Policy,
+        InlineSegment {
+            text: "second reasoning\n".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        },
+    );
+
+    // Before the Agent line arrives, there's a dangling empty Policy line.
+    let last = session.lines.last().unwrap();
+    assert_eq!(
+        last.kind,
+        InlineMessageKind::Policy,
+        "trailing empty line is Policy"
+    );
+    assert!(last.segments.is_empty(), "trailing line should be empty");
+
+    // When non-Policy content arrives via append_inline, the trailing empty
+    // Policy line should be cleaned up.
+    session.append_inline(
+        InlineMessageKind::Agent,
+        InlineSegment {
+            text: "answer".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        },
+    );
+
+    // Verify the empty Policy line was removed.
+    for (i, line) in session.lines.iter().enumerate() {
+        if line.kind == InlineMessageKind::Policy && line.segments.iter().all(|s| s.text.is_empty())
+        {
+            panic!("trailing empty Policy line still present at index {i} after Agent append");
+        }
+    }
+
+    // The Policy content should remain and be followed directly by Agent content.
+    let policy_count = session
+        .lines
+        .iter()
+        .filter(|l| l.kind == InlineMessageKind::Policy)
+        .count();
+    assert_eq!(policy_count, 2, "both reasoning lines should remain");
+}
+
+#[test]
+fn expanded_view_skips_trailing_empty_policy_line() {
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.appearance.thinking_display = ThinkingBlockState::Extended;
+    session.transcript_width = 100;
+
+    // Push reasoning content followed by a trailing empty line (the artifact).
+    push_policy_lines(&mut session, &["reasoning one", "reasoning two"]);
+    // Manually add the trailing empty line that streaming \n creates.
+    session.push_line(InlineMessageKind::Policy, vec![]);
+
+    let start = session.lines.len() - 3;
+    let transcript = session.reflow_message_lines(start, 100, true);
+    let body: Vec<String> = transcript.iter().map(line_text).collect();
+
+    assert_eq!(body[0], "Thinking", "header should be Thinking");
+    // The two content lines should be rendered.
+    assert!(
+        body.iter().any(|l| l.contains("reasoning one")),
+        "first reasoning line should appear"
+    );
+    assert!(
+        body.iter().any(|l| l.contains("reasoning two")),
+        "second reasoning line should appear"
+    );
+    // The empty line must produce no additional rendered line.
+    let rendered_count = body.iter().filter(|l| l.starts_with("  ")).count();
+    assert_eq!(
+        rendered_count, 2,
+        "only the two non-empty reasoning lines should be rendered, got {rendered_count}",
+    );
+}
+
+#[test]
+fn trailing_empty_policy_line_removed_when_non_policy_arrives_via_push_line() {
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    push_policy_lines(&mut session, &["reasoning one", "reasoning two"]);
+    // Manually add the trailing empty line.
+    session.push_line(InlineMessageKind::Policy, vec![]);
+
+    // Push non-Policy content — should trigger cleanup.
+    session.push_line(
+        InlineMessageKind::Agent,
+        vec![InlineSegment {
+            text: "answer".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        }],
+    );
+
+    // The trailing empty Policy line must be removed.
+    for (i, line) in session.lines.iter().enumerate() {
+        if line.kind == InlineMessageKind::Policy && line.segments.is_empty() {
+            panic!("trailing empty Policy line still present at index {i} after push_line cleanup");
+        }
+    }
+    assert_eq!(session.lines.len(), 3, "lines: 2 Policy content + 1 Agent");
+}
+
+#[test]
 fn reasoning_stream_expands_run_len() {
     let mut session = Session::new(InlineTheme::default(), None, 24);
     session.transcript_width = 100;
