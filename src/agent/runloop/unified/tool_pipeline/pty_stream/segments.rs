@@ -24,52 +24,56 @@ pub(super) struct PtyLineStyles {
 impl PtyLineStyles {
     pub(super) fn new() -> Self {
         let theme_styles = theme::active_styles();
-        let output = Arc::new(convert_style(theme_styles.tool_detail.dimmed()));
-        let glyph = Arc::new(convert_style(theme_styles.tool_detail.dimmed()));
-        let verb = Arc::new(convert_style(
+        let dimmed = Arc::new(convert_style(theme_styles.tool_detail.dimmed()));
+        let magenta_bold = Arc::new(convert_style(
             AnsiStyle::new()
                 .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Magenta)))
                 .effects(Effects::BOLD),
         ));
-        let command = Arc::new(convert_style(
-            AnsiStyle::new()
-                .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Green)))
-                .effects(Effects::BOLD),
-        ));
-        let args = Arc::new(convert_style(
-            AnsiStyle::new()
-                .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::White)))
-                .effects(Effects::DIMMED),
-        ));
-        let keyword = Arc::new(convert_style(
-            AnsiStyle::new()
-                .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Magenta)))
-                .effects(Effects::BOLD),
-        ));
-        let variable = Arc::new(convert_style(
+        let yellow = Arc::new(convert_style(
             AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Yellow))),
         ));
-        let string = Arc::new(convert_style(
-            AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Yellow))),
-        ));
-        let option = Arc::new(convert_style(
-            AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Red))),
-        ));
-        let truncation = Arc::new(convert_style(theme_styles.tool_detail.dimmed()));
 
         Self {
-            output,
-            glyph,
-            verb,
-            command,
-            args,
-            keyword,
-            variable,
-            string,
-            option,
-            truncation,
+            output: Arc::clone(&dimmed),
+            glyph: dimmed,
+            verb: Arc::clone(&magenta_bold),
+            command: Arc::new(convert_style(
+                AnsiStyle::new()
+                    .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Green)))
+                    .effects(Effects::BOLD),
+            )),
+            args: Arc::new(convert_style(
+                AnsiStyle::new()
+                    .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::White)))
+                    .effects(Effects::DIMMED),
+            )),
+            keyword: magenta_bold,
+            variable: Arc::clone(&yellow),
+            string: yellow,
+            option: Arc::new(convert_style(
+                AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Red))),
+            )),
+            truncation: Arc::new(convert_style(theme_styles.pty_output)),
         }
     }
+}
+
+fn glyph_prefix(glyph: char, styles: &PtyLineStyles) -> Vec<InlineSegment> {
+    vec![
+        InlineSegment {
+            text: "  ".to_string(),
+            style: Arc::clone(&styles.output),
+        },
+        InlineSegment {
+            text: glyph.to_string(),
+            style: Arc::clone(&styles.glyph),
+        },
+        InlineSegment {
+            text: " ".to_string(),
+            style: Arc::clone(&styles.output),
+        },
+    ]
 }
 
 fn is_bash_keyword(token: &str) -> bool {
@@ -520,39 +524,13 @@ pub(super) fn line_to_segments(
     }
 
     if let Some(text) = line.strip_prefix("  │ ") {
-        let mut segments = vec![
-            InlineSegment {
-                text: "  ".to_string(),
-                style: Arc::clone(&styles.output),
-            },
-            InlineSegment {
-                text: "│".to_string(),
-                style: Arc::clone(&styles.glyph),
-            },
-            InlineSegment {
-                text: " ".to_string(),
-                style: Arc::clone(&styles.output),
-            },
-        ];
+        let mut segments = glyph_prefix('│', styles);
         segments.extend(shell_syntax_segments(text, styles, false));
         return (segments, Vec::new());
     }
 
     if let Some(text) = line.strip_prefix("  └ ") {
-        let mut segments = vec![
-            InlineSegment {
-                text: "  ".to_string(),
-                style: Arc::clone(&styles.output),
-            },
-            InlineSegment {
-                text: "└".to_string(),
-                style: Arc::clone(&styles.glyph),
-            },
-            InlineSegment {
-                text: " ".to_string(),
-                style: Arc::clone(&styles.output),
-            },
-        ];
+        let mut segments = glyph_prefix('└', styles);
         let mut link_ranges = Vec::new();
         append_output_segments_with_ansi(&mut segments, &mut link_ranges, text, styles);
         return (segments, shift_link_ranges(&link_ranges, 4));

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::Path;
 
 use vtcode_commons::formatting::wrap_text_words;
 use vtcode_commons::preview::{
@@ -12,6 +13,7 @@ use vtcode_ui::tui::app::InlineLinkRange;
 use vtcode_ui::tui::app::InlineSegment;
 
 use super::segments::{PtyLineStyles, line_to_segments};
+use crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths;
 
 const LIVE_PREVIEW_HEAD_LINES: usize = 3;
 const MAX_BUFFERED_TAIL_LINES: usize = 64;
@@ -147,6 +149,7 @@ impl LegacyPtyStreamState {
 pub(super) struct PtyStreamState {
     pty_config: PtyConfig,
     command_header: Vec<String>,
+    line_styles: PtyLineStyles,
     legacy: LegacyPtyStreamState,
     preview: PtyPreviewRenderer,
     displayed_count: usize,
@@ -159,13 +162,18 @@ pub(super) struct PtyStreamState {
 }
 
 impl PtyStreamState {
-    pub(super) fn new(command_prompt: Option<String>, pty_config: PtyConfig) -> Self {
+    pub(super) fn new(
+        command_prompt: Option<String>,
+        pty_config: PtyConfig,
+        workspace_root: Option<&Path>,
+    ) -> Self {
         let preview = PtyPreviewRenderer::from_config(&pty_config);
         Self {
             pty_config,
             command_header: normalize_command_prompt(command_prompt)
-                .map(|command| format_command_header_lines(&command))
+                .map(|command| format_command_header_lines(&command, workspace_root))
                 .unwrap_or_default(),
+            line_styles: PtyLineStyles::new(),
             legacy: LegacyPtyStreamState::new(),
             preview,
             displayed_count: 0,
@@ -210,10 +218,9 @@ impl PtyStreamState {
 
     pub(super) fn render_current_segments(&mut self, tail_limit: usize) -> RenderedPtyPreview {
         let rendered = self.render_lines(tail_limit);
-        let styles = PtyLineStyles::new();
         let rendered_lines = rendered
             .into_iter()
-            .map(|line| line_to_segments(&line, &styles))
+            .map(|line| line_to_segments(&line, &self.line_styles))
             .collect::<Vec<_>>();
         let (segments, link_ranges): (Vec<_>, Vec<_>) = rendered_lines.into_iter().unzip();
         let replace_count = self.displayed_count;
@@ -349,11 +356,12 @@ fn normalize_command_prompt(command_prompt: Option<String>) -> Option<String> {
     })
 }
 
-fn format_command_header_lines(command: &str) -> Vec<String> {
+fn format_command_header_lines(command: &str, workspace_root: Option<&Path>) -> Vec<String> {
     const FIRST_LINE_WIDTH: usize = 62;
     const CONTINUATION_WIDTH: usize = 58;
 
-    let wrapped = wrap_text_words(command, FIRST_LINE_WIDTH, CONTINUATION_WIDTH);
+    let relative = relativize_command_paths(command, workspace_root);
+    let wrapped = wrap_text_words(&relative, FIRST_LINE_WIDTH, CONTINUATION_WIDTH);
     if wrapped.is_empty() {
         return vec!["• Ran command".to_string()];
     }

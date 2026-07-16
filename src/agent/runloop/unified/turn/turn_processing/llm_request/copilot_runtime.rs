@@ -987,6 +987,7 @@ impl ObservedToolPtyStream {
             tail_limit,
             Some(command_display),
             pty_config,
+            None,
         );
 
         Self {
@@ -1448,6 +1449,7 @@ async fn setup_terminal_stream(
         tail_limit,
         Some(command_display.to_string()),
         pty_config,
+        None,
     );
 
     (

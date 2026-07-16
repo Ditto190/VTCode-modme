@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -26,14 +27,16 @@ impl PtyStreamRuntime {
         tail_limit: usize,
         command_prompt: Option<String>,
         pty_config: PtyConfig,
+        workspace_root: Option<&Path>,
     ) -> (Self, ToolProgressCallback) {
+        let owned_root = workspace_root.map(Path::to_path_buf);
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let active = Arc::new(AtomicBool::new(true));
         let worker_active = Arc::clone(&active);
         let effective_tail_limit = tail_limit.clamp(1, Self::MAX_LIVE_STREAM_LINES);
 
         let task = tokio::spawn(async move {
-            let mut state = PtyStreamState::new(command_prompt, pty_config);
+            let mut state = PtyStreamState::new(command_prompt, pty_config, owned_root.as_deref());
             let (replace_count, segments, link_ranges, _) =
                 state.render_segments("", effective_tail_limit);
             if !segments.is_empty() && worker_active.load(Ordering::Relaxed) {

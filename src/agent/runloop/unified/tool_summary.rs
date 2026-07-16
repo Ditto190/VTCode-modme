@@ -18,7 +18,8 @@ use crate::agent::runloop::tool_output::render_tree_detail;
 use crate::agent::runloop::unified::tool_summary_helpers::{
     collect_param_details, command_line_for_args, describe_fetch_action, describe_grep_file,
     describe_list_files, describe_path_action, describe_shell_command, highlight_texts_for_summary,
-    relativize_to_workspace, should_render_command_line, truncate_path_middle,
+    relativize_command_paths, relativize_to_workspace, should_render_command_line,
+    truncate_path_middle,
 };
 
 /// Ambient context required to render tool-call summaries.
@@ -162,17 +163,56 @@ pub(crate) fn render_tool_call_summary(
     stream_label: Option<&str>,
     ctx: &ToolSummaryRenderContext,
 ) -> Result<()> {
-    let (headline, highlights) = describe_tool_action(tool_name, args, ctx.workspace_root);
-    let command_line_candidate = command_line_for_args(args);
-    let summary_highlights = highlight_texts_for_summary(args, &highlights, ctx.workspace_root);
+    let data = prepare_summary_data(tool_name, args, ctx.workspace_root);
+
+    let theme_styles = theme::active_styles();
+    let main_color = theme_styles
+        .primary
+        .get_fg_color()
+        .unwrap_or(Color::Ansi(anstyle::AnsiColor::Green));
     let palette = ColorPalette::default();
+
+    let mut line = String::with_capacity(128);
+    line.push_str(&render_styled("•", palette.muted, Some("dim".to_string())));
+    line.push(' ');
+
+    let wrapped_run_segments =
+        render_bullet_line(&mut line, &data, stream_label, main_color, &palette);
+
+    renderer.line(MessageStyle::Info, &line)?;
+
+    render_continuation_lines(renderer, &wrapped_run_segments, &palette)?;
+    render_command_line(renderer, &data.command_line, &palette)?;
+    render_details(renderer, &data.details)?;
+
+    Ok(())
+}
+
+struct SummaryData {
+    summary: String,
+    summary_highlights: Vec<String>,
+    command_line: Option<String>,
+    details: Vec<String>,
+}
+
+fn prepare_summary_data(
+    tool_name: &str,
+    args: &Value,
+    workspace_root: Option<&Path>,
+) -> SummaryData {
+    let (headline, highlights) = describe_tool_action(tool_name, args, workspace_root);
+    let command_line_candidate =
+        command_line_for_args(args).map(|cmd| relativize_command_paths(&cmd, workspace_root));
+    let summary_highlights = highlight_texts_for_summary(args, &highlights, workspace_root);
     let action_label = tool_action_label(tool_name, args);
     let is_run_command = action_label == "Run command";
+
     let details = if is_run_command {
         Vec::new()
     } else {
-        collect_param_details(args, &highlights, ctx.workspace_root)
+        collect_param_details(args, &highlights, workspace_root)
     };
+
     let mut summary = build_tool_summary(&action_label, &headline);
     if is_run_command {
         summary = command_line_candidate
@@ -183,24 +223,30 @@ pub(crate) fn render_tool_call_summary(
     if is_run_command && run_summary_is_placeholder(&summary) {
         summary = "Ran command".to_string();
     }
+
     let command_line = if is_run_command {
         None
     } else {
         command_line_candidate.filter(|_| should_render_command_line(&highlights))
     };
 
-    // Get current theme's primary color
-    let theme_styles = theme::active_styles();
-    let main_color = theme_styles
-        .primary
-        .get_fg_color()
-        .unwrap_or(Color::Ansi(anstyle::AnsiColor::Green));
+    SummaryData {
+        summary,
+        summary_highlights,
+        command_line,
+        details,
+    }
+}
 
-    let mut line = String::with_capacity(128);
-    line.push_str(&render_styled("•", palette.muted, Some("dim".to_string())));
-    line.push(' ');
+fn render_bullet_line(
+    line: &mut String,
+    data: &SummaryData,
+    stream_label: Option<&str>,
+    main_color: Color,
+    palette: &ColorPalette,
+) -> Option<Vec<String>> {
     let mut wrapped_run_segments: Option<Vec<String>> = None;
-    if let Some(command) = summary.strip_prefix("Ran ") {
+    if let Some(command) = data.summary.strip_prefix("Ran ") {
         let wrapped = wrap_text_words(
             command,
             RUN_SUMMARY_FIRST_WIDTH,
@@ -224,51 +270,66 @@ pub(crate) fn render_tool_call_summary(
         ));
     } else {
         line.push_str(&render_summary_with_highlights(
-            &summary,
-            &summary_highlights,
+            &data.summary,
+            &data.summary_highlights,
             main_color,
             palette.accent,
             palette.muted,
         ));
     }
 
-    let stream_label = if summary.starts_with("Ran ") {
+    let effective_stream = if data.summary.starts_with("Ran ") {
         None
     } else {
         stream_label
     };
 
-    if let Some(stream) = stream_label {
+    if let Some(stream) = effective_stream {
         line.push(' ');
         line.push_str(&render_styled(stream, palette.info, None));
     }
 
-    renderer.line(MessageStyle::Info, &line)?;
+    wrapped_run_segments
+}
+
+fn render_continuation_lines(
+    renderer: &mut AnsiRenderer,
+    wrapped_run_segments: &Option<Vec<String>>,
+    palette: &ColorPalette,
+) -> Result<()> {
     if let Some(wrapped) = wrapped_run_segments {
-        for segment in wrapped.into_iter().skip(1) {
+        for segment in wrapped.iter().skip(1) {
             let mut continuation = String::with_capacity(segment.len() + 32);
             continuation.push_str("  ");
             continuation.push_str(&render_styled("│", palette.muted, Some("dim".to_string())));
             continuation.push(' ');
-            continuation.push_str(&render_styled(&segment, palette.muted, None));
+            continuation.push_str(&render_styled(segment, palette.muted, None));
             renderer.line(MessageStyle::Info, &continuation)?;
         }
     }
+    Ok(())
+}
 
+fn render_command_line(
+    renderer: &mut AnsiRenderer,
+    command_line: &Option<String>,
+    palette: &ColorPalette,
+) -> Result<()> {
     if let Some(command_line) = command_line {
         let mut styled = String::with_capacity(64);
-        crate::agent::runloop::tool_output::push_tree_prefix(&mut styled, &palette);
+        crate::agent::runloop::tool_output::push_tree_prefix(&mut styled, palette);
         styled.push_str(&render_styled("$", palette.accent, None));
         styled.push(' ');
-        styled.push_str(&render_styled(&command_line, palette.muted, None));
+        styled.push_str(&render_styled(command_line, palette.muted, None));
         renderer.line(MessageStyle::Info, &styled)?;
     }
+    Ok(())
+}
 
-    // Details in gray if present - these are the call parameters
+fn render_details(renderer: &mut AnsiRenderer, details: &[String]) -> Result<()> {
     for detail in details {
-        render_tree_detail(renderer, &detail)?;
+        render_tree_detail(renderer, detail)?;
     }
-
     Ok(())
 }
 
@@ -453,112 +514,66 @@ pub(crate) fn describe_tool_action(
         tool_name
     };
 
+    let with_mcp = |desc: String, used: HashSet<String>| -> (String, HashSet<String>) {
+        (format!("{}{}", mcp_label(is_mcp_tool), desc), used)
+    };
+    let fallback = |label: &str| -> (String, HashSet<String>) {
+        (
+            format!("{}{}", mcp_label(is_mcp_tool), label),
+            HashSet::new(),
+        )
+    };
+
     match actual_tool_name {
         actual_name if tool_intent::is_command_run_tool(actual_name) => {
             describe_shell_command(args)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new()))
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("command"))
         }
         actual_name if actual_name == tool_names::UNIFIED_EXEC => {
             match tool_intent::command_session_action(args).unwrap_or("run") {
                 "run" => describe_shell_command(args)
-                    .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                    .unwrap_or_else(|| {
-                        (format!("{}command", mcp_label(is_mcp_tool)), HashSet::new())
-                    }),
-                "write" => (
-                    format!("{}Send command input", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                "poll" => (
-                    format!("{}Read command session", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                "continue" => (
-                    format!("{}Continue command session", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                "inspect" => (
-                    format!("{}Inspect command output", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                "list" => (
-                    format!("{}List command sessions", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                "close" => (
-                    format!("{}Close command session", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                "code" => (
-                    format!("{}Run code", mcp_label(is_mcp_tool)),
-                    HashSet::new(),
-                ),
-                _ => (
-                    format!("{}exec_command", if is_mcp_tool { "MCP " } else { "" }),
-                    HashSet::new(),
-                ),
+                    .map(|(desc, used)| with_mcp(desc, used))
+                    .unwrap_or_else(|| fallback("command")),
+                "write" => with_mcp("Send command input".into(), HashSet::new()),
+                "poll" => with_mcp("Read command session".into(), HashSet::new()),
+                "continue" => with_mcp("Continue command session".into(), HashSet::new()),
+                "inspect" => with_mcp("Inspect command output".into(), HashSet::new()),
+                "list" => with_mcp("List command sessions".into(), HashSet::new()),
+                "close" => with_mcp("Close command session".into(), HashSet::new()),
+                "code" => with_mcp("Run code".into(), HashSet::new()),
+                _ => with_mcp("exec_command".into(), HashSet::new()),
             }
         }
         actual_name if actual_name == tool_names::LIST_FILES => {
-            { describe_list_files(args, workspace_root) }
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}List files", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+            describe_list_files(args, workspace_root)
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("List files"))
         }
         actual_name if actual_name == tool_names::GREP_FILE => {
-            { describe_grep_file(args, workspace_root) }
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}Search with grep", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+            describe_grep_file(args, workspace_root)
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("Search with grep"))
         }
         actual_name if actual_name == tool_names::READ_FILE => {
             describe_path_action(args, "Read file", &["path"], workspace_root)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}Read file", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("Read file"))
         }
         actual_name if actual_name == tool_names::WRITE_FILE => {
             describe_path_action(args, "Write file", &["path"], workspace_root)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}Write file", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("Write file"))
         }
         actual_name if actual_name == tool_names::EDIT_FILE => {
             describe_path_action(args, "Edit file", &["path"], workspace_root)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}Edit file", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("Edit file"))
         }
         actual_name if actual_name == tool_names::CREATE_FILE => {
             describe_path_action(args, "Create file", &["path"], workspace_root)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}Create file", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("Create file"))
         }
         actual_name if actual_name == tool_names::UNIFIED_FILE => {
             let action = file_operation_action(args);
@@ -575,23 +590,13 @@ pub(crate) fn describe_tool_action(
             };
 
             describe_path_action(args, verb, keys, workspace_root)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}{}", mcp_label(is_mcp_tool), verb),
-                        HashSet::new(),
-                    )
-                })
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| with_mcp(verb.into(), HashSet::new()))
         }
         actual_name if actual_name == tool_names::DELETE_FILE => {
             describe_path_action(args, "Delete file", &["path"], workspace_root)
-                .map(|(desc, used)| (format!("{}{}", mcp_label(is_mcp_tool), desc), used))
-                .unwrap_or_else(|| {
-                    (
-                        format!("{}Delete file", mcp_label(is_mcp_tool)),
-                        HashSet::new(),
-                    )
-                })
+                .map(|(desc, used)| with_mcp(desc, used))
+                .unwrap_or_else(|| fallback("Delete file"))
         }
         actual_name if actual_name == tool_names::APPLY_PATCH => {
             let prefix = mcp_label(is_mcp_tool);
@@ -600,19 +605,15 @@ pub(crate) fn describe_tool_action(
                     format!("{prefix}Apply patch to {path}"),
                     HashSet::from(["path".to_string()]),
                 ),
-                None => (format!("{prefix}Apply workspace patch"), HashSet::new()),
+                None => with_mcp("Apply workspace patch".into(), HashSet::new()),
             }
         }
         "fetch" | tool_names::WEB_FETCH => {
             let (desc, used) = describe_fetch_action(args);
-            (format!("{}{}", mcp_label(is_mcp_tool), desc), used)
+            with_mcp(desc, used)
         }
-        _ => (
-            format!(
-                "{}Use {}",
-                mcp_label(is_mcp_tool),
-                humanize_tool_name(actual_tool_name)
-            ),
+        _ => with_mcp(
+            format!("Use {}", humanize_tool_name(actual_tool_name)),
             HashSet::new(),
         ),
     }

@@ -15,6 +15,7 @@ use crate::agent::runloop::unified::inline_events::harness::{
 use crate::agent::runloop::unified::progress::ProgressReporter;
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::tool_reads::spool_chunk_read_path;
+
 use crate::agent::runloop::unified::ui_interaction::PlaceholderSpinner;
 
 use super::CancellationTokens;
@@ -304,6 +305,7 @@ async fn execute_with_cache_and_streaming_inner(
             tail_limit,
             stream_command,
             registry.pty_config().clone(),
+            Some(registry.workspace_root()),
         );
         let (callback, coalescer) = build_streaming_progress_callback(
             callback,

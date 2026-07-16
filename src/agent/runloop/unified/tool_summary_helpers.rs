@@ -206,6 +206,33 @@ pub(super) fn relativize_to_workspace<'a>(
     Cow::Borrowed(path)
 }
 
+/// Relativize absolute paths within a command string for compact display.
+///
+/// Each whitespace-delimited token that is an absolute path within the
+/// workspace root gets rewritten to a relative path. Tokens outside the
+/// workspace (e.g. system paths like /dev/null, /tmp) are left unchanged.
+pub(super) fn relativize_command_paths(command: &str, workspace_root: Option<&Path>) -> String {
+    let Some(root) = workspace_root else {
+        return command.to_owned();
+    };
+    command
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let p = Path::new(word);
+            if p.is_absolute() {
+                if let Ok(rel) = p.strip_prefix(root) {
+                    if !rel.as_os_str().is_empty() {
+                        return rel.to_string_lossy().into_owned();
+                    }
+                }
+            }
+            word.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub(super) fn humanize_key(key: &str) -> String {
     let replaced = key.replace('_', " ");
     if replaced.is_empty() {
