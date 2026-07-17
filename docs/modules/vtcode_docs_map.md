@@ -659,6 +659,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: System Architecture Diagram, Data Flow: Style Parsing and Application, Module Dependencies, Effect Support Matrix, InlineTextStyle Evolution
   - **User Questions**: "What can you tell me about Architecture: Anstyle Integration in Vtcode?", "How does System Architecture Diagram work?", "How does Data Flow: Style Parsing and Application work?"
 
+- **File**: `docs/blog/battery-packs.md`
+  - **Content**: Battery Packs: Curated Tool Collections for VT Code
+  - **Topics**: What Are Battery Packs?, Battery Packs and Coding Agents, Applying Battery Packs to VT Code Skills, Why Battery Packs Matter for VT Code, Risks and Mitigations
+  - **User Questions**: "What can you tell me about Battery Packs: Curated Tool Collections for VT Code?", "How does What Are Battery Packs? work?", "How does Battery Packs and Coding Agents work?"
+
 - **File**: `docs/analysis/BLOATY_ANALYSIS.md`
   - **Content**: Bloaty Analysis Report for vtcode
   - **Topics**: Overview, Binary Size Summary, Release-fast Binary Analysis (32 MiB), Debug Binary Analysis (84 MiB), Recommendations
