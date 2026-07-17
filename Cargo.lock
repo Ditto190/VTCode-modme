@@ -7464,7 +7464,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "agent-client-protocol",
  "anstyle",
@@ -7530,7 +7530,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-a2a"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -7554,7 +7554,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-acp"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -7579,7 +7579,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-auth"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "apple-native-keyring-store",
@@ -7609,7 +7609,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-bash-runner"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -7639,12 +7639,12 @@ dependencies = [
  "vtcode-exec-events",
  "vtcode-indexer",
  "vtcode-session-store",
- "vtcode-utility-tool-specs 0.135.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vtcode-utility-tool-specs 0.135.11",
 ]
 
 [[package]]
 name = "vtcode-commons"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anstyle",
  "anstyle-query",
@@ -7680,7 +7680,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-config"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -7711,7 +7711,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-core"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "ansi-to-tui",
  "anstream",
@@ -7814,7 +7814,7 @@ dependencies = [
  "vtcode-session-store",
  "vtcode-skills",
  "vtcode-ui",
- "vtcode-utility-tool-specs 0.135.11",
+ "vtcode-utility-tool-specs 0.135.12",
  "webbrowser",
  "which",
  "wiremock",
@@ -7824,7 +7824,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-eval"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7839,7 +7839,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-exec-events"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "chrono",
  "hashbrown 0.17.1",
@@ -7854,7 +7854,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-indexer"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "fs2",
@@ -7877,7 +7877,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-llm"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -7918,14 +7918,14 @@ dependencies = [
  "vtcode-config",
  "vtcode-exec-events",
  "vtcode-macros",
- "vtcode-utility-tool-specs 0.135.11",
+ "vtcode-utility-tool-specs 0.135.12",
  "which",
  "wiremock",
 ]
 
 [[package]]
 name = "vtcode-macros"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -7933,7 +7933,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-mcp"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7962,12 +7962,12 @@ dependencies = [
  "vtcode-commons",
  "vtcode-config",
  "vtcode-llm",
- "vtcode-utility-tool-specs 0.135.11",
+ "vtcode-utility-tool-specs 0.135.12",
 ]
 
 [[package]]
 name = "vtcode-safety"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "dirs",
@@ -7992,7 +7992,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-session-store"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "chrono",
  "memchr",
@@ -8006,7 +8006,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-skills"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anyhow",
  "base64",
@@ -8031,7 +8031,7 @@ dependencies = [
 
 [[package]]
 name = "vtcode-ui"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "anstyle",
  "anstyle-git",
@@ -8080,18 +8080,18 @@ dependencies = [
 [[package]]
 name = "vtcode-utility-tool-specs"
 version = "0.135.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "259e4a5d1a8d54dd6829131b5b7c74fdb09425c9b7c3124c96031797bf831bb5"
 dependencies = [
- "rmcp",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "vtcode-utility-tool-specs"
-version = "0.135.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "259e4a5d1a8d54dd6829131b5b7c74fdb09425c9b7c3124c96031797bf831bb5"
+version = "0.135.12"
 dependencies = [
+ "rmcp",
  "serde",
  "serde_json",
 ]
@@ -8996,7 +8996,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.135.11"
+version = "0.135.12"
 dependencies = [
  "clap",
  "clap_complete",
