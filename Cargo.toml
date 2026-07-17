@@ -114,6 +114,7 @@ resolver = "2"
 members = [
     "vtcode-auth",
     "vtcode-acp",
+    "vtcode-battery-pack",
     "vtcode-core",
     "vtcode-ui",
     "vtcode-utility-tool-specs",
@@ -139,6 +140,7 @@ exclude = ["zed-extension"]
 vtcode-commons = { path = "vtcode-commons" }
 vtcode-acp = { path = "vtcode-acp" }
 vtcode-auth = { path = "vtcode-auth" }
+vtcode-battery-pack = { path = "vtcode-battery-pack" }
 vtcode-config = { path = "vtcode-config" }
 vtcode-core = { path = "vtcode-core" }
 vtcode-ui = { path = "vtcode-ui" }
