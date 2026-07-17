@@ -108,21 +108,9 @@ impl TerminalCleanupGuard {
 
 impl Drop for TerminalCleanupGuard {
     fn drop(&mut self) {
-        // Minimal terminal cleanup as last resort using centralized logic
-        // The TUI's run_inline_tui should handle full cleanup, this is just a safety net
         let _ = vtcode_ui::tui::panic_hook::restore_tui();
-
-        // Ensure stdout is also flushed
         let mut stdout = std::io::stdout();
         let _ = stdout.flush();
-
-        // Wait for terminal to finish processing any pending operations
-        // This prevents incomplete writes from corrupting the terminal
-        let delay_ms = std::env::var("VT_TERMINAL_CLEANUP_DELAY_MS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(50);
-        std::thread::sleep(Duration::from_millis(delay_ms));
     }
 }
 

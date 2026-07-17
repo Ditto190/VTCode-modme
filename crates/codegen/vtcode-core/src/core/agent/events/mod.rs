@@ -20,7 +20,12 @@ use parking_lot::Mutex;
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
+
+use vtcode_session_store::event_log::DEFAULT_MAX_EVENTS;
+
+const SESSION_STORE_DRAIN_CAPACITY: usize = 8192;
 
 /// Callback type alias for streaming structured events.
 pub type EventSink = Arc<Mutex<Box<dyn FnMut(&ThreadEvent) + Send>>>;
@@ -37,18 +42,31 @@ where
 /// per-session store ([`vtcode_session_store`]), making it the canonical
 /// source of truth for session state/history. Returns `None` (non-fatally) if
 /// the store cannot be opened.
+///
+/// The sink is decoupled from the agent runtime's hot path by draining
+/// events through a bounded channel in a background task. This prevents
+/// blocking the LLM streaming loop on disk I/O or manifest metadata writes.
 pub fn session_store_sink(workspace: &Path, session_id: &str) -> Option<EventSink> {
-    let log = match vtcode_session_store::open(workspace, session_id) {
+    let log = match vtcode_session_store::open(workspace, session_id, DEFAULT_MAX_EVENTS) {
         Ok(log) => log,
         Err(err) => {
             tracing::warn!("session store unavailable for {session_id}: {err}");
             return None;
         }
     };
-    Some(event_sink(move |e: &ThreadEvent| {
-        if let Err(err) = log.append(e) {
-            tracing::debug!("session store append failed: {err}");
+
+    let (tx, mut rx) = mpsc::channel::<ThreadEvent>(SESSION_STORE_DRAIN_CAPACITY);
+
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if let Err(err) = log.append(&event) {
+                tracing::debug!(?err, "session store background drain append failed");
+            }
         }
+    });
+
+    Some(event_sink(move |e: &ThreadEvent| {
+        let _ = tx.try_send(e.clone());
     }))
 }
 

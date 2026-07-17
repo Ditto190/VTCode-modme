@@ -13,7 +13,7 @@ use crate::agent::runloop::unified::progress::ProgressReporter;
 use super::state::PtyStreamState;
 
 pub(crate) struct PtyStreamRuntime {
-    pub(crate) sender: Option<mpsc::UnboundedSender<String>>,
+    pub(crate) sender: Option<mpsc::Sender<String>>,
     pub(crate) task: Option<JoinHandle<()>>,
     pub(crate) active: Arc<AtomicBool>,
 }
@@ -30,7 +30,7 @@ impl PtyStreamRuntime {
         workspace_root: Option<&Path>,
     ) -> (Self, ToolProgressCallback) {
         let owned_root = workspace_root.map(Path::to_path_buf);
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        let (tx, mut rx) = mpsc::channel::<String>(256);
         let active = Arc::new(AtomicBool::new(true));
         let worker_active = Arc::clone(&active);
         let effective_tail_limit = tail_limit.clamp(1, Self::MAX_LIVE_STREAM_LINES);
@@ -88,7 +88,7 @@ impl PtyStreamRuntime {
             if !callback_active.load(Ordering::Relaxed) || output.is_empty() {
                 return;
             }
-            let _ = callback_tx.send(output.to_string());
+            let _ = callback_tx.try_send(output.to_string());
         });
 
         (Self { sender: Some(tx), task: Some(task), active }, callback)

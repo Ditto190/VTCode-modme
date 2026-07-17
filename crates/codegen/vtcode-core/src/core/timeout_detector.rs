@@ -152,7 +152,7 @@ pub struct TimeoutDetector {
     stats: Arc<RwLock<TimeoutStats>>,
     /// Sender for the background cleanup task. Every `TimeoutHandle` clones this
     /// so it can report completion without blocking or spawning.
-    cleanup_tx: mpsc::UnboundedSender<String>,
+    cleanup_tx: mpsc::Sender<String>,
 }
 
 impl Default for TimeoutDetector {
@@ -180,7 +180,7 @@ impl TimeoutDetector {
         let active_operations: Arc<RwLock<HashMap<String, TimeoutEvent>>> =
             Arc::new(RwLock::new(HashMap::new()));
         let stats = Arc::new(RwLock::new(TimeoutStats::default()));
-        let (cleanup_tx, cleanup_rx) = mpsc::unbounded_channel();
+        let (cleanup_tx, cleanup_rx) = mpsc::channel(1024);
 
         // Spawn a background cleanup actor that processes end-operation requests.
         // This avoids the tokio::spawn-in-Drop anti-pattern: handles send on the
@@ -199,7 +199,7 @@ impl TimeoutDetector {
     /// Runs until the channel is closed (all senders dropped), which happens
     /// when the `TimeoutDetector` is dropped.
     async fn run_cleanup_loop(
-        mut cleanup_rx: mpsc::UnboundedReceiver<String>,
+        mut cleanup_rx: mpsc::Receiver<String>,
         active_operations: Arc<RwLock<HashMap<String, TimeoutEvent>>>,
         stats: Arc<RwLock<TimeoutStats>>,
     ) {
@@ -478,7 +478,7 @@ pub struct TimeoutHandle {
     operation_id: String,
     /// Channel sender for cleanup notification. `None` after `end()` has been
     /// called, which prevents duplicate cleanup in `Drop`.
-    end_tx: Option<mpsc::UnboundedSender<String>>,
+    end_tx: Option<mpsc::Sender<String>>,
 }
 
 impl TimeoutHandle {
@@ -488,7 +488,7 @@ impl TimeoutHandle {
     /// value so that `Drop` will not also send a duplicate.
     pub async fn end(mut self) {
         if let Some(tx) = self.end_tx.take() {
-            let _ = tx.send(self.operation_id.clone());
+            let _ = tx.send(self.operation_id.clone()).await;
         }
     }
 
@@ -500,11 +500,8 @@ impl TimeoutHandle {
 
 impl Drop for TimeoutHandle {
     fn drop(&mut self) {
-        // Send the operation ID to the cleanup task synchronously.
-        // The channel is unbounded so this never blocks, avoiding the
-        // need for tokio::spawn in Drop (see blog post "Actors with Tokio").
         if let Some(tx) = self.end_tx.take() {
-            let _ = tx.send(self.operation_id.clone());
+            let _ = tx.try_send(self.operation_id.clone());
         }
     }
 }

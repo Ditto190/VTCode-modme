@@ -277,8 +277,8 @@ pub(crate) trait CopilotRuntimeRequestHandler: Send {
 
 fn normalized_to_legacy_stream(
     mut stream: uni::LLMNormalizedStream,
-) -> (uni::LLMStream, mpsc::UnboundedReceiver<StreamProgressEvent>) {
-    let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+) -> (uni::LLMStream, mpsc::Receiver<StreamProgressEvent>) {
+    let (progress_tx, progress_rx) = mpsc::channel(256);
     let stream = try_stream! {
         let mut pending_usage = None;
 
@@ -291,10 +291,10 @@ fn normalized_to_legacy_stream(
                     yield LLMStreamEvent::Reasoning { delta };
                 }
                 NormalizedStreamEvent::ToolCallStart { call_id, name } => {
-                    let _ = progress_tx.send(StreamProgressEvent::ToolCallStarted { call_id, name });
+                    let _ = progress_tx.send(StreamProgressEvent::ToolCallStarted { call_id, name }).await;
                 }
                 NormalizedStreamEvent::ToolCallDelta { call_id, delta } => {
-                    let _ = progress_tx.send(StreamProgressEvent::ToolCallDelta { call_id, delta });
+                    let _ = progress_tx.send(StreamProgressEvent::ToolCallDelta { call_id, delta }).await;
                 }
                 NormalizedStreamEvent::Usage { usage } => {
                     pending_usage = Some(usage);
@@ -416,7 +416,7 @@ pub(crate) async fn stream_and_render_response_with_options_impl_first_progress_
 pub(crate) async fn render_stream_with_options_and_progress_impl(
     provider_name: &str,
     stream: &mut uni::BorrowedLLMStream<'_>,
-    progress_events: Option<&mut mpsc::UnboundedReceiver<StreamProgressEvent>>,
+    progress_events: Option<&mut mpsc::Receiver<StreamProgressEvent>>,
     first_progress_timeout: Option<FirstProgressTimeout>,
     spinner: &PlaceholderSpinner,
     renderer: &mut AnsiRenderer,
@@ -446,7 +446,7 @@ pub(crate) async fn render_stream_with_options_and_progress_impl(
 pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
     provider_name: &str,
     stream: &mut uni::BorrowedLLMStream<'_>,
-    progress_events: Option<&mut mpsc::UnboundedReceiver<StreamProgressEvent>>,
+    progress_events: Option<&mut mpsc::Receiver<StreamProgressEvent>>,
     runtime_requests: Option<&mut mpsc::UnboundedReceiver<CopilotRuntimeRequest>>,
     mut runtime_handler: Option<&mut dyn CopilotRuntimeRequestHandler>,
     first_progress_timeout: Option<FirstProgressTimeout>,

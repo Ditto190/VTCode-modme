@@ -185,6 +185,10 @@ impl RmcpClient {
         if !headers.is_empty() {
             client_builder = client_builder.default_headers(headers);
         }
+        client_builder = client_builder
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(Duration::from_secs(300))
+            .tcp_keepalive(Some(Duration::from_secs(60)));
 
         let http_client = client_builder.build().with_context(|| {
             format!("failed to construct reqwest client for MCP provider '{provider_name}'")

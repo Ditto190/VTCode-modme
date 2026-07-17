@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use vtcode_core::cli::args::SessionStoreCommand;
 use vtcode_session_store::{
-    RetentionPolicy, apply_retention, migrate_legacy, open, query_facts, recent_sessions,
+    DEFAULT_MAX_EVENTS, RetentionPolicy, apply_retention, migrate_legacy, open, query_facts,
+    recent_sessions,
 };
 
 /// Handle the `session-store` CLI subcommand.
@@ -48,7 +49,8 @@ pub async fn handle_session_store_command(command: SessionStoreCommand) -> Resul
             println!("{} session(s).", sessions.len());
         }
         SessionStoreCommand::Inspect { session } => {
-            let log = open(&workspace, &session).context("failed to open session")?;
+            let log =
+                open(&workspace, &session, DEFAULT_MAX_EVENTS).context("failed to open session")?;
             let manifest = log.manifest();
             println!("session_id:   {}", manifest.session_id);
             println!("status:       {}", manifest.status);

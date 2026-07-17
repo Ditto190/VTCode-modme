@@ -5,7 +5,7 @@ use std::fs;
 use tempfile::TempDir;
 use vtcode_exec_events::{ThreadEvent, TurnCompletedEvent, TurnStartedEvent, Usage};
 
-use crate::event_log::SessionEventLog;
+use crate::event_log::{DEFAULT_MAX_EVENTS, SessionEventLog};
 use crate::migration::migrate_legacy;
 use crate::query::{query_facts, recent_sessions};
 use crate::{open, retention::apply_retention, sessions_root};
@@ -20,7 +20,7 @@ fn sample_turn() -> Vec<ThreadEvent> {
 #[test]
 fn append_and_reconstruct_roundtrip() {
     let dir = TempDir::new().expect("tempdir");
-    let log = open(dir.path(), "sess-1").expect("open");
+    let log = open(dir.path(), "sess-1", DEFAULT_MAX_EVENTS).expect("open");
     for _ in 0..3 {
         for e in &sample_turn() {
             log.append(e).expect("append");
@@ -37,14 +37,14 @@ fn append_and_reconstruct_roundtrip() {
 fn index_rebuilt_on_reopen() {
     let dir = TempDir::new().expect("tempdir");
     {
-        let log = open(dir.path(), "sess-2").expect("open");
+        let log = open(dir.path(), "sess-2", DEFAULT_MAX_EVENTS).expect("open");
         for e in &sample_turn() {
             log.append(e).expect("append");
         }
         log.complete().expect("complete");
     }
     // Reopen: scan must rebuild the index from events.jsonl.
-    let log = SessionEventLog::open(dir.path(), "sess-2").expect("reopen");
+    let log = SessionEventLog::open(dir.path(), "sess-2", DEFAULT_MAX_EVENTS).expect("reopen");
     assert_eq!(log.turn_count(), 1);
     let rebuilt = log.reconstruct_turn(1).expect("reconstruct after reopen");
     assert_eq!(rebuilt.len(), 2);
@@ -100,7 +100,7 @@ fn retention_removes_oldest_sessions() {
     let dir = TempDir::new().expect("tempdir");
     // Create 3 old sessions (2020) and 2 recent sessions (today).
     for i in 0..5u64 {
-        let log = open(dir.path(), &format!("sess-{i}")).expect("open");
+        let log = open(dir.path(), &format!("sess-{i}"), DEFAULT_MAX_EVENTS).expect("open");
         for e in &sample_turn() {
             log.append(e).expect("append");
         }
@@ -135,7 +135,7 @@ fn retention_evicts_old_sessions_even_when_under_count_cap() {
     let dir = TempDir::new().expect("tempdir");
     // Create 3 sessions: 1 old (2020) and 2 recent (today).
     for i in 0..3u64 {
-        let log = open(dir.path(), &format!("sess-{i}")).expect("open");
+        let log = open(dir.path(), &format!("sess-{i}"), DEFAULT_MAX_EVENTS).expect("open");
         for e in &sample_turn() {
             log.append(e).expect("append");
         }

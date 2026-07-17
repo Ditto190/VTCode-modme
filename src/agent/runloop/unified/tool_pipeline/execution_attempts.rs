@@ -429,6 +429,7 @@ async fn run_single_tool_attempt(
                         .set_message(wait_keepalive_message(&wait_subject, elapsed))
                         .await;
                     next_keepalive_at += WAIT_KEEPALIVE_INTERVAL;
+                    tokio::task::yield_now().await;
                     continue;
                 }
             };

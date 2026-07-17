@@ -537,8 +537,14 @@ pub async fn run_with_index(
         return Ok(FileSearchResults { matches: Vec::new(), total_match_count: 0 });
     }
 
-    // Query the index
-    let matched_paths = index.query(&config.pattern_text, limit, None);
+    // Query the index off the async runtime thread to avoid stalling
+    // the tokio worker while rayon parallel-scoring runs.
+    let matched_paths = tokio::task::spawn_blocking({
+        let pattern_text = config.pattern_text.clone();
+        move || Ok::<_, anyhow::Error>(index.query(&pattern_text, limit, None))
+    })
+    .await??;
+
     let total_match_count = matched_paths.len();
 
     // Build final results

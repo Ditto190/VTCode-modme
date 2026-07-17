@@ -1,4 +1,5 @@
-use hashbrown::HashMap;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -6,13 +7,15 @@ use once_cell::sync::OnceCell;
 
 use crate::config::GatekeeperConfig;
 
+const GATEKEEPER_CACHE_MAX_ENTRIES: usize = 1024;
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub struct GatekeeperPolicy {
     warn_on_quarantine: bool,
     auto_clear_quarantine: bool,
     auto_clear_paths: Vec<PathBuf>,
-    cache: Arc<Mutex<HashMap<PathBuf, GatekeeperCacheEntry>>>,
+    cache: Arc<Mutex<LruCache<PathBuf, GatekeeperCacheEntry>>>,
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -42,7 +45,9 @@ impl GatekeeperPolicy {
             warn_on_quarantine: config.warn_on_quarantine,
             auto_clear_quarantine: config.auto_clear_quarantine,
             auto_clear_paths,
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(GATEKEEPER_CACHE_MAX_ENTRIES).unwrap(),
+            ))),
         }
     }
 
@@ -51,12 +56,12 @@ impl GatekeeperPolicy {
     }
 
     fn cache_entry(&self, path: &Path) -> Option<GatekeeperCacheEntry> {
-        self.cache.lock().ok().and_then(|cache| cache.get(path).cloned())
+        self.cache.lock().ok().and_then(|mut cache| cache.get(path).cloned())
     }
 
     fn update_cache(&self, path: PathBuf, entry: GatekeeperCacheEntry) {
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(path, entry);
+            cache.put(path, entry);
         }
     }
 }

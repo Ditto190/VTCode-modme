@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 use vtcode_commons::fs::{ensure_dir_exists, write_file_with_context};
 use vtcode_config::mcp::{
     McpAllowListConfig, McpClientConfig, McpProviderConfig, McpTransportConfig,
@@ -19,6 +19,7 @@ use super::{
     McpResourceData, McpResourceInfo, McpToolExecutor, McpToolInfo, format_tool_markdown,
     sanitize_filename,
 };
+use crate::connection_pool::McpConnectionPool;
 
 struct McpClientState {
     providers: FxHashMap<String, Arc<McpProvider>>,
@@ -67,53 +68,27 @@ impl McpClient {
 
         info!("Initializing MCP client with {} configured providers", self.config.providers.len());
 
-        // Sequential initialization
-        Box::pin(self.initialize_sequential()).await
-    }
-
-    /// Initialize providers sequentially (fallback method)
-    async fn initialize_sequential(&mut self) -> Result<()> {
-        let tool_timeout = self.tool_timeout();
+        let max_connections = self.config.max_concurrent_connections.max(1);
+        let pool = McpConnectionPool::new(max_connections, self.config.request_timeout_seconds);
+        let tool_timeout = Some(Duration::from_secs(self.config.request_timeout_seconds));
         let allowlist_snapshot = self.state.read().allowlist.clone();
 
+        let provider_configs: Vec<McpProviderConfig> =
+            self.config.providers.iter().filter(|c| c.enabled).cloned().collect();
+
+        let results = pool
+            .initialize_providers_parallel(
+                provider_configs,
+                self.elicitation_handler.clone(),
+                tool_timeout,
+                &allowlist_snapshot,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("MCP connection pool initialization failed: {e}"))?;
+
         let mut initialized = FxHashMap::default();
-
-        for provider_config in &self.config.providers {
-            if !provider_config.enabled {
-                debug!("MCP provider '{}' is disabled; skipping", provider_config.name);
-                continue;
-            }
-
-            if let Some(reason) = self.requirement_mismatch_reason(provider_config) {
-                warn!(
-                    "Skipping MCP provider '{}' due to requirements policy: {}",
-                    provider_config.name, reason
-                );
-                continue;
-            }
-
-            if matches!(provider_config.transport, McpTransportConfig::Http(_))
-                && !self.config.experimental_use_rmcp_client
-            {
-                warn!(
-                    "Skipping MCP HTTP provider '{}' because experimental_use_rmcp_client is disabled",
-                    provider_config.name
-                );
-                continue;
-            }
-
-            match self
-                .connect_and_initialize_provider(provider_config, &allowlist_snapshot, tool_timeout)
-                .await
-            {
-                Ok(provider) => {
-                    initialized.insert(provider.name.clone(), Arc::new(provider));
-                    info!("Successfully initialized MCP provider '{}'", provider_config.name);
-                }
-                Err(err) => {
-                    error!("Failed to connect to MCP provider '{}': {err}", provider_config.name);
-                }
-            }
+        for (name, provider) in results {
+            initialized.insert(name, provider);
         }
 
         self.state.write().providers = initialized;
@@ -989,8 +964,11 @@ impl McpClient {
     }
 
     fn provider_retry_delay(attempt_idx: usize) -> Duration {
-        let step = u64::try_from(attempt_idx).unwrap_or(u64::MAX).saturating_add(1);
-        Duration::from_millis((step * 250).min(1_000))
+        let base_ms = 250u64;
+        let max_ms = 5000u64;
+        let exp = base_ms.saturating_mul(2u64.saturating_pow(attempt_idx as u32));
+        let delay = exp.min(max_ms);
+        Duration::from_millis(delay)
     }
 
     fn tool_timeout(&self) -> Option<Duration> {

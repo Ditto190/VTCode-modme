@@ -23,7 +23,9 @@ pub mod query;
 pub mod retention;
 
 pub use error::SessionStoreError;
-pub use event_log::{SessionEventLog, SessionManifest, TurnIndex, TurnIndexEntry};
+pub use event_log::{
+    DEFAULT_MAX_EVENTS, SessionEventLog, SessionManifest, TurnIndex, TurnIndexEntry,
+};
 pub use migration::{MigrationReport, migrate_legacy};
 pub use progress::{
     Milestone, MilestoneStatus, ProgressLedger, load_progress, progress_path, save_progress,
@@ -60,8 +62,12 @@ pub fn session_dir(workspace: &Path, session_id: &str) -> PathBuf {
 /// returned [`SessionEventLog`] is cheap to clone (internally `Arc`-free but the
 /// file handle is shared via an internal mutex) and supports concurrent
 /// `append` calls from the runloop's event sink.
-pub fn open(workspace: &Path, session_id: &str) -> Result<SessionEventLog, SessionStoreError> {
-    SessionEventLog::open(workspace, session_id)
+pub fn open(
+    workspace: &Path,
+    session_id: &str,
+    max_events: usize,
+) -> Result<SessionEventLog, SessionStoreError> {
+    SessionEventLog::open(workspace, session_id, max_events)
 }
 
 /// Sanitize a session id so it is safe to use as a directory name.

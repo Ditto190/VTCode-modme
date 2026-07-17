@@ -1,7 +1,7 @@
 //! Append-only per-session `ThreadEvent` log plus index and manifest.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -12,7 +12,9 @@ use vtcode_exec_events::{ThreadEvent, VersionedThreadEvent};
 use crate::error::SessionStoreError;
 use crate::session_dir;
 
-use memchr::memchr;
+/// Default maximum number of events retained per session before the oldest
+/// completed turns are evicted.
+pub const DEFAULT_MAX_EVENTS: usize = 10_000;
 
 /// In-memory state protected by a mutex (cheap; appends are infrequent relative
 /// to model inference).
@@ -50,12 +52,17 @@ pub struct SessionEventLog {
     events_path: PathBuf,
     file: Mutex<File>,
     state: Mutex<LogState>,
+    max_events: usize,
 }
 
 impl SessionEventLog {
     /// Open the log for `session_id`, creating the session directory tree and
     /// rebuilding the index from `events.jsonl` if it already exists.
-    pub fn open(workspace: &Path, session_id: &str) -> Result<Self, SessionStoreError> {
+    pub fn open(
+        workspace: &Path,
+        session_id: &str,
+        max_events: usize,
+    ) -> Result<Self, SessionStoreError> {
         let dir = session_dir(workspace, session_id);
         std::fs::create_dir_all(dir.join(crate::DERIVED_DIR))
             .map_err(|e| SessionStoreError::CreateDir { path: dir.clone(), source: e })?;
@@ -73,6 +80,7 @@ impl SessionEventLog {
             events_path,
             file: Mutex::new(file),
             state: Mutex::new(LogState::new(session_id)),
+            max_events,
         };
         log.scan()?;
         // Seed the running offset from the current file length so appends
@@ -94,10 +102,6 @@ impl SessionEventLog {
     /// Append an event to the log and update the in-memory index/manifest.
     pub fn append(&self, event: &ThreadEvent) -> Result<(), SessionStoreError> {
         let line = serde_json::to_string(&VersionedThreadEvent::new(event.clone()))?;
-        // `writeln!` appends a trailing `\n`, so the bytes written are the
-        // serialized length plus one. We derive the offsets from the running
-        // `next_offset` instead of stat-ing the file, eliminating two blocking
-        // `stat` syscalls per event on the agent runloop's hot path.
         let written = line.len() + 1;
         let mut st = self.state.lock().map_err(poison)?;
         let start = st.next_offset;
@@ -154,6 +158,50 @@ impl SessionEventLog {
                     entry.event_count += 1;
                 }
             }
+        }
+        drop(st);
+        let _ = self.enforce_event_cap();
+        Ok(())
+    }
+
+    /// Enforce the per-session event cap by evicting the oldest completed
+    /// turns when the log exceeds [`Self::max_events`]. Returns `Ok(())` even
+    /// when no truncation is needed or the cap is disabled (`max_events == 0`).
+    fn enforce_event_cap(&self) -> Result<(), SessionStoreError> {
+        if self.max_events == 0 {
+            return Ok(());
+        }
+        let mut st = self.state.lock().map_err(poison)?;
+        if st.manifest.event_count <= self.max_events as u64 {
+            return Ok(());
+        }
+        while st.manifest.event_count > self.max_events as u64
+            && let Some(oldest) = st.index.entries.first()
+        {
+            let truncate_offset = oldest.end_offset;
+            let _evicted = oldest.event_count;
+            {
+                let mut file = self.file.lock().map_err(poison)?;
+                file.seek(SeekFrom::Start(truncate_offset))
+                    .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+                let mut remaining = Vec::new();
+                file.read_to_end(&mut remaining)
+                    .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+                file.set_len(0).map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+                file.seek(SeekFrom::Start(0))
+                    .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+                file.write_all(&remaining)
+                    .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+                file.flush().map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+            }
+            st.index.entries.remove(0);
+            for entry in &mut st.index.entries {
+                entry.start_offset -= truncate_offset;
+                entry.end_offset -= truncate_offset;
+            }
+            st.next_offset -= truncate_offset;
+            st.manifest.event_count = st.index.entries.iter().map(|e| e.event_count).sum();
+            let _ = st.manifest.event_count; // approximate; turns dominate
         }
         Ok(())
     }
@@ -228,22 +276,31 @@ impl SessionEventLog {
 
     /// Rebuild index + manifest by scanning `events.jsonl` (authoritative).
     ///
-    /// Performs a single pass over the file, collecting both the event counts
-    /// and the byte offsets needed by [`reconstruct_turn`].
+    /// Reads the file line-by-line via `BufReader` to avoid loading the entire
+    /// log into memory. Long-lived sessions can otherwise produce multi-megabyte
+    /// logs that spike memory on every reopen.
     fn scan(&self) -> Result<(), SessionStoreError> {
         let mut st = self.state.lock().map_err(poison)?;
         if !self.events_path.exists() {
             return Ok(());
         }
-        let content = std::fs::read_to_string(&self.events_path)
+        let file = File::open(&self.events_path)
             .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-        let bytes = content.as_bytes();
+        let mut reader = std::io::BufReader::new(file);
+        let mut buf = Vec::new();
+        let mut pos = 0u64;
         let mut first_ts: Option<String> = None;
-        let mut pos = 0usize;
         let mut in_turn = false;
-        while pos < bytes.len() {
-            let line_end = memchr_newline(bytes, pos);
-            let trimmed = std::str::from_utf8(&bytes[pos..line_end]).unwrap_or("").trim();
+        loop {
+            buf.clear();
+            let n = reader
+                .read_until(b'\n', &mut buf)
+                .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+            if n == 0 {
+                break;
+            }
+            let line_end = pos + n as u64;
+            let trimmed = std::str::from_utf8(&buf).unwrap_or("").trim();
             if !trimmed.is_empty()
                 && let Ok(v) = serde_json::from_str::<VersionedThreadEvent>(trimmed)
             {
@@ -260,8 +317,8 @@ impl SessionEventLog {
                         let n = st.manifest.turn_count + 1;
                         st.index.entries.push(TurnIndexEntry {
                             turn_number: n,
-                            start_offset: pos as u64,
-                            end_offset: 0,
+                            start_offset: pos,
+                            end_offset: line_end,
                             event_count: 1,
                             ts: now_rfc3339(),
                         });
@@ -269,7 +326,7 @@ impl SessionEventLog {
                     ThreadEvent::TurnCompleted(_) | ThreadEvent::TurnFailed(_) => {
                         if in_turn {
                             if let Some(entry) = st.index.entries.last_mut() {
-                                entry.end_offset = line_end as u64;
+                                entry.end_offset = line_end;
                                 entry.event_count += 1;
                             }
                             in_turn = false;
@@ -287,7 +344,7 @@ impl SessionEventLog {
                     }
                     _ => {
                         if in_turn && let Some(entry) = st.index.entries.last_mut() {
-                            entry.end_offset = line_end as u64;
+                            entry.end_offset = line_end;
                             entry.event_count += 1;
                         }
                     }
@@ -315,17 +372,6 @@ impl SessionEventLog {
 }
 
 /// Locate the next newline at or after `from`, returning a past-the-end index.
-///
-/// Uses the `memchr` crate's SIMD byte scan instead of a scalar
-/// `Iterator::position` loop.
-fn memchr_newline(bytes: &[u8], from: usize) -> usize {
-    let slice = &bytes[from..];
-    match memchr(b'\n', slice) {
-        Some(p) => from + p + 1,
-        None => bytes.len(),
-    }
-}
-
 fn poison<T>(_e: std::sync::PoisonError<T>) -> SessionStoreError {
     SessionStoreError::Io {
         path: PathBuf::new(),
