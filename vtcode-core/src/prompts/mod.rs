@@ -36,9 +36,10 @@ pub use resources::{
     find_prompt_template, resolve_system_prompt_layers,
 };
 pub use runtime_contract::{RuntimePromptContract, append_runtime_mode_sections};
+pub use system::SystemPromptReport;
 pub use system::{
     apply_output_style, generate_lightweight_instruction, generate_specialized_instruction,
-    generate_system_instruction,
+    generate_system_instruction, measure_system_prompt_size,
 };
 pub use system_prompt_cache::{PROMPT_CACHE, PromptProvider, SystemPromptCache, TaskType};
 pub use templates::PromptTemplates;

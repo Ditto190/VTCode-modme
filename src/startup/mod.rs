@@ -86,7 +86,7 @@ impl StartupContext {
         apply_cli_permission_overrides(&mut config, &args.allowed_tools, &args.disallowed_tools);
 
         // Validate configuration against models database
-        validate_startup_configuration(&config, &loaded.workspace, args.quiet)?;
+        validate_startup_configuration(&config, &loaded.workspace, args.quiet).await?;
 
         let (custom_session_id, session_resume) = resolve_session_resume(args)?;
         validate_resume_all_usage(args, session_resume.as_ref())?;

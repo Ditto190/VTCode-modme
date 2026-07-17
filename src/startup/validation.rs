@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::validator::ConfigValidator;
+use vtcode_core::prompts::system::measure_system_prompt_size;
 use vtcode_core::utils::path::canonicalize_workspace;
 
 pub(super) fn apply_cli_permission_overrides(
@@ -124,9 +125,9 @@ pub(super) fn resolve_workspace_path(workspace_arg: Option<PathBuf>) -> Result<P
     Ok(canonicalize_workspace(&resolved))
 }
 
-pub(super) fn validate_startup_configuration(
+pub(super) async fn validate_startup_configuration(
     config: &VTCodeConfig,
-    _workspace: &Path,
+    workspace: &Path,
     quiet: bool,
 ) -> Result<()> {
     // Ripgrep availability is checked lazily when search tools are actually
@@ -142,7 +143,10 @@ pub(super) fn validate_startup_configuration(
     }
 
     if !quiet {
-        warn_token_overhead(config);
+        for warning in collect_token_overhead_warnings(config) {
+            tracing::warn!("{warning}");
+        }
+        check_system_prompt_size_at_startup(config, workspace).await;
     }
 
     Ok(())
@@ -152,15 +156,18 @@ pub(super) fn validate_startup_configuration(
 /// to inflate the per-request token cost:
 ///
 /// - many configured MCP servers (schema tax on every request),
+/// - client-local tool deferral disabled while MCP servers are configured,
 /// - heavy `system_prompt_mode` / `tool_documentation_mode`,
-/// - disabled tool-result clearing (unbounded context growth).
+/// - disabled tool-result clearing (unbounded context growth),
+/// - disabled auto-compaction (unbounded history growth),
+/// - very low `max_system_prompt_tokens` (likely aggressive trimming).
 ///
-/// Kept pure (no logging side effects) so it can be unit-tested in isolation;
-/// `warn_token_overhead` is the logging wrapper.
+/// Kept pure (no logging side effects) so it can be unit-tested in isolation.
 fn collect_token_overhead_warnings(config: &VTCodeConfig) -> Vec<String> {
     use vtcode_core::config::{SystemPromptMode, ToolDocumentationMode};
 
     const MCP_SERVER_OVERHEAD_WARN_THRESHOLD: usize = 8;
+    const LOW_SYSTEM_PROMPT_BUDGET_WARN_THRESHOLD: u64 = 4_000;
 
     let mut warnings = Vec::new();
 
@@ -169,6 +176,12 @@ fn collect_token_overhead_warnings(config: &VTCodeConfig) -> Vec<String> {
         warnings.push(format!(
             "configured {mcp_servers} MCP servers (threshold {MCP_SERVER_OVERHEAD_WARN_THRESHOLD}); each server's tool schemas are sent on every request unless deferred. Consider reducing the count or relying on deferred tool loading (tools.client_tool_search defaults to true) to lower token cost."
         ));
+    }
+
+    if !config.tools.client_tool_search && !config.mcp.providers.is_empty() {
+        warnings.push(
+            "tools.client_tool_search is disabled but MCP servers are configured; all MCP tool schemas are sent eagerly on every request. Enable tools.client_tool_search to defer large schemas until needed.".to_string(),
+        );
     }
 
     if matches!(
@@ -195,16 +208,38 @@ fn collect_token_overhead_warnings(config: &VTCodeConfig) -> Vec<String> {
         );
     }
 
+    if !config.agent.harness.auto_compaction_enabled {
+        warnings.push(
+            "agent.harness.auto_compaction_enabled is disabled; conversation history grows without bound. Enable it (the default) to compact context when token pressure rises.".to_string(),
+        );
+    }
+
+    if config.agent.max_system_prompt_tokens < LOW_SYSTEM_PROMPT_BUDGET_WARN_THRESHOLD {
+        warnings.push(format!(
+            "agent.max_system_prompt_tokens = {} is very low; the base system prompt alone may exceed this and trigger aggressive trimming. Consider raising it to at least {}.",
+            config.agent.max_system_prompt_tokens,
+            LOW_SYSTEM_PROMPT_BUDGET_WARN_THRESHOLD,
+        ));
+    }
+
     warnings
 }
 
-/// Logs the warnings returned by `collect_token_overhead_warnings`. Token
-/// efficiency is a correctness concern — every harness token is context the
-/// model cannot spend on the task — so surfacing these at startup lets users
-/// audit and trim their setup before paying for it.
-fn warn_token_overhead(config: &VTCodeConfig) {
-    for warning in collect_token_overhead_warnings(config) {
-        tracing::warn!("{warning}");
+/// Checks the actual composed system prompt size at startup and warns if it
+/// exceeds `agent.max_system_prompt_tokens`. This is a one-time cost: the
+/// static prompt layers are cached after the first read.
+async fn check_system_prompt_size_at_startup(config: &VTCodeConfig, workspace: &Path) {
+    if !config.agent.system_prompt_budget_warning {
+        return;
+    }
+
+    let report = measure_system_prompt_size(workspace, config).await;
+    if report.over_budget {
+        tracing::warn!(
+            token_estimate = report.token_estimate,
+            max_system_prompt_tokens = config.agent.max_system_prompt_tokens,
+            "System prompt exceeds configured token budget at startup"
+        );
     }
 }
 
@@ -397,6 +432,46 @@ mod tests {
         assert!(
             warnings.iter().any(|w| w.contains("MCP servers")),
             "expected a warning for many MCP servers: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn token_overhead_warns_when_client_tool_search_disabled_with_mcp() {
+        let mut config = VTCodeConfig::default();
+        config.tools.client_tool_search = false;
+        config.mcp.providers.push(McpProviderConfig::default());
+        let warnings = collect_token_overhead_warnings(&config);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("client_tool_search is disabled")),
+            "expected a warning for disabled client tool search with MCP: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn token_overhead_warns_when_auto_compaction_disabled() {
+        let mut config = VTCodeConfig::default();
+        config.agent.harness.auto_compaction_enabled = false;
+        let warnings = collect_token_overhead_warnings(&config);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("auto_compaction_enabled is disabled")),
+            "expected a warning for disabled auto compaction: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn token_overhead_warns_on_low_system_prompt_budget() {
+        let mut config = VTCodeConfig::default();
+        config.agent.max_system_prompt_tokens = 100;
+        let warnings = collect_token_overhead_warnings(&config);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("max_system_prompt_tokens") && w.contains("very low")),
+            "expected a warning for low system prompt budget: {warnings:?}"
         );
     }
 }

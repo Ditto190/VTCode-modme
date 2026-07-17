@@ -435,7 +435,7 @@ pub struct AgentHarnessConfig {
     pub max_parallel_tool_calls: usize,
     /// Enable automatic context compaction when token pressure crosses threshold.
     ///
-    /// Disabled by default. When disabled, no automatic compaction is triggered.
+    /// Enabled by default. When disabled, no automatic compaction is triggered.
     #[serde(default = "default_harness_auto_compaction_enabled")]
     pub auto_compaction_enabled: bool,
     /// Optional absolute compact threshold (tokens) for Responses server-side compaction.

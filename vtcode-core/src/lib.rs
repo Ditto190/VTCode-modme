@@ -315,8 +315,10 @@ pub use orchestrator::{
     WorkExecutor,
 };
 pub use pods::*;
+pub use prompts::SystemPromptReport;
 pub use prompts::{
-    generate_lightweight_instruction, generate_specialized_instruction, generate_system_instruction,
+    generate_lightweight_instruction, generate_specialized_instruction,
+    generate_system_instruction, measure_system_prompt_size,
 };
 pub use retry::{RetryDecision, RetryPolicy, RetryPolicyCoreExt};
 pub use security::{IntegrityTag, PayloadEnvelope, ZeroTrustContext};

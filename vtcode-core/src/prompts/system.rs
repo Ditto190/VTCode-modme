@@ -409,6 +409,26 @@ pub async fn compose_system_instruction_with_report(
     apply_token_budget(sections, max_tokens, warn_enabled, trim_enabled)
 }
 
+/// Measure the system prompt size without applying budget trimming or warnings.
+///
+/// This is used at startup to warn about potential token budget overruns
+/// before the first request is made. Unlike [`compose_system_instruction_with_report`],
+/// this function does not apply `agent.trim_system_prompt` and does not emit
+/// budget-exceeded warnings.
+pub async fn measure_system_prompt_size(
+    project_root: &Path,
+    vtcode_config: &crate::config::VTCodeConfig,
+) -> SystemPromptReport {
+    let sections = build_prompt_sections(project_root, Some(vtcode_config), None).await;
+    let text = join_prompt_sections(&sections);
+    let token_estimate = estimate_token_count(&text);
+    SystemPromptReport {
+        token_estimate,
+        over_budget: token_estimate > vtcode_config.agent.max_system_prompt_tokens,
+        trimmed_sections: Vec::new(),
+    }
+}
+
 /// Resolve the effective `(max_system_prompt_tokens, budget_warning_enabled,
 /// trim_enabled)` settings, falling back to the `AgentConfig` defaults when
 /// no config is available.
@@ -2541,6 +2561,47 @@ Use a skill only when the user names it or the task clearly matches. Load detail
             cache_key(&project_root, Some(&auto_config), None),
             "cache key must change when default_primary_agent changes, since \
              agent_identity_label rewrites the composed prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn measure_system_prompt_size_returns_non_empty_report_for_empty_workspace() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let config = VTCodeConfig::default();
+        let report = measure_system_prompt_size(temp.path(), &config).await;
+        assert!(
+            report.token_estimate > 0,
+            "default system prompt should be non-empty, got {} tokens",
+            report.token_estimate
+        );
+        assert!(
+            !report.over_budget,
+            "default config should be within default budget, got {} tokens",
+            report.token_estimate
+        );
+        assert!(report.trimmed_sections.is_empty());
+    }
+
+    #[tokio::test]
+    async fn measure_system_prompt_size_flags_over_budget() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = VTCodeConfig::default();
+        config.agent.max_system_prompt_tokens = 1;
+        let report = measure_system_prompt_size(temp.path(), &config).await;
+        assert!(report.over_budget, "tiny budget should flag as over budget");
+    }
+
+    #[tokio::test]
+    async fn measure_system_prompt_size_respects_max_budget_setting() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = VTCodeConfig::default();
+        config.agent.max_system_prompt_tokens = 8_000;
+        let report = measure_system_prompt_size(temp.path(), &config).await;
+        // Default base prompt is well under 8k tokens for an empty workspace.
+        assert!(
+            !report.over_budget,
+            "default prompt should fit within 8k tokens, got {}",
+            report.token_estimate
         );
     }
 }

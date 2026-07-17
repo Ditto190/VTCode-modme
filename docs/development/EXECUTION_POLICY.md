@@ -150,9 +150,13 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
 - **Startup token-overhead warnings.** At session start (unless `--quiet`),
   VT Code logs non-fatal `tracing::warn!` messages when the config is likely to
   inflate per-request cost: more than 8 configured MCP servers,
-  `system_prompt_mode = "specialized"`, `tool_documentation_mode = "full"`, or
-  `tool_result_clearing` disabled. These surface the "what am I actually sending"
-  question before you pay for it.
+  `tools.client_tool_search = false` while MCP servers are configured,
+  `system_prompt_mode = "specialized"`, `tool_documentation_mode = "full"`,
+  `tool_result_clearing` disabled, `auto_compaction_enabled` disabled, or
+  `max_system_prompt_tokens` set very low (< 4000). The actual composed system
+  prompt is also measured at startup and flagged if it exceeds the configured
+  budget. These surface the "what am I actually sending" question before you pay
+  for it.
 
 ### Authoring guidance
 
