@@ -6,6 +6,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use regex::Regex;
+use std::borrow::Cow;
 use std::sync::LazyLock;
 use unicode_width::UnicodeWidthStr;
 
@@ -32,7 +33,10 @@ pub fn wrap_line_preserving_urls(line: Line<'static>, max_width: usize) -> Vec<L
         return vec![Line::default()];
     }
 
-    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    let text: Cow<'_, str> = match line.spans.as_slice() {
+        [span] => span.content.clone(),
+        _ => Cow::Owned(line.spans.iter().map(|s| s.content.as_ref()).collect()),
+    };
 
     // No URLs - use standard wrapping (delegates to text_utils)
     if !contains_preserved_token(&text) {

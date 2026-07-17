@@ -7408,30 +7408,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vtcode-battery-pack"
-version = "0.135.11"
-dependencies = [
- "vtcode-a2a",
- "vtcode-acp",
- "vtcode-auth",
- "vtcode-bash-runner",
- "vtcode-commons",
- "vtcode-config",
- "vtcode-core",
- "vtcode-eval",
- "vtcode-exec-events",
- "vtcode-indexer",
- "vtcode-llm",
- "vtcode-macros",
- "vtcode-mcp",
- "vtcode-safety",
- "vtcode-session-store",
- "vtcode-skills",
- "vtcode-ui",
- "vtcode-utility-tool-specs",
-]
-
-[[package]]
 name = "vtcode-commons"
 version = "0.135.11"
 dependencies = [

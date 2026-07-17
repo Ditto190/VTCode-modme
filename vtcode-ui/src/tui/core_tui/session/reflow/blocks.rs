@@ -138,10 +138,10 @@ impl Session {
         } else {
             ""
         };
-        let first_prefix_width = first_prefix.chars().count();
-        let continuation_prefix_width = continuation_prefix.chars().count();
+        let first_prefix_width = UnicodeWidthStr::width(first_prefix);
+        let continuation_prefix_width = UnicodeWidthStr::width(continuation_prefix);
         let prefix_width = first_prefix_width.max(continuation_prefix_width);
-        let border_width = right_border.chars().count();
+        let border_width = UnicodeWidthStr::width(right_border);
         let consumed_width = prefix_width.saturating_add(border_width);
         let content_width = max_width.saturating_sub(consumed_width);
 
@@ -437,7 +437,6 @@ impl Session {
 
         build_pty_transcript_lines(
             lines,
-            &combined,
             &line.link_ranges,
             body_prefix,
             continuation_prefix.as_str(),
@@ -447,7 +446,6 @@ impl Session {
 
 fn build_pty_transcript_lines(
     lines: Vec<Line<'static>>,
-    _combined: &str,
     link_ranges: &[InlineLinkRange],
     first_prefix: &str,
     continuation_prefix: &str,

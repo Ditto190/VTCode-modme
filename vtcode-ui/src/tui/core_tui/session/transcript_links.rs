@@ -730,7 +730,12 @@ pub(crate) fn decorate_detected_link_lines(
 
         let original_text = transcript_line_text(&line);
         let matches = detect_transcript_link_matches(&original_text, workspace_root);
-        let wrapped_lines = wrapping::wrap_line_preserving_urls(line, area.width.max(1) as usize);
+        let line_width: usize = UnicodeWidthStr::width(original_text.as_ref());
+        let wrapped_lines = if line_width <= usize::from(area.width).max(1) {
+            vec![line]
+        } else {
+            wrapping::wrap_line_preserving_urls(line, area.width.max(1) as usize)
+        };
         let mut original_offset = 0usize;
 
         for wrapped_line in wrapped_lines {

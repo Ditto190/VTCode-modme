@@ -14,7 +14,23 @@ use super::super::message::TranscriptLine;
 use super::super::render;
 use super::super::text_utils;
 use super::transcript_line_with_detected_links;
-use crate::tui::config::constants::ui;
+
+fn trim_leading_whitespace(line: &mut Line<'static>) {
+    while let Some(first) = line.spans.first_mut() {
+        let trimmed = first.content.trim_start();
+        let trimmed_len = trimmed.len();
+        let original_len = first.content.len();
+        if trimmed_len == 0 {
+            line.spans.remove(0);
+        } else if trimmed_len < original_len {
+            let content = first.content.to_mut();
+            content.drain(0..original_len - trimmed_len);
+            break;
+        } else {
+            break;
+        }
+    }
+}
 
 impl Session {
     /// Reflow the thinking/reasoning run containing `index`.
@@ -95,41 +111,44 @@ impl Session {
         )];
 
         if !collapsed {
-            let indent = ui::INLINE_THINKING_BODY_INDENT;
             let content_width = match width {
                 0 => None,
-                w => Some((w as usize).saturating_sub(indent.chars().count())),
+                w => Some(w as usize),
             };
 
+            let mut combined_spans: Vec<Span<'static>> = Vec::new();
             for idx in start..start + run_len {
                 if self.lines[idx].segments.is_empty() {
                     continue;
                 }
                 let spans = render::render_message_spans(self, idx);
-                let dimmed: Vec<Span<'static>> = spans
-                    .into_iter()
-                    .map(|mut span| {
-                        span.style = span.style.add_modifier(Modifier::DIM);
-                        span
-                    })
-                    .collect();
-                let mut wrapped = match content_width {
-                    None => vec![Line::from(dimmed)],
-                    Some(cw) => {
-                        text_utils::wrap_line_with_hanging_prefix(Line::from(dimmed), cw, indent)
-                    }
-                };
-                if let Some(first) = wrapped.first_mut() {
-                    let mut new_spans = vec![Span::raw(indent.to_owned())];
-                    new_spans.append(&mut first.spans);
-                    first.spans = new_spans;
+                if !combined_spans.is_empty()
+                    && !spans.is_empty()
+                    && !combined_spans
+                        .last()
+                        .unwrap()
+                        .content
+                        .ends_with(char::is_whitespace)
+                {
+                    combined_spans.push(Span::raw(" ".to_owned()));
                 }
-                for line in wrapped {
-                    result.push(transcript_line_with_detected_links(
-                        line,
-                        self.workspace_root.as_deref(),
-                    ));
-                }
+                combined_spans.extend(spans);
+            }
+            if combined_spans.is_empty() {
+                combined_spans.push(Span::raw(String::new()));
+            }
+            let mut wrapped = match content_width {
+                None => vec![Line::from(combined_spans)],
+                Some(cw) => text_utils::wrap_line(Line::from(combined_spans), cw),
+            };
+            for line in &mut wrapped {
+                trim_leading_whitespace(line);
+            }
+            for line in wrapped {
+                result.push(transcript_line_with_detected_links(
+                    line,
+                    self.workspace_root.as_deref(),
+                ));
             }
         }
 

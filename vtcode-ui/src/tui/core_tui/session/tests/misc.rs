@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 use super::super::*;
 use super::helpers::*;
+use unicode_width::UnicodeWidthStr;
 
 #[test]
 fn input_compact_preview_for_image_path() {
@@ -346,4 +347,56 @@ fn top_level_task_tree_tail_line_is_dimmed_in_tool_blocks() {
         task_span.style.add_modifier.contains(Modifier::DIM),
         "top-level task rows should render dimmed"
     );
+}
+
+#[test]
+fn tool_block_with_cjk_prefix_does_not_overflow_viewport() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(
+        InlineMessageKind::Tool,
+        vec![InlineSegment {
+            text: "日本語のツール詳細情報".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        }],
+    );
+    let index = session.lines.len() - 1;
+    let transcript = session.reflow_message_lines(index, VIEW_WIDTH, false);
+    for line in &transcript {
+        let width: usize = line
+            .line
+            .spans
+            .iter()
+            .map(|span| span.content.width())
+            .sum();
+        assert!(
+            width <= VIEW_WIDTH as usize,
+            "tool block line with CJK prefix overflowed viewport: {width} > {VIEW_WIDTH}"
+        );
+    }
+}
+
+#[test]
+fn error_block_with_cjk_label_reserves_correct_content_width() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(
+        InlineMessageKind::Error,
+        vec![InlineSegment {
+            text: "エラーが発生しました".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        }],
+    );
+    let index = session.lines.len() - 1;
+    let transcript = session.reflow_message_lines(index, VIEW_WIDTH, false);
+    for line in &transcript {
+        let width: usize = line
+            .line
+            .spans
+            .iter()
+            .map(|span| span.content.width())
+            .sum();
+        assert!(
+            width <= VIEW_WIDTH as usize,
+            "error block line with CJK label overflowed viewport: {width} > {VIEW_WIDTH}"
+        );
+    }
 }

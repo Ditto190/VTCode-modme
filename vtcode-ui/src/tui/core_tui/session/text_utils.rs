@@ -372,28 +372,37 @@ fn wrap_line_internal(
     rows
 }
 
-fn coalesce_adjacent_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
-    let mut merged: Vec<Span<'static>> = Vec::with_capacity(spans.len());
-    let mut last_style: Option<Style> = None;
-    for span in spans {
-        if span.content.is_empty() {
+fn coalesce_adjacent_spans(mut spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    if spans.is_empty() {
+        return spans;
+    }
+
+    let mut write = 0usize;
+    let mut last_style: Option<Style> = Some(spans[0].style);
+
+    for read in 0..spans.len() {
+        let content = spans[read].content.clone();
+        let style = spans[read].style;
+        if content.is_empty() {
             continue;
         }
-        // Carry the predicted style in a local: on the common path (same
-        // style as the previous span) we append to the tail without
-        // re-reading `merged.last().style` per element.
-        if let Some(style) = last_style
-            && style == span.style
+
+        if let Some(last) = last_style
+            && last == style
+            && write > 0
         {
-            if let Some(last) = merged.last_mut() {
-                last.content.to_mut().push_str(span.content.as_ref());
-            }
+            spans[write - 1].content.to_mut().push_str(content.as_ref());
         } else {
-            last_style = Some(span.style);
-            merged.push(span);
+            if write != read {
+                spans[write] = Span::styled(content, style);
+            }
+            write += 1;
+            last_style = Some(style);
         }
     }
-    merged
+
+    spans.truncate(write);
+    spans
 }
 
 fn wrapped_continuation_prefix(line: &Line<'static>) -> String {

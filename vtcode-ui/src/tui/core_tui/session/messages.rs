@@ -620,13 +620,13 @@ impl Session {
                 .is_some_and(|l| l.kind == InlineMessageKind::Policy && l.segments.is_empty())
         {
             self.lines.remove(prev_idx);
-            self.mark_line_dirty(prev_idx);
+            self.mark_transcript_line_dirty(prev_idx);
             self.thinking_runs.end_run();
             self.invalidate_scroll_metrics();
             return;
         }
 
-        self.mark_line_dirty(index);
+        self.mark_transcript_line_dirty(index);
         self.invalidate_scroll_metrics();
     }
 

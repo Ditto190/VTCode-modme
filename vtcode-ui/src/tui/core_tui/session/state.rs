@@ -121,6 +121,18 @@ impl Session {
         self.subprocess_entries_preview_cache = None;
     }
 
+    /// Mark a specific line as dirty to optimize reflow scans, without
+    /// invalidating header or sidebar caches. Use this for transcript-only
+    /// changes (e.g. streaming chunks) where chrome hasn't changed.
+    pub(crate) fn mark_transcript_line_dirty(&mut self, index: usize) {
+        self.first_dirty_line = match self.first_dirty_line {
+            Some(current) => Some(current.min(index)),
+            None => Some(index),
+        };
+        self.needs_redraw = true;
+        self.invalidate_transcript_viewport();
+    }
+
     /// Invalidate only the header cache (e.g. when provider/model changes)
     pub fn invalidate_header_cache(&mut self) {
         self.header_lines_cache = None;

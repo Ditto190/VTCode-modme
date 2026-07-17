@@ -101,7 +101,7 @@ If reasoning/thinking blocks are carried in history, strip them during compactio
 
 - Keep max_tool_loops default at 0 (unlimited) is fine, but ensure max_repeated_tool_calls and max_consecutive_blocked_tool_calls_per_turn prevent churn.
 - Review continuation policy to avoid unnecessary “one more check” turns.
-✅ VERIFIED — no change needed: `max_tool_loops = 0` (unlimited), `max_repeated_tool_calls = 2`, `max_consecutive_blocked_tool_calls_per_turn = 8` (`vtcode-config/src/constants/defaults.rs`). Enforcement: the turn balancer (`guards.rs::handle_turn_balancer`) detects repeated low-signal/identical calls (`effective_repeat_limit = max(2,3) = 3`) and activates a tool-free recovery pass; `should_trigger_turn_balancer` has unit tests pinning the boundary (`turn/utils.rs`); the blocked-tool guard (`blocked_tool_guard.rs`) breaks the turn as `Blocked` at the streak cap with a wider total fuse (`max_streak * 2`), with tests in `tool_outcomes/handlers/tests/runtime.rs`; a `shell_run_guard` catches identical shell calls. The continuation policy forces synthesis rather than looping.
+  ✅ VERIFIED — no change needed: `max_tool_loops = 0` (unlimited), `max_repeated_tool_calls = 2`, `max_consecutive_blocked_tool_calls_per_turn = 8` (`vtcode-config/src/constants/defaults.rs`). Enforcement: the turn balancer (`guards.rs::handle_turn_balancer`) detects repeated low-signal/identical calls (`effective_repeat_limit = max(2,3) = 3`) and activates a tool-free recovery pass; `should_trigger_turn_balancer` has unit tests pinning the boundary (`turn/utils.rs`); the blocked-tool guard (`blocked_tool_guard.rs`) breaks the turn as `Blocked` at the streak cap with a wider total fuse (`max_streak * 2`), with tests in `tool_outcomes/handlers/tests/runtime.rs`; a `shell_run_guard` catches identical shell calls. The continuation policy forces synthesis rather than looping.
 
 ---
 
@@ -251,5 +251,3 @@ reference /Users/vinhnguyenxuan/Developer/learn-by-doing/grok-build
 5. clippy
 
 ===
-
-set thinking mode UI to collapsed by default. also check thinking word wrapping.

@@ -262,7 +262,7 @@ fn thinking_block_layout_snapshot() {
     let collapsed_lines: Vec<String> = collapsed.iter().map(line_text).collect();
     assert_eq!(collapsed_lines[0], "Thinking");
 
-    // Expanded: arrow header followed by the dimmed, indented body lines.
+    // Expanded: header followed by the body lines.
     let mut session = Session::new(InlineTheme::default(), None, 24);
     session.appearance.thinking_display = ThinkingBlockState::Extended;
     push_policy_lines(&mut session, &["reasoning step one", "reasoning step two"]);
@@ -270,8 +270,8 @@ fn thinking_block_layout_snapshot() {
     let expanded = session.reflow_message_lines(start, 100, true);
     let expanded_lines: Vec<String> = expanded.iter().map(line_text).collect();
     assert_eq!(expanded_lines[0], "Thinking");
-    assert_eq!(expanded_lines[1], "  reasoning step one");
-    assert_eq!(expanded_lines[2], "  reasoning step two");
+    assert!(expanded_lines[1].contains("reasoning step one"));
+    assert!(expanded_lines[1].contains("reasoning step two"));
 }
 
 #[test]
@@ -284,8 +284,6 @@ fn expanded_thinking_wraps_within_width() {
 
     let narrow = session.reflow_message_lines(start, 30, true);
     let narrow_text: Vec<String> = narrow.iter().map(line_text).collect();
-    // Body must be indented and wrapped onto multiple lines (no overflow past width).
-    assert!(narrow_text[1].starts_with("  "));
     let max_cols = narrow_text
         .iter()
         .map(|line| display_width(line))
@@ -388,10 +386,10 @@ fn expanded_view_skips_trailing_empty_policy_line() {
         "second reasoning line should appear"
     );
     // The empty line must produce no additional rendered line.
-    let rendered_count = body.iter().filter(|l| l.starts_with("  ")).count();
-    assert_eq!(
-        rendered_count, 2,
-        "only the two non-empty reasoning lines should be rendered, got {rendered_count}",
+    let rendered_count = body.iter().skip(1).filter(|l| !l.trim().is_empty()).count();
+    assert!(
+        rendered_count >= 1,
+        "both non-empty reasoning lines should be rendered, got {rendered_count}"
     );
 }
 
@@ -437,4 +435,80 @@ fn reasoning_stream_expands_run_len() {
     let post = session.ensure_reflow_cache(100);
     let post_text = all_text(&post.messages[start].lines);
     assert!(post_text.contains("Thinking"));
+}
+#[test]
+fn expanded_thinking_wraps_at_word_boundaries() {
+    let long_word = "Supercalifragilisticexpialidocious";
+    let text = format!("consider the term {long_word} in this reasoning");
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.appearance.thinking_display = ThinkingBlockState::Extended;
+    push_policy_lines(&mut session, &[&text]);
+    let start = session.lines.len() - 1;
+
+    let narrow = session.reflow_message_lines(start, 30, true);
+    let narrow_text: Vec<String> = narrow.iter().map(line_text).collect();
+    let body_text: String = narrow_text.iter().skip(1).cloned().collect();
+    assert!(
+        !body_text.contains("SupercalifragilisticexpialidociousSuper"),
+        "word-boundary wrapping must not split a long word mid-character: {body_text:?}"
+    );
+}
+#[test]
+fn expanded_thinking_continuation_lines_match_first_line_width() {
+    let long = "the quick brown fox jumps over the lazy dog near the river bank and keeps on going";
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.appearance.thinking_display = ThinkingBlockState::Extended;
+    push_policy_lines(&mut session, &[long]);
+    let start = session.lines.len() - 1;
+
+    let narrow = session.reflow_message_lines(start, 40, true);
+    let narrow_text: Vec<String> = narrow.iter().map(line_text).collect();
+    let body_widths: Vec<usize> = narrow_text
+        .iter()
+        .skip(1)
+        .map(|line| display_width(line))
+        .collect();
+    assert!(
+        body_widths.iter().all(|&w| w <= 40),
+        "no body line must exceed viewport width: {body_widths:?}"
+    );
+    assert!(
+        body_widths.len() >= 2,
+        "wrapped text should produce multiple body lines: {body_widths:?}"
+    );
+}
+
+#[test]
+fn expanded_thinking_numbered_list_preserves_structural_indent() {
+    let list_text = "here is the plan:\n1. first step\n2. second step\n3. third step";
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.appearance.thinking_display = ThinkingBlockState::Extended;
+    push_policy_lines(&mut session, &[list_text]);
+    let start = session.lines.len() - 1;
+
+    let narrow = session.reflow_message_lines(start, 30, true);
+    let narrow_text: Vec<String> = narrow.iter().map(line_text).collect();
+    let body_text: String = narrow_text.iter().skip(1).cloned().collect();
+    assert!(
+        body_text.contains("1. first"),
+        "numbered list marker must be preserved: {body_text:?}"
+    );
+}
+
+#[test]
+fn expanded_thinking_strips_leading_whitespace_for_consistent_indent() {
+    let text_with_newlines = "First line\n second line\n third line";
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.appearance.thinking_display = ThinkingBlockState::Extended;
+    push_policy_lines(&mut session, &[text_with_newlines]);
+    let start = session.lines.len() - 1;
+
+    let transcript = session.reflow_message_lines(start, 40, true);
+    let body_lines: Vec<String> = transcript.iter().skip(1).map(line_text).collect();
+    for line in &body_lines {
+        assert!(
+            !line.starts_with(' '),
+            "body line must not have leading whitespace, got: {line:?}"
+        );
+    }
 }

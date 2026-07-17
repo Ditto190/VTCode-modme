@@ -317,9 +317,9 @@ impl Session {
         // The fill pattern is chosen per message kind (Error → Slash, Info →
         // Dash, Warning → Thick) and respects terminal Unicode capabilities.
         let rule_indent = "  ";
-        let rule_indent_width = rule_indent.chars().count();
+        let rule_indent_width = UnicodeWidthStr::width(rule_indent);
         let content_indent = "    ";
-        let content_indent_width = content_indent.chars().count();
+        let content_indent_width = UnicodeWidthStr::width(content_indent);
         let rule_width = max_width.saturating_sub(rule_indent_width);
         let content_width = max_width.saturating_sub(content_indent_width);
 
@@ -332,7 +332,7 @@ impl Session {
             format!("{}{}", rule_indent, dash.repeat(rule_width))
         } else {
             let label_segment = format!(" {label} ");
-            let label_width = label_segment.chars().count();
+            let label_width = UnicodeWidthStr::width(label_segment.as_str());
             if label_width + 2 >= rule_width {
                 format!("{}{}", rule_indent, dash.repeat(rule_width))
             } else {
@@ -414,17 +414,13 @@ impl Session {
 
         let content_width = max_width.saturating_sub(prefix_width);
         let fallback = self.text_fallback(message.kind).or(self.theme.foreground);
-        let mut content_spans = Vec::new();
+        let content_text: String = message.segments.iter().map(|s| s.text.as_str()).collect();
+        let mut content_spans = Vec::with_capacity(message.segments.len());
         for segment in &message.segments {
             let style = ratatui_style_from_inline(&segment.style, fallback);
             content_spans.push(Span::styled(segment.text.clone(), style));
         }
         let content_line = Line::from(content_spans);
-        let content_text: String = content_line
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
 
         let code_continuation_prefix = agent_code_continuation_prefix(message);
 
@@ -477,14 +473,14 @@ impl Session {
             prefix_span.content = replacement.into();
         }
 
-        let first_line_prefix_text = format!(
-            "{}{}",
-            prefix_spans
+        let first_line_prefix_text = {
+            let mut text: String = prefix_spans
                 .iter()
                 .map(|span| span.content.as_ref())
-                .collect::<String>(),
-            left_padding
-        );
+                .collect();
+            text.push_str(left_padding);
+            text
+        };
         let first_line_prefix_width = UnicodeWidthStr::width(first_line_prefix_text.as_str());
         let indent = " ".repeat(prefix_width);
         let mut lines = Vec::with_capacity(wrapped.len());

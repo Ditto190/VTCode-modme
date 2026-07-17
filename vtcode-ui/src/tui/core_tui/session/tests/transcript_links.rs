@@ -2,6 +2,7 @@
 use super::super::*;
 use super::helpers::*;
 use crate::tui::core_tui::session::transcript_links::TranscriptLinkTarget;
+use ratatui::style::Style;
 
 #[test]
 fn transcript_relative_file_reference_is_underlined() {
@@ -1551,5 +1552,30 @@ fn pty_busy_state_does_not_overlay_transcript_status() {
     assert!(
         !rendered.iter().any(|line| line.contains("Running...")),
         "busy PTY state should not inject transcript status overlay"
+    );
+}
+
+#[test]
+fn narrow_lines_skip_redundant_wrap_in_decorate_detected_link_lines() {
+    let line = Line::from(Span::raw("short link text"));
+    let area = Rect::new(0, 0, 80, 1);
+    let (decorated, targets) = transcript_links::decorate_detected_link_lines(
+        vec![line],
+        area,
+        None,
+        None,
+        Style::default(),
+        Style::default(),
+    );
+    assert_eq!(decorated.len(), 1, "narrow line should not be split");
+    assert_eq!(
+        decorated[0].spans.len(),
+        1,
+        "narrow line should keep single span"
+    );
+    assert_eq!(decorated[0].spans[0].content.as_ref(), "short link text");
+    assert!(
+        targets.is_empty(),
+        "no link targets expected for plain text without URL pattern"
     );
 }
