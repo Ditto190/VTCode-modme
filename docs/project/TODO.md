@@ -504,3 +504,12 @@ Regex::new(r"^L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?$").expect("invalid hash location 
     Hardcoded regex LazyLock
     Proc-macro derive
     Total: 27 production-code crash risks identified across 20+ files.
+
+===
+
+move
+
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/vscode-extension
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/zed-extension
+
+to suitable location. update references in the codebase to point to the new location. Ensure that any build scripts, configuration files, or documentation that reference these directories are updated accordingly.
