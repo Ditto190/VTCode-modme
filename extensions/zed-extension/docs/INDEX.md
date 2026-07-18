@@ -230,7 +230,7 @@ export OPENAI_API_KEY="sk-..."
 ## File Organization
 
 ```
-zed-extension/
+extensions/zed-extension/
  Documentation Files (*.md)
     INDEX.md (this file)
     README.md (overview)

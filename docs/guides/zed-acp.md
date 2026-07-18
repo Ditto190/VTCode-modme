@@ -170,13 +170,13 @@ the source tree you are editing.
 When you are ready to distribute VT Code to other Zed users, wrap the ACP bridge inside an Agent
 Server Extension. Extensions bundle both metadata and platform-specific binaries so users can install
 VT Code from Zed's marketplace without touching `settings.json`. This repository ships a ready-to-edit
-manifest at `zed-extension/extension.toml`; customize it for each release and publish the directory as
+manifest at `extensions/zed-extension/extension.toml`; customize it for each release and publish the directory as
 the Zed extension package.
 
 ### Extension manifest layout
 
 Add the VT Code agent definition under the `[agent_servers]` table in `extension.toml`. The copy in
-`zed-extension/extension.toml` uses the latest published macOS artifacts as a baseline (note the required top-level metadata):
+`extensions/zed-extension/extension.toml` uses the latest published macOS artifacts as a baseline (note the required top-level metadata):
 
 ```toml
 [agent_servers.vtcode]
@@ -233,9 +233,9 @@ sha256 = "replace-with-real-sha256"
 1. Produce release builds for every platform you intend to support (see `scripts/` for cross-compiling
    helpers). Bundle the artifacts as `.tar.gz` or `.zip` archives that include the `vtcode` binary at
    the root, plus any support files (for example `vtcode.toml.example`).
-2. Create a GitHub release and upload each archive. Copy the asset URLs into `zed-extension/extension.toml`.
+2. Create a GitHub release and upload each archive. Copy the asset URLs into `extensions/zed-extension/extension.toml`.
 3. Run `./scripts/release.sh` to execute the automated release flow. It rebuilds the binaries,
-   uploads release assets, and rewrites `zed-extension/extension.toml` with fresh SHA-256 checksums
+   uploads release assets, and rewrites `extensions/zed-extension/extension.toml` with fresh SHA-256 checksums
    for every archive that exists in `dist/`.
 4. Confirm each target you ship is represented in the manifest; add new target tables as you
    introduce additional builds.

@@ -151,7 +151,7 @@ members = [
     "crates/codegen/vtcode-session-store",
     "crates/codegen/vtcode-skills",
     "crates/codegen/vtcode-ui",
-    "xtask",
+    "crates/codegen/xtask",
 ]
 default-members = [
     ".",
@@ -159,7 +159,7 @@ default-members = [
     "crates/codegen/vtcode-ui",
 ]
 exclude = [
-    "zed-extension",
+    "extensions/zed-extension",
     "fuzz",
 ]
 

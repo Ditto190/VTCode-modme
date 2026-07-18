@@ -271,7 +271,7 @@ v 7 passed
 
 ```bash
 # Run all extension tests
-cd zed-extension && cargo test
+cd extensions/zed-extension && cargo test
 
 # Run just file search tests
 cargo test --lib commands::tests

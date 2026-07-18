@@ -16,7 +16,7 @@ Before you begin, ensure you have the following installed:
 
 ```bash
 # Navigate to your extension directory
-cd /path/to/vtcode/vscode-extension
+cd /path/to/vtcode/extensions/vscode-extension
 
 # Install dependencies
 npm install
@@ -103,7 +103,7 @@ npm run lint
 ## Extension Structure
 
 ```
-vscode-extension/
+extensions/vscode-extension/
  package.json          # Extension manifest and configuration
  src/
     extension.ts      # Main extension entry point

@@ -84,7 +84,7 @@ Cargo workspace with ~30 crates. Rust stable, MSRV 1.88, edition 2024.
 - **`vtcode-safety/`**: Command safety detection and sandboxing
 - **`vtcode-a2a/`**: Agent2Agent protocol client and server
 - **`vtcode-mcp/`**: Model Context Protocol client and tool discovery
-- **`xtask/`**: Release packaging automation
+- **`crates/codegen/xtask/`**: Release packaging automation
 
 ### Key Directories
 

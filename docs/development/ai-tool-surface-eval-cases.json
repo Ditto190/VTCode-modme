@@ -6,7 +6,7 @@
     "capability": "ordinary_file_discovery",
     "task": "Inspect this repository and list every crate-level AGENTS.md path. Report the total count and the exact shell command used to discover them.",
     "metric": "llm_grader",
-    "rubric": "Mark correct only when the output contains repository-derived evidence from an executed file-discovery command. It must report exactly 20 crate-level AGENTS.md paths, including src/AGENTS.md, vtcode-core/AGENTS.md, vtcode-skills/AGENTS.md, vtcode-utility-tool-specs/AGENTS.md, and xtask/AGENTS.md, and show the exact shell command used. Every listed item must be a concrete path ending in AGENTS.md. Mark incorrect if the output merely repeats the task, mentions AGENTS.md without enumerating paths, omits the count or command, or reports a count other than 20."
+    "rubric": "Mark correct only when the output contains repository-derived evidence from an executed file-discovery command. It must report exactly 20 crate-level AGENTS.md paths, including src/AGENTS.md, vtcode-core/AGENTS.md, vtcode-skills/AGENTS.md, vtcode-utility-tool-specs/AGENTS.md, and crates/codegen/xtask/AGENTS.md, and show the exact shell command used. Every listed item must be a concrete path ending in AGENTS.md. Mark incorrect if the output merely repeats the task, mentions AGENTS.md without enumerating paths, omits the count or command, or reports a count other than 20."
   },
   {
     "id": "tool_surface_text_search_default",

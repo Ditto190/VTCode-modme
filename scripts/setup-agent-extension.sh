@@ -7,7 +7,7 @@ set -e
 echo "VT Code Agent Server Extension - Development Setup"
 
 # Check if we're in the right directory
-if [ ! -f "Cargo.toml" ] || [ ! -d "zed-extension" ]; then
+if [ ! -f "Cargo.toml" ] || [ ! -d "extensions/zed-extension" ]; then
     echo "Error: This script must be run from the root VT Code directory"
     exit 1
 fi

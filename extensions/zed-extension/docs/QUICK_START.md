@@ -47,12 +47,12 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```bash
 # Clone this repository
 git clone https://github.com/vinhnx/vtcode.git
-cd vtcode/zed-extension
+cd vtcode/extensions/zed-extension
 
 # In Zed:
 # 1. Open Extensions panel (Cmd/Ctrl + Shift + X)
 # 2. Click "Install Dev Extension"
-# 3. Select the zed-extension directory
+# 3. Select the extensions/zed-extension directory
 ```
 
 ## 3. Configure VT Code

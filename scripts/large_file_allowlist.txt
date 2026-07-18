@@ -11,7 +11,7 @@
 
 # Allow the pre-built Zed extension binary, which is required for the
 # integration tests and kept under 1 MB.
-zed-extension/extension.wasm=1_000_000
+extensions/zed-extension/extension.wasm=1_000_000
 
 # Keep changelog history available while capping growth.
 CHANGELOG.md=600_000

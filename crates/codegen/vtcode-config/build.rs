@@ -206,7 +206,7 @@ fn generate_artifacts() -> Result<()> {
 }
 
 fn load_provider_metadata(manifest_dir: &Path) -> Result<Provider> {
-    let docs_path = manifest_dir.join("../docs/models.json");
+    let docs_path = manifest_dir.join("../../../docs/models.json");
     if docs_path.exists() {
         println!("cargo:rerun-if-changed={}", docs_path.display());
         let models_source = fs::read_to_string(&docs_path)
@@ -393,7 +393,7 @@ impl Provider {
 }
 
 fn load_model_capability_entries(manifest_dir: &Path) -> Result<Vec<CapabilityEntry>> {
-    let docs_path = manifest_dir.join("../docs/models.json");
+    let docs_path = manifest_dir.join("../../../docs/models.json");
     if !docs_path.exists() {
         return Ok(Vec::new());
     }
