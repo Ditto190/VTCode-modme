@@ -1,10 +1,17 @@
 [package]
 name = "vtcode-skills"
-version = "0.135.14"
+version.workspace = true
 edition = "2024"
-license.workspace = true
+rust-version = "1.93.0"
+authors = ["Vinh Nguyen <vinhnguyen2308@gmail.com>"]
 description = "Skill types, discovery, loading, and validation for VT Code"
-publish = false
+license.workspace = true
+readme = "README.md"
+homepage = "https://github.com/vinhnx/vtcode"
+repository = "https://github.com/vinhnx/vtcode"
+documentation = "https://docs.rs/vtcode-skills"
+categories = ["development-tools"]
+keywords = ["vt", "skills", "agent", "plugins", "discovery"]
 
 [dependencies]
 anyhow.workspace = true

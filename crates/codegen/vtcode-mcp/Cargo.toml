@@ -12,7 +12,6 @@ repository = "https://github.com/vinhnx/vtcode"
 documentation = "https://docs.rs/vtcode-mcp"
 categories = ["development-tools"]
 keywords = ["vt", "mcp", "model-context-protocol", "client"]
-publish = false
 
 [dependencies]
 anyhow = { workspace = true }

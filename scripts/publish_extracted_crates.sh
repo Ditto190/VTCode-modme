@@ -10,20 +10,20 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # same script can be used for validation ahead of the real release window.
 
 usage() {
-    cat <<USAGE
+	cat <<USAGE
 Usage: $0 [--dry-run] [--start-from <crate>] [--skip-tests] [--skip-docs] [--skip-tags] [--skip-follow-up]
 
 Options:
-  --dry-run          Use `cargo publish --dry-run` for each crate instead of
+  --dry-run          Use $(cargo publish --dry-run) for each crate instead of
                      performing the real publish. This is the default when the
-                     VT_RELEASE_DRY_RUN environment variable is set to `1`.
+                     VT_RELEASE_DRY_RUN environment variable is set to $(1).
   --start-from CRATE Resume publishing from the provided crate name. Valid
-                     crates: vtcode-commons,
-                     vtcode-auth, vtcode-exec-events,
-                     vtcode-session-store, vtcode-macros,
-                     vtcode-config,
-                     vtcode-indexer, vtcode-bash-runner,
-                     vtcode-utility-tool-specs, vtcode-eval.
+                     crates: vtcode-commons, vtcode-auth, vtcode-exec-events,
+                     vtcode-session-store, vtcode-macros, vtcode-config,
+                     vtcode-indexer, vtcode-bash-runner, vtcode-utility-tool-specs,
+                     vtcode-eval, vtcode-safety, vtcode-a2a, vtcode-llm,
+                     vtcode-skills, vtcode-ui, vtcode-mcp, vtcode-core,
+                     vtcode-acp, vtcode.
   --skip-tests       Skip running the workspace fmt/clippy/test checks. Use with
                      caution; the release plan expects the validation suite to
                      pass before publishing.
@@ -34,12 +34,12 @@ Options:
   -h, --help         Show this help message and exit.
 
 Environment variables:
-  VT_RELEASE_DRY_RUN When set to `1`, the script defaults to performing a dry
-                     run. Passing `--dry-run` or providing `--start-from` still
+  VT_RELEASE_DRY_RUN When set to $(1), the script defaults to performing a dry
+                     run. Passing $(--dry-run) or providing $(--start-from) still
                      works while the variable is set.
   VT_RELEASE_SKIP_DOCS
-                     When set to `1`, skip regenerating API docs even if
-                     `--skip-docs` is not passed.
+                     When set to $(1), skip regenerating API docs even if
+                     $(--skip-docs) is not passed.
 USAGE
 }
 
@@ -52,234 +52,243 @@ RUN_FOLLOW_UP=1
 CURRENT_VERSION=$(get_current_version)
 
 if [[ ${VT_RELEASE_SKIP_DOCS:-0} -eq 1 ]]; then
-    RUN_DOCS=0
+	RUN_DOCS=0
 fi
 
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --dry-run)
-            DRY_RUN=1
-            shift
-            ;;
-        --start-from)
-            START_FROM="$2"
-            shift 2
-            ;;
-        --skip-tests)
-            RUN_TESTS=0
-            shift
-            ;;
-        --skip-docs)
-            RUN_DOCS=0
-            shift
-            ;;
-        --skip-tags)
-            RUN_TAGS=0
-            shift
-            ;;
-        --skip-follow-up)
-            RUN_FOLLOW_UP=0
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1" >&2
-            usage
-            exit 1
-            ;;
-    esac
+	case "$1" in
+	--dry-run)
+		DRY_RUN=1
+		shift
+		;;
+	--start-from)
+		START_FROM="$2"
+		shift 2
+		;;
+	--skip-tests)
+		RUN_TESTS=0
+		shift
+		;;
+	--skip-docs)
+		RUN_DOCS=0
+		shift
+		;;
+	--skip-tags)
+		RUN_TAGS=0
+		shift
+		;;
+	--skip-follow-up)
+		RUN_FOLLOW_UP=0
+		shift
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	*)
+		echo "Unknown option: $1" >&2
+		usage
+		exit 1
+		;;
+	esac
 done
 
 CRATES=(
-    vtcode-commons
-    vtcode-auth
-    vtcode-exec-events
-    vtcode-session-store
-    vtcode-macros
-    vtcode-config
-    vtcode-indexer
-    vtcode-bash-runner
-    vtcode-utility-tool-specs
-    vtcode-eval
+	vtcode-commons
+	vtcode-auth
+	vtcode-exec-events
+	vtcode-session-store
+	vtcode-macros
+	vtcode-config
+	vtcode-indexer
+	vtcode-bash-runner
+	vtcode-utility-tool-specs
+	vtcode-eval
+	vtcode-safety
+	vtcode-a2a
+	vtcode-llm
+	vtcode-skills
+	vtcode-ui
+	vtcode-mcp
+	vtcode-core
+	vtcode-acp
+	vtcode
 )
 
 # Validate that all workspace path dependencies of crates in the publish list
 # are also in the publish list. This catches missing crates early.
 validate_publish_order() {
-    local errors=0
-    # Build a set of crates in the publish list for fast lookup
-    local crate_set=""
-    for crate in "${CRATES[@]}"; do
-        crate_set="${crate_set} ${crate}"
-    done
+	local errors=0
+	# Build a set of crates in the publish list for fast lookup
+	local crate_set=""
+	for crate in "${CRATES[@]}"; do
+		crate_set="${crate_set} ${crate}"
+	done
 
-    for crate in "${CRATES[@]}"; do
-        local cargo_toml="${crate}/Cargo.toml"
-        if [[ ! -f "$cargo_toml" ]]; then
-            continue
-        fi
-        # Extract workspace path dependencies
-        local deps
-        deps=$(grep -E 'path\s*=' "$cargo_toml" | grep -oE 'path\s*=\s*"\.\./([^"]+)"' | sed 's|path\s*=\s*"\.\./||;s|"||g' | sort -u || true)
-        for dep in $deps; do
-            if [[ -n "$dep" && "$crate_set" != *" $dep "* ]]; then
-                # Check if it's actually a workspace member
-                if [[ -d "$dep" && -f "$dep/Cargo.toml" ]]; then
-                    echo "ERROR: ${crate} depends on workspace member '${dep}' which is not in the CRATES publish list" >&2
-                    errors=$((errors + 1))
-                fi
-            fi
-        done
-    done
+	for crate in "${CRATES[@]}"; do
+		local cargo_toml="${crate}/Cargo.toml"
+		if [[ ! -f "$cargo_toml" ]]; then
+			continue
+		fi
+		# Extract workspace path dependencies
+		local deps
+		deps=$(grep -E 'path\s*=' "$cargo_toml" | grep -oE 'path\s*=\s*"\.\./([^"]+)"' | sed 's|path\s*=\s*"\.\./||;s|"||g' | sort -u || true)
+		for dep in $deps; do
+			if [[ -n "$dep" && "$crate_set" != *" $dep "* ]]; then
+				# Check if it's actually a workspace member
+				if [[ -d "$dep" && -f "$dep/Cargo.toml" ]]; then
+					echo "ERROR: ${crate} depends on workspace member '${dep}' which is not in the CRATES publish list" >&2
+					errors=$((errors + 1))
+				fi
+			fi
+		done
+	done
 
-    if [[ $errors -gt 0 ]]; then
-        echo "Found $errors missing dependency(ies) in the publish list. Aborting." >&2
-        exit 1
-    fi
+	if [[ $errors -gt 0 ]]; then
+		echo "Found $errors missing dependency(ies) in the publish list. Aborting." >&2
+		exit 1
+	fi
 }
 
 validate_publish_order
 
 if [[ -n "$START_FROM" ]]; then
-    found=0
-    filtered=()
-    for crate in "${CRATES[@]}"; do
-        if [[ $crate == "$START_FROM" ]]; then
-            found=1
-        fi
-        if [[ $found -eq 1 ]]; then
-            filtered+=("$crate")
-        fi
-    done
-    if [[ $found -eq 0 ]]; then
-        echo "Unknown crate passed to --start-from: $START_FROM" >&2
-        exit 1
-    fi
-    CRATES=("${filtered[@]}")
+	found=0
+	filtered=()
+	for crate in "${CRATES[@]}"; do
+		if [[ $crate == "$START_FROM" ]]; then
+			found=1
+		fi
+		if [[ $found -eq 1 ]]; then
+			filtered+=("$crate")
+		fi
+	done
+	if [[ $found -eq 0 ]]; then
+		echo "Unknown crate passed to --start-from: $START_FROM" >&2
+		exit 1
+	fi
+	CRATES=("${filtered[@]}")
 fi
 
 run_cmd() {
-    echo "+ $*"
-    eval "$@"
+	echo "+ $*"
+	eval "$@"
 }
 
 publish_cmd() {
-    local crate="$1"
-    if [[ $DRY_RUN -eq 1 ]]; then
-        run_cmd "cargo publish --dry-run -p $crate"
-    else
-        run_cmd "cargo publish -p $crate"
-    fi
+	local crate="$1"
+	if [[ $DRY_RUN -eq 1 ]]; then
+		run_cmd "cargo publish --dry-run -p $crate"
+	else
+		run_cmd "cargo publish -p $crate"
+	fi
 }
 
 wait_for_crates_io_version() {
-    local crate="$1"
-    local version="$2"
+	local crate="$1"
+	local version="$2"
 
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "[dry-run] Skipping crates.io availability check for ${crate} ${version}."
-        return 0
-    fi
+	if [[ $DRY_RUN -eq 1 ]]; then
+		echo "[dry-run] Skipping crates.io availability check for ${crate} ${version}."
+		return 0
+	fi
 
-    local endpoint="https://crates.io/api/v1/crates/${crate}/${version}"
-    local attempt=1
-    local max_attempts=36
+	local endpoint="https://crates.io/api/v1/crates/${crate}/${version}"
+	local attempt=1
+	local max_attempts=36
 
-    print_info "Waiting for ${crate} ${version} to be indexed on crates.io..."
-    while [[ $attempt -le $max_attempts ]]; do
-        if curl --silent --show-error --fail --location --user-agent "vtcode-publish-script" "$endpoint" >/dev/null; then
-            print_success "${crate} ${version} is available on crates.io"
-            return 0
-        fi
+	print_info "Waiting for ${crate} ${version} to be indexed on crates.io..."
+	while [[ $attempt -le $max_attempts ]]; do
+		if curl --silent --show-error --fail --location --user-agent "vtcode-publish-script" "$endpoint" >/dev/null; then
+			print_success "${crate} ${version} is available on crates.io"
+			return 0
+		fi
 
-        if [[ $attempt -lt $max_attempts ]]; then
-            sleep 5
-        fi
+		if [[ $attempt -lt $max_attempts ]]; then
+			sleep 5
+		fi
 
-        attempt=$((attempt + 1))
-    done
+		attempt=$((attempt + 1))
+	done
 
-    print_error "Timed out waiting for ${crate} ${version} to appear on crates.io"
-    return 1
+	print_error "Timed out waiting for ${crate} ${version} to appear on crates.io"
+	return 1
 }
 
 generate_docs() {
-    local crate="$1"
-    if [[ $RUN_DOCS -eq 0 ]]; then
-        echo "Skipping doc generation for ${crate}."
-        return
-    fi
-    run_cmd "cargo doc --no-deps -p ${crate}"
+	local crate="$1"
+	if [[ $RUN_DOCS -eq 0 ]]; then
+		echo "Skipping doc generation for ${crate}."
+		return
+	fi
+	run_cmd "cargo doc --no-deps -p ${crate}"
 }
 
 maybe_tag() {
-    local tag="$1"
-    if [[ $RUN_TAGS -eq 0 ]]; then
-        echo "Skipping creation of git tag ${tag}."
-        return
-    fi
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "[dry-run] Skipping creation of git tag ${tag}."
-        return
-    fi
-    if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-        echo "Tag ${tag} already exists; skipping creation."
-        return
-    fi
-    run_cmd "git tag ${tag}"
+	local tag="$1"
+	if [[ $RUN_TAGS -eq 0 ]]; then
+		echo "Skipping creation of git tag ${tag}."
+		return
+	fi
+	if [[ $DRY_RUN -eq 1 ]]; then
+		echo "[dry-run] Skipping creation of git tag ${tag}."
+		return
+	fi
+	if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+		echo "Tag ${tag} already exists; skipping creation."
+		return
+	fi
+	run_cmd "git tag ${tag}"
 }
 
 post_publish_follow_up() {
-    local crate="$1"
-    if [[ $RUN_FOLLOW_UP -eq 0 ]]; then
-        echo "Skipping follow-up update/check for ${crate}."
-        return
-    fi
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "[dry-run] Would run 'cargo update -p ${crate}' and 'cargo check -p ${crate}'."
-        return
-    fi
-    run_cmd "cargo update -p ${crate}"
-    run_cmd "cargo check -p ${crate}"
+	local crate="$1"
+	if [[ $RUN_FOLLOW_UP -eq 0 ]]; then
+		echo "Skipping follow-up update/check for ${crate}."
+		return
+	fi
+	if [[ $DRY_RUN -eq 1 ]]; then
+		echo "[dry-run] Would run 'cargo update -p ${crate}' and 'cargo check -p ${crate}'."
+		return
+	fi
+	run_cmd "cargo update -p ${crate}"
+	run_cmd "cargo check -p ${crate}"
 }
 
 if [[ $RUN_TESTS -eq 1 ]]; then
-    run_cmd "cargo fmt"
-    run_cmd "cargo clippy --all-targets --all-features"
-    run_cmd "cargo test --workspace"
-    run_cmd "cargo test --doc"
+	run_cmd "cargo fmt"
+	run_cmd "cargo clippy --all-targets --all-features"
+	run_cmd "cargo test --workspace"
+	run_cmd "cargo test --doc"
 fi
 
 for crate in "${CRATES[@]}"; do
-    generate_docs "$crate"
-    if [[ "$crate" == "vtcode-bash-runner" && $DRY_RUN -eq 0 ]]; then
-        echo "Re-running vtcode-bash-runner dry run now that vtcode-exec-events is published..."
-        run_cmd "cargo publish --dry-run -p vtcode-bash-runner"
-    fi
-    publish_cmd "$crate"
-    wait_for_crates_io_version "$crate" "$CURRENT_VERSION"
-    tag="${crate}-${CURRENT_VERSION}"
-    maybe_tag "${tag}"
-    post_publish_follow_up "${crate}"
-    echo "Completed processing for ${crate}."
-    echo "---"
-    if [[ $DRY_RUN -eq 1 ]]; then
-        echo "[dry-run] Validate docs/changelogs and rehearse dependency bumps after each publish."
-        echo "[dry-run] Use a real run without --dry-run to create tags and refresh dependencies."
-    else
-        echo "Review the updated Cargo.lock and bump the dependency in dependent crates before pushing ${tag}."
-        echo "When ready, commit the changes, push the tag, and proceed to the next crate."
-    fi
-    echo "=========================="
-    echo
+	generate_docs "$crate"
+	if [[ "$crate" == "vtcode-bash-runner" && $DRY_RUN -eq 0 ]]; then
+		echo "Re-running vtcode-bash-runner dry run now that vtcode-exec-events is published..."
+		run_cmd "cargo publish --dry-run -p vtcode-bash-runner"
+	fi
+	publish_cmd "$crate"
+	wait_for_crates_io_version "$crate" "$CURRENT_VERSION"
+	tag="${crate}-${CURRENT_VERSION}"
+	maybe_tag "${tag}"
+	post_publish_follow_up "${crate}"
+	echo "Completed processing for ${crate}."
+	echo "---"
+	if [[ $DRY_RUN -eq 1 ]]; then
+		echo "[dry-run] Validate docs/changelogs and rehearse dependency bumps after each publish."
+		echo "[dry-run] Use a real run without --dry-run to create tags and refresh dependencies."
+	else
+		echo "Review the updated Cargo.lock and bump the dependency in dependent crates before pushing ${tag}."
+		echo "When ready, commit the changes, push the tag, and proceed to the next crate."
+	fi
+	echo "=========================="
+	echo
 done
 
 echo "Release sequence complete."
 if [[ $DRY_RUN -eq 1 ]]; then
-    echo "All commands were executed in dry-run mode."
+	echo "All commands were executed in dry-run mode."
 else
-    echo "Remember to push the created tags and follow up with dependency bump PRs."
+	echo "Remember to push the created tags and follow up with dependency bump PRs."
 fi

@@ -12,7 +12,6 @@ repository = "https://github.com/vinhnx/vtcode"
 documentation = "https://docs.rs/vtcode-a2a"
 categories = ["development-tools"]
 keywords = ["vt", "a2a", "agent", "protocol"]
-publish = false
 
 [features]
 default = []

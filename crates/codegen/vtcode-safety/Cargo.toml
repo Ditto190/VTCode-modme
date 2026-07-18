@@ -12,7 +12,6 @@ repository = "https://github.com/vinhnx/vtcode"
 documentation = "https://docs.rs/vtcode-safety"
 categories = ["development-tools"]
 keywords = ["vt", "safety", "sandbox", "policy", "command"]
-publish = false
 
 [dependencies]
 anyhow = { workspace = true }

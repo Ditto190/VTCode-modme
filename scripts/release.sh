@@ -647,12 +647,10 @@ trigger_docs_rs_rebuild() {
 
 	print_distribution "Triggering docs.rs rebuild for version $version..."
 	local crates=(
-		vtcode-core vtcode-config
-		vtcode-commons vtcode-indexer vtcode-bash-runner
-		vtcode-exec-events vtcode-session-store vtcode-eval vtcode-acp vtcode-auth
-		vtcode-macros
-		vtcode-utility-tool-specs vtcode-a2a vtcode-mcp
-		vtcode-ui vtcode-safety vtcode-llm vtcode-skills
+		vtcode-commons vtcode-auth vtcode-exec-events vtcode-session-store vtcode-macros
+		vtcode-config vtcode-indexer vtcode-bash-runner vtcode-utility-tool-specs vtcode-eval
+		vtcode-safety vtcode-a2a vtcode-llm vtcode-skills vtcode-ui vtcode-mcp
+		vtcode-core vtcode-acp vtcode
 	)
 	for crate in "${crates[@]}"; do
 		curl -s -o /dev/null "https://docs.rs/${crate}/${version}" || true
