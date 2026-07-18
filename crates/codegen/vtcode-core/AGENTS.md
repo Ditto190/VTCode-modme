@@ -20,7 +20,7 @@ Implement in `tools/` (web_search, defuddle, outline_search are reference patter
 
 ## Adding an LLM Provider
 
-Implement in `crates/codegen/vtcode-llm/src/providers/` (the canonical home). Use `adding-llm-providers` skill. Update `ModelId::all_models()` + `builtin_model_presets()`. Then add a re-export in `crates/codegen/vtcode-core/src/llm/providers/mod.rs`.
+Implement in `crates/codegen/vtcode-llm/src/providers/` (the canonical home). Use `adding-llm-providers` skill. Update `ModelId::all_models()` + `builtin_model_presets()`. Provider presets live in `models_manager/model_presets/presets/<provider>.rs` — register in `presets/mod.rs`, add a call in `builtin_model_presets()` + a match arm in `presets_for_provider()`. Then add a re-export in `crates/codegen/vtcode-core/src/llm/providers/mod.rs`.
 
 ## Gotchas
 

@@ -1,11 +1,11 @@
 use std::collections::hash_map::DefaultHasher;
 use std::env;
-use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use tracing::{debug, warn};
+use vtcode_commons::canonicalize;
 use vtcode_config::IdeContextConfig;
 use vtcode_core::ide_context::{EditorContextSnapshot, IDE_CONTEXT_ENV_VAR, LEGACY_VSCODE_CONTEXT_ENV_VAR};
 use vtcode_core::tools::dominant_workspace_language;
@@ -349,9 +349,9 @@ fn file_path_matches_workspace(workspace: &Path, raw_path: &str) -> bool {
 
 fn paths_match(left: &Path, right: &Path) -> bool {
     left == right
-        || fs::canonicalize(left)
+        || canonicalize(left)
             .ok()
-            .zip(fs::canonicalize(right).ok())
+            .zip(canonicalize(right).ok())
             .is_some_and(|(left, right)| left == right)
 }
 

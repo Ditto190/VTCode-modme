@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
+use vtcode_commons::canonicalize;
 use vtcode_commons::reference::StaticWorkspacePaths;
 
 #[test]
@@ -410,8 +411,8 @@ fn config_defaults_provider_overrides_paths_and_theme() {
         let manager = ConfigManager::load_from_workspace(workspace_root).expect("failed to load workspace config");
 
         let resolved_path = manager.config_path().expect("config path should be resolved");
-        let resolved_canonical = fs::canonicalize(resolved_path).expect("resolved config path should canonicalize");
-        let expected_canonical = fs::canonicalize(&config_path).expect("expected config path should canonicalize");
+        let resolved_canonical = canonicalize(resolved_path).expect("resolved config path should canonicalize");
+        let expected_canonical = canonicalize(&config_path).expect("expected config path should canonicalize");
         assert_eq!(resolved_canonical, expected_canonical);
 
         assert_eq!(SyntaxHighlightingDefaults::theme(), "custom-theme");

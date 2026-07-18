@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use once_cell::sync::OnceCell;
 
 use crate::config::GatekeeperConfig;
+use vtcode_commons::canonicalize;
 
 const GATEKEEPER_CACHE_MAX_ENTRIES: usize = 1024;
 
@@ -86,7 +87,7 @@ pub fn check_quarantine(path: &Path) {
             return;
         }
 
-        let canonical = match path.canonicalize() {
+        let canonical = match canonicalize(path) {
             Ok(canonical) => canonical,
             Err(err) => {
                 tracing::warn!(

@@ -6,6 +6,7 @@ use crate::utils::file_utils::ensure_dir_exists;
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 use tracing::info;
+use vtcode_commons::canonicalize_async;
 
 impl FileOpsTool {
     /// Shared validation for move and copy operations.
@@ -104,8 +105,7 @@ impl FileOpsTool {
             return Err(anyhow!("Error: Path '{path}' does not exist. Provide force=true to ignore missing files."));
         }
 
-        let canonical =
-            with_path_context(tokio::fs::canonicalize(&target_path).await, "resolve canonical path for", &path)?;
+        let canonical = with_path_context(canonicalize_async(&target_path).await, "resolve canonical path for", &path)?;
 
         if !canonical.starts_with(self.canonical_workspace_root()) {
             return Err(anyhow!("Error: Path '{path}' resolves outside the workspace and cannot be deleted."));

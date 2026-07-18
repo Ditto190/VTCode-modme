@@ -12,6 +12,7 @@ use vtcode_core::llm::provider as uni;
 use crate::agent::runloop::unified::incremental_system_prompt::{
     IncrementalSystemPrompt, SystemPromptContext, hash_base_system_prompt,
 };
+use vtcode_commons::canonicalize;
 
 /// Parameters for building system prompts
 #[derive(Clone)]
@@ -347,7 +348,7 @@ impl ContextManager {
             self.workspace_root.as_ref()?.join(candidate)
         };
 
-        std::fs::canonicalize(&path).ok().or(Some(path))
+        canonicalize(&path).ok().or(Some(path))
     }
 }
 

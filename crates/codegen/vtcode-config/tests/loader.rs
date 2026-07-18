@@ -5,6 +5,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use vtcode_commons::canonicalize;
 use vtcode_commons::paths::WorkspacePaths;
 use vtcode_config::ConfigLayerSource;
 use vtcode_config::ConfigManager;
@@ -78,7 +79,7 @@ fn loads_config_from_workspace_root_before_config_dir() -> Result<()> {
     let manager = with_test_defaults(workspace_root, config_dir, vec![home_config.clone()], || {
         ConfigManager::load_from_workspace(workspace_root)
     })?;
-    let expected_root_config = fs::canonicalize(&root_config)?;
+    let expected_root_config = canonicalize(&root_config)?;
 
     assert_eq!(manager.config().agent.provider, "workspace-root");
     assert_eq!(manager.config_path(), Some(expected_root_config.as_path()));
@@ -103,7 +104,7 @@ fn loads_config_from_config_dir_when_root_missing() -> Result<()> {
     let manager = with_test_defaults(workspace_root, config_dir, vec![home_config.clone()], || {
         ConfigManager::load_from_workspace(workspace_root)
     })?;
-    let expected_config_dir_config = fs::canonicalize(&config_dir_config)?;
+    let expected_config_dir_config = canonicalize(&config_dir_config)?;
 
     assert_eq!(manager.config().agent.provider, "config-dir");
     assert_eq!(manager.config_path(), Some(expected_config_dir_config.as_path()));
@@ -125,7 +126,7 @@ fn loads_config_from_home_directory_when_workspace_missing() -> Result<()> {
     let manager = with_test_defaults(workspace_root, config_dir, vec![home_config.clone()], || {
         ConfigManager::load_from_workspace(workspace_root)
     })?;
-    let expected_home_config = fs::canonicalize(&home_config)?;
+    let expected_home_config = canonicalize(&home_config)?;
 
     assert_eq!(manager.config().agent.provider, "home");
     assert_eq!(manager.config_path(), Some(expected_home_config.as_path()));
@@ -170,7 +171,7 @@ fn load_uses_current_directory_workspace() -> Result<()> {
     std::env::set_current_dir(original_dir)?;
 
     let manager = manager?;
-    let expected_root_config = fs::canonicalize(&root_config)?;
+    let expected_root_config = canonicalize(&root_config)?;
     assert_eq!(manager.config().agent.provider, "workspace-root");
     assert_eq!(manager.config_path(), Some(expected_root_config.as_path()));
 
@@ -197,8 +198,8 @@ fn load_canonicalizes_relative_workspace_paths() -> Result<()> {
 
     std::env::set_current_dir(original_dir)?;
     let manager = manager?;
-    let expected_root_config = fs::canonicalize(&root_config)?;
-    let expected_workspace_root = fs::canonicalize(workspace_root)?;
+    let expected_root_config = canonicalize(&root_config)?;
+    let expected_workspace_root = canonicalize(workspace_root)?;
 
     assert_eq!(manager.config().agent.provider, "workspace-root");
     assert_eq!(manager.config_path(), Some(expected_root_config.as_path()));

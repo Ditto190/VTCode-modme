@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use hashbrown::{HashMap, HashSet};
-use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
+use vtcode_commons::canonicalize;
 use vtcode_core::ui::is_tui_mode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,10 +79,10 @@ pub(crate) fn normalize_workspace_path(workspace: &Path, path: &Path) -> PathBuf
     } else {
         workspace.join(path)
     };
-    fs::canonicalize(&candidate).unwrap_or_else(|_| {
+    canonicalize(&candidate).unwrap_or_else(|_| {
         candidate
             .parent()
-            .and_then(|parent| fs::canonicalize(parent).ok())
+            .and_then(|parent| canonicalize(parent).ok())
             .and_then(|parent| candidate.file_name().map(|name| parent.join(name)))
             .unwrap_or(candidate)
     })
@@ -92,7 +92,7 @@ pub(crate) fn workspace_relative_display(workspace: &Path, path: &Path) -> Strin
     if let Ok(relative) = path.strip_prefix(workspace) {
         return relative.display().to_string();
     }
-    if let Ok(canonical_workspace) = fs::canonicalize(workspace)
+    if let Ok(canonical_workspace) = canonicalize(workspace)
         && let Ok(relative) = path.strip_prefix(canonical_workspace)
     {
         return relative.display().to_string();

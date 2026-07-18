@@ -73,6 +73,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+    use vtcode_commons::canonicalize;
     use vtcode_core::tools::ast_grep_binary::{AST_GREP_INSTALL_COMMAND, set_ast_grep_binary_override_for_tests};
 
     fn create_workspace_with_scaffold() -> TempDir {
@@ -167,14 +168,14 @@ exit 0\n"
         let scan_args = read_lines(&workspace.path().join("scan-args.log"));
         assert_eq!(scan_args, ["scan", "--config", AST_GREP_CONFIG_PATH]);
 
-        let expected_workspace = fs::canonicalize(workspace.path()).expect("canonical workspace");
+        let expected_workspace = canonicalize(workspace.path()).expect("canonical workspace");
 
         let test_cwd = fs::read_to_string(workspace.path().join("test-cwd.log")).expect("test cwd");
-        let test_cwd = fs::canonicalize(test_cwd.trim()).expect("canonical test cwd");
+        let test_cwd = canonicalize(test_cwd.trim()).expect("canonical test cwd");
         assert_eq!(test_cwd, expected_workspace);
 
         let scan_cwd = fs::read_to_string(workspace.path().join("scan-cwd.log")).expect("scan cwd");
-        let scan_cwd = fs::canonicalize(scan_cwd.trim()).expect("canonical scan cwd");
+        let scan_cwd = canonicalize(scan_cwd.trim()).expect("canonical scan cwd");
         assert_eq!(scan_cwd, expected_workspace);
     }
 

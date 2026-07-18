@@ -191,10 +191,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dev-dependencies]
 assert_fs = { workspace = true }
-mockito = "1.7"
 proptest = "1.11"
 criterion = { workspace = true }
-wiremock = "0.6.5"
 serial_test = { workspace = true }
 
 [[bench]]

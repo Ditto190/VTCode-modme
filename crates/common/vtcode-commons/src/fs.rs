@@ -148,17 +148,26 @@ pub fn parse_json_or_default<T: for<'de> Deserialize<'de> + Default>(input: &str
     })
 }
 
-/// Canonicalize path with context
+/// Canonicalize path with context.
+///
+/// Uses [`crate::paths::canonicalize`] (backed by `dunce`) to avoid Windows
+/// `\\?\` verbatim prefixes from `std::fs::canonicalize`.
 pub fn canonicalize_with_context(path: &Path, context: &str) -> Result<PathBuf> {
-    path.canonicalize()
+    crate::paths::canonicalize(path)
         .with_context(|| format!("Failed to canonicalize {} path: {}", context, path.display()))
 }
 
-/// Canonicalize path with context (async)
+/// Canonicalize path with context (async).
+///
+/// `dunce::canonicalize` is a synchronous syscall; we wrap it in
+/// `spawn_blocking` to preserve the async interface without blocking the
+/// runtime, matching the behaviour of `tokio::fs::canonicalize`.
 pub async fn canonicalize_with_context_async(path: &Path, context: &str) -> Result<PathBuf> {
-    fs::canonicalize(path)
-        .await
-        .with_context(|| format!("Failed to canonicalize {} path: {}", context, path.display()))
+    let path = path.to_path_buf();
+    let path_display = path.display().to_string();
+    // `?` coerces JoinError → anyhow::Error via the blanket From impl.
+    let result = tokio::task::spawn_blocking(move || crate::paths::canonicalize(&path)).await?;
+    result.with_context(|| format!("Failed to canonicalize {context} path: {path_display}"))
 }
 
 /// Read a file to string with contextual error (async)

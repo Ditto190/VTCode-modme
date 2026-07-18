@@ -166,6 +166,7 @@ pub async fn get_head_commit_hash_async(cwd: std::path::PathBuf) -> Result<Optio
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use vtcode_commons::canonicalize;
 
     #[test]
     fn test_is_git_repo() {
@@ -176,10 +177,10 @@ mod tests {
 
     #[test]
     fn test_get_git_repo_root() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).canonicalize().unwrap();
+        let manifest_dir = canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR"))).unwrap();
         let root = get_git_repo_root(&manifest_dir).unwrap();
         assert!(root.is_some());
-        let root = PathBuf::from(root.unwrap()).canonicalize().unwrap();
+        let root = canonicalize(PathBuf::from(root.unwrap())).unwrap();
         assert!(
             manifest_dir == root || manifest_dir.starts_with(&root),
             "repo root {} should be an ancestor of manifest dir {}",

@@ -1,0 +1,140 @@
+//! ollama_presets — provider preset definitions for ollama.
+
+use super::super::{ModelPreset, ReasoningEffortPreset};
+use crate::config::models::Provider;
+use crate::config::types::ReasoningEffortLevel;
+pub(crate) fn ollama_presets() -> Vec<ModelPreset> {
+    vec![
+        ModelPreset {
+            id: "ollama/gpt-oss:20b".to_string(),
+            model: "gpt-oss:20b".to_string(),
+            display_name: "GPT-OSS 20B (Ollama)".to_string(),
+            description: "Open-weight GPT-OSS served locally".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Medium,
+                description: "Balanced".to_string(),
+            }],
+            is_default: true,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(96_000),
+        },
+        ModelPreset {
+            id: "ollama/deepseek-v4-flash:cloud".to_string(),
+            model: "deepseek-v4-flash:cloud".to_string(),
+            display_name: "DeepSeek V4 Flash (Ollama)".to_string(),
+            description: "Fast inference DeepSeek V4 Flash model via Ollama Cloud".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Medium,
+                description: "Balanced".to_string(),
+            }],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(128_000),
+        },
+        ModelPreset {
+            id: "ollama/deepseek-v4-pro:cloud".to_string(),
+            model: "deepseek-v4-pro:cloud".to_string(),
+            display_name: "DeepSeek V4 Pro (Ollama)".to_string(),
+            description: "High-performance DeepSeek V4 Pro model via Ollama Cloud".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Medium,
+                description: "Balanced".to_string(),
+            }],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(128_000),
+        },
+        ModelPreset {
+            id: "ollama/nemotron-3-ultra:cloud".to_string(),
+            model: "nemotron-3-ultra:cloud".to_string(),
+            display_name: "Nemotron 3 Ultra (Ollama)".to_string(),
+            description: "NVIDIA Nemotron 3 Ultra 550B for high-throughput reasoning and long-running agent workflows via Ollama Cloud".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(256_000),
+        },
+        ModelPreset {
+            id: "ollama/gemma4".to_string(),
+            model: "gemma4".to_string(),
+            display_name: "Gemma 4 (Ollama)".to_string(),
+            description: "Google Gemma 4 for reasoning, agentic workflows, coding, and multimodal understanding".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Medium,
+                description: "Balanced".to_string(),
+            }],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(128_000),
+        },
+        ModelPreset {
+            id: "ollama/minimax-m3:cloud".to_string(),
+            model: "minimax-m3:cloud".to_string(),
+            display_name: "MiniMax-M3 (Ollama)".to_string(),
+            description: "Cloud-hosted MiniMax-M3 model via Ollama Cloud".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Medium,
+                description: "Balanced".to_string(),
+            }],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(131_072),
+        },
+        ModelPreset {
+            id: "ollama/glm-5.2:cloud".to_string(),
+            model: "glm-5.2:cloud".to_string(),
+            display_name: "GLM-5.2 (Ollama)".to_string(),
+            description: "Cloud-hosted GLM-5.2 flagship model for long-horizon tasks with 1M context via Ollama Cloud".to_string(),
+            provider: Provider::Ollama,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
+    ]
+}

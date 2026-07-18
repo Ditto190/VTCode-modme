@@ -158,6 +158,7 @@ fn provider_env_override() -> Option<String> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use vtcode_commons::canonicalize;
 
     #[test]
     fn provider_resolution_prefers_configured_provider_for_config_model() {
@@ -298,7 +299,7 @@ mod tests {
         );
 
         std::env::set_current_dir(original_dir).expect("restore current dir");
-        let expected_workspace = std::fs::canonicalize(temp.path()).expect("canonical workspace");
+        let expected_workspace = canonicalize(temp.path()).expect("canonical workspace");
 
         assert_eq!(agent_config.workspace, expected_workspace);
     }

@@ -4,6 +4,7 @@
 use assert_fs::TempDir;
 use serde_json::{Value, json};
 use std::fs;
+use vtcode_commons::canonicalize;
 use vtcode_core::tools::cache::FileCache;
 use vtcode_core::tools::registry::ToolRegistry;
 
@@ -18,7 +19,7 @@ mod e2e_tests {
     async fn test_file_operations_with_cache() {
         // Create temporary directory for testing
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
 
         // Create test file
         let test_file = workspace_root.join("test_file.txt");
@@ -135,7 +136,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_directory_caching() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
 
         // Create test directory structure
         let subdir = workspace_root.join("subdir");
@@ -177,7 +178,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_cache_invalidation() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
 
         let test_file = workspace_root.join("test.txt");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
@@ -218,7 +219,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_write_file_overwrite_mode() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
         let test_file = workspace_root.join("test.txt");
 
@@ -251,7 +252,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_write_file_append_mode() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
         let test_file = workspace_root.join("test.txt");
 
@@ -290,7 +291,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_write_file_skip_if_exists_mode() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
         let test_file = workspace_root.join("test.txt");
 
@@ -329,7 +330,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_file_edit_exact_match() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
         let test_file = workspace_root.join("test.txt");
 
@@ -367,7 +368,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_file_edit_multiple_occurrences() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
         let test_file = workspace_root.join("test.txt");
 
@@ -405,7 +406,7 @@ mod e2e_tests {
     #[tokio::test]
     async fn test_file_edit_with_newlines() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let workspace_root = fs::canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
+        let workspace_root = canonicalize(temp_dir.path()).expect("Failed to canonicalize workspace");
         let registry = ToolRegistry::new(workspace_root.clone()).await;
         let test_file = workspace_root.join("test.txt");
 

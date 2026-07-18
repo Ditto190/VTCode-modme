@@ -8,6 +8,8 @@ use crate::utils::file_utils::canonicalize_with_context;
 use anyhow::{Context, Result, anyhow};
 use glob::{Pattern, glob};
 use tracing::warn;
+use vtcode_commons::canonicalize;
+use vtcode_commons::canonicalize_async;
 use vtcode_commons::walk::build_walker_single_threaded;
 
 const AGENTS_FILENAME: &str = "AGENTS.md";
@@ -144,7 +146,7 @@ impl MatchContext {
     async fn new(project_root: &Path, match_paths: &[PathBuf]) -> Self {
         let mut seen = HashSet::new();
         let mut candidates = Vec::with_capacity(match_paths.len());
-        let canonical_root = tokio::fs::canonicalize(project_root).await.ok();
+        let canonical_root = canonicalize_async(project_root).await.ok();
 
         for raw_path in match_paths {
             let candidate = if raw_path.is_absolute() {
@@ -153,7 +155,7 @@ impl MatchContext {
                 project_root.join(raw_path)
             };
 
-            let normalized = tokio::fs::canonicalize(&candidate).await.unwrap_or_else(|_| candidate.clone());
+            let normalized = canonicalize_async(&candidate).await.unwrap_or_else(|_| candidate.clone());
             let relative = normalized
                 .strip_prefix(project_root)
                 .ok()
@@ -1242,7 +1244,7 @@ fn resolve_import_path(import: &str, containing_file: &Path, allowed_roots: &[Pa
         }
     };
 
-    let canonical = match std::fs::canonicalize(&candidate) {
+    let canonical = match canonicalize(&candidate) {
         Ok(path) => path,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             warn!("Skipping missing instruction import `@{}` referenced from {}", import, containing_file.display());
@@ -1391,7 +1393,7 @@ mod tests {
             discover_instruction_sources(&default_options(project_root, project_root, Some(home.path()), &[])).await?;
 
         assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].path, std::fs::canonicalize(user_agents_path)?);
+        assert_eq!(sources[0].path, canonicalize(user_agents_path)?);
         assert_eq!(sources[0].scope, InstructionScope::User);
         assert_eq!(sources[0].kind, InstructionSourceKind::Agents);
 
@@ -1401,7 +1403,7 @@ mod tests {
     #[tokio::test]
     async fn discovers_claude_files_alongside_workspace_agents() -> Result<()> {
         let workspace = tempdir()?;
-        let project_root = std::fs::canonicalize(workspace.path())?;
+        let project_root = canonicalize(workspace.path())?;
         let nested = project_root.join("src");
         std::fs::create_dir_all(&nested)?;
 

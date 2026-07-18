@@ -29,6 +29,7 @@ use super::file_conflict_prompt::resolve_file_conflict_status;
 use super::status::{ToolExecutionStatus, ToolPipelineOutcome};
 use super::validation::{SafetyValidationFailure, validate_tool_call_with_limit_prompt};
 use crate::agent::runloop::unified::planning_workflow::{handle_finish_planning, handle_start_planning};
+use vtcode_commons::canonicalize;
 
 fn resolve_harness_item_identity(tool_item_id: &str) -> (ToolInvocationId, String) {
     match ToolInvocationId::parse(tool_item_id) {
@@ -553,7 +554,7 @@ async fn apply_post_execution_side_effects(
 }
 
 fn cache_invalidation_paths(workspace_root: &Path, changed_paths: &[String]) -> Vec<String> {
-    let workspace_root = workspace_root.canonicalize().unwrap_or_else(|_| workspace_root.to_path_buf());
+    let workspace_root = canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     changed_paths
         .iter()
         .map(Path::new)
@@ -563,7 +564,7 @@ fn cache_invalidation_paths(workspace_root: &Path, changed_paths: &[String]) -> 
             } else {
                 workspace_root.join(path)
             };
-            absolute.canonicalize().unwrap_or(absolute)
+            canonicalize(&absolute).unwrap_or(absolute)
         })
         .map(|path| path.to_string_lossy().into_owned())
         .collect()
@@ -573,6 +574,7 @@ fn cache_invalidation_paths(workspace_root: &Path, changed_paths: &[String]) -> 
 mod tests {
     use super::{cache_invalidation_paths, exec_settlement_mode_for_tool_call, resolve_harness_item_identity};
     use serde_json::json;
+    use vtcode_commons::canonicalize;
     use vtcode_core::tools::registry::ExecSettlementMode;
     use vtcode_core::{config::constants::tools, tools::ToolInvocationId};
 
@@ -586,7 +588,7 @@ mod tests {
 
         let paths = cache_invalidation_paths(workspace.path(), &["src/widget.rs".to_string()]);
 
-        assert_eq!(paths, vec![changed.canonicalize().expect("canonical source").to_string_lossy()]);
+        assert_eq!(paths, vec![canonicalize(changed).expect("canonical source").to_string_lossy()]);
     }
 
     #[test]

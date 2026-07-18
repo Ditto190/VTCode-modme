@@ -238,6 +238,8 @@ def strip_non_code(source: str) -> str:
 
 
 def scan_file(path: Path, rules: list[AllowRule]) -> list[tuple[str, int, str]]:
+    if not path.exists():
+        return []
     rel_path = path.relative_to(REPO_ROOT).as_posix()
     source = path.read_text(encoding="utf-8", errors="ignore")
     stripped = strip_non_code(source)

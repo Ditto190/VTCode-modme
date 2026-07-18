@@ -9,6 +9,7 @@ use tokio::process::Command;
 
 use crate::tools::ast_grep_installer::AstGrepStatus;
 use crate::tools::ast_grep_language::AstGrepLanguage;
+use vtcode_commons::canonicalize;
 use vtcode_commons::exclusions::is_sensitive_file;
 use vtcode_commons::walk::{build_walker_single_threaded, is_excluded_dir};
 const CODE_SEARCH_OUTLINE_BYTE_CAP: usize = 1024 * 1024;
@@ -299,7 +300,7 @@ fn arg_os_bytes(arg: &std::ffi::OsStr) -> usize {
 /// Build the path argument passed to ast-grep. Use the workspace-relative form
 /// when possible so the emitted `path` field is relative and readable.
 fn command_path_arg(workspace_root: &Path, resolved: &Path) -> String {
-    let workspace_canonical = std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+    let workspace_canonical = canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     if let Ok(relative) = resolved.strip_prefix(&workspace_canonical) {
         if relative.as_os_str().is_empty() {
             ".".to_string()

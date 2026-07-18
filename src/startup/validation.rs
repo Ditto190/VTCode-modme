@@ -231,6 +231,7 @@ mod tests {
     use super::*;
     use assert_fs::TempDir;
     use std::env;
+    use vtcode_commons::canonicalize;
     use vtcode_commons::env_lock;
     use vtcode_config::McpProviderConfig;
     use vtcode_core::config::loader::ConfigBuilder;
@@ -244,7 +245,7 @@ mod tests {
         env::set_current_dir(temp_dir.path())?;
 
         let resolved = resolve_workspace_path(None)?;
-        assert_eq!(resolved, temp_dir.path().canonicalize()?);
+        assert_eq!(resolved, canonicalize(temp_dir.path())?);
 
         env::set_current_dir(original_cwd)?;
         Ok(())
@@ -260,7 +261,7 @@ mod tests {
         env::set_current_dir(temp_dir.path())?;
 
         let resolved = resolve_workspace_path(Some(PathBuf::from("project")))?;
-        assert_eq!(resolved, workspace_dir.canonicalize()?);
+        assert_eq!(resolved, canonicalize(workspace_dir)?);
 
         env::set_current_dir(original_cwd)?;
         Ok(())

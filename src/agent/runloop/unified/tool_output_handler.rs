@@ -15,6 +15,7 @@ use vtcode_ui::tui::app::{InlineHandle, InlineMessageKind, InlineSegment, Inline
 
 use crate::agent::runloop::unified::run_loop_context::RunLoopContext;
 use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
+use vtcode_commons::canonicalize;
 
 fn record_mcp_success_event(mcp_panel_state: &mut McpPanelState, tool_name: &str, args_val: &serde_json::Value) {
     let mut mcp_event = crate::agent::runloop::mcp_events::McpEvent::new(
@@ -36,7 +37,7 @@ fn collect_instruction_activity_paths(
     output: &serde_json::Value,
     modified_files: &[String],
 ) -> Vec<PathBuf> {
-    let canonical_workspace = std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+    let canonical_workspace = canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     let mut paths = BTreeSet::new();
     for modified in modified_files {
         push_activity_path(workspace_root, &canonical_workspace, modified, &mut paths);

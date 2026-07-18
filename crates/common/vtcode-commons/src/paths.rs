@@ -38,9 +38,36 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Canonicalize a filesystem path without the Windows `\\?\` verbatim prefix.
+///
+/// `std::fs::canonicalize` returns verbatim (`\\?\`) paths on Windows, which
+/// break path comparisons, round-tripping through user config, and some APIs
+/// that reject verbatim paths. `dunce::canonicalize` strips the prefix when it
+/// is safe to do so and is a perfect drop-in on non-Windows platforms.
+///
+/// This is the single canonical entry point for path canonicalization in the
+/// workspace. All call sites should use this (or `canonicalize_workspace`) rather
+/// than `std::fs::canonicalize` / `Path::canonicalize`, which are banned by
+/// `clippy.toml`'s `disallowed-methods`.
+pub fn canonicalize(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    dunce::canonicalize(path)
+}
+
+/// Async canonicalize via `dunce`, using `spawn_blocking` to avoid blocking the
+/// runtime. Equivalent to `tokio::fs::canonicalize` but without the Windows
+/// `\\?\` verbatim prefix. Use this in async contexts instead of the sync
+/// [`canonicalize`] when the path may require I/O.
+pub async fn canonicalize_async(path: impl AsRef<Path> + Send) -> std::io::Result<PathBuf> {
+    let path = path.as_ref().to_path_buf();
+    match tokio::task::spawn_blocking(move || dunce::canonicalize(&path)).await {
+        Ok(inner) => inner,
+        Err(join_error) => Err(std::io::Error::other(join_error)),
+    }
+}
+
 /// Canonicalize a path with fallback to the original path if canonicalization fails.
 pub fn canonicalize_workspace(workspace_root: &Path) -> PathBuf {
-    std::fs::canonicalize(workspace_root).unwrap_or_else(|error| {
+    canonicalize(workspace_root).unwrap_or_else(|error| {
         warn!(
             path = %workspace_root.display(),
             %error,
@@ -58,10 +85,10 @@ pub fn resolve_workspace_path(workspace_root: &Path, user_path: &Path) -> Result
         workspace_root.join(user_path)
     };
 
-    let canonical = std::fs::canonicalize(&candidate)
-        .with_context(|| format!("Failed to canonicalize path {}", candidate.display()))?;
+    let canonical =
+        canonicalize(&candidate).with_context(|| format!("Failed to canonicalize path {}", candidate.display()))?;
 
-    let workspace_canonical = std::fs::canonicalize(workspace_root)
+    let workspace_canonical = canonicalize(workspace_root)
         .with_context(|| format!("Failed to canonicalize workspace root {}", workspace_root.display()))?;
 
     if !canonical.starts_with(&workspace_canonical) {
@@ -120,7 +147,7 @@ pub async fn ensure_path_within_workspace_resolved(candidate: &Path, workspace_r
     let normalized_root = normalize_path(workspace_root);
     let normalized_candidate = normalize_path(candidate);
 
-    let canonical_root = match tokio::fs::canonicalize(&normalized_root).await {
+    let canonical_root = match canonicalize_async(&normalized_root).await {
         Ok(resolved) => resolved,
         Err(error) => {
             warn!(
@@ -157,7 +184,7 @@ pub async fn ensure_path_within_workspace_resolved(candidate: &Path, workspace_r
             }
         };
 
-        let resolved = tokio::fs::canonicalize(&prefix)
+        let resolved = canonicalize_async(&prefix)
             .await
             .with_context(|| format!("failed to canonicalize path component '{}'", prefix.display()))?;
 
@@ -319,7 +346,7 @@ pub fn file_name_from_path(path: &str) -> String {
 pub async fn canonicalize_allow_missing(normalized: &Path) -> Result<PathBuf> {
     // If the path exists, canonicalize it directly
     if tokio::fs::try_exists(normalized).await.unwrap_or(false) {
-        return tokio::fs::canonicalize(normalized)
+        return canonicalize_async(normalized)
             .await
             .map_err(|e| anyhow!("Failed to resolve canonical path for '{}': {}", normalized.display(), e));
     }
@@ -329,7 +356,7 @@ pub async fn canonicalize_allow_missing(normalized: &Path) -> Result<PathBuf> {
     while let Some(parent) = current.parent() {
         if tokio::fs::try_exists(parent).await.unwrap_or(false) {
             // Canonicalize the existing parent
-            let canonical_parent = tokio::fs::canonicalize(parent)
+            let canonical_parent = canonicalize_async(parent)
                 .await
                 .map_err(|e| anyhow!("Failed to resolve canonical path for '{}': {}", parent.display(), e))?;
 
@@ -590,7 +617,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_check_accepts_nested_existing_path() {
         let workspace = tempfile::tempdir().unwrap();
-        let root = workspace.path().canonicalize().unwrap();
+        let root = canonicalize(workspace.path()).unwrap();
         let nested = root.join("src");
         tokio::fs::create_dir_all(&nested).await.unwrap();
         let file = nested.join("lib.rs");
@@ -603,7 +630,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_check_accepts_missing_tail_components() {
         let workspace = tempfile::tempdir().unwrap();
-        let root = workspace.path().canonicalize().unwrap();
+        let root = canonicalize(workspace.path()).unwrap();
         let missing = root.join("new_dir/new_file.txt");
 
         let result = ensure_path_within_workspace_resolved(&missing, &root).await;
@@ -613,7 +640,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_check_rejects_lexical_escape() {
         let workspace = tempfile::tempdir().unwrap();
-        let root = workspace.path().canonicalize().unwrap();
+        let root = canonicalize(workspace.path()).unwrap();
         let escape = root.join("../outside.txt");
 
         assert!(ensure_path_within_workspace_resolved(&escape, &root).await.is_err());
@@ -624,8 +651,8 @@ mod tests {
     async fn resolved_check_rejects_symlink_escape() {
         let workspace = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let root = workspace.path().canonicalize().unwrap();
-        let outside_dir = outside.path().canonicalize().unwrap();
+        let root = canonicalize(workspace.path()).unwrap();
+        let outside_dir = canonicalize(outside.path()).unwrap();
 
         let link = root.join("escape");
         tokio::fs::symlink(&outside_dir, &link).await.unwrap();
@@ -638,7 +665,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_check_accepts_symlink_within_workspace() {
         let workspace = tempfile::tempdir().unwrap();
-        let root = workspace.path().canonicalize().unwrap();
+        let root = canonicalize(workspace.path()).unwrap();
         let target = root.join("real");
         tokio::fs::create_dir_all(&target).await.unwrap();
         let link = root.join("alias");
@@ -651,7 +678,7 @@ mod tests {
     #[tokio::test]
     async fn resolved_check_rejects_traversal_through_file() {
         let workspace = tempfile::tempdir().unwrap();
-        let root = workspace.path().canonicalize().unwrap();
+        let root = canonicalize(workspace.path()).unwrap();
         let file = root.join("data.txt");
         tokio::fs::write(&file, b"test").await.unwrap();
 

@@ -30,6 +30,7 @@ use tracing::{debug, warn};
 #[cfg(test)]
 use crate::tools::CgpRuntimeMode;
 use crate::tools::error_messages::skill_ops;
+use vtcode_commons::canonicalize;
 
 type SkillMap = Arc<RwLock<HashMap<String, Skill>>>;
 type ToolDefList = Arc<RwLock<Vec<ToolDefinition>>>;
@@ -391,12 +392,9 @@ fn resolve_skill_resource_path(skill_root: &Path, resource_path: &str) -> anyhow
     }
 
     let full_path = skill_root.join(relative_path);
-    let canonical_root = skill_root
-        .canonicalize()
-        .with_context(|| format!("Failed to resolve skill root {}", skill_root.display()))?;
-    let canonical_path = full_path
-        .canonicalize()
-        .with_context(|| format!("Resource '{resource_path}' not found"))?;
+    let canonical_root =
+        canonicalize(skill_root).with_context(|| format!("Failed to resolve skill root {}", skill_root.display()))?;
+    let canonical_path = canonicalize(full_path).with_context(|| format!("Resource '{resource_path}' not found"))?;
 
     if !canonical_path.starts_with(&canonical_root) {
         return Err(anyhow::anyhow!("Resource '{resource_path}' escapes the skill directory"));

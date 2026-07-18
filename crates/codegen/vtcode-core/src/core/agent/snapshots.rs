@@ -18,6 +18,7 @@ use crate::utils::session_archive::SessionMessage;
 
 const MAX_DESCRIPTION_LEN: usize = 160;
 use crate::core::SECONDS_PER_DAY;
+use vtcode_commons::canonicalize;
 pub const DEFAULT_CHECKPOINTS_ENABLED: bool = true;
 pub const DEFAULT_MAX_SNAPSHOTS: usize = 50;
 pub const DEFAULT_MAX_AGE_DAYS: u64 = 30;
@@ -240,7 +241,7 @@ impl SnapshotManager {
 
     fn normalize_path(&self, path: &Path) -> Option<PathBuf> {
         if path.is_absolute() {
-            if let Ok(canonical_path) = fs::canonicalize(path)
+            if let Ok(canonical_path) = canonicalize(path)
                 && let Ok(stripped) = canonical_path.strip_prefix(&self.canonical_workspace)
             {
                 return sanitize_relative_path(stripped);

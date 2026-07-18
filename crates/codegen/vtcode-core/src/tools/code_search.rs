@@ -14,6 +14,7 @@ use crate::tools::tree_sitter_runtime::{
     SourceByteRange, exact_declaration_name_range, is_exact_usage_identifier, parse_source, usage_node_kind_allowlist,
 };
 use crate::types::CompactStr;
+use vtcode_commons::canonicalize;
 use vtcode_commons::exclusions::is_sensitive_file;
 use vtcode_commons::formatting::{collapse_whitespace, truncate_byte_budget};
 use vtcode_commons::walk::{build_default_walker, is_excluded_dir};
@@ -200,7 +201,7 @@ fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
     let mut missing_components = Vec::new();
 
     loop {
-        if let Ok(canonical) = std::fs::canonicalize(existing_prefix) {
+        if let Ok(canonical) = canonicalize(existing_prefix) {
             return missing_components.iter().rev().fold(canonical, |mut resolved, component| {
                 resolved.push(component);
                 resolved
@@ -337,14 +338,14 @@ fn resolve_scope(workspace_root: &Path, requested: &str) -> Result<ResolvedSearc
     if requested_path.components().any(|component| component == Component::ParentDir) {
         bail!("code_search path must not contain '..' traversal");
     }
-    let workspace_root = std::fs::canonicalize(workspace_root)
+    let workspace_root = canonicalize(workspace_root)
         .with_context(|| format!("failed to canonicalise workspace root {}", workspace_root.display()))?;
     let candidate = if requested_path.is_absolute() {
         requested_path.to_path_buf()
     } else {
         workspace_root.join(requested_path)
     };
-    let requested_path = std::fs::canonicalize(&candidate)
+    let requested_path = canonicalize(&candidate)
         .with_context(|| format!("failed to resolve code_search path {}", candidate.display()))?;
     if !requested_path.starts_with(&workspace_root) {
         bail!("code_search path escapes the workspace");
@@ -380,7 +381,7 @@ fn resolve_scope(workspace_root: &Path, requested: &str) -> Result<ResolvedSearc
         if path.file_name().and_then(|name| name.to_str()).is_some_and(is_sensitive_file) {
             continue;
         }
-        let Ok(canonical) = std::fs::canonicalize(path) else {
+        let Ok(canonical) = canonicalize(path) else {
             continue;
         };
         if !canonical.starts_with(&workspace_root) {
@@ -426,7 +427,7 @@ fn accepted_candidate_path(
     } else {
         base.join(candidate)
     };
-    let canonical = std::fs::canonicalize(path).ok()?;
+    let canonical = canonicalize(path).ok()?;
     if !scope.allowed_files.contains(&canonical)
         || !canonical.starts_with(&scope.workspace_root)
         || (scope.requested_is_file && canonical != scope.requested_path)
@@ -1037,7 +1038,7 @@ mod tests {
         fs::create_dir_all(workspace.path().join("src/module")).expect("source fixture");
         let args = json!({"query": "Widget", "path": "src/module"});
         let absolute_child = workspace.path().join("src/module/widget.rs");
-        let canonical_child = fs::canonicalize(workspace.path())
+        let canonical_child = canonicalize(workspace.path())
             .expect("canonical workspace")
             .join("src/module/widget.rs");
 
@@ -1078,8 +1079,8 @@ mod tests {
         let workspace = TempDir::new().expect("workspace");
         let source = workspace.path().join("widget.rs");
         fs::write(&source, "fn Widget() {}\n").expect("source fixture");
-        let canonical_root = fs::canonicalize(workspace.path()).expect("canonical workspace");
-        let canonical_source = fs::canonicalize(&source).expect("canonical source");
+        let canonical_root = canonicalize(workspace.path()).expect("canonical workspace");
+        let canonical_source = canonicalize(&source).expect("canonical source");
         let scope = ResolvedSearchScope {
             workspace_root: canonical_root.clone(),
             requested_path: canonical_root,
@@ -1589,8 +1590,7 @@ mod tests {
     fn code_search_incomplete_declaration_inventory_preserves_text() {
         let fixture = code_search_fixture();
         let scope = resolve_scope(fixture.workspace.path(), "src/widget.rs").expect("scope");
-        let canonical =
-            fs::canonicalize(fixture.workspace.path().join("src/widget.rs")).expect("canonical fixture path");
+        let canonical = canonicalize(fixture.workspace.path().join("src/widget.rs")).expect("canonical fixture path");
         let mut inventories = HashMap::new();
         inventories.insert(canonical, DeclarationInventory { complete: false, exact_name_ranges: Vec::new() });
         let mut candidates = Vec::new();
@@ -1622,8 +1622,7 @@ mod tests {
     fn code_search_definitions_require_exact_name_ranges() {
         let fixture = code_search_fixture();
         let scope = resolve_scope(fixture.workspace.path(), "src/widget.rs").expect("scope");
-        let canonical =
-            fs::canonicalize(fixture.workspace.path().join("src/widget.rs")).expect("canonical fixture path");
+        let canonical = canonicalize(fixture.workspace.path().join("src/widget.rs")).expect("canonical fixture path");
         let source = fs::read_to_string(&canonical).expect("fixture source");
         let exact_end = source.find("}\n").expect("exact declaration end") + 1;
         let missing_name_start = source.find("Widget();").expect("body call");
@@ -1730,7 +1729,7 @@ mod tests {
                 .all(|path| path.starts_with(&subtree.requested_path))
         );
         assert!(!subtree.allowed_files.contains(
-            &fs::canonicalize(fixture.workspace.path().join("ignored.rs")).expect("ignored fixture canonical path")
+            &canonicalize(fixture.workspace.path().join("ignored.rs")).expect("ignored fixture canonical path")
         ));
     }
 

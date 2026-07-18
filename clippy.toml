@@ -16,6 +16,13 @@ disallowed-methods = [
     { path = "std::panic::panic_any", reason = "Use anyhow/thiserror for error handling instead" },
     { path = "std::iter::Iterator::for_each", reason = "prefer `for` for side-effects (F-COMBINATOR)" },
     { path = "std::iter::Iterator::try_for_each", reason = "prefer `for` for side-effects (F-COMBINATOR)" },
+    # Canonicalization: std::fs::canonicalize returns \\?\ verbatim paths on
+    # Windows, which break path comparisons and round-tripping. Use
+    # vtcode_commons::canonicalize (backed by dunce) instead. Pattern adopted
+    # from grok-build.
+    { path = "std::fs::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use vtcode_commons::canonicalize (dunce-backed)" },
+    { path = "std::path::Path::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use vtcode_commons::canonicalize (dunce-backed)" },
+    { path = "tokio::fs::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use vtcode_commons::fs::canonicalize_with_context_async (spawn_blocking + dunce)" },
 ]
 
 # Allow absolute paths from specific crates (for project structure)

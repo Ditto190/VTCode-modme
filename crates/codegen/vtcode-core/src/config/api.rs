@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
+use vtcode_commons::canonicalize;
 use vtcode_commons::paths::normalize_path;
 use vtcode_config::defaults;
 use vtcode_config::loader::layers::{ConfigLayerMetadata, ConfigLayerSource};
@@ -266,8 +267,8 @@ fn source_matches_target(source: &ConfigLayerSource, target: &ConfigWriteTarget,
 }
 
 fn same_config_path(left: &Path, right: &Path) -> bool {
-    let left = fs::canonicalize(left).unwrap_or_else(|_| normalize_path(left));
-    let right = fs::canonicalize(right).unwrap_or_else(|_| normalize_path(right));
+    let left = canonicalize(left).unwrap_or_else(|_| normalize_path(left));
+    let right = canonicalize(right).unwrap_or_else(|_| normalize_path(right));
     left == right
 }
 

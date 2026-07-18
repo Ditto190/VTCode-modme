@@ -56,6 +56,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
+use vtcode_commons::canonicalize;
 
 /// Current plugin ABI version
 /// Increment this when breaking changes are made to the plugin interface
@@ -195,8 +196,7 @@ impl std::fmt::Debug for NativePlugin {
 }
 
 fn canonicalize_existing_path(path: &Path, label: &str) -> Result<PathBuf> {
-    path.canonicalize()
-        .with_context(|| format!("Failed to resolve {label} '{}'", path.display()))
+    canonicalize(path).with_context(|| format!("Failed to resolve {label} '{}'", path.display()))
 }
 
 /// Resolve a C-ABI symbol from a trusted, already-validated plugin library.

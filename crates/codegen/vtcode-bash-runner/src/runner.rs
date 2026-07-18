@@ -9,7 +9,7 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use vtcode_commons::WorkspacePaths;
+use vtcode_commons::{WorkspacePaths, canonicalize};
 
 /// LRU cache for canonicalized paths to reduce fs::canonicalize() calls
 type PathCache = Arc<Mutex<LruCache<PathBuf, PathBuf>>>;
@@ -35,8 +35,7 @@ where
             bail!("workspace root `{}` does not exist", workspace_root.display());
         }
 
-        let canonical_root = workspace_root
-            .canonicalize()
+        let canonical_root = canonicalize(&workspace_root)
             .with_context(|| format!("failed to canonicalize `{}`", workspace_root.display()))?;
 
         Ok(Self {
@@ -81,9 +80,7 @@ where
         }
 
         // Cache miss - perform canonicalization
-        let canonical = path
-            .canonicalize()
-            .with_context(|| format!("failed to canonicalize `{}`", path.display()))?;
+        let canonical = canonicalize(path).with_context(|| format!("failed to canonicalize `{}`", path.display()))?;
 
         // Store in cache
         self.path_cache.lock().put(path.to_path_buf(), canonical.clone());
@@ -517,7 +514,7 @@ mod tests {
         let mut runner = runner?;
         runner.cd("nested")?;
         // Canonicalize expected path to match runner's canonical working_dir
-        let expected = nested.canonicalize()?;
+        let expected = canonicalize(&nested)?;
         assert_eq!(runner.working_dir(), expected);
         Ok(())
     }

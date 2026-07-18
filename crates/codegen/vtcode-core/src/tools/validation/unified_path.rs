@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
+use vtcode_commons::canonicalize_async;
 
 /// Consolidated path validation combining safety checks, normalization, and workspace bounds.
 ///
@@ -28,7 +29,7 @@ pub async fn validate_and_resolve_path(workspace_root: &Path, path_str: &str) ->
     // Step 3: Canonical resolve + re-check (catches symlink escapes)
     let canonical = crate::utils::path::canonicalize_allow_missing(&normalized).await?;
     let canonical_root = if tokio::fs::try_exists(workspace_root).await.unwrap_or(false) {
-        tokio::fs::canonicalize(workspace_root)
+        canonicalize_async(workspace_root)
             .await
             .unwrap_or_else(|_| normalized_root.clone())
     } else {

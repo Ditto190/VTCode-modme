@@ -736,14 +736,6 @@ impl ToolRegistry {
             }
         }
 
-        // PERFORMANCE OPTIMIZATION: Check hot cache for tool lookup if optimizations enabled
-        let cached_tool = if self.optimization_config.tool_registry.use_optimized_registry {
-            let cache = self.hot_tool_cache.read();
-            cache.peek(name).cloned()
-        } else {
-            None
-        };
-
         // Look up the canonical tool name by trying to resolve the alias
         // The inventory's registration_for() handles alias resolution
         let (tool_name, tool_name_owned, display_name) =
@@ -761,6 +753,18 @@ impl ToolRegistry {
                 let display_name = tool_name_owned.clone();
                 (tool_name_owned.clone(), tool_name_owned, display_name)
             };
+
+        // PERFORMANCE OPTIMIZATION: Check hot cache for tool lookup using the canonical name.
+        // This must happen AFTER alias resolution so that aliased tools resolve to their
+        // canonical cache entry on the first hit. Without this, the cache lookup uses the
+        // raw alias string while insertion uses the canonical name, making aliased tools
+        // perpetually miss the cache.
+        let cached_tool = if self.optimization_config.tool_registry.use_optimized_registry {
+            let cache = self.hot_tool_cache.read();
+            cache.peek(&tool_name).cloned()
+        } else {
+            None
+        };
 
         // PERFORMANCE OPTIMIZATION: Update hot cache with resolved tool if optimizations enabled
         if let Some(tool_arc) = cached_tool.as_ref()
@@ -1267,7 +1271,7 @@ impl ToolRegistry {
                     false,
                 );
 
-                return Ok(error.to_json_value());
+                return Err(anyhow!(error.to_json_value()).context("tool denied by policy constraints"));
             }
         };
 
@@ -1550,24 +1554,15 @@ impl ToolRegistry {
                 let (tool_names, similar_tools) = self.public_tool_catalog_for_error(&requested_name).await;
                 let available_tool_list = tool_names.join(", ");
 
-                let error_msg = if tool_name != requested_name {
-                    // An alias was attempted but didn't resolve to an actual tool
-                    format!(
-                        "Tool '{requested_name}' (registered alias for '{tool_name}') not found in registry. \
-                        Available tools: {available_tool_list}. \
-                        Note: Tool aliases are defined during tool registration."
-                    )
+                let suggestion = if !similar_tools.is_empty() {
+                    format!(" Did you mean: {}?", similar_tools.join(", "))
                 } else {
-                    let suggestion = if !similar_tools.is_empty() {
-                        format!(" Did you mean: {}?", similar_tools.join(", "))
-                    } else {
-                        String::new()
-                    };
-
-                    format!(
-                        "Tool '{display_name}' not found in registry. Available tools: {available_tool_list}.{suggestion}"
-                    )
+                    String::new()
                 };
+
+                let error_msg = format!(
+                    "Tool '{display_name}' not found in registry. Available tools: {available_tool_list}.{suggestion}"
+                );
 
                 let error =
                     ToolExecutionError::new(tool_name_owned.clone(), ToolErrorType::ToolNotFound, error_msg.clone());

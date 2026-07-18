@@ -83,6 +83,7 @@ dirs = "6.0"
 path-clean = "1.0"
 shell-words = "1.1"
 dialoguer = "0.12.0"
+dunce = "1.0"
 itertools = "0.15.0"
 memchr = "2.8"
 url = "2.5"
@@ -467,8 +468,6 @@ assert_cmd = "2.1"
 predicates = "3.1"
 insta = "1.39"
 serial_test = { workspace = true }
-agent-client-protocol = { workspace = true }
-vtcode-battery-pack = { version = "0.135.13" }
 
 [package.metadata.cargo-machete]
 ignored = []

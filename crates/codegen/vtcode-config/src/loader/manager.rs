@@ -9,9 +9,10 @@ use crate::loader::config::VTCodeConfig;
 use crate::loader::layers::{
     ConfigLayerEntry, ConfigLayerMetadata, ConfigLayerSource, ConfigLayerStack, LayerDisabledReason,
 };
+use vtcode_commons::canonicalize;
 
 fn canonicalize_workspace_root(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Configuration manager for loading and validating configurations

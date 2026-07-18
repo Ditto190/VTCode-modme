@@ -2,6 +2,7 @@ use std::env;
 use std::path::Path;
 
 use super::types::{UpdateAction, UpdateExecutionStrategy};
+use vtcode_commons::canonicalize;
 
 const CURL_INSTALL_COMMAND: &str =
     "curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash";
@@ -124,7 +125,7 @@ pub(super) fn detect_install_source() -> InstallSource {
         Err(_) => return InstallSource::Standalone,
     };
 
-    let canonical = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let canonical = canonicalize(&exe).unwrap_or(exe);
     detect_install_source_from_path(&canonical)
 }
 

@@ -13,6 +13,7 @@ use vtcode_core::core::trajectory::TrajectoryLogger;
 use vtcode_core::tools::result_cache::ToolResultCache;
 
 use super::*;
+use vtcode_commons::canonicalize;
 
 #[tokio::test]
 async fn test_run_tool_call_unknown_tool_failure() {
@@ -784,9 +785,7 @@ async fn successful_apply_patch_invalidates_cached_code_search() {
             assert_eq!(
                 modified_files,
                 vec![
-                    source_dir
-                        .join("widget.rs")
-                        .canonicalize()
+                    canonicalize(source_dir.join("widget.rs"))
                         .expect("canonical widget.rs")
                         .to_string_lossy()
                 ]

@@ -13,6 +13,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
+use vtcode_commons::canonicalize;
 
 /// Maximum compressed bundle size (50 MB)
 pub const MAX_BUNDLE_SIZE: usize = 50 * 1024 * 1024;
@@ -245,8 +246,8 @@ fn validate_dir_recursive(root: &Path, dir: &Path, file_count: &mut u64, total_s
             bail!("Symlinks not allowed in skill bundles: {}", path.display());
         }
 
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        let root_canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let canonical = canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let root_canonical = canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         if !canonical.starts_with(&root_canonical) {
             bail!("Path traversal detected: {} escapes bundle root", path.display());
         }

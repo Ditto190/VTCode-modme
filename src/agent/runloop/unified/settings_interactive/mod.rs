@@ -288,6 +288,7 @@ fn describe_array_change(path: &str, added: bool) -> String {
 mod tests {
     use super::*;
     use crate::agent::runloop::unified::config_section_headings::normalize_config_path;
+    use vtcode_commons::canonicalize;
 
     #[test]
     fn parse_path_handles_arrays() {
@@ -828,8 +829,8 @@ mod tests {
         let state = create_settings_palette_state(temp.path(), &None).expect("settings state should load");
 
         assert_eq!(
-            std::fs::canonicalize(&state.source_path).expect("canonical state source path"),
-            std::fs::canonicalize(&source_path).expect("canonical expected source path")
+            canonicalize(&state.source_path).expect("canonical state source path"),
+            canonicalize(&source_path).expect("canonical expected source path")
         );
         assert_eq!(state.draft.agent.theme, "ansi");
     }

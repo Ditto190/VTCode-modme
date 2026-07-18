@@ -1,76 +1,68 @@
-//! CLI argument parsing and configuration
+use clap::{ArgAction, ColorChoice, Parser, Subcommand, ValueHint};
+use colorchoice_clap::Color as ColorSelection;
+use std::env;
+use std::path::{Path, PathBuf};
 
 use crate::config::models::ModelId;
-use clap::{ArgAction, Args, ColorChoice, Parser, Subcommand, ValueEnum, ValueHint};
-use colorchoice_clap::Color as ColorSelection;
-use std::path::PathBuf;
 
-/// Get the long version information following Ratatui recipe pattern
-///
-/// Displays version, authors, and directory information following the
-/// XDG Base Directory Specification for organized file storage.
-/// See: <https://ratatui.rs/recipes/apps/config-directories/>
-///
-/// This function is called at runtime to provide dynamic version info
-/// that includes actual resolved directory paths.
-pub fn long_version() -> String {
-    use crate::config::defaults::{get_config_dir, get_data_dir};
+mod acp;
+mod ask;
+mod background;
+mod bench;
+mod check;
+mod config;
+mod dependencies;
+mod exec;
+mod models;
+mod pods;
+mod review;
+mod schedule;
+mod schema;
+mod session_store;
+mod skills;
 
-    let git_info = option_env!("VT_CODE_GIT_INFO").unwrap_or(env!("CARGO_PKG_VERSION"));
+pub use acp::AgentClientProtocolTarget;
+pub use ask::{AskCommandOptions, AskOutputFormat};
+pub use background::BackgroundSubagentArgs;
+pub use bench::BenchAllocatorArgs;
+pub use check::CheckSubcommand;
+pub use config::{ConfigFile, ContextConfig, LoggingConfig, PerformanceConfig, SecurityConfig, ToolConfig};
+pub use dependencies::{DependenciesSubcommand, ManagedDependency};
+pub use exec::{ExecEvalArgs, ExecResumeArgs, ExecSubcommand};
+pub use models::ModelCommands;
+pub use pods::PodsCommands;
+pub use review::ReviewArgs;
+pub use schedule::{ScheduleCreateArgs, ScheduleSubcommand};
+pub use schema::{SchemaCommands, SchemaMode, SchemaOutputFormat};
+pub use session_store::SessionStoreCommand;
+pub use skills::{SkillsRefSubcommand, SkillsSubcommand};
 
-    let config_dir = get_config_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "~/.vtcode/".to_string());
+pub const PLANNING_WORKFLOW_READ_ONLY_HEADER: &str = "# PLANNING WORKFLOW (READ-ONLY)";
 
-    let data_dir = get_data_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "~/.vtcode/cache/".to_string());
+pub const PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE: &str = "Mutating file edits are blocked, including `apply_patch`. Use `exec_command.cmd` only for read-only repository inspection with the active shell profile's syntax; keep `task_tracker` current. Plan artifacts under `.vtcode/plans/` are allowed.";
 
-    format!(
-        "{}\n\nAuthors: {}\nConfig directory: {}\nData directory: {}\n\nEnvironment variables:\n  VTCODE_CONFIG - Override config directory\n  VTCODE_DATA - Override data directory",
-        git_info,
-        env!("CARGO_PKG_AUTHORS"),
-        config_dir,
-        data_dir
-    )
-}
+pub const PLANNING_WORKFLOW_EXIT_INSTRUCTION_LINE: &str =
+    "The user approved the plan. Stop planning and switch to implementation.";
 
-fn parse_workspace_directory(raw: &str) -> Result<PathBuf, String> {
-    let candidate = PathBuf::from(raw);
-    if !candidate.exists() {
-        return Err(format!(
-            "'{}' is not a valid workspace path or subcommand.\n\
-             Run `vtcode --help` to see available commands and options.",
-            candidate.display()
-        ));
-    }
-    if !candidate.is_dir() {
-        return Err(format!("Workspace path is not a directory: {}", candidate.display()));
-    }
-    Ok(candidate)
-}
+pub const PLANNING_WORKFLOW_PLAN_QUALITY_LINE: &str = "Keep plans compact and spec-like. Emit ONE `<proposed_plan>` that fits ~1500 tokens: a 1-3 line Summary; a tight numbered step list where each step is `Action -> files/symbols -> verify:`; one Validation line (build/lint + test commands); Assumptions as short bullets. Prefer file:symbol references over prose, written as plain text or inline code (e.g. `src/main.rs:42`) — never as markdown links or editor/IDE URIs (no `[label](url)`, no `vscode-file://`/`file://` schemes). Ask only material blocking questions; unresolved: `Next open decision: ...`.";
 
-/// Main CLI structure for vtcode with advanced features
+pub const PLANNING_WORKFLOW_RESEARCH_SCOPE_LINE: &str = "Scale research to the request: for a narrow or simple ask, ~5-10 targeted reads/searches is usually enough before drafting `<proposed_plan>` — do not exhaustively enumerate the whole repository. For a broad or ambiguous ask, research proportionally more, but stop and draft as soon as scope/decomposition/verification decisions are closed.";
+
+pub const PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE: &str = "Use `request_user_input` for interview questions informed by repo context. Continue until scope/decomposition/verification decisions are closed before finalizing `<proposed_plan>`.";
+
+pub const PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE: &str = "`request_user_input` unavailable here. Continue exploring read-only, finish unblocked planning, surface blockers in plain text.";
+
+pub const PLANNING_WORKFLOW_NO_AUTO_EXIT_LINE: &str = "Do not auto-exit planning workflow. Present `<proposed_plan>` and wait for explicit user approval (\"implement\", \"looks good\", \"ship it\", etc.) before switching to implementation.";
+
+pub const PLANNING_WORKFLOW_IMPLEMENTATION_PROMPT: &str = "Implement the approved plan.";
+
+pub const PLANNING_WORKFLOW_HINT: &str = "Present the plan for approval; do not start implementing yet.";
+
+pub const PLANNING_WORKFLOW_TASK_TRACKER_LINE: &str = "`task_tracker` remains available while planning.";
+
+pub const PLANNING_WORKFLOW_IMPLEMENT_REMINDER: &str = "• Planning workflow is active with read-only permissions. Say “implement” to present the plan for user approval, or “stay in planning workflow” to revise. Calling `finish_planning` only presents the plan; mutating tools stay disabled until the user approves the plan. If a write tool is unavailable because planning workflow is active, do not emit the full artifact content in the chat. Instead, summarize the blocker briefly and ask the user to save the content, or call `finish_planning` to present the plan for approval.";
+
 #[derive(Parser, Debug, Clone)]
-#[command(
-    name = "vtcode",
-    version,
-    about = "VT Code is a Rust coding agent built for long-running autonomous workflows, with OS-native sandboxing, multi-provider LLM support, open protocols, and extensible Skills.",
-    long_about = "VT Code\n\n\
-VT Code is a Rust coding agent built for long-running autonomous workflows, with OS-native sandboxing, multi-provider LLM support, open protocols, and extensible Skills.\n\n\
-Quick start:\n\
-  vtcode                  Launch interactive chat\n\
-  vtcode ask \"question\"   Single prompt, no tools\n\
-  vtcode exec \"task\"      Headless execution with tools\n\
-  vtcode init             Bootstrap workspace\n\n\
-Configuration:\n\
-  Settings are read from vtcode.toml in the workspace root.\n\
-  Run `vtcode config` to generate a starter config file.\n\n\
-Authentication:\n\
-  Run `vtcode login <provider>` to store API credentials.\n\
-  Supported providers: openai, openrouter, copilot, codex.",
-    color = ColorChoice::Auto
-)]
 pub struct Cli {
     /// Color output selection (auto, always, never)
     #[command(flatten)]
@@ -299,226 +291,6 @@ Full-auto does not override explicit denies or grant tools outside `[automation.
     pub command: Option<Commands>,
 }
 
-/// Options for the `ask` command
-#[derive(Debug, Default, Clone)]
-pub struct AskCommandOptions {
-    pub output_format: Option<AskOutputFormat>,
-    pub allowed_tools: Vec<String>,
-    pub disallowed_tools: Vec<String>,
-    pub skip_confirmations: bool,
-}
-
-/// Output format options for the `ask` subcommand.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
-pub enum AskOutputFormat {
-    /// Emit the response as a structured JSON document.
-    Json,
-}
-
-/// Output format options for the `schema` command.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
-pub enum SchemaOutputFormat {
-    /// Emit one JSON document with all selected schemas.
-    Json,
-    /// Emit one JSON object per line.
-    Ndjson,
-}
-
-/// Documentation detail level for the `schema` command.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
-pub enum SchemaMode {
-    /// Minimal descriptions and compact parameter metadata.
-    Minimal,
-    /// Balanced descriptions for agent discovery.
-    Progressive,
-    /// Full descriptions and full parameter metadata.
-    Full,
-}
-
-/// Schema-focused subcommands.
-#[derive(Subcommand, Debug, Clone)]
-pub enum SchemaCommands {
-    /// List built-in VT Code tool schemas.
-    Tools {
-        /// Documentation detail level for tool descriptions.
-        #[arg(long, value_enum, default_value_t = SchemaMode::Progressive)]
-        mode: SchemaMode,
-        /// Output format for schema payloads.
-        #[arg(long, value_enum, default_value_t = SchemaOutputFormat::Json)]
-        format: SchemaOutputFormat,
-        /// Filter by tool name (repeatable).
-        #[arg(long = "name", value_name = "TOOL")]
-        names: Vec<String>,
-    },
-}
-
-/// `exec` subcommands.
-#[derive(Subcommand, Debug, Clone)]
-pub enum ExecSubcommand {
-    /// Resume a previous exec session with a follow-up prompt
-    #[command(
-        long_about = "Resume a previous exec session with a follow-up prompt.\n\nExamples:\n  vtcode exec resume session-123 \"continue from the prior investigation\"\n  vtcode exec resume --last \"continue from the prior investigation\"\n  echo \"continue from stdin\" | vtcode exec resume --last"
-    )]
-    Resume(ExecResumeArgs),
-    /// Run an evaluation suite for regression or capability testing
-    #[command(
-        long_about = "Run an evaluation suite against the agent. Each task in the suite is\n\
-                      executed autonomously, then verified with environment probes.\n\
-                      Results are aggregated into a report with pass@k and pass^k metrics.\n\n\
-                      Examples:\n  vtcode exec eval --suite my-suite.json\n  vtcode exec eval --suite suite.json --output report.md"
-    )]
-    Eval(ExecEvalArgs),
-}
-
-/// Arguments for `vtcode exec eval`.
-#[derive(Args, Debug, Clone)]
-pub struct ExecEvalArgs {
-    /// Path to the eval suite JSON file
-    #[arg(long, value_name = "FILE")]
-    pub suite: String,
-    /// Optional path to write the markdown report
-    #[arg(long, value_name = "FILE")]
-    pub output: Option<String>,
-}
-
-/// Arguments for `vtcode exec resume`.
-#[derive(Args, Debug, Clone)]
-pub struct ExecResumeArgs {
-    /// Resume the most recent archived exec session
-    #[arg(long)]
-    pub last: bool,
-    /// Search archived exec sessions across every workspace
-    #[arg(long)]
-    pub all: bool,
-    /// Archived session identifier to resume, or the prompt when `--last` is used
-    #[arg(value_name = "SESSION_ID_OR_PROMPT", required_unless_present = "last")]
-    pub session_or_prompt: Option<String>,
-    /// Follow-up prompt to execute when resuming a specific session. Use `-` to force reading from stdin.
-    #[arg(value_name = "PROMPT")]
-    pub prompt: Option<String>,
-}
-
-/// `schedule` subcommands.
-#[derive(Subcommand, Debug, Clone)]
-pub enum ScheduleSubcommand {
-    /// Create a durable scheduled task
-    #[command(
-        long_about = "Create a durable scheduled task.\n\nExamples:\n  vtcode schedule create --prompt \"check the deployment\" --every 10m\n  vtcode schedule create --prompt \"review the nightly build\" --cron \"0 9 * * 1-5\"\n  vtcode schedule create --reminder \"push the release branch\" --at \"15:00\""
-    )]
-    Create(ScheduleCreateArgs),
-    /// List durable scheduled tasks
-    List,
-    /// Delete a durable scheduled task by id
-    Delete {
-        #[arg(value_name = "TASK_ID")]
-        id: String,
-    },
-    /// Run the local durable scheduler daemon
-    Serve,
-    /// Install the scheduler as a user service
-    #[command(name = "install-service")]
-    InstallService,
-    /// Uninstall the scheduler user service
-    #[command(name = "uninstall-service")]
-    UninstallService,
-}
-
-/// Arguments for `vtcode schedule create`.
-#[derive(Args, Debug, Clone)]
-pub struct ScheduleCreateArgs {
-    /// Optional short label for the task
-    #[arg(long, value_name = "NAME")]
-    pub name: Option<String>,
-    /// Prompt to run with `vtcode exec`
-    #[arg(long, value_name = "PROMPT", conflicts_with = "reminder")]
-    pub prompt: Option<String>,
-    /// Local reminder text to surface without invoking the model
-    #[arg(long, value_name = "TEXT", conflicts_with = "prompt")]
-    pub reminder: Option<String>,
-    /// Fixed interval such as 10m, 2h, or 1d
-    #[arg(long, value_name = "DURATION", conflicts_with_all = ["cron", "at"])]
-    pub every: Option<String>,
-    /// Five-field cron expression
-    #[arg(long, value_name = "EXPR", conflicts_with_all = ["every", "at"])]
-    pub cron: Option<String>,
-    /// One-shot local time (RFC3339, YYYY-MM-DD HH:MM, or HH:MM)
-    #[arg(long, value_name = "TIME", conflicts_with_all = ["every", "cron"])]
-    pub at: Option<String>,
-    /// Workspace to use for prompt tasks
-    #[arg(long, value_name = "PATH", value_hint = ValueHint::DirPath)]
-    pub workspace: Option<PathBuf>,
-}
-
-/// Arguments for `vtcode review`.
-#[derive(Args, Debug, Clone)]
-pub struct ReviewArgs {
-    /// Emit structured JSON events to stdout (one per line)
-    #[arg(long)]
-    pub json: bool,
-    /// Optional path to write the JSONL transcript
-    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
-    pub events: Option<PathBuf>,
-    /// Write the last agent message to this file
-    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
-    pub last_message_file: Option<PathBuf>,
-    /// Review the last committed diff instead of the current diff
-    #[arg(long, conflicts_with_all = ["target", "files"])]
-    pub last_diff: bool,
-    /// Review a custom git target expression
-    #[arg(long, value_name = "TARGET", conflicts_with = "files")]
-    pub target: Option<String>,
-    /// Optional review style or focus area
-    #[arg(long, value_name = "STYLE")]
-    pub style: Option<String>,
-    /// Review specific files instead of a diff target (repeatable)
-    #[arg(
-        long = "file",
-        value_name = "FILE",
-        value_hint = ValueHint::FilePath,
-        conflicts_with_all = ["last_diff", "target"]
-    )]
-    pub files: Vec<PathBuf>,
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct BackgroundSubagentArgs {
-    #[arg(long = "agent-name", value_name = "NAME")]
-    pub agent_name: String,
-    #[arg(long = "parent-session-id", value_name = "SESSION_ID")]
-    pub parent_session_id: String,
-    #[arg(long = "session-id", value_name = "SESSION_ID")]
-    pub session_id: String,
-    #[arg(long = "prompt", value_name = "PROMPT")]
-    pub prompt: String,
-    #[arg(long = "max-turns", value_name = "COUNT")]
-    pub max_turns: Option<usize>,
-    #[arg(long = "model-override", value_name = "MODEL")]
-    pub model_override: Option<String>,
-    #[arg(long = "reasoning-override", value_name = "LEVEL")]
-    pub reasoning_override: Option<String>,
-}
-
-/// Arguments for `vtcode bench-allocator` — see the command docs for meaning.
-#[derive(Debug, Clone, clap::Args)]
-pub struct BenchAllocatorArgs {
-    /// Number of bursts to run
-    #[arg(long, default_value_t = 3)]
-    pub bursts: usize,
-    /// Concurrent tasks per burst (Semaphore cap)
-    #[arg(long, default_value_t = 30)]
-    pub concurrency: usize,
-    /// Tokens allocated per task (each roughly up to 1KB)
-    #[arg(long, default_value_t = 200)]
-    pub tokens_per_task: usize,
-    /// Idle seconds between bursts (lets Tokio workers go idle)
-    #[arg(long, default_value_t = 2)]
-    pub idle_seconds: u64,
-    /// Payload size per task in bytes
-    #[arg(long, default_value_t = 4096)]
-    pub payload_bytes: usize,
-}
-
-/// Available commands
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     /// Start Agent Client Protocol bridge for IDE integrations
@@ -973,7 +745,6 @@ pub enum Commands {
     ///   vtcode update --list
     ///   vtcode update --pin 0.120.0
     ///   vtcode update --unpin
-    ///   vtcode update --channel beta
     #[command(name = "update")]
     Update {
         /// Check for updates without installing
@@ -992,11 +763,7 @@ pub enum Commands {
         #[arg(long, long_help = "Print available release versions from GitHub and exit.")]
         list: bool,
         /// Number of versions to list (default: 10)
-        #[arg(
-            long,
-            default_value_t = 10,
-            long_help = "Maximum number of versions to display with --list."
-        )]
+        #[arg(long, long_help = "Maximum number of versions to display with --list.")]
         limit: usize,
         /// Pin to a specific version
         #[arg(
@@ -1035,630 +802,6 @@ pub enum Commands {
     },
 }
 
-/// Subcommands for the unified per-session state store.
-#[derive(Debug, Clone, clap::Subcommand)]
-pub enum SessionStoreCommand {
-    /// Migrate legacy `history/` and `logs/` stores into the unified
-    /// per-session store. Pass `--remove-legacy` to delete the originals
-    /// afterwards.
-    Migrate {
-        /// Delete the now-imported `history/` and `logs/` directories.
-        #[arg(long)]
-        remove_legacy: bool,
-    },
-    /// Apply retention policy, evicting the oldest/stale sessions.
-    Gc {
-        /// Maximum number of sessions to keep.
-        #[arg(long, default_value_t = 50)]
-        max_sessions: usize,
-        /// Maximum session age in days.
-        #[arg(long, default_value_t = 30)]
-        max_age_days: u64,
-    },
-    /// List recent sessions.
-    List {
-        /// Number of sessions to show.
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
-    },
-    /// Print a session's manifest.
-    Inspect {
-        /// Session id (directory name under `.vtcode/sessions/`).
-        session: String,
-    },
-    /// Query grounded facts across all sessions (long-term learning).
-    Facts {
-        /// Maximum number of facts to return.
-        #[arg(long, default_value_t = 100)]
-        limit: usize,
-    },
-}
-
-/// Supported Agent Client Protocol clients
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum AgentClientProtocolTarget {
-    /// Agent Client Protocol client (legacy Zed identifier)
-    Zed,
-    /// Standard Agent Client Protocol client
-    Standard,
-}
-
-/// Model management commands with concise, actionable help
-#[derive(Subcommand, Debug, Clone)]
-pub enum ModelCommands {
-    /// List all providers and models with status indicators
-    List,
-
-    /// Set default provider (gemini, openai, anthropic, deepseek)
-    #[command(name = "set-provider")]
-    SetProvider {
-        /// Provider name to set as default
-        provider: String,
-    },
-
-    /// Set default model (e.g., deepseek-reasoner, gpt-5, claude-sonnet-4-6)
-    #[command(name = "set-model")]
-    SetModel {
-        /// Model name to set as default
-        model: String,
-    },
-
-    /// Configure provider settings (API keys, base URLs, models)
-    Config {
-        /// Provider name to configure
-        provider: String,
-
-        /// API key for the provider
-        #[arg(long)]
-        api_key: Option<String>,
-
-        /// Base URL for local providers
-        #[arg(long)]
-        base_url: Option<String>,
-
-        /// Default model for this provider
-        #[arg(long)]
-        model: Option<String>,
-    },
-
-    /// Test provider connectivity and validate configuration
-    Test {
-        /// Provider name to test
-        provider: String,
-    },
-
-    /// Compare model performance across providers (coming soon)
-    Compare,
-
-    /// Show detailed model information and specifications
-    Info {
-        /// Model name to get information about
-        model: String,
-    },
-}
-
-/// GPU pod management commands.
-#[derive(Subcommand, Debug, Clone)]
-pub enum PodsCommands {
-    /// Start a model on the active pod.
-    Start {
-        /// Local model name used for lookup and storage.
-        #[arg(long)]
-        name: String,
-        /// Hugging Face or provider model identifier to launch.
-        #[arg(long)]
-        model: String,
-        /// Optional explicit pod name to store as the active pod.
-        #[arg(long = "pod-name")]
-        pod_name: Option<String>,
-        /// SSH connection string used for the pod.
-        #[arg(long)]
-        ssh: Option<String>,
-        /// GPU identifiers on the pod, repeated as `ID:NAME`.
-        #[arg(long = "gpu", value_name = "ID:NAME", action = ArgAction::Append)]
-        gpus: Vec<String>,
-        /// Optional remote models directory.
-        #[arg(long = "models-path")]
-        models_path: Option<String>,
-        /// Optional exact profile name to use.
-        #[arg(long)]
-        profile: Option<String>,
-        /// Optional requested GPU count.
-        #[arg(long = "gpus")]
-        gpus_count: Option<usize>,
-        /// Optional override for `--gpu-memory-utilization` (percent).
-        #[arg(long)]
-        memory: Option<f32>,
-        /// Optional override for `--max-model-len` (e.g. 4k, 32k, 131072).
-        #[arg(long)]
-        context: Option<String>,
-    },
-
-    /// Stop a running model on the active pod.
-    Stop {
-        /// Local model name to stop.
-        #[arg(long)]
-        name: String,
-    },
-
-    /// Stop every running model on the active pod.
-    StopAll,
-
-    /// List running models on the active pod.
-    List,
-
-    /// Stream logs for a running model on the active pod.
-    Logs {
-        /// Local model name whose logs should be streamed.
-        #[arg(long)]
-        name: String,
-    },
-
-    /// Show compatible and incompatible known models for the active pod.
-    KnownModels,
-}
-
-/// Skills subcommands
-#[derive(Debug, Subcommand, Clone)]
-pub enum SkillsSubcommand {
-    /// List available skills
-    #[command(name = "list")]
-    List {
-        /// Show all skills including system skills
-        #[arg(long)]
-        all: bool,
-    },
-
-    /// Load a skill for use in agent session
-    #[command(name = "load")]
-    Load {
-        /// Skill name to load
-        name: String,
-        /// Optional path to skill directory
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-
-    /// Unload a skill from session
-    #[command(name = "unload")]
-    Unload {
-        /// Skill name to unload
-        name: String,
-    },
-
-    /// Show skill details and instructions
-    #[command(name = "info")]
-    Info {
-        /// Skill name to get information about
-        name: String,
-    },
-
-    /// Create a new skill from template
-    #[command(name = "create")]
-    Create {
-        /// Path for new skill directory
-        path: PathBuf,
-        /// Optional template to use
-        #[arg(long)]
-        template: Option<String>,
-    },
-
-    /// Validate SKILL.md manifest
-    #[command(name = "validate")]
-    Validate {
-        /// Path to skill directory or SKILL.md file
-        path: PathBuf,
-        /// Enable strict validation (warnings become errors for routing quality checks)
-        #[arg(long)]
-        strict: bool,
-    },
-
-    /// Validate all skills for container skills compatibility
-    #[command(name = "check-compatibility")]
-    CheckCompatibility,
-
-    /// Show skill configuration and search paths
-    #[command(name = "config")]
-    Config,
-
-    /// Regenerate skills index file
-    #[command(name = "regenerate-index")]
-    RegenerateIndex,
-
-    /// skills-ref compatible commands (agentskills.io spec)
-    #[command(name = "skills-ref", subcommand)]
-    SkillsRef(SkillsRefSubcommand),
-}
-
-/// skills-ref compatible subcommands per agentskills.io specification
-#[derive(Debug, Subcommand, Clone)]
-pub enum SkillsRefSubcommand {
-    /// Validate a skill directory
-    #[command(name = "validate")]
-    Validate {
-        /// Path to skill directory
-        path: PathBuf,
-    },
-
-    /// Generate <available_skills> XML for agent prompts
-    #[command(name = "to-prompt")]
-    ToPrompt {
-        /// Paths to skill directories
-        paths: Vec<PathBuf>,
-    },
-
-    /// List discovered skills
-    #[command(name = "list")]
-    List {
-        /// Optional path to search (defaults to current directory)
-        path: Option<PathBuf>,
-    },
-}
-
-/// Optional VT Code dependency names
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
-pub enum ManagedDependency {
-    #[value(name = "search-tools")]
-    SearchTools,
-    #[value(name = "ripgrep")]
-    Ripgrep,
-    #[value(name = "ast-grep")]
-    AstGrep,
-}
-
-/// Dependency management subcommands
-#[derive(Debug, Subcommand, Clone)]
-pub enum DependenciesSubcommand {
-    /// Install or update an optional dependency
-    #[command(name = "install")]
-    Install {
-        /// Dependency to install
-        dependency: ManagedDependency,
-    },
-
-    /// Show current status for an optional dependency
-    #[command(name = "status")]
-    Status {
-        /// Dependency to inspect
-        dependency: ManagedDependency,
-    },
-}
-
-/// Built-in repository checks
-#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
-pub enum CheckSubcommand {
-    /// Run ast-grep rule tests and scan for the current workspace
-    #[command(name = "ast-grep")]
-    AstGrep,
-}
-
-/// Configuration file structure with latest features
-#[derive(Debug)]
-pub struct ConfigFile {
-    pub model: Option<String>,
-    pub provider: Option<String>,
-    pub api_key_env: Option<String>,
-    pub verbose: Option<bool>,
-    pub log_level: Option<String>,
-    pub workspace: Option<PathBuf>,
-    pub tools: Option<ToolConfig>,
-    pub context: Option<ContextConfig>,
-    pub logging: Option<LoggingConfig>,
-    pub performance: Option<PerformanceConfig>,
-    pub security: Option<SecurityConfig>,
-}
-
-/// Tool configuration from config file
-#[derive(Debug, serde::Deserialize)]
-pub struct ToolConfig {
-    pub enable_validation: Option<bool>,
-    pub max_execution_time_seconds: Option<u64>,
-    pub allow_file_creation: Option<bool>,
-    pub allow_file_deletion: Option<bool>,
-}
-
-/// Context management configuration
-#[derive(Debug, serde::Deserialize)]
-pub struct ContextConfig {
-    pub max_context_length: Option<usize>,
-}
-
-/// Logging configuration
-#[derive(Debug, serde::Deserialize)]
-pub struct LoggingConfig {
-    pub file_logging: Option<bool>,
-    pub log_directory: Option<String>,
-    pub max_log_files: Option<usize>,
-    pub max_log_size_mb: Option<usize>,
-}
-
-#[cfg(test)]
-mod exec_command_tests {
-    use super::{
-        CheckSubcommand, Cli, Commands, DependenciesSubcommand, ExecSubcommand, ManagedDependency, PodsCommands,
-    };
-    use clap::Parser;
-    use std::path::PathBuf;
-
-    #[test]
-    fn exec_shorthand_preserves_prompt() {
-        let cli = Cli::parse_from(["vtcode", "exec", "count files"]);
-        let Some(Commands::Exec { command, prompt, .. }) = cli.command else {
-            panic!("expected exec command");
-        };
-
-        assert!(command.is_none());
-        assert_eq!(prompt.as_deref(), Some("count files"));
-    }
-
-    #[test]
-    fn exec_resume_parses_specific_session_and_prompt() {
-        let cli = Cli::parse_from(["vtcode", "exec", "resume", "session-123", "follow up"]);
-        let Some(Commands::Exec {
-            command: Some(ExecSubcommand::Resume(resume)),
-            prompt,
-            ..
-        }) = cli.command
-        else {
-            panic!("expected exec resume command");
-        };
-
-        assert!(prompt.is_none());
-        assert!(!resume.last);
-        assert_eq!(resume.session_or_prompt.as_deref(), Some("session-123"));
-        assert_eq!(resume.prompt.as_deref(), Some("follow up"));
-    }
-
-    #[test]
-    fn exec_resume_parses_last_flag() {
-        let cli = Cli::parse_from(["vtcode", "exec", "resume", "--last", "continue"]);
-        let Some(Commands::Exec { command: Some(ExecSubcommand::Resume(resume)), .. }) = cli.command else {
-            panic!("expected exec resume command");
-        };
-
-        assert!(resume.last);
-        assert_eq!(resume.session_or_prompt.as_deref(), Some("continue"));
-        assert!(resume.prompt.is_none());
-    }
-
-    #[test]
-    fn exec_resume_parses_all_flag() {
-        let cli = Cli::parse_from(["vtcode", "exec", "resume", "--last", "--all", "continue"]);
-        let Some(Commands::Exec { command: Some(ExecSubcommand::Resume(resume)), .. }) = cli.command else {
-            panic!("expected exec resume command");
-        };
-
-        assert!(resume.last);
-        assert!(resume.all);
-        assert_eq!(resume.session_or_prompt.as_deref(), Some("continue"));
-    }
-
-    #[test]
-    fn exec_resume_allows_last_without_positional_for_stdin_prompt() {
-        let cli = Cli::parse_from(["vtcode", "exec", "resume", "--last"]);
-        let Some(Commands::Exec { command: Some(ExecSubcommand::Resume(resume)), .. }) = cli.command else {
-            panic!("expected exec resume command");
-        };
-
-        assert!(resume.last);
-        assert!(resume.session_or_prompt.is_none());
-        assert!(resume.prompt.is_none());
-    }
-
-    #[test]
-    fn global_resume_and_continue_parse_all_flag() {
-        let resume_cli = Cli::parse_from(["vtcode", "--resume", "session-123", "--all"]);
-        assert_eq!(resume_cli.resume_session.as_deref(), Some("session-123"));
-        assert!(resume_cli.all);
-
-        let continue_cli = Cli::parse_from(["vtcode", "--continue", "--all"]);
-        assert!(continue_cli.continue_latest);
-        assert!(continue_cli.all);
-    }
-
-    #[test]
-    fn global_fork_flags_parse_summarize() {
-        let cli = Cli::parse_from(["vtcode", "--fork-session", "session-123", "--summarize"]);
-        assert_eq!(cli.fork_session.as_deref(), Some("session-123"));
-        assert!(cli.summarize);
-    }
-
-    #[test]
-    fn notify_parses_title_and_message() {
-        let cli = Cli::parse_from(["vtcode", "notify", "--title", "VT Code", "Session started"]);
-        let Some(Commands::Notify { title, message }) = cli.command else {
-            panic!("expected notify command");
-        };
-
-        assert_eq!(title.as_deref(), Some("VT Code"));
-        assert_eq!(message, "Session started");
-    }
-
-    #[test]
-    fn review_defaults_to_current_diff() {
-        let cli = Cli::parse_from(["vtcode", "review"]);
-        let Some(Commands::Review(review)) = cli.command else {
-            panic!("expected review command");
-        };
-
-        assert!(!review.last_diff);
-        assert!(review.target.is_none());
-        assert!(review.files.is_empty());
-        assert!(review.style.is_none());
-    }
-
-    #[test]
-    fn review_parses_target_and_style_flags() {
-        let cli = Cli::parse_from(["vtcode", "review", "--target", "HEAD~1..HEAD", "--style", "security"]);
-        let Some(Commands::Review(review)) = cli.command else {
-            panic!("expected review command");
-        };
-
-        assert_eq!(review.target.as_deref(), Some("HEAD~1..HEAD"));
-        assert_eq!(review.style.as_deref(), Some("security"));
-        assert!(!review.last_diff);
-    }
-
-    #[test]
-    fn review_parses_files() {
-        let cli = Cli::parse_from(["vtcode", "review", "--file", "src/main.rs", "--file", "src/lib.rs"]);
-        let Some(Commands::Review(review)) = cli.command else {
-            panic!("expected review command");
-        };
-
-        assert_eq!(review.files.len(), 2);
-        assert_eq!(review.files[0], PathBuf::from("src/main.rs"));
-        assert_eq!(review.files[1], PathBuf::from("src/lib.rs"));
-    }
-
-    #[test]
-    fn dependencies_install_parses_ast_grep() {
-        let cli = Cli::parse_from(["vtcode", "dependencies", "install", "ast-grep"]);
-        let Some(Commands::Dependencies(DependenciesSubcommand::Install { dependency })) = cli.command else {
-            panic!("expected dependencies install command");
-        };
-
-        assert_eq!(dependency, ManagedDependency::AstGrep);
-    }
-
-    #[test]
-    fn dependencies_install_parses_ripgrep() {
-        let cli = Cli::parse_from(["vtcode", "dependencies", "install", "ripgrep"]);
-        let Some(Commands::Dependencies(DependenciesSubcommand::Install { dependency })) = cli.command else {
-            panic!("expected dependencies install command");
-        };
-
-        assert_eq!(dependency, ManagedDependency::Ripgrep);
-    }
-
-    #[test]
-    fn dependencies_install_parses_search_tools() {
-        let cli = Cli::parse_from(["vtcode", "dependencies", "install", "search-tools"]);
-        let Some(Commands::Dependencies(DependenciesSubcommand::Install { dependency })) = cli.command else {
-            panic!("expected dependencies install command");
-        };
-
-        assert_eq!(dependency, ManagedDependency::SearchTools);
-    }
-
-    #[test]
-    fn deps_alias_parses_status_command() {
-        let cli = Cli::parse_from(["vtcode", "deps", "status", "ast-grep"]);
-        let Some(Commands::Dependencies(DependenciesSubcommand::Status { dependency })) = cli.command else {
-            panic!("expected deps status command");
-        };
-
-        assert_eq!(dependency, ManagedDependency::AstGrep);
-    }
-
-    #[test]
-    fn deps_alias_parses_ripgrep_status_command() {
-        let cli = Cli::parse_from(["vtcode", "deps", "status", "ripgrep"]);
-        let Some(Commands::Dependencies(DependenciesSubcommand::Status { dependency })) = cli.command else {
-            panic!("expected deps status command");
-        };
-
-        assert_eq!(dependency, ManagedDependency::Ripgrep);
-    }
-
-    #[test]
-    fn deps_alias_parses_search_tools_status_command() {
-        let cli = Cli::parse_from(["vtcode", "deps", "status", "search-tools"]);
-        let Some(Commands::Dependencies(DependenciesSubcommand::Status { dependency })) = cli.command else {
-            panic!("expected deps status command");
-        };
-
-        assert_eq!(dependency, ManagedDependency::SearchTools);
-    }
-
-    #[test]
-    fn check_parses_ast_grep_subcommand() {
-        let cli = Cli::parse_from(["vtcode", "check", "ast-grep"]);
-        let Some(Commands::Check { command }) = cli.command else {
-            panic!("expected check command");
-        };
-
-        assert_eq!(command, CheckSubcommand::AstGrep);
-    }
-
-    #[test]
-    fn pods_start_parses_model_and_gpu_flags() {
-        let cli = Cli::parse_from([
-            "vtcode",
-            "pods",
-            "start",
-            "--name",
-            "llama",
-            "--model",
-            "meta-llama/Llama-3.1-8B-Instruct",
-            "--pod-name",
-            "gpu-box",
-            "--ssh",
-            "ssh root@gpu.example.com",
-            "--gpu",
-            "0:A100",
-            "--gpu",
-            "1:A100",
-            "--gpus",
-            "2",
-            "--memory",
-            "90",
-            "--context",
-            "32k",
-        ]);
-        let Some(Commands::Pods {
-            command:
-                PodsCommands::Start {
-                    name,
-                    model,
-                    pod_name,
-                    ssh,
-                    gpus,
-                    models_path,
-                    profile,
-                    gpus_count,
-                    memory,
-                    context,
-                },
-        }) = cli.command
-        else {
-            panic!("expected pods start command");
-        };
-
-        assert_eq!(name, "llama");
-        assert_eq!(model, "meta-llama/Llama-3.1-8B-Instruct");
-        assert_eq!(pod_name.as_deref(), Some("gpu-box"));
-        assert_eq!(ssh.as_deref(), Some("ssh root@gpu.example.com"));
-        assert_eq!(gpus, vec!["0:A100", "1:A100"]);
-        assert!(models_path.is_none());
-        assert!(profile.is_none());
-        assert_eq!(gpus_count, Some(2));
-        assert_eq!(memory, Some(90.0));
-        assert_eq!(context.as_deref(), Some("32k"));
-    }
-}
-
-/// Performance monitoring configuration
-#[derive(Debug, serde::Deserialize)]
-pub struct PerformanceConfig {
-    pub enabled: Option<bool>,
-    pub track_token_usage: Option<bool>,
-    pub track_api_costs: Option<bool>,
-    pub track_response_times: Option<bool>,
-    pub enable_benchmarking: Option<bool>,
-    pub metrics_retention_days: Option<usize>,
-}
-
-/// Security configuration
-#[derive(Debug, serde::Deserialize)]
-pub struct SecurityConfig {
-    pub level: Option<String>,
-    pub enable_audit_logging: Option<bool>,
-    pub enable_vulnerability_scanning: Option<bool>,
-    pub allow_external_urls: Option<bool>,
-    pub max_file_access_depth: Option<usize>,
-}
-
 impl Default for Cli {
     fn default() -> Self {
         Self {
@@ -1692,16 +835,16 @@ impl Default for Cli {
             session_id: None,
             summarize: false,
             debug: false,
-            enable_skills: false,                // Skills disabled by default
-            tick_rate: 250,                      // Default tick rate: 250ms
-            frame_rate: 60,                      // Default frame rate: 60 FPS
-            agent: None,                         // No agent override by default
-            allowed_tools: Vec::new(),           // No tool restrictions by default
-            disallowed_tools: Vec::new(),        // No tool restrictions by default
-            dangerously_skip_permissions: false, // Safety confirmations enabled by default
-            ide: false,                          // No auto IDE connection by default
-            chrome: false,                       // Chrome integration disabled by default
-            no_chrome: false,                    // Chrome integration not explicitly disabled
+            enable_skills: false,
+            tick_rate: 250,
+            frame_rate: 60,
+            agent: None,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            dangerously_skip_permissions: false,
+            ide: false,
+            chrome: false,
+            no_chrome: false,
             command: Some(Commands::Chat),
         }
     }
@@ -1723,7 +866,6 @@ impl Cli {
     ///   log_level = "info"
     ///   workspace = "/path/to/workspace"
     pub async fn load_config(&self) -> anyhow::Result<ConfigFile> {
-        use std::path::Path;
         use tokio::fs;
 
         // Resolve candidate path
@@ -1739,7 +881,7 @@ impl Cli {
         let path = if let Some(p) = explicit_path {
             p
         } else {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let primary = cwd.join("vtcode.toml");
             let secondary = cwd.join(".vtcode.toml");
             if fs::try_exists(&primary).await.unwrap_or(false) {
@@ -1843,7 +985,7 @@ impl Cli {
     pub fn get_workspace(&self) -> PathBuf {
         self.workspace
             .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+            .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
     }
 
     /// Get the effective API key environment variable
@@ -1891,9 +1033,44 @@ impl Cli {
     }
 }
 
+fn parse_workspace_directory(raw: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(raw);
+    if !candidate.exists() {
+        return Err(format!(
+            "'{}' is not a valid workspace path or subcommand.\n\
+             Run `vtcode --help` to see available commands and options.",
+            raw
+        ));
+    }
+
+    Ok(candidate)
+}
+
+pub fn long_version() -> String {
+    use crate::config::defaults::{get_config_dir, get_data_dir};
+
+    let git_info = option_env!("VT_CODE_GIT_INFO").unwrap_or(env!("CARGO_PKG_VERSION"));
+
+    let config_dir = get_config_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "~/.vtcode/".to_string());
+
+    let data_dir = get_data_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "~/.vtcode/cache/".to_string());
+
+    format!(
+        "{}\n\nAuthors: {}\nConfig directory: {}\nData directory: {}\n\nEnvironment variables:\n  VTCODE_CONFIG - Override config directory\n  VTCODE_DATA - Override data directory",
+        git_info,
+        env!("CARGO_PKG_AUTHORS"),
+        config_dir,
+        data_dir
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Cli, long_version};
+    use super::*;
     use clap::Parser;
 
     #[test]
@@ -1933,7 +1110,7 @@ mod tests {
 
         assert!(matches!(
             cli.command,
-            Some(super::Commands::AppServer { ref listen }) if listen == "stdio://"
+            Some(Commands::AppServer { ref listen }) if listen == "stdio://"
         ));
     }
 
@@ -1941,7 +1118,7 @@ mod tests {
     fn parses_init_force_flag() {
         let cli = Cli::parse_from(["vtcode", "init", "--force"]);
 
-        assert!(matches!(cli.command, Some(super::Commands::Init { force: true })));
+        assert!(matches!(cli.command, Some(Commands::Init { force: true })));
     }
 
     #[test]
@@ -1950,7 +1127,7 @@ mod tests {
 
         assert!(matches!(
             cli.command,
-            Some(super::Commands::Login {
+            Some(Commands::Login {
                 ref provider,
                 device_code: true
             }) if provider == "codex"
@@ -1987,7 +1164,7 @@ mod tests {
 
         assert!(matches!(
             cli.command,
-            Some(super::Commands::CreateProject { ref name, ref features })
+            Some(Commands::CreateProject { ref name, ref features })
                 if name == "demo" && features == &vec!["web".to_string(), "db".to_string()]
         ));
     }
@@ -1998,7 +1175,7 @@ mod tests {
 
         assert!(matches!(
             cli.command,
-            Some(super::Commands::Revert {
+            Some(Commands::Revert {
                 turn: 3,
                 partial: Some(ref scope)
             }) if scope == "code"

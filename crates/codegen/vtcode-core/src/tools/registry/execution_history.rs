@@ -231,6 +231,12 @@ const DEFAULT_LOOP_DETECT_WINDOW: usize = 8;
 /// the loop detector fires.  A limit of 2 means the same identical call must
 /// appear 2 times in the detection window before it is flagged.
 const MIN_READONLY_IDENTICAL_LIMIT: usize = 2;
+/// Maximum limit for identical readonly operations.
+///
+/// Mirrors the hard-block threshold in `execution_facade.rs`. Keeping this
+/// in sync ensures `set_loop_detection_limits` can never raise the read-only
+/// limit so high that every identical call immediately hard-blocks.
+const MAX_READONLY_IDENTICAL_LIMIT: usize = 4;
 
 fn spool_path_exists(result: &Value) -> bool {
     let Some(spool_path) = result.get("spool_path").and_then(|v| v.as_str()) else {
@@ -854,7 +860,10 @@ impl ToolExecutionHistory {
     fn effective_identical_limit_for_call(&self, tool_name: &str, args: &Value) -> usize {
         let base_limit = self.identical_limit.load(std::sync::atomic::Ordering::Relaxed);
         if is_read_style_tool_call(tool_name, args) || tool_name_matches(tool_name, tools::CODE_SEARCH) {
-            base_limit.max(MIN_READONLY_IDENTICAL_LIMIT)
+            // Read-only tools: clamp to [MIN, MAX] so the limit cannot grow
+            // unbounded via set_loop_detection_limits, while still allowing
+            // callers to lower it below the default for aggressive dedup.
+            base_limit.clamp(MIN_READONLY_IDENTICAL_LIMIT, MAX_READONLY_IDENTICAL_LIMIT)
         } else {
             base_limit
         }

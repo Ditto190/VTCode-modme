@@ -1,0 +1,55 @@
+//! zai_presets — provider preset definitions for zai.
+
+use super::super::{ModelPreset, ReasoningEffortPreset};
+use crate::config::models::Provider;
+use crate::config::types::ReasoningEffortLevel;
+pub(crate) fn zai_presets() -> Vec<ModelPreset> {
+    vec![
+        ModelPreset {
+            id: "glm-5.2".to_string(),
+            model: "glm-5.2".to_string(),
+            display_name: "GLM-5.2".to_string(),
+            description: "Z.ai flagship model for long-horizon tasks with truly usable 1M-token context".to_string(),
+            provider: Provider::ZAI,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep thinking".to_string(),
+                },
+            ],
+            is_default: true,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
+        ModelPreset {
+            id: "glm-5.1".to_string(),
+            model: "glm-5.1".to_string(),
+            display_name: "GLM-5.1".to_string(),
+            description: "Z.ai's next-gen foundation model with improved reasoning and agent capabilities".to_string(),
+            provider: Provider::ZAI,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep thinking".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(200_000),
+        },
+    ]
+}

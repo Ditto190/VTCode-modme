@@ -14,6 +14,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
+use vtcode_commons::canonicalize;
 use vtcode_commons::utils::calculate_sha256;
 
 pub const FILE_CONFLICT_OVERRIDE_ARG: &str = "__vtcode_conflict_override";
@@ -690,9 +691,9 @@ fn spawn_event_loop(inner: Arc<EditedFileMonitorInner>, event_rx: Receiver<PathB
 }
 
 fn normalize_event_path(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| {
+    canonicalize(path).unwrap_or_else(|_| {
         path.parent()
-            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .and_then(|parent| canonicalize(parent).ok())
             .and_then(|parent| path.file_name().map(|name| parent.join(name)))
             .unwrap_or_else(|| path.to_path_buf())
     })
@@ -751,7 +752,7 @@ fn workspace_relative_display(workspace_root: &Path, path: &Path) -> String {
     if let Ok(relative) = path.strip_prefix(workspace_root) {
         return relative.to_string_lossy().to_string();
     }
-    if let Ok(canonical_root) = std::fs::canonicalize(workspace_root)
+    if let Ok(canonical_root) = canonicalize(workspace_root)
         && let Ok(relative) = path.strip_prefix(canonical_root)
     {
         return relative.to_string_lossy().to_string();
@@ -989,7 +990,7 @@ mod tests {
     fn normalizes_missing_event_paths_via_canonical_parent() -> Result<()> {
         let temp = TempDir::new()?;
         let missing = temp.path().join("missing.txt");
-        let canonical_parent = std::fs::canonicalize(temp.path())?;
+        let canonical_parent = canonicalize(temp.path())?;
 
         assert_eq!(normalize_event_path(&missing), canonical_parent.join("missing.txt"));
         Ok(())

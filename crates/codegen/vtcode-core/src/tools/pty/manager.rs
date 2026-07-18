@@ -61,6 +61,7 @@ use crate::tools::types::VTCodePtySession;
 use crate::utils::gatekeeper;
 use crate::utils::path::ensure_path_within_workspace;
 use crate::utils::unicode_monitor::UNICODE_MONITOR;
+use vtcode_commons::canonicalize;
 
 mod session_ops;
 
@@ -80,7 +81,7 @@ struct PtyState {
 
 impl PtyManager {
     pub fn new(workspace_root: PathBuf, config: PtyConfig) -> Self {
-        let resolved_root = workspace_root.canonicalize().unwrap_or_else(|_| workspace_root.clone());
+        let resolved_root = canonicalize(&workspace_root).unwrap_or_else(|_| workspace_root.clone());
 
         let default_paths =
             path_env::compute_extra_search_paths(&CommandsConfig::default().extra_path_entries, &resolved_root);

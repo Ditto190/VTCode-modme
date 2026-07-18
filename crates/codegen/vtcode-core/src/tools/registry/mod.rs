@@ -126,6 +126,7 @@ pub type SessionModelTools = Arc<tokio::sync::RwLock<Vec<crate::llm::provider::T
 pub type ToolProgressCallback = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 use super::traits::Tool;
+
 #[cfg(test)]
 use crate::config::types::CapabilityLevel;
 
@@ -300,6 +301,7 @@ mod tests {
     use std::fs;
     use std::time::Duration;
     use tempfile::TempDir;
+    use vtcode_commons::canonicalize;
 
     const CUSTOM_TOOL_NAME: &str = "custom_test_tool";
     const SLOW_TIMEOUT_TOOL_NAME: &str = "slow_timeout_test_tool";
@@ -1656,7 +1658,7 @@ mod tests {
         let response = registry.execute_tool(tools::APPLY_PATCH, json!({ "patch": patch })).await?;
 
         assert_eq!(response.get("success").and_then(Value::as_bool), Some(true));
-        let expected_path = fs::canonicalize(temp_dir.path().join("patched_via_alias.txt"))?
+        let expected_path = canonicalize(temp_dir.path().join("patched_via_alias.txt"))?
             .to_string_lossy()
             .into_owned();
         let modified_files = response
@@ -1665,7 +1667,7 @@ mod tests {
             .map_or(&[] as &[Value], |arr| arr)
             .iter()
             .filter_map(|v| v.as_str().map(std::path::PathBuf::from))
-            .filter_map(|p| fs::canonicalize(p).ok())
+            .filter_map(|p| canonicalize(p).ok())
             .filter_map(|p| p.to_str().map(String::from))
             .collect::<Vec<_>>();
         assert_eq!(modified_files, vec![expected_path]);
@@ -1682,7 +1684,7 @@ mod tests {
         fs::create_dir(temp_dir.path().join("src"))?;
         fs::write(temp_dir.path().join("src/delete.rs"), "delete me\n")?;
         fs::write(temp_dir.path().join("src/old.rs"), "old\n")?;
-        let canonical_base = fs::canonicalize(temp_dir.path())?;
+        let canonical_base = canonicalize(temp_dir.path())?;
         let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
         registry.allow_all_tools().await?;
 

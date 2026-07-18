@@ -31,6 +31,7 @@ pub use std::path::{Path, PathBuf};
 pub use std::sync::Arc;
 pub use std::time::{Duration, Instant};
 pub use tempfile::TempDir;
+use vtcode_commons::canonicalize;
 pub use vtcode_config::ToolProfile;
 pub use vtcode_config::core::permissions::{AgentPermissionsConfig, PermissionDefault};
 
@@ -375,7 +376,7 @@ pub fn tool_call_response_with_request_id(tool_name: &str, args: serde_json::Val
 }
 
 pub fn workspace_root(temp: &TempDir) -> PathBuf {
-    temp.path().canonicalize().unwrap_or_else(|_| temp.path().to_path_buf())
+    canonicalize(temp.path()).unwrap_or_else(|_| temp.path().to_path_buf())
 }
 
 pub async fn make_runner(temp: &TempDir, vt_cfg: VTCodeConfig, session_id: &str) -> AgentRunner {

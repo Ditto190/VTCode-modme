@@ -235,6 +235,7 @@ fn sanitize_worktree_name(name: &str) -> String {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use vtcode_commons::canonicalize;
 
     #[test]
     fn sanitize_worktree_name_basic() {
@@ -282,7 +283,7 @@ mod tests {
     /// `starts_with(managed_dir)` filter would miss worktrees when the caller
     /// passes a symlinked path (e.g. macOS `/tmp` -> `/private/tmp`).
     fn manager_for(repo: &TempDir) -> WorktreeManager {
-        WorktreeManager::new(std::fs::canonicalize(repo.path()).expect("canonicalize repo"))
+        WorktreeManager::new(canonicalize(repo.path()).expect("canonicalize repo"))
     }
 
     fn init_temp_git_repo() -> TempDir {
