@@ -147,7 +147,7 @@ All file operations (read, write, list, search) must validate that paths are wit
 
 ```rust
 // At the tool boundary, before any file operation:
-let canonical = path.canonicalize()
+let canonical = vtcode_commons::canonicalize(path)
     .with_context(|| format!("Failed to resolve path: {}", path.display()))?;
 if !canonical.starts_with(&workspace_root) {
     anyhow::bail!("Path {} is outside workspace boundary", path.display());

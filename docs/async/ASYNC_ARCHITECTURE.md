@@ -44,7 +44,7 @@ VT Code uses a **fully async architecture** for all I/O operations, providing no
     ::run_command       ::read_to_string
                         ::write
     Uses:               ::metadata
-    spawn_blocking      ::canonicalize
+    spawn_blocking      vtcode_commons::canonicalize
 
 
 
@@ -167,8 +167,8 @@ tokio::fs::write(path, data).await?;
 // Metadata
 let metadata = tokio::fs::metadata(path).await?;
 
-// Canonicalize
-let canonical = tokio::fs::canonicalize(path).await?;
+// Canonicalize (dunce-backed via vtcode_commons)
+let canonical = vtcode_commons::canonicalize(path)?;
 
 // Create directories
 tokio::fs::create_dir_all(path).await?;

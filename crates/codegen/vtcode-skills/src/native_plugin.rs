@@ -52,6 +52,8 @@ use hashbrown::HashMap;
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::Mutex;
@@ -226,6 +228,24 @@ fn normalize_trusted_dir(path: PathBuf) -> PathBuf {
     })
 }
 
+#[cfg(unix)]
+fn warn_if_insecure_trusted_dir(dir: &Path) {
+    if let Ok(metadata) = std::fs::metadata(dir) {
+        let mode = metadata.permissions().mode();
+        if mode & 0o022 != 0 {
+            let perm_octal = format!("{:o}", mode & 0o777);
+            warn!(
+                dir = ?dir,
+                mode = %perm_octal,
+                "trusted plugin directory is writable by group or others; a non-owner user could plant a malicious plugin via symlink or replacement"
+            );
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn warn_if_insecure_trusted_dir(_dir: &Path) {}
+
 impl NativePlugin {
     /// Create a new native plugin from a loaded library
     pub fn new(library: Library, path: PathBuf) -> Result<Self> {
@@ -337,6 +357,7 @@ impl PluginLoader {
     pub fn add_trusted_dir(&mut self, path: PathBuf) -> &mut Self {
         let path = normalize_trusted_dir(path);
         if !self.trusted_dirs.contains(&path) {
+            warn_if_insecure_trusted_dir(&path);
             self.trusted_dirs.push(path);
         }
         self
@@ -385,6 +406,7 @@ impl PluginLoader {
         let mut plugins = Vec::new();
 
         for dir in &self.trusted_dirs {
+            warn_if_insecure_trusted_dir(dir);
             if !dir.exists() {
                 continue;
             }
@@ -936,5 +958,31 @@ mod tests {
 
         // With thread_safe: true, we expect max concurrency > 1
         assert!(TEST_EXECUTE_MAX_CONCURRENCY.load(Ordering::SeqCst) > 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_warn_if_insecure_trusted_dir_warns_on_writable_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let writable_dir = temp_dir.path().join("writable");
+        std::fs::create_dir(&writable_dir).unwrap();
+        std::fs::set_permissions(&writable_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        warn_if_insecure_trusted_dir(&writable_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_warn_if_insecure_trusted_dir_silent_on_restricted_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let restricted_dir = temp_dir.path().join("restricted");
+        std::fs::create_dir(&restricted_dir).unwrap();
+        std::fs::set_permissions(&restricted_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        warn_if_insecure_trusted_dir(&restricted_dir);
     }
 }

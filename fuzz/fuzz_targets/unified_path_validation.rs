@@ -4,6 +4,7 @@ use libfuzzer_sys::fuzz_target;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tokio::runtime::{Builder, Runtime};
+use vtcode_commons::canonicalize;
 use vtcode_core::tools::validation::unified_path::validate_and_resolve_path;
 
 const MAX_INPUT_BYTES: usize = 1024;
@@ -46,7 +47,7 @@ fn setup_workspace(root: &Path) {
 }
 
 fn canonical_or_fallback(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fuzz_target!(|data: &[u8]| {
