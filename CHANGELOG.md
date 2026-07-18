@@ -2,6 +2,24 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.135.13 - 2026-07-18
+
+### Highlights
+#### Bug Fixes
+
+- Add workspace dependency versions for crates.io publishing (ef854c98) (@vinhnx)
+### Other Changes
+#### CI
+
+- Use local setup-zig action with node24 (db171faa) (@vinhnx)
+- Optimize platform build bottlenecks across CI and release (e1612291) 
+#### Other
+
+- Update project (32eaa76e) 
+- Update TODO (b2540992) 
+#### Refactors
+
+- Simplify auto-permission prompts and asset sync, remove redundant system prompts (c625737e) 
 ## 0.135.12 - 2026-07-17
 
 ### Highlights
