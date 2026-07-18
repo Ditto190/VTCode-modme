@@ -32,19 +32,33 @@ VT Code is a Rust coding agent built for long-running autonomous workflows, with
 
 ## Quick start
 
-```shell
+Install via homebrew
+
+```yaml
+brew install vinhnx/tap/vtcode
+```
+
+One-liner for macOS/Linux (also installs ripgrep + ast-grep)
+
+```yaml
 curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
+```
+
+Scaffolds `vtcode.toml`, `.vtcode/`, and `AGENTS.md` in your project
+
+```yaml
 vtcode init
+```
+
+Launch VT Code
+
+```yaml
 vtcode
 ```
 
-1. **Install** - one-liner for macOS/Linux (also installs ripgrep + ast-grep)
-2. **Init** - scaffolds `vtcode.toml`, `.vtcode/`, and `AGENTS.md` in your project
-3. **Launch** - interactive TUI with streaming, tools, and slash commands
-
 ### Common commands
 
-```shell
+```yaml
 vtcode                         # interactive TUI
 vtcode init                    # scaffold project config + AGENTS.md
 vtcode ask "explain Rc vs Arc" # one-shot question
@@ -89,7 +103,7 @@ cost. VT Code supports three local backends, all managed from the TUI:
 - **LM Studio** (`lms server start`) — OpenAI-compatible; select the loaded model in the picker.
 - **llama.cpp** (`llama-server -m model.gguf`) — most automated; auto-starts via `LLAMACPP_MODEL_PATH`.
 
-```shell
+```yaml
 /local                 # interactive local server manager
 /local start ollama   # start a specific backend
 /local troubleshoot   # diagnose connection / model issues
@@ -106,7 +120,7 @@ sizing, and a reliable-setup checklist, and
 
 ## Development
 
-```shell
+```yaml
 git clone https://github.com/vinhnx/vtcode.git
 cd vtcode
 ./scripts/run-debug.sh
@@ -122,7 +136,7 @@ Rust stable, edition 2024, MSRV 1.93.0. Workspace of ~30 crates:
 
 Want to use VT Code as a library? See [`vtcode-battery-pack`](https://github.com/vinhnx/vtcode-battery-pack) for a curated set of crates you can add to your own Rust projects.
 
-```shell
+```yaml
 ./scripts/check-dev.sh  # fast quality gate (clippy, fmt, check)
 cargo nextest run        # parallel test runner
 ```
