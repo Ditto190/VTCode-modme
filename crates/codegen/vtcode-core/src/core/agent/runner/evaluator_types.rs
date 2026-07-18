@@ -9,7 +9,7 @@ use serde::Deserialize;
 pub(super) const EVALUATOR_SCORE_THRESHOLD: u8 = 4;
 
 /// Structured response from the evaluator LLM.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(super) struct EvaluatorResponse {
     pub(super) verdict: String,
     pub(super) summary: String,
@@ -28,7 +28,7 @@ pub(super) struct EvaluatorResponse {
 }
 
 /// A single finding from the evaluator.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(super) struct EvaluatorFinding {
     pub(super) severity: String,
     pub(super) title: String,
@@ -156,5 +156,90 @@ impl EvaluatorResponse {
         }
 
         summary
+    }
+}
+
+/// Single skeptic panel entry: model id + its evaluator response.
+#[derive(Debug, Clone)]
+pub(super) struct SkepticPanelEntry {
+    pub(super) model: String,
+    pub(super) response: EvaluatorResponse,
+}
+
+/// Aggregated result of the skeptic panel.
+///
+/// The panel passes only when every skeptic verdict is "pass" and every
+/// scorecard dimension meets the threshold across all panelists.
+#[derive(Debug, Clone)]
+pub(super) struct SkepticPanelAggregate {
+    pub(super) entries: Vec<SkepticPanelEntry>,
+    pub(super) verdict: String,
+    pub(super) summary: String,
+    pub(super) scorecard: EvaluatorScorecard,
+    pub(super) high_severity_findings: usize,
+    pub(super) all_passed: bool,
+}
+
+impl SkepticPanelAggregate {
+    /// Aggregate the strictest verdict/scorecard across all skeptics.
+    pub(super) fn from_entries(entries: Vec<SkepticPanelEntry>) -> Self {
+        let all_passed = entries.iter().all(|e| e.response.passed());
+        let verdict = if all_passed {
+            "pass".to_string()
+        } else {
+            "fail".to_string()
+        };
+        let high_severity_findings = entries.iter().map(|e| e.response.high_severity_findings).max().unwrap_or(0);
+        let mut summaries = entries.iter().map(|e| e.response.summary.trim()).collect::<Vec<_>>();
+        if summaries.len() > 3 {
+            summaries.truncate(3);
+        }
+        let summary = if summaries.is_empty() {
+            "Skeptic panel: no responses.".to_string()
+        } else {
+            format!("Skeptic panel ({} models): {}", entries.len(), summaries.join(" | "))
+        };
+        let mut scorecard = EvaluatorScorecard::default();
+        for entry in &entries {
+            let sc = entry.response.effective_scorecard();
+            for (label, _current) in scorecard.entries() {
+                if let Some(new) = sc.entries().iter().find(|(l, _)| **l == *label).and_then(|(_, s)| *s) {
+                    scorecard = scorecard.with_min_score(label, new);
+                }
+            }
+        }
+        Self {
+            entries,
+            verdict,
+            summary,
+            scorecard,
+            high_severity_findings,
+            all_passed,
+        }
+    }
+}
+
+impl EvaluatorScorecard {
+    pub(super) fn with_min_score(mut self, label: &str, new_score: u8) -> Self {
+        let current = match label {
+            "Contract fidelity" => self.contract_fidelity,
+            "Functionality" => self.functionality,
+            "Code quality" => self.code_quality,
+            "Verification integrity" => self.verification_integrity,
+            _ => None,
+        };
+        let merged = match (current, new_score) {
+            (Some(c), n) if n < c => Some(n),
+            (None, n) => Some(n),
+            (Some(c), _) => Some(c),
+        };
+        match label {
+            "Contract fidelity" => self.contract_fidelity = merged,
+            "Functionality" => self.functionality = merged,
+            "Code quality" => self.code_quality = merged,
+            "Verification integrity" => self.verification_integrity = merged,
+            _ => {}
+        }
+        self
     }
 }

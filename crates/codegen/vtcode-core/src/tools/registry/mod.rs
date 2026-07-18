@@ -37,6 +37,8 @@ mod mcp_helpers;
 mod metrics_facade;
 mod optimization_facade;
 mod output_processing;
+mod pack;
+mod pack_impls;
 mod planning_workflow_checks;
 mod planning_workflow_facade;
 mod policy;
@@ -183,6 +185,9 @@ pub struct ToolRegistry {
     hot_tool_cache: Arc<parking_lot::RwLock<lru::LruCache<String, Arc<dyn Tool>>>>,
     /// Optimization configuration
     optimization_config: vtcode_config::OptimizationConfig,
+
+    /// Composable middleware chain for pre/post tool execution hooks.
+    middleware: crate::tools::tool_middleware::MiddlewareChain,
 
     /// Output spooler for dynamic context discovery (large outputs to files)
     output_spooler: Arc<super::output_spooler::ToolOutputSpooler>,

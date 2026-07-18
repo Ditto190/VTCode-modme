@@ -40,17 +40,16 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::RwLock;
 
 use rayon::prelude::*;
+use vtcode_commons::StringId;
 
 /// Pre-computed file index for instant queries.
 ///
 /// This index is built in the background and cached to avoid
 /// repeated directory traversals on every search.
 pub struct FileIndex {
-    /// All file paths in the workspace
-    files: Vec<String>,
-    /// All directory paths in the workspace
-    directories: Vec<String>,
-    /// When this index was last built
+    files: Vec<StringId>,
+    directories: Vec<StringId>,
+    interner: Arc<Mutex<vtcode_commons::StringInterner>>,
     last_built: std::time::Instant,
 }
 
@@ -141,9 +140,14 @@ impl FileIndex {
             .map_err(|arc| anyhow::anyhow!("failed to unwrap dirs arc, {} references remain", Arc::strong_count(&arc)))?
             .into_inner();
 
+        let mut interner = vtcode_commons::StringInterner::new();
+        let interned_files: Vec<StringId> = files.iter().map(|s| interner.intern(s)).collect();
+        let interned_dirs: Vec<StringId> = directories.iter().map(|s| interner.intern(s)).collect();
+
         Ok(Self {
-            files,
-            directories,
+            files: interned_files,
+            directories: interned_dirs,
+            interner: Arc::new(Mutex::new(interner)),
             last_built: std::time::Instant::now(),
         })
     }
@@ -155,7 +159,7 @@ impl FileIndex {
         pattern_text: &str,
         limit: usize,
         match_type_filter: Option<MatchType>,
-    ) -> Vec<(u32, String, MatchType)> {
+    ) -> Vec<(u32, StringId, MatchType)> {
         // `query` stays serial and declarative: the parallel scoring strategy
         // is isolated behind `score_paths_top_k`, and the per-chunk top-K heaps
         // are merged by the shared `merge_top_k` helper. This keeps the index
@@ -163,14 +167,14 @@ impl FileIndex {
         let mut heaps = Vec::new();
 
         if match_type_filter.is_none_or(|t| t == MatchType::File) {
-            heaps.push(score_paths_top_k(&self.files, limit, pattern_text, MatchType::File));
+            heaps.push(score_paths_top_k(&self.files, &self.interner, limit, pattern_text, MatchType::File));
         }
 
         if match_type_filter.is_none_or(|t| t == MatchType::Directory) {
-            heaps.push(score_paths_top_k(&self.directories, limit, pattern_text, MatchType::Directory));
+            heaps.push(score_paths_top_k(&self.directories, &self.interner, limit, pattern_text, MatchType::Directory));
         }
 
-        merge_top_k(heaps, limit)
+        merge_top_k(heaps, &self.interner, limit)
             .into_sorted_vec()
             .into_iter()
             .map(|Reverse(item)| item)
@@ -186,19 +190,23 @@ impl FileIndex {
 /// `map_init`), keeps its own top-K heap, and the partial heaps are merged by
 /// `merge_top_k`. Callers must not depend on equal-score ordering.
 fn score_paths_top_k(
-    paths: &[String],
+    paths: &[StringId],
+    interner: &Arc<Mutex<vtcode_commons::StringInterner>>,
     limit: usize,
     pattern_text: &str,
     match_type: MatchType,
-) -> BinaryHeap<Reverse<(u32, String, MatchType)>> {
+) -> BinaryHeap<Reverse<(u32, StringId, MatchType)>> {
     const CHUNK: usize = 1024;
 
     // Serial fast path for small inputs: avoids the rayon thread-pool spawn
     // overhead and keeps equal-score ordering deterministic.
     if paths.len() <= CHUNK {
-        let mut list = BestMatchesList::new(limit, pattern_text);
-        for path in paths {
-            list.record_match(path, match_type);
+        let mut list = BestMatchesList::new(limit, pattern_text, interner);
+        for &path_id in paths {
+            let path_opt = interner.lock().get(path_id).map(|s| s.to_string());
+            if let Some(path) = path_opt {
+                list.record_match(&path, match_type);
+            }
         }
         return list.matches;
     }
@@ -206,17 +214,20 @@ fn score_paths_top_k(
     let heaps: Vec<_> = paths
         .par_chunks(CHUNK)
         .map_init(
-            || BestMatchesList::new(limit, pattern_text),
+            || BestMatchesList::new(limit, pattern_text, interner),
             |list, chunk| {
-                for path in chunk {
-                    list.record_match(path, match_type);
+                for &path_id in chunk {
+                    let path_opt = interner.lock().get(path_id).map(|s| s.to_string());
+                    if let Some(path) = path_opt {
+                        list.record_match(&path, match_type);
+                    }
                 }
                 std::mem::take(&mut list.matches)
             },
         )
         .collect();
 
-    merge_top_k(heaps, limit)
+    merge_top_k(heaps, interner, limit)
 }
 
 /// Merge worker-local top-K heaps into a single top-K heap.
@@ -225,9 +236,10 @@ fn score_paths_top_k(
 /// entries, the global top-K is a subset of their union; merging and re-keeping
 /// the top-K yields the correct global result.
 fn merge_top_k(
-    heaps: Vec<BinaryHeap<Reverse<(u32, String, MatchType)>>>,
+    heaps: Vec<BinaryHeap<Reverse<(u32, StringId, MatchType)>>>,
+    _interner: &Arc<Mutex<vtcode_commons::StringInterner>>,
     limit: usize,
-) -> BinaryHeap<Reverse<(u32, String, MatchType)>> {
+) -> BinaryHeap<Reverse<(u32, StringId, MatchType)>> {
     let mut merged = BinaryHeap::with_capacity(limit);
     for heap in heaps {
         for Reverse(item) in heap.into_vec() {
@@ -325,15 +337,16 @@ impl FileIndexCache {
         let Some(existing) = guard.take() else { return };
 
         let mut index = Arc::try_unwrap(existing).unwrap_or_else(|arc| (*arc).clone());
+        let path_id = index.interner.lock().intern(path);
         if is_added {
             if Path::new(path).is_dir() {
-                index.directories.push(path.to_string());
+                index.directories.push(path_id);
             } else {
-                index.files.push(path.to_string());
+                index.files.push(path_id);
             }
         } else {
-            index.files.retain(|p| p != path);
-            index.directories.retain(|p| p != path);
+            index.files.retain(|&p| p != path_id);
+            index.directories.retain(|&p| p != path_id);
         }
         index.last_built = std::time::Instant::now();
         *guard = Some(Arc::new(index));
@@ -352,6 +365,7 @@ impl Clone for FileIndex {
         Self {
             files: self.files.clone(),
             directories: self.directories.clone(),
+            interner: self.interner.clone(),
             last_built: self.last_built,
         }
     }
@@ -406,12 +420,13 @@ pub use vtcode_commons::paths::file_name_from_path;
 /// Each worker thread gets its own instance to avoid locking during
 /// directory traversal. Results are merged at the end.
 struct BestMatchesList {
-    matches: BinaryHeap<Reverse<(u32, String, MatchType)>>,
+    matches: BinaryHeap<Reverse<(u32, StringId, MatchType)>>,
     limit: usize,
     matcher: nucleo_matcher::Matcher,
     haystack_buf: Vec<char>,
     /// Pre-computed pattern - avoids per-match UTF-32 conversion
     pattern: PatternStorage,
+    interner: Arc<Mutex<vtcode_commons::StringInterner>>,
 }
 
 /// Stores a pattern in the optimal form for Utf32Str creation.
@@ -423,7 +438,11 @@ enum PatternStorage {
 }
 
 impl BestMatchesList {
-    fn new(limit: usize, pattern_text: &str) -> Self {
+    fn new(
+        limit: usize,
+        pattern_text: &str,
+        interner: &Arc<Mutex<vtcode_commons::StringInterner>>,
+    ) -> Self {
         // Normalize pattern to lowercase to work around a nucleo-matcher bug:
         // its prefilter only does case-insensitive search for lowercase needle
         // chars, not uppercase. See https://github.com/openai/codex/pull/15772.
@@ -439,6 +458,7 @@ impl BestMatchesList {
             matcher: nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
             haystack_buf: Vec::with_capacity(256),
             pattern,
+            interner: interner.clone(),
         }
     }
 
@@ -457,16 +477,17 @@ impl BestMatchesList {
             return false;
         };
 
-        push_top_match(&mut self.matches, self.limit, score as u32, path.to_string(), match_type);
+        let path_id = self.interner.lock().intern(path);
+        push_top_match(&mut self.matches, self.limit, score as u32, path_id, match_type);
         true
     }
 }
 
 fn push_top_match(
-    matches: &mut BinaryHeap<Reverse<(u32, String, MatchType)>>,
+    matches: &mut BinaryHeap<Reverse<(u32, StringId, MatchType)>>,
     limit: usize,
     score: u32,
-    path: String,
+    path: StringId,
     match_type: MatchType,
 ) -> bool {
     let candidate = (score, path, match_type);
@@ -519,6 +540,7 @@ pub async fn run_with_index(
 
     // Query the index off the async runtime thread to avoid stalling
     // the tokio worker while rayon parallel-scoring runs.
+    let index_for_results = index.clone();
     let matched_paths = tokio::task::spawn_blocking({
         let pattern_text = config.pattern_text.clone();
         move || Ok::<_, anyhow::Error>(index.query(&pattern_text, limit, None))
@@ -530,11 +552,14 @@ pub async fn run_with_index(
     // Build final results
     let matches = matched_paths
         .into_iter()
-        .map(|(score, path, match_type)| FileMatch {
-            score,
-            path,
-            match_type,
-            indices: if compute_indices { Some(Vec::new()) } else { None },
+        .filter_map(|(score, path_id, match_type)| {
+            let path = index_for_results.interner.lock().get(path_id)?.to_string();
+            Some(FileMatch {
+                score,
+                path,
+                match_type,
+                indices: if compute_indices { Some(Vec::new()) } else { None },
+            })
         })
         .collect();
 
@@ -593,7 +618,8 @@ fn run_bounded_no_follow_with_visit(
         walk_builder.overrides(override_builder.build()?);
     }
 
-    let mut matches = BestMatchesList::new(limit, &config.pattern_text);
+    let interner = Arc::new(Mutex::new(vtcode_commons::StringInterner::new()));
+    let mut matches = BestMatchesList::new(limit, &config.pattern_text, &interner);
     let mut matching_count = 0usize;
     for result in walk_builder.build() {
         if config.cancel_flag.load(Ordering::Relaxed) {
@@ -624,15 +650,19 @@ fn run_bounded_no_follow_with_visit(
         }
     }
 
+    let interner_guard = interner.lock();
     let matches = matches
         .matches
         .into_sorted_vec()
         .into_iter()
-        .map(|Reverse((score, path, match_type))| FileMatch {
-            score,
-            path,
-            match_type,
-            indices: config.compute_indices.then(Vec::new),
+        .filter_map(|Reverse((score, path_id, match_type))| {
+            let path = interner_guard.get(path_id)?.to_string();
+            Some(FileMatch {
+                score,
+                path,
+                match_type,
+                indices: config.compute_indices.then(Vec::new),
+            })
         })
         .collect();
 
@@ -659,12 +689,15 @@ fn run_with_policy(
 
     let walker = build_parallel_walker(search_directory, exclude, threads, respect_gitignore, follow_links)?;
 
+    let interner = Arc::new(Mutex::new(vtcode_commons::StringInterner::new()));
+
     // Create per-worker result collection using Arc + Mutex for thread safety.
     // Each worker gets exactly one instance - no sharing between workers.
     let best_matchers_per_worker: Vec<Arc<Mutex<BestMatchesList>>> = (0..threads)
-        .map(|_| Arc::new(Mutex::new(BestMatchesList::new(limit, &config.pattern_text))))
+        .map(|_| Arc::new(Mutex::new(BestMatchesList::new(limit, &config.pattern_text, &interner))))
         .collect();
 
+    let interner_for_merge = interner.clone();
     let total_match_count = Arc::new(AtomicUsize::new(0));
 
     // Run parallel traversal - the closure is called once per worker thread.
@@ -676,6 +709,7 @@ fn run_with_policy(
         let best_list = best_matchers_per_worker[worker_id].clone();
         let cancel_flag_clone = cancel_flag.clone();
         let total_match_count_clone = total_match_count.clone();
+        let _interner = interner.clone();
 
         Box::new(move |result| {
             // Check cancellation flag periodically
@@ -719,21 +753,25 @@ fn run_with_policy(
     });
 
     // Merge worker-local top-K heaps into one final top-K heap.
-    let worker_heaps: Vec<BinaryHeap<Reverse<(u32, String, MatchType)>>> = best_matchers_per_worker
+    let worker_heaps: Vec<BinaryHeap<Reverse<(u32, StringId, MatchType)>>> = best_matchers_per_worker
         .into_iter()
         .map(|arc| std::mem::take(&mut arc.lock().matches))
         .collect();
-    let merged_matches = merge_top_k(worker_heaps, limit);
+    let merged_matches = merge_top_k(worker_heaps, &interner_for_merge, limit);
 
     // Build final results
+    let interner_guard = interner_for_merge.lock();
     let matches = merged_matches
         .into_sorted_vec()
         .into_iter()
-        .map(|Reverse((score, path, match_type))| FileMatch {
-            score,
-            path,
-            match_type,
-            indices: if compute_indices { Some(Vec::new()) } else { None },
+        .filter_map(|Reverse((score, path_id, match_type))| {
+            let path = interner_guard.get(path_id)?.to_string();
+            Some(FileMatch {
+                score,
+                path,
+                match_type,
+                indices: if compute_indices { Some(Vec::new()) } else { None },
+            })
         })
         .collect();
 

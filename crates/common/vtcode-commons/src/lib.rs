@@ -34,6 +34,8 @@ pub mod formatting;
 pub mod fs;
 pub mod http;
 pub mod image;
+pub mod interjection;
+pub mod interner;
 pub mod llm;
 pub mod lr_map;
 pub mod memory;
@@ -74,6 +76,11 @@ pub use error_category::{
     is_retryable_llm_error_message,
 };
 pub use errors::{DisplayErrorFormatter, ErrorFormatter, ErrorReporter, MultiErrors, NoopErrorReporter};
+pub use interjection::{
+    EventQueue, FormattedInterjection, InterjectionBuffer, LARGE_PROMPT_THRESHOLD, PendingInterjection,
+    drain_formatted, format_interjection, user_query,
+};
+pub use interner::{StringId, StringInterner};
 pub use paths::{
     PathExt, PathResolver, PathScope, StrPathExt, WorkspacePaths, canonicalize, canonicalize_async,
     file_name_from_path, is_safe_relative_path, normalize_ascii_identifier, resolve_workspace_path,

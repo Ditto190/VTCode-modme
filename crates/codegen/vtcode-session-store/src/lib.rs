@@ -17,6 +17,8 @@
 
 pub mod error;
 pub mod event_log;
+/// Manifest and turn-index persistence helpers.
+pub mod manifest;
 pub mod migration;
 pub mod progress;
 pub mod query;
@@ -25,8 +27,11 @@ pub mod retention;
 pub use error::SessionStoreError;
 pub use event_log::{DEFAULT_MAX_EVENTS, SessionEventLog, SessionManifest, TurnIndex, TurnIndexEntry};
 pub use migration::{MigrationReport, migrate_legacy};
-pub use progress::{Milestone, MilestoneStatus, ProgressLedger, load_progress, progress_path, save_progress};
-pub use query::{FactRecord, SessionSummary, query_facts, recent_sessions};
+pub use progress::{
+    GoalClassifierVerdict, GoalEvent, GoalHistoryEntry, GoalOrchestration, GoalPauseReason, GoalPhase, GoalStatus,
+    GoalTracker, Milestone, MilestoneStatus, ProgressLedger, load_progress, progress_path, save_progress,
+};
+pub use query::{FactRecord, MemorySearchResult, SessionSummary, query_facts, recent_sessions, search_memory};
 pub use retention::{RetentionPolicy, apply_retention, gc_legacy};
 
 use std::path::{Path, PathBuf};

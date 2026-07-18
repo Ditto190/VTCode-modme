@@ -13,6 +13,7 @@ use crate::llm::utils::truncate_to_token_limit;
 pub mod auto;
 pub mod memory_envelope;
 pub mod summarizer;
+pub mod two_pass;
 
 const DEFAULT_COMPACTION_TARGET_THRESHOLD: f64 = 0.50;
 const DEFAULT_COMPACTION_KEEP_LAST_MESSAGES: usize = 10;

@@ -25,6 +25,7 @@ use super::distributed::ToolConfigSnapshot;
 use super::execution_history::ToolExecutionHistory;
 use super::harness::HarnessContext;
 use super::inventory::ToolInventory;
+use super::pack::register_builtin_packs;
 use super::policy::ToolPolicyGateway;
 use super::pty;
 use super::resiliency::ResiliencyContext;
@@ -119,7 +120,7 @@ impl ToolRegistry {
         let inventory = ToolInventory::new(workspace_root.clone(), Arc::clone(&edited_file_monitor));
         let planning_workflow_state = PlanningWorkflowState::new(workspace_root.clone());
 
-        register_builtin_tools(&inventory, &planning_workflow_state);
+        register_builtin_packs(&inventory, &planning_workflow_state).await;
 
         let pty_sessions = pty::PtySessionManager::new(workspace_root.clone(), pty_config);
         let exec_sessions =
@@ -173,6 +174,7 @@ impl ToolRegistry {
             memory_pool: Arc::new(MemoryPool::from_config(&optimization_config.memory_pool)),
             hot_tool_cache: Arc::new(parking_lot::RwLock::new(lru::LruCache::new(hot_cache_size))),
             optimization_config,
+            middleware: crate::tools::tool_middleware::MiddlewareChain::new(),
 
             output_spooler,
 

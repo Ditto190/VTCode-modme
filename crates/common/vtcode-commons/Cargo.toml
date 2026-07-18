@@ -54,6 +54,8 @@ url = { workspace = true }
 percent-encoding = "2.3"
 schemars = { workspace = true, optional = true }
 tiktoken = { workspace = true }
+rustc-hash = { workspace = true }
+smallvec = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

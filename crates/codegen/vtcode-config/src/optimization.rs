@@ -167,6 +167,11 @@ pub struct ToolRegistryConfig {
 
     /// Tool execution timeout in seconds
     pub default_timeout_secs: u64,
+
+    /// When `true`, middleware `before_execute` failures are logged but do
+    /// not block the tool call (fail-open). When `false` (the default),
+    /// middleware errors deny execution (fail-closed).
+    pub middleware_fail_open: bool,
 }
 
 /// Async pipeline configuration
@@ -323,6 +328,7 @@ impl Default for ToolRegistryConfig {
             max_concurrent_tools: 4,
             hot_cache_size: 16,
             default_timeout_secs: 180,
+            middleware_fail_open: false, // Fail-closed by default; opt-in to fail-open
         }
     }
 }
@@ -395,6 +401,7 @@ impl OptimizationConfig {
             tool_registry: ToolRegistryConfig {
                 use_optimized_registry: true,
                 max_concurrent_tools: 2,
+                middleware_fail_open: false,
                 ..Default::default()
             },
             async_pipeline: AsyncPipelineConfig {
@@ -444,6 +451,7 @@ impl OptimizationConfig {
                 max_concurrent_tools: 8,
                 hot_cache_size: 32,
                 default_timeout_secs: 300,
+                middleware_fail_open: false,
             },
             async_pipeline: AsyncPipelineConfig {
                 enable_batching: true,

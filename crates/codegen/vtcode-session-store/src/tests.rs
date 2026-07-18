@@ -3,7 +3,7 @@
 use std::fs;
 
 use tempfile::TempDir;
-use vtcode_exec_events::{ThreadEvent, TurnCompletedEvent, TurnStartedEvent, Usage};
+use vtcode_exec_events::{ThreadEvent, TurnCompletedEvent, TurnStartedEvent, Usage, VersionedThreadEvent};
 
 use crate::event_log::{DEFAULT_MAX_EVENTS, SessionEventLog};
 use crate::migration::migrate_legacy;
@@ -151,4 +151,46 @@ fn retention_evicts_old_sessions_even_when_under_count_cap() {
     assert_eq!(removed, 1);
     let remaining = recent_sessions(dir.path(), 100);
     assert_eq!(remaining.len(), 2);
+}
+
+#[test]
+fn manifest_shortcut_skips_scan_on_reopen() {
+    let dir = TempDir::new().expect("tempdir");
+    // Write a few turns and complete.
+    {
+        let log = open(dir.path(), "sess-shortcut", DEFAULT_MAX_EVENTS).expect("open");
+        for e in &sample_turn() {
+            log.append(e).expect("append");
+        }
+        log.complete().expect("complete");
+    }
+    // Reopen: the manifest + index should be loaded without scanning.
+    let log = SessionEventLog::open(dir.path(), "sess-shortcut", DEFAULT_MAX_EVENTS).expect("reopen");
+    assert_eq!(log.turn_count(), 1);
+    assert_eq!(log.manifest().status, "completed");
+    let rebuilt = log.reconstruct_turn(1).expect("reconstruct");
+    assert_eq!(rebuilt.len(), 2);
+}
+
+#[test]
+fn scan_fallback_when_manifest_missing() {
+    let dir = TempDir::new().expect("tempdir");
+    // Write events directly to events.jsonl without manifest/index.
+    let session_dir = dir.path().join(".vtcode/sessions/sess-raw");
+    let events_path = session_dir.join("events.jsonl");
+    fs::create_dir_all(&session_dir).expect("mkdir");
+    let events = vec![
+        VersionedThreadEvent::new(ThreadEvent::ThreadStarted(vtcode_exec_events::ThreadStartedEvent {
+            thread_id: "t-1".to_string(),
+        })),
+        VersionedThreadEvent::new(ThreadEvent::TurnStarted(TurnStartedEvent::default())),
+        VersionedThreadEvent::new(ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() })),
+    ];
+    let lines: Vec<String> = events.iter().map(|v| serde_json::to_string(v).expect("ser")).collect();
+    fs::write(&events_path, lines.join("\n") + "\n").expect("write raw events");
+
+    let log = SessionEventLog::open(dir.path(), "sess-raw", DEFAULT_MAX_EVENTS).expect("open");
+    assert_eq!(log.turn_count(), 1);
+    let rebuilt = log.reconstruct_turn(1).expect("reconstruct");
+    assert_eq!(rebuilt.len(), 2);
 }

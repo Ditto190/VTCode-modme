@@ -508,6 +508,12 @@ pub struct AgentHarnessConfig {
     /// on terminal input.  Opt-in (default: disabled).
     #[serde(default)]
     pub async_approval: AsyncApprovalConfig,
+    /// Adversarial multi-model evaluator panel.  When enabled, the harness
+    /// runs the evaluator prompt against every listed model in parallel and
+    /// aggregates the strictest verdict/scorecard across the panel.
+    /// Opt-in (default: disabled).
+    #[serde(default)]
+    pub skeptic_panel: SkepticPanelConfig,
 }
 
 impl Default for AgentHarnessConfig {
@@ -533,6 +539,7 @@ impl Default for AgentHarnessConfig {
             max_revision_rounds: default_harness_max_revision_rounds(),
             confidence_escalation: ConfidenceEscalationConfig::default(),
             async_approval: AsyncApprovalConfig::default(),
+            skeptic_panel: SkepticPanelConfig::default(),
         }
     }
 }
@@ -580,6 +587,37 @@ impl Default for AsyncApprovalConfig {
             auto_approve_timeout_secs: None,
         }
     }
+}
+
+/// Configuration for the adversarial multi-model evaluator panel.
+///
+/// When enabled, the evaluator phase runs against every listed model in
+/// parallel and aggregates the strictest verdict/scorecard across the panel.
+/// This is opt-in because each additional skeptic adds latency and cost.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SkepticPanelConfig {
+    /// Master switch. Default: false (opt-in).
+    #[serde(default = "default_skeptic_panel_enabled")]
+    pub enabled: bool,
+
+    /// Model identifiers to run as skeptic evaluators (in addition to the
+    /// primary evaluator). Empty when `enabled = false`.
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+impl Default for SkepticPanelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_skeptic_panel_enabled(),
+            models: Vec::new(),
+        }
+    }
+}
+
+const fn default_skeptic_panel_enabled() -> bool {
+    false
 }
 
 const fn default_async_approval_enabled() -> bool {

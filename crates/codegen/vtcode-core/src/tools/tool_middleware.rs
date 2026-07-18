@@ -44,6 +44,7 @@ pub struct NoopMiddleware;
 impl Middleware for NoopMiddleware {}
 
 /// Middleware composition chain.
+#[derive(Clone)]
 pub struct MiddlewareChain {
     middlewares: Vec<Arc<dyn Middleware>>,
 }
@@ -58,6 +59,30 @@ impl MiddlewareChain {
     pub fn push(mut self, mw: Arc<dyn Middleware>) -> Self {
         self.middlewares.push(mw);
         self
+    }
+
+    /// Execute before hooks, with optional fail-open behavior.
+    ///
+    /// When `fail_open` is `false` (the default), the first middleware error
+    /// short-circuits the chain and is returned to the caller (fail-closed).
+    /// When `fail_open` is `true`, middleware errors are logged and the chain
+    /// continues; the caller receives `Ok(())` unless every middleware fails.
+    pub async fn before_execute_opt(&self, req: &ToolRequest, fail_open: bool) -> MiddlewareResult<()> {
+        if !fail_open {
+            return self.before_execute(req).await;
+        }
+        let mut last_err = None;
+        for mw in &self.middlewares {
+            if let Err(err) = mw.before_execute(req).await {
+                tracing::warn!(
+                    tool = %req.tool_name,
+                    error = %err,
+                    "middleware before_execute failed; ignoring (fail-open)"
+                );
+                last_err = Some(err);
+            }
+        }
+        if let Some(err) = last_err { Err(err) } else { Ok(()) }
     }
 
     /// Execute before hooks.

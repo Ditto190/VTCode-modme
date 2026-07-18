@@ -22,7 +22,11 @@ use crate::tool_policy::ToolExecutionDecision;
 use crate::tools::error_messages::agent_execution;
 use crate::tools::invocation::ToolInvocationId;
 use crate::tools::mcp::{legacy_mcp_tool_name, parse_canonical_mcp_tool_name};
+use crate::tools::request_response::{ToolCallRequest, ToolCallResponse};
 use crate::tools::safety_gateway::{SafetyContext, SafetyDecision, SafetyError as GatewaySafetyError};
+use crate::tools::tool_middleware::MiddlewareChain;
+use crate::tools::unified_error::UnifiedErrorKind;
+use crate::tools::unified_error::UnifiedToolError;
 use crate::ui::search::fuzzy_match;
 
 use super::assembly::public_tool_name_candidates;
@@ -1476,6 +1480,33 @@ impl ToolRegistry {
         let execution_started_at = Instant::now();
         let effective_timeout = self.effective_timeout(timeout_category);
         let effective_timeout_ms = effective_timeout.map(|d| d.as_millis() as u64);
+
+        let fail_open = self.optimization_config.tool_registry.middleware_fail_open;
+        let middleware_req = ToolCallRequest {
+            id: requested_name.clone(),
+            tool_name: tool_name.as_str().into(),
+            args: args.clone(),
+            metadata: None,
+        };
+        if let Err(err) = self.middleware.before_execute_opt(&middleware_req, fail_open).await {
+            if !fail_open {
+                let error_msg = format!("Middleware denied execution: {err}");
+                record_failure(
+                    tool_name_owned.clone(),
+                    is_mcp_tool,
+                    mcp_provider.clone(),
+                    args_for_recording.clone(),
+                    error_msg.clone(),
+                    timeout_category_label.clone(),
+                    base_timeout_ms,
+                    adaptive_timeout_ms,
+                    None,
+                    false,
+                );
+                return Err(anyhow!(error_msg).context("tool denied by middleware"));
+            }
+        }
+
         let exec_future = async {
             if is_mcp_tool {
                 let mcp_name = mcp_tool_name
@@ -1752,6 +1783,21 @@ impl ToolRegistry {
                     ));
                 }
 
+                let _ = self
+                    .middleware
+                    .after_execute(
+                        &middleware_req,
+                        &ToolCallResponse {
+                            id: middleware_req.id.clone(),
+                            success: true,
+                            result: Some(normalized_value.clone()),
+                            error: None,
+                            duration_ms: Some(execution_started_at.elapsed().as_millis() as u64),
+                            cache_hit: None,
+                        },
+                    )
+                    .await;
+
                 Ok(normalized_value)
             }
             Err(err) => {
@@ -1806,6 +1852,17 @@ impl ToolRegistry {
                     effective_timeout_ms,
                     tripped,
                 );
+
+                let _ = self
+                    .middleware
+                    .on_error(
+                        &middleware_req,
+                        &UnifiedToolError::new(
+                            UnifiedErrorKind::from(vtcode_commons::classify_anyhow_error(&err)),
+                            err.to_string(),
+                        ),
+                    )
+                    .await;
 
                 Ok(payload)
             }

@@ -147,8 +147,8 @@ async fn spawn_process_internal(opts: PipeSpawnOptions) -> Result<SpawnedProcess
     }
 
     #[cfg(unix)]
-    {
-        command.process_group(0);
+    unsafe {
+        command.pre_exec(process_group::detach_from_tty);
     }
 
     #[cfg(not(unix))]
@@ -341,6 +341,7 @@ pub async fn spawn_process_with_options(opts: PipeSpawnOptions) -> Result<Spawne
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_fs::TempDir;
 
     fn find_echo_command() -> Option<(String, Vec<String>)> {
         #[cfg(windows)]
@@ -379,5 +380,19 @@ mod tests {
         assert_eq!(opts.program, "echo");
         assert_eq!(opts.args, vec!["hello", "world"]);
         assert!(matches!(opts.stdin_mode, PipeStdinMode::Null));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_spawn_process_detaches_from_tty() {
+        let dir = TempDir::new().expect("tempdir");
+        let env: HashMap<String, String> = HashMap::new();
+
+        let spawned = spawn_process("sh", &["-c".into(), "echo ok".into()], dir.path(), &env, &None)
+            .await
+            .expect("spawn");
+
+        let exit_code = spawned.exit_rx.await.unwrap_or(-1);
+        assert_eq!(exit_code, 0);
     }
 }

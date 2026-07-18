@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use vtcode_exec_events::{ThreadEvent, VersionedThreadEvent};
 
 use crate::error::SessionStoreError;
+use crate::manifest::ManifestStore;
 use crate::session_dir;
 
 /// Default maximum number of events retained per session before the oldest
@@ -48,8 +49,8 @@ impl LogState {
 /// state is never read back into context from here; the log is only consumed
 /// for revert, compaction, analytics, and long-term-learning queries.
 pub struct SessionEventLog {
-    session_dir: PathBuf,
     events_path: PathBuf,
+    manifest_store: ManifestStore,
     file: Mutex<File>,
     state: Mutex<LogState>,
     max_events: usize,
@@ -71,26 +72,33 @@ impl SessionEventLog {
             .append(true)
             .open(&events_path)
             .map_err(|e| SessionStoreError::io(events_path.clone(), e))?;
+        let manifest_store = ManifestStore::new(dir.clone());
         let log = Self {
-            session_dir: dir,
-            events_path,
+            events_path: events_path.clone(),
+            manifest_store,
             file: Mutex::new(file),
             state: Mutex::new(LogState::new(session_id)),
             max_events,
         };
-        log.scan()?;
-        // Seed the running offset from the current file length so appends
-        // continue seamlessly after a reopen (one stat at open, not per event).
-        {
-            let mut st = log.state.lock().map_err(poison)?;
-            let len = log
-                .file
-                .lock()
-                .map_err(poison)?
-                .metadata()
-                .map_err(|e| SessionStoreError::io(&log.events_path, e))?
-                .len();
-            st.next_offset = len;
+        // Try the fast path: read the persisted manifest + index and skip
+        // the O(n) scan when they are present and consistent.
+        let manifest_opt = log.manifest_store.load_manifest()?;
+        let index_opt = log.manifest_store.load_turn_index()?;
+        let file_len = std::fs::metadata(&events_path)
+            .map_err(|e| SessionStoreError::io(events_path.clone(), e))?
+            .len();
+        match (manifest_opt, index_opt) {
+            (Some(manifest), Some(index)) => {
+                let mut st = log.state.lock().map_err(poison)?;
+                st.manifest = manifest;
+                st.index = index;
+                st.next_offset = file_len;
+            }
+            _ => {
+                log.scan()?;
+                let mut st = log.state.lock().map_err(poison)?;
+                st.next_offset = file_len;
+            }
         }
         Ok(log)
     }
@@ -104,6 +112,7 @@ impl SessionEventLog {
         {
             let mut file = self.file.lock().map_err(poison)?;
             writeln!(file, "{line}").map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+            file.flush().map_err(|e| SessionStoreError::io(&self.events_path, e))?;
         }
         let end = start + written as u64;
         st.next_offset = end;
@@ -358,12 +367,8 @@ impl SessionEventLog {
     }
 
     fn persist_meta_locked(&self, st: &LogState) -> Result<(), SessionStoreError> {
-        let mpath = self.session_dir.join("manifest.json");
-        let bytes = serde_json::to_string_pretty(&st.manifest)?;
-        std::fs::write(&mpath, bytes).map_err(|e| SessionStoreError::io(mpath, e))?;
-        let ipath = self.session_dir.join("index").join("turns.json");
-        let bytes = serde_json::to_string_pretty(&st.index)?;
-        std::fs::write(&ipath, bytes).map_err(|e| SessionStoreError::io(ipath, e))?;
+        self.manifest_store.write_manifest(&st.manifest)?;
+        self.manifest_store.write_turn_index(&st.index)?;
         Ok(())
     }
 }

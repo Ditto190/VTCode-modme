@@ -1,6 +1,6 @@
 use super::AgentRunner;
 use super::continuation::VerificationResult;
-use super::evaluator_types::EvaluatorResponse;
+use super::evaluator_types::{EvaluatorResponse, SkepticPanelAggregate, SkepticPanelEntry};
 use super::planner_types::{PlannerResponse, ReplanResponse};
 use crate::core::agent::events::ExecEventRecorder;
 use crate::core::agent::harness_artifacts;
@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 use std::fmt::Write;
+use std::future::Future;
 
 #[derive(Debug, Clone)]
 pub(super) struct PlannerArtifacts {
@@ -152,9 +153,24 @@ impl AgentRunner {
             None,
         );
 
-        let evaluator = self
-            .request_evaluator_response(task, session_state, verification_results)
-            .await?;
+        let evaluator = if self.config().agent.harness.skeptic_panel.enabled
+            && !self.config().agent.harness.skeptic_panel.models.is_empty()
+        {
+            let aggregate = self.run_skeptic_panel(task, session_state, verification_results).await?;
+            EvaluatorResponse {
+                verdict: aggregate.verdict,
+                summary: aggregate.summary,
+                high_severity_findings: aggregate.high_severity_findings,
+                scorecard: Some(aggregate.scorecard),
+                findings: Vec::new(),
+                unmet_contract_items: Vec::new(),
+                residual_risks: Vec::new(),
+                required_tracker_updates: Vec::new(),
+            }
+        } else {
+            self.request_evaluator_response(task, session_state, verification_results)
+                .await?
+        };
         let summary = evaluator.effective_summary();
         let passed = evaluator.passed();
         let evaluation_path =
@@ -424,6 +440,112 @@ impl AgentRunner {
             "parse evaluator response",
         )
         .await
+    }
+
+    /// Run the adversarial skeptic panel: query every configured skeptic model
+    /// in parallel and aggregate the strictest verdict/scorecard.
+    async fn run_skeptic_panel(
+        &mut self,
+        task: &Task,
+        session_state: &AgentSessionState,
+        verification_results: &[VerificationResult],
+    ) -> Result<SkepticPanelAggregate> {
+        let models: Vec<String> = self
+            .config()
+            .agent
+            .harness
+            .skeptic_panel
+            .models
+            .clone()
+            .into_iter()
+            .filter(|m| !m.is_empty())
+            .collect();
+        if models.is_empty() {
+            return self
+                .request_evaluator_response(task, session_state, verification_results)
+                .await
+                .map(|r| {
+                    SkepticPanelAggregate::from_entries(vec![SkepticPanelEntry {
+                        model: self.get_selected_model(),
+                        response: r,
+                    }])
+                });
+        }
+
+        let spec_content = tokio::fs::read_to_string(harness_artifacts::current_spec_path(&self._workspace))
+            .await
+            .unwrap_or_default();
+        let contract_content = tokio::fs::read_to_string(harness_artifacts::current_contract_path(&self._workspace))
+            .await
+            .unwrap_or_default();
+        let tracker_content = tokio::fs::read_to_string(harness_artifacts::current_task_path(&self._workspace))
+            .await
+            .unwrap_or_default();
+        let feature_list_content =
+            tokio::fs::read_to_string(harness_artifacts::current_feature_list_path(&self._workspace))
+                .await
+                .unwrap_or_default();
+        let changed_files = load_changed_file_snapshots(&self._workspace, &session_state.modified_files).await;
+        let verification_summary = format_verification_results(verification_results);
+        const SYSTEM_PROMPT: &str = "You are the VT Code exec harness evaluator. You are not the builder. Judge the candidate skeptically and prefer failing borderline cases. Return strict JSON only with keys verdict, summary, high_severity_findings, scorecard, findings, unmet_contract_items, residual_risks, required_tracker_updates. The scorecard must contain 1-5 scores for contract_fidelity, functionality, code_quality, and verification_integrity. Use verdict=pass only when every provided score is at least 4, the tracker/spec/contract all agree, verification evidence is credible, and there are no high-severity issues. If you discover new acceptance criteria through testing, add them to required_tracker_updates so the replanner can update the feature list.";
+        let user_prompt = format!(
+            "Evaluate this run against the current execution contract.\n\nTask title: {}\nTask description: {}\n\nCurrent spec:\n{}\n\nCurrent contract:\n{}\n\nCurrent feature list:\n{}\n\nCurrent tracker:\n{}\n\nVerification results:\n{}\n\nModified files:\n{}\n\nWarnings:\n{}\n\nScoring guidance:\n- contract_fidelity: Did the implementation satisfy the spec and contract rather than a looser interpretation?\n- functionality: Do the implemented paths actually work beyond stubs and happy-path claims?\n- code_quality: Are the changes coherent, scoped, and consistent with local patterns?\n- verification_integrity: Do the tracker state and verification evidence really justify completion?\n\nIf you find new acceptance criteria that should be tracked, list them in required_tracker_updates.\n\nReturn JSON only.",
+            task.title,
+            task.description,
+            spec_content,
+            contract_content,
+            feature_list_content,
+            tracker_content,
+            verification_summary,
+            changed_files,
+            format_string_list(&session_state.warnings)
+        );
+
+        let base_request = LLMRequest {
+            messages: std::sync::Arc::new(vec![Message::user(user_prompt)]),
+            system_prompt: Some(std::sync::Arc::new(SYSTEM_PROMPT.to_string())),
+            tools: Some(std::sync::Arc::new(Vec::<ToolDefinition>::new())),
+            model: String::new(),
+            stream: false,
+            temperature: Some(0.1),
+            max_tokens: Some(1800),
+            ..Default::default()
+        };
+
+        let mut handles = Vec::with_capacity(models.len());
+        for model in models {
+            let mut req = LLMRequest { model: model.clone(), ..base_request.clone() };
+            let provider = self.provider_client.as_ref();
+            handles.push(async move {
+                let response = provider
+                    .generate(req)
+                    .await
+                    .context(format!("skeptic evaluator request failed for model {model}"));
+                (model, response)
+            });
+        }
+
+        let mut entries = Vec::with_capacity(handles.len());
+        for (model, response) in futures::future::join_all(handles).await {
+            let response = response?;
+            let content = response.content.unwrap_or_default();
+            let parsed: Result<EvaluatorResponse> = parse_json_response(content.as_str())
+                .context(format!("parse skeptic evaluator response for model {model}"));
+            match parsed {
+                Ok(evaluator) => {
+                    entries.push(SkepticPanelEntry { model, response: evaluator });
+                }
+                Err(err) => {
+                    tracing::warn!(model = %model, error = %err, "skeptic evaluator parse failed");
+                }
+            }
+        }
+
+        if entries.is_empty() {
+            anyhow::bail!("skeptic panel produced no valid responses");
+        }
+
+        Ok(SkepticPanelAggregate::from_entries(entries))
     }
 }
 
