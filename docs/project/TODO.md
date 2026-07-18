@@ -246,153 +246,12 @@ Key Recommendations
 2. vtcode-commons/.../memory.rs:47 — Add a // SAFETY: comment to the unsafe { libc::sysconf(...) } block, noting that \_SC_PAGESIZE is a compile-time constant and the syscall has no mutable aliasing concerns.
 3. vtcode-skills/.../native_plugin.rs — The overall structure is sound: symbol resolution is centralized in get_plugin_symbol, all unsafe blocks have safety comments, and the execution_lock guards non-reentrant plugins. The main architectural risk is the trusted_dirs configuration — if an operator adds a writable directory like /tmp to trusted_dirs, the symlink and .. escape tests are the only remaining protection. Consider adding a startup warning when trusted dirs are writable by non-owners.
 
+STATUS (2026-07-18):
+- Rec #1 DONE — src/allocator.rs: `#[allow(clippy::undocumented_unsafe_blocks)]` removed; real `// SAFETY:` comment added to `unsafe impl Sync for MallocConfPtr`. Verified via `cargo clippy --locked -p vtcode --features allocator-jemalloc -- -D warnings`.
+- Rec #2 DONE — vtcode-commons/src/memory.rs Linux `libc::sysconf` block now has a `// SAFETY:` comment (macOS path was already documented). env_lock.rs was already documented (stale TODO line refs).
+- Rec #3 DEFERRED — "startup warning when trusted dirs are writable by non-owners" is a new *feature* (behavior change), not a comment fix. All 8 unsafe blocks in native_plugin.rs already have SAFETY comments. Deferred to a separate task; tracked in `.vtcode/memory/decisions.md`.
+
 ===
-
-Here is a comprehensive summary of the vtcode codebase structure and architectural observations.
-
-1. Overall Crate Layout
-   The workspace is organized under crates/ with two top-level directories:
-   Directory Crates Purpose
-   crates/common/ vtcode-commons, vtcode-exec-events, vtcode-macros, vtcode-utility-tool-specs Shared, reusable infrastructure with minimal business logic
-   crates/codegen/ 14 crates (see below) Feature crates containing actual runtime logic
-   crates/codegen/xtask/ Release automation Build/release scripting
-   Common crates (4):
-
-- vtcode-commons — Shared traits, utilities, error handling, path resolution, ANSI styling, env locking
-- vtcode-exec-events — Authoritative ThreadEvent schema (the single runtime event contract)
-- vtcode-macros — Proc-macro crate (derive/attribute macros); zero internal vtcode dependencies
-- vtcode-utility-tool-specs — Passive JSON schemas for tool surfaces; leaf dependency
-  Codegen crates (14):
-- vtcode-core — The central runtime (agent loop, tools, LLM orchestration, config, safety)
-- vtcode-ui — Unified TUI/design system (ratatui-based)
-- vtcode-config — Config loading, schema, constants, model definitions
-- vtcode-llm — LLM provider abstraction and implementations
-- vtcode-skills — Skill types, discovery, loading, validation
-- vtcode-mcp — Model Context Protocol client
-- vtcode-bash-runner — Shell execution helpers
-- vtcode-safety — Command safety detection and sandboxing
-- vtcode-session-store — Append-only ThreadEvent log + derived views
-- vtcode-auth — OAuth PKCE and credential storage
-- vtcode-acp — Agent Client Protocol (Zed integration)
-- vtcode-a2a — Agent2Agent protocol
-- vtcode-indexer — Workspace file indexer
-- vtcode-eval — Agent evaluation framework
-
-2. Dependency Graph (Key Relationships)
-   vtcode (binary)
-   ├── vtcode-core [default-features = false]
-   ├── vtcode-ui
-   ├── vtcode-config
-   ├── vtcode-auth
-   ├── vtcode-session-store
-   ├── vtcode-eval
-   └── ...
-
-vtcode-core (the hub)
-├── vtcode-commons
-├── vtcode-exec-events
-├── vtcode-macros
-├── vtcode-utility-tool-specs
-├── vtcode-config
-├── vtcode-auth
-├── vtcode-ui
-├── vtcode-indexer
-├── vtcode-bash-runner
-├── vtcode-safety
-├── vtcode-session-store
-├── vtcode-llm [features = ["copilot"]]
-├── vtcode-mcp
-├── vtcode-skills
-└── vtcode-a2a
-
-vtcode-acp
-├── vtcode-core
-├── vtcode-config
-└── vtcode-commons
-
-vtcode-llm
-├── vtcode-commons
-├── vtcode-config
-├── vtcode-exec-events
-├── vtcode-macros
-└── vtcode-utility-tool-specs
-
-vtcode-mcp
-├── vtcode-commons
-├── vtcode-config
-├── vtcode-llm
-└── vtcode-utility-tool-specs
-
-vtcode-ui
-├── vtcode-commons
-└── vtcode-config
-
-Leaf/low-dependency crates:
-├── vtcode-eval → commons, exec-events
-├── vtcode-session-store → exec-events
-├── vtcode-bash-runner → commons [optional: exec-events]
-├── vtcode-indexer → commons
-├── vtcode-safety → commons
-├── vtcode-skills → commons, config
-├── vtcode-auth → (no internal vtcode deps)
-└── vtcode-a2a → (no internal vtcode deps)
-Key observation: vtcode-core is the central hub, depending on 13 of the 14 other workspace crates (everything except vtcode-eval). vtcode-commons is the universal foundation, depended on by almost every crate. 3. Unsafe Code Blocks
-Unsafe code is concentrated in a few specific areas:
-File Purpose Risk Level
-src/allocator.rs jemalloc malloc_conf export via #[unsafe(export_name = ...)]; unsafe impl Sync for transparent pointer Low (well-isolated allocator config)
-crates/common/vtcode-commons/src/memory.rs libc::mach_task_basic_info, mach_task_self(), sysconf for RSS reporting on macOS Low (platform-specific, bounded)
-crates/common/vtcode-commons/src/env_lock.rs POSIX setenv/getenv are not thread-safe; mutex-serialized env mutation Low (centralized, startup-only)
-crates/codegen/vtcode-skills/src/native_plugin.rs FFI boundary for dynamic plugin loading (libloading, CStr::from_ptr, extern "C" calls) Medium-High — loads arbitrary native code; safety relies on trusted-path canonicalization and ABI version checks
-crates/codegen/vtcode-core/src/tools/registry/builtins.rs #![allow(unsafe_code)] at crate level Low (likely test-related suppression)
-The native_plugin.rs system is the most significant unsafe surface. It loads .dylib/.so/.dll files from "trusted" directories with ABI version verification, but the safety contract depends on path canonicalization holding. 4. Large Files / Monolith Concerns
-vtcode-core is the dominant crate by volume. Files exceeding 1,500 lines:
-File Lines Concern
-src/prompts/system.rs 2,486 Massive prompt template definitions
-src/models_manager/model_presets.rs 2,396 Model preset data (could be codegen'd or external JSON)
-src/tools/registry/mod.rs 2,274 Tool registry (should be split)
-src/tools/handlers/session_tool_catalog.rs 2,236 Tool catalog shaping
-src/utils/session_archive.rs 2,097 Session archive utilities
-src/skills/executor.rs 2,074 Skill execution engine
-src/cli/args.rs 2,072 CLI argument definitions (clap)
-src/core/loop_detector.rs 2,007 Loop detection logic
-src/tools/registry/execution_history.rs 1,971
-src/tools/registry/execution_facade.rs 1,963
-src/subagents/tests.rs 1,882 Test file (justified)
-src/tools/code_search.rs 1,869
-src/tools/handlers/read_file.rs 1,784
-src/commands/init.rs 1,748
-src/tool_policy.rs 1,691
-Binary crate duplication concern: The src/agent/runloop/unified/ directory alone contains 322 files totaling ~106,000 lines. This overlaps thematically with vtcode-core/src/core/agent/ (77 files). The AGENTS.md notes that agent/runloop/unified/turn/compaction/ is a "thin delegator" and that compaction logic lives in vtcode-core::compaction, but the sheer volume of code in the binary crate's agent/ tree suggests either:
-
-- Significant duplication between src/agent/runloop/ and vtcode-core/src/core/agent/
-- Or the binary crate contains the "real" runloop while vtcode-core provides supporting infrastructure
-
-5. Architectural Red Flags
-   A. vtcode-core is a "God Crate"
-   vtcode-core depends on 13 of 14 other workspace crates and has 70+ public modules. Its lib.rs is 508 lines of re-exports. The AGENTS.md acknowledges: "lib.rs is 500+ lines — append re-exports, don't restructure." This is a known accumulation problem.
-   B. Binary Crate Contains Massive Agent Logic
-   src/agent/runloop/unified/ has 106k+ lines across 322 files. The root src/AGENTS.md says this is the "single-agent runloop" and that "multi-agent is in vtcode-core::subagents", but the volume suggests the binary crate is doing substantial runtime work that arguably belongs in vtcode-core.
-   C. vtcode-acp Depends on vtcode-core
-   vtcode-acp depends on vtcode-core, which is fine, but vtcode-core also re-exports ACP-related types. This is a minor coupling concern — if ACP needs to reference core types, this is expected, but it creates a bidirectional conceptual link.
-   D. Feature Flag Complexity
-   vtcode-core has features: default, tui, mock, policies, schema, a2a-server, anthropic-api, http-server, desktop-notifications, sqlite. The root binary disables vtcode-core's default features (default-features = false) and then selectively enables them. This creates a complex feature interaction surface.
-   E. Tree-Sitter Version Pinning
-   Multiple tree-sitter crates are pinned to specific minor versions (0.23–0.26 range) across vtcode-core and vtcode-safety. This creates a maintenance burden and potential for subtle AST-parsing differences.
-   F. Native Plugin System (vtcode-skills)
-   The native_plugin.rs module loads arbitrary native code via libloading. While it has path canonicalization and ABI version checks, this is the most security-sensitive unsafe surface in the codebase. A compromised plugin directory could lead to arbitrary code execution.
-   G. The "Partial Extraction" Pattern
-   vtcode-skills, vtcode-llm (copilot), and vtcode-core's open_responses/copilot modules use a "partial extraction" pattern where vtcode-core re-exports from sub-crates but keeps local sub-modules. This creates a split-brain architecture where the "canonical" implementation lives in the sub-crate but vtcode-core maintains parallel local modules.
-6. Summary
-   The vtcode codebase is a large, mature Rust workspace (~30 crates) with a clear separation between:
-
-- Common crates (crates/common/) — pure infrastructure, zero business logic
-- Codegen crates (crates/codegen/) — runtime feature implementations
-  vtcode-core is the architectural center, depending on nearly every other crate. The main immediate concerns are:
-
-1. Monolithic files in vtcode-core (several >2,000 lines)
-2. Massive binary crate agent code (~106k lines in src/agent/runloop/) that may overlap with vtcode-core
-3. Unsafe FFI surface in the native plugin system
-4. God-crate syndrome in vtcode-core (70+ modules, 13 inbound deps within the workspace)
 
 ===
 
@@ -405,3 +264,5 @@ reference and explore research /Users/vinhnguyenxuan/Developer/learn-by-doing/cl
 ===
 
 run cargo marchette for unsused, redudant crates and fix and improve for vtcode
+
+STATUS (2026-07-18): DONE. `cargo machete` 0.9.2 found 4 genuinely-unused deps (verified against source, no false positives): `vtcode-eval` → `thiserror`, `vtcode-commons`, `vtcode-exec-events`; `vtcode-session-store` → `memchr`. All 4 removed from manifests; `Cargo.lock` reconciled (4 deletions, no version bumps). Verified: `cargo check --locked`, `cargo clippy --locked -D warnings`, `cargo nextest run` (313/313 pass). See `.vtcode/memory/decisions.md` + `gotchas.md` for the `--locked` vs `--offline` reconciliation workflow.

@@ -38,6 +38,10 @@ pub fn resident_set_size_mb() -> Option<f64> {
     let contents = std::fs::read_to_string("/proc/self/statm").ok()?;
     let field = contents.split_whitespace().nth(1)?;
     let pages: f64 = field.parse().ok()?;
+    // SAFETY: `_SC_PAGESIZE` is a compile-time constant selector passed by value.
+    // `sysconf` only reads the selector and returns a `c_long`; it performs no
+    // mutable aliasing against process memory and has no preconditions on this
+    // input. The result is a stable system constant for the process lifetime.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as f64;
     Some(pages * page_size / (1024.0 * 1024.0))
 }

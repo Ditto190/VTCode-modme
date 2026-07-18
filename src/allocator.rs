@@ -17,7 +17,12 @@ mod jemalloc_malloc_conf {
     /// not a Rust `&[u8]` fat pointer.
     #[repr(transparent)]
     struct MallocConfPtr(*const u8);
-    #[allow(clippy::undocumented_unsafe_blocks)]
+    // SAFETY: `MallocConfPtr` is `#[repr(transparent)]` over a `*const u8` that
+    // points exclusively at `static CONF: [u8; 63]` — statically-backed, immutable
+    // data with no interior mutability. Sharing `&MallocConfPtr` across threads
+    // only copies the pointer value itself (a `Copy` type) and, when dereferenced,
+    // reads read-only bytes. There is no mutable aliasing of the pointed-to data
+    // and the static lives for the entire program duration, so `Sync` is sound.
     unsafe impl Sync for MallocConfPtr {}
     static CONF: [u8; 63] = *b"prof:true,prof_active:false,lg_prof_sample:19,prof_final:false\0";
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]

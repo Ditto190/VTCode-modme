@@ -7831,10 +7831,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
- "vtcode-commons",
- "vtcode-exec-events",
 ]
 
 [[package]]
@@ -7995,7 +7992,6 @@ name = "vtcode-session-store"
 version = "0.135.14"
 dependencies = [
  "chrono",
- "memchr",
  "serde",
  "serde_json",
  "tempfile",
