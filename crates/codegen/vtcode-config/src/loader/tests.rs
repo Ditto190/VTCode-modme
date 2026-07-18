@@ -134,7 +134,8 @@ fn test_config_builder_overrides() {
 #[test]
 fn test_insert_dotted_key() {
     let mut table = toml::Table::new();
-    ConfigBuilder::insert_dotted_key(&mut table, "a.b.c", toml::Value::String("value".to_string()));
+    ConfigBuilder::insert_dotted_key(&mut table, "a.b.c", toml::Value::String("value".to_string()))
+        .expect("insert_dotted_key should succeed for a.b.c");
 
     let a = table.get("a").unwrap().as_table().unwrap();
     let b = a.get("b").unwrap().as_table().unwrap();

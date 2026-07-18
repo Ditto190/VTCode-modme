@@ -66,7 +66,7 @@ impl ConfigBuilder {
         if !self.cli_overrides.is_empty() {
             let mut runtime_toml = toml::Table::new();
             for (key, value) in self.cli_overrides {
-                Self::insert_dotted_key(&mut runtime_toml, &key, value);
+                Self::insert_dotted_key(&mut runtime_toml, &key, value).context("Failed to apply CLI override")?;
             }
 
             let runtime_layer = ConfigLayerEntry::new(ConfigLayerSource::Runtime, toml::Value::Table(runtime_toml));
@@ -87,13 +87,13 @@ impl ConfigBuilder {
         Ok(manager)
     }
 
-    pub(crate) fn insert_dotted_key(table: &mut toml::Table, key: &str, value: toml::Value) {
+    pub(crate) fn insert_dotted_key(table: &mut toml::Table, key: &str, value: toml::Value) -> Result<()> {
         let parts: Vec<&str> = key.split('.').collect();
         let mut current = table;
         for (i, part) in parts.iter().enumerate() {
             if i == parts.len() - 1 {
                 current.insert(part.to_string(), value);
-                return;
+                return Ok(());
             }
 
             if !current.contains_key(*part) || !current[*part].is_table() {
@@ -103,7 +103,8 @@ impl ConfigBuilder {
             current = current
                 .get_mut(*part)
                 .and_then(|v| v.as_table_mut())
-                .expect("inserted table should remain a table");
+                .with_context(|| format!("failed to descend into TOML table at `{part}` while inserting `{key}`"))?;
         }
+        Ok(())
     }
 }

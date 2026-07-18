@@ -1,5 +1,5 @@
 use crate::updater::{InstallOutcome, UpdateInfo, Updater};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use crossterm::style::Stylize;
 use std::env;
 use vtcode_config::update::{ReleaseChannel, UpdateConfig};
@@ -120,7 +120,9 @@ fn handle_unpin() -> Result<()> {
 
     let pinned = updater
         .pinned_version()
-        .expect("is_pinned() returned true, so pinned_version() should be Some")
+        .ok_or_else(|| {
+            anyhow!("is_pinned() returned true but pinned_version() returned None — updater state is inconsistent")
+        })?
         .clone();
     updater.unpin_version()?;
 

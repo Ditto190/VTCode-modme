@@ -582,6 +582,22 @@ mod tests {
     use assert_fs::TempDir;
     use std::fs;
 
+    /// Walk up from `CARGO_MANIFEST_DIR` to the directory whose `Cargo.toml`
+    /// contains `[workspace]`. Hardcoding `parent()` breaks when crates are
+    /// nested (e.g. `crates/codegen/<crate>` — three levels deep, not one).
+    fn find_workspace_root() -> PathBuf {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut current = manifest.as_path();
+        while let Some(parent) = current.parent() {
+            let cargo_toml = parent.join("Cargo.toml");
+            if cargo_toml.is_file() && fs::read_to_string(&cargo_toml).is_ok_and(|c| c.contains("[workspace]")) {
+                return parent.to_path_buf();
+            }
+            current = parent;
+        }
+        panic!("could not find workspace root from CARGO_MANIFEST_DIR");
+    }
+
     #[test]
     fn prompt_caching_defaults_align_with_constants() {
         let cfg = PromptCachingConfig::default();
@@ -782,7 +798,7 @@ gap_warning_threshold_secs = 120
         assert!(loader_source.contains("cache_friendly_prompt_shaping = true"));
         assert!(loader_source.contains("# prompt_cache_retention = \"24h\""));
 
-        let workspace_root = manifest_dir.parent().expect("workspace root").to_path_buf();
+        let workspace_root = find_workspace_root();
         let example_config =
             fs::read_to_string(workspace_root.join("vtcode.toml.example")).expect("vtcode.toml.example");
         if example_config.contains("[prompt_cache]") {

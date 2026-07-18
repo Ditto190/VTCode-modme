@@ -969,8 +969,26 @@ fn looks_like_transcript_path(token: &str) -> bool {
 mod tests {
     use super::*;
     use std::borrow::Cow;
+    use std::fs;
+    use std::path::PathBuf;
 
     use crate::tui::core_tui::types::InlineTheme;
+
+    /// Walk up from `CARGO_MANIFEST_DIR` to the directory whose `Cargo.toml`
+    /// contains `[workspace]`. Hardcoding `parent()` breaks when crates are
+    /// nested (e.g. `crates/codegen/<crate>` — three levels deep, not one).
+    fn find_workspace_root() -> PathBuf {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut current = manifest.as_path();
+        while let Some(parent) = current.parent() {
+            let cargo_toml = parent.join("Cargo.toml");
+            if cargo_toml.is_file() && fs::read_to_string(&cargo_toml).is_ok_and(|c| c.contains("[workspace]")) {
+                return parent.to_path_buf();
+            }
+            current = parent;
+        }
+        panic!("could not find workspace root from CARGO_MANIFEST_DIR");
+    }
 
     #[test]
     fn plain_text_prefilter_skips_link_detection() {
@@ -1019,11 +1037,8 @@ mod tests {
             Line::from(" those files"),
         ];
 
-        let projected = project_detected_links_onto_wrapped_lines(
-            &wrapped_lines,
-            original_text,
-            Some(Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()),
-        );
+        let projected =
+            project_detected_links_onto_wrapped_lines(&wrapped_lines, original_text, Some(&find_workspace_root()));
 
         assert_eq!(projected.len(), 2);
         assert_eq!(projected[0].len(), 1);

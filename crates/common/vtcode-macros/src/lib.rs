@@ -40,7 +40,12 @@ fn impl_string_newtype(input: &DeriveInput) -> syn::Result<TokenStream> {
                         "StringNewtype requires a tuple struct with exactly one field",
                     ));
                 }
-                let field = fields.unnamed.first().unwrap();
+                let Some(field) = fields.unnamed.first() else {
+                    return Err(syn::Error::new_spanned(
+                        name,
+                        "StringNewtype requires a tuple struct with exactly one field",
+                    ));
+                };
                 &field.ty
             }
             _ => {

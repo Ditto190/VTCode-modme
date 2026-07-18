@@ -10,7 +10,6 @@
 //! or storing in session archives.
 
 use regex::Regex;
-use std::borrow::Cow;
 use std::sync::LazyLock;
 
 /// OpenAI API key pattern: sk- followed by alphanumeric characters
@@ -37,20 +36,21 @@ static SECRET_ASSIGNMENT_REGEX: LazyLock<Regex> =
 /// ```
 /// use vtcode_commons::sanitizer::redact_secrets;
 ///
-/// let input = "API key is sk-abcdefghijklmnopqrstuvwxyz1234".to_string();
+/// let input = "Found key: sk-test1234567890abcdefghij".to_string();
 /// let output = redact_secrets(input);
-/// assert_eq!(output, "API key is [REDACTED_SECRET]");
+/// assert_eq!(output, "Found key: [REDACTED_SECRET]");
 /// ```
 pub fn redact_secrets(input: String) -> String {
     let r1 = OPENAI_KEY_REGEX.replace_all(&input, "[REDACTED_SECRET]");
     let r2 = AWS_ACCESS_KEY_ID_REGEX.replace_all(&r1, "[REDACTED_SECRET]");
     let r3 = BEARER_TOKEN_REGEX.replace_all(&r2, "Bearer [REDACTED_SECRET]");
     let r4 = SECRET_ASSIGNMENT_REGEX.replace_all(&r3, "$1$2$3[REDACTED_SECRET]");
-
-    match r4 {
-        Cow::Borrowed(_) => input,
-        Cow::Owned(s) => s,
-    }
+    // `into_owned` clones only when the final result is `Borrowed` (no regex
+    // matched at all); when any redaction occurred it moves the owned string
+    // without an extra allocation. Do NOT short-circuit on `Cow::Borrowed` —
+    // the final Cow is `Borrowed` whenever the *last* regex doesn't match,
+    // even if earlier regexes did, which would silently discard redactions.
+    r4.into_owned()
 }
 
 #[allow(clippy::panic)]
@@ -74,16 +74,17 @@ mod tests {
 
     #[test]
     fn redacts_openai_key() {
-        let input = "sk-abcdefghijklmnopqrstuvwxyz123456".to_string();
+        let input = "Found key: sk-test1234567890abcdefghij".to_string();
         let output = redact_secrets(input);
-        assert_eq!(output, "[REDACTED_SECRET]");
+        assert_eq!(output, "Found key: [REDACTED_SECRET]");
     }
 
     #[test]
     fn redacts_aws_access_key() {
-        let input = "AKIAIOSFODNN7EXAMPLE".to_string();
+        // AKIAIOSFODNN7EXAMPLE is AWS's well-known documentation example key.
+        let input = " creds: AKIAIOSFODNN7EXAMPLE ".to_string();
         let output = redact_secrets(input);
-        assert_eq!(output, "[REDACTED_SECRET]");
+        assert_eq!(output, " creds: [REDACTED_SECRET] ");
     }
 
     #[test]
@@ -124,12 +125,12 @@ mod tests {
 
     #[test]
     fn redacts_multiple_secrets() {
-        let input = "Keys: sk-test12345678901234567890 and AKIAIOSFODNN7EXAMPLE".to_string();
+        let input = "Keys: sk-test1234567890abcdefghij and AKIAIOSFODNN7EXAMPLE".to_string();
         let output = redact_secrets(input);
         // Verify both secrets are redacted
         assert!(output.contains("[REDACTED_SECRET]"));
         assert!(!output.contains("AKIAIOSFODNN7EXAMPLE"));
-        assert!(!output.contains("sk-test12345678901234567890"));
+        assert!(!output.contains("sk-test1234567890abcdefghij"));
     }
 
     #[test]

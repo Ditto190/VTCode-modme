@@ -51,21 +51,22 @@ where
 
 /// Create a default HTTP client with standard timeouts.
 ///
-/// # Panics
-///
-/// Panics if the HTTP client cannot be created (e.g., TLS library failure).
-/// For a non-panicking version, use [`try_build_client`].
-#[allow(clippy::panic)]
+/// Falls back to a bare default client if the configured builder and its
+/// fallback both fail (e.g., TLS misconfiguration, resource exhaustion).
+/// The fallback mirrors the resilience pattern in `http_client_pool`: a
+/// `tracing::error!` is logged so the failure is observable, but the process
+/// does not crash — callers get a working (if unconfigured) client.
 fn build_client<F>(configure: F) -> Client
 where
     F: Fn(ClientBuilder) -> ClientBuilder,
 {
     try_build_client(configure).unwrap_or_else(|e| {
-        panic!(
-            "failed to build HTTP client: {e}. \
-             This usually indicates a TLS configuration issue or system resource exhaustion. \
-             Ensure the system has valid TLS certificates and sufficient resources."
-        )
+        tracing::error!(
+            error = %e,
+            "HTTP client build failed (primary + fallback); falling back to bare default client. \
+             This usually indicates a TLS configuration issue or system resource exhaustion."
+        );
+        Client::new()
     })
 }
 

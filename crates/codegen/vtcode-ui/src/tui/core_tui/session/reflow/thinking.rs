@@ -121,9 +121,7 @@ impl Session {
                     && !spans.is_empty()
                     && !combined_spans
                         .last()
-                        .expect("combined_spans is not empty")
-                        .content
-                        .ends_with(char::is_whitespace)
+                        .is_some_and(|last| last.content.ends_with(char::is_whitespace))
                 {
                     combined_spans.push(Span::raw(" ".to_owned()));
                 }
