@@ -20,7 +20,7 @@ exclude = [
     "scripts/",
     "screenshots/",
     "logs/",
-    "prompts/",
+    "/prompts/",
     "dist/",
     "npm/",
     "resources/",
