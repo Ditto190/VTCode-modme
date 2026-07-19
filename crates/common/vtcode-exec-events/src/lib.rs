@@ -820,6 +820,7 @@ impl ToolOutcome {
 /// Panics if `status` is [`ToolCallStatus::InProgress`], which is a non-terminal
 /// state and must never be passed to a completion-event emitter.
 #[must_use]
+#[allow(clippy::unreachable)]
 pub fn tool_outcome_from_status(status: &ToolCallStatus) -> ToolOutcome {
     match status {
         ToolCallStatus::Completed => ToolOutcome::Success,

@@ -1088,7 +1088,7 @@ mod goal_tracker_tests {
     use super::*;
 
     fn make_tracker() -> GoalTracker {
-        GoalTracker::new(std::path::PathBuf::from("/tmp/test-goal-session"))
+        GoalTracker::new(PathBuf::from("/tmp/test-goal-session"))
     }
 
     fn activate_tracker(t: &mut GoalTracker) {

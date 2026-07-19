@@ -179,7 +179,7 @@ fn scan_fallback_when_manifest_missing() {
     let session_dir = dir.path().join(".vtcode/sessions/sess-raw");
     let events_path = session_dir.join("events.jsonl");
     fs::create_dir_all(&session_dir).expect("mkdir");
-    let events = vec![
+    let events = [
         VersionedThreadEvent::new(ThreadEvent::ThreadStarted(vtcode_exec_events::ThreadStartedEvent {
             thread_id: "t-1".to_string(),
         })),

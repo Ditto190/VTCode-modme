@@ -770,7 +770,7 @@ async fn select_subagent_model_target(
         search_value: Some("manual exact model id".to_string()),
     });
 
-    let selected = preferred_subagent_model_selection(&options, dynamic_models, current_model)
+    let selected = preferred_subagent_model_selection(options, dynamic_models, current_model)
         .or_else(|| items.first().and_then(|item| item.selection.clone()));
     handle.show_list_modal(
         "Subagent model".to_string(),

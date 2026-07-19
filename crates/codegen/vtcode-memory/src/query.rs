@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].snippet, "the widget is blue");
         assert_eq!(results[0].chunk_id, "s1:0");
-        assert_eq!(results[0].score, 1.0);
+        assert!((results[0].score - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod tests {
 
         let results = search_memory(dir.path(), "cargo", 10, 0.0).expect("search");
         assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|r| r.score == 1.0));
+        assert!(results.iter().all(|r| (r.score - 1.0).abs() < f64::EPSILON));
     }
 
     #[test]
