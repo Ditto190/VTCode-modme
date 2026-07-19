@@ -2,6 +2,43 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.136.0 - 2026-07-19
+
+### Highlights
+#### Bug Fixes
+
+- Replace private intra-doc link with literal value (1a643383) (@vinhnx)
+- Remove jemalloc feature from Windows builds; format release.sh (48452837) (@vinhnx)
+- Prevent gh run view from opening interactive pager on CI failure (cb208c11) (@vinhnx)
+- Resolve 3 failing tests after workspace reorganization (438119cb) 
+- Robustly detect workspace root and propagate CLI override errors (c897aee7) 
+- Resolve link_section warnings and unblock vtcode-core build (aa8a4b57) 
+- Resolve clippy warnings and dead code across registry and compaction (873e5473) 
+- Handle blocked planning tools by ending turn gracefully (e44794ed) 
+#### Documentation
+
+- Add TODO for API key UI/UX and auto-discovery (c118c464) 
+#### Features
+
+- Warn if trusted plugin directory is writable by group/others (cff365e7) 
+- Implement permission events and preflight flow for policy-denied tools (f15cd7df) 
+- Improve credential discovery with env var detail and paste UI (a6dd9480) 
+- Add /secret slash command for managing secrets (eb279628) 
+### Other Changes
+#### Other
+
+- Update README.md (967799ac) (@vinhnx)
+- Update README.md (e869ec35) (@vinhnx)
+- Update README.md (a6105983) (@vinhnx)
+- Update TODO (6ff1ed1d) 
+- Update TODO (1910ff03) 
+- Update TODO (0165ff68) 
+#### Refactors
+
+- Restructure extensions and xtask locations (20367519) 
+- Decompose file palette monolith, fix last_entered fragility, add tree-style rendering (413ccd2e) 
+- Remove unused dependencies and improve safety documentation (6a7d47dc) 
+- Rename session-store to memory, add harness_emitter (28b451f0) 
 ## 0.135.14 - 2026-07-18
 
 ### Highlights
