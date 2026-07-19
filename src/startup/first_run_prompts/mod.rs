@@ -4,6 +4,7 @@ mod memory;
 mod model;
 mod provider;
 mod reasoning;
+mod secret_input;
 mod trust;
 
 pub(super) use api_key::prompt_api_key_interactive;

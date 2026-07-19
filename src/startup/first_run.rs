@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use vtcode_config::api_keys::{
-    CredentialSource, DiscoveredProvider, discover_available_providers, provider_credential_source,
+    CredentialSource, DiscoveredProvider, discover_available_providers, provider_credential_detail,
 };
 use vtcode_core::cli::args::{Cli, Commands};
 use vtcode_core::config::constants::{defaults, llm_generation};
@@ -299,19 +299,22 @@ fn api_key_hint(provider: Provider) -> String {
     if provider.uses_managed_auth() {
         return format!("Run `vtcode login {}` to authenticate.", provider);
     }
-    match provider_credential_source(provider) {
-        Some(CredentialSource::Env) => {
-            format!("Using {} from your environment.", provider.default_api_key_env())
-        }
-        Some(CredentialSource::SecureStorage) => {
-            format!("Using the {} key from your OS keyring.", provider.label())
-        }
-        Some(CredentialSource::OAuth) => {
-            format!("Using your active {} OAuth session.", provider.label())
-        }
-        Some(CredentialSource::ManagedAuth | CredentialSource::Local) => {
-            format!("{} is ready.", provider.label())
-        }
+    match provider_credential_detail(provider) {
+        Some(detail) => match detail.source {
+            CredentialSource::Env => {
+                let var = detail.env_var.unwrap_or_else(|| provider.default_api_key_env());
+                format!("Using {var} from your environment.")
+            }
+            CredentialSource::SecureStorage => {
+                format!("Using the {} key from your OS keyring.", provider.label())
+            }
+            CredentialSource::OAuth => {
+                format!("Using your active {} OAuth session.", provider.label())
+            }
+            CredentialSource::ManagedAuth | CredentialSource::Local => {
+                format!("{} is ready.", provider.label())
+            }
+        },
         None => format!("Set {} in your environment, or paste it with /model.", provider.default_api_key_env()),
     }
 }
@@ -330,12 +333,35 @@ fn render_discovery_summary(renderer: &mut AnsiRenderer, discovered: &[Discovere
         .collect();
 
     if ready.is_empty() {
+        // No real credentials — but local providers (Ollama / LM Studio /
+        // llama.cpp) need no key, so the user is not stuck. Mention them so the
+        // empty state has a concrete next step rather than a dead end.
+        let local: Vec<&str> = discovered
+            .iter()
+            .filter(|d| matches!(d.source, CredentialSource::Local))
+            .map(|d| d.provider.label())
+            .collect();
+        let local_hint = if local.is_empty() {
+            String::new()
+        } else {
+            format!(" You can also use a local provider ({}) — no key required.", local.join(", "))
+        };
         renderer.line(
             MessageStyle::Info,
-            "No provider API keys found in your environment or OS keyring. You can paste a key next, or export one (e.g. in ~/.zshrc) and re-run /init.",
+            &format!(
+                "No provider API keys found in your environment or OS keyring. You can paste a key next, export one (e.g. in ~/.zshrc) and re-run /init, or press Enter to skip.{local_hint}"
+            ),
         )?;
     } else {
-        let labels: Vec<&str> = ready.iter().map(|d| d.provider.label()).collect();
+        // Surface the specific env var that was found so the user knows
+        // exactly what vtcode read (e.g. GOOGLE_API_KEY vs GEMINI_API_KEY).
+        let labels: Vec<String> = ready
+            .iter()
+            .map(|d| match d.env_var {
+                Some(var) => format!("{} ({var})", d.provider.label()),
+                None => d.provider.label().to_string(),
+            })
+            .collect();
         renderer.line(
             MessageStyle::Status,
             &format!("Found credentials for: {}. Pick any of these — no need to re-enter a key.", labels.join(", ")),

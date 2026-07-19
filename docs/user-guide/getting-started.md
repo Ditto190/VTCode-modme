@@ -113,9 +113,15 @@ export OPENAI_API_KEY=your_api_key_here
 export ANTHROPIC_API_KEY=your_api_key_here
 ```
 
-On first launch in a fresh workspace, VT Code auto-discovers any provider whose key is already in your shell environment (so if you `export OPENROUTER_API_KEY` in `~/.zshrc`, the setup wizard detects it and skips re-prompting). The provider picker marks every ready provider with `✓` and defaults the cursor to one you can use immediately. If you paste a key in the wizard instead, it is stored in your OS keyring — not a workspace `.env` — so the secret is never duplicated per project. You can switch providers anytime with `/model`.
+On first launch in a fresh workspace, VT Code auto-discovers any provider whose key is already in your shell environment (so if you `export OPENROUTER_API_KEY` in `~/.zshrc`, the setup wizard detects it and skips re-prompting). The wizard tells you exactly which environment variable it read — e.g. "Found credentials for: OpenRouter (OPENROUTER_API_KEY), Gemini (GOOGLE_API_KEY)." — so alternate env vars (such as `GOOGLE_API_KEY` for Gemini, or `DASHSCOPE_API_KEY` for Qwen) are surfaced explicitly. The provider picker shows ready providers first, marks each with `✓` (real credential) or `•` (local / managed-auth), and defaults the cursor to one you can use immediately. You can switch providers anytime with `/model`.
 
-If no key is in your environment, the wizard lets you paste one now or skip and set it later via `/model`.
+If no key is in your environment, the wizard lets you paste one now or skip and set it later via `/model`. The paste flow is built for safe input:
+
+-   **Input is hidden** — terminal echo is disabled while you paste, so the key never appears in your scrollback or terminal recordings (each character shows as `*`). If stdin is not a terminal, the wizard warns you and falls back to visible input.
+-   **Masked preview + confirm** — before saving, the wizard shows a masked preview (e.g. `sk-or-v1-…7Q2x`) and the key length, and asks you to confirm. A paste mistake can be discarded and re-entered without restarting the wizard.
+-   **Stored in your OS keyring, not a workspace `.env`** — the secret is never duplicated per project. If a key is already stored, the wizard offers to use it or replace it (so you can rotate keys without leaving setup).
+
+If you have no provider key at all, the wizard still offers a path forward: local providers like Ollama, LM Studio, and llama.cpp need no key.
 
 ### 2. Confirm Workspace Context
 

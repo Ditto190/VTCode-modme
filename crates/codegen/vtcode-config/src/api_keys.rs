@@ -154,7 +154,7 @@ pub fn get_api_key(provider: &str, _sources: &ApiKeySources) -> Result<String> {
         // All other providers: env var was already checked above, nothing more to do
         _ => {
             return Err(anyhow::anyhow!(
-                "{normalized_provider} API key not found. Set {inferred_env} environment variable or add to .env file.",
+                "{normalized_provider} API key not found. Export {inferred_env} in your shell, or paste it with `/model` (it is stored in your OS keyring, not a workspace .env).",
             ));
         }
     };
@@ -235,34 +235,66 @@ impl CredentialSource {
 pub struct DiscoveredProvider {
     pub provider: Provider,
     pub source: CredentialSource,
+    /// The specific environment variable that satisfied discovery, when
+    /// `source == Env`. Carries the *alternate* name (e.g. `GOOGLE_API_KEY`)
+    /// when discovery used the alternate rather than the primary env var, so
+    /// the UI can tell the user exactly what was read — e.g. "Found
+    /// GOOGLE_API_KEY in your environment" instead of a generic "found in
+    /// environment". `None` for non-env sources and for providers with no env
+    /// var (local / managed-auth).
+    pub env_var: Option<&'static str>,
 }
 
 /// Determine whether a single built-in provider has a usable credential right
-/// now, and where it comes from. Returns `None` when no credential is found.
+/// now, and the full detail of where it came from. Returns `None` when no
+/// credential is found.
 ///
 /// Mirrors the resolution order of [`get_api_key`]: env var (including
 /// provider-specific alternate env vars) → OAuth session → secure storage.
 /// Local and managed-auth providers are always considered ready.
-pub fn provider_credential_source(provider: Provider) -> Option<CredentialSource> {
+///
+/// Prefer this over [`provider_credential_source`] when you need to surface
+/// *which* env var was read (e.g. the first-run wizard and `api_key_hint`).
+pub fn provider_credential_detail(provider: Provider) -> Option<DiscoveredProvider> {
     if provider.is_local() {
-        return Some(CredentialSource::Local);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::Local,
+            env_var: None,
+        });
     }
     if provider.uses_managed_auth() {
-        return Some(CredentialSource::ManagedAuth);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::ManagedAuth,
+            env_var: None,
+        });
     }
 
     // OAuth-backed providers: an active session counts as ready.
     if matches!(provider, Provider::OpenRouter) && crate::auth::load_oauth_token().ok().flatten().is_some() {
-        return Some(CredentialSource::OAuth);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::OAuth,
+            env_var: None,
+        });
     }
     if matches!(provider, Provider::OpenAI) && crate::auth::load_openai_chatgpt_session().ok().flatten().is_some() {
-        return Some(CredentialSource::OAuth);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::OAuth,
+            env_var: None,
+        });
     }
 
     // Primary env var for the provider.
     let env_key = provider.default_api_key_env();
     if !env_key.is_empty() && env_value_present(env_key) {
-        return Some(CredentialSource::Env);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::Env,
+            env_var: Some(env_key),
+        });
     }
 
     // Provider-specific alternate env vars (kept in sync with get_api_key).
@@ -270,15 +302,30 @@ pub fn provider_credential_source(provider: Provider) -> Option<CredentialSource
     if let Some(alt_key) = alt
         && env_value_present(alt_key)
     {
-        return Some(CredentialSource::Env);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::Env,
+            env_var: Some(alt_key),
+        });
     }
 
     // Secure storage (OS keyring with encrypted-file fallback).
     if has_stored_credential(provider) {
-        return Some(CredentialSource::SecureStorage);
+        return Some(DiscoveredProvider {
+            provider,
+            source: CredentialSource::SecureStorage,
+            env_var: None,
+        });
     }
 
     None
+}
+
+/// Thin wrapper over [`provider_credential_detail`] that returns only the
+/// credential source. Kept for backward compatibility with callers that don't
+/// need the env-var detail.
+pub fn provider_credential_source(provider: Provider) -> Option<CredentialSource> {
+    provider_credential_detail(provider).map(|detail| detail.source)
 }
 
 /// Scan all built-in providers and return those with a discoverable credential.
@@ -294,9 +341,7 @@ pub fn provider_credential_source(provider: Provider) -> Option<CredentialSource
 pub fn discover_available_providers() -> Vec<DiscoveredProvider> {
     Provider::all_providers()
         .into_iter()
-        .filter_map(|provider| {
-            provider_credential_source(provider).map(|source| DiscoveredProvider { provider, source })
-        })
+        .filter_map(provider_credential_detail)
         .collect()
 }
 
@@ -570,6 +615,80 @@ mod tests {
         with_overrides(&[("QWEN_API_KEY", None), ("DASHSCOPE_API_KEY", Some("ds-key"))], || {
             assert_eq!(provider_credential_source(Provider::Qwen), Some(CredentialSource::Env));
         });
+    }
+
+    #[test]
+    fn credential_detail_surfaces_primary_env_var_name() {
+        with_override("OPENROUTER_API_KEY", Some("or-key"), || {
+            let detail = provider_credential_detail(Provider::OpenRouter).expect("OpenRouter discovered");
+            assert_eq!(detail.source, CredentialSource::Env);
+            assert_eq!(detail.env_var, Some("OPENROUTER_API_KEY"));
+        });
+    }
+
+    #[test]
+    fn credential_detail_surfaces_alternate_env_var_name() {
+        // When only the alternate GOOGLE_API_KEY is set, the detail must report
+        // *that* name (not the primary GEMINI_API_KEY) so the UI can tell the
+        // user exactly which variable was read.
+        with_overrides(&[("GEMINI_API_KEY", None), ("GOOGLE_API_KEY", Some("g-key"))], || {
+            let detail = provider_credential_detail(Provider::Gemini).expect("Gemini discovered");
+            assert_eq!(detail.source, CredentialSource::Env);
+            assert_eq!(detail.env_var, Some("GOOGLE_API_KEY"));
+        });
+    }
+
+    #[test]
+    fn credential_detail_env_var_is_none_for_non_env_sources() {
+        // Local and managed-auth providers are discovered without an env var.
+        assert_eq!(
+            provider_credential_detail(Provider::Ollama).map(|d| d.env_var),
+            Some(None),
+            "local providers must report env_var = None"
+        );
+        assert_eq!(
+            provider_credential_detail(Provider::Copilot).map(|d| d.env_var),
+            Some(None),
+            "managed-auth providers must report env_var = None"
+        );
+    }
+
+    #[test]
+    fn credential_detail_returns_none_when_no_credential() {
+        with_overrides(
+            &[
+                ("OPENROUTER_API_KEY", None),
+                ("OPENAI_API_KEY", None),
+                ("ANTHROPIC_API_KEY", None),
+            ],
+            || {
+                // OpenRouter has no env var, no OAuth token in tests, no keyring
+                // entry in tests → not discovered.
+                assert!(provider_credential_detail(Provider::OpenRouter).is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn discover_available_providers_carries_env_var_detail() {
+        with_overrides(
+            &[
+                ("OPENROUTER_API_KEY", Some("or-key")),
+                ("GEMINI_API_KEY", None),
+                ("GOOGLE_API_KEY", Some("g-key")),
+                ("OPENAI_API_KEY", None),
+                ("ANTHROPIC_API_KEY", None),
+            ],
+            || {
+                let discovered = discover_available_providers();
+                let or = find_discovered(&discovered, Provider::OpenRouter).unwrap();
+                assert_eq!(or.source, CredentialSource::Env);
+                assert_eq!(or.env_var, Some("OPENROUTER_API_KEY"));
+                let gemini = find_discovered(&discovered, Provider::Gemini).unwrap();
+                assert_eq!(gemini.source, CredentialSource::Env);
+                assert_eq!(gemini.env_var, Some("GOOGLE_API_KEY"));
+            },
+        );
     }
 
     #[test]

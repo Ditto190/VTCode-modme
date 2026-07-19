@@ -1,4 +1,4 @@
-reference compaction summarization template for auto compact -> continuation for vtcode harnessing agent, m
+reference compaction summarization template for auto compact -> continuation for vtcode harnessing agent, make sure vtcode able to continue and resume work on the project after compaction, and ensure that the agent can pick up from where it left off, including fixing the build script path and verifying that the model capabilities are generated correctly. The agent will also run the failing tests to ensure that the fixes have resolved the issues.
 
 ```
 --- compaction ---
@@ -49,3 +49,9 @@ Relevant Files
 ===
 
 reference and explore research /Users/vinhnguyenxuan/Developer/learn-by-doing/claude-code-main and apply learning to improve vtcode codebase.
+
+===
+
+make the API keys manager controller in TUI easy to use and control in VT Code TUI. maybe introduct a new /secret tui interactive sercured api keys controller keyrin command to control it
+
+also maybe we should completley remove the .env file support completely and only use keyring
