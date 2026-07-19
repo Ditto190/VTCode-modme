@@ -140,7 +140,7 @@ fn relaunch_attempts(
     let candidates = match preference {
         RelaunchPreference::PreferPathCommand => vec![Some(OsString::from("vtcode")), original_program, current_exe],
         RelaunchPreference::PreferOriginalExecutable => {
-            vec![original_program, current_exe, Some(OsString::from("vtcode"))]
+            vec![current_exe, original_program, Some(OsString::from("vtcode"))]
         }
     };
 
@@ -179,8 +179,21 @@ mod tests {
             RelaunchPreference::PreferOriginalExecutable,
         );
 
-        assert_eq!(attempts[0].program, OsString::from("/Users/dev/.local/bin/vtcode"));
-        assert_eq!(attempts[1].program, OsString::from("/tmp/current-vtcode"));
+        assert_eq!(attempts[0].program, OsString::from("/tmp/current-vtcode"));
+        assert_eq!(attempts[1].program, OsString::from("/Users/dev/.local/bin/vtcode"));
+    }
+
+    #[test]
+    fn relaunch_attempts_try_current_exe_first_for_bare_command_standalone() {
+        let attempts = relaunch_attempts(
+            &[OsString::from("vtcode"), OsString::from("--resume")],
+            Some(Path::new("/tmp/current-vtcode")),
+            RelaunchPreference::PreferOriginalExecutable,
+        );
+
+        assert_eq!(attempts[0].program, OsString::from("/tmp/current-vtcode"));
+        assert_eq!(attempts[0].args, vec![OsString::from("--resume")]);
+        assert_eq!(attempts[1].program, OsString::from("vtcode"));
     }
 
     #[test]

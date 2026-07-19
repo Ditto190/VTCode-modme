@@ -763,7 +763,11 @@ pub enum Commands {
         #[arg(long, long_help = "Print available release versions from GitHub and exit.")]
         list: bool,
         /// Number of versions to list (default: 10)
-        #[arg(long, long_help = "Maximum number of versions to display with --list.")]
+        #[arg(
+            long,
+            default_value = "10",
+            long_help = "Maximum number of versions to display with --list."
+        )]
         limit: usize,
         /// Pin to a specific version
         #[arg(

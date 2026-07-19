@@ -1,7 +1,8 @@
-use crate::updater::{InstallOutcome, UpdateInfo, Updater};
+use crate::updater::{InstallOutcome, UpdateExecutionStrategy, UpdateInfo, Updater};
 use anyhow::{Context, Result, anyhow};
 use crossterm::style::Stylize;
 use std::env;
+use std::process::Command;
 use vtcode_config::update::{ReleaseChannel, UpdateConfig};
 use vtcode_core::ui::user_confirmation::UserConfirmation;
 
@@ -256,11 +257,56 @@ async fn handle_update_available(updater: &Updater, update: &UpdateInfo, options
     install_update(updater, options.force).await
 }
 
+fn run_update_command(command: &str, strategy: UpdateExecutionStrategy) -> Result<std::process::ExitStatus> {
+    let mut cmd = match strategy {
+        UpdateExecutionStrategy::Shell => {
+            #[cfg(target_os = "windows")]
+            {
+                let mut c = Command::new("cmd");
+                c.arg("/C").arg(command);
+                c
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let mut c = Command::new("/bin/sh");
+                c.arg("-lc").arg(command);
+                c
+            }
+        }
+        UpdateExecutionStrategy::PowerShell => {
+            let mut c = if cfg!(target_os = "windows") {
+                Command::new("powershell")
+            } else {
+                Command::new("pwsh")
+            };
+            c.arg("-NoLogo").arg("-NoProfile").arg("-Command").arg(command);
+            c
+        }
+    };
+
+    cmd.status().with_context(|| format!("failed to run update command: {command}"))
+}
+
 async fn install_update(updater: &Updater, force: bool) -> Result<()> {
     let guidance = updater.update_guidance();
     if guidance.source.is_managed() {
         println!("{} Managed install detected ({}).", "!".yellow(), guidance.source.label());
-        println!("{} Update with: {}", "→".cyan(), guidance.command().green());
+        println!("{} Running: {}", "→".cyan(), guidance.command().green());
+
+        let status = run_update_command(guidance.action.display_command, guidance.action.execution)
+            .with_context(|| format!("failed to run update command for {}", guidance.source.label()))?;
+
+        if status.success() {
+            println!("{} Update command completed successfully!", "✓".green());
+            println!("\n{} Restart VT Code to use the new version", "→".cyan());
+            println!("{} vtcode init   # scaffold project if needed", "→".cyan());
+            println!("{} vtcode        # launch TUI", "→".cyan());
+        } else {
+            let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".to_string());
+            println!("{} Update command exited with status: {}", "!".yellow(), code);
+            println!("{} You may need to run the command manually.", "→".cyan());
+        }
+
         return Ok(());
     }
 
