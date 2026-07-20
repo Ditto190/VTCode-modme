@@ -34,6 +34,7 @@ pub fn resident_set_size_mb() -> Option<f64> {
 /// Returns the current process Resident Set Size in **megabytes**, or `None` if
 /// it cannot be determined on the current platform.
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 pub fn resident_set_size_mb() -> Option<f64> {
     let contents = std::fs::read_to_string("/proc/self/statm").ok()?;
     let field = contents.split_whitespace().nth(1)?;
