@@ -380,6 +380,16 @@ inherits = "release"
 lto = "thin"
 codegen-units = 4
 
+# Windows release-fast: MSVC's link.exe is dramatically slower with thin LTO
+# than GNU ld or lld. Disabling LTO entirely and bumping codegen-units gives
+# ~2× faster compile times on the Windows CI runner (2-core) with negligible
+# runtime impact for a CLI binary. See: build-linux-windows.yml, release.yml.
+[profile.release-fast-windows]
+inherits = "release-fast"
+lto = "off"
+codegen-units = 16
+strip = true
+
 [profile.release]
 codegen-units = 1 # Allows compiler to perform better optimization.
 lto = true        # Enables Link-time Optimization for better performance and size reduction.

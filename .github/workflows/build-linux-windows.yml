@@ -193,6 +193,7 @@ jobs:
     env:
       CARGO_TERM_VERBOSE: false
       CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C target-cpu=x86-64
     steps:
       - name: Wait for tag to exist
         shell: bash
@@ -225,13 +226,13 @@ jobs:
           key: x86_64-pc-windows-msvc
 
       - name: Build (x86_64-pc-windows-msvc)
-        run: cargo build --profile release-fast --target x86_64-pc-windows-msvc --jobs 4
+        run: cargo build --frozen --profile release-fast-windows --target x86_64-pc-windows-msvc --jobs 2
         shell: bash
 
       - name: Check Binary
         shell: bash
         run: |
-          if [ -f "target/x86_64-pc-windows-msvc/release-fast/vtcode.exe" ]; then
+          if [ -f "target/x86_64-pc-windows-msvc/release-fast-windows/vtcode.exe" ]; then
             echo "✓ Found Windows binary: vtcode.exe"
           else
             echo "✗ Binary not found!" && exit 1
@@ -241,7 +242,7 @@ jobs:
         shell: pwsh
         run: |
           $archive = "vtcode-${{ inputs.tag }}-x86_64-pc-windows-msvc.zip"
-          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release-fast/vtcode.exe" -DestinationPath $archive -Force
+          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release-fast-windows/vtcode.exe" -DestinationPath $archive -Force
           $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path "vtcode-${{ inputs.tag }}-x86_64-pc-windows-msvc.sha256" -Value $hash -NoNewline
 

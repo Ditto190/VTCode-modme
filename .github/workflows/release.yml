@@ -106,7 +106,7 @@ jobs:
 
       - name: Build with cargo (${{ matrix.target }})
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo build --profile release-fast --target ${{ matrix.target }} --features allocator-jemalloc --jobs 4
+        run: cargo build --frozen --profile release-fast --target ${{ matrix.target }} --features allocator-jemalloc --jobs 4
         shell: bash
         env:
           RUSTC_WRAPPER: sccache
@@ -115,7 +115,7 @@ jobs:
 
       - name: Build with cross (${{ matrix.target }})
         if: matrix.target != 'x86_64-unknown-linux-gnu'
-        run: cross build --profile release-fast --target ${{ matrix.target }} ${{ endsWith(matrix.target, 'linux-gnu') && ' --features allocator-jemalloc' || '' }} --jobs 4
+        run: cross build --frozen --profile release-fast --target ${{ matrix.target }} ${{ endsWith(matrix.target, 'linux-gnu') && ' --features allocator-jemalloc' || '' }} --jobs 4
         shell: bash
         env:
           RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64' || '' }}
@@ -202,6 +202,7 @@ jobs:
     env:
       CARGO_TERM_VERBOSE: false
       CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C target-cpu=x86-64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
@@ -219,13 +220,13 @@ jobs:
           key: x86_64-pc-windows-msvc
 
       - name: Build (x86_64-pc-windows-msvc)
-        run: cargo build --profile release-fast --target x86_64-pc-windows-msvc --jobs 4
+        run: cargo build --frozen --profile release-fast-windows --target x86_64-pc-windows-msvc --jobs 2
         shell: bash
 
       - name: Check Binary
         shell: bash
         run: |
-          if [ -f "target/x86_64-pc-windows-msvc/release-fast/vtcode.exe" ]; then
+          if [ -f "target/x86_64-pc-windows-msvc/release-fast-windows/vtcode.exe" ]; then
             echo "✓ Found Windows binary: vtcode.exe"
           else
             echo "✗ Binary not found!" && exit 1
@@ -235,7 +236,7 @@ jobs:
         shell: pwsh
         run: |
           $archive = "vtcode-${{ github.event.inputs.tag }}-x86_64-pc-windows-msvc.zip"
-          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release-fast/vtcode.exe" -DestinationPath $archive -Force
+          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release-fast-windows/vtcode.exe" -DestinationPath $archive -Force
           $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path "vtcode-${{ github.event.inputs.tag }}-x86_64-pc-windows-msvc.sha256" -Value $hash -NoNewline
 
@@ -261,6 +262,7 @@ jobs:
     env:
       CARGO_TERM_VERBOSE: false
       CARGO_TERM_COLOR: always
+      RUSTFLAGS: ${{ startsWith(matrix.target, 'x86_64') && '-C target-cpu=x86-64' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -290,7 +292,7 @@ jobs:
           version: 0.15.2
 
       - name: Build (${{ matrix.target }})
-        run: cargo build --profile release-fast --target ${{ matrix.target }} --jobs 4
+        run: cargo build --frozen --profile release-fast --target ${{ matrix.target }} --jobs 4
         shell: bash
 
       - name: Check Binary
