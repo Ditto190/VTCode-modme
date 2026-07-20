@@ -58,8 +58,7 @@ impl OpenAiCompatSpec for EvolinkSpec {
 
     fn resolve_api_key(api_key: Option<String>) -> String {
         api_key
-            .filter(|key| !key.trim().is_empty())
-            .or_else(|| std::env::var(Self::API_KEY_ENV).ok())
+            .or_else(|| std::env::var(Self::API_KEY_ENV).ok().filter(|key| !key.trim().is_empty()))
             .unwrap_or_default()
     }
 

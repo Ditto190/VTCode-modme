@@ -153,7 +153,7 @@ pub fn get_api_key(provider: &str, _sources: &ApiKeySources) -> Result<String> {
         )),
         // All other providers: env var was already checked above, nothing more to do
         _ => Err(anyhow::anyhow!(
-            "{normalized_provider} API key not found. Export {inferred_env} in your shell, or paste it with `/model` (it is stored in your OS keyring, not a workspace .env).",
+            "{normalized_provider} API key not found. Export {inferred_env} in your shell, or store it with `/secret add {normalized_provider}` (it is kept in your OS keyring, not a workspace .env).",
         )),
     };
 
@@ -381,6 +381,7 @@ fn has_stored_credential(provider: Provider) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::{AuthCredentialsStoreMode, CustomApiKeyStorage};
     use std::sync::Mutex;
 
     // Serialise all env-override tests so that one test's Drop restore cannot
@@ -732,5 +733,19 @@ mod tests {
     fn credential_source_describes_origin() {
         assert_eq!(CredentialSource::Env.describe(Provider::OpenRouter), "found in environment");
         assert_eq!(CredentialSource::Local.describe(Provider::Ollama), "local — no key required");
+    }
+
+    #[test]
+    fn get_api_key_falls_through_to_secure_storage_for_generic_providers() {
+        // Providers without a dedicated match arm (e.g. stepfun, deepseek) must
+        // still fall through to the secure-storage fallback. Regression test for
+        // the bug where the `_` arm returned early and skipped keyring lookup.
+        with_overrides(&[("STEPFUN_API_KEY", None)], || {
+            let storage = CustomApiKeyStorage::new("stepfun");
+            storage.store("test-stepfun-key", AuthCredentialsStoreMode::default()).unwrap();
+
+            let result = get_api_key("stepfun", &default_sources());
+            assert_eq!(result.unwrap(), "test-stepfun-key");
+        });
     }
 }

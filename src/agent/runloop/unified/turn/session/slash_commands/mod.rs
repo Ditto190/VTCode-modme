@@ -31,6 +31,7 @@ use vtcode_core::utils::ansi::AnsiRenderer;
 
 mod handlers;
 mod outcome_router;
+pub mod secrets;
 
 pub(crate) enum SlashCommandControl {
     Continue,

@@ -539,10 +539,6 @@ pub(super) async fn run_interaction_loop_impl(
                                             &ctx.config.provider,
                                         ),
                             )?;
-                            ctx.renderer.line(
-                                MessageStyle::Info,
-                                "Then type /model to reselect and choose 'skip' when prompted for an API key.",
-                            )?;
                         }
                     }
                     continue;

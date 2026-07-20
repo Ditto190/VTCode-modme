@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::agent::runloop::slash_commands::SlashCommandOutcome;
 
-use super::{SlashCommandContext, SlashCommandControl, handlers};
+use super::{SlashCommandContext, SlashCommandControl, handlers, secrets};
 
 pub(super) async fn route_outcome(
     outcome: SlashCommandOutcome,
@@ -176,7 +176,7 @@ async fn route_mode_and_auth_outcome(
         SlashCommandOutcome::OAuthLogout { provider } => handlers::handle_oauth_logout(ctx, provider).await,
         SlashCommandOutcome::RefreshOAuth { provider } => handlers::handle_refresh_oauth(ctx, provider).await,
         SlashCommandOutcome::ShowAuthStatus { provider } => handlers::handle_show_auth_status(ctx, provider).await,
-        SlashCommandOutcome::ManageSecrets { action } => handlers::handle_manage_secrets(ctx, action).await,
+        SlashCommandOutcome::ManageSecrets { action } => secrets::handle_manage_secrets(ctx, action).await,
         _ => anyhow::bail!("unexpected mode/auth outcome"),
     }
 }
