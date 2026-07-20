@@ -105,8 +105,11 @@ impl Updater {
         }
 
         let snapshot = cache::read_snapshot()?;
+        let dismissed = snapshot.dismissed_version.as_ref();
+
         let cached_notice = snapshot.latest_version.as_ref().and_then(|latest_version| {
-            if snapshot.latest_was_newer && latest_version > &self.current_version {
+            if snapshot.latest_was_newer && latest_version > &self.current_version && dismissed != Some(latest_version)
+            {
                 Some(self.notice_for_version(latest_version.clone()))
             } else {
                 None
@@ -379,5 +382,58 @@ mod tests {
         let check = updater.startup_update_check().expect("startup check");
         assert!(check.cached_notice.is_none());
         assert!(!check.should_refresh);
+    }
+
+    #[test]
+    fn startup_update_check_suppresses_dismissed_version() {
+        use std::env;
+        use tempfile::TempDir;
+        use vtcode_commons::env_lock;
+
+        let env_guard = env_lock::lock();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let previous = env::var_os("XDG_CACHE_HOME");
+        env_guard.set_var("XDG_CACHE_HOME", temp_dir.path());
+
+        let dismissed = Version::parse("0.113.0").expect("dismissed");
+        cache::record_successful_check(Some(&dismissed), true).expect("write cache");
+        cache::record_dismissed_version(&dismissed).expect("record dismissal");
+
+        let updater = Updater {
+            current_version: Version::parse("0.111.0").expect("current"),
+            config: UpdateConfig::default(),
+        };
+
+        let check = updater.startup_update_check().expect("startup check");
+        assert!(check.cached_notice.is_none(), "Dismissed version should not produce a cached notice");
+
+        env_guard.restore_var("XDG_CACHE_HOME", previous);
+    }
+
+    #[test]
+    fn startup_update_check_shows_undismissed_newer_version() {
+        use std::env;
+        use tempfile::TempDir;
+        use vtcode_commons::env_lock;
+
+        let env_guard = env_lock::lock();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let previous = env::var_os("XDG_CACHE_HOME");
+        env_guard.set_var("XDG_CACHE_HOME", temp_dir.path());
+
+        let latest = Version::parse("0.114.0").expect("latest");
+        cache::record_successful_check(Some(&latest), true).expect("write cache");
+        // Only dismissed 0.113.0, not 0.114.0 — notice should appear
+        cache::record_dismissed_version(&Version::parse("0.113.0").expect("older")).expect("record dismissal");
+
+        let updater = Updater {
+            current_version: Version::parse("0.111.0").expect("current"),
+            config: UpdateConfig::default(),
+        };
+
+        let check = updater.startup_update_check().expect("startup check");
+        assert!(check.cached_notice.is_some(), "Newer, non-dismissed version should produce a cached notice");
+
+        env_guard.restore_var("XDG_CACHE_HOME", previous);
     }
 }

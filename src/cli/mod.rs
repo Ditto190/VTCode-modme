@@ -35,6 +35,7 @@ pub mod dependencies;
 pub mod exec;
 pub mod review;
 pub mod schema;
+pub mod secret;
 pub mod skills;
 pub mod skills_ref;
 pub mod update;

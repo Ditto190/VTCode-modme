@@ -3,6 +3,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use vtcode_auth::AuthCredentialsStoreMode;
 use vtcode_config::api_keys::{CredentialSource, provider_credential_detail};
+use vtcode_config::workspace_env::{MigrationOutcome, migrate_workspace_env_keys, workspace_env_path};
 use vtcode_core::config::models::Provider;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::app::{InlineEvent, InlineListItem, InlineListSelection, TransientEvent};
@@ -66,10 +67,24 @@ pub(crate) async fn handle_manage_secrets(
             handle_delete_secret(&mut ctx, provider).await?;
             Ok(SlashCommandControl::Continue)
         }
+        SecretCommandAction::Migrate { provider } => {
+            let provider = match provider {
+                Some(name) => match resolve_provider(&name) {
+                    Ok(p) => Some(p),
+                    Err(err) => {
+                        ctx.renderer.line(MessageStyle::Error, &err)?;
+                        return Ok(SlashCommandControl::Continue);
+                    }
+                },
+                None => None,
+            };
+            handle_migrate_secrets(&mut ctx, provider).await?;
+            Ok(SlashCommandControl::Continue)
+        }
         SecretCommandAction::Help => {
             ctx.renderer.line(
                 MessageStyle::Info,
-                "Usage: /secret [list|status [provider]|add <provider>|delete <provider>|help]",
+                "Usage: /secret [list|status [provider]|add <provider>|delete <provider>|migrate [provider]|help]",
             )?;
             Ok(SlashCommandControl::Continue)
         }
@@ -103,6 +118,9 @@ async fn run_interactive_secret_manager(ctx: &mut SlashCommandContext<'_>) -> Re
             "list" | "status" => {
                 render_secret_status_table(ctx.renderer, None)?;
             }
+            "migrate" => {
+                handle_migrate_secrets(ctx, None).await?;
+            }
             _ => {
                 if let Some(provider_name) = action_key.strip_prefix("add:") {
                     if let Ok(provider) = Provider::from_str(provider_name) {
@@ -128,6 +146,12 @@ fn show_secret_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             "list all secrets status",
         ),
         list_item(
+            "Migrate .env keys",
+            "Move API keys from workspace .env to secure storage",
+            format!("{SECRET_ACTION_PREFIX}migrate"),
+            "migrate dotenv workspace secrets",
+        ),
+        list_item(
             "Add or replace a secret",
             "Paste an API key for a provider",
             format!("{SECRET_ACTION_PREFIX}add:provider"),
@@ -145,6 +169,10 @@ fn show_secret_actions_modal(ctx: &mut SlashCommandContext<'_>) {
         let label = provider.label();
         let key = provider.as_ref();
         if provider.is_local() || provider.uses_managed_auth() {
+            continue;
+        }
+        let detail = provider_credential_detail(provider);
+        if matches!(detail.map(|d| d.source), Some(CredentialSource::OAuth)) {
             continue;
         }
         items.push(InlineListItem {
@@ -178,7 +206,7 @@ fn show_secret_actions_modal(ctx: &mut SlashCommandContext<'_>) {
         "Secrets",
         vec![
             "Manage API keys in secure storage (OS keyring or encrypted file).".to_string(),
-            "Keys are never written to vtcode.toml or workspace .env.".to_string(),
+            "Keys are never written to vtcode.toml or workspace environment files.".to_string(),
         ],
         items,
         Some(InlineListSelection::ConfigAction(format!("{SECRET_ACTION_PREFIX}list"))),
@@ -198,6 +226,17 @@ fn list_item(title: &str, subtitle: &str, action: String, search: &str) -> Inlin
 }
 
 async fn handle_add_secret(ctx: &mut SlashCommandContext<'_>, provider: Provider) -> Result<()> {
+    if provider.uses_managed_auth() {
+        ctx.renderer.line(
+            MessageStyle::Info,
+            &format!(
+                "{} uses managed auth (GitHub Copilot CLI). Run `/login {}` instead.",
+                provider.label(),
+                provider.as_ref()
+            ),
+        )?;
+        return Ok(());
+    }
     let label = provider.label();
     let env_key = provider.default_api_key_env();
     let prompt_label = format!("{} API key ({})", label, env_key);
@@ -207,7 +246,7 @@ async fn handle_add_secret(ctx: &mut SlashCommandContext<'_>, provider: Provider
         format!("Expected env: {}", env_key),
         "Secure display hint: \u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}".to_string(),
         "Key will be stored in secure storage (OS keyring or encrypted file).".to_string(),
-        "Key will NOT be stored in vtcode.toml or workspace .env.".to_string(),
+        "Key will NOT be stored in vtcode.toml or workspace environment files.".to_string(),
         "Paste the key now, or press Esc to cancel.".to_string(),
     ];
 
@@ -245,7 +284,82 @@ async fn handle_add_secret(ctx: &mut SlashCommandContext<'_>, provider: Provider
     Ok(())
 }
 
+async fn handle_migrate_secrets(ctx: &mut SlashCommandContext<'_>, provider: Option<Provider>) -> Result<()> {
+    if let Some(p) = provider {
+        if p.uses_managed_auth() {
+            ctx.renderer.line(
+                MessageStyle::Info,
+                &format!("{} uses managed auth (GitHub Copilot CLI). Run `/login {}` instead.", p.label(), p.as_ref()),
+            )?;
+            return Ok(());
+        }
+    }
+
+    let targets: Vec<Provider> = match provider {
+        Some(p) => vec![p],
+        None => Provider::all_providers(),
+    };
+
+    let env_path = workspace_env_path(&ctx.config.workspace);
+    let env_path_display = env_path.display().to_string();
+
+    if !env_path.exists() {
+        ctx.renderer
+            .line(MessageStyle::Info, &format!("No .env file found at {}. Nothing to migrate.", env_path_display))?;
+        return Ok(());
+    }
+
+    let (summary, outcomes) =
+        migrate_workspace_env_keys(&ctx.config.workspace, &targets, AuthCredentialsStoreMode::default())?;
+
+    for (provider, outcome) in outcomes {
+        let env_key = provider.default_api_key_env();
+        match outcome {
+            MigrationOutcome::Migrated => {
+                ctx.renderer
+                    .line(MessageStyle::Info, &format!("Migrated {} API key to secure storage.", provider.label()))?;
+            }
+            MigrationOutcome::Skipped => {}
+            MigrationOutcome::Failed => {
+                ctx.renderer.line(
+                    MessageStyle::Error,
+                    &format!("Failed to migrate {} API key: {}", provider.label(), env_key),
+                )?;
+            }
+        }
+    }
+
+    ctx.renderer.line(MessageStyle::Output, "")?;
+    ctx.renderer.line(
+        MessageStyle::Info,
+        &format!(
+            "Migration complete: {} migrated, {} skipped, {} failed.",
+            summary.migrated, summary.skipped, summary.failed
+        ),
+    )?;
+
+    if summary.migrated > 0 {
+        ctx.renderer
+            .line(MessageStyle::Output, "Keys moved from .env to secure storage (OS keyring or encrypted file).")?;
+        ctx.renderer
+            .line(MessageStyle::Output, "Reload providers or restart VT Code for changes to take effect.")?;
+    }
+
+    Ok(())
+}
+
 async fn handle_delete_secret(ctx: &mut SlashCommandContext<'_>, provider: Provider) -> Result<()> {
+    if provider.uses_managed_auth() {
+        ctx.renderer.line(
+            MessageStyle::Info,
+            &format!(
+                "{} uses managed auth (GitHub Copilot CLI). Run `/login {}` instead.",
+                provider.label(),
+                provider.as_ref()
+            ),
+        )?;
+        return Ok(());
+    }
     let label = provider.label();
 
     let storage = vtcode_auth::CustomApiKeyStorage::new(provider.as_ref());
@@ -302,7 +416,7 @@ fn render_secret_status_table(renderer: &mut AnsiRenderer, filter: Option<Provid
         None => Provider::all_providers(),
     };
 
-    for provider in providers {
+    for &provider in &providers {
         let detail = provider_credential_detail(provider);
         let source = detail.map(|d| d.source);
         let source_label = match source {
@@ -330,8 +444,28 @@ fn render_secret_status_table(renderer: &mut AnsiRenderer, filter: Option<Provid
         renderer.line(MessageStyle::Output, "")?;
     }
 
+    let mut has_oauth_or_managed = false;
+    for provider in &providers {
+        let detail = provider_credential_detail(*provider);
+        if let Some(source) = detail.map(|d| d.source) {
+            if matches!(source, CredentialSource::OAuth | CredentialSource::ManagedAuth) {
+                has_oauth_or_managed = true;
+            }
+        }
+    }
+
     renderer.line(MessageStyle::Info, "Use /secret add <provider> to store a key.")?;
-    renderer.line(MessageStyle::Info, "Use /secret delete <provider> to remove a stored key.")?;
+    if !has_oauth_or_managed {
+        renderer.line(MessageStyle::Info, "Use /secret delete <provider> to remove a stored key.")?;
+    }
+    renderer.line(MessageStyle::Info, "Use /secret migrate to move keys from workspace .env to secure storage.")?;
+    if has_oauth_or_managed {
+        renderer.line(
+            MessageStyle::Info,
+            "OAuth / managed-auth providers (copilot, openai, openrouter) use their own login flows.",
+        )?;
+        renderer.line(MessageStyle::Info, "Run `/login <provider>` for those.")?;
+    }
 
     Ok(())
 }

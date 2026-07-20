@@ -18,6 +18,7 @@ mod pods;
 mod review;
 mod schedule;
 mod schema;
+mod secret;
 mod session_store;
 mod skills;
 
@@ -34,6 +35,7 @@ pub use pods::PodsCommands;
 pub use review::ReviewArgs;
 pub use schedule::{ScheduleCreateArgs, ScheduleSubcommand};
 pub use schema::{SchemaCommands, SchemaMode, SchemaOutputFormat};
+pub use secret::{MigrateArgs, SecretArgs, SecretProvider, SecretSubcommand};
 pub use session_store::SessionStoreCommand;
 pub use skills::{SkillsRefSubcommand, SkillsSubcommand};
 
@@ -721,6 +723,19 @@ pub enum Commands {
     ///   vtcode deps install ripgrep
     #[command(name = "dependencies", visible_alias = "deps", subcommand)]
     Dependencies(DependenciesSubcommand),
+
+    /// Manage API keys in secure storage (OS keyring or encrypted file)
+    ///
+    /// Store, inspect, and delete provider API keys without exposing them
+    /// in shell history or workspace files.
+    ///
+    /// Examples:
+    ///   vtcode secret
+    ///   vtcode secret list
+    ///   vtcode secret status openai
+    ///   vtcode secret add openai
+    ///   vtcode secret delete openai
+    Secret(SecretArgs),
 
     /// Run built-in repository checks
     ///

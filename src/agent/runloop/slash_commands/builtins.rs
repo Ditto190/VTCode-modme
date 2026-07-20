@@ -462,7 +462,7 @@ pub(in crate::agent::runloop::slash_commands) fn parse_update_args(
             "force" | "--force" => force = true,
             _ => {
                 return Err(
-                    "Usage: /update [check|install] [--force]\nExamples: /update, /update check, /update install --force".to_string(),
+                    "Usage: /update [check|install] [--force]\nExamples: /update, /update check, /update install --force\n\nTip: You can also run `vtcode update` from the CLI.".to_string(),
                 );
             }
         }

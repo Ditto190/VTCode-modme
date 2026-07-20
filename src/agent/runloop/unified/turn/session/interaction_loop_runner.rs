@@ -533,12 +533,11 @@ pub(super) async fn run_interaction_loop_impl(
                         {
                             ctx.renderer.line(
                                 MessageStyle::Info,
-                                &format!(
-                                    "Recovery: add your API key manually to {}/.env: echo '{}=<your-key>' >> {}/.env",
-                                    ctx.config.workspace.display(),
-                                    env_key,
-                                    ctx.config.workspace.display(),
-                                ),
+                                        &format!(
+                                            "Recovery: set {} in your shell environment, or run `/secret add {}` in a session to store it securely.",
+                                            env_key,
+                                            &ctx.config.provider,
+                                        ),
                             )?;
                             ctx.renderer.line(
                                 MessageStyle::Info,

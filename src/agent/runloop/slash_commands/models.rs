@@ -226,7 +226,8 @@ pub(crate) enum SlashCommandOutcome {
 /// OAuth / local / managed auth / none). `/secret add` and `/secret delete`
 /// operate on the OS keyring entry for a single provider — they do not touch
 /// environment variables (which the user controls in their shell) or the
-/// workspace `.env`.
+/// workspace `.env`. `/secret migrate` moves keys from the workspace `.env`
+/// into secure storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SecretCommandAction {
     /// `/secret` with no args — render the status table (text mode) or open
@@ -242,6 +243,9 @@ pub(crate) enum SecretCommandAction {
     Add { provider: String },
     /// `/secret delete <provider>` — clear the keyring entry for a provider.
     Delete { provider: String },
+    /// `/secret migrate [provider]` — move API keys from workspace `.env` to
+    /// secure storage.
+    Migrate { provider: Option<String> },
     /// `/secret help` — usage.
     #[allow(dead_code)]
     Help,

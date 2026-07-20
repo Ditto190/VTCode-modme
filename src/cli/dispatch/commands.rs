@@ -15,7 +15,7 @@ use crate::cli::bench_allocator::handle_bench_allocator_command;
 use crate::cli::session_store::handle_session_store_command;
 use crate::cli::{
     analyze, benchmark, check, config, create_project, dependencies, exec, init, init_project, man, notify, revert,
-    review, schedule, schema, skills, snapshots, trajectory, update,
+    review, schedule, schema, secret, skills, snapshots, trajectory, update,
 };
 
 pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, command: Commands) -> Result<()> {
@@ -197,6 +197,10 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
         }
         Commands::Dependencies(command) => {
             dependencies::handle_dependencies_command(command).await?;
+        }
+        Commands::Secret(args) => {
+            let command = args.command.unwrap_or(vtcode_core::cli::args::SecretSubcommand::List);
+            secret::handle_secret_command(command, &startup.workspace).await?;
         }
         Commands::Check { command } => {
             check::handle_check_command(&startup.workspace, command).await?;

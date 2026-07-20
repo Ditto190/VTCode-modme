@@ -83,7 +83,7 @@ fn effective_timeout(timeout_secs: u64) -> Duration {
 }
 
 pub(super) fn release_url(version: &Version) -> String {
-    format!("https://github.com/{REPO_SLUG}/releases/tag/v{version}")
+    format!("https://github.com/{REPO_SLUG}/releases/tag/{version}")
 }
 
 /// Fetch the latest release info for a given release channel.

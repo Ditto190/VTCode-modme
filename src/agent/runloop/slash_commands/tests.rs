@@ -1043,3 +1043,31 @@ async fn secret_help_renders_usage() {
     let outcome = handle_slash_command("secret help", &mut renderer, &workspace).await.unwrap();
     assert!(matches!(outcome, SlashCommandOutcome::Handled));
 }
+
+#[tokio::test]
+async fn secret_migrate_no_provider() {
+    let mut renderer = renderer_for_tests();
+    let workspace = std::path::PathBuf::from("/tmp");
+    let outcome = handle_slash_command("secret migrate", &mut renderer, &workspace).await.unwrap();
+    assert!(matches!(
+        outcome,
+        SlashCommandOutcome::ManageSecrets {
+            action: SecretCommandAction::Migrate { provider: None }
+        }
+    ));
+}
+
+#[tokio::test]
+async fn secret_migrate_with_provider() {
+    let mut renderer = renderer_for_tests();
+    let workspace = std::path::PathBuf::from("/tmp");
+    let outcome = handle_slash_command("secret migrate openai", &mut renderer, &workspace)
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        SlashCommandOutcome::ManageSecrets {
+            action: SecretCommandAction::Migrate { provider: Some(ref p) }
+        } if p == "openai"
+    ));
+}

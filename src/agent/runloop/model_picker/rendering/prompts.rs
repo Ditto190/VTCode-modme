@@ -185,7 +185,7 @@ pub(crate) fn prompt_api_key_plain(
         )?;
         renderer.line(
             MessageStyle::Info,
-            "ChatGPT subscription auth will be stored securely and will not be written to your workspace .env.",
+            "ChatGPT subscription auth will be stored securely and will not be written to your workspace environment.",
         )?;
         return Ok(());
     }

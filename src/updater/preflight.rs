@@ -67,12 +67,6 @@ pub(crate) async fn run_preflight_check() {
     let current = updater.current_version();
     let latest_is_newer = latest.version > *current;
 
-    if latest_is_newer {
-        debug!("Preflight update check: new version {latest} > current {current}", latest = latest.version,);
-    } else {
-        debug!("Preflight update check: versions match ({current}), no update available",);
-    }
-
     // Keep the on-disk cache in sync so the session init code can also
     // read the result when it loads the cache later.
     if let Err(err) = cache::record_successful_check(Some(&latest.version), latest_is_newer) {
@@ -80,9 +74,22 @@ pub(crate) async fn run_preflight_check() {
     }
 
     if latest_is_newer {
-        let notice = updater.notice_for_version(latest.version);
-        set_preflight_notice(Some(notice));
+        let cache_snapshot = cache::read_snapshot().unwrap_or_default();
+        let was_dismissed = cache_snapshot.dismissed_version.as_ref().is_some_and(|d| d == &latest.version);
+
+        if was_dismissed {
+            debug!(
+                "Preflight update check: latest version {latest} was already dismissed, suppressing notice",
+                latest = latest.version
+            );
+            set_preflight_notice(None);
+        } else {
+            debug!("Preflight update check: new version {latest} > current {current}", latest = latest.version,);
+            let notice = updater.notice_for_version(latest.version);
+            set_preflight_notice(Some(notice));
+        }
     } else {
+        debug!("Preflight update check: versions match ({current}), no update available",);
         set_preflight_notice(None);
     }
 }

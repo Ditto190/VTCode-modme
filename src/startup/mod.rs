@@ -21,6 +21,7 @@ use theme::determine_theme;
 use validation::{apply_cli_permission_overrides, validate_full_auto_configuration, validate_startup_configuration};
 use vtcode_config::PromptCacheRetention;
 use vtcode_config::auth::{OpenAIChatGptAuthHandle, resolve_openai_auth};
+use vtcode_config::workspace_env::read_workspace_env_value;
 use vtcode_core::cli::args::{Cli, Commands};
 use vtcode_core::config::api_keys::{ApiKeySources, get_api_key};
 use vtcode_core::config::loader::VTCodeConfig;
@@ -149,7 +150,14 @@ impl StartupContext {
             if skip_auth {
                 return Ok::<_, anyhow::Error>((String::new(), None));
             }
-            match resolve_runtime_provider_auth(&config, &loaded.workspace, &selection, loaded.first_run_occurred).await
+            match resolve_runtime_provider_auth(
+                &config,
+                &loaded.workspace,
+                &selection,
+                loaded.first_run_occurred,
+                args.command.as_ref(),
+            )
+            .await
             {
                 Ok(auth) => Ok(auth),
                 Err(err) if can_start_without_provider_auth(args.command.as_ref()) => {
@@ -273,7 +281,7 @@ async fn resolve_codex_fallback_selection(
         provider: "openai".to_string(),
         model_source: selection.model_source,
     };
-    if resolve_runtime_provider_auth(config, workspace, &openai_candidate, first_run_occurred)
+    if resolve_runtime_provider_auth(config, workspace, &openai_candidate, first_run_occurred, None)
         .await
         .is_ok()
     {
@@ -285,7 +293,7 @@ async fn resolve_codex_fallback_selection(
         provider: "copilot".to_string(),
         model_source: selection.model_source,
     };
-    if resolve_runtime_provider_auth(config, workspace, &copilot_candidate, first_run_occurred)
+    if resolve_runtime_provider_auth(config, workspace, &copilot_candidate, first_run_occurred, None)
         .await
         .is_ok()
     {
@@ -328,6 +336,7 @@ async fn resolve_runtime_provider_auth(
     workspace: &Path,
     selection: &RuntimeModelSelection,
     first_run_occurred: bool,
+    command: Option<&Commands>,
 ) -> Result<(String, Option<OpenAIChatGptAuthHandle>)> {
     if selection.provider.eq_ignore_ascii_case(crate::codex_app_server::CODEX_PROVIDER) {
         return Ok((String::new(), None));
@@ -336,7 +345,7 @@ async fn resolve_runtime_provider_auth(
     if selection.provider.eq_ignore_ascii_case("openai") {
         let api_key = get_api_key(&selection.provider, &ApiKeySources::default()).ok();
         let resolved = resolve_openai_auth(&config.auth.openai, config.agent.credential_storage_mode, api_key)
-            .with_context(|| missing_api_key_message(config, selection, first_run_occurred))?;
+            .with_context(|| missing_api_key_message(config, selection, first_run_occurred, command, workspace))?;
         return Ok((resolved.api_key().to_string(), resolved.handle()));
     }
 
@@ -346,7 +355,7 @@ async fn resolve_runtime_provider_auth(
             CopilotAuthStatusKind::Authenticated => Ok((String::new(), None)),
             CopilotAuthStatusKind::Unauthenticated | CopilotAuthStatusKind::AuthFlowFailed => {
                 Err(anyhow::anyhow!(status.message.unwrap_or_else(|| {
-                    missing_api_key_message(config, selection, first_run_occurred)
+                    missing_api_key_message(config, selection, first_run_occurred, command, workspace)
                 })))
             }
             CopilotAuthStatusKind::ServerUnavailable => Err(anyhow::anyhow!(
@@ -371,7 +380,7 @@ async fn resolve_runtime_provider_auth(
     }
 
     let api_key = get_api_key(&selection.provider, &ApiKeySources::default())
-        .with_context(|| missing_api_key_message(config, selection, first_run_occurred))?;
+        .with_context(|| missing_api_key_message(config, selection, first_run_occurred, command, workspace))?;
     Ok((api_key, None))
 }
 
@@ -379,8 +388,42 @@ fn missing_api_key_message(
     config: &VTCodeConfig,
     selection: &RuntimeModelSelection,
     first_run_occurred: bool,
+    command: Option<&Commands>,
+    workspace: &Path,
 ) -> String {
     let provider_name = provider_label(&selection.provider, Some(config));
+    let tui_hint = if command_launches_tui(command) {
+        format!(
+            "Run `/secret add {provider_name}` in the interactive session to store it in secure storage (recommended)."
+        )
+    } else {
+        format!("Run `vtcode secret add {provider_name}` to store it in secure storage (recommended).")
+    };
+
+    let env_var = selection
+        .provider
+        .parse::<Provider>()
+        .ok()
+        .filter(|provider| !provider.uses_managed_auth())
+        .map(|provider| provider.default_api_key_env().to_string())
+        .unwrap_or_else(|| api_key_env_var(&selection.provider));
+
+    let env_hint = format!("Set {env_var} environment variable,");
+    let config_hint = "configure it in vtcode.toml";
+
+    let in_env = read_workspace_env_value(workspace, &env_var)
+        .map(|v| v.is_some())
+        .unwrap_or(false);
+    let migrate_hint = if in_env {
+        if command_launches_tui(command) {
+            "Or run `/secret migrate` to move keys from workspace `.env` to secure storage."
+        } else {
+            "Or run `vtcode secret migrate` to move keys from workspace `.env` to secure storage."
+        }
+    } else {
+        ""
+    };
+
     if selection.provider.eq_ignore_ascii_case(crate::codex_app_server::CODEX_PROVIDER) {
         return format!(
             "Codex authentication is managed by the official `codex app-server`. Run `vtcode auth codex` or `vtcode login codex`. {}",
@@ -394,43 +437,73 @@ fn missing_api_key_message(
     }
 
     if let Some(custom_provider) = config.custom_provider(&selection.provider) {
-        let env_var = custom_provider.resolved_api_key_env();
-        if first_run_occurred {
-            return format!(
-                "API key not found for {provider_name}. To fix:\n  1. Set {env_var} environment variable, or\n  2. Add to .env file, or\n  3. Configure in vtcode.toml under [[custom_providers]], or\n  4. Run `/secret add {provider_name}` to store it in secure storage\n\nRun `/init` anytime to reconfigure."
-            );
-        }
-
-        return format!(
-            "API key not found for custom provider '{provider_name}'. Set {env_var} environment variable (or add to .env file), configure it in vtcode.toml under [[custom_providers]], or run `/secret add {provider_name}`."
-        );
+        let custom_env_var = custom_provider.resolved_api_key_env();
+        let custom_env_hint = format!("Set {custom_env_var} environment variable,");
+        let custom_config_hint = "configure it in vtcode.toml under [[custom_providers]]";
+        let base = if first_run_occurred {
+            format!(
+                "API key not found for {provider_name}. To fix:\n  1. {tui_hint}\n  2. {custom_env_hint} or\n  3. {custom_config_hint}\n\nRun `/init` anytime to reconfigure."
+            )
+        } else {
+            format!(
+                "API key not found for custom provider '{provider_name}'. {tui_hint} Or {custom_env_hint} {custom_config_hint}."
+            )
+        };
+        let msg = if migrate_hint.is_empty() {
+            base
+        } else {
+            format!("{}\n{}", base, migrate_hint)
+        };
+        return msg;
     }
 
-    let env_var = selection
-        .provider
-        .parse::<Provider>()
-        .ok()
-        .filter(|provider| !provider.uses_managed_auth())
-        .map(|provider| provider.default_api_key_env().to_string())
-        .unwrap_or_else(|| api_key_env_var(&selection.provider));
     if selection.provider.eq_ignore_ascii_case("openai") {
-        return format!(
-            "Authentication not found for OpenAI. Set {env_var}, configure it in vtcode.toml, run `vtcode login openai`, or run `/secret add openai`."
+        let base = format!(
+            "Authentication not found for OpenAI. {tui_hint} Or {env_hint} {config_hint}, or run `vtcode login openai`."
         );
+        if migrate_hint.is_empty() {
+            return base;
+        } else {
+            return format!("{} {}", base, migrate_hint);
+        }
     }
 
     if first_run_occurred {
-        format!(
-            "API key not found for {provider_name}. To fix:\n  1. Set {env_var} environment variable, or\n  2. Add to .env file, or\n  3. Configure in vtcode.toml, or\n  4. Run `/secret add {provider_name}` to store it in secure storage\n\nRun `/init` anytime to reconfigure."
-        )
+        let base = format!(
+            "API key not found for {provider_name}. To fix:\n  1. {tui_hint}\n  2. {env_hint} or\n  3. {config_hint}\n\nRun `/init` anytime to reconfigure."
+        );
+        if migrate_hint.is_empty() {
+            base
+        } else {
+            format!("{}\n{}", base, migrate_hint)
+        }
     } else {
-        format!(
-            "API key not found for provider '{}'. Set {} environment variable (or add to .env file), configure it in vtcode.toml, or run `/secret add {}`.",
-            selection.provider,
-            api_key_env_var(&selection.provider),
-            selection.provider,
-        )
+        let base =
+            format!("API key not found for provider '{}'. {tui_hint} Or {env_hint} {config_hint}", selection.provider,);
+        if migrate_hint.is_empty() {
+            base
+        } else {
+            format!("{} {}", base, migrate_hint)
+        }
     }
+}
+
+fn command_launches_tui(command: Option<&Commands>) -> bool {
+    matches!(
+        command,
+        None | Some(
+            Commands::Chat
+                | Commands::ChatVerbose
+                | Commands::Ask { .. }
+                | Commands::Exec { .. }
+                | Commands::Review(_)
+                | Commands::Benchmark { .. }
+                | Commands::Analyze { .. }
+                | Commands::Schema { .. }
+                | Commands::Continue
+                | Commands::BackgroundSubagent(_)
+        )
+    )
 }
 
 fn command_skips_provider_auth(command: Option<&Commands>) -> bool {
@@ -445,6 +518,9 @@ fn command_skips_provider_auth(command: Option<&Commands>) -> bool {
                 | Commands::Notify { .. }
                 | Commands::Pods { .. }
                 | Commands::Schedule { .. }
+                | Commands::Update { .. }
+                | Commands::Dependencies { .. }
+                | Commands::Secret { .. }
         )
     )
 }
@@ -469,6 +545,9 @@ fn can_start_without_provider_auth(command: Option<&Commands>) -> bool {
                 | Commands::Notify { .. }
                 | Commands::Pods { .. }
                 | Commands::Schedule { .. }
+                | Commands::Update { .. }
+                | Commands::Dependencies { .. }
+                | Commands::Secret { .. }
         )
     )
 }
@@ -479,6 +558,7 @@ mod validation_tests {
     use assert_fs::TempDir;
     use clap::Parser;
     use std::fs;
+    use std::io::Write;
     use std::path::Path;
     use vtcode_commons::env_lock;
     use vtcode_config::ConfigManager;
@@ -600,6 +680,43 @@ mod validation_tests {
     }
 
     #[test]
+    fn update_can_start_without_provider_auth() {
+        let command = Commands::Update {
+            check: false,
+            force: false,
+            list: false,
+            limit: 10,
+            pin: None,
+            unpin: false,
+            channel: None,
+            show_config: false,
+        };
+
+        assert!(command_skips_provider_auth(Some(&command)));
+        assert!(can_start_without_provider_auth(Some(&command)));
+    }
+
+    #[test]
+    fn dependencies_can_start_without_provider_auth() {
+        let command = Commands::Dependencies(vtcode_core::cli::args::DependenciesSubcommand::Install {
+            dependency: vtcode_core::cli::args::ManagedDependency::SearchTools,
+        });
+
+        assert!(command_skips_provider_auth(Some(&command)));
+        assert!(can_start_without_provider_auth(Some(&command)));
+    }
+
+    #[test]
+    fn secret_can_start_without_provider_auth() {
+        let command = Commands::Secret(vtcode_core::cli::args::SecretArgs {
+            command: Some(vtcode_core::cli::args::SecretSubcommand::List),
+        });
+
+        assert!(command_skips_provider_auth(Some(&command)));
+        assert!(can_start_without_provider_auth(Some(&command)));
+    }
+
+    #[test]
     fn missing_api_key_message_uses_custom_provider_label_and_env_key() {
         let mut cfg = VTCodeConfig::default();
         cfg.custom_providers.push(vtcode_config::core::CustomProviderConfig {
@@ -618,7 +735,7 @@ mod validation_tests {
             model_source: vtcode_core::config::types::ModelSelectionSource::WorkspaceConfig,
         };
 
-        let message = missing_api_key_message(&cfg, &selection, true);
+        let message = missing_api_key_message(&cfg, &selection, true, None, Path::new("/tmp"));
 
         assert!(message.contains("MyCorporateName"));
         assert!(message.contains("MYCORP_API_KEY"));
@@ -634,11 +751,31 @@ mod validation_tests {
             model_source: vtcode_core::config::types::ModelSelectionSource::WorkspaceConfig,
         };
 
-        let message = missing_api_key_message(&cfg, &selection, true);
+        let message = missing_api_key_message(&cfg, &selection, true, None, Path::new("/tmp"));
 
         assert!(message.contains("codex app-server"));
         assert!(message.contains("vtcode auth codex"));
         assert!(message.contains("`$PATH`"));
+    }
+
+    #[test]
+    fn missing_api_key_message_suggests_migrate_when_key_in_workspace_env() {
+        let tmp = std::env::temp_dir().join(format!("vtcode-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp);
+        let mut env_file = fs::File::create(tmp.join(".env")).expect("create .env");
+        let _ = env_file.write_all(b"OPENAI_API_KEY=sk-test\n");
+
+        let cfg = VTCodeConfig::default();
+        let selection = RuntimeModelSelection {
+            model: "gpt-4o".to_string(),
+            provider: "openai".to_string(),
+            model_source: vtcode_core::config::types::ModelSelectionSource::WorkspaceConfig,
+        };
+
+        let message = missing_api_key_message(&cfg, &selection, true, None, &tmp);
+        eprintln!("MESSAGE: {}", message);
+
+        assert!(message.contains("secret migrate"));
     }
 
     #[test]

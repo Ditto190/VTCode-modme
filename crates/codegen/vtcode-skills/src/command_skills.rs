@@ -273,7 +273,7 @@ pub const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     },
     built_in_command_spec!(
         "update",
-        "Check for new VT Code releases and install updates (usage: /update [check|install] [--force])",
+        "Check for new VT Code releases and install updates (usage: /update [check|install] [--force], or run `vtcode update` from the CLI)",
         "/update [check|install] [--force]",
         "status"
     ),

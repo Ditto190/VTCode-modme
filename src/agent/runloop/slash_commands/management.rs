@@ -225,6 +225,10 @@ pub(super) fn handle_secret_command(args: &str, renderer: &mut AnsiRenderer) -> 
                 action: SecretCommandAction::Delete { provider: provider.to_ascii_lowercase() },
             })
         }
+        "migrate" => {
+            let provider = tokens.get(1).map(|s| s.to_ascii_lowercase());
+            Ok(SlashCommandOutcome::ManageSecrets { action: SecretCommandAction::Migrate { provider } })
+        }
         "help" | "--help" | "-h" => {
             render_secret_usage(renderer)?;
             Ok(SlashCommandOutcome::Handled)

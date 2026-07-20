@@ -244,7 +244,7 @@ pub(crate) async fn finalize_model_selection(
         renderer.line(
             MessageStyle::Info,
             &format!(
-                "API key saved to secure storage (keyring) and workspace .env as {}. The key will NOT appear in vtcode.toml.",
+                "API key saved to secure storage (keyring) and environment variable {}. The key will NOT appear in vtcode.toml.",
                 selection.env_key
             ),
         )?;
@@ -388,7 +388,7 @@ async fn resolve_runtime_api_key(
 
 fn read_workspace_api_key(workspace: &Path, env_key: &str) -> Result<Option<String>> {
     read_workspace_env_value(workspace, env_key)
-        .with_context(|| format!("Failed to read workspace .env value for {env_key}"))
+        .with_context(|| format!("Failed to read environment variable {env_key}"))
 }
 
 fn sync_runtime_custom_api_key(config: &mut CoreAgentConfig, selection: &ModelSelectionResult) {

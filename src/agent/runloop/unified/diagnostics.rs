@@ -426,7 +426,7 @@ fn render_checkup_optimizations(
         Some(ToolPolicy::Allow) | None => {}
     }
 
-    renderer.line(MessageStyle::Info, "[TIP] Run `/update` to ensure VT Code is on the latest version.")?;
+    renderer.line(MessageStyle::Info, "[TIP] Run `/update` or `vtcode update` to check for the latest version.")?;
     renderer.line(
         MessageStyle::Info,
         "[TIP] Remove unused skills/MCPs and deduplicate or split your CLAUDE.md into nested files to save context.",

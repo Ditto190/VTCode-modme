@@ -61,7 +61,7 @@ pub(crate) fn append_notice_highlight(highlights: &mut Vec<InlineHeaderHighlight
 fn format_update_banner(notice: &StartupUpdateNotice, _use_unicode: bool) -> String {
     let lines = [
         format!("Update available! {} -> {}", notice.current_version, notice.latest_version),
-        "Run /update install to update.".to_string(),
+        "Run /update install, or `vtcode update` from the CLI, to update.".to_string(),
         String::new(),
         "See full release notes:".to_string(),
         Updater::release_url(&notice.latest_version),
@@ -110,7 +110,9 @@ fn build_update_prompt_request(notice: &StartupUpdateNotice) -> TransientRequest
             format!("VT Code {} -> {}", notice.current_version, notice.latest_version),
             format!("Release notes: {}", Updater::release_url(&notice.latest_version)),
         ],
-        footer_hint: Some("Choose update and restart, or stay on the current version.".to_string()),
+        footer_hint: Some(
+            "Choose update and restart, stay on the current version, or run `vtcode update` from the CLI.".to_string(),
+        ),
         items: vec![
             InlineListItem {
                 title: "Update and restart".to_string(),
@@ -122,7 +124,7 @@ fn build_update_prompt_request(notice: &StartupUpdateNotice) -> TransientRequest
             },
             InlineListItem {
                 title: "Stay on current version".to_string(),
-                subtitle: Some("Dismiss this prompt for the rest of this launch.".to_string()),
+                subtitle: Some("Dismiss for now. Run `vtcode update` when ready.".to_string()),
                 badge: None,
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(STAY_CURRENT_ACTION.to_string())),
@@ -189,6 +191,7 @@ pub(crate) async fn run_inline_update_prompt(
             execute_inline_update(renderer, handle, workspace_root, notice).await
         }
         OverlayWaitOutcome::Submitted(UpdatePromptChoice::StayCurrent) => {
+            let _ = super::cache::record_dismissed_version(&notice.latest_version);
             renderer.line(MessageStyle::Info, "Staying on the current version for this session.")?;
             Ok(InlineUpdateOutcome::Continue)
         }
@@ -219,6 +222,7 @@ pub(crate) async fn execute_inline_update(
     // The CLI `vtcode update` path uses `install_update` and gets the bar back.
     match updater.install_update_with_progress(false, false).await {
         Ok(InstallOutcome::Updated(version)) => {
+            let _ = super::cache::clear_dismissed_version();
             queue_runtime_relaunch(relaunch_preference(notice));
             renderer.line(MessageStyle::Info, &format!("Update installed (v{version}). Restarting VT Code..."))?;
             Ok(InlineUpdateOutcome::RestartRequested)
@@ -288,9 +292,9 @@ mod tests {
     #[test]
     fn banner_uses_release_specific_url() {
         let banner = format_update_banner(&sample_notice(), true);
-        assert!(banner.contains("https://github.com/vinhnx/vtcode/releases/tag/v0.113.0"));
+        assert!(banner.contains("https://github.com/vinhnx/vtcode/releases/tag/0.113.0"));
         assert!(banner.contains("0.111.0 -> 0.113.0"));
-        assert!(banner.contains("/update install"));
+        assert!(banner.contains("vtcode update"));
     }
 
     #[test]

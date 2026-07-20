@@ -124,7 +124,7 @@ fn prompt_paste_flow(renderer: &mut AnsiRenderer, provider: Provider, env_key: &
     renderer.line(
         MessageStyle::Info,
         &format!(
-            "Tip: export {env_key} in your shell (e.g. ~/.zshrc) to skip this in every workspace — no duplication, no .env file."
+            "Tip: export {env_key} in your shell (e.g. ~/.zshrc) to skip this in every workspace — no duplication needed."
         ),
     )?;
 
@@ -169,7 +169,7 @@ fn prompt_paste_flow(renderer: &mut AnsiRenderer, provider: Provider, env_key: &
             .store(&key, mode)
             .map_err(|e| anyhow::anyhow!("Failed to store {} API key in OS keyring: {e}", provider.label()))?;
 
-        renderer.line(MessageStyle::Status, "API key saved to your OS keyring (not workspace .env).")?;
+        renderer.line(MessageStyle::Status, "API key saved to your OS keyring (not workspace environment files).")?;
         renderer.line(
             MessageStyle::Info,
             &format!("To use the env var instead, export {env_key} in your shell and clear this key with /model."),

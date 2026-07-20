@@ -350,6 +350,16 @@ pub fn find_discovered(discovered: &[DiscoveredProvider], provider: Provider) ->
     discovered.iter().find(|entry| entry.provider == provider)
 }
 
+/// Check whether any provider in the slice has an OAuth session or managed auth.
+///
+/// Used by secret-management UIs to decide whether to show the generic
+/// `secret add/delete` hints or the OAuth-specific `login` hint.
+pub fn has_oauth_or_managed_auth(discovered: &[DiscoveredProvider]) -> bool {
+    discovered
+        .iter()
+        .any(|entry| matches!(entry.source, CredentialSource::OAuth | CredentialSource::ManagedAuth))
+}
+
 fn env_value_present(env_key: &str) -> bool {
     matches!(read_env_var(env_key), Some(value) if !value.trim().is_empty())
 }

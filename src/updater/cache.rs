@@ -11,6 +11,7 @@ pub(super) struct UpdateCacheSnapshot {
     pub(super) latest_version: Option<Version>,
     pub(super) latest_was_newer: bool,
     pub(super) last_seen_version: Option<Version>,
+    pub(super) dismissed_version: Option<Version>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +23,8 @@ struct UpdateCachePayload {
     latest_was_newer: bool,
     #[serde(default)]
     last_seen_version: Option<String>,
+    #[serde(default)]
+    dismissed_version: Option<String>,
 }
 
 pub(super) fn read_snapshot() -> Result<UpdateCacheSnapshot> {
@@ -40,6 +43,7 @@ pub(super) fn read_snapshot() -> Result<UpdateCacheSnapshot> {
             latest_version: None,
             latest_was_newer: false,
             last_seen_version: None,
+            dismissed_version: None,
         });
     };
 
@@ -50,6 +54,7 @@ pub(super) fn read_snapshot() -> Result<UpdateCacheSnapshot> {
             latest_version: None,
             latest_was_newer: false,
             last_seen_version: None,
+            dismissed_version: None,
         });
     }
 
@@ -59,6 +64,7 @@ pub(super) fn read_snapshot() -> Result<UpdateCacheSnapshot> {
             latest_version: None,
             latest_was_newer: false,
             last_seen_version: None,
+            dismissed_version: None,
         });
     };
 
@@ -68,6 +74,10 @@ pub(super) fn read_snapshot() -> Result<UpdateCacheSnapshot> {
         latest_was_newer: payload.latest_was_newer,
         last_seen_version: payload
             .last_seen_version
+            .as_deref()
+            .and_then(|value| Version::parse(value).ok()),
+        dismissed_version: payload
+            .dismissed_version
             .as_deref()
             .and_then(|value| Version::parse(value).ok()),
     })
@@ -80,6 +90,7 @@ pub(super) fn record_successful_check(latest_version: Option<&Version>, latest_w
         latest_version: latest_version.cloned(),
         latest_was_newer,
         last_seen_version: existing.last_seen_version,
+        dismissed_version: existing.dismissed_version,
     })
 }
 
@@ -95,6 +106,18 @@ pub(super) fn record_seen_version(version: &Version) -> Result<()> {
     write_snapshot(snapshot)
 }
 
+pub(super) fn record_dismissed_version(version: &Version) -> Result<()> {
+    let mut snapshot = read_snapshot()?;
+    snapshot.dismissed_version = Some(version.clone());
+    write_snapshot(snapshot)
+}
+
+pub(super) fn clear_dismissed_version() -> Result<()> {
+    let mut snapshot = read_snapshot()?;
+    snapshot.dismissed_version = None;
+    write_snapshot(snapshot)
+}
+
 fn write_snapshot(snapshot: UpdateCacheSnapshot) -> Result<()> {
     let last_checked = snapshot.last_checked.unwrap_or_else(SystemTime::now);
     let last_checked_unix_secs = last_checked.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
@@ -103,6 +126,7 @@ fn write_snapshot(snapshot: UpdateCacheSnapshot) -> Result<()> {
         latest_version: snapshot.latest_version.map(|version| version.to_string()),
         latest_was_newer: snapshot.latest_was_newer,
         last_seen_version: snapshot.last_seen_version.map(|version| version.to_string()),
+        dismissed_version: snapshot.dismissed_version.map(|version| version.to_string()),
     };
     let serialized = serde_json::to_string(&payload).context("Failed to serialize update cache payload")?;
     write_file_with_context_sync(&cache_file_path()?, &serialized, "update cache")
@@ -165,6 +189,28 @@ mod tests {
         assert_eq!(snapshot.latest_version, Some(version));
         assert!(snapshot.latest_was_newer);
         assert!(snapshot.last_checked.is_some());
+        assert!(snapshot.dismissed_version.is_none());
+
+        env_guard.restore_var("XDG_CACHE_HOME", previous);
+    }
+
+    #[test]
+    fn record_and_clear_dismissed_version() {
+        let env_guard = env_lock::lock();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let previous = env::var_os("XDG_CACHE_HOME");
+        env_guard.set_var("XDG_CACHE_HOME", temp_dir.path());
+
+        let version = Version::parse("0.113.0").expect("version");
+        record_successful_check(Some(&version), true).expect("write cache");
+        assert!(read_snapshot().expect("snapshot").dismissed_version.is_none());
+
+        record_dismissed_version(&version).expect("record dismissal");
+        let snapshot = read_snapshot().expect("read snapshot");
+        assert_eq!(snapshot.dismissed_version, Some(version));
+
+        clear_dismissed_version().expect("clear dismissal");
+        assert!(read_snapshot().expect("snapshot").dismissed_version.is_none());
 
         env_guard.restore_var("XDG_CACHE_HOME", previous);
     }
