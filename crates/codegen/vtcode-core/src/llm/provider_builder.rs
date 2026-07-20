@@ -81,7 +81,7 @@ where
     ///
     /// This method is intended for use in contexts where provider creation
     /// should never fail (e.g., after configuration validation). If failure
-    /// is possible, use [`try_build`] instead.
+    /// is possible, use [`Self::try_build`] instead.
     ///
     /// # Panics
     ///

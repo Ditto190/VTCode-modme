@@ -32,7 +32,7 @@ pub fn reasoning_from_selection_string(s: &str) -> ReasoningEffortLevel {
     ReasoningEffortLevel::parse(s).unwrap_or_default()
 }
 
-/// Convert a config [`UiSurfacePreference`] to the TUI [`SessionSurface`] enum.
+/// Convert a config `UiSurfacePreference` to the TUI `SessionSurface` enum.
 pub fn to_tui_surface(preference: crate::config::types::UiSurfacePreference) -> SessionSurface {
     match preference {
         crate::config::types::UiSurfacePreference::Auto => SessionSurface::Auto,

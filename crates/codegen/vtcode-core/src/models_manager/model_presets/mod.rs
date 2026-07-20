@@ -3,7 +3,7 @@
 //! This module provides pre-configured model presets for all supported providers,
 //! following the pattern from OpenAI Codex's models_manager.
 //!
-//! Per-provider preset definitions live in the [`presets`] subdirectory; this
+//! Per-provider preset definitions live in the `presets` subdirectory; this
 //! module owns the shared types and the two public aggregators
 //! ([`builtin_model_presets`] and [`presets_for_provider`]).
 

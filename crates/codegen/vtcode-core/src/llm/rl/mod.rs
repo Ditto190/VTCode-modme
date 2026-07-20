@@ -7,14 +7,14 @@
 //!
 //! - Command/sandbox outcomes are captured through the existing `bash_runner`
 //!   and PTY subsystems (no extra instrumentation).
-//! - Each outcome becomes a [`RewardSignal`] (success + latency + cost).
-//! - Signals accumulate in a rolling [`RewardLedger`] keyed by action id.
-//! - [`RlEngine::select`] picks the next action via UCB / epsilon-greedy
+//! - Each outcome becomes a [`crate::llm::rl::RewardSignal`] (success + latency + cost).
+//! - Signals accumulate in a rolling [`crate::llm::rl::RewardLedger`] keyed by action id.
+//! - [`crate::llm::rl::RlEngine::select`] picks the next action via UCB / epsilon-greedy
 //!   bandit logic, or an actor-critic stand-in, driven by `[optimization].rl`.
 //!
 //! The module is decomposed into independently testable chunks:
-//! [`signal`] (reward math + strategy), [`ledger`] (rolling statistics),
-//! [`engine`] (selection policy), and [`eval`] (eval-report bridge).
+//! [`crate::llm::rl::signal`] (reward math + strategy), [`crate::llm::rl::ledger`] (rolling statistics),
+//! [`crate::llm::rl::engine`] (selection policy), and [`crate::llm::rl::eval`] (eval-report bridge).
 
 pub mod engine;
 pub mod eval;

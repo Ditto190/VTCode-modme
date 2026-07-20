@@ -281,7 +281,7 @@ struct PromptSection {
     text: String,
 }
 
-/// Identifies which layer of the system prompt a [`PromptSection`] belongs to.
+/// Identifies which layer of the system prompt a `PromptSection` belongs to.
 ///
 /// Variants mirror the layers `compose_system_instruction_text` actually
 /// assembles today. Agent identity is not a separate variant: it is applied
@@ -381,7 +381,7 @@ pub async fn compose_system_instruction_text(
 }
 
 /// Compose the system instruction and return the token-budget report
-/// alongside it. See [`SystemPromptReport`] and [`SectionKind::trim_priority`]
+/// alongside it. See [`SystemPromptReport`] and `SectionKind::trim_priority`
 /// for the budget/trim behavior driven by `agent.max_system_prompt_tokens`,
 /// `agent.system_prompt_budget_warning`, and `agent.trim_system_prompt`.
 pub async fn compose_system_instruction_with_report(

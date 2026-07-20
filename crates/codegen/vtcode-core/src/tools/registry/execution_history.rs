@@ -881,7 +881,7 @@ impl ToolExecutionHistory {
 
     /// Detect if the agent is stuck in a loop.
     ///
-    /// Returns a [`LoopDetectionResult`] indicating whether a loop was detected.
+    /// Returns a `LoopDetectionResult` indicating whether a loop was detected.
     pub fn detect_loop(&self, tool_name: &str, args: &Value) -> LoopDetectionResult {
         let limit = self.effective_identical_limit_for_call(tool_name, args);
         if limit == 0 {

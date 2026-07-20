@@ -1,7 +1,7 @@
 //! Worktree reconciliation: diff, verify, merge.
 //!
 //! After a worktree-isolated subagent finishes, the `WorktreeReconciler`
-//! captures the branch diff, asks a [`DiffVerifier`](crate::git::verify::DiffVerifier)
+//! captures the branch diff, asks a [`DiffVerifier`]
 //! to approve or reject it, and merges approved changes back into the main
 //! branch.
 

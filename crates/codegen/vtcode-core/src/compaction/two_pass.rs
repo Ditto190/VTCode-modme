@@ -2,7 +2,7 @@
 //!
 //! Pass1 summarizes ~95% of history (by estimated-token weight) -> NOTE₁.
 //! Pass2 rewrites NOTE₁ + the ~5% tail into the successor-visible NOTE₂.
-//! Sampling lives in [`super::mod`]; this module has no I/O.
+//! Sampling lives in [`super`]; this module has no I/O.
 
 use crate::llm::provider::Message;
 

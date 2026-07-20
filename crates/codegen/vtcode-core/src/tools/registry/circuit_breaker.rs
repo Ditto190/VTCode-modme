@@ -11,7 +11,7 @@
 //! simultaneously observe the same state and attempt conflicting transitions.
 //!
 //! See "Rust Prevents Data Races, Not Race Conditions" for why this matters:
-//! https://corrode.dev/blog/rust-prevents-data-races-not-race-conditions/
+//! <https://corrode.dev/blog/rust-prevents-data-races-not-race-conditions/>
 
 use crate::metrics::MetricsCollector;
 use parking_lot::Mutex;

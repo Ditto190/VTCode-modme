@@ -399,7 +399,7 @@ impl AgentSessionState {
 
     /// Calculate total estimated tokens in the conversation.
     /// Returns the cached value updated incrementally on each push.
-    /// Use [`reconcile_token_count`] after mutations that bypass push methods.
+    /// Use [`Self::reconcile_token_count`] after mutations that bypass push methods.
     #[inline]
     pub fn total_tokens(&self) -> usize {
         self.cached_total_tokens

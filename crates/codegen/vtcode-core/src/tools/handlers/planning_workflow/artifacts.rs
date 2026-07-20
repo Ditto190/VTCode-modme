@@ -110,7 +110,7 @@ pub(super) fn render_plan_with_tracker(plan_markdown: &str, tracker_markdown: Op
 /// Merge plan markdown with an optional tracker sidecar into the canonical
 /// on-disk representation.
 ///
-/// This deliberately delegates to [`render_plan_with_tracker`] so the result is
+/// This deliberately delegates to `render_plan_with_tracker` so the result is
 /// identical to what `persist_plan_draft` writes: the plan body with the
 /// tracker embedded between `PLAN_TRACKER_START`/`PLAN_TRACKER_END` markers.
 /// Previously this module appended the tracker as a bare trailing block, which
