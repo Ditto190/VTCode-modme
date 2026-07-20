@@ -1196,9 +1196,9 @@ main() {
 		print_info "Building macOS binaries in parallel..."
 
 		# Build both architectures in parallel on multi-core machines
-		cargo build --profile release-fast --target x86_64-apple-darwin --jobs 4 &>/dev/null &
+		cargo build --profile release --target x86_64-apple-darwin --jobs 4 &>/dev/null &
 		local pid_x86=$!
-		cargo build --profile release-fast --target aarch64-apple-darwin --jobs 4 &>/dev/null &
+		cargo build --profile release --target aarch64-apple-darwin --jobs 4 &>/dev/null &
 		local pid_arm=$!
 
 		# Wait for x86_64
