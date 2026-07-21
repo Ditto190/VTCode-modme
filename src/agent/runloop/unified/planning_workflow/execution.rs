@@ -240,7 +240,9 @@ async fn handle_pending_confirmation(
         .get("draft_incomplete")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    let confirmation_outcome = if ctx.renderer.supports_inline_ui() {
+    let confirmation_outcome = if ctx.plan_session.approval_requested() {
+        Ok(PlanConfirmationOutcome::AutoAccept)
+    } else if ctx.renderer.supports_inline_ui() {
         execute_plan_confirmation(ctx.handle, ctx.session, plan_content, draft_incomplete, ctrl_c_state, ctrl_c_notify)
             .await
     } else {

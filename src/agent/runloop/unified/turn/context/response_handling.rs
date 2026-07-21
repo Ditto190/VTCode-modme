@@ -249,6 +249,19 @@ impl<'a> TurnProcessingContext<'a> {
         if self.is_planning_active()
             && let Some(plan_text) = proposed_plan
         {
+            // Streaming providers may render reasoning/tool activity but leave
+            // the final synthesized plan out of the terminal response path.
+            // Render the persisted plan explicitly so planning never appears
+            // to stop with only a "Thinking" transcript on screen.
+            if response_streamed {
+                use vtcode_core::utils::ansi::MessageStyle;
+                self.renderer.line(MessageStyle::Info, "Plan ready for approval:")?;
+                self.renderer.line(MessageStyle::Response, &plan_text)?;
+                self.renderer.line(
+                    MessageStyle::Info,
+                    "Type `approve` or `implement` to begin execution, or `edit` to revise the plan.",
+                )?;
+            }
             self.emit_plan_events(&plan_text).await;
             let _persisted = persist_plan_draft(&self.tool_registry.planning_workflow_state(), &plan_text).await?;
         }

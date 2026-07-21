@@ -90,7 +90,6 @@ const PLANNING_WORKFLOW_MAX_TOOL_LOOP_INCREMENT_PER_PROMPT: usize = 80;
 const PLANNING_WORKFLOW_ENTER_TRIGGER_STATUS: &str =
     "Planning workflow: explicit planning request detected. Entering read-only planning before continuing this turn.";
 const PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS: &str = "Planning workflow: implementation intent detected from your message. Running `finish_planning` for plan confirmation; once approved, VT Code will switch to the selected primary agent and execute.";
-const PLANNING_WORKFLOW_EXIT_SWITCHED_CONTINUE_STATUS: &str = "Planning workflow disabled. Continuing this turn with the selected primary agent to execute your implementation request.";
 
 fn resolve_tool_loop_limit(configured_limit: usize, planning_active: bool) -> usize {
     if configured_limit == 0 {
@@ -358,6 +357,7 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
         PlanningIntent::ExitAndImplement => {
             // Mark that we've attempted finish_planning this turn to prevent re-entry.
             *ctx.auto_finish_planning_attempted = true;
+            ctx.plan_session.request_approval();
 
             display_status(ctx.renderer, PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS)?;
             // Continue with finish_planning logic below...
@@ -391,6 +391,12 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
     let default_placeholder = ctx.default_placeholder.clone();
     let lifecycle_hooks = ctx.lifecycle_hooks;
     let vt_cfg = ctx.vt_cfg;
+    // This helper is entered only after the user explicitly typed an approval
+    // intent (`approve`, `implement`, etc.). Do not open the plan-confirmation
+    // overlay a second time; that would consume the approval turn and leave
+    // the agent apparently idle. The finish tool still performs the normal
+    // planning-state transition and execution policy checks.
+    ctx.handle.set_skip_confirmations(true);
     let mut run_ctx = ctx.as_run_loop_context();
 
     let outcome = run_tool_call(
@@ -442,8 +448,13 @@ pub(super) async fn maybe_handle_planning_exit_trigger(
                 return Ok(true);
             }
 
-            display_status(ctx.renderer, PLANNING_WORKFLOW_EXIT_SWITCHED_CONTINUE_STATUS)?;
-            Ok(false)
+            // Planning was fully disabled (auto-accept on user's approval intent).
+            // Break the turn loop to avoid an unnecessary LLM round-trip that
+            // would see the synthetic finish_planning tool artifacts in the
+            // history and could produce confusing or duplicate output. The exit
+            // trigger status above already informed the user; no additional
+            // message is needed here.
+            return Ok(true);
         }
         Err(err) => {
             display_error(ctx.renderer, "Failed to exit Planning workflow", &err)?;
@@ -597,9 +608,9 @@ pub(super) async fn maybe_handle_tool_loop_limit(
 #[cfg(test)]
 mod tests {
     use super::{
-        PLANNING_WORKFLOW_EXIT_SWITCHED_CONTINUE_STATUS, PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS,
-        PLANNING_WORKFLOW_MIN_TOOL_LOOPS, UNLIMITED_TOOL_LOOPS, clamp_tool_loop_increment, extract_turn_config,
-        handle_steering_messages, resolve_safety_tool_call_limits, resolve_tool_loop_limit, tool_loop_hard_cap,
+        PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS, PLANNING_WORKFLOW_MIN_TOOL_LOOPS, UNLIMITED_TOOL_LOOPS,
+        clamp_tool_loop_increment, extract_turn_config, handle_steering_messages, resolve_safety_tool_call_limits,
+        resolve_tool_loop_limit, tool_loop_hard_cap,
     };
     use crate::agent::runloop::unified::planning_workflow::{
         PlanningIntent, detect_enter_planning_intent, detect_planning_intent,
@@ -726,12 +737,6 @@ mod tests {
         assert!(PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS.contains("finish_planning"));
         assert!(PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS.contains("selected primary agent"));
         assert!(PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS.contains("implementation intent"));
-    }
-
-    #[test]
-    fn planning_exit_switched_continue_status_mentions_agent_and_turn_continuation() {
-        assert!(PLANNING_WORKFLOW_EXIT_SWITCHED_CONTINUE_STATUS.contains("selected primary agent"));
-        assert!(PLANNING_WORKFLOW_EXIT_SWITCHED_CONTINUE_STATUS.contains("Continuing this turn"));
     }
 
     #[test]

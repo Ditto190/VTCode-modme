@@ -31,6 +31,7 @@ pub(crate) struct PlanningWorkflowSessionState {
     /// the planning session, falling back to autonomous plan synthesis
     /// instead of looping (see checkpoint turn_655/turn_660).
     interview_denied: bool,
+    approval_requested: bool,
 }
 
 impl PlanningWorkflowSessionState {
@@ -44,6 +45,15 @@ impl PlanningWorkflowSessionState {
         self.budget_exhausted = false;
         self.recovery_exhausted = false;
         self.interview_denied = false;
+        self.approval_requested = false;
+    }
+
+    pub(crate) fn request_approval(&mut self) {
+        self.approval_requested = true;
+    }
+
+    pub(crate) fn approval_requested(&self) -> bool {
+        self.approval_requested
     }
 
     pub(crate) fn exit(&mut self) {
@@ -51,6 +61,7 @@ impl PlanningWorkflowSessionState {
         self.budget_exhausted = false;
         self.recovery_exhausted = false;
         self.interview_denied = false;
+        self.approval_requested = false;
     }
 
     #[allow(dead_code)]
