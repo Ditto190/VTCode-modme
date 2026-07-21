@@ -26,8 +26,25 @@ pub(crate) fn process_llm_response(
     use vtcode_core::llm::provider as uni;
 
     let reasoning = split_reasoning_from_text(response.reasoning.as_deref().unwrap_or("")).0;
+    let reasoning_text = reasoning
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     let reasoning_details = response.reasoning_details.clone();
     let mut final_text = response.content.clone();
+
+    // Some providers put the completed planning synthesis in the reasoning
+    // channel and return an empty assistant content field. That previously
+    // made a successful planning turn look empty and left the user stuck after
+    // the model said it was ready to present the plan. Preserve this only for
+    // planning mode, and only when there is no normal response content.
+    if planning_active
+        && final_text.as_deref().is_none_or(|text| text.trim().is_empty())
+        && !reasoning_text.trim().is_empty()
+    {
+        final_text = Some(reasoning_text);
+    }
 
     // Strip provider noise (e.g. MiniMax `]<]minimax[>[`) from non-streamed
     // response content before any downstream processing. This prevents noise
@@ -75,6 +92,19 @@ pub(crate) fn process_llm_response(
                 .replace("</plan>", ""),
         );
         proposed_plan = extraction.plan_text;
+    }
+
+    // Providers occasionally omit the plan tags while still returning a
+    // structured synthesis. Treat a Summary/Steps response as the plan so it
+    // is persisted and shown to the user instead of being treated as an
+    // uncommitted intermediate answer.
+    if planning_active
+        && proposed_plan.is_none()
+        && tool_calls.is_empty()
+        && let Some(text) = final_text.as_deref()
+        && looks_like_structured_plan(text)
+    {
+        proposed_plan = Some(text.trim().to_string());
     }
 
     // Strip DSML markup from text before rendering to prevent raw tags
@@ -204,6 +234,12 @@ pub(crate) fn process_llm_response(
     );
 
     Ok(TurnProcessingResult::Empty)
+}
+
+fn looks_like_structured_plan(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    normalized.contains("summary:")
+        && (normalized.contains("steps:") || normalized.contains("validation:") || normalized.contains("assumptions:"))
 }
 
 pub(crate) fn prepare_tool_calls(
