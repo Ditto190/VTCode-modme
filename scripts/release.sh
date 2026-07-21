@@ -1144,7 +1144,7 @@ main() {
 						CI_RUN_ID="$run_id"
 					else
 						print_warning "CI build failed with conclusion: $conclusion - will use macOS binaries only"
-						gh run view --no-pager "$run_id" --log || true
+						gh run view "$run_id" --log || true
 					fi
 				fi
 			else
