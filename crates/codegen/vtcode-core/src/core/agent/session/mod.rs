@@ -563,7 +563,6 @@ mod tests {
     use crate::config::types::ReasoningEffortLevel;
     use crate::llm::provider::Message;
     use crate::llm::providers::gemini::wire::Part;
-    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 

@@ -1251,10 +1251,9 @@ impl ToolRegistry {
             return Err(anyhow!("{error_msg}").context("tool denied by policy"));
         }
 
-        let args = match {
-            let gateway = self.policy_gateway.clone();
-            gateway.apply_policy_constraints(&tool_name, args).await
-        } {
+        let gateway = self.policy_gateway.clone();
+        let constrained_result = gateway.apply_policy_constraints(&tool_name, args).await;
+        let args = match constrained_result {
             Ok(processed_args) => processed_args,
             Err(err) => {
                 let error = ToolExecutionError::with_original_error(

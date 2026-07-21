@@ -50,10 +50,10 @@ pub const PLANNING_WORKFLOW_PLAN_QUALITY_LINE: &str = "Keep plans compact and sp
 /// delivered — the model had no signal to stop researching and draft. This
 /// line gives it a concrete budget to self-regulate against.
 pub const PLANNING_WORKFLOW_RESEARCH_SCOPE_LINE: &str = "Scale research to the request: for a narrow or simple ask, ~5-10 targeted reads/searches is usually enough before drafting `<proposed_plan>` — do not exhaustively enumerate the whole repository. For a broad or ambiguous ask, research proportionally more, but stop and draft as soon as scope/decomposition/verification decisions are closed.";
-/// Shared Planning workflow policy line requiring context-aware interview closure before final plans.
-pub const PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE: &str = "Use `request_user_input` for interview questions informed by repo context. Continue until scope/decomposition/verification decisions are closed before finalizing `<proposed_plan>`.";
-/// Shared Planning workflow policy line for runtimes where `request_user_input` is unavailable.
-pub const PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE: &str = "`request_user_input` unavailable here. Continue exploring read-only, finish unblocked planning, surface blockers in plain text.";
+/// Shared Planning workflow policy line directing context-aware read-only research and plain-text question resolution.
+pub const PLANNING_WORKFLOW_PLAN_POLICY_LINE: &str = "Continue exploring read-only, finish unblocked planning, and surface open decisions or questions directly in plain text.";
+pub const PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE: &str = PLANNING_WORKFLOW_PLAN_POLICY_LINE;
+pub const PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE: &str = PLANNING_WORKFLOW_PLAN_POLICY_LINE;
 /// Shared Planning workflow guard line requiring explicit transition from planning to execution.
 pub const PLANNING_WORKFLOW_NO_AUTO_EXIT_LINE: &str =
     "Do not auto-exit Planning workflow; wait for explicit implementation intent.";

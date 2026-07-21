@@ -27,6 +27,10 @@ pub enum ModelId {
     Gemini31ProPreviewCustomTools,
     /// Gemini 3.5 Flash - High-efficiency frontier model for fast inference
     Gemini35Flash,
+    /// Gemini 3.5 Flash Lite - Cost-optimized lightweight model for efficient inference
+    Gemini35FlashLite,
+    /// Gemini 3.6 Flash - Latest flash model with improved capabilities
+    Gemini36Flash,
 
     // OpenAI models
     /// GPT-5.6 Sol - Frontier model for complex professional work in the GPT-5.6 family
@@ -273,6 +277,10 @@ pub enum ModelId {
 
     /// Gemini 3.1 Pro Preview - Google's latest Gemini 3.1 Pro model via OpenRouter
     OpenRouterGoogleGemini31ProPreview,
+    /// Gemini 3.5 Flash Lite - Cost-optimized lightweight Gemini model via OpenRouter
+    OpenRouterGoogleGemini35FlashLite,
+    /// Gemini 3.6 Flash - Latest Gemini flash model with improved capabilities via OpenRouter
+    OpenRouterGoogleGemini36Flash,
 
     /// Claude Sonnet 4.6 - Anthropic Claude Sonnet 4.6 listing
     OpenRouterAnthropicClaudeSonnet46,

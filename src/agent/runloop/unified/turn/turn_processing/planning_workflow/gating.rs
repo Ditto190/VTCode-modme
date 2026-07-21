@@ -7,6 +7,8 @@
 //! the readiness/need decision independently testable and decoupled from
 //! orchestration (`super::maybe_force_planning_workflow_interview`), which is
 //! the only caller outside this module.
+#![allow(dead_code)]
+
 use vtcode_core::config::constants::tools;
 
 use super::MIN_PLANNING_WORKFLOW_TURNS_BEFORE_INTERVIEW;

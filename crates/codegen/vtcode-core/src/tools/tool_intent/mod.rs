@@ -88,7 +88,8 @@ mod tests {
 
     #[test]
     fn command_session_run_is_mutating_and_destructive() {
-        let intent = classify_tool_intent(tools::UNIFIED_EXEC, &json!({"action": "run", "command": "rm -rf /tmp/test"}));
+        let intent =
+            classify_tool_intent(tools::UNIFIED_EXEC, &json!({"action": "run", "command": "rm -rf /tmp/test"}));
         assert!(intent.mutating);
         assert!(intent.destructive);
         assert!(!intent.retry_safe);

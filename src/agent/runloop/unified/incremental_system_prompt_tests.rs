@@ -122,20 +122,21 @@ async fn test_planning_workflow_notice_appended() {
 }
 
 #[tokio::test]
-async fn test_planning_workflow_uses_noninteractive_notice_when_request_user_input_is_disabled() {
-    let prompt_builder = IncrementalSystemPrompt::new();
-    let context = SystemPromptContext {
-        planning_active: true,
-        request_user_input_enabled: false,
-        ..test_context()
-    };
+async fn test_planning_workflow_uses_plan_notice_unconditionally() {
+    for request_user_input_enabled in [true, false] {
+        let prompt_builder = IncrementalSystemPrompt::new();
+        let context = SystemPromptContext {
+            planning_active: true,
+            request_user_input_enabled,
+            ..test_context()
+        };
 
-    let prompt = prompt_builder
-        .get_system_prompt("You are a helpful assistant.", 1, context.hash(), &context, None)
-        .await;
+        let prompt = prompt_builder
+            .get_system_prompt("You are a helpful assistant.", 1, context.hash(), &context, None)
+            .await;
 
-    assert!(prompt.contains(vtcode_core::prompts::system::PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE));
-    assert!(!prompt.contains(vtcode_core::prompts::system::PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE));
+        assert!(prompt.contains(vtcode_core::prompts::system::PLANNING_WORKFLOW_PLAN_POLICY_LINE));
+    }
 }
 
 #[tokio::test]

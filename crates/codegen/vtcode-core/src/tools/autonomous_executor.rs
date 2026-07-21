@@ -652,10 +652,7 @@ mod tests {
             executor.get_policy(tools::UNIFIED_EXEC, &json!({"cmd": "cargo build"})),
             AutonomousPolicy::VerifyThenExecute
         );
-        assert_eq!(
-            executor.get_policy(tools::UNIFIED_EXEC, &json!({"cmd": "echo hi"})),
-            AutonomousPolicy::AutoExecute
-        );
+        assert_eq!(executor.get_policy(tools::UNIFIED_EXEC, &json!({"cmd": "echo hi"})), AutonomousPolicy::AutoExecute);
         assert_eq!(
             executor.get_policy(
                 tools::UNIFIED_EXEC,

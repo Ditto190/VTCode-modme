@@ -42,6 +42,17 @@ impl ConfigLayerSource {
             Self::Runtime => "runtime".to_string(),
         }
     }
+
+    /// Return a copy of this source with an updated file path.
+    pub fn with_file(&self, new_file: PathBuf) -> Self {
+        match self {
+            Self::System { .. } => Self::System { file: new_file },
+            Self::User { .. } => Self::User { file: new_file },
+            Self::Project { .. } => Self::Project { file: new_file },
+            Self::Workspace { .. } => Self::Workspace { file: new_file },
+            Self::Runtime => Self::Runtime,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

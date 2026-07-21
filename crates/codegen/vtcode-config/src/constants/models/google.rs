@@ -6,6 +6,8 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     "gemini-3.1-pro-preview-customtools", // Optimized for custom tools & bash
     "gemini-3.1-flash-lite-preview",      // Most cost-efficient, fastest for lightweight tasks
     "gemini-3.5-flash",                   // Gemini 3.5 Flash - high-efficiency frontier model
+    "gemini-3.5-flash-lite",              // Gemini 3.5 Flash Lite - cost-optimized lightweight model
+    "gemini-3.6-flash",                   // Gemini 3.6 Flash - latest flash model with improved capabilities
     "gemini-3-flash-preview",             // Fast version of Gemini 3 Pro with 3-level thinking
     "gemini-3-pro-image-preview",         // Image generation model with 4K resolution
 ];
@@ -19,6 +21,8 @@ pub const REASONING_MODELS: &[&str] = &[
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash-lite-preview",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
     "gemini-3-flash-preview",
 ];
 
@@ -37,6 +41,8 @@ pub const CACHING_MODELS: &[&str] = &[
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash-lite-preview",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
     "gemini-3-flash-preview",
 ];
 
@@ -48,6 +54,8 @@ pub const CODE_EXECUTION_MODELS: &[&str] = &[
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash-lite-preview",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
     "gemini-3-flash-preview",
 ];
 
@@ -56,5 +64,7 @@ pub const GEMINI_3_1_PRO_PREVIEW: &str = "gemini-3.1-pro-preview";
 pub const GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS: &str = "gemini-3.1-pro-preview-customtools";
 pub const GEMINI_3_1_FLASH_LITE_PREVIEW: &str = "gemini-3.1-flash-lite-preview";
 pub const GEMINI_3_5_FLASH: &str = "gemini-3.5-flash";
+pub const GEMINI_3_5_FLASH_LITE: &str = "gemini-3.5-flash-lite";
+pub const GEMINI_3_6_FLASH: &str = "gemini-3.6-flash";
 pub const GEMINI_3_FLASH_PREVIEW: &str = "gemini-3-flash-preview";
 pub const GEMINI_3_PRO_IMAGE_PREVIEW: &str = "gemini-3-pro-image-preview";

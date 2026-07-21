@@ -105,6 +105,20 @@ model_id_table! {
         display: "Gemini 3.5 Flash",
         description: "High-efficiency frontier model for fast inference with excellent quality-to-speed balance",
     },
+    Gemini35FlashLite {
+        provider: Gemini,
+        id: models::GEMINI_3_5_FLASH_LITE,
+        parse: [models::GEMINI_3_5_FLASH_LITE],
+        display: "Gemini 3.5 Flash Lite",
+        description: "Cost-optimized lightweight model for efficient inference with balanced quality and speed",
+    },
+    Gemini36Flash {
+        provider: Gemini,
+        id: models::GEMINI_3_6_FLASH,
+        parse: [models::GEMINI_3_6_FLASH],
+        display: "Gemini 3.6 Flash",
+        description: "Latest flash model with improved reasoning, efficiency, and factual consistency",
+    },
     // OpenAI models
     GPT56Sol {
         provider: OpenAI,

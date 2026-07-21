@@ -1,5 +1,7 @@
 //! Planning workflow open-decision detection helpers.
 
+#![allow(dead_code)]
+
 pub(super) fn has_open_decision_markers(text: &str) -> bool {
     text.lines().any(line_has_open_decision_marker)
 }

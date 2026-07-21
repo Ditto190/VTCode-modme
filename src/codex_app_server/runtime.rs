@@ -417,6 +417,9 @@ async fn run_interactive_session(
                 thread.thread.id.clone(),
                 turn_input,
                 None,
+                // A planning-to-execution transition must not keep the
+                // app-server sandbox read-only after the plan is approved.
+                // Ordinary planning turns remain read-only.
                 planning_active,
                 skip_confirmations || full_auto,
             ),

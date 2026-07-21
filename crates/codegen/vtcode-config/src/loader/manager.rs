@@ -15,6 +15,19 @@ fn canonicalize_workspace_root(path: &Path) -> PathBuf {
     canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Timing metrics (in microseconds) for configuration loading phases
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConfigPhaseTiming {
+    /// Duration of workspace path resolution (in microseconds)
+    pub path_resolution_us: u64,
+    /// Duration of layer probing and loading (in microseconds)
+    pub layer_loading_us: u64,
+    /// Duration of TOML merging and deserialization (in microseconds)
+    pub merge_and_parse_us: u64,
+    /// Duration of validation and API key migration (in microseconds)
+    pub validation_us: u64,
+}
+
 /// Configuration manager for loading and validating configurations
 #[derive(Clone)]
 pub struct ConfigManager {
@@ -23,6 +36,7 @@ pub struct ConfigManager {
     workspace_root: Option<PathBuf>,
     config_file_name: String,
     pub(crate) layer_stack: ConfigLayerStack,
+    pub(crate) phase_timing: Option<ConfigPhaseTiming>,
 }
 
 impl ConfigManager {
@@ -41,13 +55,16 @@ impl ConfigManager {
 
     /// Load configuration from a specific workspace
     pub fn load_from_workspace(workspace: impl AsRef<Path>) -> Result<Self> {
+        let t0 = std::time::Instant::now();
         let workspace = workspace.as_ref();
         let defaults_provider = defaults::current_config_defaults();
         let workspace_paths = defaults_provider.workspace_paths_for(workspace);
         let workspace_root = canonicalize_workspace_root(workspace_paths.workspace_root());
         let config_dir = workspace_paths.config_dir();
         let config_file_name = defaults_provider.config_file_name().to_string();
+        let path_res_duration = t0.elapsed();
 
+        let t1 = std::time::Instant::now();
         let mut layer_stack = ConfigLayerStack::default();
 
         // 1. System config (e.g., /etc/vtcode/vtcode.toml)
@@ -76,8 +93,7 @@ impl ConfigManager {
         // 4. Config directory fallback (.vtcode/vtcode.toml)
         let fallback_path = config_dir.join(&config_file_name);
         let workspace_config_path = workspace_root.join(&config_file_name);
-        if fallback_path.exists()
-            && fallback_path != workspace_config_path
+        if fallback_path != workspace_config_path
             && let Some(layer) = Self::load_optional_layer(ConfigLayerSource::Workspace { file: fallback_path })
         {
             layer_stack.push(layer);
@@ -89,11 +105,22 @@ impl ConfigManager {
         {
             layer_stack.push(layer);
         }
+        let layer_load_duration = t1.elapsed();
 
         // If no layers found, use default config
         if layer_stack.layers().is_empty() {
+            let t_val = std::time::Instant::now();
             let config = VTCodeConfig::default();
             config.validate().context("Default configuration failed validation")?;
+            let val_duration = t_val.elapsed();
+
+            let phase_timing = ConfigPhaseTiming {
+                path_resolution_us: path_res_duration.as_micros() as u64,
+                layer_loading_us: layer_load_duration.as_micros() as u64,
+                merge_and_parse_us: 0,
+                validation_us: val_duration.as_micros() as u64,
+            };
+            tracing::debug!(target: "vtcode_config", ?phase_timing, "Default configuration loaded");
 
             return Ok(Self {
                 config,
@@ -101,6 +128,7 @@ impl ConfigManager {
                 workspace_root: Some(workspace_root),
                 config_file_name,
                 layer_stack,
+                phase_timing: Some(phase_timing),
             });
         }
 
@@ -139,16 +167,29 @@ impl ConfigManager {
             bail!("Configuration layer '{}' failed to load: {}", layer.source.label(), error.message);
         }
 
+        let t2 = std::time::Instant::now();
         let (effective_toml, origins) = layer_stack.effective_config_with_origins();
         let mut config: VTCodeConfig = effective_toml
             .try_into()
             .context("Failed to deserialize effective configuration")?;
+        let merge_duration = t2.elapsed();
+
+        let t3 = std::time::Instant::now();
         Self::validate_restricted_agent_fields(&layer_stack, &origins)?;
 
         config.validate().context("Configuration failed validation")?;
 
         // Migrate any plain-text API keys from config to secure storage
         migrate_custom_api_keys_if_needed(&mut config)?;
+        let val_duration = t3.elapsed();
+
+        let phase_timing = ConfigPhaseTiming {
+            path_resolution_us: path_res_duration.as_micros() as u64,
+            layer_loading_us: layer_load_duration.as_micros() as u64,
+            merge_and_parse_us: merge_duration.as_micros() as u64,
+            validation_us: val_duration.as_micros() as u64,
+        };
+        tracing::debug!(target: "vtcode_config", ?phase_timing, "Workspace configuration loaded");
 
         let config_path = layer_stack
             .layers()
@@ -169,6 +210,7 @@ impl ConfigManager {
             workspace_root: Some(workspace_root),
             config_file_name,
             layer_stack,
+            phase_timing: Some(phase_timing),
         })
     }
 
@@ -191,24 +233,27 @@ impl ConfigManager {
             }
         };
 
-        if !file.exists() {
-            return None;
-        }
-
-        let resolved_file = canonicalize_workspace_root(file);
-        let resolved_source = match source {
-            ConfigLayerSource::System { .. } => ConfigLayerSource::System { file: resolved_file.clone() },
-            ConfigLayerSource::User { .. } => ConfigLayerSource::User { file: resolved_file.clone() },
-            ConfigLayerSource::Project { .. } => ConfigLayerSource::Project { file: resolved_file.clone() },
-            ConfigLayerSource::Workspace { .. } => ConfigLayerSource::Workspace { file: resolved_file.clone() },
-            ConfigLayerSource::Runtime => {
-                return Some(ConfigLayerEntry::new(ConfigLayerSource::Runtime, toml::Value::Table(toml::Table::new())));
+        // Single-pass disk read: attempt reading directly to avoid redundant stat calls on probed layers
+        let content = match fs::read_to_string(file) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(err) => {
+                let resolved_file = canonicalize_workspace_root(file);
+                let resolved_source = source.with_file(resolved_file);
+                return Some(Self::disabled_layer_from_error(resolved_source, err.into()));
             }
         };
 
-        match Self::load_toml_from_file(&resolved_file) {
+        let resolved_file = canonicalize_workspace_root(file);
+        let resolved_source = source.with_file(resolved_file);
+
+        match toml::from_str::<toml::Value>(&content) {
             Ok(toml) => Some(ConfigLayerEntry::new(resolved_source, toml)),
-            Err(error) => Some(Self::disabled_layer_from_error(resolved_source, error)),
+            Err(err) => {
+                let error =
+                    anyhow::Error::from(err).context(format!("Failed to parse config file: {}", file.display()));
+                Some(Self::disabled_layer_from_error(resolved_source, error))
+            }
         }
     }
 
@@ -315,12 +360,18 @@ impl ConfigManager {
             workspace_root: path.parent().map(canonicalize_workspace_root),
             config_file_name,
             layer_stack,
+            phase_timing: None,
         })
     }
 
     /// Get the loaded configuration
     pub fn config(&self) -> &VTCodeConfig {
         &self.config
+    }
+
+    /// Get the timing metrics recorded during loading, if available.
+    pub fn phase_timing(&self) -> Option<ConfigPhaseTiming> {
+        self.phase_timing
     }
 
     /// Get the configuration file path (if loaded from file)

@@ -1271,7 +1271,6 @@ mod tests {
     use crate::core::agent::task::TaskOutcome;
     use crate::exec::events::ThreadEvent;
     use crate::llm::provider::{Message, records_responses_continuation_state};
-    use std::sync::Arc;
 
     #[test]
     fn failed_outcome_emits_only_turn_failed() {

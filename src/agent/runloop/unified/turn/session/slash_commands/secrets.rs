@@ -672,7 +672,6 @@ static ALL_PROVIDER_NAMES: std::sync::LazyLock<String> = std::sync::LazyLock::ne
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vtcode_auth::AuthCredentialsStoreMode;
 
     #[test]

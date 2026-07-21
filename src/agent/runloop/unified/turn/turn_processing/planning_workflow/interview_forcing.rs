@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde_json::json;
 use vtcode_core::llm::provider as uni;
 
@@ -154,9 +156,7 @@ pub(super) fn filter_interview_tool_calls(
 
         if is_interview {
             had_interview = true;
-            if allow_interview && !response_has_plan {
-                filtered.push(call);
-            }
+            // request_user_input is removed from plan mode; do not pass it through
         } else {
             had_non_interview = true;
             filtered.push(call);

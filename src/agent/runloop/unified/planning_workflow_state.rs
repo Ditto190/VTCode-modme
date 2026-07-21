@@ -53,11 +53,13 @@ impl PlanningWorkflowSessionState {
         self.interview_denied = false;
     }
 
+    #[allow(dead_code)]
     #[cfg(test)]
     pub(crate) fn interview_shown(&self) -> bool {
         self.interview_shown
     }
 
+    #[allow(dead_code)]
     pub(crate) fn mark_interview_shown(&mut self) {
         self.interview_shown = true;
         self.interview_pending = false;
@@ -71,14 +73,17 @@ impl PlanningWorkflowSessionState {
         self.turns = self.turns.saturating_add(1);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn interview_pending(&self) -> bool {
         self.interview_pending
     }
 
+    #[allow(dead_code)]
     pub(crate) fn mark_interview_pending(&mut self) {
         self.interview_pending = true;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn clear_interview_pending(&mut self) {
         self.interview_pending = false;
     }
@@ -96,10 +101,12 @@ impl PlanningWorkflowSessionState {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn interview_cycles_completed(&self) -> usize {
         self.interview_cycles_completed
     }
 
+    #[allow(dead_code)]
     pub(crate) fn last_interview_cancelled(&self) -> bool {
         self.last_interview_cancelled
     }

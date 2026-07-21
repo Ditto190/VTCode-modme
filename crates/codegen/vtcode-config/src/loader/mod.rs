@@ -16,7 +16,7 @@ mod tests;
 pub use builder::ConfigBuilder;
 pub use config::{FeaturesConfig, ProviderConfig, VTCodeConfig, WorkspaceConfig};
 pub use fingerprint::{fingerprint_str, fingerprint_toml_value};
-pub use manager::ConfigManager;
+pub use manager::{ConfigManager, ConfigPhaseTiming};
 pub use merge::{merge_toml_values, merge_toml_values_with_origins};
 pub use syntax_highlighting::SyntaxHighlightingConfig;
 pub use watch::{ConfigWatcher, SimpleConfigWatcher};

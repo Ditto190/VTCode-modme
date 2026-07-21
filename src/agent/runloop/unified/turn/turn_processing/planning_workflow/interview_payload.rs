@@ -5,6 +5,8 @@
 //! which is intentionally fixed — no research context is consulted, so the
 //! wording and options are constant.
 
+#![allow(dead_code)]
+
 use serde_json::{Value, json};
 
 /// Build the single static clarifying question injected into plan mode when the

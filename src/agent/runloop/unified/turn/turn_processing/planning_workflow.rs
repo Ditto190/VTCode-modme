@@ -18,13 +18,8 @@ mod interview_forcing;
 mod interview_payload;
 
 use crate::agent::runloop::unified::turn::context::TurnProcessingResult;
-use crate::agent::runloop::unified::turn::turn_processing::extract_interview_questions;
-use gating::interview_need_state;
 pub(crate) use gating::planning_workflow_interview_ready;
-use interview_forcing::{
-    filter_interview_tool_calls, inject_planning_workflow_interview, maybe_append_planning_workflow_reminder,
-    strip_assistant_text,
-};
+use interview_forcing::{filter_interview_tool_calls, maybe_append_planning_workflow_reminder};
 
 #[cfg(test)]
 use super::response_processing::prepare_tool_calls;
@@ -38,106 +33,19 @@ const PLANNING_WORKFLOW_REMINDER: &str = vtcode_core::prompts::system::PLANNING_
 pub(crate) fn maybe_force_planning_workflow_interview(
     processing_result: TurnProcessingResult,
     response_text: Option<&str>,
-    session_stats: &mut crate::agent::runloop::unified::state::SessionStats,
+    _session_stats: &mut crate::agent::runloop::unified::state::SessionStats,
     plan_session: &mut PlanningWorkflowSessionState,
-    conversation_len: usize,
+    _conversation_len: usize,
 ) -> TurnProcessingResult {
-    // Do NOT force the interview when budget is exhausted — no further LLM
-    // calls are possible and re-forcing would loop forever. The same applies
-    // when post-tool recovery is exhausted (saturated planning context):
-    // re-forcing the interview would re-research and loop forever. Likewise,
-    // once the interview has been permanently denied by policy, forcing it
-    // again just repeats the same denial (checkpoint turn_655/turn_660).
-    if plan_session.is_budget_exhausted() || plan_session.is_recovery_exhausted() || plan_session.is_interview_denied()
-    {
-        return processing_result;
-    }
-    let allow_interview = planning_workflow_interview_ready(session_stats, plan_session);
-    let need_state = interview_need_state(response_text, plan_session);
-    let response_has_plan = need_state.response_has_plan;
+    let filter_outcome = filter_interview_tool_calls(processing_result, plan_session, false, false, false);
+    let processing_result = filter_outcome.processing_result;
 
+    let response_has_plan = response_text.map(|text| text.contains("<proposed_plan>")).unwrap_or(false);
     if response_has_plan {
-        let processing_result = filter_interview_tool_calls(
-            processing_result,
-            plan_session,
-            allow_interview,
-            response_has_plan,
-            need_state.needs_interview,
-        )
-        .processing_result;
-
-        if allow_interview && need_state.needs_interview {
-            let stripped = strip_assistant_text(processing_result);
-            return inject_planning_workflow_interview(stripped, plan_session, conversation_len);
-        }
-
         return maybe_append_planning_workflow_reminder(processing_result);
     }
 
-    let filter_outcome = filter_interview_tool_calls(
-        processing_result,
-        plan_session,
-        allow_interview,
-        response_has_plan,
-        need_state.needs_interview,
-    );
-    let processing_result = filter_outcome.processing_result;
-    let has_interview_tool_calls = filter_outcome.had_interview_tool_calls;
-    let has_non_interview_tool_calls = filter_outcome.had_non_interview_tool_calls;
-
-    if plan_session.interview_pending() {
-        if !need_state.needs_interview {
-            plan_session.clear_interview_pending();
-            return processing_result;
-        }
-
-        if has_interview_tool_calls && allow_interview {
-            plan_session.mark_interview_shown();
-            return processing_result;
-        }
-
-        if has_non_interview_tool_calls {
-            return processing_result;
-        }
-
-        if !allow_interview {
-            return processing_result;
-        }
-
-        return inject_planning_workflow_interview(processing_result, plan_session, conversation_len);
-    }
-
-    let explicit_questions = response_text
-        .map(|text| !extract_interview_questions(text).is_empty())
-        .unwrap_or(false);
-    if explicit_questions {
-        if allow_interview {
-            plan_session.mark_interview_shown();
-        }
-        return processing_result;
-    }
-
-    if has_interview_tool_calls {
-        if allow_interview {
-            plan_session.mark_interview_shown();
-        } else {
-            plan_session.mark_interview_pending();
-        }
-        return processing_result;
-    }
-
-    if has_non_interview_tool_calls {
-        if need_state.needs_interview {
-            plan_session.mark_interview_pending();
-        }
-        return processing_result;
-    }
-
-    if !allow_interview || !need_state.needs_interview {
-        return processing_result;
-    }
-
-    inject_planning_workflow_interview(processing_result, plan_session, conversation_len)
+    processing_result
 }
 
 #[cfg(test)]

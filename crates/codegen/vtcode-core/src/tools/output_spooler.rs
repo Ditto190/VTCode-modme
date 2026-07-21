@@ -397,7 +397,7 @@ impl ToolOutputSpooler {
             // Keep the recovery guidance aligned with the model-facing command tools.
             // Large data stays on disk and the model pulls only the sections it needs.
             let spool_note = format!(
-                "Large output ({} bytes) spooled to `spool_path`. Do not re-inline the full file. Use `exec_command` with tools such as `sed -n` or `rg` to inspect only the sections you need.",
+                "Large output ({} bytes) spooled to `spool_path`. Do not re-inline the full file. Use `view_file` or `grep_search` (or `exec_command` if available) to inspect only the sections you need.",
                 spool_result.original_bytes
             );
             obj.insert("spool_note".to_string(), json!(spool_note));

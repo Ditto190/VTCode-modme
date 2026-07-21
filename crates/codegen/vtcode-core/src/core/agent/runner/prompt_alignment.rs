@@ -9,9 +9,7 @@ use futures::future::BoxFuture;
 use tracing::warn;
 
 use crate::core::agent::harness_kernel::SessionToolCatalogSnapshot;
-use crate::prompts::system::{
-    PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE, PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE,
-};
+use crate::prompts::system::PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE;
 
 /// A misalignment between the system prompt and the tool catalog snapshot.
 #[derive(Debug, PartialEq, Eq)]
@@ -131,17 +129,8 @@ pub fn validate_prompt_catalog_alignment(
     // Canary: mutating tool signatures that must never appear in a planning workflow prompt.
     // After Phase 2-F/G these should be unreachable; the check is intentionally cheap.
     if planning_active {
-        let expected_line = if request_user_input_enabled {
-            PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE
-        } else {
-            PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE
-        };
-        let unexpected_line = if request_user_input_enabled {
-            PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE
-        } else {
-            PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE
-        };
-        if !system_instruction.contains(expected_line) || system_instruction.contains(unexpected_line) {
+        let expected_line = PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE;
+        if !system_instruction.contains(expected_line) {
             return Err(AlignmentError::PlanningWorkflowPromptPolicyMismatch { expected_line });
         }
 
@@ -283,13 +272,8 @@ mod tests {
     #[test]
     fn alignment_ok_when_planning_states_match() {
         validate_prompt_catalog_alignment("normal prompt", &snapshot(false), false, false).unwrap();
-        validate_prompt_catalog_alignment(
-            PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE,
-            &snapshot(true),
-            true,
-            false,
-        )
-        .unwrap();
+        validate_prompt_catalog_alignment(PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE, &snapshot(true), true, false)
+            .unwrap();
     }
 
     #[test]
@@ -308,7 +292,7 @@ mod tests {
     #[test]
     fn mutating_tool_in_planning_workflow_prompt_detected() {
         let err = validate_prompt_catalog_alignment(
-            &format!("{PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE}\nyou may call apply_patch to write files"),
+            &format!("{PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE}\nyou may call apply_patch to write files"),
             &snapshot(true),
             true,
             false,
@@ -326,7 +310,7 @@ mod tests {
     #[test]
     fn request_user_input_mismatch_detected() {
         let err = validate_prompt_catalog_alignment(
-            PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE,
+            PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE,
             &SessionToolCatalogSnapshot::new(1, 1, true, false, Some(Arc::new(Vec::new())), false),
             true,
             true,
@@ -344,7 +328,7 @@ mod tests {
     #[test]
     fn prompt_policy_mismatch_detected() {
         let err = validate_prompt_catalog_alignment(
-            PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE,
+            "missing planning policy header line",
             &SessionToolCatalogSnapshot::new(1, 1, true, false, Some(Arc::new(Vec::new())), false),
             true,
             false,
@@ -353,7 +337,7 @@ mod tests {
         assert_eq!(
             err,
             AlignmentError::PlanningWorkflowPromptPolicyMismatch {
-                expected_line: PLANNING_WORKFLOW_NO_REQUEST_USER_INPUT_POLICY_LINE,
+                expected_line: PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE,
             }
         );
     }
