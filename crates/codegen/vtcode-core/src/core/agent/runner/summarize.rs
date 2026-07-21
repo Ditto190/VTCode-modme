@@ -44,7 +44,7 @@ impl AgentRunner {
                 prefire: None,
                 auto_compact_suppressed: &mut session_state.auto_compact_suppressed,
             },
-            std::sync::Arc::make_mut(&mut session_state.messages),
+            &mut session_state.messages,
         )
         .await
         {

@@ -43,13 +43,15 @@ pub(crate) fn spool_chunk_read_path<'a>(canonical_tool_name: &str, args: &'a Val
     }
 }
 
+use tokio::fs::File;
 /// Read the first 4 KB of a file to detect error payloads written by previous
 /// tool calls. Used to short-circuit repeated reads of an error spool.
-pub(crate) fn read_spool_head_for_error_check(path: &str) -> Option<String> {
-    use std::io::Read;
-    let mut file = std::fs::File::open(path).ok()?;
+use tokio::io::AsyncReadExt;
+
+pub(crate) async fn read_spool_head_for_error_check(path: &str) -> Option<String> {
+    let mut file = File::open(path).await.ok()?;
     let mut buffer = vec![0u8; 4096];
-    let read = file.read(&mut buffer).ok()?;
+    let read = file.read(&mut buffer).await.ok()?;
     if read == 0 {
         return None;
     }

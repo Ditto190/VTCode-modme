@@ -1214,14 +1214,19 @@ impl ToolRegistry {
                 .context("tool denied by full-auto allowlist"));
         }
 
-        let skip_policy_prompt = self.policy_gateway.lock().await.take_preapproved(&tool_name);
+        let skip_policy_prompt = {
+            let gateway = self.policy_gateway.lock().await;
+            gateway.take_preapproved(&tool_name).await
+        };
 
         let decision = if skip_policy_prompt {
             ToolExecutionDecision::Allowed
         } else {
-            // In TUI mode, permission should have been collected via ensure_tool_permission().
-            // If not preapproved, check policy as fallback.
-            self.policy_gateway.lock().await.should_execute_tool(&tool_name).await?
+            let cloned_gateway = {
+                let gateway = self.policy_gateway.lock().await;
+                gateway.clone()
+            };
+            cloned_gateway.should_execute_tool(&tool_name).await?
         };
 
         if !decision.is_allowed() {
@@ -1251,7 +1256,10 @@ impl ToolRegistry {
             return Err(anyhow!("{error_msg}").context("tool denied by policy"));
         }
 
-        let args = match self.policy_gateway.lock().await.apply_policy_constraints(&tool_name, args) {
+        let args = match {
+            let gateway = self.policy_gateway.lock().await;
+            gateway.apply_policy_constraints(&tool_name, args).await
+        } {
             Ok(processed_args) => processed_args,
             Err(err) => {
                 let error = ToolExecutionError::with_original_error(

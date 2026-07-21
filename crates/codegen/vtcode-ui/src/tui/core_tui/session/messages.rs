@@ -148,7 +148,9 @@ impl Session {
         self.lines
             .push(MessageLine { kind, segments, link_ranges: Vec::new(), revision });
         self.mark_line_dirty(index);
-        self.invalidate_scroll_metrics();
+        if !self.is_streaming_final_answer {
+            self.invalidate_scroll_metrics();
+        }
         self.adjust_scroll_after_change(previous_max_offset);
 
         // Mark thinking spinner as active after user message (no placeholder line - just state)
@@ -514,7 +516,9 @@ impl Session {
 
         if appended {
             self.mark_line_dirty(self.lines.len() - 1);
-            self.invalidate_scroll_metrics();
+            if !self.is_streaming_final_answer {
+                self.invalidate_scroll_metrics();
+            }
             return;
         }
 
@@ -534,7 +538,9 @@ impl Session {
                 line.revision = revision;
             }
             self.mark_line_dirty(index);
-            self.invalidate_scroll_metrics();
+            if !self.is_streaming_final_answer {
+                self.invalidate_scroll_metrics();
+            }
             return;
         }
 

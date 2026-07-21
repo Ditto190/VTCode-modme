@@ -213,10 +213,13 @@ impl ToolRegistry {
             }
 
             let mcp_index = self.mcp_tool_index.read().await;
-            // Convert FxHashMap to std HashMap for policy manager API compatibility
             let std_index: hashbrown::HashMap<String, Vec<String>> =
                 mcp_index.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-            if let Some(allowlist) = self.policy_gateway.lock().await.update_mcp_tools(&std_index).await? {
+            let allowlist = {
+                let gateway = self.policy_gateway.lock().await;
+                gateway.update_mcp_tools(&std_index).await?
+            };
+            if let Some(allowlist) = allowlist {
                 mcp_client.update_allowlist(allowlist);
             }
 

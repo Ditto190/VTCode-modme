@@ -30,12 +30,11 @@ pub struct AgentSessionState {
 
     /// Standardized conversation messages (OpenAI/Anthropic style).
     ///
-    /// Shared via `Arc` so building an `LLMRequest` each turn is an O(1)
-    /// refcount bump instead of an O(history) deep copy. Mutation goes
-    /// through [`Self::messages_mut`] (`Arc::make_mut`): O(1) while uniquely
-    /// owned, cloning only when the history is still shared (e.g. with a
-    /// recorded responses-continuation chain).
-    pub messages: Arc<Vec<Message>>,
+    /// Stored as a plain `Vec` so mutations (push tool result, add user
+    /// message) are O(1) — no `Arc::make_mut` clone storm on long histories.
+    /// The single-threaded agent loop holds `&mut self` for the duration of
+    /// a turn, so no interior mutability is needed.
+    pub messages: Vec<Message>,
 
     /// Schema version for durable state persistence.
     pub schema_version: SchemaVersion,
@@ -151,7 +150,7 @@ impl AgentSessionState {
             session_id,
             schema_version: SchemaVersion::CURRENT,
             conversation: Vec::new(),
-            messages: Arc::new(Vec::new()),
+            messages: Vec::new(),
             stats: SessionStats::default(),
             auto_compact_suppressed: crate::compaction::SUPPRESS_NONE,
             constraints: SessionConstraints { max_turns, max_tool_loops, max_context_tokens },
@@ -277,7 +276,7 @@ impl AgentSessionState {
         provider: &str,
         model: &str,
         response_id: Option<&str>,
-        messages: Arc<Vec<Message>>,
+        messages: Vec<Message>,
     ) {
         let Some(key) = responses_continuation_key(provider, model) else {
             return;
@@ -287,8 +286,13 @@ impl AgentSessionState {
             return;
         };
 
-        self.previous_response_chains
-            .insert(key, ResponsesContinuationState { response_id: response_id.to_string(), messages });
+        self.previous_response_chains.insert(
+            key,
+            ResponsesContinuationState {
+                response_id: response_id.to_string(),
+                messages: Arc::new(messages),
+            },
+        );
     }
 
     pub fn clear_previous_response_chain_for(&mut self, provider: &str, model: &str) {
@@ -312,12 +316,10 @@ impl AgentSessionState {
 
     /// Mutable access to the conversation history.
     ///
-    /// `Arc::make_mut`: O(1) while the history is uniquely owned (the common
-    /// case), deep-clones only when still shared with an in-flight request or
-    /// a recorded continuation chain.
+    /// O(1) direct mutable borrow — no clone-on-write.
     #[inline]
     pub fn messages_mut(&mut self) -> &mut Vec<Message> {
-        Arc::make_mut(&mut self.messages)
+        &mut self.messages
     }
 
     /// Add a user message to the history with metadata.
@@ -607,8 +609,8 @@ mod tests {
         let messages_52 = vec![Message::user("hello".to_string())];
         let messages_54 = vec![Message::user("continue".to_string())];
 
-        state.set_previous_response_chain("openai", "gpt-5.2", Some("resp_123"), Arc::new(messages_52.clone()));
-        state.set_previous_response_chain("openai", "gpt-5.4", Some("resp_456"), Arc::new(messages_54.clone()));
+        state.set_previous_response_chain("openai", "gpt-5.2", Some("resp_123"), messages_52.clone());
+        state.set_previous_response_chain("openai", "gpt-5.4", Some("resp_456"), messages_54.clone());
 
         assert_eq!(state.previous_response_id_for("openai", "gpt-5.2"), Some("resp_123".to_string()));
         assert_eq!(state.previous_response_id_for("openai", "gpt-5.4"), Some("resp_456".to_string()));
@@ -722,7 +724,7 @@ mod tests {
         state.last_processed_message_idx = 2;
         state.progress_hashes.push_back(123);
         state.stagnant_turns = 3;
-        state.set_previous_response_chain("openai", "gpt-5", Some("resp_1"), Arc::new(vec![]));
+        state.set_previous_response_chain("openai", "gpt-5", Some("resp_1"), vec![]);
 
         assert!(!state.messages.is_empty());
         assert!(!state.conversation.is_empty());

@@ -84,7 +84,7 @@ impl AgentRunner {
         let mut session_state =
             AgentSessionState::new(self.session_id.clone(), self.max_turns, max_tool_loops, max_context_tokens);
         session_state.conversation = conversation;
-        session_state.messages = std::sync::Arc::new(conversation_messages);
+        session_state.messages = conversation_messages;
         session_state.reconcile_token_count();
         session_state.last_processed_message_idx = session_state.conversation.len();
 

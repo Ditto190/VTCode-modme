@@ -829,36 +829,35 @@ fn cache_key(
 ) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     let mut hasher = DefaultHasher::new();
 
-    // Core key: project root
     project_root.hash(&mut hasher);
 
     if let Some(cfg) = vtcode_config {
-        // Config fields that affect prompt generation
         cfg.agent.include_working_directory.hash(&mut hasher);
         cfg.agent.include_temporal_context.hash(&mut hasher);
         cfg.prompt_cache.cache_friendly_prompt_shaping.hash(&mut hasher);
         cfg.agent.include_structured_reasoning_tags.hash(&mut hasher);
-        // Use discriminant since SystemPromptMode doesn't derive Hash
         std::mem::discriminant(&cfg.agent.system_prompt_mode).hash(&mut hasher);
         std::mem::discriminant(&cfg.agent.tool_documentation_mode).hash(&mut hasher);
-        // Token-budget settings affect whether/how sections get trimmed, so
-        // toggling any of them must invalidate the cached prompt.
         cfg.agent.max_system_prompt_tokens.hash(&mut hasher);
         cfg.agent.system_prompt_budget_warning.hash(&mut hasher);
         cfg.agent.trim_system_prompt.hash(&mut hasher);
-        // `agent_identity_label` rewrites the composed prompt based on the
-        // primary agent, so configs differing only here must not collide in
-        // the process-global PROMPT_CACHE.
         cfg.default_primary_agent.hash(&mut hasher);
+
+        if cfg.agent.include_temporal_context && !cfg.prompt_cache.cache_friendly_prompt_shaping {
+            let epoch_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() / 60)
+                .unwrap_or(0);
+            epoch_secs.hash(&mut hasher);
+        }
     } else {
         "default".hash(&mut hasher);
     }
 
-    // Invalidate the cached prompt when the tool catalog changes (planning workflow toggle,
-    // MCP refresh, permission grant/revoke).
     catalog_epoch.unwrap_or(0).hash(&mut hasher);
 
     format!("sys_prompt:{:016x}", hasher.finish())

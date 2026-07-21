@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
+use tokio::sync::Mutex;
 
 use crate::config::constants::tools;
 use crate::config::mcp::McpAllowListConfig;
@@ -96,8 +97,8 @@ use super::risk_scorer::{RiskLevel, ToolRiskContext, ToolRiskScorer, ToolSource,
 
 #[derive(Clone, Default)]
 pub(super) struct ToolPolicyGateway {
-    tool_policy: Option<ToolPolicyManager>,
-    preapproved_tools: FxHashSet<String>,
+    tool_policy: Arc<tokio::sync::Mutex<Option<ToolPolicyManager>>>,
+    preapproved_tools: Arc<tokio::sync::Mutex<FxHashSet<String>>>,
     full_auto_allowlist: Option<FxHashSet<String>>,
     full_auto_catalogue_config: Option<SessionToolsConfig>,
     /// Serialises full-auto lifecycle changes with catalogue snapshots.
@@ -118,8 +119,8 @@ impl ToolPolicyGateway {
         };
 
         Self {
-            tool_policy,
-            preapproved_tools: FxHashSet::default(),
+            tool_policy: Arc::new(Mutex::new(tool_policy)),
+            preapproved_tools: Arc::new(Mutex::new(FxHashSet::default())),
             full_auto_allowlist: None,
             full_auto_catalogue_config: None,
             full_auto_catalogue_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -131,8 +132,8 @@ impl ToolPolicyGateway {
 
     pub fn with_policy_manager(manager: ToolPolicyManager) -> Self {
         Self {
-            tool_policy: Some(manager),
-            preapproved_tools: FxHashSet::default(),
+            tool_policy: Arc::new(Mutex::new(Some(manager))),
+            preapproved_tools: Arc::new(Mutex::new(FxHashSet::default())),
             full_auto_allowlist: None,
             full_auto_catalogue_config: None,
             full_auto_catalogue_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -150,29 +151,36 @@ impl ToolPolicyGateway {
         self.enforce_safe_mode_prompts && safe_mode_prompt
     }
 
-    pub fn has_policy_manager(&self) -> bool {
-        self.tool_policy.is_some()
+    pub async fn has_policy_manager(&self) -> bool {
+        self.tool_policy.lock().await.is_some()
     }
 
-    pub async fn sync_available_tools(&mut self, mut available: Vec<String>, mcp_keys: &[String]) {
+    pub async fn sync_available_tools(&self, mut available: Vec<String>, mcp_keys: &[String]) {
         available.extend(mcp_keys.iter().cloned());
         available.sort();
         available.dedup();
 
-        if let Some(ref mut policy) = self.tool_policy
+        if let Some(ref mut policy) = *self.tool_policy.lock().await
             && let Err(err) = policy.update_available_tools(available).await
         {
             tracing::warn!(%err, "Failed to update tool policies");
         }
     }
 
-    pub fn apply_policy_constraints(&self, name: &str, args: &Value) -> Result<Value> {
+    pub async fn apply_policy_constraints(&self, name: &str, args: &Value) -> Result<Value> {
         let mut args = args.clone();
         let canonical = canonical_tool_name(name);
         let normalized = canonical;
         let file_operation_read = normalized == tools::UNIFIED_FILE && file_operation_action_is(&args, "read");
 
-        if let Some(constraints) = self.tool_policy.as_ref().and_then(|tp| tp.get_constraints(normalized)).cloned() {
+        if let Some(constraints) = self
+            .tool_policy
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|tp| tp.get_constraints(normalized))
+            .cloned()
+        {
             let obj = args
                 .as_object_mut()
                 .ok_or_else(|| anyhow!("Error: tool arguments must be an object"))?;
@@ -226,67 +234,71 @@ impl ToolPolicyGateway {
         Ok(args)
     }
 
-    pub fn policy_manager(&self) -> Option<ToolPolicyManager> {
-        self.tool_policy.clone()
+    pub async fn policy_manager(&self) -> Option<ToolPolicyManager> {
+        self.tool_policy.lock().await.clone()
     }
 
-    pub fn policy_manager_mut(&mut self) -> Result<&mut ToolPolicyManager> {
-        self.tool_policy
-            .as_mut()
-            .ok_or_else(|| anyhow!("Tool policy manager not available"))
+    pub async fn set_policy_manager(&self, manager: ToolPolicyManager) {
+        *self.tool_policy.lock().await = Some(manager);
     }
 
-    pub fn set_policy_manager(&mut self, manager: ToolPolicyManager) {
-        self.tool_policy = Some(manager);
-    }
-
-    pub async fn set_tool_policy(&mut self, tool_name: &str, policy: ToolPolicy) -> Result<()> {
+    pub async fn set_tool_policy(&self, tool_name: &str, policy: ToolPolicy) -> Result<()> {
         let canonical = canonical_tool_name(tool_name);
-        if let Some(ref mut manager) = self.tool_policy {
+        if let Some(ref mut manager) = *self.tool_policy.lock().await {
             manager.set_policy(canonical, policy).await
         } else {
             Err(anyhow::anyhow!("Tool policy manager not initialized"))
         }
     }
 
-    pub async fn add_approval_cache_key(&mut self, approval_key: &str) -> Result<()> {
-        if let Some(ref mut manager) = self.tool_policy {
+    pub async fn add_approval_cache_key(&self, approval_key: &str) -> Result<()> {
+        if let Some(ref mut manager) = *self.tool_policy.lock().await {
             manager.add_approval_cache_key_with_segments(approval_key).await
         } else {
             Err(anyhow::anyhow!("Tool policy manager not initialized"))
         }
     }
 
-    pub async fn add_approval_cache_prefix(&mut self, prefix_entry: &str) -> Result<()> {
-        if let Some(ref mut manager) = self.tool_policy {
+    pub async fn add_approval_cache_prefix(&self, prefix_entry: &str) -> Result<()> {
+        if let Some(ref mut manager) = *self.tool_policy.lock().await {
             manager.add_approval_cache_prefix(prefix_entry).await
         } else {
             Err(anyhow::anyhow!("Tool policy manager not initialized"))
         }
     }
 
-    pub fn has_approval_cache_key(&self, approval_key: &str) -> bool {
+    pub async fn has_approval_cache_key(&self, approval_key: &str) -> bool {
         self.tool_policy
+            .lock()
+            .await
             .as_ref()
             .is_some_and(|manager| manager.has_approval_cache_key(approval_key))
     }
 
-    pub fn matching_shell_approval_prefix(&self, command_words: &[String], scope_signature: &str) -> Option<String> {
+    pub async fn matching_shell_approval_prefix(
+        &self,
+        command_words: &[String],
+        scope_signature: &str,
+    ) -> Option<String> {
         self.tool_policy
+            .lock()
+            .await
             .as_ref()
             .and_then(|manager| manager.matching_shell_approval_prefix(command_words, scope_signature))
     }
 
-    pub fn get_tool_policy(&self, tool_name: &str) -> ToolPolicy {
+    pub async fn get_tool_policy(&self, tool_name: &str) -> ToolPolicy {
         let canonical = canonical_tool_name(tool_name);
         self.tool_policy
+            .lock()
+            .await
             .as_ref()
             .map(|tp| tp.get_policy(canonical))
             .unwrap_or(ToolPolicy::Allow)
     }
 
-    pub fn print_policy_status(&self) {
-        if let Some(tp) = self.tool_policy.as_ref() {
+    pub async fn print_policy_status(&self) {
+        if let Some(tp) = self.tool_policy.lock().await.as_ref() {
             tp.print_status();
         } else {
             tracing::warn!("Tool policy manager not available");
@@ -333,6 +345,10 @@ impl ToolPolicyGateway {
         Arc::clone(&self.full_auto_catalogue_lifecycle)
     }
 
+    pub(crate) fn tool_policy_arc(&self) -> Arc<tokio::sync::Mutex<Option<ToolPolicyManager>>> {
+        Arc::clone(&self.tool_policy)
+    }
+
     #[cfg(test)]
     pub(super) fn full_auto_catalogue_test_hooks(&self) -> Arc<PolicyCatalogueTestHooks> {
         Arc::clone(&self.full_auto_catalogue_test_hooks)
@@ -376,7 +392,7 @@ impl ToolPolicyGateway {
     }
 
     pub async fn evaluate_tool_policy(
-        &mut self,
+        &self,
         name: &str,
         safe_mode_prompt: bool,
         default_permission: ToolPolicy,
@@ -384,8 +400,6 @@ impl ToolPolicyGateway {
         let canonical = canonical_tool_name(name);
         let normalized = canonical;
 
-        // In safe mode (tools_policy), high-risk tools always require a prompt
-        // regardless of persisted policy
         if self.requires_safe_mode_prompt(safe_mode_prompt) {
             tracing::debug!("Tool '{}' requires prompt in safe mode (tools_policy)", normalized);
             return Ok(ToolPermissionDecision::Prompt);
@@ -396,39 +410,36 @@ impl ToolPolicyGateway {
                 return Ok(ToolPermissionDecision::Deny);
             }
 
-            if let Some(policy_manager) = self.tool_policy.as_mut() {
+            if let Some(policy_manager) = self.tool_policy.lock().await.as_mut() {
                 match policy_manager.get_policy(normalized) {
                     ToolPolicy::Deny => return Ok(ToolPermissionDecision::Deny),
                     ToolPolicy::Allow => {
-                        self.preapproved_tools.insert(normalized.to_string());
+                        self.preapproved_tools.lock().await.insert(normalized.to_string());
                         return Ok(ToolPermissionDecision::Allow);
                     }
                     ToolPolicy::Prompt => {
-                        // Always prompt for explicit "prompt" policy, even in full-auto permission review
-                        // This ensures human-in-the-loop approval for sensitive operations
                         return Ok(ToolPermissionDecision::Prompt);
                     }
                 }
             }
 
-            self.preapproved_tools.insert(normalized.to_string());
+            self.preapproved_tools.lock().await.insert(normalized.to_string());
             return Ok(ToolPermissionDecision::Allow);
         }
 
-        if let Some(policy_manager) = self.tool_policy.as_mut() {
+        if let Some(policy_manager) = self.tool_policy.lock().await.as_mut() {
             match policy_manager.get_policy(normalized) {
                 ToolPolicy::Allow => {
-                    self.preapproved_tools.insert(normalized.to_string());
+                    self.preapproved_tools.lock().await.insert(normalized.to_string());
                     Ok(ToolPermissionDecision::Allow)
                 }
                 ToolPolicy::Deny => Ok(ToolPermissionDecision::Deny),
                 ToolPolicy::Prompt => {
-                    // Check if low-risk by using risk scorer
                     if Self::should_auto_approve_by_risk(normalized)
                         || ToolPolicyManager::is_auto_allow_tool(normalized)
                     {
                         policy_manager.set_policy(normalized, ToolPolicy::Allow).await?;
-                        self.preapproved_tools.insert(normalized.to_string());
+                        self.preapproved_tools.lock().await.insert(normalized.to_string());
                         Ok(ToolPermissionDecision::Allow)
                     } else {
                         Ok(ToolPermissionDecision::Prompt)
@@ -438,7 +449,7 @@ impl ToolPolicyGateway {
         } else {
             Ok(match default_permission {
                 ToolPolicy::Allow => {
-                    self.preapproved_tools.insert(normalized.to_string());
+                    self.preapproved_tools.lock().await.insert(normalized.to_string());
                     ToolPermissionDecision::Allow
                 }
                 ToolPolicy::Deny => ToolPermissionDecision::Deny,
@@ -463,34 +474,36 @@ impl ToolPolicyGateway {
         matches!(risk, RiskLevel::Low)
     }
 
-    pub fn take_preapproved(&mut self, name: &str) -> bool {
+    pub async fn take_preapproved(&self, name: &str) -> bool {
         let canonical = canonical_tool_name(name);
-        let was_preapproved = self.preapproved_tools.remove(canonical);
+        let mut preapproved = self.preapproved_tools.lock().await;
+        let was_preapproved = preapproved.remove(canonical);
         tracing::trace!(
             "take_preapproved: tool='{}', canonical='{}', was_preapproved={}, remaining={:?}",
             name,
             canonical,
             was_preapproved,
-            self.preapproved_tools
+            *preapproved
         );
         was_preapproved
     }
 
-    pub fn preapprove(&mut self, name: &str) {
+    pub async fn preapprove(&self, name: &str) {
         let canonical = canonical_tool_name(name);
         let canonical_owned = canonical.to_owned();
-        self.preapproved_tools.insert(canonical_owned.clone());
+        let mut preapproved = self.preapproved_tools.lock().await;
+        preapproved.insert(canonical_owned.clone());
         tracing::trace!(
             "preapprove: tool='{}', canonical='{}', preapproved_tools={:?}",
             name,
             canonical_owned,
-            self.preapproved_tools
+            *preapproved
         );
     }
 
-    pub async fn should_execute_tool(&mut self, name: &str) -> Result<ToolExecutionDecision> {
+    pub async fn should_execute_tool(&self, name: &str) -> Result<ToolExecutionDecision> {
         let canonical = canonical_tool_name(name);
-        if let Some(policy_manager) = self.tool_policy.as_mut() {
+        if let Some(policy_manager) = self.tool_policy.lock().await.as_mut() {
             policy_manager.should_execute_tool(canonical).await
         } else {
             Ok(ToolExecutionDecision::Allowed)
@@ -498,18 +511,18 @@ impl ToolPolicyGateway {
     }
 
     pub async fn update_mcp_tools(
-        &mut self,
+        &self,
         mcp_tool_index: &hashbrown::HashMap<String, Vec<String>>,
     ) -> Result<Option<McpAllowListConfig>> {
-        if let Some(policy_manager) = self.tool_policy.as_mut() {
+        if let Some(policy_manager) = self.tool_policy.lock().await.as_mut() {
             policy_manager.update_mcp_tools(mcp_tool_index).await?;
             return Ok(Some(policy_manager.mcp_allowlist().clone()));
         }
         Ok(None)
     }
 
-    pub async fn persist_mcp_tool_policy(&mut self, provider: &str, tool_name: &str, policy: ToolPolicy) -> Result<()> {
-        if let Some(manager) = self.tool_policy.as_mut() {
+    pub async fn persist_mcp_tool_policy(&self, provider: &str, tool_name: &str, policy: ToolPolicy) -> Result<()> {
+        if let Some(manager) = self.tool_policy.lock().await.as_mut() {
             manager.set_mcp_tool_policy(provider, tool_name, policy).await?;
         }
         Ok(())
@@ -580,6 +593,7 @@ mod tests {
                     "max_results": 50
                 }),
             )
+            .await
             .expect("constrained args");
 
         assert_eq!(constrained["max_results"], json!(15));
@@ -600,6 +614,7 @@ mod tests {
 
             let constrained = gateway
                 .apply_policy_constraints(tools::CODE_SEARCH, &json!({"query": "ToolRegistry", "path": "."}))
+                .await
                 .expect("valid omitted max_results must remain valid under policy");
 
             assert_eq!(constrained["max_results"], json!(expected_limit), "configured cap {configured_cap}");
@@ -618,6 +633,7 @@ mod tests {
         .await;
         let constrained = gateway
             .apply_policy_constraints(tools::CODE_SEARCH, &json!({"query": "ToolRegistry", "max_results": 80}))
+            .await
             .expect("constrained args");
         assert_eq!(constrained["max_results"], json!(50));
     }

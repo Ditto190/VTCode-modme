@@ -42,18 +42,20 @@ fn public_spool_grep_args(path: &str, pattern: &str) -> Value {
 
 /// Read a spool file's content for inline embedding when the spool-chunk
 /// guard trips. Returns `None` if the file is missing, empty, or unreadable.
-fn read_spool_preview_for_guard(path: &str) -> Option<String> {
-    let metadata = std::fs::metadata(path).ok()?;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+
+async fn read_spool_preview_for_guard(path: &str) -> Option<String> {
+    let metadata = tokio::fs::metadata(path).await.ok()?;
     let len = metadata.len() as usize;
     if len == 0 {
         return None;
     }
 
     let total_cap = SPOOL_CHUNK_INLINE_MAX_BYTES.min(len);
-    let mut file = std::fs::File::open(path).ok()?;
+    let mut file = File::open(path).await.ok()?;
     let mut buffer = vec![0u8; total_cap];
-    use std::io::Read;
-    let bytes_read = file.read(&mut buffer).ok()?;
+    let bytes_read = file.read(&mut buffer).await.ok()?;
     buffer.truncate(bytes_read);
     let content = String::from_utf8_lossy(&buffer).to_string();
     if content.len() <= SPOOL_CHUNK_INLINE_HEAD_BYTES + SPOOL_CHUNK_INLINE_TAIL_BYTES {
@@ -124,8 +126,8 @@ fn spool_chunk_guard_fallback_tool(path: &str) -> Option<String> {
 
 /// Build the error content for a spool chunk guard trip.
 #[cold]
-fn build_spool_chunk_guard_error_content(path: &str, max_reads_per_turn: usize) -> String {
-    let inline_content = read_spool_preview_for_guard(path);
+async fn build_spool_chunk_guard_error_content(path: &str, max_reads_per_turn: usize) -> String {
+    let inline_content = read_spool_preview_for_guard(path).await;
     let fallback_tool = spool_chunk_guard_fallback_tool(path);
     let fallback_args = spool_chunk_guard_fallback_args(path);
 
@@ -197,7 +199,7 @@ fn build_previous_turn_error_spool_content(spool_path: &str, head: &str) -> Stri
 ///
 /// Returns `Some(ValidationResult)` when the guard trips,
 /// or `None` when the guard passes.
-pub(crate) fn enforce_spool_chunk_read_guard(
+pub(crate) async fn enforce_spool_chunk_read_guard(
     ctx: &mut TurnProcessingContext<'_>,
     tool_call_id: &str,
     canonical_tool_name: &str,
@@ -212,7 +214,7 @@ pub(crate) fn enforce_spool_chunk_read_guard(
     // payload, the agent already has the error in its conversation history
     // from the previous turn. Inject the error inline as a tool response and
     // tell the model to use it instead of paginating the spool.
-    if let Some(head) = read_spool_head_for_error_check(spool_path) {
+    if let Some(head) = read_spool_head_for_error_check(spool_path).await {
         if spool_content_looks_like_error(&head) {
             ctx.push_tool_response(
                 tool_call_id,
@@ -250,7 +252,7 @@ pub(crate) fn enforce_spool_chunk_read_guard(
         ctx,
         tool_call_id,
         canonical_tool_name,
-        build_spool_chunk_guard_error_content(spool_path, max_reads_per_turn),
+        build_spool_chunk_guard_error_content(spool_path, max_reads_per_turn).await,
         &block_reason,
     );
 
@@ -261,9 +263,9 @@ pub(crate) fn enforce_spool_chunk_read_guard(
 mod tests {
     use super::*;
 
-    #[test]
-    fn spool_chunk_guard_error_resolves_to_pty_poll_for_run_prefix() {
-        let payload = build_spool_chunk_guard_error_content(".vtcode/context/tool_outputs/run-1.txt", 3);
+    #[tokio::test]
+    async fn spool_chunk_guard_error_resolves_to_pty_poll_for_run_prefix() {
+        let payload = build_spool_chunk_guard_error_content(".vtcode/context/tool_outputs/run-1.txt", 3).await;
         let parsed: Value = serde_json::from_str(&payload).expect("spool chunk guard payload should be json");
 
         assert_eq!(parsed.get("fallback_tool").and_then(Value::as_str), Some(tool_names::WRITE_STDIN));
@@ -274,12 +276,13 @@ mod tests {
         assert_eq!(parsed.get("recovery_required").and_then(Value::as_bool), Some(true));
     }
 
-    #[test]
-    fn spool_chunk_guard_error_resolves_to_search_grep_for_search_prefix() {
+    #[tokio::test]
+    async fn spool_chunk_guard_error_resolves_to_search_grep_for_search_prefix() {
         let payload = build_spool_chunk_guard_error_content(
             ".vtcode/context/tool_outputs/unified_search_1782625284532136.txt",
             3,
-        );
+        )
+        .await;
         let parsed: Value = serde_json::from_str(&payload).expect("spool chunk guard payload should be json");
 
         assert_eq!(parsed.get("fallback_tool").and_then(Value::as_str), Some(tool_names::EXEC_COMMAND));
@@ -292,9 +295,9 @@ mod tests {
         assert_eq!(parsed.get("recovery_required").and_then(Value::as_bool), Some(true));
     }
 
-    #[test]
-    fn spool_chunk_guard_error_falls_back_to_warning_error_todo_for_unknown_prefix() {
-        let payload = build_spool_chunk_guard_error_content(".vtcode/context/tool_outputs/custom_tool_42.txt", 3);
+    #[tokio::test]
+    async fn spool_chunk_guard_error_falls_back_to_warning_error_todo_for_unknown_prefix() {
+        let payload = build_spool_chunk_guard_error_content(".vtcode/context/tool_outputs/custom_tool_42.txt", 3).await;
         let parsed: Value = serde_json::from_str(&payload).expect("spool chunk guard payload should be json");
 
         assert_eq!(parsed.get("fallback_tool").and_then(Value::as_str), Some(tool_names::EXEC_COMMAND));

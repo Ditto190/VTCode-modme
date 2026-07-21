@@ -71,11 +71,29 @@ impl PromptResourceCacheKey {
 struct CachedPromptTemplates {
     templates: Vec<PromptTemplate>,
     timestamp: SystemTime,
+    source_mtime: SystemTime,
+    source_paths: (PathBuf, Option<PathBuf>),
 }
 
 impl CachedPromptTemplates {
     fn is_expired(&self) -> bool {
         self.timestamp.elapsed().unwrap_or(PROMPT_RESOURCE_CACHE_TTL) > PROMPT_RESOURCE_CACHE_TTL
+    }
+
+    fn is_source_stale(&self) -> bool {
+        let mut check: Vec<&Path> = vec![self.source_paths.0.as_path()];
+        if let Some(ref h) = self.source_paths.1 {
+            check.push(h.as_path());
+        }
+        let mut newest = SystemTime::UNIX_EPOCH;
+        for path in &check {
+            if let Ok(metadata) = std::fs::metadata(path) {
+                if let Ok(mtime) = metadata.modified() {
+                    newest = newest.max(mtime);
+                }
+            }
+        }
+        newest > self.source_mtime
     }
 }
 
@@ -83,16 +101,41 @@ impl CachedPromptTemplates {
 struct CachedSystemPromptLayers {
     layers: SystemPromptLayers,
     timestamp: SystemTime,
+    source_mtime: SystemTime,
 }
 
 impl CachedSystemPromptLayers {
     fn is_expired(&self) -> bool {
         self.timestamp.elapsed().unwrap_or(PROMPT_RESOURCE_CACHE_TTL) > PROMPT_RESOURCE_CACHE_TTL
     }
+
+    fn is_source_stale(&self, check_paths: &[&Path]) -> bool {
+        let mut newest = SystemTime::UNIX_EPOCH;
+        for path in check_paths {
+            if let Ok(metadata) = std::fs::metadata(path) {
+                if let Ok(mtime) = metadata.modified() {
+                    newest = newest.max(mtime);
+                }
+            }
+        }
+        newest > self.source_mtime
+    }
 }
 
 fn normalize_cache_path(path: &Path) -> PathBuf {
     dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn newest_source_mtime(paths: &[PathBuf]) -> SystemTime {
+    let mut newest = SystemTime::UNIX_EPOCH;
+    for path in paths {
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(mtime) = metadata.modified() {
+                newest = newest.max(mtime);
+            }
+        }
+    }
+    newest
 }
 
 fn system_prompt_layers_cache() -> &'static RwLock<HashMap<PromptResourceCacheKey, CachedSystemPromptLayers>> {
@@ -103,12 +146,9 @@ fn prompt_templates_cache() -> &'static RwLock<HashMap<PromptResourceCacheKey, C
     PROMPT_TEMPLATES_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-fn get_cached_system_prompt_layers(key: &PromptResourceCacheKey) -> Option<SystemPromptLayers> {
+fn get_cached_system_prompt_layers(key: &PromptResourceCacheKey) -> Option<CachedSystemPromptLayers> {
     match system_prompt_layers_cache().read() {
-        Ok(cache) => cache
-            .get(key)
-            .filter(|cached| !cached.is_expired())
-            .map(|cached| cached.layers.clone()),
+        Ok(cache) => cache.get(key).filter(|cached| !cached.is_expired()).cloned(),
         Err(_) => {
             warn!("system prompt layers cache lock poisoned while reading cache");
             None
@@ -140,11 +180,22 @@ fn cache_system_prompt_layers(key: PromptResourceCacheKey, layers: &SystemPrompt
                 }
             }
 
+            let mut source_paths = vec![
+                key.workspace_root.join(PROMPTS_DIR).join(SYSTEM_PROMPT_FILENAME),
+                key.workspace_root.join(PROMPTS_DIR).join(APPEND_SYSTEM_PROMPT_FILENAME),
+            ];
+            if let Some(ref home) = key.home_dir {
+                source_paths.push(home.join(PROMPTS_DIR).join(SYSTEM_PROMPT_FILENAME));
+                source_paths.push(home.join(PROMPTS_DIR).join(APPEND_SYSTEM_PROMPT_FILENAME));
+            }
+            let source_mtime = newest_source_mtime(&source_paths);
+
             cache.insert(
                 key,
                 CachedSystemPromptLayers {
                     layers: layers.clone(),
                     timestamp: SystemTime::now(),
+                    source_mtime,
                 },
             );
         }
@@ -152,12 +203,9 @@ fn cache_system_prompt_layers(key: PromptResourceCacheKey, layers: &SystemPrompt
     }
 }
 
-fn get_cached_prompt_templates(key: &PromptResourceCacheKey) -> Option<Vec<PromptTemplate>> {
+fn get_cached_prompt_templates(key: &PromptResourceCacheKey) -> Option<CachedPromptTemplates> {
     match prompt_templates_cache().read() {
-        Ok(cache) => cache
-            .get(key)
-            .filter(|cached| !cached.is_expired())
-            .map(|cached| cached.templates.clone()),
+        Ok(cache) => cache.get(key).filter(|cached| !cached.is_expired()).cloned(),
         Err(_) => {
             warn!("prompt templates cache lock poisoned while reading cache");
             None
@@ -189,11 +237,23 @@ fn cache_prompt_templates(key: PromptResourceCacheKey, templates: &[PromptTempla
                 }
             }
 
+            let source_paths = (
+                key.workspace_root.join(PROMPTS_DIR).join(TEMPLATES_DIR),
+                key.home_dir.as_ref().map(|h| h.join(PROMPTS_DIR).join(TEMPLATES_DIR)),
+            );
+            let mut mtime_paths = vec![source_paths.0.clone()];
+            if let Some(ref p) = source_paths.1 {
+                mtime_paths.push(p.clone());
+            }
+            let source_mtime = newest_source_mtime(&mtime_paths);
+
             cache.insert(
                 key,
                 CachedPromptTemplates {
                     templates: templates.to_vec(),
                     timestamp: SystemTime::now(),
+                    source_mtime,
+                    source_paths,
                 },
             );
         }
@@ -329,7 +389,24 @@ impl<'a> PromptResourceOptions<'a> {
 async fn resolve_system_prompt_layers_with_options(options: PromptResourceOptions<'_>) -> SystemPromptLayers {
     let cache_key = PromptResourceCacheKey::new(&options);
     if let Some(cached) = get_cached_system_prompt_layers(&cache_key) {
-        return cached;
+        let check_paths = [
+            options.workspace_root.join(PROMPTS_DIR).join(SYSTEM_PROMPT_FILENAME),
+            options
+                .home_dir
+                .as_ref()
+                .map(|h| h.join(PROMPTS_DIR).join(SYSTEM_PROMPT_FILENAME))
+                .unwrap_or_default(),
+            options.workspace_root.join(PROMPTS_DIR).join(APPEND_SYSTEM_PROMPT_FILENAME),
+            options
+                .home_dir
+                .as_ref()
+                .map(|h| h.join(PROMPTS_DIR).join(APPEND_SYSTEM_PROMPT_FILENAME))
+                .unwrap_or_default(),
+        ];
+        let check_refs: Vec<_> = check_paths.iter().map(|p| p.as_path()).collect();
+        if !cached.is_source_stale(&check_refs) {
+            return cached.layers;
+        }
     }
 
     let layers = resolve_system_prompt_layers_uncached(&options).await;
@@ -374,7 +451,9 @@ async fn resolve_system_prompt_layers_uncached(options: &PromptResourceOptions<'
 async fn discover_prompt_templates_with_options(options: PromptResourceOptions<'_>) -> Vec<PromptTemplate> {
     let cache_key = PromptResourceCacheKey::new(&options);
     if let Some(cached) = get_cached_prompt_templates(&cache_key) {
-        return cached;
+        if !cached.is_source_stale() {
+            return cached.templates;
+        }
     }
 
     let templates = discover_prompt_templates_uncached(&options).await;
@@ -616,11 +695,11 @@ mod tests {
         std::fs::remove_file(workspace_templates.join("cache-test.md")).expect("remove workspace template");
 
         let second = discover_with_roots(workspace.path(), Some(home.path())).await;
-        assert!(second.iter().any(|template| template.name == "cache-test"));
+        assert!(!second.iter().any(|template| template.name == "cache-test"));
         assert!(
             find_with_roots(workspace.path(), Some(home.path()), "cache-test")
                 .await
-                .is_some()
+                .is_none()
         );
 
         clear_prompt_resource_caches();

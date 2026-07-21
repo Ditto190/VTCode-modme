@@ -467,7 +467,8 @@ pub(crate) async fn validate_tool_call<'a>(
         return Ok(outcome);
     }
 
-    if let Some(outcome) = enforce_spool_chunk_read_guard(ctx, tool_call_id, &canonical_tool_name, effective_args) {
+    if let Some(outcome) = enforce_spool_chunk_read_guard(ctx, tool_call_id, &canonical_tool_name, effective_args).await
+    {
         return Ok(outcome);
     }
 

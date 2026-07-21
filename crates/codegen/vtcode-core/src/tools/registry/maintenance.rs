@@ -42,13 +42,16 @@ impl ToolRegistry {
             test_hooks.pause_after_refresh_snapshot().await;
         }
         {
+            let policy_gateway = self.policy_gateway.lock().await;
+            let cloned = policy_gateway.clone();
+            drop(policy_gateway);
+            cloned.sync_available_tools(available, &mcp_keys).await;
+        }
+        if let (Some(config), Some(visible_policy_names)) =
+            (full_auto_catalogue_config.as_ref(), full_auto_visible_policy_names.as_ref())
+        {
             let mut policy_gateway = self.policy_gateway.lock().await;
-            policy_gateway.sync_available_tools(available, &mcp_keys).await;
-            if let (Some(config), Some(visible_policy_names)) =
-                (full_auto_catalogue_config.as_ref(), full_auto_visible_policy_names.as_ref())
-            {
-                policy_gateway.refresh_full_auto_catalogue(config, visible_policy_names);
-            }
+            policy_gateway.refresh_full_auto_catalogue(config, visible_policy_names);
         }
 
         // Seed default permissions from tool metadata when policy manager is present
@@ -60,29 +63,35 @@ impl ToolRegistry {
                 .map(|(name, metadata)| (name.clone(), metadata.clone()))
                 .collect::<Vec<_>>()
         };
-        let mut policy_gateway = self.policy_gateway.lock().await;
-        if let Ok(policy) = policy_gateway.policy_manager_mut() {
-            let mut seeded = 0usize;
-            for (name, metadata) in policy_seeds {
-                if let Some(default_policy) = metadata.default_permission() {
-                    let current = policy.get_policy(&name);
-                    if matches!(current, ToolPolicy::Prompt) {
-                        if let Err(err) = policy.seed_default_policy(&name, default_policy.clone()).await {
-                            tracing::warn!(
-                                tool = %name,
-                                error = %err,
-                                "Failed to seed default policy from tool metadata"
-                            );
-                        } else {
-                            seeded += 1;
-                        }
+        let policy_arc = {
+            let gateway = self.policy_gateway.lock().await;
+            gateway.tool_policy_arc()
+        };
+        let mut policy_lock = policy_arc.lock().await;
+        let policy_guard = match policy_lock.as_mut() {
+            Some(guard) => guard,
+            None => return,
+        };
+        let mut seeded = 0usize;
+        for (name, metadata) in policy_seeds {
+            if let Some(default_policy) = metadata.default_permission() {
+                let current = policy_guard.get_policy(&name);
+                if matches!(current, ToolPolicy::Prompt) {
+                    if let Err(err) = policy_guard.seed_default_policy(&name, default_policy.clone()).await {
+                        tracing::warn!(
+                            tool = %name,
+                            error = %err,
+                            "Failed to seed default policy from tool metadata"
+                        );
+                    } else {
+                        seeded += 1;
                     }
                 }
             }
+        }
 
-            if seeded > 0 {
-                tracing::trace!(seeded, "Seeded default tool policies from tool assembly");
-            }
+        if seeded > 0 {
+            tracing::trace!(seeded, "Seeded default tool policies from tool assembly");
         }
     }
 

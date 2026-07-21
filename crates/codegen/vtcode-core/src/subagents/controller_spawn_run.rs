@@ -597,9 +597,17 @@ impl SubagentController {
     }
 
     /// Signal that the program is shutting down. Subsequent calls to
-    /// `save_background_state` will be skipped.
-    pub fn signal_shutdown(&self) {
+    /// `save_background_state` will be skipped. All running child handles
+    /// are aborted so subagent tasks do not outlive the parent session.
+    pub async fn signal_shutdown(&self) {
         self.shutdown_requested.store(true, Ordering::Relaxed);
+        let mut state = self.state.write().await;
+        for record in state.children.values_mut() {
+            if let Some(handle) = record.handle.take() {
+                handle.abort();
+            }
+            record.status = SubagentStatus::Closed;
+        }
     }
 
     pub(super) async fn save_background_state(&self) -> Result<()> {

@@ -611,11 +611,8 @@ impl AgentRunner {
                     &turn_model,
                     &runtime.state.messages,
                 );
-
-                // O(1) in the common Cow::Borrowed case: share the session
-                // history Arc instead of deep-copying it into the request.
                 let request_messages = match request_messages {
-                    std::borrow::Cow::Borrowed(_) => Arc::clone(&runtime.state.messages),
+                    std::borrow::Cow::Borrowed(_) => Arc::new(runtime.state.messages.clone()),
                     std::borrow::Cow::Owned(messages) => Arc::new(messages),
                 };
                 let request = build_harness_request_plan(HarnessRequestPlanInput {
@@ -719,7 +716,7 @@ impl AgentRunner {
                         &provider_name,
                         &turn_model,
                         response.request_id.as_deref(),
-                        sent_messages,
+                        (*sent_messages).clone(),
                     );
                 }
                 match crate::llm::usage_cost::estimate_session_costs(
@@ -1163,7 +1160,7 @@ impl AgentRunner {
             };
 
             let outcome = runtime.state.outcome.clone();
-            self.thread_handle.replace_messages(runtime.state.messages.as_ref().clone());
+            self.thread_handle.replace_messages(runtime.state.messages.clone());
             let summary = self.generate_task_summary(
                 &effective_task,
                 &runtime.state.modified_files,
@@ -1342,7 +1339,7 @@ mod tests {
             Message::user("hello".to_string()),
             Message::user("continue".to_string()),
         ];
-        state.set_previous_response_chain("openai", "gpt-5.4", Some("resp_123"), Arc::new(prior_messages));
+        state.set_previous_response_chain("openai", "gpt-5.4", Some("resp_123"), prior_messages);
 
         let (request_messages, previous_response_id) = prepare_responses_request_messages(
             &mut state.previous_response_chains,
@@ -1362,7 +1359,7 @@ mod tests {
         let messages = vec![Message::user("hello".to_string())];
 
         if records_responses_continuation_state("openai", true) {
-            state.set_previous_response_chain("openai", "gpt-5.4", Some("resp_123"), Arc::new(messages));
+            state.set_previous_response_chain("openai", "gpt-5.4", Some("resp_123"), messages);
         }
 
         assert_eq!(state.previous_response_chain_for("openai", "gpt-5.4"), None);
@@ -1374,7 +1371,7 @@ mod tests {
         let messages = vec![Message::user("hello".to_string())];
 
         if records_responses_continuation_state("mycorp", true) {
-            state.set_previous_response_chain("mycorp", "gpt-5.4", Some("resp_123"), Arc::new(messages));
+            state.set_previous_response_chain("mycorp", "gpt-5.4", Some("resp_123"), messages);
         }
 
         assert_eq!(state.previous_response_chain_for("mycorp", "gpt-5.4"), None);
@@ -1388,7 +1385,7 @@ mod tests {
             Message::user("hello".to_string()),
             Message::user("continue".to_string()),
         ];
-        state.set_previous_response_chain("gemini", "gemini-2.5-pro", Some("resp_123"), Arc::new(prior_messages));
+        state.set_previous_response_chain("gemini", "gemini-2.5-pro", Some("resp_123"), prior_messages);
 
         let (request_messages, previous_response_id) = prepare_responses_request_messages(
             &mut state.previous_response_chains,
@@ -1410,7 +1407,7 @@ mod tests {
             Message::user("hello".to_string()),
             Message::user("continue".to_string()),
         ];
-        state.set_previous_response_chain("mycorp", "gpt-5.4", Some("resp_123"), Arc::new(prior_messages));
+        state.set_previous_response_chain("mycorp", "gpt-5.4", Some("resp_123"), prior_messages);
 
         let (request_messages, previous_response_id) = prepare_responses_request_messages(
             &mut state.previous_response_chains,
