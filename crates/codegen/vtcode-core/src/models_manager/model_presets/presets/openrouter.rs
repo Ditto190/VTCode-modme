@@ -186,6 +186,23 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             context_window: Some(262_144),
         },
         ModelPreset {
+            id: "openrouter/poolside/laguna-s-2.1:free".to_string(),
+            model: "poolside/laguna-s-2.1:free".to_string(),
+            display_name: "Laguna S 2.1 free (OpenRouter)".to_string(),
+            description: "Poolside Laguna S 2.1 118B MoE free coding agent model with 256K context via OpenRouter".to_string(),
+            provider: Provider::OpenRouter,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Medium,
+                description: "Balanced".to_string(),
+            }],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(262_144),
+        },
+        ModelPreset {
             id: "openrouter/google/gemini-3.5-flash-lite".to_string(),
             model: "google/gemini-3.5-flash-lite".to_string(),
             display_name: "Gemini 3.5 Flash Lite (OpenRouter)".to_string(),

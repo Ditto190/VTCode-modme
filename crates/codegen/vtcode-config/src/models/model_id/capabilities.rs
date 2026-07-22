@@ -173,6 +173,7 @@ impl ModelId {
             | ModelId::EvolinkClaudeOpus48
             | ModelId::EvolinkClaudeHaiku45 => None,
             ModelId::PoolsideLagunaM1 => Some(ModelId::PoolsideLagunaXs2),
+            ModelId::PoolsideLagunaS21 => Some(ModelId::PoolsideLagunaXs2),
             _ => None,
         }
     }
@@ -310,6 +311,7 @@ impl ModelId {
                 | ModelId::MoonshotKimiK3
                 | ModelId::MoonshotKimiK27Code
                 | ModelId::PoolsideLagunaM1
+                | ModelId::PoolsideLagunaS21
         )
     }
 
@@ -389,6 +391,7 @@ impl ModelId {
                 | ModelId::MoonshotKimiK3
                 | ModelId::MoonshotKimiK27Code
                 | ModelId::PoolsideLagunaM1
+                | ModelId::PoolsideLagunaS21
                 | ModelId::OllamaGlm52Cloud
         )
     }
@@ -497,6 +500,7 @@ impl ModelId {
             // Poolside models
             ModelId::PoolsideLagunaM1 => "laguna-m.1",
             ModelId::PoolsideLagunaXs2 => "laguna-xs.2",
+            ModelId::PoolsideLagunaS21 => "laguna-s.2.1",
             // Qwen models
             ModelId::QwenDeepSeekV4Flash | ModelId::QwenDeepSeekV4Pro => "v4",
             ModelId::QwenGlm51 => "5.1",

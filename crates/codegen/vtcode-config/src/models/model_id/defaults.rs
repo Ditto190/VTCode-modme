@@ -51,7 +51,7 @@ impl ModelId {
             Provider::Qwen => ModelId::QwenDeepSeekV4Flash,
             Provider::StepFun => ModelId::StepFun37Flash,
             Provider::Evolink => ModelId::EvolinkGpt52,
-            Provider::Poolside => ModelId::PoolsideLagunaM1,
+            Provider::Poolside => ModelId::PoolsideLagunaS21,
         }
     }
 

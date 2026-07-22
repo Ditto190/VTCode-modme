@@ -3108,6 +3108,37 @@
           "generation": "Laguna-M.1",
           "doc_comment": "Laguna M.1 (free) - Poolside's flagship free coding agent model via OpenRouter"
         }
+      },
+      "poolside/laguna-s-2.1:free": {
+        "id": "poolside/laguna-s-2.1:free",
+        "name": "Poolside: Laguna S 2.1 (free)",
+        "description": "Laguna S 2.1 is Poolside's 118B MoE coding agent model, optimized for long-horizon agentic tasks with tool calling and reasoning support, available as a free endpoint via OpenRouter.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 262144,
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "vtcode": {
+          "variant": "OpenRouterPoolsideLagunaS21Free",
+          "constant": "POOLSIDE_LAGUNA_S_2_1_FREE",
+          "vendor": "poolside",
+          "display": "Laguna S 2.1 (free)",
+          "description": "Poolside Laguna S 2.1 118B MoE free coding agent model via OpenRouter",
+          "efficient": false,
+          "top_tier": true,
+          "generation": "Laguna-S.2.1",
+          "doc_comment": "Laguna S 2.1 (free) - Poolside's 118B MoE free coding agent model via OpenRouter"
+        }
       }
     },
     "default_model": "xiaomi/mimo-v2.5-pro"
@@ -4043,8 +4074,30 @@
     "api": "https://api.poolsi.de/openai/v1",
     "name": "Poolside",
     "doc": "https://docs.poolside.ai",
-    "default_model": "laguna-m.1",
+    "default_model": "laguna-s-2.1",
     "models": {
+      "laguna-s-2.1": {
+        "id": "laguna-s-2.1",
+        "name": "Laguna S 2.1",
+        "description": "Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks, tool use, and validation",
+        "version": "s.2.1",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": true
+        }
+      },
       "laguna-m.1": {
         "id": "laguna-m.1",
         "name": "Laguna M.1",

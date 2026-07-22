@@ -139,6 +139,7 @@ impl ModelId {
             // Poolside models
             ModelId::PoolsideLagunaM1,
             ModelId::PoolsideLagunaXs2,
+            ModelId::PoolsideLagunaS21,
         ];
         models.extend(Self::openrouter_models());
         let mut seen = HashSet::new();

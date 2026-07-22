@@ -827,6 +827,13 @@ model_id_table! {
         display: "Laguna XS.2",
         description: "Poolside's efficient MoE coding agent model with 128K context, optimized for fast agentic coding with lower resource requirements",
     },
+    PoolsideLagunaS21 {
+        provider: Poolside,
+        id: models::poolside::LAGUNA_S_2_1,
+        parse: [models::poolside::LAGUNA_S_2_1],
+        display: "Laguna S 2.1",
+        description: "Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks, tool use, and validation",
+    },
 }
 
 #[cfg(test)]
