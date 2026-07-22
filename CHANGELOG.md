@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.138.0 - 2026-07-22
+
+### Highlights
+#### Features
+
+- Add Poolside Laguna S 2.1 model and set as default (62ac704a) 
+### Other Changes
 ## 0.137.0 - 2026-07-21
 
 ### Highlights
