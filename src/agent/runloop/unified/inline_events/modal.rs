@@ -108,7 +108,7 @@ impl<'a> InlineModalProcessor<'a> {
             InlineListSelection::PlanApprovalAutoAccept => {
                 return Ok(InlineLoopAction::PlanApproved { auto_accept: true });
             }
-            InlineListSelection::PlanApprovalEditPlan => {
+            InlineListSelection::PlanApprovalEditPlan | InlineListSelection::PlanApprovalDiscuss => {
                 return Ok(InlineLoopAction::PlanEditRequested);
             }
             _ => {}

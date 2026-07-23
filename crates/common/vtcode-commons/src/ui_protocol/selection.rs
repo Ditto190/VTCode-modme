@@ -68,8 +68,10 @@ pub enum InlineListSelection {
 
     /// Plan confirmation dialog result (human-in-the-loop flow).
     PlanApprovalExecute,
-    /// Return to planning to edit the plan.
+    /// Return to planning to edit the plan file.
     PlanApprovalEditPlan,
+    /// Return to planning to discuss and revise the plan in chat.
+    PlanApprovalDiscuss,
     /// Auto-accept all future plans in this session.
     PlanApprovalAutoAccept,
     /// Hand off to the build primary agent and execute the plan.

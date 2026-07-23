@@ -448,6 +448,7 @@ impl ModelPickerState {
                 | InlineListSelection::RequestUserInputAnswer { .. }
                 | InlineListSelection::PlanApprovalExecute
                 | InlineListSelection::PlanApprovalEditPlan
+                | InlineListSelection::PlanApprovalDiscuss
                 | InlineListSelection::PlanApprovalAutoAccept
                 | InlineListSelection::PlanApprovalSwitchBuild
                 | InlineListSelection::PlanApprovalSwitchAuto
@@ -502,6 +503,7 @@ impl ModelPickerState {
                 | InlineListSelection::RequestUserInputAnswer { .. }
                 | InlineListSelection::PlanApprovalExecute
                 | InlineListSelection::PlanApprovalEditPlan
+                | InlineListSelection::PlanApprovalDiscuss
                 | InlineListSelection::PlanApprovalAutoAccept
                 | InlineListSelection::PlanApprovalSwitchBuild
                 | InlineListSelection::PlanApprovalSwitchAuto
@@ -556,6 +558,7 @@ impl ModelPickerState {
                 | InlineListSelection::RequestUserInputAnswer { .. }
                 | InlineListSelection::PlanApprovalExecute
                 | InlineListSelection::PlanApprovalEditPlan
+                | InlineListSelection::PlanApprovalDiscuss
                 | InlineListSelection::PlanApprovalAutoAccept
                 | InlineListSelection::PlanApprovalSwitchBuild
                 | InlineListSelection::PlanApprovalSwitchAuto => {
@@ -607,6 +610,7 @@ impl ModelPickerState {
                 | InlineListSelection::RequestUserInputAnswer { .. }
                 | InlineListSelection::PlanApprovalExecute
                 | InlineListSelection::PlanApprovalEditPlan
+                | InlineListSelection::PlanApprovalDiscuss
                 | InlineListSelection::PlanApprovalAutoAccept
                 | InlineListSelection::PlanApprovalSwitchBuild
                 | InlineListSelection::PlanApprovalSwitchAuto

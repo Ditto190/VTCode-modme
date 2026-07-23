@@ -144,23 +144,17 @@ scope/decomposition/verification decisions are closed.
 
 ## Review Gate
 
-After a plan is ready, a confirmation popup presents a structured summary (phases/steps
-checklist, or the raw plan when the structured data is absent) and a decision gate. The
-default selection for a complete draft is **Auto-accept**; for a draft still missing
-required content it is **Edit plan**.
+After a plan is ready, an interactive human-in-the-loop (HITL) confirmation popup presents a structured summary (phases/steps
+checklist, or the raw plan when structured data is absent) and a decision gate.
 
 Approval options:
 
-- **Execute** — approve and execute the plan on the current primary agent with per-step
-  HITL permission confirmations.
-- **Auto-accept** — approve and auto-execute the plan on the current primary agent
-  (skip per-step confirmations). This is the default for a complete draft.
-- **Switch to build agent** — hand the plan off to the `build` primary agent and execute
-  it with per-step HITL confirmations (manual edit approvals).
-- **Switch to auto agent** — hand the plan off to the `auto` primary agent and
-  auto-execute the plan (skip per-step confirmations).
-- **Edit plan** — return to the planning workflow to revise (type `/edit` or select it).
-- **Cancel** — discard the plan without executing.
+- **Approve (Auto-accept edits)** — approve and execute the plan automatically (Recommended).
+- **Approve (Manual review)** — approve and execute the plan with per-step edit approvals.
+- **Edit Plan** — open the plan file (`.vtcode/plans/...`) in your editor to make direct changes (or press `ctrl-g`).
+- **Discuss & Revise** — return to chat to provide feedback, ask clarifying questions, or revise the plan with the agent.
+- **Switch to build agent** — hand off execution to the `build` primary agent (manual per-step edit confirmations).
+- **Switch to auto agent** — hand off execution to the `auto` primary agent (auto-execute).
 
 Handoff options perform a true primary-agent switch: the chosen agent becomes active and
 executes the approved plan. The planning workflow is disabled and mutating tools are enabled
