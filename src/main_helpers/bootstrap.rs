@@ -179,9 +179,12 @@ fn parse_help_color_choice(value: &str) -> Option<CliColorChoice> {
 }
 
 pub(crate) async fn resolve_startup_context(args: &Cli) -> Result<StartupContext> {
+    let startup_start = Instant::now();
     let startup = StartupContext::from_cli_args(args)
         .await
         .context("failed to initialize VT Code startup context")?;
+    let startup_ms = startup_start.elapsed().as_millis() as u64;
+    tracing::debug!(target = "vtcode.startup", startup_ms, "startup context resolved");
     Ok(startup)
 }
 

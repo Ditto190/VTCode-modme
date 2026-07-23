@@ -31,6 +31,12 @@ pub(crate) async fn maybe_run_first_run_setup(args: &Cli, workspace: &Path, conf
         return Ok(false);
     }
 
+    // If the effective config already has a provider/model, do not run first-run
+    // setup even if the workspace lacks vtcode.toml.
+    if !config.agent.provider.is_empty() || !config.agent.default_model.is_empty() {
+        return Ok(false);
+    }
+
     if let Some(command) = &args.command {
         match command {
             Commands::Chat | Commands::ChatVerbose => {}
