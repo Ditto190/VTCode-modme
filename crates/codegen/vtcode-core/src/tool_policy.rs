@@ -596,11 +596,14 @@ impl ToolPolicyManager {
             return Ok(());
         }
 
-        // Clone once to avoid borrow issues with self.apply_config_policy
         let tools: Vec<_> = self.config.available_tools.to_vec();
         for tool in tools {
-            let config_policy = Self::resolve_config_policy(tools_config, &tool);
-            self.apply_config_policy(&tool, config_policy);
+            let canonical = canonical_tool_name(&tool);
+            if tools_config.policies.contains_key(canonical) {
+                self.apply_config_policy(&tool, Self::resolve_config_policy(tools_config, &tool));
+            } else if !self.config.policies.contains_key(canonical) {
+                self.apply_config_policy(&tool, Self::resolve_config_policy(tools_config, &tool));
+            }
         }
 
         self.save_config().await
@@ -1622,5 +1625,51 @@ mod tests {
         assert!(!reloaded.has_approval_cache_key("read_file"));
         assert!(reloaded.config.approval_cache.prefixes.is_empty());
         assert!(reloaded.config.approval_cache.regexes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn apply_tools_config_preserves_existing_policies_for_unconfigured_tools() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("tool-policy.json");
+        let mut manager = ToolPolicyManager::new_with_config_path(&config_path).await.expect("manager");
+
+        manager.config.available_tools = vec![tools::EXEC_COMMAND.to_owned(), tools::CODE_SEARCH.to_owned()];
+        manager
+            .config
+            .policies
+            .insert(tools::EXEC_COMMAND.to_owned(), ToolPolicy::Allow);
+        manager.config.policies.insert(tools::CODE_SEARCH.to_owned(), ToolPolicy::Allow);
+        manager.save_config().await.expect("save initial config");
+
+        let mut tools_config = ToolsConfig {
+            default_policy: ToolPolicy::Prompt,
+            ..Default::default()
+        };
+
+        manager.apply_tools_config(&tools_config).await.expect("apply config");
+
+        assert_eq!(manager.get_policy(tools::EXEC_COMMAND), ToolPolicy::Allow);
+        assert_eq!(manager.get_policy(tools::CODE_SEARCH), ToolPolicy::Allow);
+    }
+
+    #[tokio::test]
+    async fn apply_tools_config_applies_explicit_overrides_from_vtcode_toml() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("tool-policy.json");
+        let mut manager = ToolPolicyManager::new_with_config_path(&config_path).await.expect("manager");
+
+        manager.config.available_tools = vec![tools::EXEC_COMMAND.to_owned()];
+        manager
+            .config
+            .policies
+            .insert(tools::EXEC_COMMAND.to_owned(), ToolPolicy::Allow);
+        manager.save_config().await.expect("save initial config");
+
+        let mut tools_config = ToolsConfig::default();
+        tools_config.policies.insert(tools::EXEC_COMMAND.to_string(), ToolPolicy::Deny);
+
+        manager.apply_tools_config(&tools_config).await.expect("apply config");
+
+        assert_eq!(manager.get_policy(tools::EXEC_COMMAND), ToolPolicy::Deny);
     }
 }

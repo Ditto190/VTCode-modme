@@ -1,4 +1,4 @@
-const PLANNING_WORKFLOW_MIN_TOOL_CALLS_PER_TURN: usize = 48;
+const PLANNING_WORKFLOW_MIN_TOOL_CALLS_PER_TURN: usize = 120;
 
 pub(super) fn effective_max_tool_calls_for_turn(configured_limit: usize, planning_active: bool) -> usize {
     if configured_limit == 0 {

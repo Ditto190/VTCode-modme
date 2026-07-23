@@ -53,8 +53,10 @@ fn resume_session(intent: ArchivedSessionIntent) -> ResumeSession {
 
 #[test]
 fn planning_workflow_applies_tool_call_floor() {
-    assert_eq!(effective_max_tool_calls_for_turn(32, true), 48);
-    assert_eq!(effective_max_tool_calls_for_turn(64, true), 64);
+    assert_eq!(effective_max_tool_calls_for_turn(32, true), 120);
+    assert_eq!(effective_max_tool_calls_for_turn(64, true), 120);
+    assert_eq!(effective_max_tool_calls_for_turn(120, true), 120);
+    assert_eq!(effective_max_tool_calls_for_turn(200, true), 200);
 }
 
 #[test]
