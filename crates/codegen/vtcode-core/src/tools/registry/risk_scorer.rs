@@ -255,6 +255,11 @@ impl ToolRiskScorer {
             // Potentially risky write operations (base: 25)
             tools::APPLY_PATCH | tools::DELETE_FILE => 25,
 
+            // Skill loading can cross from untrusted model-selected content
+            // into executable or native-backed implementations. Keep it out
+            // of the low-risk auto-approval path even in trusted workspaces.
+            tools::LOAD_SKILL => 60,
+
             // PTY/interactive commands (base: 35)
             tools::CREATE_PTY_SESSION | tools::RUN_PTY_CMD | tools::SEND_PTY_INPUT | tools::UNIFIED_EXEC => 35,
 
@@ -327,6 +332,14 @@ mod tests {
                 "network tool '{tool}' should not be auto-approved as low risk, got {risk:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_skill_loading_is_not_low_risk_even_when_trusted() {
+        let ctx = ToolRiskContext::new(tools::LOAD_SKILL.to_string(), ToolSource::Internal, WorkspaceTrust::Trusted);
+        let risk = ToolRiskScorer::calculate_risk(&ctx);
+
+        assert!(risk > RiskLevel::Low, "skill loading should require approval, got {risk:?}");
     }
 
     #[test]

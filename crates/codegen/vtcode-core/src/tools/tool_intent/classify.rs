@@ -265,7 +265,6 @@ fn builtin_tool_behavior_canonical(tool: &str) -> Option<ToolBehavior> {
         | tools::MEMORY
         | tools::START_PLANNING
         | tools::LIST_SKILLS
-        | tools::LOAD_SKILL
         | tools::LOAD_SKILL_RESOURCE
         | tools::TASK_TRACKER
         | tools::GET_ERRORS
@@ -282,6 +281,7 @@ fn builtin_tool_behavior_canonical(tool: &str) -> Option<ToolBehavior> {
             false,
             false,
         )),
+        tools::LOAD_SKILL => Some(ToolBehavior::function(ToolMutationModel::Mutating, false, true)),
         tools::READ_FILE | tools::GREP_FILE | tools::LIST_FILES => {
             Some(ToolBehavior::function(ToolMutationModel::ReadOnly, true, false))
         }

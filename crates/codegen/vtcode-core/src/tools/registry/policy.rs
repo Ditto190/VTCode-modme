@@ -591,6 +591,11 @@ mod tests {
     }
 
     #[test]
+    fn skill_loading_is_not_auto_approved_by_risk() {
+        assert!(!ToolPolicyGateway::should_auto_approve_by_risk(tools::LOAD_SKILL));
+    }
+
+    #[test]
     fn mcp_connect_and_disconnect_are_not_auto_approved_by_risk() {
         // `mcp` itself is a low-risk discovery tool (Allow by default), but its
         // connect/disconnect actions open/tear down a network connection and

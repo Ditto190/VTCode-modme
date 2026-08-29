@@ -755,7 +755,7 @@ pub enum EnhancedSkill {
     CliTool(Box<CliToolBridge>),
     /// Built-in VT Code command skill
     BuiltInCommand(Box<BuiltInCommandSkill>),
-    /// Native code plugin skill
+    /// Native code plugin skill reserved for explicitly gated integrations
     NativePlugin(Box<dyn crate::skills::native_plugin::NativePluginTrait>),
 }
 
@@ -775,33 +775,6 @@ pub struct EnhancedSkillLoader {
     workspace_root: PathBuf,
     codex_home: PathBuf,
     discovery: SkillDiscovery,
-    plugin_loader: crate::skills::native_plugin::PluginLoader,
-}
-
-fn plugin_loader_for_workspace(
-    workspace_root: &Path,
-    codex_home: Option<&Path>,
-) -> crate::skills::native_plugin::PluginLoader {
-    let mut plugin_loader = crate::skills::native_plugin::PluginLoader::new();
-
-    if let Some(codex_home) = codex_home {
-        plugin_loader.add_trusted_dir(codex_home.join("plugins"));
-        if let Ok(paths) = VtCodePaths::resolve() {
-            plugin_loader
-                .add_trusted_dir(paths.plugins_dir())
-                .add_trusted_dir(paths.legacy_dir().join("plugins"));
-        }
-    } else if let Ok(paths) = VtCodePaths::resolve() {
-        plugin_loader
-            .add_trusted_dir(paths.plugins_dir())
-            .add_trusted_dir(paths.legacy_dir().join("plugins"));
-    }
-
-    plugin_loader
-        .add_trusted_dir(workspace_root.join(".vtcode/plugins"))
-        .add_trusted_dir(workspace_root.join(".agents/plugins"));
-
-    plugin_loader
 }
 
 fn default_codex_home() -> PathBuf {
@@ -842,25 +815,13 @@ impl EnhancedSkillLoader {
     pub fn new(workspace_root: PathBuf) -> Self {
         let codex_home = default_codex_home();
         let discovery = SkillDiscovery::with_config(discovery_config_for_codex_home(&workspace_root, &codex_home));
-        let plugin_loader = plugin_loader_for_workspace(&workspace_root, Some(&codex_home));
-        Self {
-            workspace_root,
-            codex_home,
-            discovery,
-            plugin_loader,
-        }
+        Self { workspace_root, codex_home, discovery }
     }
 
     /// Create a loader pinned to a specific VT Code home directory.
     pub fn with_codex_home(workspace_root: PathBuf, codex_home: PathBuf) -> Self {
         let discovery = SkillDiscovery::with_config(discovery_config_for_codex_home(&workspace_root, &codex_home));
-        let plugin_loader = plugin_loader_for_workspace(&workspace_root, Some(&codex_home));
-        Self {
-            workspace_root,
-            codex_home,
-            discovery,
-            plugin_loader,
-        }
+        Self { workspace_root, codex_home, discovery }
     }
 
     fn ensure_system_skills_installed(&self) {
@@ -909,31 +870,11 @@ impl EnhancedSkillLoader {
             return Ok(EnhancedSkill::BuiltInCommand(Box::new(skill)));
         }
 
-        // Try native plugins - discover plugin directories and load on demand
-        // First, find the plugin directory by scanning trusted directories
-        for plugin_dir in self.get_plugin_directories() {
-            if !tokio::fs::try_exists(&plugin_dir).await.unwrap_or(false) {
-                continue;
-            }
-
-            // Check if this directory contains the requested plugin
-            let plugin_json = plugin_dir.join("plugin.json");
-            if let Ok(content) = fs::read_to_string(&plugin_json)
-                && let Ok(metadata) = serde_json::from_str::<crate::skills::native_plugin::PluginMetadata>(&content)
-                && metadata.name == name
-            {
-                // Load the plugin
-                let plugin = self.plugin_loader.load_plugin(&plugin_dir)?;
-                return Ok(EnhancedSkill::NativePlugin(plugin));
-            }
-        }
-
+        // Native plugins are intentionally not loaded by the generic skill
+        // lookup. Opening a dynamic library executes arbitrary native code
+        // before this loader can inspect its metadata, so native loading must
+        // remain an explicit, separately-gated operation.
         Err(skill_ops::skill_not_found_error(name))
-    }
-
-    /// Get all trusted plugin directories
-    fn get_plugin_directories(&self) -> Vec<PathBuf> {
-        self.plugin_loader.trusted_dirs().to_vec()
     }
 
     /// Generate a comprehensive container validation report
@@ -1298,6 +1239,40 @@ mod tests {
 
         let skill = loader.get_skill("cmd-review").await.expect("load cmd-review");
         assert!(matches!(skill, EnhancedSkill::Traditional(_)));
+    }
+
+    #[tokio::test]
+    async fn enhanced_loader_does_not_open_repository_native_plugins() {
+        let workspace = tempdir().expect("workspace");
+        let codex_home = tempdir().expect("codex home");
+        let plugin_root = workspace.path().join(".agents/plugins");
+        fs::create_dir_all(&plugin_root).expect("create repository plugin root");
+
+        let plugin_name = format!("repository-native-plugin-{}", std::process::id());
+        fs::write(
+            plugin_root.join("plugin.json"),
+            format!(
+                r#"{{
+                    "name": "{plugin_name}",
+                    "description": "repository-controlled native plugin",
+                    "version": "1.0.0",
+                    "abi_version": 1
+                }}"#
+            ),
+        )
+        .expect("write plugin metadata");
+        let library_name = crate::skills::native_plugin::PluginLoader::new().library_filename(&plugin_name);
+        fs::write(plugin_root.join(library_name), b"not a dynamic library").expect("write fake library");
+
+        let mut loader =
+            EnhancedSkillLoader::with_codex_home(workspace.path().to_path_buf(), codex_home.path().to_path_buf());
+        let error = loader
+            .get_skill(&plugin_name)
+            .await
+            .expect_err("repository native plugin must not be opened by generic skill lookup");
+
+        assert!(error.to_string().contains("not found"), "unexpected error: {error}");
+        assert!(!error.to_string().contains("dynamic library"));
     }
 
     #[tokio::test]

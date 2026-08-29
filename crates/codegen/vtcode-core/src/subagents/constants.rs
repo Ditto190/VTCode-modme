@@ -45,9 +45,5 @@ pub(crate) const SUBAGENT_TOOL_NAMES: &[&str] = &[
 /// argument alias of the unified `agent` registration, not a separate tool.
 pub(crate) const CHILD_BLOCKED_BACKGROUND_TOOL_NAMES: &[&str] = &[tools::SPAWN_BACKGROUND_SUBPROCESS];
 
-pub(crate) const NON_MUTATING_TOOL_PREFIXES: &[&str] = &[
-    tools::CODE_SEARCH,
-    tools::LIST_SKILLS,
-    tools::LOAD_SKILL,
-    tools::LOAD_SKILL_RESOURCE,
-];
+pub(crate) const NON_MUTATING_TOOL_PREFIXES: &[&str] =
+    &[tools::CODE_SEARCH, tools::LIST_SKILLS, tools::LOAD_SKILL_RESOURCE];

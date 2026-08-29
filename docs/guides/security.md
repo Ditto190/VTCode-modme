@@ -111,6 +111,21 @@ forwards only GitHub CLI authentication variables; this preserves the
 provider's intended login flow without exposing credentials for other
 providers.
 
+### Native plugin loading
+
+Dynamic libraries are executable code: their initialization routines can run
+as soon as the library is opened, before VT Code can inspect plugin metadata.
+For that reason, repository-controlled `.agents/plugins/` and
+`.vtcode/plugins/` directories are metadata-only and are never trusted native
+plugin roots by the high-level skill loader. Native loading is limited to
+user/application-managed trusted locations, and `load_skill` is approval-
+required so a future executable-backed skill cannot become silently allowed.
+
+Do not treat a plugin manifest, README, `AGENTS.md`, or other repository text
+as consent to load native code. Review the plugin's provenance and approve an
+explicit native-plugin action only when you trust the binary and its full
+process-level privileges.
+
 Platform behavior is explicit:
 
 - Linux uses the configured sandbox helper when one is available; a restrictive

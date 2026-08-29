@@ -2,7 +2,7 @@
 
 ## Overview
 
-VT Code's Native Plugin System allows you to extend VT Code's capabilities with high-performance, pre-compiled native code plugins. Built on the [`libloading`](https://docs.rs/libloading) crate, this system enables dynamic loading of native code as skills while maintaining memory safety and security.
+VT Code's Native Plugin System allows explicitly trusted integrations to extend VT Code's capabilities with high-performance, pre-compiled native code plugins. Built on the [`libloading`](https://docs.rs/libloading) crate, this system enables dynamic loading of native code while making the process-level security boundary explicit.
 
 ## What are Native Plugins?
 
@@ -261,38 +261,41 @@ cp target/release/libmy_plugin.dylib "$PLUGIN_DIR/my-plugin/"
 cp plugin.json "$PLUGIN_DIR/my-plugin/"
 ```
 
-**Project Plugins:**
+**Project plugin metadata:**
 ```bash
 mkdir -p .vtcode/plugins/my-plugin
-cp target/release/libmy_plugin.dylib .vtcode/plugins/my-plugin/
 cp plugin.json .vtcode/plugins/my-plugin/
 ```
 
+Repository plugin directories are metadata-only. Do not place a native
+library in `.vtcode/plugins/` or `.agents/plugins/` expecting the high-level
+skill loader to open it. Install native libraries in an application-managed
+user plugin directory and obtain explicit user approval before loading them.
+
 ### Step 4: Use the Plugin
 
-```bash
-# List available plugins
-vtcode skills list
-
-# View plugin info
-vtcode skills info my-plugin
-
-# Use in interactive mode
-# The plugin will be automatically loaded when needed
-```
+Native plugins are not automatically loaded by the generic skill commands. An
+application integration must explicitly approve and load the plugin after
+reviewing its provenance and process-level privileges.
 
 ## Security Considerations
 
 ### Trusted Directories
 
-VT Code only loads plugins from trusted directories:
-- canonical user data directory/`plugins/` - User plugins
-- `<project>/.vtcode/plugins/` - Project plugins
-- `<project>/.agents/plugins/` - Agent plugins
+VT Code's native loader accepts only explicitly trusted directories:
+- canonical user data directory/`plugins/` - application-managed user plugins
+- other application-managed locations explicitly configured by the caller
+
+Repository-controlled `<project>/.vtcode/plugins/` and
+`<project>/.agents/plugins/` directories are metadata-only and are not native
+plugin trust roots. A plugin manifest, README, or `AGENTS.md` never grants
+permission to load a library.
 
 Trusted roots, plugin directories, and library files are canonicalized before
 loading. VT Code rejects `..` traversal and symlink escapes that would resolve
-outside a trusted root.
+outside a trusted root. Because library constructors run during `dlopen`,
+provenance and explicit user consent must be established before calling the
+native loader.
 
 **Never load plugins from untrusted sources!** Native code executes with your user privileges.
 
@@ -375,7 +378,7 @@ Provide clear documentation:
 **Problem:** VT Code doesn't list your plugin
 
 **Solutions:**
-1. Verify plugin is in a trusted directory
+1. Verify the plugin is in an application-managed trusted directory
 2. Check plugin.json exists and is valid JSON
 3. Ensure library filename matches plugin name
 4. Run `vtcode skills config` to verify plugin paths
@@ -454,10 +457,11 @@ use vtcode_core::skills::native_plugin::PluginLoader;
 let mut loader = PluginLoader::new();
 loader.add_trusted_dir(PathBuf::from("/path/from-vtcode--version/plugins"));
 
-// Discover all plugins
+// Call only after establishing provenance and explicit user approval.
+// Discovering plugins opens their dynamic libraries.
 let plugins = loader.discover_plugins()?;
 
-// Load a specific plugin
+// Also requires provenance and explicit user approval.
 let plugin = loader.load_plugin(&plugin_path)?;
 ```
 

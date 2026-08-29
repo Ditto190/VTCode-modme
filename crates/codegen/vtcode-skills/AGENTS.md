@@ -18,3 +18,7 @@
 ## Coding Conventions
 
 `anyhow::Result`, `serde`, `tracing`. Manifest parsing uses `serde-saphyr` for YAML frontmatter. Template paths relative to `templates/`.
+
+## Gotchas
+
+- `native_plugin.rs` loads process-level code through `dlopen`; callers must establish provenance and explicit approval, and must never trust repository plugin roots.

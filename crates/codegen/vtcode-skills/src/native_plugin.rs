@@ -12,9 +12,10 @@
 //! # Safety
 //!
 //! Loading native code plugins requires careful security considerations:
-//! - Plugins are loaded from canonicalized trusted locations only
+//! - Plugins are loaded from canonicalized, explicitly trusted locations only
+//! - Callers must obtain user approval before loading an untrusted plugin
 //! - Plugin signatures can be verified (future enhancement)
-//! - Plugin execution is sandboxed where possible
+//! - This module does not sandbox plugin execution; native code runs with process privileges
 //! - VT Code serializes plugin FFI calls for ABI v1
 //! - All plugin operations go through VT Code's tool system
 //!
@@ -348,7 +349,12 @@ impl NativePluginTrait for NativePlugin {
     }
 }
 
-/// Plugin loader responsible for discovering and loading native plugins
+/// Plugin loader responsible for discovering and loading native plugins.
+///
+/// A trusted directory is an application-managed or explicitly user-approved
+/// installation location. Repository-controlled directories must not be added
+/// as trusted directories: loading a dynamic library executes its constructors
+/// before the plugin ABI can be inspected.
 pub struct PluginLoader {
     /// Trusted plugin directories
     trusted_dirs: Vec<PathBuf>,
@@ -360,7 +366,11 @@ impl PluginLoader {
         Self { trusted_dirs: Vec::new() }
     }
 
-    /// Add a trusted plugin directory
+    /// Add an explicitly trusted plugin directory.
+    ///
+    /// This method only enforces path containment after the directory is
+    /// trusted; it does not verify provenance or obtain user consent. Callers
+    /// must not pass paths selected from repository contents.
     pub fn add_trusted_dir(&mut self, path: PathBuf) -> &mut Self {
         let path = normalize_trusted_dir(path);
         if !self.trusted_dirs.contains(&path) {
@@ -375,7 +385,14 @@ impl PluginLoader {
         &self.trusted_dirs
     }
 
-    /// Load a plugin from a specific path
+    /// Load a plugin from a specific path.
+    ///
+    /// # Security
+    ///
+    /// `Library::new` can execute arbitrary native initialization code before
+    /// this function returns. The caller must establish explicit user consent
+    /// and provenance before calling this method; plugin metadata is not an
+    /// authorization mechanism.
     pub fn load_plugin(&self, plugin_path: &Path) -> Result<Box<dyn NativePluginTrait>> {
         debug!("Loading native plugin from {:?}", plugin_path);
 
@@ -408,7 +425,10 @@ impl PluginLoader {
         Ok(Box::new(plugin))
     }
 
-    /// Discover all plugins in trusted directories
+    /// Discover and load all plugins in trusted directories.
+    ///
+    /// Loading occurs during discovery, so callers must establish provenance
+    /// and explicit user consent before invoking this method.
     pub fn discover_plugins(&self) -> Result<Vec<Box<dyn NativePluginTrait>>> {
         let mut plugins = Vec::new();
 

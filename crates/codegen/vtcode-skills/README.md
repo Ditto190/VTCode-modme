@@ -45,7 +45,7 @@ validation, bundling, template rendering, and native plugin support.
 
 - **Manifest-based**: YAML/JSON skill manifests with validation
 - **Bundling**: Package skills for distribution
-- **Native plugins**: Load skills from compiled dynamic libraries
+- **Native plugins**: Load compiled dynamic libraries only from explicitly trusted, user/application-managed locations
 - **Template rendering**: Render skill content with variable substitution
 - **Validation**: Comprehensive skill validation with detailed reports
 

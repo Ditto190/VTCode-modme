@@ -25,6 +25,17 @@ downgrading or broadening the request.
 
 VT Code implements a comprehensive, defense-in-depth command security system that enables non-powered users to run safe commands by default while protecting against dangerous operations. This system helps the agent use system and build tools properly via environment PATH configuration.
 
+### Native plugin boundary
+
+Opening a dynamic library can execute native initialization code before the
+library's metadata or ABI is validated. Repository-controlled `.agents/plugins/`
+and `.vtcode/plugins/` directories therefore remain metadata-only; the
+high-level skill loader does not add them to the native loader's trusted roots.
+The `load_skill` tool is approval-required because executable-backed skill
+implementations must never inherit the read-only policy used for ordinary
+skill instructions. Low-level native loading is reserved for callers that
+have already established plugin provenance and explicit user consent.
+
 ## Design Philosophy
 
 **Safe-by-default**: All known safe commands for development and system utilities are enabled without requiring user confirmation or configuration.

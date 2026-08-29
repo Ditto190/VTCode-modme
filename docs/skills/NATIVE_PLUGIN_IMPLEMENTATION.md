@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document summarizes the implementation of the Native Plugin System for VT Code using the [`libloading`](https://docs.rs/libloading) crate. The system enables VT Code to load and execute native code plugins as skills, providing high-performance, pre-compiled capabilities.
+This document summarizes the implementation of the Native Plugin System for VT Code using the [`libloading`](https://docs.rs/libloading) crate. The system enables explicitly approved integrations to load and execute native code plugins, providing high-performance, pre-compiled capabilities.
 
 ## What Was Implemented
 
@@ -25,7 +25,7 @@ This document summarizes the implementation of the Native Plugin System for VT C
 - **`PluginLoader`**: Discovers and loads plugins
     - Manages trusted directories
     - Validates plugin structure
-    - Loads dynamic libraries safely
+    - Loads dynamic libraries only after the caller's trust and approval gate
     - Platform-specific library naming
 
 - **Plugin ABI Functions**:
@@ -93,11 +93,10 @@ pub struct SkillRoot {
 
 Added plugin scanning to `skill_roots_with_home_dir()`:
 
-**Trusted Directories:**
+**Metadata discovery roots:**
 
 - canonical user data directory/`plugins/` - User plugins
-- `<project>/.vtcode/plugins/` - Project plugins
-- `<project>/.agents/plugins/` - Agent plugins
+- repository plugin roots may be inspected as metadata, but are never native trust roots
 
 **Discovery Logic:**
 
@@ -468,13 +467,16 @@ cargo check
 
 **Trust Model:**
 
-- Plugins are trusted code
+- Plugins are trusted code only after explicit provenance review and user approval
 - Execute with user privileges
 - No sandboxing by default
 
 **Protections:**
 
 - Trusted directory requirement
+- Repository plugin roots are metadata-only
+- Generic skill lookup never opens native libraries
+- `load_skill` is approval-required and classified above low-risk auto-approval
 - ABI version validation
 - Metadata validation
 - Library existence check
@@ -490,7 +492,7 @@ cargo check
 1. **Only install plugins from trusted sources**
 2. **Review plugin source code when possible**
 3. **Keep plugins updated**
-4. **Use project-specific plugins for isolation**
+4. **Use application-managed user plugin locations; do not treat project files as trust roots**
 5. **Monitor plugin behavior**
 
 ## Compatibility
@@ -520,7 +522,7 @@ cargo check
 
 ## Conclusion
 
-The Native Plugin System successfully integrates libloading into VT Code's skill architecture, enabling high-performance native code extensions while maintaining safety and security. The implementation is complete, tested, and ready for use.
+The Native Plugin System integrates libloading into VT Code's skill architecture, enabling high-performance native code extensions behind an explicit trust and approval boundary. Repository-controlled plugin roots remain metadata-only, and generic skill lookup does not open native libraries.
 
 ---
 

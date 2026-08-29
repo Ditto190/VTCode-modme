@@ -493,7 +493,7 @@ impl Tool for LoadSkillTool {
     }
 
     fn description(&self) -> &str {
-        "Load detailed instructions for a specific traditional skill and activate its associated tool into your environment. Use list_skills first to see what is available. Do NOT call load_skill for skills already listed as active — they are already loaded. Returns the skill instructions and activation status."
+        "Load detailed instructions for a specific traditional skill and activate its associated tool into your environment. This operation requires approval because skill content may be executable or native-backed. Use list_skills first to see what is available. Do NOT call load_skill for skills already listed as active — they are already loaded. Returns the skill instructions and activation status."
     }
 
     fn parameter_schema(&self) -> Option<Value> {
@@ -510,12 +510,15 @@ impl Tool for LoadSkillTool {
     }
 
     fn default_permission(&self) -> ToolPolicy {
-        // Loading instructions is safe and read-only
-        ToolPolicy::Allow
+        // A skill may be backed by executable content or a native plugin. The
+        // approval gate must run before discovery can reach any such loader.
+        ToolPolicy::Prompt
     }
 
     fn is_mutating(&self) -> bool {
-        false
+        // Activation changes the session tool set and may cross into
+        // executable-backed skill implementations.
+        true
     }
 
     fn is_parallel_safe(&self) -> bool {
@@ -815,6 +818,24 @@ mod tests {
         crate::skills::system::install_system_skills(&codex_home)
             .expect("install embedded system skills for test codex home");
         codex_home
+    }
+
+    #[tokio::test]
+    async fn load_skill_requires_explicit_approval() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let active_skills = Arc::new(RwLock::new(HashMap::new()));
+        let registry = Arc::new(ToolRegistry::new(temp_dir.path().to_path_buf()).await);
+        let runtime = SkillToolSessionRuntime::new(
+            registry,
+            None,
+            ToolDocumentationMode::Full,
+            ToolModelCapabilities::default(),
+            None,
+        );
+        let tool = LoadSkillTool::new(temp_dir.path().to_path_buf(), active_skills, runtime);
+
+        assert_eq!(tool.default_permission(), ToolPolicy::Prompt);
+        assert!(tool.is_mutating());
     }
 
     fn write_skill_fixture(workspace: &Path, name: &str) {

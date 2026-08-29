@@ -47,6 +47,14 @@ mod tests {
     }
 
     #[test]
+    fn skill_loading_is_mutating_and_requires_confirmation() {
+        let intent = classify_tool_intent(tools::LOAD_SKILL, &json!({"name": "example"}));
+        assert!(intent.mutating);
+        assert!(intent.destructive);
+        assert!(!intent.retry_safe);
+    }
+
+    #[test]
     fn command_session_inspect_is_retry_safe() {
         let intent = classify_tool_intent(
             tools::UNIFIED_EXEC,

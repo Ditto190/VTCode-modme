@@ -459,9 +459,9 @@ const FINAL_RESPONSE_CONTRACT: &str = "Return your final response using this exa
 Use `- None` for empty sections. Keep it concise and grounded in the work you actually performed.";
 
 const READ_ONLY_TOOL_REMINDER: &str = "Tool reminder: stay inside the exposed read-only tool set for this child. \
-Use advanced `code_search` for a focused literal query with bounded filters. Use `list_skills`, `load_skill`, and \
-`load_skill_resource` when the task requires repository skills. If these tools are insufficient, report the blocker \
-instead of retrying denied calls.";
+Use advanced `code_search` for a focused literal query with bounded filters. Use `list_skills` and \
+`load_skill_resource` for already-loaded repository skills when needed. If these tools are insufficient, report the \
+blocker instead of retrying denied calls.";
 
 const READ_ONLY_PLANNING_WORKFLOW_REMINDER: &str = "This delegated agent already runs with a read-only tool surface. \
 Do not try to enter or exit planning workflow, do not call hidden mutating tools, and do not retry the same denied tool \
@@ -603,6 +603,7 @@ mod slice4_tests {
             &spec,
             vec![
                 definition(tools::CODE_SEARCH),
+                definition(tools::LOAD_SKILL),
                 definition(tools::EXEC_COMMAND),
                 definition(tools::APPLY_PATCH),
                 definition(tools::WRITE_STDIN),
@@ -617,9 +618,10 @@ mod slice4_tests {
 
     #[test]
     fn read_only_tool_reminder_names_only_exposed_read_only_tools() {
-        for tool in ["code_search", "list_skills", "load_skill", "load_skill_resource"] {
+        for tool in ["code_search", "list_skills", "load_skill_resource"] {
             assert!(READ_ONLY_TOOL_REMINDER.contains(&format!("`{tool}`")));
         }
+        assert!(!READ_ONLY_TOOL_REMINDER.contains("`load_skill`"));
         assert!(!READ_ONLY_TOOL_REMINDER.contains("`exec_command`"));
         assert!(!READ_ONLY_TOOL_REMINDER.contains("`write_stdin`"));
         assert!(!READ_ONLY_TOOL_REMINDER.contains("search_dispatch"));
