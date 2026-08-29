@@ -330,9 +330,11 @@ impl ModelId {
                 | ModelId::ZaiGlm52
                 | ModelId::OpenRouterStepfunStep35FlashFree
                 | ModelId::OllamaGlm52Cloud
+                | ModelId::OllamaGlm53Cloud
                 | ModelId::HuggingFaceDeepseekV4ProTogether
                 | ModelId::HuggingFaceGlm52Novita
                 | ModelId::HuggingFaceGlm53FlashTogether
+                | ModelId::HuggingFaceGlm53Together
                 | ModelId::HuggingFaceMinimaxM3Novita
                 | ModelId::HuggingFaceDeepseekV4ProNovita
                 | ModelId::OpenRouterMoonshotaiKimiK3
@@ -413,6 +415,7 @@ impl ModelId {
                 | ModelId::ZaiGlm52
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::HuggingFaceGlm53FlashTogether
+                | ModelId::HuggingFaceGlm53Together
                 | ModelId::OpenRouterStepfunStep35FlashFree
                 | ModelId::HuggingFaceDeepseekV4FlashNovita
                 | ModelId::HuggingFaceDeepseekV4ProTogether
@@ -427,6 +430,7 @@ impl ModelId {
                 | ModelId::PoolsideLagunaM1
                 | ModelId::PoolsideLagunaS21
                 | ModelId::OllamaGlm52Cloud
+                | ModelId::OllamaGlm53Cloud
                 | ModelId::XaiGrok46
                 | ModelId::MergeGatewayXaiGrok46
                 | ModelId::XaiGrok420Reasoning
@@ -505,6 +509,7 @@ impl ModelId {
             ModelId::OllamaDeepseekV4ProCloud => "deepseek-v4-pro",
             ModelId::OllamaMinimaxM3Cloud => "minimax-m3",
             ModelId::OllamaGlm52Cloud => "glm-5.2",
+            ModelId::OllamaGlm53Cloud => "glm-5.3",
             ModelId::OllamaKimiK27CodeCloud => "kimi-k2.7-code",
             ModelId::OllamaLagunaXs2 => "laguna-xs.2",
             ModelId::OllamaGemma4 => "gemma-4",
@@ -524,6 +529,7 @@ impl ModelId {
             ModelId::HuggingFaceMinimaxM3Novita => "m3",
             ModelId::HuggingFaceGlm52Novita => "5.2",
             ModelId::HuggingFaceGlm53FlashTogether => "5.3",
+            ModelId::HuggingFaceGlm53Together => "5.3",
             ModelId::HuggingFaceDeepseekV4FlashNovita => "v4-flash",
             ModelId::HuggingFaceDeepseekV4ProTogether => "v4-pro",
             ModelId::HuggingFaceDeepseekV4ProNovita => "v4-pro",

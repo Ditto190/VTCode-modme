@@ -137,6 +137,8 @@ pub enum ModelId {
     HuggingFaceGlm52Novita,
     /// Z.AI GLM-5.3 Flash via Together inference provider on Hugging Face router
     HuggingFaceGlm53FlashTogether,
+    /// Z.AI GLM-5.3 via Together inference provider on Hugging Face router
+    HuggingFaceGlm53Together,
     /// Kimi K3 via Together on Hugging Face router
     HuggingFaceKimiK3Together,
     /// DeepSeek V4 Flash via Novita on Hugging Face router
@@ -254,6 +256,8 @@ pub enum ModelId {
     OllamaMinimaxM3Cloud,
     /// GLM-5.2 Cloud - Cloud-hosted GLM-5.2 flagship model served via Ollama Cloud
     OllamaGlm52Cloud,
+    /// GLM-5.3 Cloud - Cloud-hosted GLM-5.3 flagship model served via Ollama Cloud
+    OllamaGlm53Cloud,
     /// Kimi K2.7 Code Cloud - Moonshot Kimi K2.7 Code via Ollama Cloud
     OllamaKimiK27CodeCloud,
     /// Kimi K3 Cloud - Moonshot Kimi K3 via Ollama Cloud

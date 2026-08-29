@@ -604,6 +604,26 @@
           "structured_output": true
         }
       },
+      "zai-org/GLM-5.3:together": {
+        "id": "zai-org/GLM-5.3:together",
+        "name": "GLM-5.3 (Together)",
+        "description": "Z.AI GLM-5.3 via Together inference provider on Hugging Face router. Frontier coding model with 1M context.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "max_output_tokens": 128000,
+        "capabilities": {
+          "structured_output": true
+        }
+      },
       "Qwen/Qwen3-4B-Thinking-2507": {
         "id": "Qwen/Qwen3-4B-Thinking-2507",
         "name": "Qwen3 4B Thinking 2507",
@@ -2764,6 +2784,23 @@
         "id": "glm-5.2:cloud",
         "name": "GLM-5.2 (cloud)",
         "description": "Cloud-hosted Z.AI GLM-5.2 flagship model for long-horizon tasks with 1M context via Ollama Cloud.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "max_output_tokens": 128000
+      },
+      "glm-5.3:cloud": {
+        "id": "glm-5.3:cloud",
+        "name": "GLM-5.3 (cloud)",
+        "description": "Cloud-hosted Z.AI GLM-5.3 flagship model for long-horizon tasks with 1M context via Ollama Cloud.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {

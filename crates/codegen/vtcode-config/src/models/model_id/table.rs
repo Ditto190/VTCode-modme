@@ -443,6 +443,13 @@ model_id_table! {
         display: "GLM-5.3 Flash (Together)",
         description: "Z.ai GLM-5.3 Flash via Together inference provider on HuggingFace router. Efficient multimodal model with hybrid sparse+linear attention (320B/18B, 1M context, native vision).",
     },
+    HuggingFaceGlm53Together {
+        provider: HuggingFace,
+        id: models::huggingface::ZAI_GLM_5_3_TOGETHER,
+        parse: [models::huggingface::ZAI_GLM_5_3_TOGETHER],
+        display: "GLM-5.3 (Together)",
+        description: "Z.ai GLM-5.3 via Together inference provider on HuggingFace router. Frontier coding model with 1M context.",
+    },
     HuggingFaceKimiK3Together {
         provider: HuggingFace,
         id: models::huggingface::KIMI_K3_TOGETHER,
@@ -805,6 +812,13 @@ model_id_table! {
         parse: [models::ollama::GLM_5_2_CLOUD],
         display: "GLM-5.2 (cloud)",
         description: "Cloud-hosted GLM-5.2 flagship model for long-horizon tasks with 1M context via Ollama Cloud",
+    },
+    OllamaGlm53Cloud {
+        provider: OllamaCloud,
+        id: models::ollama::GLM_5_3_CLOUD,
+        parse: [models::ollama::GLM_5_3_CLOUD],
+        display: "GLM-5.3 (cloud)",
+        description: "Cloud-hosted GLM-5.3 flagship model for long-horizon tasks with 1M context via Ollama Cloud",
     },
     OllamaKimiK27CodeCloud {
         provider: OllamaCloud,

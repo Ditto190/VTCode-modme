@@ -8,6 +8,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     ZAI_GLM_5_2_NOVITA,
     // Together inference provider models (incl. Z.AI Flash via Together)
     ZAI_GLM_5_3_FLASH_TOGETHER,
+    ZAI_GLM_5_3_TOGETHER,
     // Moonshot inference provider models
     KIMI_K3_TOGETHER,
     // Together inference provider models
@@ -31,6 +32,7 @@ pub(crate) const OPENAI_GPT_OSS_20B: &str = "openai/gpt-oss-20b:huggingface";
 
 pub const ZAI_GLM_5_2_NOVITA: &str = "zai-org/GLM-5.2:novita";
 pub const ZAI_GLM_5_3_FLASH_TOGETHER: &str = "zai-org/GLM-5.3-Flash:together";
+pub const ZAI_GLM_5_3_TOGETHER: &str = "zai-org/GLM-5.3:together";
 pub const KIMI_K3_TOGETHER: &str = "moonshotai/Kimi-K3:together";
 
 // DeepSeek V4 models via HF router
@@ -52,6 +54,7 @@ pub const REASONING_MODELS: &[&str] = &[
     OPENAI_GPT_OSS_20B,
     ZAI_GLM_5_2_NOVITA,
     ZAI_GLM_5_3_FLASH_TOGETHER,
+    ZAI_GLM_5_3_TOGETHER,
     MINIMAX_M3_NOVITA,
     DEEPSEEK_V4_PRO_TOGETHER,
     DEEPSEEK_V4_PRO_NOVITA,

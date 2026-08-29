@@ -124,5 +124,30 @@ pub(crate) fn huggingface_presets() -> Vec<ModelPreset> {
             supported_in_api: true,
             context_window: Some(1_000_000),
         },
+        ModelPreset {
+            id: "huggingface/glm-5.3".to_string(),
+            model: "zai-org/GLM-5.3:together".to_string(),
+            display_name: "GLM-5.3 (HF/Together)".to_string(),
+            description:
+                "Z.ai GLM-5.3 via Together inference provider on HuggingFace router. Frontier coding model with 1M context."
+                    .to_string(),
+            provider: Provider::HuggingFace,
+            default_reasoning_effort: ReasoningEffortLevel::High,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum thinking".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
     ]
 }

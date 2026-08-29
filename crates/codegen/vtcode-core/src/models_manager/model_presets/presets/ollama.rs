@@ -153,5 +153,28 @@ pub(crate) fn ollama_presets() -> Vec<ModelPreset> {
             supported_in_api: true,
             context_window: Some(1_000_000),
         },
+        ModelPreset {
+            id: "ollama/glm-5.3:cloud".to_string(),
+            model: "glm-5.3:cloud".to_string(),
+            display_name: "GLM-5.3 (Ollama)".to_string(),
+            description: "Cloud-hosted GLM-5.3 flagship model for long-horizon tasks with 1M context via Ollama Cloud".to_string(),
+            provider: Provider::OllamaCloud,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
     ]
 }
