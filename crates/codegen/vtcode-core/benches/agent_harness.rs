@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use criterion::criterion_group;
 use criterion::criterion_main;
-use criterion::{BatchSize, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion};
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use vtcode_core::config::types::CapabilityLevel;
@@ -21,7 +21,9 @@ use vtcode_core::core::agent::harness_kernel::{
 };
 use vtcode_core::llm::provider::{Message, ToolChoice, ToolDefinition};
 use vtcode_core::prompts::{FewShotExample, FewShotStore, resolve_system_prompt_layers, sort_tool_definitions};
-use vtcode_core::tools::handlers::{SessionSurface, SessionToolCatalog, SessionToolsConfig, ToolModelCapabilities};
+use vtcode_core::tools::handlers::{
+    DeferredToolPolicy, SessionSurface, SessionToolCatalog, SessionToolsConfig, ToolModelCapabilities,
+};
 use vtcode_core::tools::registry::SessionToolCatalogState;
 use vtcode_core::tools::registry::ToolRegistration;
 use vtcode_indexer::file_search::{FileIndexCache, FileSearchConfig, run, run_with_index};
@@ -47,8 +49,8 @@ fn sample_messages(count: usize) -> Vec<Message> {
     (0..count).map(|index| Message::user(format!("message {index}"))).collect()
 }
 
-fn benchmark_tool_catalog() -> SessionToolCatalog {
-    let registrations = (0..128)
+fn benchmark_tool_catalog_registrations() -> Vec<ToolRegistration> {
+    (0..128)
         .map(|index| {
             ToolRegistration::new(
                 format!("catalog_projection_{index:03}"),
@@ -67,7 +69,11 @@ fn benchmark_tool_catalog() -> SessionToolCatalog {
                 }
             }))
         })
-        .collect();
+        .collect()
+}
+
+fn benchmark_tool_catalog() -> SessionToolCatalog {
+    let registrations = benchmark_tool_catalog_registrations();
     SessionToolCatalog::rebuild_from_registrations(registrations)
 }
 
@@ -172,6 +178,38 @@ fn tool_catalog_projection_benchmark(c: &mut Criterion) {
             black_box((schemas.len(), definitions.len()))
         })
     });
+}
+
+fn tool_catalog_deferred_policy_benchmark(c: &mut Criterion) {
+    let registrations = benchmark_tool_catalog_registrations();
+    let policies = [
+        ("hosted", DeferredToolPolicy::openai_hosted(Vec::new())),
+        ("client_local", DeferredToolPolicy::client_local(Vec::new())),
+        ("disabled", DeferredToolPolicy::default()),
+    ];
+    let mut group = c.benchmark_group("agent_harness_tool_catalog_deferred_policy");
+
+    for (policy_name, deferred_tool_policy) in policies {
+        let config = benchmark_tool_catalog_config().with_deferred_tool_policy(deferred_tool_policy);
+        let expected =
+            SessionToolCatalog::rebuild_from_registrations(registrations.clone()).model_tools(config.clone());
+        assert!(!expected.is_empty(), "{policy_name} catalog benchmark must emit tool definitions");
+        let actual = SessionToolCatalog::rebuild_from_registrations(registrations.clone()).model_tools(config.clone());
+        assert_eq!(actual, expected, "{policy_name} catalog output must remain stable");
+
+        let _benchmark = group.bench_function(BenchmarkId::from_parameter(policy_name), |b| {
+            b.iter_batched(
+                || SessionToolCatalog::rebuild_from_registrations(registrations.clone()),
+                |catalog| {
+                    let definitions = catalog.model_tools(config.clone());
+                    black_box(definitions)
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+
+    group.finish();
 }
 
 fn prompt_resource_cache_hit_benchmark(c: &mut Criterion) {
@@ -290,6 +328,7 @@ criterion_group!(
     request_plan_benchmark,
     prepared_batch_planning_benchmark,
     tool_catalog_projection_benchmark,
+    tool_catalog_deferred_policy_benchmark,
     prompt_resource_cache_hit_benchmark,
     few_shot_selection_benchmark,
     tool_definition_sorting_benchmark,

@@ -18,6 +18,12 @@ VT Code uses a local-first performance workflow. Performance checks are measured
 
 These rules apply to product code and refactors alike. The burden of proof is on the optimization, not on the simpler baseline.
 
+### Filter before expensive projection or normalization
+
+Establish relevance before performing expensive projection or normalization work. In practice, filter a catalog, request, or candidate set before serializing schemas, constructing derived views, or normalizing data that will not be used. This keeps common paths from paying for work that only matters after a policy or relevance check succeeds.
+
+The default documentation gate follows the same principle: `cargo doc --workspace --no-deps` builds the public API documentation and intentionally excludes private items. Private-item documentation expands the work to internal implementation details that are not part of the contributor-facing API artifact. Maintainers who need internal API inspection can opt in with `cargo doc --workspace --no-deps --document-private-items`.
+
 ### Bounded I/O on the agent hot path
 
 Independent code-search backends (literal, declaration, and path search) are
@@ -283,9 +289,10 @@ Use benches when a hotspot is stable and repeatable. Use the baseline/profile sc
 
 The `agent_harness` target measures the repeated work that affects interactive
 requests: warm prompt-resource cache hits, few-shot tag selection, tool
-definition sorting during catalog refresh, and scoring against a warm indexed
-file list. Its fixtures are deterministic and keep filesystem setup outside the
-timed iterations.
+definition sorting during catalog refresh, scoring against a warm indexed file
+list, and cold-cache tool-catalog assembly under hosted, client-local, and
+disabled deferred-loading policies. Its fixtures are deterministic and keep
+filesystem setup outside the timed iterations.
 
 Prompt resources use canonical source paths, a five-minute bounded cache, and a
 two-second metadata polling interval. Cache misses perform scans, reads, and

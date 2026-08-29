@@ -7,11 +7,11 @@ use serde::Serialize;
 use serde_json::Value;
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct ToolEntryProjection {
     description: String,
     parameters: Value,
-    serialized_token_estimate: usize,
+    serialized_token_estimate: OnceLock<usize>,
 }
 
 impl ToolEntryProjection {
@@ -23,8 +23,21 @@ impl ToolEntryProjection {
         &self.parameters
     }
 
-    pub(super) fn serialized_token_estimate(&self) -> usize {
-        self.serialized_token_estimate
+    pub(super) fn serialized_token_estimate(&self, name: &str) -> usize {
+        *self.serialized_token_estimate.get_or_init(|| {
+            serde_json::to_string(&SerializedToolSchema {
+                name,
+                description: self.description.as_str(),
+                parameters: &self.parameters,
+            })
+            .map(|serialized| serialized.len() / 4)
+            .unwrap_or(0)
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_serialized_token_estimate(&self) -> bool {
+        self.serialized_token_estimate.get().is_some()
     }
 }
 
@@ -50,15 +63,12 @@ impl ToolProjectionCache {
             let description =
                 compact_tool_description(entry.description.as_str(), documentation_mode, entry.max_description_length);
             let parameters = compact_parameters(entry.parameters.clone(), documentation_mode);
-            let serialized_token_estimate = serde_json::to_string(&SerializedToolSchema {
-                name: entry.public_name.as_str(),
-                description: description.as_str(),
-                parameters: &parameters,
-            })
-            .map(|serialized| serialized.len() / 4)
-            .unwrap_or(0);
 
-            ToolEntryProjection { description, parameters, serialized_token_estimate }
+            ToolEntryProjection {
+                description,
+                parameters,
+                serialized_token_estimate: OnceLock::new(),
+            }
         })
     }
 }

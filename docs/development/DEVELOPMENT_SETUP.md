@@ -77,6 +77,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace
 
 # Docs
+cargo doc --workspace --no-deps
+
+# Docs, including private items (maintainer inspection)
 cargo doc --workspace --no-deps --document-private-items
 ```
 

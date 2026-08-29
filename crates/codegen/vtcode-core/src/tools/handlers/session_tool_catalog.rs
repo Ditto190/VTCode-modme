@@ -452,7 +452,6 @@ impl SessionToolCatalog {
             .iter()
             .filter(|&&index| should_defer_tool_loading(&self.entries[index], &config))
             .count();
-        let estimated_schema_tokens = self.estimate_schema_tokens(&visible_entry_indices, &config);
         let has_mcp_tools = visible_entry_indices
             .iter()
             .any(|&index| matches!(self.entries[index].source, ToolCatalogSource::Mcp));
@@ -465,36 +464,46 @@ impl SessionToolCatalog {
         // threshold, eager exposure is cheaper and simpler -- exactly the gate
         // documented on `DIRECT_TOOL_EXPOSURE_THRESHOLD` and the
         // `deferred_tool_policy_for_runtime` fallback arm.
-        let expose_tools_directly = !config.deferred_tool_policy.is_enabled()
-            || (config.deferred_tool_policy.is_client_local()
-                && !catalog_would_benefit_from_deferral(has_mcp_tools, deferable_tool_count, estimated_schema_tokens));
+        let expose_tools_directly = if !config.deferred_tool_policy.is_enabled() {
+            // The disabled policy needs the estimate for its advisory warning.
+            let estimated_schema_tokens = self.estimate_schema_tokens(&visible_entry_indices, &config);
 
-        // Advisory one-shot: if deferred loading is disabled but this catalog
-        // is large enough that deferral would engage, the user is paying the
-        // full tool-schema tax on every request they could shed by enabling
-        // `tools.client_tool_search`. Warn once per process -- the config
-        // choice is stable across a session and repeating per request is noise.
-        // (The system-prompt-exceeds-budget warning is emitted separately in
-        // `prompts::system::apply_token_budget`; this covers the tool side.)
-        if !config.deferred_tool_policy.is_enabled()
-            && catalog_would_benefit_from_deferral(has_mcp_tools, deferable_tool_count, estimated_schema_tokens)
-        {
-            static DEFERRAL_DISABLED_WARNING: OnceLock<()> = OnceLock::new();
-            if DEFERRAL_DISABLED_WARNING.set(()).is_ok() {
-                tracing::warn!(
-                    available_tools = visible_entry_indices.len(),
-                    deferable_tools = deferable_tool_count,
-                    has_mcp_tools,
-                    estimated_schema_tokens,
-                    threshold = DIRECT_TOOL_EXPOSURE_THRESHOLD,
-                    token_budget = DIRECT_TOOL_EXPOSURE_TOKEN_BUDGET,
-                    "Deferred tool loading is disabled (tools.client_tool_search = false) \
-                     but the catalog is large enough to benefit from it; the full tool \
-                     schema tax is paid on every request. Enable tools.client_tool_search \
-                     to omit MCP/large schemas from the wire payload until needed."
-                );
+            // Advisory one-shot: if deferred loading is disabled but this catalog
+            // is large enough that deferral would engage, the user is paying the
+            // full tool-schema tax on every request they could shed by enabling
+            // `tools.client_tool_search`. Warn once per process -- the config
+            // choice is stable across a session and repeating per request is noise.
+            // (The system-prompt-exceeds-budget warning is emitted separately in
+            // `prompts::system::apply_token_budget`; this covers the tool side.)
+            if catalog_would_benefit_from_deferral(has_mcp_tools, deferable_tool_count, estimated_schema_tokens) {
+                static DEFERRAL_DISABLED_WARNING: OnceLock<()> = OnceLock::new();
+                if DEFERRAL_DISABLED_WARNING.set(()).is_ok() {
+                    tracing::warn!(
+                        available_tools = visible_entry_indices.len(),
+                        deferable_tools = deferable_tool_count,
+                        has_mcp_tools,
+                        estimated_schema_tokens,
+                        threshold = DIRECT_TOOL_EXPOSURE_THRESHOLD,
+                        token_budget = DIRECT_TOOL_EXPOSURE_TOKEN_BUDGET,
+                        "Deferred tool loading is disabled (tools.client_tool_search = false) \
+                         but the catalog is large enough to benefit from it; the full tool \
+                         schema tax is paid on every request. Enable tools.client_tool_search \
+                         to omit MCP/large schemas from the wire payload until needed."
+                    );
+                }
             }
-        }
+
+            true
+        } else if config.deferred_tool_policy.is_client_local() {
+            // Client-local deferral uses the estimate to decide whether omitting
+            // the deferred definitions is worthwhile for this catalog.
+            let estimated_schema_tokens = self.estimate_schema_tokens(&visible_entry_indices, &config);
+            !catalog_would_benefit_from_deferral(has_mcp_tools, deferable_tool_count, estimated_schema_tokens)
+        } else {
+            // Hosted policies always keep their deferred definitions in the wire
+            // payload and therefore never need the schema-token estimate.
+            false
+        };
 
         let mut tools = Vec::with_capacity(visible_entry_indices.len() + if expose_tools_directly { 0 } else { 1 });
         let mut has_deferred_tools = false;
@@ -572,7 +581,7 @@ impl SessionToolCatalog {
                         &self.parameters_for_entry(entry, projection, config),
                     )
                 } else {
-                    projection.serialized_token_estimate()
+                    projection.serialized_token_estimate(entry.public_name.as_str())
                 }
             })
             .sum()
@@ -1749,6 +1758,104 @@ mod tests {
 
             assert_eq!(catalog.model_tools(config.clone()), definitions);
             assert!(definitions.iter().any(|tool| tool.function_name() == tools::EXEC_COMMAND));
+        }
+    }
+
+    #[test]
+    fn hosted_deferral_skips_schema_estimation_without_changing_tool_output() {
+        let registrations = (0..(DIRECT_TOOL_EXPOSURE_THRESHOLD + 4))
+            .map(|index| {
+                ToolRegistration::new(
+                    format!("hosted_catalog_tool_{index}"),
+                    CapabilityLevel::CodeSearch,
+                    false,
+                    |_, _| Box::pin(async { Ok(Value::Null) }),
+                )
+                .with_description(format!("Search the hosted catalog for item {index}."))
+                .with_parameter_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query." }
+                    },
+                    "required": ["query"]
+                }))
+            })
+            .collect();
+        let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+        let config = SessionToolsConfig::full_public(
+            SessionSurface::AgentRunner,
+            CapabilityLevel::CodeSearch,
+            ToolDocumentationMode::Progressive,
+            ToolModelCapabilities::default(),
+        )
+        .with_tool_profile(ToolProfile::AdvancedVtCode)
+        .with_deferred_tool_policy(DeferredToolPolicy::openai_hosted(Vec::new()));
+
+        let expected_schema = catalog.schema_entries(config.clone());
+        let definitions = catalog.model_tools(config.clone());
+
+        assert_eq!(definitions.len(), expected_schema.len() + 1, "hosted search must be added to the catalog");
+        assert!(definitions.iter().any(ToolDefinition::is_tool_search));
+        for schema in expected_schema {
+            let definition = definitions
+                .iter()
+                .find(|tool| tool.function_name() == schema.name)
+                .unwrap_or_else(|| panic!("missing hosted definition for {}", schema.name));
+            let function = definition.function.as_ref().expect("hosted catalog function definition");
+            assert_eq!(function.name, schema.name);
+            assert_eq!(function.description, schema.description);
+            assert_eq!(function.parameters, schema.parameters);
+            assert_eq!(definition.defer_loading, Some(true));
+        }
+
+        let estimates_initialized = catalog.visible_entry_indices(&config).into_iter().any(|index| {
+            let entry = &catalog.entries[index];
+            catalog
+                .projection(index, entry, config.documentation_mode)
+                .has_serialized_token_estimate()
+        });
+        assert!(!estimates_initialized, "hosted policies must not serialize schema-token estimates");
+    }
+
+    #[test]
+    fn eager_and_client_local_policies_still_estimate_schema_tokens_when_needed() {
+        for deferred_tool_policy in [
+            DeferredToolPolicy::default(),
+            DeferredToolPolicy::client_local(Vec::new()),
+        ] {
+            let registrations = (0..(DIRECT_TOOL_EXPOSURE_THRESHOLD + 1))
+                .map(|index| {
+                    ToolRegistration::new(
+                        format!("estimated_catalog_tool_{index}"),
+                        CapabilityLevel::CodeSearch,
+                        false,
+                        |_, _| Box::pin(async { Ok(Value::Null) }),
+                    )
+                    .with_description(format!("Estimate this catalog entry {index}."))
+                    .with_parameter_schema(json!({
+                        "type": "object",
+                        "properties": { "path": { "type": "string" } }
+                    }))
+                })
+                .collect();
+            let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+            let config = SessionToolsConfig::full_public(
+                SessionSurface::AgentRunner,
+                CapabilityLevel::CodeSearch,
+                ToolDocumentationMode::Progressive,
+                ToolModelCapabilities::default(),
+            )
+            .with_tool_profile(ToolProfile::AdvancedVtCode)
+            .with_deferred_tool_policy(deferred_tool_policy);
+
+            let _ = catalog.model_tools(config.clone());
+            let estimates_initialized = catalog.visible_entry_indices(&config).into_iter().any(|index| {
+                let entry = &catalog.entries[index];
+                catalog
+                    .projection(index, entry, config.documentation_mode)
+                    .has_serialized_token_estimate()
+            });
+            assert!(estimates_initialized, "the active policy must retain its schema-token decision");
         }
     }
 

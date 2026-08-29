@@ -163,7 +163,7 @@ run_build() {
 # Check documentation
 run_docs() {
     print_status "Checking documentation..."
-    if cargo doc --workspace --no-deps --document-private-items; then
+    if cargo doc --workspace --no-deps; then
         print_success "Documentation generated successfully!"
         return 0
     else
