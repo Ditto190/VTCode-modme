@@ -215,6 +215,7 @@ impl ConfigManager {
                 .try_into()
                 .context("Failed to deserialize effective global configuration")?;
             Self::validate_restricted_agent_fields(&layer_stack, &origins)?;
+            Self::validate_provider_security_fields(&layer_stack, &origins, &config, false)?;
             config.validate().context("Global configuration failed validation")?;
             config.workspace_lifecycle_hooks =
                 Some(Self::collect_workspace_lifecycle_hooks(&layer_stack, &config.hooks));
@@ -444,6 +445,7 @@ impl ConfigManager {
 
         let t3 = std::time::Instant::now();
         Self::validate_restricted_agent_fields(&layer_stack, &origins)?;
+        Self::validate_provider_security_fields(&layer_stack, &origins, &config, false)?;
 
         config.validate().context("Configuration failed validation")?;
         config.workspace_lifecycle_hooks = Some(Self::collect_workspace_lifecycle_hooks(&layer_stack, &config.hooks));
@@ -634,6 +636,10 @@ impl ConfigManager {
             .try_into()
             .with_context(|| format!("Failed to parse effective config with file: {}", path.display()))?;
         Self::validate_restricted_agent_fields(&layer_stack, &origins)?;
+        // A path supplied explicitly by the user is an opt-in trusted layer,
+        // even though it uses the Workspace source variant for precedence and
+        // compatibility with the existing loader.
+        Self::validate_provider_security_fields(&layer_stack, &origins, &config, true)?;
 
         config
             .validate()
@@ -1021,6 +1027,76 @@ impl ConfigManager {
         }
 
         Ok(())
+    }
+
+    /// Reject provider settings from repository-controlled layers before they
+    /// can reach provider registration or request handling.
+    ///
+    /// Workspace and project files are repository-controlled input. They may
+    /// configure ordinary agent behavior, but must not introduce executable
+    /// authentication commands or redirect provider requests/credentials.
+    /// `load_from_file` is an explicit user opt-in and therefore passes
+    /// `explicit_config_is_trusted = true`.
+    fn validate_provider_security_fields(
+        layer_stack: &ConfigLayerStack,
+        origins: &hashbrown::HashMap<String, ConfigLayerMetadata>,
+        config: &VTCodeConfig,
+        explicit_config_is_trusted: bool,
+    ) -> Result<()> {
+        if explicit_config_is_trusted {
+            return Ok(());
+        }
+
+        if !config.custom_providers.is_empty()
+            && let Some(origin) = origins.get("custom_providers")
+            && let Some(layer) = Self::enabled_layer_for_origin(layer_stack, origin)
+            && Self::is_repository_controlled_source(&layer.source)
+        {
+            bail!(
+                "repository-controlled configuration cannot define `custom_providers` (including `auth.command`); move custom provider settings to system, user, or an explicitly selected config file (source: {})",
+                layer.source.label()
+            );
+        }
+
+        for (path, origin) in origins {
+            if !Self::is_provider_endpoint_or_credential_path(path) {
+                continue;
+            }
+
+            let Some(layer) = Self::enabled_layer_for_origin(layer_stack, origin) else {
+                continue;
+            };
+            if Self::is_repository_controlled_source(&layer.source) {
+                bail!(
+                    "repository-controlled configuration cannot set `{path}`; provider endpoints and credential environment variables must be configured in system, user, or an explicitly selected config file (source: {})",
+                    layer.source.label()
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn enabled_layer_for_origin<'a>(
+        layer_stack: &'a ConfigLayerStack,
+        origin: &ConfigLayerMetadata,
+    ) -> Option<&'a ConfigLayerEntry> {
+        layer_stack
+            .layers()
+            .iter()
+            .find(|layer| layer.is_enabled() && layer.metadata == *origin)
+    }
+
+    fn is_repository_controlled_source(source: &ConfigLayerSource) -> bool {
+        matches!(source, ConfigLayerSource::Project { .. } | ConfigLayerSource::Workspace { .. })
+    }
+
+    fn is_provider_endpoint_or_credential_path(path: &str) -> bool {
+        let mut segments = path.split('.');
+        matches!(segments.next(), Some("provider_overrides"))
+            && segments.next().is_some()
+            && matches!(segments.next(), Some("base_url" | "api_key_env"))
+            && segments.next().is_none()
     }
 
     /// Collect lifecycle hook commands whose effective origin is a

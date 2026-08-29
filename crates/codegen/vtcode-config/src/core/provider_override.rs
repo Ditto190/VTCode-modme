@@ -31,14 +31,16 @@ pub struct ProviderOverrideConfig {
     /// Optional base URL override for the provider endpoint.
     ///
     /// When set, custom models from this override are routed to the
-    /// specified endpoint instead of the provider's default.
+    /// specified endpoint instead of the provider's default. Values from
+    /// repository-controlled workspace/project layers are rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
     /// Optional environment variable name for the API key.
     ///
     /// When set, overrides the provider's default API key environment
-    /// variable for models from this override.
+    /// variable for models from this override. Values from
+    /// repository-controlled workspace/project layers are rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
 }

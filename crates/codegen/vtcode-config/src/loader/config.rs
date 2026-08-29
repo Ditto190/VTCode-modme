@@ -251,7 +251,9 @@ pub struct VTCodeConfig {
 
     /// User-defined OpenAI-compatible provider endpoints.
     /// These entries are editable in `/config` and appear in the model picker
-    /// using each entry's `display_name`.
+    /// using each entry's `display_name`. Non-empty values from
+    /// repository-controlled workspace/project layers are rejected; define
+    /// provider endpoints in trusted system/user or explicitly selected config.
     #[serde(default)]
     pub custom_providers: Vec<CustomProviderConfig>,
 

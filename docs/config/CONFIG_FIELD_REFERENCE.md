@@ -235,17 +235,17 @@ python3 scripts/generate_config_field_reference.py
 | `context.max_context_tokens` | `integer` | no | `160000` | Maximum prompt tokens allowed for the session safety budget. The effective auto-compaction boundary is 90% of the smaller of this value and the provider's hard context capacity. |
 | `context.preserve_recent_turns` | `integer` | no | `10` | Preserve recent turns during context management This field is maintained for compatibility but no longer used for trimming |
 | `context.trim_to_percent` | `integer` | no | `60` | Percentage to trim context to when it gets too large This field is maintained for compatibility but no longer used for trimming |
-| `custom_providers` | `array` | no | `[]` | User-defined OpenAI-compatible provider endpoints. These entries are editable in `/config` and appear in the model picker using each entry's `display_name`. |
+| `custom_providers` | `array` | no | `[]` | User-defined OpenAI-compatible provider endpoints. These entries are editable in `/config` and appear in the model picker using each entry's `display_name`. Non-empty values from repository-controlled workspace/project layers are rejected; define provider endpoints in trusted system/user or explicitly selected config. |
 | `custom_providers[].api_format` | `string` | no | `-` | Typed API format for the provider's default profile. |
 | `custom_providers[].api_key_env` | `string` | no | `""` | Environment variable name that holds the API key for this endpoint (e.g., "MYCORP_API_KEY"). |
 | `custom_providers[].auth` | `CustomProviderCommandAuthConfig \| null` | no | `-` | Optional command-backed bearer token configuration. |
 | `custom_providers[].auth.args` | `array` | no | `[]` | Optional command arguments. |
 | `custom_providers[].auth.args[]` | `string` | no | `-` | - |
-| `custom_providers[].auth.command` | `string` | yes | `-` | Command to execute. Bare names are resolved via `PATH`. |
+| `custom_providers[].auth.command` | `string` | yes | `-` | Command to execute. Bare names are resolved via `PATH`. Command-backed auth is accepted only from trusted system/user or explicitly selected configuration; repository-controlled workspace/project values are rejected. |
 | `custom_providers[].auth.cwd` | `null \| string` | no | `null` | Optional working directory for the token command. |
 | `custom_providers[].auth.refresh_interval_ms` | `integer` | no | `300000` | Maximum age for the cached token before rerunning the command. |
 | `custom_providers[].auth.timeout_ms` | `integer` | no | `5000` | Maximum time to wait for the command to complete successfully. |
-| `custom_providers[].base_url` | `string` | yes | `-` | Base URL of the OpenAI-compatible API endpoint (e.g., `<https://llm.corp.example/v1>`). |
+| `custom_providers[].base_url` | `string` | yes | `-` | Base URL of the OpenAI-compatible API endpoint (e.g., `<https://llm.corp.example/v1>`). Non-empty custom providers from repository-controlled workspace/project layers are rejected. |
 | `custom_providers[].context_window` | `integer \| null` | no | `-` | Optional context window size in tokens for models served by this endpoint. When omitted, the OpenAI-compatible provider uses its default context window size. |
 | `custom_providers[].display_name` | `string` | yes | `-` | Human-friendly label shown in the TUI header, footer, and model picker (e.g., "MyCorporateName"). |
 | `custom_providers[].frequency_penalty` | `null \| number` | no | `-` | Optional frequency penalty default (-2.0-2.0). |
@@ -675,8 +675,8 @@ python3 scripts/generate_config_field_reference.py
 | `provider.openai.tool_search.enabled` | `boolean` | no | `true` | Enable hosted tool search for OpenAI Responses-compatible models. |
 | `provider.openai.websocket_mode` | `boolean` | no | `false` | Enable Responses API WebSocket transport for non-streaming requests on native OpenAI and OpenAI-compatible Responses endpoints. This is an opt-in path designed for long-running, tool-heavy workflows. |
 | `provider_overrides` | `object` | no | `{}` | Built-in provider overrides for model lists and endpoint configuration. Maps provider key (e.g., "opencode-zen", "opencode-go") to override config that extends the provider's hardcoded model list with custom models, and optionally overrides the base URL or API key env var. |
-| `provider_overrides.*.api_key_env` | `null \| string` | no | `-` | Optional environment variable name for the API key. When set, overrides the provider's default API key environment variable for models from this override. |
-| `provider_overrides.*.base_url` | `null \| string` | no | `-` | Optional base URL override for the provider endpoint. When set, custom models from this override are routed to the specified endpoint instead of the provider's default. |
+| `provider_overrides.*.api_key_env` | `null \| string` | no | `-` | Optional environment variable name for the API key. When set, overrides the provider's default API key environment variable for models from this override. Values from repository-controlled workspace/project layers are rejected. |
+| `provider_overrides.*.base_url` | `null \| string` | no | `-` | Optional base URL override for the provider endpoint. When set, custom models from this override are routed to the specified endpoint instead of the provider's default. Values from repository-controlled workspace/project layers are rejected. |
 | `provider_overrides.*.models` | `array` | no | `[]` | Additional model identifiers to offer for this built-in provider. These models are appended to the provider's hardcoded model list and appear in the `/model` picker alongside built-in entries. |
 | `provider_overrides.*.models[]` | `string` | no | `-` | - |
 | `providers_whitelist` | `array` | no | `[]` | Restrict which providers may be used. When non-empty, only providers listed here are visible in the model picker, selectable at first-run, and instantiable at runtime. Empty (the default) means all built-in and custom providers are available. |

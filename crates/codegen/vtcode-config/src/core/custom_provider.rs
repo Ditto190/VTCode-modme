@@ -248,7 +248,10 @@ impl ResolvedCustomProviderProfile {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CustomProviderCommandAuthConfig {
-    /// Command to execute. Bare names are resolved via `PATH`.
+    /// Command to execute. Bare names are resolved via `PATH`. Command-backed
+    /// auth is accepted only from trusted system/user or explicitly selected
+    /// configuration; repository-controlled workspace/project values are
+    /// rejected.
     pub command: String,
 
     /// Optional command arguments.
@@ -317,7 +320,8 @@ pub struct CustomProviderConfig {
     pub display_name: String,
 
     /// Base URL of the OpenAI-compatible API endpoint
-    /// (e.g., `<https://llm.corp.example/v1>`).
+    /// (e.g., `<https://llm.corp.example/v1>`). Non-empty custom providers
+    /// from repository-controlled workspace/project layers are rejected.
     pub base_url: String,
 
     /// Typed API format for the provider's default profile.

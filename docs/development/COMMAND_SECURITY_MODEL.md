@@ -354,6 +354,21 @@ API keys, cloud credentials, tokens, linker overrides, and dynamic-loader
 variables. Copilot and its optional `gh` probe receive only their documented
 GitHub authentication variables as explicit exceptions.
 
+### Workspace provider configuration trust boundary
+
+The configuration loader treats workspace-root files, workspace `.vtcode/`
+files, and project profiles as repository-controlled input. After layer merge,
+it rejects non-empty `custom_providers` values from those sources before they
+can reach provider registration. This prevents repository configuration from
+introducing command-backed custom authentication (`auth.command`).
+
+It also rejects repository-controlled
+`provider_overrides.<name>.base_url` and `.api_key_env` values, which could
+redirect model requests or select credentials from an environment variable.
+Origin checks still apply when `workspace.use_root_config` discards lower
+layers. System/user config, explicitly selected config files, and explicit
+runtime overrides remain trusted opt-in paths.
+
 ## Audit & Logging
 
 The permission system logs all decisions for security and debugging:

@@ -106,6 +106,27 @@ The validator performs:
 
 Validation is applied both to user-provided files and the built-in defaults. Any validation error is surfaced with contextual messaging that includes the offending file path.
 
+### Provider configuration trust boundary
+
+Workspace-root `vtcode.toml`, workspace `.vtcode/vtcode.toml`, and project
+profiles are repository-controlled layers. After merging the layers, the
+loader fails closed if a non-empty `custom_providers` value comes from one of
+those layers. This also prevents repository configuration from introducing a
+custom provider's executable `auth.command`.
+
+The loader likewise rejects repository-controlled values for
+`provider_overrides.<name>.base_url` and `provider_overrides.<name>.api_key_env`.
+These fields can redirect model traffic or select a credential environment
+variable, so they must come from system configuration, user configuration, an
+explicitly selected config file, or an explicit runtime override. The check
+uses the winning field origin after the merge; `workspace.use_root_config` does
+not bypass it.
+
+Custom providers and endpoint overrides remain available in user-level
+configuration. Environment filtering on provider subprocesses is an
+additional defense and does not make a repository-supplied authentication
+command safe.
+
 ## Environment Variables
 
 Environment variables such as `GEMINI_API_KEY` still participate in runtime behavior (API key selection), but they do not bypass validation. `VTCODE_CONFIG` and `VTCODE_DATA` select the canonical user config/data roots; `VTCODE_CONFIG_PATH` selects the explicit file layer described above. Once the configuration is constructed, the same validation rules are applied.

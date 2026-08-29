@@ -224,6 +224,12 @@ vtcode --codex-experimental
 
 Use `custom_providers` for named OpenAI-compatible endpoints that are not one of VT Code's built-in providers. Each entry has a stable `name`, a human-friendly `display_name`, a `base_url`, an optional `api_key_env`, a default `model`, and an optional `context_window` in tokens. When omitted, the provider uses the default context window. This describes the provider capability; the separate `context.max_context_tokens` setting can still impose a lower session budget. Secure credentials are scoped by `(name, api_key_env)`; they are not shared with another configured endpoint that uses the same API-key environment variable.
 
+Custom provider definitions are trusted configuration. VT Code rejects a
+non-empty `custom_providers` value when its winning value comes from a
+repository-controlled workspace or project layer, including command-backed
+`auth.command` entries. Put custom providers in the system or user config, or
+select a config file explicitly with `--config path/to/file.toml`.
+
 New provider-level fields
 
 ```toml
@@ -318,6 +324,12 @@ api_key_env = "MY_CUSTOM_KEY"                        # optional
 Each `[providers.<name>]` section supports. Its `api_key_env` override also
 becomes the credential identity used by model availability, the picker, and the
 runtime:
+
+For the same trust-boundary reason, endpoint and credential overrides are
+accepted only from system/user configuration, an explicitly selected config
+file, or explicit runtime flags. A repository-controlled workspace or project
+file cannot set `base_url` or `api_key_env`; model-list-only overrides remain
+available there.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|

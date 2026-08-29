@@ -78,6 +78,11 @@ Complete guide to VT Code's security documentation.
 - **Documentation**: [Security Model - Workspace Lifecycle Hook Approval](./SECURITY_MODEL.md#layer-7-workspace-lifecycle-hook-approval), [Security Guide - Workspace Lifecycle Hook Approval](../guides/security.md#workspace-lifecycle-hook-approval)
 - **Workspace-controlled hooks** (`vtcode.toml`, `.vtcode/`, project profiles, agent-spec files): gate the whole engine — no lifecycle hook runs until the exact command set is approved for the workspace; digest-bound approval revalidated before every spawn, after config reload, and across primary-agent switches
 
+### Layer 8: Workspace Provider Configuration Trust Boundary
+- **Location**: `crates/codegen/vtcode-config/src/loader/manager.rs`
+- **Documentation**: [Security Model - Workspace Provider Configuration Trust Boundary](./SECURITY_MODEL.md#layer-8-workspace-provider-configuration-trust-boundary), [Security Guide - Workspace Provider Configuration Trust Boundary](../guides/security.md#workspace-provider-configuration-trust-boundary)
+- **Repository-controlled provider settings**: non-empty custom providers, command-backed auth, and provider endpoint/credential overrides are rejected before provider registration; explicit user/system configuration remains supported
+
 ## Configuration
 
 ### Tool Policy

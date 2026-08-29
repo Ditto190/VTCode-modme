@@ -173,6 +173,23 @@ permissions are never treated as blanket approval for executable workspace
 configuration, because repository-controlled content can change after trust is
 granted.
 
+### Layer 8: Workspace Provider Configuration Trust Boundary
+
+The configuration loader records the winning origin of merged fields and treats
+workspace-root files, workspace `.vtcode/` files, and project profiles as
+repository-controlled. It fails closed before provider validation and
+registration when a non-empty `custom_providers` value comes from those layers.
+That prevents a repository from introducing a custom provider's executable
+`auth.command`.
+
+The same check rejects repository-controlled
+`provider_overrides.<name>.base_url` and `.api_key_env` values, which could
+redirect requests or select a credential environment variable. The restriction
+still applies when `workspace.use_root_config` discards lower layers. System,
+user, explicitly selected config files, and explicit runtime overrides are
+trusted opt-in sources. Provider subprocess environment filtering remains an
+additional defense, not an approval mechanism for repository configuration.
+
 ## Threat Model
 
 ### In Scope
