@@ -184,6 +184,8 @@ impl Updater {
         }
 
         let (asset, archive_kind) = github::select_archive_asset(&release.assets, target)?;
+        let checksum_asset = download::checksum_asset(&release.assets, &asset.name)
+            .with_context(|| format!("no checksum metadata was published for update archive {}", asset.name))?;
         let binary_name = install_source::binary_name_for_target(target);
         let temporary_directory = tempfile::tempdir().context("Failed to create update temporary directory")?;
         // Keep remote asset names out of filesystem paths; GitHub metadata is
@@ -204,28 +206,17 @@ impl Updater {
             .context("Failed to download update archive")?;
         }
 
-        if let Some(checksum_asset) = download::checksum_asset(&release.assets, &asset.name) {
-            on_progress(UpdateProgress::VerifyingChecksum);
-            match download::download_checksum(
-                checksum_asset,
-                std::time::Duration::from_secs(self.config.download_timeout_secs.max(1)),
-            )
-            .await
-            {
-                Ok(metadata) => match download::parse_checksum_metadata(&metadata, &asset.name) {
-                    Some(expected) => download::verify_file_checksum(&archive_path, &expected)
-                        .context("Downloaded update archive failed checksum verification")?,
-                    None => {
-                        tracing::warn!(asset = %checksum_asset.name, "Checksum metadata did not contain the selected archive; continuing without verification")
-                    }
-                },
-                Err(error) => {
-                    tracing::warn!(%error, asset = %checksum_asset.name, "Checksum metadata could not be downloaded; continuing without verification")
-                }
-            }
-        } else {
-            tracing::warn!(asset = %asset.name, "No checksum metadata was published for the selected update archive; continuing without checksum verification");
-        }
+        on_progress(UpdateProgress::VerifyingChecksum);
+        let metadata = download::download_checksum(
+            checksum_asset,
+            std::time::Duration::from_secs(self.config.download_timeout_secs.max(1)),
+        )
+        .await
+        .with_context(|| format!("failed to download checksum metadata for update archive {}", asset.name))?;
+        let expected = download::parse_checksum_metadata(&metadata, &asset.name)
+            .with_context(|| format!("checksum metadata did not contain update archive {}", asset.name))?;
+        download::verify_file_checksum(&archive_path, &expected)
+            .context("downloaded update archive failed checksum verification")?;
 
         on_progress(UpdateProgress::Extracting);
         let extraction_directory = temporary_directory.path().join("extracted");

@@ -18,7 +18,9 @@ pub(super) async fn download_asset<F>(
 where
     F: FnMut(u64, Option<u64>) + Send,
 {
-    let response = response_for_url(&asset.download_url, timeout).await?;
+    let response = response_for_url(&asset.download_url, timeout)
+        .await
+        .with_context(|| format!("failed to download update asset {}", asset.name))?;
     let response = response
         .error_for_status()
         .with_context(|| format!("GitHub asset download returned an error for {}", asset.name))?;
@@ -61,7 +63,9 @@ where
 }
 
 pub(super) async fn download_checksum(asset: &ReleaseAsset, timeout: Duration) -> Result<String> {
-    let response = response_for_url(&asset.download_url, timeout).await?;
+    let response = response_for_url(&asset.download_url, timeout)
+        .await
+        .with_context(|| format!("failed to download checksum asset {}", asset.name))?;
     response
         .error_for_status()
         .with_context(|| format!("checksum download returned an error for {}", asset.name))?
@@ -71,27 +75,15 @@ pub(super) async fn download_checksum(asset: &ReleaseAsset, timeout: Duration) -
 }
 
 async fn response_for_url(url: &str, timeout: Duration) -> Result<reqwest::Response> {
-    let response = github::github_client()?
+    github::validate_asset_download_url(url)?;
+
+    github::unauthenticated_client()?
         .get(url)
         .timeout(timeout)
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .send()
         .await
-        .with_context(|| format!("failed to download update asset from {url}"));
-
-    match response {
-        Ok(response) if response.status() == reqwest::StatusCode::UNAUTHORIZED && github::github_token().is_some() => {
-            github::unauthenticated_client()?
-                .get(url)
-                .timeout(timeout)
-                .header(reqwest::header::ACCEPT, "application/octet-stream")
-                .send()
-                .await
-                .with_context(|| format!("failed to download update asset from {url}"))
-        }
-        Ok(response) => Ok(response),
-        Err(error) => Err(error),
-    }
+        .with_context(|| format!("failed to download update asset from {url}"))
 }
 
 pub(super) fn checksum_asset<'a>(assets: &'a [ReleaseAsset], archive_name: &str) -> Option<&'a ReleaseAsset> {
@@ -267,7 +259,7 @@ b9362df9124a6180c5cf0787d6159ff525e7caee6ceb51a0987fb827205df91e  vtcode-0.141.7
     }
 
     #[test]
-    fn missing_checksum_metadata_is_optional() {
+    fn parse_checksum_metadata_returns_none_for_missing_archive() {
         assert!(parse_checksum_metadata("signature only", "vtcode.tar.gz").is_none());
     }
 
@@ -344,22 +336,10 @@ b9362df9124a6180c5cf0787d6159ff525e7caee6ceb51a0987fb827205df91e  vtcode-0.141.7
     }
 
     #[tokio::test]
-    async fn download_reports_http_failures_with_asset_context() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
-        let address = listener.local_addr().expect("address");
-        tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("connection");
-            let mut request = [0_u8; 256];
-            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await;
-            stream
-                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                .await
-                .expect("response");
-        });
-
+    async fn download_rejects_untrusted_asset_url_with_asset_context() {
         let asset = ReleaseAsset {
             name: "vtcode.tar.gz".to_string(),
-            download_url: format!("http://{address}/missing"),
+            download_url: "https://example.com/vtcode.tar.gz".to_string(),
         };
         let temp = tempfile::tempdir().expect("temp");
         let error = download_asset(
@@ -370,25 +350,18 @@ b9362df9124a6180c5cf0787d6159ff525e7caee6ceb51a0987fb827205df91e  vtcode-0.141.7
             None::<&mut fn(u64, Option<u64>)>,
         )
         .await
-        .expect_err("http error");
+        .expect_err("untrusted URL");
 
         assert!(error.to_string().contains("vtcode.tar.gz"));
     }
 
     #[tokio::test]
-    async fn download_reports_timeout_with_url_context() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
-        let address = listener.local_addr().expect("address");
-        tokio::spawn(async move {
-            let _ = listener.accept().await;
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        });
-
-        let error = response_for_url(&format!("http://{address}/slow"), Duration::from_millis(20))
+    async fn response_rejects_non_github_asset_url_before_network_request() {
+        let error = response_for_url("http://127.0.0.1:1/slow", Duration::from_millis(20))
             .await
-            .expect_err("timeout");
+            .expect_err("untrusted URL");
 
-        assert!(error.to_string().contains("failed to download update asset"));
+        assert!(error.to_string().contains("must use HTTPS"));
     }
 
     #[test]

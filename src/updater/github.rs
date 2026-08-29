@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use semver::Version;
 use serde::Deserialize;
 use std::time::Duration;
+use url::Url;
 use vtcode_config::update::ReleaseChannel;
 
 use super::Updater;
@@ -9,6 +10,8 @@ use super::archive::ArchiveKind;
 use super::types::{UpdateInfo, VersionInfo};
 
 const REPO_SLUG: &str = "vinhnx/vtcode";
+const GITHUB_HOST: &str = "github.com";
+const RELEASE_ASSET_PATH_PREFIX: &str = "/vinhnx/vtcode/releases/download/";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub(super) struct ReleaseAsset {
@@ -42,6 +45,43 @@ pub(super) fn select_archive_asset<'a>(
         [] => bail!("no compatible archive found for target {target}"),
         _ => bail!("multiple compatible archives found for target {target}"),
     }
+}
+
+/// Validate the URL supplied by GitHub for a release asset before making a
+/// request. Release metadata is remote input, so downloads must remain on the
+/// expected GitHub release endpoint.
+pub(super) fn validate_asset_download_url(raw_url: &str) -> Result<()> {
+    let url = Url::parse(raw_url).context("invalid release asset URL")?;
+
+    if url.scheme() != "https" {
+        bail!("release asset URL must use HTTPS");
+    }
+    if url.host_str().is_none_or(|host| !host.eq_ignore_ascii_case(GITHUB_HOST)) {
+        bail!("release asset URL must use github.com");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("release asset URL must not include credentials");
+    }
+    if url.port().is_some_and(|port| port != 443) {
+        bail!("release asset URL must use the default HTTPS port");
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        bail!("release asset URL must not include a query or fragment");
+    }
+
+    let path = url.path().to_ascii_lowercase();
+    let Some(download_path) = path.strip_prefix(RELEASE_ASSET_PATH_PREFIX) else {
+        bail!("release asset URL is outside the VT Code release path");
+    };
+
+    let mut path_segments = download_path.split('/');
+    let has_release_tag = path_segments.next().is_some_and(|segment| !segment.is_empty());
+    let has_asset_name = path_segments.next().is_some_and(|segment| !segment.is_empty());
+    if !has_release_tag || !has_asset_name || path_segments.next().is_some() {
+        bail!("release asset URL does not identify one release asset");
+    }
+
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -97,8 +137,9 @@ pub(super) fn github_token() -> Option<String> {
         .filter(|token| !token.trim().is_empty())
 }
 
-/// Strip the `Authorization` header and rebuild the client for unauthenticated
-/// requests.  Used as a fallback when a configured token is rejected.
+/// Build a client without credentials for public asset downloads and API
+/// fallback requests. Asset URLs come from remote release metadata and must
+/// never receive the GitHub API token.
 pub(super) fn unauthenticated_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent("vtcode-updater")
@@ -282,6 +323,29 @@ mod tests {
 
         assert_eq!(selected.name, "vtcode-1.0.0-aarch64-apple-darwin.tar.gz");
         assert_eq!(kind, ArchiveKind::TarGz);
+    }
+
+    #[test]
+    fn accepts_github_release_asset_url() {
+        let url =
+            "https://github.com/vinhnx/VTCode/releases/download/0.150.0/vtcode-0.150.0-aarch64-apple-darwin.tar.gz";
+
+        assert!(validate_asset_download_url(url).is_ok());
+    }
+
+    #[test]
+    fn rejects_release_asset_urls_outside_expected_github_endpoint() {
+        let urls = [
+            "http://github.com/vinhnx/VTCode/releases/download/0.150.0/vtcode.tar.gz",
+            "https://example.com/vinhnx/VTCode/releases/download/0.150.0/vtcode.tar.gz",
+            "https://github.com/other/repo/releases/download/0.150.0/vtcode.tar.gz",
+            "https://github.com/vinhnx/VTCode/releases/download/0.150.0/vtcode.tar.gz?token=secret",
+            "https://github.com:444/vinhnx/VTCode/releases/download/0.150.0/vtcode.tar.gz",
+        ];
+
+        for url in urls {
+            assert!(validate_asset_download_url(url).is_err(), "accepted unsafe URL: {url}");
+        }
     }
 
     #[test]
