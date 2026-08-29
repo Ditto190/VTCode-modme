@@ -21,6 +21,9 @@ pub enum A2aCommands {
     /// Examples:
     ///   vtcode a2a serve --port 8080
     ///   vtcode a2a serve --host 0.0.0.0 --port 8080
+    ///
+    /// Set VTCODE_A2A_TOKEN to use a managed token; otherwise one is generated
+    /// and printed when the server starts.
     Serve {
         /// Host to bind the server to
         #[arg(long, default_value = "127.0.0.1")]

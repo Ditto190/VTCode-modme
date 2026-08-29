@@ -11,6 +11,7 @@ The A2A Protocol enables:
 -   **Real-time Streaming**: Via Server-Sent Events (SSE)
 -   **Rich Content Types**: Text, file, and structured data parts
 -   **Multi-agent workflows**: Agents can discover and communicate with each other
+-   **Authenticated endpoints**: RPC and streaming requests use bearer tokens
 
 ## Architecture
 
@@ -59,7 +60,8 @@ VT Code's A2A support is organized into the `vtcode-core::a2a` module with the f
     -   `GET /.well-known/agent-card.json` - Agent discovery
     -   `POST /a2a` - JSON-RPC RPC requests
     -   `POST /a2a/stream` - Streaming with SSE (placeholder)
--   CORS support for cross-origin requests
+-   Restrictive CORS defaults; browser origins are not trusted by default
+-   Bearer authentication for RPC and streaming endpoints
 -   Type-safe error responses with appropriate HTTP status codes
 
 ## Usage
@@ -67,7 +69,7 @@ VT Code's A2A support is organized into the `vtcode-core::a2a` module with the f
 ### Basic Setup
 
 ```rust
-use vtcode_core::a2a::{TaskManager, AgentCard};
+use vtcode_core::a2a::{AgentCard, TaskManager};
 
 // Create a task manager
 let manager = TaskManager::new();
@@ -99,12 +101,17 @@ manager.add_artifact(&task.id, artifact).await?;
 ### Running the HTTP Server
 
 ```rust
+use vtcode_core::a2a::{AgentCard, TaskManager};
 use vtcode_core::a2a::server::{A2aServerState, run};
 use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
-    let state = A2aServerState::vtcode_default("http://localhost:8080");
+    let state = A2aServerState::new(
+        TaskManager::new(),
+        AgentCard::vtcode_default("http://localhost:8080"),
+    );
+    println!("Use this bearer token for A2A requests: {}", state.auth_token());
     let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
     run(state, addr).await.unwrap();
 }
@@ -115,6 +122,20 @@ Build with the `a2a-server` feature:
 ```bash
 cargo build --features a2a-server
 ```
+
+### Server security
+
+`GET /.well-known/agent-card.json` remains public so clients can discover the
+agent. `POST /a2a` and `POST /a2a/stream` require the bearer token exposed by
+`A2aServerState::auth_token()` (or supplied to
+`A2aServerState::new_with_auth_token`). The `vtcode a2a serve` command prints
+the generated token. Set it as `VTCODE_A2A_TOKEN` when using the CLI client
+commands; this keeps the token out of process arguments.
+
+The server disables cross-origin browser access by default. Webhook URLs must
+use HTTPS, or HTTP to exact `localhost`/loopback hosts, and webhook delivery
+does not follow redirects. Task listings omit conversation history unless an
+explicit history length is requested.
 
 ## JSON-RPC API Reference
 
@@ -249,7 +270,7 @@ Common error codes:
 -   Agent discovery endpoint
 -   JSON-RPC request handlers
 -   Error response handling
--   CORS support
+-   Restrictive CORS and bearer authentication
 -   Basic SSE placeholder
 
 ### Phase 3: Client & Advanced Features
@@ -257,7 +278,7 @@ Common error codes:
 -   A2A client for agent-to-agent communication
 -   Full SSE streaming implementation
 -   Push notification support
--   Authentication handling
+-   Authenticated A2A client requests
 
 ## Configuration
 
@@ -276,8 +297,8 @@ max_tasks = 1000
 Run A2A tests:
 
 ```bash
-cargo test --package vtcode-core a2a::
-cargo test --package vtcode-core --features a2a-server
+cargo nextest run -p vtcode-a2a --features a2a-server
+cargo nextest run -p vtcode-core --features a2a-server
 ```
 
 ## References

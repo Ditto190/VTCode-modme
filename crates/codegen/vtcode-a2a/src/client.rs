@@ -8,8 +8,9 @@ use std::sync::{
 
 use anyhow::Context;
 use futures::{Stream, StreamExt};
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder};
 use serde_json::Value;
+use std::fmt;
 
 use crate::agent_card::AgentCard;
 use crate::errors::{A2aError, A2aErrorCode, A2aResult};
@@ -21,17 +22,31 @@ use crate::rpc::{
 use crate::types::Task;
 
 /// HTTP client for interacting with A2A agents
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct A2aClient {
     base_url: String,
     http: Client,
     request_id: Arc<AtomicU64>,
+    auth_token: Option<String>,
+}
+
+impl fmt::Debug for A2aClient {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("A2aClient")
+            .field("base_url", &self.base_url)
+            .field("http", &self.http)
+            .field("request_id", &self.request_id)
+            .field("auth_token", &self.auth_token.as_ref().map(|_| "REDACTED"))
+            .finish()
+    }
 }
 
 impl A2aClient {
     /// Create a new client with default reqwest settings
     pub fn new(base_url: impl Into<String>) -> A2aResult<Self> {
         let http = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("Failed to build HTTP client")
             .map_err(|e| A2aError::Internal(e.to_string()))?;
@@ -40,7 +55,14 @@ impl A2aClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             http,
             request_id: Arc::new(AtomicU64::new(1)),
+            auth_token: None,
         })
+    }
+
+    /// Attach a bearer token to RPC and streaming requests.
+    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.auth_token = Some(token.into());
+        self
     }
 
     fn next_id(&self) -> String {
@@ -58,6 +80,13 @@ impl A2aClient {
 
     fn agent_card_url(&self) -> String {
         format!("{}/.well-known/agent-card.json", self.base_url)
+    }
+
+    fn with_authentication(&self, request: RequestBuilder) -> RequestBuilder {
+        match self.auth_token.as_deref() {
+            Some(token) => request.bearer_auth(token),
+            None => request,
+        }
     }
 
     /// Fetch the remote agent card
@@ -103,11 +132,13 @@ impl A2aClient {
         let req =
             JsonRpcRequest::with_string_id(METHOD_MESSAGE_STREAM, Some(serde_json::to_value(&params)?), self.next_id());
 
-        let response = self
+        let request = self
             .http
             .post(self.stream_url())
             .header("accept", "text/event-stream")
-            .json(&req)
+            .json(&req);
+        let response = self
+            .with_authentication(request)
             .send()
             .await
             .context("Failed to open streaming request")
@@ -205,10 +236,9 @@ impl A2aClient {
     async fn call_rpc(&self, method: &str, params: Option<Value>) -> A2aResult<Value> {
         let request = JsonRpcRequest::with_string_id(method, params, self.next_id());
 
+        let request = self.http.post(self.rpc_url()).json(&request);
         let resp = self
-            .http
-            .post(self.rpc_url())
-            .json(&request)
+            .with_authentication(request)
             .send()
             .await
             .context("RPC request failed")

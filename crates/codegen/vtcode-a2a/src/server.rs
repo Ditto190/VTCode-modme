@@ -19,8 +19,12 @@ use crate::task_manager::TaskManager;
 use crate::types::TaskState;
 use axum::{
     Json, Router,
-    extract::State,
-    http::StatusCode,
+    extract::{Request, State},
+    http::{
+        HeaderMap, HeaderValue, Method, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE, WWW_AUTHENTICATE},
+    },
+    middleware::{self, Next},
     response::{
         IntoResponse, Response,
         sse::{Event, Sse},
@@ -29,11 +33,56 @@ use axum::{
 };
 use serde_json::{Value, json};
 use std::convert::Infallible;
+use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
+use uuid::Uuid;
+
+/// Bearer token used to protect the A2A RPC and streaming endpoints.
+#[derive(Clone)]
+struct AuthToken(Arc<str>);
+
+impl fmt::Debug for AuthToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AuthToken(REDACTED)")
+    }
+}
+
+impl AuthToken {
+    fn generated() -> Self {
+        Self(Arc::from(Uuid::new_v4().to_string()))
+    }
+
+    fn from_value(value: String) -> anyhow::Result<Self> {
+        if value.is_empty() || !value.is_ascii() || value.chars().any(char::is_whitespace) {
+            anyhow::bail!("A2A authentication token must be non-empty ASCII text without whitespace");
+        }
+
+        Ok(Self(Arc::from(value)))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn matches(&self, presented: &str) -> bool {
+        let expected = self.0.as_bytes();
+        let presented = presented.as_bytes();
+        let mut difference = expected.len() ^ presented.len();
+        let comparison_len = expected.len().max(presented.len());
+
+        for index in 0..comparison_len {
+            let expected_byte = expected.get(index).copied().unwrap_or_default();
+            let presented_byte = presented.get(index).copied().unwrap_or_default();
+            difference |= usize::from(expected_byte ^ presented_byte);
+        }
+
+        difference == 0
+    }
+}
 
 // ============================================================================
 // Server State
@@ -50,18 +99,40 @@ pub struct A2aServerState {
     event_tx: Arc<tokio::sync::broadcast::Sender<StreamingEvent>>,
     /// Webhook notifier for push notifications
     webhook_notifier: Arc<WebhookNotifier>,
+    /// Bearer token required by the RPC and streaming endpoints
+    auth_token: AuthToken,
 }
 
 impl A2aServerState {
     /// Create a new server state
     pub fn new(task_manager: TaskManager, agent_card: AgentCard) -> Self {
+        Self::from_auth_token(task_manager, agent_card, AuthToken::generated())
+    }
+
+    /// Create a new server state with a caller-supplied bearer token.
+    pub fn new_with_auth_token(
+        task_manager: TaskManager,
+        agent_card: AgentCard,
+        auth_token: impl Into<String>,
+    ) -> anyhow::Result<Self> {
+        let auth_token = AuthToken::from_value(auth_token.into())?;
+        Ok(Self::from_auth_token(task_manager, agent_card, auth_token))
+    }
+
+    fn from_auth_token(task_manager: TaskManager, agent_card: AgentCard, auth_token: AuthToken) -> Self {
         let (event_tx, _) = tokio::sync::broadcast::channel(100);
         Self {
             task_manager: Arc::new(task_manager),
-            agent_card: Arc::new(agent_card),
+            agent_card: Arc::new(agent_card.with_bearer_auth()),
             event_tx: Arc::new(event_tx),
             webhook_notifier: Arc::new(WebhookNotifier::new()),
+            auth_token,
         }
+    }
+
+    /// Return the bearer token clients must use for protected endpoints.
+    pub fn auth_token(&self) -> &str {
+        self.auth_token.as_str()
     }
 
     /// Create a server state with default settings for VT Code
@@ -76,12 +147,59 @@ impl A2aServerState {
 
 /// Create the A2A HTTP router
 pub fn create_router(state: A2aServerState) -> Router {
-    Router::new()
-        .route("/.well-known/agent-card.json", axum::routing::get(get_agent_card))
+    let protected_routes = Router::new()
         .route("/a2a", post(handle_rpc))
         .route("/a2a/stream", post(handle_stream))
+        .layer(middleware::from_fn_with_state(state.clone(), require_bearer_auth));
+
+    Router::new()
+        .route("/.well-known/agent-card.json", axum::routing::get(get_agent_card))
+        .merge(protected_routes)
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        // Cross-origin access is disabled by default. A deployment that needs
+        // browser clients must add an explicit origin allowlist at its edge.
+        .layer(
+            CorsLayer::new()
+                .allow_methods([Method::POST])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
+        )
+}
+
+async fn require_bearer_auth(State(state): State<A2aServerState>, request: Request, next: Next) -> Response {
+    if has_valid_bearer_auth(&state, request.headers()) {
+        next.run(request).await
+    } else {
+        let mut response = (
+            StatusCode::UNAUTHORIZED,
+            Json(JsonRpcResponse::error(JsonRpcError::new(-32600, "Authentication required"), Value::Null)),
+        )
+            .into_response();
+        drop(
+            response
+                .headers_mut()
+                .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer")),
+        );
+        response
+    }
+}
+
+fn has_valid_bearer_auth(state: &A2aServerState, headers: &HeaderMap) -> bool {
+    if headers.get_all(AUTHORIZATION).iter().count() != 1 {
+        return false;
+    }
+
+    let Some(value) = headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+
+    let Some((scheme, token)) = value.split_once(' ') else {
+        return false;
+    };
+
+    scheme.eq_ignore_ascii_case("Bearer")
+        && !token.is_empty()
+        && !token.chars().any(char::is_whitespace)
+        && state.auth_token.matches(token)
 }
 
 // ============================================================================
@@ -353,14 +471,21 @@ async fn handle_tasks_get(state: &A2aServerState, params: Option<Value>, _id: Va
     let params: TaskQueryParams = serde_json::from_value(params.unwrap_or_default())
         .map_err(|_e| A2aError::rpc(A2aErrorCode::InvalidParams, "Invalid tasks/get params"))?;
 
-    let task = state.task_manager.get_task_or_error(&params.id).await?;
+    let task = state
+        .task_manager
+        .get_task_or_error_with_history(&params.id, params.history_length.unwrap_or_default() as usize)
+        .await?;
 
     Ok(serde_json::to_value(task)?)
 }
 
 /// Handle tasks/list RPC method
 async fn handle_tasks_list(state: &A2aServerState, params: Option<Value>, _id: Value) -> A2aResult<Value> {
-    let params: ListTasksParams = serde_json::from_value(params.unwrap_or_default()).unwrap_or_default();
+    let params = match params {
+        Some(params) => serde_json::from_value(params)
+            .map_err(|_e| A2aError::rpc(A2aErrorCode::InvalidParams, "Invalid tasks/list params"))?,
+        None => ListTasksParams::default(),
+    };
 
     let result = state.task_manager.list_tasks(params).await;
 
@@ -410,7 +535,14 @@ impl A2aErrorResponse {
     fn from_error(error: A2aError, id: Value) -> Self {
         let code: i32 = error.code().into();
         let message = error.to_string();
-        let status_code = match error {
+        let status_code = match &error {
+            A2aError::RpcError { code, .. } => match code {
+                A2aErrorCode::InvalidRequest | A2aErrorCode::InvalidParams | A2aErrorCode::JsonParseError => {
+                    StatusCode::BAD_REQUEST
+                }
+                A2aErrorCode::MethodNotFound => StatusCode::NOT_FOUND,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            },
             A2aError::TaskNotFound(_) => StatusCode::NOT_FOUND,
             A2aError::TaskNotCancelable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             A2aError::InvalidStateTransition { .. } => StatusCode::UNPROCESSABLE_ENTITY,
@@ -493,5 +625,286 @@ mod tests {
         // Receive the event
         let received = rx.recv().await.expect("receive event");
         assert!(!received.is_final());
+    }
+
+    #[test]
+    fn test_server_state_debug_redacts_auth_token() {
+        let state = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+
+        let debug = format!("{state:?}");
+        assert!(!debug.contains("test-token"));
+        assert!(debug.contains("REDACTED"));
+    }
+
+    #[test]
+    fn test_server_state_rejects_invalid_auth_token() {
+        let result = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            " ",
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_agent_card_is_public_and_advertises_authentication() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let state = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/agent-card.json")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let card: Value = serde_json::from_slice(&body).expect("parse card");
+        assert_eq!(card["securitySchemes"]["bearerAuth"]["scheme"], "bearer");
+        assert_eq!(card["security"][0]["bearerAuth"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn test_rpc_requires_bearer_auth_before_json_parsing() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let state = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+        let token = state.auth_token().to_string();
+        let app = create_router(state);
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .body(Body::from("not-json"))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(unauthorized.headers()[WWW_AUTHENTICATE], "Bearer");
+
+        let wrong_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, "Bearer wrong-token")
+                    .body(Body::from("{}"))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+        assert_eq!(wrong_token.status(), StatusCode::UNAUTHORIZED);
+
+        let stream_unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from("not-json"))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+        assert_eq!(stream_unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let authenticated = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"unknown","id":1}"#))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+        assert_eq!(authenticated.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_authorization_headers_are_rejected() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let state = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+        let app = create_router(state);
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/a2a")
+            .header("content-type", "application/json")
+            .body(Body::from("{}"))
+            .expect("build request");
+        let _ = request
+            .headers_mut()
+            .append(AUTHORIZATION, HeaderValue::from_static("Bearer test-token"));
+        let _ = request
+            .headers_mut()
+            .append(AUTHORIZATION, HeaderValue::from_static("Bearer test-token"));
+
+        let response = app.oneshot(request).await.expect("receive response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_rpc_does_not_allow_cross_origin_cors_access() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let state = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("origin", "https://attacker.example")
+                    .body(Body::from("{}"))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response.headers().get("access-control-allow-origin").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_task_history_limits_are_applied_by_rpc_handlers() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let task_manager = TaskManager::new();
+        let task = task_manager.create_task(None).await;
+        drop(
+            task_manager
+                .add_message(&task.id, crate::types::Message::user_text("private message"))
+                .await
+                .expect("add message"),
+        );
+        let state = A2aServerState::new_with_auth_token(
+            task_manager,
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+        let app = create_router(state);
+
+        let request_body = |params| {
+            serde_json::to_vec(&json!({
+                "jsonrpc": "2.0",
+                "method": METHOD_TASKS_GET,
+                "params": params,
+                "id": 1,
+            }))
+            .expect("serialize request")
+        };
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, "Bearer test-token")
+                    .body(Body::from(request_body(json!({"id": task.id}))))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let body: Value = serde_json::from_slice(&body).expect("parse response");
+        assert!(body["result"].get("history").is_none());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, "Bearer test-token")
+                    .body(Body::from(request_body(json!({"id": task.id, "historyLength": 1}))))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("read body");
+        let body: Value = serde_json::from_slice(&body).expect("parse response");
+        assert_eq!(body["result"]["history"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_malformed_task_list_params_are_rejected() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let state = A2aServerState::new_with_auth_token(
+            TaskManager::new(),
+            AgentCard::vtcode_default("http://localhost:8080"),
+            "test-token",
+        )
+        .expect("valid auth token");
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .header(AUTHORIZATION, "Bearer test-token")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"tasks/list","params":[],"id":1}"#))
+                    .expect("build request"),
+            )
+            .await
+            .expect("receive response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

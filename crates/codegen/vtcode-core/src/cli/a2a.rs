@@ -38,7 +38,12 @@ async fn serve_a2a_agent(host: String, port: u16, base_url: Option<String>, _ena
     let agent_card = AgentCard::vtcode_default(&base_url);
     let task_manager = TaskManager::new();
 
-    let server_state = A2aServerState::new(task_manager, agent_card);
+    let server_state = match std::env::var(A2A_TOKEN_ENV_VAR) {
+        Ok(auth_token) => A2aServerState::new_with_auth_token(task_manager, agent_card, auth_token)?,
+        Err(std::env::VarError::NotPresent) => A2aServerState::new(task_manager, agent_card),
+        Err(error) => anyhow::bail!("Failed to read {A2A_TOKEN_ENV_VAR}: {error}"),
+    };
+    let auth_token = server_state.auth_token().to_string();
     let router = create_router(server_state);
 
     let addr = format!("{host}:{port}").parse::<SocketAddr>()?;
@@ -46,6 +51,7 @@ async fn serve_a2a_agent(host: String, port: u16, base_url: Option<String>, _ena
     println!("Agent Card: http://{addr}/.well-known/agent-card.json");
     println!("JSON-RPC API: http://{addr}/a2a");
     println!("Streaming API: http://{addr}/a2a/stream");
+    println!("Bearer token: {auth_token}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router)
@@ -131,12 +137,12 @@ async fn send_task_to_agent(
     stream: bool,
     context_id: Option<String>,
 ) -> anyhow::Result<()> {
-    use crate::a2a::{A2aClient, Message, rpc::MessageSendParams};
+    use crate::a2a::{Message, rpc::MessageSendParams};
     use futures::StreamExt;
 
     println!("Connecting to A2A agent: {agent_url}");
 
-    let client = A2aClient::new(&agent_url)?;
+    let client = a2a_client(&agent_url)?;
     let msg = Message::user_text(message);
 
     let mut params = MessageSendParams::new(msg);
@@ -204,12 +210,12 @@ async fn send_task_to_agent(
 
 /// List tasks from a remote A2A agent
 async fn list_agent_tasks(agent_url: String, context_id: Option<String>, limit: u32) -> anyhow::Result<()> {
-    use crate::a2a::{A2aClient, rpc::ListTasksParams};
+    use crate::a2a::rpc::ListTasksParams;
     use serde_json::Value;
 
     println!("Fetching tasks from: {agent_url}");
 
-    let client = A2aClient::new(&agent_url)?;
+    let client = a2a_client(&agent_url)?;
     let mut params = ListTasksParams::default();
 
     if let Some(ctx_id) = context_id {
@@ -256,11 +262,9 @@ async fn list_agent_tasks(agent_url: String, context_id: Option<String>, limit: 
 
 /// Get details about a specific task
 async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()> {
-    use crate::a2a::A2aClient;
-
     println!("Fetching task {task_id} from: {agent_url}");
 
-    let client = A2aClient::new(&agent_url)?;
+    let client = a2a_client(&agent_url)?;
     let task = client.get_task(task_id.clone()).await?;
 
     println!("\n═══════════════════════════════════════════════════════════════");
@@ -319,16 +323,25 @@ async fn get_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()
 
 /// Cancel a running task
 async fn cancel_agent_task(agent_url: String, task_id: String) -> anyhow::Result<()> {
-    use crate::a2a::A2aClient;
-
     println!("Canceling task {task_id} at: {agent_url}");
 
-    let client = A2aClient::new(&agent_url)?;
+    let client = a2a_client(&agent_url)?;
     client.cancel_task(task_id).await?;
 
     println!("Task cancellation requested successfully.");
 
     Ok(())
+}
+
+const A2A_TOKEN_ENV_VAR: &str = "VTCODE_A2A_TOKEN";
+
+fn a2a_client(agent_url: &str) -> anyhow::Result<crate::a2a::A2aClient> {
+    let client = crate::a2a::A2aClient::new(agent_url)?;
+    match std::env::var(A2A_TOKEN_ENV_VAR) {
+        Ok(auth_token) => Ok(client.with_bearer_token(auth_token)),
+        Err(std::env::VarError::NotPresent) => Ok(client),
+        Err(error) => anyhow::bail!("Failed to read {A2A_TOKEN_ENV_VAR}: {error}"),
+    }
 }
 
 #[cfg(test)]

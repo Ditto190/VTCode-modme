@@ -26,4 +26,4 @@
 
 - `server.rs` uses `crate::shutdown_signal_logged` (not vtcode-core's shutdown) — local function.
 - Feature flag chain: vtcode binary `a2a-server` -> vtcode-core `a2a-server` -> vtcode-a2a `a2a-server`.
-- `WebhookNotifier` is always available (not feature-gated) — only the HTTP server is gated.
+- `WebhookNotifier` is always available (not feature-gated) — only the HTTP server is gated; protected server routes require bearer auth, and webhook URLs must be parsed/validated with redirects disabled.

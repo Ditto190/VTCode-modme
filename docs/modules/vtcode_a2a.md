@@ -34,6 +34,13 @@ The task manager handles the lifecycle of A2A tasks, including creation, executi
 
 `WebhookNotifier` is always available (not feature-gated) — only the HTTP server is gated behind `a2a-server`.
 
+### Security Boundaries
+
+The agent card is public for discovery; `/a2a` and `/a2a/stream` require the
+server bearer token. Browser cross-origin access is disabled by default.
+Webhook destinations require HTTPS or exact localhost/loopback HTTP, and
+redirects are not followed.
+
 ## Feature Flags
 
 - `a2a-server` — enables the HTTP server module

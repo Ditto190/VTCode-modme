@@ -172,6 +172,11 @@ Returns the agent's capability card:
 POST /a2a
 ```
 
+RPC and streaming requests require an `Authorization: Bearer <token>` header.
+The agent card is public for discovery, but no browser origin is trusted by
+default. `A2aServerState::new` generates the token, while
+`A2aServerState::new_with_auth_token` accepts an explicitly managed token.
+
 Send JSON-RPC requests for task management:
 
 **Create Task & Send Message**:
@@ -378,9 +383,10 @@ use vtcode_core::a2a::server::A2aServerState;
 
 #[tokio::main]
 async fn main() {
-    let agent_card = AgentCard::new("my-agent", "My AI Agent", "1.0.0");
+    let agent_card = AgentCard::vtcode_default("http://localhost:8080");
     let task_manager = TaskManager::new();
     let server_state = A2aServerState::new(task_manager, agent_card);
+    println!("Bearer token: {}", server_state.auth_token());
 
     // Create router
     let router = vtcode_core::a2a::server::create_router(server_state);
@@ -433,14 +439,14 @@ Integration tests cover:
 Run tests:
 
 ```bash
-cargo test --test a2a_integration_tests
+cargo nextest run -p vtcode-a2a --features a2a-server
 ```
 
 ## Implementation Status
 
 - v **Phase 1**: Core types, task manager, server
 - v **Phase 2**: Integration tests, streaming, webhooks
--  **Phase 3**: Advanced client features, authentication
+- v **Phase 3**: Authenticated client requests
 -  **Phase 4**: Extended documentation, examples
 
 ## Dependencies
@@ -461,6 +467,10 @@ cargo test --test a2a_integration_tests
 
 ## Security Notes
 
+- The agent card endpoint is public; RPC and streaming endpoints require bearer authentication.
+- Cross-origin browser access is disabled by default.
+- Task listings omit conversation history unless a history length is requested.
+- Webhook URLs require HTTPS or exact localhost/loopback HTTP, and redirects are disabled.
 - Webhook authentication via headers
 - Request validation per JSON-RPC spec
 - Error code sanitization

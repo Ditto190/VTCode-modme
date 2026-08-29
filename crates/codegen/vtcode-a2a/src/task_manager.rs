@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 use super::errors::{A2aError, A2aResult};
 use super::rpc::{ListTasksParams, ListTasksResult, TaskPushNotificationConfig};
 use super::types::{Artifact, Message, Task, TaskState, TaskStatus};
+use super::webhook::parse_webhook_url;
 
 /// A2A Task Manager - handles task creation, updates, and queries
 #[derive(Debug, Clone)]
@@ -118,6 +119,12 @@ impl TaskManager {
             .ok_or_else(|| A2aError::TaskNotFound(task_id.to_string()))
     }
 
+    /// Get a task while limiting the returned conversation history.
+    pub(crate) async fn get_task_or_error_with_history(&self, task_id: &str, history_length: usize) -> A2aResult<Task> {
+        let task = self.get_task_or_error(task_id).await?;
+        Ok(Self::clone_task_for_history(task, history_length))
+    }
+
     /// Update task status
     pub(crate) async fn update_status(
         &self,
@@ -202,18 +209,20 @@ impl TaskManager {
         true
     }
 
+    fn clone_task_for_history(mut task: Task, history_length: usize) -> Task {
+        if task.history.len() > history_length {
+            let trim_count = task.history.len() - history_length;
+            drop(task.history.drain(..trim_count));
+        }
+
+        task
+    }
+
     fn clone_task_for_listing(task: &Task, include_artifacts: bool, history_length: Option<usize>) -> Task {
-        let mut task = task.clone();
+        let mut task = Self::clone_task_for_history(task.clone(), history_length.unwrap_or(0));
 
         if !include_artifacts {
             task.artifacts.clear();
-        }
-
-        if let Some(history_length) = history_length
-            && task.history.len() > history_length
-        {
-            let trim_count = task.history.len() - history_length;
-            drop(task.history.drain(..trim_count));
         }
 
         task
@@ -321,9 +330,7 @@ impl TaskManager {
 
     /// Set webhook configuration for a task
     pub(crate) async fn set_webhook_config(&self, config: TaskPushNotificationConfig) -> A2aResult<()> {
-        if !config.url.starts_with("https://") && !config.url.starts_with("http://localhost") {
-            return Err(A2aError::UnsupportedOperation("Webhook URL must use HTTPS or be localhost".to_string()));
-        }
+        drop(parse_webhook_url(&config.url).map_err(A2aError::UnsupportedOperation)?);
 
         let mut state = self.state.write().await;
         if !state.tasks.contains_key(&config.task_id) {
@@ -473,12 +480,20 @@ mod tests {
     async fn test_list_tasks() {
         let manager = TaskManager::new();
 
-        let _task1 = manager.create_task(Some("ctx-1".to_string())).await;
+        let task1 = manager.create_task(Some("ctx-1".to_string())).await;
         let _task2 = manager.create_task(Some("ctx-1".to_string())).await;
         let _task3 = manager.create_task(Some("ctx-2".to_string())).await;
+        drop(
+            manager
+                .add_message(&task1.id, Message::user_text("private message"))
+                .await
+                .expect("add message"),
+        );
 
         let all = manager.list_tasks(ListTasksParams::default()).await;
         assert_eq!(all.tasks.len(), 3);
+        let listed_task = all.tasks.iter().find(|task| task.id == task1.id).expect("listed task");
+        assert!(listed_task.history.is_empty());
 
         let ctx1_tasks = manager
             .list_tasks(ListTasksParams {
@@ -562,5 +577,77 @@ mod tests {
         assert_eq!(updated.history.len(), 2);
         assert_eq!(updated.history[0].role, MessageRole::User);
         assert_eq!(updated.history[1].role, MessageRole::Agent);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_history_length_is_enforced() {
+        let manager = TaskManager::new();
+        let task = manager.create_task(None).await;
+        drop(
+            manager
+                .add_message(&task.id, Message::user_text("first"))
+                .await
+                .expect("add first message"),
+        );
+        drop(
+            manager
+                .add_message(&task.id, Message::agent_text("second"))
+                .await
+                .expect("add second message"),
+        );
+
+        let without_history = manager
+            .get_task_or_error_with_history(&task.id, 0)
+            .await
+            .expect("get task without history");
+        assert!(without_history.history.is_empty());
+
+        let last_message = manager
+            .get_task_or_error_with_history(&task.id, 1)
+            .await
+            .expect("get task with one history item");
+        assert_eq!(last_message.history.len(), 1);
+        assert_eq!(last_message.history[0].role, MessageRole::Agent);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_url_validation_requires_exact_localhost_for_http() {
+        let manager = TaskManager::new();
+        let task = manager.create_task(None).await;
+
+        let invalid_urls = [
+            "http://localhost.evil.example/hook",
+            "http://localhost@evil.example/hook",
+            "http://example.com/hook",
+            "ftp://example.com/hook",
+            "https://user:password@example.com/hook",
+        ];
+
+        for url in invalid_urls {
+            let result = manager
+                .set_webhook_config(TaskPushNotificationConfig {
+                    task_id: task.id.clone(),
+                    url: url.to_string(),
+                    authentication: None,
+                })
+                .await;
+            assert!(result.is_err(), "URL should be rejected: {url}");
+        }
+
+        for url in [
+            "https://example.com/hook",
+            "http://localhost:8080/hook",
+            "http://127.0.0.1:8080/hook",
+            "http://[::1]:8080/hook",
+        ] {
+            manager
+                .set_webhook_config(TaskPushNotificationConfig {
+                    task_id: task.id.clone(),
+                    url: url.to_string(),
+                    authentication: None,
+                })
+                .await
+                .expect("valid webhook URL");
+        }
     }
 }

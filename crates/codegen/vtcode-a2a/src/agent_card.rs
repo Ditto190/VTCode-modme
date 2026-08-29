@@ -104,6 +104,24 @@ impl AgentCard {
         card
     }
 
+    /// Advertise bearer-token authentication for protected agent endpoints.
+    pub fn with_bearer_auth(mut self) -> Self {
+        drop(
+            self.security_schemes
+                .get_or_insert_with(HashMap::new)
+                .insert("bearerAuth".to_string(), serde_json::json!({"type": "http", "scheme": "bearer"})),
+        );
+
+        let requirements = self.security.get_or_insert_with(Vec::new);
+        if !requirements.iter().any(|requirement| requirement.contains_key("bearerAuth")) {
+            let mut requirement = HashMap::new();
+            drop(requirement.insert("bearerAuth".to_string(), Vec::new()));
+            requirements.push(requirement);
+        }
+
+        self
+    }
+
     /// Set the URL
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
