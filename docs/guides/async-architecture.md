@@ -302,11 +302,36 @@ async fn actor_loop(mut rx: mpsc::Receiver<ActorMessage>) {
 
 7. **Avoid cycles of bounded channels.** If Actor A sends to Actor B and B sends to A, both using bounded channels, a deadlock can occur if both channels fill up. Break cycles with `tokio::select!` on a "primary" channel, or use `try_send` for the cycle-closing path.
 
+### Local stdio transport decision
+
+The [stdio MCP/LSP analysis](https://developerlife.com/2026/08/22/to-async-or-not-to-async-rust-mcp-server/)
+is right that a standalone 1:1 local pipe does not become better merely by
+adding an async runtime. VT Code still keeps Tokio at this boundary because
+the transport is embedded in a mixed async application that also multiplexes
+the TUI, provider streams, concurrent tools, and network MCP connections. We
+apply the article's reliability rules inside the async transport instead:
+
+- ACP and Copilot each have one bounded writer channel and one task that owns
+  serialized stdin writes.
+- The stdout reader owns response routing; EOF or a reader error wakes every
+  pending call immediately instead of leaving callers to wait for a timeout.
+- Newline-delimited JSON-RPC frames are capped at 64 MiB; oversized frames are
+  drained and rejected so a malformed child cannot desynchronise later frames.
+- Request guards remove pending entries on send failure, timeout, cancellation,
+  or response completion, so abandoned calls cannot accumulate.
+- Stderr is continuously drained, retained per record only up to the provider
+  diagnostic limit, and passed through the secret-redacting sanitizer.
+
+Use synchronous threads and standard channels for a genuinely standalone local
+bridge when it reduces complexity. Do not introduce a synchronous island into
+these transports without preserving the same bounded buffering, serialized
+writes, response demultiplexing, and deterministic teardown guarantees.
+
 **Real examples in vtcode:**
 
 | Component | File | Pattern |
 |---|---|---|
-| `StdioTransport` | `crates/codegen/vtcode-acp/src/transport.rs` | Handle sends JSON-RPC via bounded `mpsc`; background tasks handle stdin write, stdout read, stderr log. Uses `oneshot` for RPC responses. |
+| `StdioTransport` | `crates/codegen/vtcode-acp/src/transport.rs` and `crates/codegen/vtcode-llm/src/copilot/transport.rs` | Handle sends JSON-RPC via bounded `mpsc`; background tasks handle stdin write, stdout read, and bounded/sanitized stderr diagnostics. Uses `oneshot` for RPC responses. |
 | `AsyncLineWriter` | `crates/codegen/vtcode-core/src/utils/async_line_writer.rs` | Cloneable handle sends `LogMessage` via bounded `mpsc`; the actor bounds queued bytes/lines and periodically flushes through `spawn_blocking`. |
 | `TimeoutDetector` | `crates/codegen/vtcode-core/src/core/timeout_detector.rs` | Global detector with `mpsc::UnboundedSender<String>` cleanup channel; background task processes end-operation requests from dropped `TimeoutHandle`s. |
 | `ProcessHandle` | `crates/codegen/vtcode-bash-runner/src/pipe.rs` | Handle wraps channels for stdin, output broadcast, and exit status; separate writer, reader, and wait tasks. |

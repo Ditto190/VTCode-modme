@@ -1,15 +1,19 @@
 use std::path::Path;
+use std::str;
 
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStderr, ChildStdout};
+use tokio::io::{AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, ChildStdout};
 use tokio::time::timeout;
-use vtcode_commons::sanitizer::sanitize_provider_diagnostic;
+use vtcode_commons::sanitizer::{PROVIDER_DIAGNOSTIC_MAX_BYTES, sanitize_provider_diagnostic};
 use vtcode_config::auth::CopilotAuthConfig;
 
 use super::command::{resolve_copilot_command, spawn_copilot_server_process};
+use super::transport::{read_bounded_line, trim_line_ending};
 use super::types::CopilotDiscoveredModel;
+
+const MAX_COPILOT_HEADER_BYTES: usize = 8 * 1024;
 
 pub async fn list_available_models(
     config: &CopilotAuthConfig,
@@ -89,21 +93,40 @@ pub async fn list_available_models(
         discovered.dedup_by(|left, right| left.id.eq_ignore_ascii_case(&right.id));
         Ok::<Vec<CopilotDiscoveredModel>, anyhow::Error>(discovered)
     })
-    .await
-    .context("copilot cli model discovery timeout")??;
+    .await;
 
-    let _ = child.start_kill();
+    terminate_child(&mut child).await;
+    let result = result.context("copilot cli model discovery timeout")??;
     Ok(result)
+}
+
+async fn terminate_child(child: &mut Child) {
+    if let Err(error) = child.start_kill() {
+        tracing::debug!(target: "copilot.server", error = %error, "copilot cli child already stopped");
+    }
+    if let Err(error) = child.wait().await {
+        tracing::debug!(target: "copilot.server", error = %error, "failed to reap copilot cli child");
+    }
 }
 
 fn spawn_server_stderr(stderr: ChildStderr) {
     tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                let safe_line = sanitize_provider_diagnostic(trimmed.as_bytes());
-                tracing::debug!(target: "copilot.server.stderr", "{}", safe_line);
+        let mut reader = BufReader::new(stderr);
+        let mut line = Vec::with_capacity(PROVIDER_DIAGNOSTIC_MAX_BYTES);
+        loop {
+            match read_bounded_line(&mut reader, &mut line, PROVIDER_DIAGNOSTIC_MAX_BYTES).await {
+                Ok(Some(_truncated)) => {
+                    let trimmed = trim_line_ending(&line);
+                    if !trimmed.iter().all(u8::is_ascii_whitespace) {
+                        let safe_line = sanitize_provider_diagnostic(trimmed);
+                        tracing::debug!(target: "copilot.server.stderr", "{}", safe_line);
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::warn!(target: "copilot.server.stderr", error = %error, "stderr reader failed");
+                    break;
+                }
             }
         }
     });
@@ -176,14 +199,20 @@ const MAX_COPILOT_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
 async fn read_message(reader: &mut BufReader<ChildStdout>) -> Result<Value> {
     let mut content_length = None;
+    let mut line = Vec::with_capacity(MAX_COPILOT_HEADER_BYTES);
     loop {
-        let mut line = String::new();
-        let read = reader.read_line(&mut line).await.context("copilot cli header read failed")?;
-        if read == 0 {
+        let Some(truncated) = read_bounded_line(reader, &mut line, MAX_COPILOT_HEADER_BYTES)
+            .await
+            .context("copilot cli header read failed")?
+        else {
             return Err(anyhow!("copilot cli server closed the stdio stream"));
+        };
+        if truncated {
+            return Err(anyhow!("copilot cli header exceeds {MAX_COPILOT_HEADER_BYTES} byte limit"));
         }
 
-        let trimmed = line.trim_end_matches(['\r', '\n']);
+        let trimmed_bytes = trim_line_ending(&line);
+        let trimmed = str::from_utf8(trimmed_bytes).context("copilot cli header is not valid UTF-8")?;
         if trimmed.is_empty() {
             break;
         }

@@ -31,17 +31,30 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use vtcode_commons::sanitizer::sanitize_provider_diagnostic;
+use vtcode_commons::sanitizer::{PROVIDER_DIAGNOSTIC_MAX_BYTES, sanitize_provider_diagnostic};
 
 use super::error::{AcpError, AcpResult};
 
 /// Capacity of the bounded write channel. Limits in-flight JSON-RPC messages
 /// to prevent unbounded memory growth when the subprocess is slow.
 const WRITE_CHANNEL_CAPACITY: usize = 64;
+
+/// Maximum amount of one stderr record retained before the remainder is
+/// drained. A child must not be able to grow the diagnostic buffer without
+/// bound by omitting newlines.
+const STDERR_LINE_MAX_BYTES: usize = PROVIDER_DIAGNOSTIC_MAX_BYTES;
+
+/// Maximum size of one newline-delimited JSON-RPC frame received from or sent
+/// to a subprocess. Oversized input is drained before being rejected so the
+/// next frame remains aligned.
+const MAX_JSON_RPC_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
+type PendingRequestMap = HashMap<i64, oneshot::Sender<AcpResult<Value>>>;
+type PendingRequestStore = Arc<StdMutex<PendingRequestMap>>;
 
 /// Callback type for incoming server→client requests and notifications.
 ///
@@ -62,7 +75,7 @@ type NotificationHandler = Arc<dyn Fn(Value) -> anyhow::Result<()> + Send + Sync
 /// The child process is killed when this struct is dropped.
 pub struct StdioTransport {
     write_tx: mpsc::Sender<String>,
-    pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<AcpResult<Value>>>>>,
+    pending: PendingRequestStore,
     request_counter: AtomicI64,
     notification_handler: Arc<StdMutex<Option<NotificationHandler>>>,
     child: StdMutex<Option<Child>>,
@@ -142,6 +155,7 @@ impl StdioTransport {
             .lock()
             .map_err(|_e| AcpError::Internal("stdio transport pending mutex poisoned".into()))?
             .insert(id, tx);
+        let _pending_guard = PendingRequestGuard::new(Arc::clone(&self.pending), id);
 
         let payload = serde_json::json!({
             "jsonrpc": "2.0",
@@ -149,20 +163,11 @@ impl StdioTransport {
             "method": method,
             "params": params,
         });
-        if let Err(e) = self.send_raw(payload) {
-            // Clean up the pending entry so it doesn't linger until timeout.
-            self.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
-            return Err(e);
-        }
+        self.send_raw(payload)?;
 
         timeout(self.rpc_timeout, rx)
             .await
-            .map_err(|_e| {
-                // The peer never replied; drop the pending entry so the table
-                // does not grow unboundedly across repeated timeouts.
-                self.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
-                AcpError::Timeout(format!("{method} timed out"))
-            })?
+            .map_err(|_e| AcpError::Timeout(format!("{method} timed out")))?
             .map_err(|_e| AcpError::Internal(format!("{method} response channel closed")))
             .and_then(|r| r)
     }
@@ -217,12 +222,34 @@ impl StdioTransport {
 
     fn send_raw(&self, payload: Value) -> AcpResult<()> {
         let text = serde_json::to_string(&payload)?;
+        if text.len() > MAX_JSON_RPC_MESSAGE_BYTES {
+            return Err(AcpError::Internal(format!(
+                "stdio transport JSON-RPC frame exceeds {MAX_JSON_RPC_MESSAGE_BYTES} byte limit"
+            )));
+        }
         self.write_tx.try_send(text).map_err(|e| match e {
             mpsc::error::TrySendError::Full(_) => {
                 AcpError::Internal("stdio transport write channel full; subprocess may be slow".into())
             }
             mpsc::error::TrySendError::Closed(_) => AcpError::Internal("stdio transport writer channel closed".into()),
         })
+    }
+}
+
+struct PendingRequestGuard {
+    pending: PendingRequestStore,
+    id: i64,
+}
+
+impl PendingRequestGuard {
+    fn new(pending: PendingRequestStore, id: i64) -> Self {
+        Self { pending, id }
+    }
+}
+
+impl Drop for PendingRequestGuard {
+    fn drop(&mut self) {
+        drop(self.pending.lock().unwrap_or_else(|error| error.into_inner()).remove(&self.id));
     }
 }
 
@@ -269,14 +296,26 @@ fn spawn_writer(mut write_rx: mpsc::Receiver<String>, mut stdin: ChildStdin) {
 fn spawn_stderr_logger(stderr: ChildStderr) {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stderr);
-        let mut line = String::new();
+        let mut line = Vec::with_capacity(STDERR_LINE_MAX_BYTES);
         loop {
-            line.clear();
-            match reader.read_line(&mut line).await {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    let safe_line = sanitize_provider_diagnostic(line.trim_end().as_bytes());
-                    tracing::debug!(target: "vtcode.stdio_transport.stderr", "{}", safe_line)
+            match read_bounded_line(&mut reader, &mut line, STDERR_LINE_MAX_BYTES).await {
+                Ok(None) => break,
+                Ok(Some(truncated)) => {
+                    let safe_line = sanitize_provider_diagnostic(trim_line_ending(&line));
+                    tracing::debug!(
+                        target: "vtcode.stdio_transport.stderr",
+                        truncated,
+                        "{}",
+                        safe_line
+                    )
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        target: "vtcode.stdio_transport.stderr",
+                        error = %error,
+                        "stderr reader failed"
+                    );
+                    break;
                 }
             }
         }
@@ -285,19 +324,37 @@ fn spawn_stderr_logger(stderr: ChildStderr) {
 
 fn spawn_reader(
     stdout: ChildStdout,
-    pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<AcpResult<Value>>>>>,
+    pending: PendingRequestStore,
     notification_handler: Arc<StdMutex<Option<NotificationHandler>>>,
 ) {
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            if line.trim().is_empty() {
+        let mut reader = BufReader::new(stdout);
+        let mut line = Vec::with_capacity(256);
+        let close_reason = loop {
+            let truncated = match read_bounded_line(&mut reader, &mut line, MAX_JSON_RPC_MESSAGE_BYTES).await {
+                Ok(Some(truncated)) => truncated,
+                Ok(None) => break "stdout stream closed",
+                Err(error) => {
+                    tracing::warn!("stdio transport reader failed: {error}");
+                    break "stdout reader failed";
+                }
+            };
+
+            if truncated {
+                tracing::warn!(
+                    target: "vtcode.stdio_transport",
+                    "stdout JSON-RPC frame exceeded {MAX_JSON_RPC_MESSAGE_BYTES} byte limit; discarded"
+                );
                 continue;
             }
-            let message: Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!("stdio transport: JSON decode failed: {e}");
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+
+            let message: Value = match serde_json::from_slice(&line) {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!("stdio transport: JSON decode failed: {error}");
                     continue;
                 }
             };
@@ -320,8 +377,73 @@ fn spawn_reader(
             {
                 tracing::warn!("stdio transport: notification handler error: {e}");
             }
-        }
+        };
+
+        fail_pending_requests(&pending, close_reason);
     });
+}
+
+/// Read one physical line while retaining at most `max_bytes` bytes.
+///
+/// The complete physical line is consumed before returning, so a truncated
+/// diagnostic cannot desynchronise the next read. A partial final line is
+/// returned as a normal line when the stream reaches EOF.
+pub(super) async fn read_bounded_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+    max_bytes: usize,
+) -> std::io::Result<Option<bool>> {
+    line.clear();
+    let mut truncated = false;
+
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(if line.is_empty() && !truncated {
+                None
+            } else {
+                Some(truncated)
+            });
+        }
+
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |position| position + 1);
+        if line.len() < max_bytes {
+            let copy_len = (max_bytes - line.len()).min(consumed);
+            line.extend_from_slice(&available[..copy_len]);
+            truncated |= copy_len < consumed;
+        } else {
+            truncated = true;
+        }
+        reader.consume(consumed);
+
+        if newline.is_some() {
+            return Ok(Some(truncated));
+        }
+    }
+}
+
+pub(super) fn trim_line_ending(mut line: &[u8]) -> &[u8] {
+    if line.last() == Some(&b'\n') {
+        line = &line[..line.len().saturating_sub(1)];
+    }
+    if line.last() == Some(&b'\r') {
+        line = &line[..line.len().saturating_sub(1)];
+    }
+    line
+}
+
+fn fail_pending_requests(pending: &PendingRequestStore, reason: &str) {
+    let senders: Vec<_> = pending
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .drain()
+        .map(|(_, sender)| sender)
+        .collect();
+
+    for sender in senders {
+        drop(sender.send(Err(AcpError::Internal(reason.to_string()))));
+    }
 }
 
 // ============================================================================
@@ -480,5 +602,32 @@ mod tests {
 
         let pending_len = transport.pending.lock().unwrap().len();
         assert_eq!(pending_len, 0, "timed-out call must not leave a pending entry");
+    }
+
+    #[tokio::test]
+    async fn bounded_stderr_reader_drains_oversized_lines() -> std::io::Result<()> {
+        let mut data = vec![b'x'; STDERR_LINE_MAX_BYTES + 32];
+        data.extend_from_slice(b"\nnext\n");
+        let mut reader = BufReader::new(data.as_slice());
+        let mut line = Vec::new();
+
+        assert_eq!(read_bounded_line(&mut reader, &mut line, STDERR_LINE_MAX_BYTES).await?, Some(true));
+        assert_eq!(line.len(), STDERR_LINE_MAX_BYTES);
+        assert_eq!(read_bounded_line(&mut reader, &mut line, STDERR_LINE_MAX_BYTES).await?, Some(false));
+        assert_eq!(trim_line_ending(&line), b"next");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn eof_fails_all_pending_calls() {
+        let pending = Arc::new(StdMutex::new(HashMap::new()));
+        let (sender, receiver) = oneshot::channel();
+        pending.lock().unwrap().insert(7, sender);
+
+        fail_pending_requests(&pending, "stdout stream closed");
+
+        let result = receiver.await.expect("pending call should be notified");
+        assert!(matches!(result, Err(AcpError::Internal(message)) if message == "stdout stream closed"));
+        assert!(pending.lock().unwrap().is_empty());
     }
 }
