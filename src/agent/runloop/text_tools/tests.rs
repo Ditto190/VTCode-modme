@@ -618,6 +618,15 @@ fn test_detect_yaml_tool_call_with_multiline_content() {
 }
 
 #[test]
+fn test_yaml_multiline_unicode_indentation_does_not_panic() {
+    let message = "write_file\ncontent: |\n \u{2003}你好\n";
+    let (name, args) = parse_yaml::parse_yaml_tool_call(message).expect("should parse");
+
+    assert_eq!(name, "write_file");
+    assert_eq!(args["content"], serde_json::json!("你好"));
+}
+
+#[test]
 fn test_detect_yaml_tool_call_ignores_language_hint_lines() {
     let message = "Rust block\n\n```yaml\nwrite_file\npath: /tmp/hello.txt\ncontent: hi\nmode: overwrite\n```";
     let (name, _) = detect_textual_tool_call(message).expect("should parse");

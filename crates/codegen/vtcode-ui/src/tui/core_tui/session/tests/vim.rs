@@ -89,6 +89,27 @@ fn vim_dot_repeats_change_text_object_edits() {
 }
 
 #[test]
+fn vim_vertical_motion_uses_character_columns_for_unicode() {
+    let mut session = session_with_input("你a\nxy", "你".len());
+    enable_vim_normal_mode(&mut session);
+
+    assert!(session.handle_vim_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)));
+
+    assert_eq!(session.cursor(), "你a\nx".len());
+}
+
+#[test]
+fn vim_go_to_line_clamps_unicode_target_to_a_character_boundary() {
+    let mut session = session_with_input("你界\nabc", "你界\nab".len());
+    enable_vim_normal_mode(&mut session);
+
+    assert!(session.handle_vim_key(&KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)));
+    assert!(session.handle_vim_key(&KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)));
+
+    assert_eq!(session.cursor(), "你界".len());
+}
+
+#[test]
 fn appearance_updates_do_not_reset_session_local_vim_mode() {
     let mut session = session_with_input("hello", 5);
     session.handle_command(InlineCommand::SetVimModeEnabled(true));

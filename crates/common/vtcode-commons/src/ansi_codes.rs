@@ -182,10 +182,8 @@ fn send_osc9_notification(message: Option<&str>) {
 
 fn sanitize_notification_text(raw: &str) -> String {
     const MAX_LEN: usize = 200;
-    let mut cleaned = raw.chars().filter(|c| *c >= ' ' && *c != '\u{007f}').collect::<String>();
-    if cleaned.len() > MAX_LEN {
-        cleaned.truncate(MAX_LEN);
-    }
+    let cleaned = raw.chars().filter(|c| *c >= ' ' && *c != '\u{007f}').collect::<String>();
+    let cleaned = crate::formatting::truncate_byte_budget(&cleaned, MAX_LEN, "");
     cleaned.replace(';', ":")
 }
 
@@ -265,6 +263,13 @@ mod redraw_tests {
     fn osc_payload_format_is_stable() {
         assert_eq!(build_osc9_payload("done"), format!("{OSC}9;done"));
         assert_eq!(build_osc777_payload("VT Code", "finished"), format!("{OSC}777;notify;VT Code;finished"));
+    }
+
+    #[test]
+    fn notification_sanitization_does_not_split_utf8() {
+        let raw = format!("{}界", "a".repeat(199));
+
+        assert_eq!(sanitize_notification_text(&raw), "a".repeat(199));
     }
 }
 

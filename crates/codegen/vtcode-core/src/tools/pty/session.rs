@@ -62,16 +62,18 @@ impl CommandEchoState {
         const ZERO_WIDTH_SPACE: &[u8] = "\u{200B}".as_bytes();
 
         while index < bytes.len() {
-            let slice = &text[index..];
+            if text.is_char_boundary(index) {
+                let slice = &text[index..];
 
-            if let Some(len) = parse_ansi_sequence(slice) {
-                index += len;
-                continue;
-            }
+                if let Some(len) = parse_ansi_sequence(slice) {
+                    index += len;
+                    continue;
+                }
 
-            if slice.as_bytes().starts_with(ZERO_WIDTH_SPACE) {
-                index += ZERO_WIDTH_SPACE.len();
-                continue;
+                if slice.as_bytes().starts_with(ZERO_WIDTH_SPACE) {
+                    index += ZERO_WIDTH_SPACE.len();
+                    continue;
+                }
             }
 
             let byte = bytes[index];
@@ -364,5 +366,21 @@ impl PtySessionHandle {
 
 fn filter_command_echo(text: String, state: &mut CommandEchoState) -> (String, bool) {
     let (consumed, done) = state.consume_chunk(&text);
-    (text.get(consumed..).map(|tail| tail.to_owned()).unwrap_or_default(), done)
+    let consumed = (0..=consumed).rev().find(|&idx| text.is_char_boundary(idx)).unwrap_or(0);
+    (text[consumed..].to_owned(), done)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_echo_filter_handles_multibyte_command() {
+        let mut state = CommandEchoState::new("привет\n", true).expect("command should be tracked");
+
+        let (filtered, done) = filter_command_echo("привет\noutput".to_owned(), &mut state);
+
+        assert_eq!(filtered, "output");
+        assert!(done);
+    }
 }

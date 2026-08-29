@@ -1,13 +1,12 @@
-#![expect(
-    clippy::string_slice,
-    clippy::cast_possible_truncation,
-    reason = "Hex input is validated to six ASCII digits and RGB interpolation is clamped to byte range."
-)]
-
 //! Color utilities for VT Code
 //!
 //! This module provides color manipulation capabilities using anstyle,
 //! which offers low-level ANSI styling with RGB and 256-color support.
+
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "RGB interpolation is clamped to the byte range before conversion."
+)]
 
 use anstyle::{AnsiColor, Color, Effects, RgbColor, Style};
 
@@ -18,9 +17,10 @@ pub fn color_from_hex(hex: &str) -> Option<Color> {
         return None;
     }
 
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    let mut components = hex.as_bytes().chunks_exact(2);
+    let r = u8::from_str_radix(std::str::from_utf8(components.next()?).ok()?, 16).ok()?;
+    let g = u8::from_str_radix(std::str::from_utf8(components.next()?).ok()?, 16).ok()?;
+    let b = u8::from_str_radix(std::str::from_utf8(components.next()?).ok()?, 16).ok()?;
 
     Some(Color::Rgb(RgbColor(r, g, b)))
 }
@@ -322,4 +322,14 @@ pub fn custom_style(text: &str, styles: &[&str]) -> String {
     }
 
     styled(text, style)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_ascii_hex_is_rejected_without_panicking() {
+        assert!(color_from_hex("红色").is_none());
+    }
 }

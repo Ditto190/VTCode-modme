@@ -250,15 +250,18 @@ async fn fetch_markdown(url: &str, timeout_secs: u64, max_bytes: usize) -> Resul
 
     let body = response.text().await.context("defuddle_fetch: failed to read response body")?;
 
+    Ok(truncate_markdown_body(body, max_bytes))
+}
+
+fn truncate_markdown_body(body: String, max_bytes: usize) -> (String, bool) {
     if body.len() > max_bytes {
         // Truncate to a hard cap so a giant page never blows up the agent.
-        let mut truncated = body;
-        truncated.truncate(max_bytes);
+        let truncated = vtcode_commons::formatting::truncate_byte_budget(&body, max_bytes, "");
         // `truncated` is `true` only when the upstream body exceeded the cap,
         // not when it just happened to land exactly on it.
-        Ok((truncated, true))
+        (truncated, true)
     } else {
-        Ok((body, false))
+        (body, false)
     }
 }
 
@@ -391,6 +394,14 @@ mod tests {
         assert!(!tool.try_consume());
         tool.reset();
         assert!(tool.try_consume());
+    }
+
+    #[test]
+    fn markdown_truncation_preserves_utf8_boundaries() {
+        let (body, truncated) = truncate_markdown_body("你好".to_owned(), 4);
+
+        assert_eq!(body, "你");
+        assert!(truncated);
     }
 
     #[test]

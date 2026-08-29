@@ -122,6 +122,9 @@ impl Rgb {
         if trimmed.len() != 6 {
             return Err(anyhow!("Invalid hex color '{hex}': expected #RRGGBB"));
         }
+        if !trimmed.is_ascii() {
+            return Err(anyhow!("Invalid hex color '{hex}': expected #RRGGBB"));
+        }
 
         let r = u8::from_str_radix(&trimmed[0..2], 16).map_err(|e| anyhow!("Invalid red component in '{hex}': {e}"))?;
         let g =
@@ -836,5 +839,10 @@ mod tests {
         let actual_base16 = palette.iter().take(16).map(|rgb| rgb.to_hex()).collect::<Vec<_>>();
 
         assert_eq!(actual_base16, expected_base16);
+    }
+
+    #[test]
+    fn test_non_ascii_hex_is_rejected_without_panicking() {
+        assert!(Rgb::from_hex("红色").is_err());
     }
 }

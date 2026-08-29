@@ -82,13 +82,17 @@ fn parse_yaml_tool_block(block: &str) -> Option<(String, Value)> {
             let indent = raw.chars().take_while(|c| c.is_whitespace()).count();
             let content = if let Some(expected) = multiline_indent {
                 if indent >= expected {
-                    raw[expected..].to_string()
+                    raw.char_indices()
+                        .nth(expected)
+                        .map_or_else(String::new, |(idx, _)| raw[idx..].to_string())
                 } else {
                     raw.trim_start().to_string()
                 }
             } else {
                 multiline_indent = Some(indent);
-                raw[indent..].to_string()
+                raw.char_indices()
+                    .nth(indent)
+                    .map_or_else(String::new, |(idx, _)| raw[idx..].to_string())
             };
             multiline_buffer.push(content);
             continue;

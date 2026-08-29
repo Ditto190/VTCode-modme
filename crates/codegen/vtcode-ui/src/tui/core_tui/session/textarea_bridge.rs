@@ -11,7 +11,9 @@ pub(super) fn byte_offset_to_row_col(lines: &[String], byte_offset: usize) -> (u
     for (row, line) in lines.iter().enumerate() {
         let line_byte_len = line.len();
         if consumed + line_byte_len >= byte_offset {
-            let col = line[..byte_offset - consumed].chars().count();
+            let byte_col = (byte_offset - consumed).min(line_byte_len);
+            let byte_col = (0..=byte_col).rev().find(|&idx| line.is_char_boundary(idx)).unwrap_or(0);
+            let col = line[..byte_col].chars().count();
             return (row, col);
         }
         // +1 for the '\n' that TextArea strips from each line boundary
@@ -127,5 +129,14 @@ mod tests {
         let lines = vec!["".to_string()];
         assert_eq!(byte_offset_to_row_col(&lines, 0), (0, 0));
         assert_eq!(row_col_to_byte_offset(&lines, 0, 0), 0);
+    }
+
+    #[test]
+    fn mid_character_byte_offset_clamps_to_boundary() {
+        let lines = vec!["你x".to_string()];
+
+        assert_eq!(byte_offset_to_row_col(&lines, 1), (0, 0));
+        assert_eq!(byte_offset_to_row_col(&lines, 2), (0, 0));
+        assert_eq!(byte_offset_to_row_col(&lines, 3), (0, 1));
     }
 }

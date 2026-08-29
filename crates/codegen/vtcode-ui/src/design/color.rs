@@ -80,9 +80,10 @@ pub(crate) fn hex_to_ratatui_color(hex: &str) -> Option<Color> {
     if hex.len() != 6 {
         return None;
     }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    let mut components = hex.as_bytes().chunks_exact(2);
+    let r = u8::from_str_radix(std::str::from_utf8(components.next()?).ok()?, 16).ok()?;
+    let g = u8::from_str_radix(std::str::from_utf8(components.next()?).ok()?, 16).ok()?;
+    let b = u8::from_str_radix(std::str::from_utf8(components.next()?).ok()?, 16).ok()?;
     Some(Color::Rgb(r, g, b))
 }
 
@@ -154,6 +155,11 @@ mod tests {
         assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(42))), Color::Indexed(42));
         assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(0))), Color::Indexed(0));
         assert_eq!(anstyle_to_ratatui_color(AnstyleColor::Ansi256(anstyle::Ansi256Color(255))), Color::Indexed(255));
+    }
+
+    #[test]
+    fn non_ascii_hex_is_rejected_without_panicking() {
+        assert!(hex_to_ratatui_color("红色").is_none());
     }
 
     #[test]

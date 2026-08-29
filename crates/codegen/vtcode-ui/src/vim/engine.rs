@@ -453,10 +453,10 @@ impl<E: Editor> VimContext<'_, E> {
     fn move_vertical(&mut self, down: bool) {
         let content = self.editor.content();
         let (line_start, line_end) = vim_current_line_bounds(content, self.editor.cursor());
-        let column = self
+        let char_column = self
             .state
             .preferred_column
-            .unwrap_or_else(|| self.editor.cursor().saturating_sub(line_start));
+            .unwrap_or_else(|| content[line_start..self.editor.cursor()].chars().count());
         let target = if down {
             if line_end >= content.len() {
                 self.editor.cursor()
@@ -466,38 +466,51 @@ impl<E: Editor> VimContext<'_, E> {
                     .find('\n')
                     .map(|idx| next_start + idx)
                     .unwrap_or(content.len());
-                (next_start + column).min(next_end)
+                next_start
+                    + content[next_start..next_end]
+                        .char_indices()
+                        .nth(char_column)
+                        .map_or(next_end - next_start, |(idx, _)| idx)
             }
         } else if line_start == 0 {
             self.editor.cursor()
         } else {
             let prev_end = line_start - 1;
             let prev_start = content[..prev_end].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-            (prev_start + column).min(prev_end)
+            prev_start
+                + content[prev_start..prev_end]
+                    .char_indices()
+                    .nth(char_column)
+                    .map_or(prev_end - prev_start, |(idx, _)| idx)
         };
         self.editor.set_cursor(target);
-        self.state.preferred_column = Some(column);
+        self.state.preferred_column = Some(char_column);
     }
 
     fn move_to_line(&mut self, first: bool) {
         let content = self.editor.content();
         let (current_start, _) = vim_current_line_bounds(content, self.editor.cursor());
-        let column = self
+        let char_column = self
             .state
             .preferred_column
-            .unwrap_or_else(|| self.editor.cursor().saturating_sub(current_start));
+            .unwrap_or_else(|| content[current_start..self.editor.cursor()].chars().count());
         let target = if first {
-            column.min(content.find('\n').unwrap_or(content.len()))
+            let end = content.find('\n').unwrap_or(content.len());
+            content[..end].char_indices().nth(char_column).map_or(end, |(idx, _)| idx)
         } else {
             let last_start = content.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
             let last_end = content[last_start..]
                 .find('\n')
                 .map(|idx| last_start + idx)
                 .unwrap_or(content.len());
-            (last_start + column).min(last_end)
+            last_start
+                + content[last_start..last_end]
+                    .char_indices()
+                    .nth(char_column)
+                    .map_or(last_end - last_start, |(idx, _)| idx)
         };
         self.editor.set_cursor(target);
-        self.state.preferred_column = Some(column);
+        self.state.preferred_column = Some(char_column);
     }
 
     fn apply_motion_operator(&mut self, operator: Operator, motion: Motion) -> bool {

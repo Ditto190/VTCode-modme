@@ -1,5 +1,11 @@
 # TODO
 
+## UTF-8-safe text boundaries (#745)
+
+- [x] Replace raw byte-offset truncation and slicing in the reported runtime paths with boundary-safe helpers.
+- [x] Add regression coverage for non-ASCII PTY input, Vim vertical movement, notifications, excerpts, and related truncation paths.
+- [x] Run focused quality checks, then reply to and close the issue.
+
 ## Memory fixes
 
 - [ ] Investigate and fix the memory feature not saving user context.

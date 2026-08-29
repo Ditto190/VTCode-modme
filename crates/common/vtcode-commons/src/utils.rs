@@ -95,11 +95,7 @@ pub fn extract_readme_excerpt(md: &str, max_len: usize) -> String {
             break;
         }
     }
-    if excerpt.len() > max_len {
-        excerpt.truncate(max_len);
-        excerpt.push_str("...\n");
-    }
-    excerpt
+    crate::formatting::truncate_byte_budget(&excerpt, max_len, "...\n")
 }
 
 /// Safe text replacement with validation
@@ -113,4 +109,16 @@ pub fn safe_replace_text(content: &str, old_str: &str, new_str: &str) -> Result<
     }
 
     Ok(content.replace(old_str, new_str))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readme_excerpt_does_not_split_utf8() {
+        let markdown = "你".repeat(700);
+
+        assert_eq!(extract_readme_excerpt(&markdown, 1201), format!("{}...\n", "你".repeat(400)));
+    }
 }
