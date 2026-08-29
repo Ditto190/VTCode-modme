@@ -273,6 +273,7 @@ async fn remember_planner_requests_missing_details() {
         MemoryOpKind::Remember,
         "save to memory and remember my name",
         None,
+        None,
         &[],
     )
     .await
@@ -280,6 +281,77 @@ async fn remember_planner_requests_missing_details() {
 
     assert_eq!(plan.kind, MemoryOpKind::AskMissing);
     assert_eq!(plan.missing.as_ref().map(|missing| missing.field.as_str()), Some("name"));
+    assert!(
+        !provider.last_request().messages[0]
+            .content
+            .as_text()
+            .contains("Immediately preceding assistant reply")
+    );
+}
+
+#[tokio::test]
+async fn remember_planner_uses_immediately_preceding_assistant_reply_for_deictic_request() {
+    let workspace = tempdir().expect("workspace");
+    let provider = StaticProvider::new(
+        r#"{
+          "kind": "remember",
+          "facts": [
+            {
+              "topic": "preferences",
+              "fact": "My name is Vinh Nguyen; my alias is vinhnx.",
+              "source": "assistant_reply"
+            }
+          ],
+          "selected_ids": [],
+          "missing": null,
+          "message": null
+        }"#,
+    );
+    let route = MemoryModelRoute {
+        provider_name: "stub".to_string(),
+        model: "stub-model".to_string(),
+        temperature: 0.0,
+    };
+    let prior_assistant_reply = "Your name is Vinh Nguyen and you go by vinhnx.";
+    let plan = plan_memory_operation_with_provider(
+        &provider,
+        &route,
+        workspace.path(),
+        MemoryOpKind::Remember,
+        "remember it",
+        None,
+        Some(prior_assistant_reply),
+        &[],
+    )
+    .await
+    .expect("plan");
+
+    assert_eq!(plan.kind, MemoryOpKind::Remember);
+    assert_eq!(plan.facts.len(), 1);
+    assert_eq!(plan.facts[0].topic, MemoryPlannedTopic::Preferences);
+    assert_eq!(plan.facts[0].fact, "My name is Vinh Nguyen; my alias is vinhnx.");
+
+    let request = provider.last_request();
+    let prompt = request.messages[0].content.as_text();
+    assert!(prompt.contains("Immediately preceding assistant reply"));
+    assert!(prompt.contains(prior_assistant_reply));
+    assert!(prompt.contains("approved by the current user"));
+
+    std::fs::write(workspace.path().join(".git"), "gitdir: /tmp/git").expect("git marker");
+    let vt_cfg = enabled_vt_memory_config_for(workspace.path());
+    let report = persist_remembered_memory_plan(&runtime_config(workspace.path()), Some(&vt_cfg), &plan)
+        .await
+        .expect("persist contextual plan")
+        .expect("write report");
+    assert_eq!(report.added_facts, 1);
+
+    let candidates = list_persistent_memory_candidates(&vt_cfg.agent.persistent_memory, workspace.path())
+        .await
+        .expect("read persisted candidates")
+        .expect("enabled");
+    assert!(candidates.iter().any(|candidate| {
+        candidate.fact == "My name is Vinh Nguyen; my alias is vinhnx." && candidate.source == "assistant_reply"
+    }));
 }
 
 #[tokio::test]
@@ -317,6 +389,7 @@ async fn forget_planner_selects_exact_candidate_ids() {
         workspace.path(),
         MemoryOpKind::Forget,
         "forget my pnpm preference",
+        None,
         None,
         &candidates,
     )
@@ -368,6 +441,7 @@ async fn planner_falls_back_to_prompt_only_json_when_native_schema_is_unsupporte
         workspace.path(),
         MemoryOpKind::Remember,
         "remember my name",
+        None,
         None,
         &[],
     )
@@ -448,6 +522,7 @@ async fn planner_supports_streaming_only_provider() {
         workspace.path(),
         MemoryOpKind::Remember,
         "remember my name",
+        None,
         None,
         &[],
     )
@@ -806,6 +881,16 @@ async fn remember_plan_persists_normalized_manual_memory_update() {
         .expect("excerpt")
         .expect("present");
     assert!(excerpt.contents.contains("Prefer pnpm"));
+
+    let candidates = list_persistent_memory_candidates(&vt_cfg.agent.persistent_memory, workspace.path())
+        .await
+        .expect("candidates")
+        .expect("enabled");
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.fact == "Prefer pnpm for workspace package management.")
+    );
 }
 
 #[tokio::test]

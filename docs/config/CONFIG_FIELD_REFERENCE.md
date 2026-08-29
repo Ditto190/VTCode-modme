@@ -114,7 +114,7 @@ python3 scripts/generate_config_field_reference.py
 | `agent.open_responses.map_tool_calls` | `boolean` | no | `true` | Map internal tool calls to Open Responses function_call items When true, command executions and MCP tool calls are represented as function_call items |
 | `agent.persistent_memory.auto_write` | `boolean` | no | `true` | Write durable memory after completed turns and session finalization |
 | `agent.persistent_memory.directory_override` | `null \| string` | no | `null` | Optional user-local directory override for persistent memory storage |
-| `agent.persistent_memory.enabled` | `boolean` | no | `false` | Toggle main-session persistent memory for this repository |
+| `agent.persistent_memory.enabled` | `boolean` | no | `false` | Toggle main-session persistent memory for this repository. Natural-language saves resolve "it", "this", and "that" only against the immediately preceding assistant answer and require confirmation; identity names and aliases are stored as preferences. |
 | `agent.persistent_memory.memories.consolidation_model` | `null \| string` | no | `null` | Overrides the model used for global memory consolidation. |
 | `agent.persistent_memory.memories.extract_model` | `null \| string` | no | `null` | Overrides the model used for per-thread memory extraction. |
 | `agent.persistent_memory.memories.generate_memories` | `boolean` | no | `true` | Controls whether newly completed threads can be stored as memory-generation inputs. |

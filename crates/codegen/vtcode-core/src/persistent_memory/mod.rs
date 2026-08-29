@@ -664,11 +664,18 @@ pub async fn find_persistent_memory_matches(
     collect_memory_matches(&files, &normalized_query).await.map(Some)
 }
 
+/// Plan a user-approved persistent-memory save.
+///
+/// `prior_assistant_reply` is reference material for deictic requests such as
+/// "remember it" and must contain only the immediately preceding assistant
+/// reply. The caller remains responsible for limiting it to those requests and
+/// for obtaining confirmation before calling [`persist_remembered_memory_plan`].
 pub async fn plan_remember_persistent_memory(
     runtime_config: &RuntimeAgentConfig,
     vt_cfg: Option<&VTCodeConfig>,
     request: &str,
     supplemental_answer: Option<&str>,
+    prior_assistant_reply: Option<&str>,
 ) -> Result<Option<MemoryOpPlan>> {
     let config = effective_persistent_memory_config(vt_cfg);
     if !config.enabled {
@@ -682,6 +689,7 @@ pub async fn plan_remember_persistent_memory(
         MemoryOpKind::Remember,
         request,
         supplemental_answer,
+        prior_assistant_reply,
         &[],
     )
     .await?;
@@ -728,6 +736,7 @@ pub async fn plan_forget_persistent_memory(
         runtime_config.workspace.as_path(),
         MemoryOpKind::Forget,
         request,
+        None,
         None,
         candidates,
     )

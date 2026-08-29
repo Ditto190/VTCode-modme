@@ -178,7 +178,11 @@ VT Code also detects explicit memory-management prompts before they go to the mo
 
 - Prompts like `remember that I prefer pnpm`, `save to memory: use cargo nextest`, and `forget my pnpm preference` open a human-in-the-loop confirmation dialog in inline UI.
 - VT Code sends the raw request through the memory planner first, then shows the normalized fact or exact deletion candidates before applying the change.
+- Deictic saves such as `remember it`, `remember this`, and `remember that` resolve only against the immediately preceding non-empty assistant answer. Tool output and earlier conversation entries are not used as the reference.
+- The referenced answer is treated as reference material only because the current request explicitly approves saving it; the structured planner and inline confirmation remain required before any write.
+- Personal identity details, including names and aliases, are stored in the existing `preferences.md` topic rather than the repository-facts topic.
 - If the request is underspecified, such as `save to memory and remember my name`, VT Code asks for the missing detail before it writes anything.
+- If a save succeeds but the read-back verification cannot find the normalized fact, VT Code reports the verification failure and directs you to `/memory` to inspect the store.
 - Prompts like `show memory` or `what do you remember` route to the existing `/memory` surface instead of sending the request to the model.
 - If cleanup is required, VT Code asks you to run the one-time cleanup before any memory mutation.
 - If inline selection UI is unavailable, VT Code does not mutate memory and points you back to `/memory`.

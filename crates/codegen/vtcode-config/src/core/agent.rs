@@ -1348,7 +1348,9 @@ const fn default_memories_use() -> bool {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PersistentMemoryConfig {
-    /// Toggle main-session persistent memory for this repository
+    /// Toggle main-session persistent memory for this repository. Natural-language saves resolve
+    /// "it", "this", and "that" only against the immediately preceding assistant answer and
+    /// require confirmation; identity names and aliases are stored as preferences.
     #[serde(default = "default_persistent_memory_enabled")]
     pub enabled: bool,
 
