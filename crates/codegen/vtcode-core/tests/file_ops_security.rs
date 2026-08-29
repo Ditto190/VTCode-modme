@@ -7,6 +7,7 @@ use serde_json::json;
 use std::sync::Arc;
 use vtcode_core::tools::file_ops::FileOpsTool;
 use vtcode_core::tools::grep_file::GrepSearchManager;
+use vtcode_core::tools::traits::Tool;
 
 #[tokio::test]
 async fn create_file_rejects_workspace_escape() {
@@ -28,6 +29,39 @@ async fn create_file_rejects_workspace_escape() {
     let message = value.to_string();
     assert!(message.contains("outside the workspace"), "expected workspace guard in error, got: {message}");
     assert!(!outside.exists(), "create_file must not materialize escaped paths");
+}
+
+#[tokio::test]
+async fn list_files_all_modes_reject_workspace_escape_paths() {
+    let workspace = TempDir::new().expect("temp workspace");
+    let grep_manager = Arc::new(GrepSearchManager::new(workspace.path().to_path_buf()));
+    let file_tool = FileOpsTool::new(workspace.path().to_path_buf(), grep_manager);
+    let outside = workspace.path().parent().expect("temp dir parent").join("vtcode-list-outside");
+
+    for path in [
+        "../vtcode-list-outside",
+        outside.to_str().expect("absolute outside path"),
+    ] {
+        for (mode, extra) in [
+            ("list", json!({})),
+            ("recursive", json!({})),
+            ("find_name", json!({"name_pattern": "Cargo.toml"})),
+            ("find_content", json!({"content_pattern": "secret"})),
+            ("largest", json!({})),
+            ("tree", json!({})),
+        ] {
+            let mut args = json!({"path": path, "mode": mode});
+            args.as_object_mut()
+                .expect("list arguments object")
+                .extend(extra.as_object().expect("mode arguments object").clone());
+            let error = file_tool
+                .execute(args)
+                .await
+                .expect_err("list_files should reject paths outside the workspace")
+                .to_string();
+            assert!(error.contains("outside the workspace"), "mode={mode}, error={error}");
+        }
+    }
 }
 
 #[tokio::test]

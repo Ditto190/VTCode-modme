@@ -14,7 +14,7 @@ impl FileOpsTool {
     pub(crate) async fn execute_recursive_search(&self, input: &ListInput) -> Result<Value> {
         let list_glob = compile_list_glob(input)?;
         let pattern = input.glob_pattern.as_deref().or(input.name_pattern.as_deref()).unwrap_or("*");
-        let search_path = self.workspace_root.join(&input.path);
+        let search_path = self.normalize_list_path(input).await?;
 
         // Check if path exists before walking
         if !tokio::fs::try_exists(&search_path).await.unwrap_or(false) {
@@ -108,7 +108,7 @@ impl FileOpsTool {
             .name_pattern
             .as_ref()
             .ok_or_else(|| anyhow!("Error: Invalid 'list_files' arguments. When mode='find_name', must provide name_pattern (string). Example: {{\"path\": \".\", \"mode\": \"find_name\", \"name_pattern\": \"Cargo.toml\"}}"))?;
-        let search_path = self.workspace_root.join(&input.path);
+        let search_path = self.normalize_list_path(input).await?;
 
         let walker_entries: Vec<(PathBuf, bool)> = spawn_blocking({
             let search_path = search_path.clone();
@@ -169,7 +169,7 @@ impl FileOpsTool {
             .as_ref()
             .ok_or_else(|| anyhow!("Error: Invalid 'list_files' arguments. When mode='find_content', must provide content_pattern (string). Example: {{\"path\": \"src\", \"mode\": \"find_content\", \"content_pattern\": \"fn main\"}}"))?;
 
-        let search_root = self.workspace_root.join(&input.path);
+        let search_root = self.normalize_list_path(input).await?;
         if self.should_exclude(&search_root).await {
             return Err(anyhow!("Path '{}' is excluded by .vtcodegitignore", input.path));
         }

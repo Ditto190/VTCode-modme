@@ -11,7 +11,7 @@ use tokio::task::spawn_blocking;
 use vtcode_commons::walk::build_default_walker;
 
 pub(super) async fn execute_tree_view(tool: &FileOpsTool, input: &ListInput) -> Result<Value> {
-    let search_path = tool.workspace_root.join(&input.path);
+    let search_path = tool.normalize_list_path(input).await?;
 
     if !fs::try_exists(&search_path).await.unwrap_or(false) {
         let suggestion = tool.missing_path_suggestion_suffix(&input.path, PathSuggestionKind::Any).await;

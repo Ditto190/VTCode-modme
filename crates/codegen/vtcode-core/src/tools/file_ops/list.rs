@@ -55,6 +55,10 @@ pub(super) fn list_entry_matches(
 }
 
 impl FileOpsTool {
+    pub(super) async fn normalize_list_path(&self, input: &ListInput) -> Result<std::path::PathBuf> {
+        self.normalize_and_validate_candidate(Path::new(&input.path), &input.path).await
+    }
+
     fn directory_cache_key(&self, input: &ListInput) -> String {
         fn push_component(key: &mut String, value: &str) {
             key.push_str(&value.len().to_string());
@@ -105,7 +109,7 @@ impl FileOpsTool {
     pub(super) async fn execute_basic_list(&self, input: &ListInput) -> Result<Value> {
         use crate::tools::cache::FILE_CACHE;
 
-        let base = self.workspace_root.join(&input.path);
+        let base = self.normalize_list_path(input).await?;
         let list_glob = compile_list_glob(input)?;
 
         if self.should_exclude(&base).await {

@@ -6,6 +6,11 @@
 - [x] Add regression coverage for non-ASCII PTY input, Vim vertical movement, notifications, excerpts, and related truncation paths.
 - [x] Run focused quality checks, then reply to and close the issue.
 
+## list_files path containment (#746)
+
+- [x] Validate every listing mode through the symlink-aware workspace path policy.
+- [x] Add traversal and absolute-path regression coverage for all listing modes.
+
 ## Memory fixes
 
 - [ ] Investigate and fix the memory feature not saving user context.

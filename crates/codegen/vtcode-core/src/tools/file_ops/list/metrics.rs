@@ -10,7 +10,7 @@ use vtcode_commons::walk::build_walker_single_threaded;
 
 impl FileOpsTool {
     pub(crate) async fn execute_largest_files(&self, input: &ListInput) -> Result<Value> {
-        let search_root = self.workspace_root.join(&input.path);
+        let search_root = self.normalize_list_path(input).await?;
 
         if !tokio::fs::try_exists(&search_root).await.unwrap_or(false) {
             let suggestion = self.missing_path_suggestion_suffix(&input.path, PathSuggestionKind::Any).await;
