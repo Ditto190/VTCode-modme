@@ -779,7 +779,7 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
 
 fn open_private_append(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
-    let _ = options.create(true).append(true).write(true);
+    let _ = options.create(true).append(true).read(true).write(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};

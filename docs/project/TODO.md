@@ -1,5 +1,12 @@
 # TODO
 
+## Session event-log durability (#744)
+
+- [x] Make event-log compaction and manifest/index writes atomic and fsynced.
+- [x] Recover from malformed metadata and reject stale turn-index offsets.
+- [x] Enforce private session directories (`0700`) and artifacts (`0600`).
+- [x] Add compaction, recovery, reopen, and permission regression coverage.
+
 ## UTF-8-safe text boundaries (#745)
 
 - [x] Replace raw byte-offset truncation and slicing in the reported runtime paths with boundary-safe helpers.

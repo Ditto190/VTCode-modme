@@ -1,13 +1,14 @@
 //! Append-only per-session `ThreadEvent` log plus index and manifest.
 
 use std::collections::VecDeque;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use vtcode_commons::VtCodePaths;
 use vtcode_exec_events::{EVENT_SCHEMA_VERSION, ThreadEvent, VersionedThreadEvent};
 
 use crate::error::SessionStoreError;
@@ -113,6 +114,13 @@ struct LogState {
     write_buf: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CapEvictionPlan {
+    truncate_offset: u64,
+    evicted_event_count: u64,
+    evicted_turn_count: usize,
+}
+
 impl LogState {
     fn new(session_id: &str) -> Self {
         Self {
@@ -210,28 +218,45 @@ impl LogState {
     /// Plan a cap-enforcement eviction: pop the oldest completed turns from
     /// the index until `event_count` is within `max_events`.
     ///
-    /// Returns the byte offset at which the file should be truncated and the
-    /// number of events removed, so the caller can perform the I/O and adjust
-    /// `next_offset` / `event_count` in one place.  Returns `None` when no
-    /// eviction is needed.
-    fn plan_cap_eviction(&mut self, max_events: usize) -> Option<(u64, u64)> {
+    /// Returns the byte offset at which the file should be rewritten and the
+    /// counts needed to apply the eviction after successful I/O. Returns
+    /// `None` when no eviction is needed.
+    fn plan_cap_eviction(&self, max_events: usize) -> Option<CapEvictionPlan> {
         if max_events == 0 || self.manifest.event_count <= max_events as u64 {
             return None;
         }
         let mut evicted_event_count = 0u64;
         let mut truncate_offset = 0u64;
-        while self.manifest.event_count - evicted_event_count > max_events as u64
-            && let Some(oldest) = self.index.entries.front()
-        {
+        let mut evicted_turn_count = 0;
+        for oldest in &self.index.entries {
+            if self.manifest.event_count.saturating_sub(evicted_event_count) <= max_events as u64 {
+                break;
+            }
             truncate_offset = oldest.end_offset;
             evicted_event_count += oldest.event_count;
-            self.index.entries.pop_front();
+            evicted_turn_count += 1;
         }
-        if truncate_offset == 0 {
+        if truncate_offset == 0 || evicted_turn_count == 0 {
             None
         } else {
-            Some((truncate_offset, evicted_event_count))
+            Some(CapEvictionPlan {
+                truncate_offset,
+                evicted_event_count,
+                evicted_turn_count,
+            })
         }
+    }
+
+    fn apply_cap_eviction(&mut self, plan: CapEvictionPlan, next_offset: u64) {
+        for _ in 0..plan.evicted_turn_count {
+            let _ = self.index.entries.pop_front();
+        }
+        for entry in &mut self.index.entries {
+            entry.start_offset = entry.start_offset.saturating_sub(plan.truncate_offset);
+            entry.end_offset = entry.end_offset.saturating_sub(plan.truncate_offset);
+        }
+        self.next_offset = next_offset;
+        self.manifest.event_count = self.manifest.event_count.saturating_sub(plan.evicted_event_count);
     }
 }
 
@@ -243,7 +268,7 @@ impl LogState {
 pub struct SessionEventLog {
     events_path: PathBuf,
     manifest_store: ManifestStore,
-    file: Mutex<File>,
+    file: Mutex<Option<File>>,
     state: Mutex<LogState>,
     max_events: usize,
 }
@@ -253,22 +278,18 @@ impl SessionEventLog {
     /// rebuilding the index from `events.jsonl` if it already exists.
     pub(crate) fn open(workspace: &Path, session_id: &str, max_events: usize) -> Result<Self, SessionStoreError> {
         let dir = session_dir(workspace, session_id);
-        std::fs::create_dir_all(dir.join(crate::DERIVED_DIR))
-            .map_err(|e| SessionStoreError::CreateDir { path: dir.clone(), source: e })?;
-        std::fs::create_dir_all(dir.join("index"))
-            .map_err(|e| SessionStoreError::CreateDir { path: dir.clone(), source: e })?;
+        crate::ensure_private_directory(&crate::sessions_root(workspace))?;
+        crate::ensure_private_directory(&dir)?;
+        crate::ensure_private_directory(&dir.join(crate::DERIVED_DIR))?;
+        crate::ensure_private_directory(&dir.join("index"))?;
         let events_path = dir.join("events.jsonl");
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&events_path)
-            .map_err(|e| SessionStoreError::io(events_path.clone(), e))?;
+        let file = VtCodePaths::open_private_append_file(&events_path)
+            .map_err(|error| SessionStoreError::io(events_path.clone(), std::io::Error::other(error)))?;
         let manifest_store = ManifestStore::new(dir.clone());
         let log = Self {
             events_path: events_path.clone(),
             manifest_store,
-            file: Mutex::new(file),
+            file: Mutex::new(Some(file)),
             state: Mutex::new(LogState::new(session_id)),
             max_events,
         };
@@ -276,11 +297,9 @@ impl SessionEventLog {
         // the O(n) scan when they are present and consistent.
         let manifest_opt = log.manifest_store.load_manifest()?;
         let index_opt = log.manifest_store.load_turn_index()?;
-        let file_len = std::fs::metadata(&events_path)
-            .map_err(|e| SessionStoreError::io(events_path.clone(), e))?
-            .len();
+        let file_len = log.event_file_metadata_len()?;
         match (manifest_opt, index_opt) {
-            (Some(manifest), Some(index)) => {
+            (Some(manifest), Some(index)) if index.is_valid_for_file(file_len) => {
                 let mut st = log.state.lock().map_err(poison)?;
                 st.manifest = manifest;
                 st.index = index;
@@ -290,6 +309,7 @@ impl SessionEventLog {
                 log.scan()?;
                 let mut st = log.state.lock().map_err(poison)?;
                 st.next_offset = file_len;
+                log.persist_meta_locked(&mut st)?;
             }
         }
         Ok(log)
@@ -333,7 +353,7 @@ impl SessionEventLog {
 
         // `plan_cap_eviction` encapsulates the index arithmetic and returns
         // `None` when the cap is disabled or not yet exceeded.
-        let Some((truncate_offset, evicted_event_count)) = st.plan_cap_eviction(self.max_events) else {
+        let Some(plan) = st.plan_cap_eviction(self.max_events) else {
             return Ok(());
         };
 
@@ -342,27 +362,29 @@ impl SessionEventLog {
         // needs the complete on-disk file before rewriting it.
         self.flush_write_buf_locked(&mut st)?;
 
-        {
-            let mut file = self.file.lock().map_err(poison)?;
-            file.seek(SeekFrom::Start(truncate_offset))
+        let remaining = {
+            let mut file_slot = self.file.lock().map_err(poison)?;
+            let file = file_slot.as_mut().ok_or_else(|| self.event_file_unavailable())?;
+            let file_len = file
+                .metadata()
+                .map_err(|error| SessionStoreError::io(&self.events_path, error))?
+                .len();
+            if plan.truncate_offset > file_len {
+                return Err(SessionStoreError::io(
+                    &self.events_path,
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "cap offset exceeds event log length"),
+                ));
+            }
+            file.seek(SeekFrom::Start(plan.truncate_offset))
                 .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
             let mut remaining = Vec::new();
             file.read_to_end(&mut remaining)
                 .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-            file.set_len(0).map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-            file.seek(SeekFrom::Start(0))
-                .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-            file.write_all(&remaining)
-                .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-            file.flush().map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-        }
+            remaining
+        };
 
-        for entry in &mut st.index.entries {
-            entry.start_offset -= truncate_offset;
-            entry.end_offset -= truncate_offset;
-        }
-        st.next_offset -= truncate_offset;
-        st.manifest.event_count = st.manifest.event_count.saturating_sub(evicted_event_count);
+        let next_offset = self.replace_event_file_contents(&remaining)?;
+        st.apply_cap_eviction(plan, next_offset);
         // The rewrite changed byte offsets and retained counts; persist the
         // derived metadata before exposing the append as successful.
         self.persist_meta_locked(&mut st)?;
@@ -385,10 +407,19 @@ impl SessionEventLog {
             self.flush_write_buf_locked(&mut st)?;
         }
         let buf = {
-            let mut file = self.file.lock().map_err(poison)?;
+            let mut file_slot = self.file.lock().map_err(poison)?;
+            let file = file_slot.as_mut().ok_or_else(|| self.event_file_unavailable())?;
             file.seek(SeekFrom::Start(entry.start_offset))
                 .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
-            let len = (entry.end_offset - entry.start_offset) as usize;
+            let len = usize::try_from(entry.end_offset.checked_sub(entry.start_offset).ok_or_else(|| {
+                SessionStoreError::io(
+                    &self.events_path,
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "turn index offsets are out of order"),
+                )
+            })?)
+            .map_err(|error| {
+                SessionStoreError::io(&self.events_path, std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+            })?;
             let mut buf = vec![0u8; len];
             file.read_exact(&mut buf)
                 .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
@@ -467,11 +498,18 @@ impl SessionEventLog {
     /// logs that spike memory on every reopen.
     fn scan(&self) -> Result<(), SessionStoreError> {
         let mut st = self.state.lock().map_err(poison)?;
-        if !self.events_path.exists() {
-            return Ok(());
-        }
-        let file = File::open(&self.events_path).map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+        let file = self
+            .file
+            .lock()
+            .map_err(poison)?
+            .as_ref()
+            .ok_or_else(|| self.event_file_unavailable())?
+            .try_clone()
+            .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
         let mut reader = std::io::BufReader::new(file);
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
         let mut buf = Vec::new();
         let mut pos = 0u64;
         let mut first_ts: Option<String> = None;
@@ -532,11 +570,72 @@ impl SessionEventLog {
         if st.write_buf.is_empty() {
             return Ok(());
         }
-        let mut file = self.file.lock().map_err(poison)?;
-        file.write_all(&st.write_buf)
-            .map_err(|e| SessionStoreError::io(&self.events_path, e))?;
+        let mut file_slot = self.file.lock().map_err(poison)?;
+        let file = file_slot.as_mut().ok_or_else(|| self.event_file_unavailable())?;
+        let previous_len = file.metadata().map_err(|e| SessionStoreError::io(&self.events_path, e))?.len();
+        if let Err(error) = file.write_all(&st.write_buf) {
+            if file.set_len(previous_len).is_err() {
+                st.write_buf.clear();
+            }
+            return Err(SessionStoreError::io(&self.events_path, error));
+        }
+        if let Err(error) = file.sync_data() {
+            st.write_buf.clear();
+            return Err(SessionStoreError::io(&self.events_path, error));
+        }
         st.write_buf.clear();
         Ok(())
+    }
+
+    fn event_file_metadata_len(&self) -> Result<u64, SessionStoreError> {
+        let file_slot = self.file.lock().map_err(poison)?;
+        file_slot
+            .as_ref()
+            .ok_or_else(|| self.event_file_unavailable())?
+            .metadata()
+            .map(|metadata| metadata.len())
+            .map_err(|error| SessionStoreError::io(&self.events_path, error))
+    }
+
+    fn open_event_file(&self) -> Result<File, SessionStoreError> {
+        VtCodePaths::open_private_append_file(&self.events_path)
+            .map_err(|error| SessionStoreError::io(&self.events_path, std::io::Error::other(error)))
+    }
+
+    fn replace_event_file_contents(&self, contents: &[u8]) -> Result<u64, SessionStoreError> {
+        let old_file = {
+            let mut file_slot = self.file.lock().map_err(poison)?;
+            file_slot.take().ok_or_else(|| self.event_file_unavailable())?
+        };
+        drop(old_file);
+
+        if let Err(error) = VtCodePaths::write_private_file_atomic(&self.events_path, contents)
+            .map_err(|error| SessionStoreError::io(&self.events_path, std::io::Error::other(error)))
+        {
+            let restored = self.open_event_file();
+            if let Ok(file) = restored {
+                let mut file_slot = self.file.lock().map_err(poison)?;
+                *file_slot = Some(file);
+                return Err(error);
+            }
+            return Err(SessionStoreError::io(
+                &self.events_path,
+                std::io::Error::other(format!("{error}; failed to restore event log handle")),
+            ));
+        }
+
+        let replacement = self.open_event_file()?;
+        let next_offset = replacement
+            .metadata()
+            .map_err(|error| SessionStoreError::io(&self.events_path, error))?
+            .len();
+        let mut file_slot = self.file.lock().map_err(poison)?;
+        *file_slot = Some(replacement);
+        Ok(next_offset)
+    }
+
+    fn event_file_unavailable(&self) -> SessionStoreError {
+        SessionStoreError::io(&self.events_path, std::io::Error::other("event log file is unavailable"))
     }
 }
 
@@ -638,6 +737,20 @@ impl TurnIndex {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    fn is_valid_for_file(&self, file_len: u64) -> bool {
+        let mut previous_end = 0u64;
+        self.entries.iter().all(|entry| {
+            let valid = entry.event_count > 0
+                && entry.start_offset >= previous_end
+                && entry.start_offset <= entry.end_offset
+                && entry.end_offset <= file_len;
+            if valid {
+                previous_end = entry.end_offset;
+            }
+            valid
+        })
     }
 }
 
@@ -848,14 +961,14 @@ mod cap_eviction_tests {
 
     #[test]
     fn no_eviction_when_under_cap() {
-        let mut st = state_with_turns(3, 2); // 6 events
+        let st = state_with_turns(3, 2); // 6 events
         assert!(st.plan_cap_eviction(10).is_none());
         assert_eq!(st.index.entries.len(), 3, "no turns should be evicted");
     }
 
     #[test]
     fn no_eviction_when_cap_disabled() {
-        let mut st = state_with_turns(5, 2); // 10 events
+        let st = state_with_turns(5, 2); // 10 events
         assert!(st.plan_cap_eviction(0).is_none());
         assert_eq!(st.index.entries.len(), 5);
     }
@@ -863,13 +976,17 @@ mod cap_eviction_tests {
     #[test]
     fn evicts_oldest_turns_to_meet_cap() {
         // 5 turns × 2 events = 10 events; cap = 6 → need to evict 2 turns (4 events).
-        let mut st = state_with_turns(5, 2);
-        let (truncate_offset, evicted) = st.plan_cap_eviction(6).expect("eviction planned");
-        assert_eq!(evicted, 4, "should evict 4 events (2 turns)");
-        assert_eq!(st.index.entries.len(), 3, "should keep 3 turns");
+        let st = state_with_turns(5, 2);
+        let plan = st.plan_cap_eviction(6).expect("eviction planned");
+        assert_eq!(plan.evicted_event_count, 4, "should evict 4 events (2 turns)");
+        assert_eq!(st.index.entries.len(), 5, "planning must not mutate state");
         // Truncate offset is the end of the last evicted turn.
-        assert_eq!(truncate_offset, 40); // 2 turns × 20 bytes each
-        // Remaining turns should be turns 3, 4, 5.
+        assert_eq!(plan.truncate_offset, 40); // 2 turns × 20 bytes each
+
+        // Applying the plan leaves turns 3, 4, 5.
+        let mut st = st;
+        st.apply_cap_eviction(plan, 60);
+        assert_eq!(st.index.entries.len(), 3, "should keep 3 turns");
         assert_eq!(st.index.entries[0].turn_number, 3);
         assert_eq!(st.index.entries[2].turn_number, 5);
     }
@@ -879,9 +996,11 @@ mod cap_eviction_tests {
         // 3 turns × 5 events = 15 events; cap = 3 → evict turns until ≤ 3 remain.
         // Each turn has 5 events, so evicting 2 turns leaves 5 (>3), evicting
         // 3 turns leaves 0.
-        let mut st = state_with_turns(3, 5);
-        let (_truncate_offset, evicted) = st.plan_cap_eviction(3).expect("eviction planned");
-        assert_eq!(evicted, 15, "all events evicted");
+        let st = state_with_turns(3, 5);
+        let plan = st.plan_cap_eviction(3).expect("eviction planned");
+        assert_eq!(plan.evicted_event_count, 15, "all events evicted");
+        let mut st = st;
+        st.apply_cap_eviction(plan, 0);
         assert_eq!(st.index.entries.len(), 0);
     }
 }

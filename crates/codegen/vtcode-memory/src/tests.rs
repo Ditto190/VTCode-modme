@@ -384,6 +384,98 @@ fn manifest_shortcut_skips_scan_on_reopen() {
 }
 
 #[test]
+fn corrupt_manifest_falls_back_to_event_log_scan() {
+    let dir = TempDir::new().expect("tempdir");
+    {
+        let log = open(dir.path(), "sess-corrupt-manifest", DEFAULT_MAX_EVENTS).expect("open");
+        for event in &sample_turn() {
+            log.append(event).expect("append");
+        }
+        log.complete().expect("complete");
+    }
+
+    let session_dir = sessions_root(dir.path()).join("sess-corrupt-manifest");
+    fs::write(session_dir.join("manifest.json"), b"{\"broken\"").expect("corrupt manifest");
+
+    let reopened = open(dir.path(), "sess-corrupt-manifest", DEFAULT_MAX_EVENTS).expect("recover from manifest");
+    assert_eq!(reopened.turn_count(), 1);
+    assert_eq!(reopened.reconstruct_turn(1).expect("reconstruct").len(), 2);
+    serde_json::from_str::<crate::SessionManifest>(
+        &fs::read_to_string(session_dir.join("manifest.json")).expect("read repaired manifest"),
+    )
+    .expect("manifest should be repaired");
+}
+
+#[test]
+fn stale_turn_index_offsets_fall_back_to_event_log_scan() {
+    let dir = TempDir::new().expect("tempdir");
+    {
+        let log = open(dir.path(), "sess-stale-index", DEFAULT_MAX_EVENTS).expect("open");
+        for event in &sample_turn() {
+            log.append(event).expect("append");
+        }
+        log.complete().expect("complete");
+    }
+
+    let index_path = sessions_root(dir.path()).join("sess-stale-index/index/turns.json");
+    let mut index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&index_path).expect("read index")).expect("parse index");
+    index["entries"][0]["end_offset"] = serde_json::json!(u64::MAX);
+    fs::write(&index_path, serde_json::to_vec(&index).expect("serialize stale index")).expect("write stale index");
+
+    let reopened = open(dir.path(), "sess-stale-index", DEFAULT_MAX_EVENTS).expect("recover from stale index");
+    assert_eq!(reopened.turn_count(), 1);
+    assert_eq!(reopened.reconstruct_turn(1).expect("reconstruct").len(), 2);
+}
+
+#[test]
+fn cap_rewrite_keeps_event_log_appendable_and_reopenable() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "sess-cap-rewrite", 2).expect("open");
+    let turn = || {
+        [
+            ThreadEvent::TurnStarted(TurnStartedEvent::default()),
+            ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ]
+    };
+
+    for event in turn().into_iter().chain(turn()) {
+        log.append(&event).expect("append");
+    }
+
+    let events_path = sessions_root(dir.path()).join("sess-cap-rewrite/events.jsonl");
+    assert_eq!(fs::read_to_string(&events_path).expect("read compacted log").lines().count(), 2);
+    assert_eq!(log.reconstruct_turn(2).expect("reconstruct retained turn").len(), 2);
+
+    drop(log);
+    let reopened = open(dir.path(), "sess-cap-rewrite", 2).expect("reopen compacted log");
+    assert_eq!(reopened.event_count(), 2);
+    assert_eq!(reopened.reconstruct_turn(2).expect("reconstruct after reopen").len(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn session_artifacts_use_private_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "sess-private", DEFAULT_MAX_EVENTS).expect("open");
+    for event in &sample_turn() {
+        log.append(event).expect("append");
+    }
+    log.flush().expect("flush");
+
+    let session_dir = sessions_root(dir.path()).join("sess-private");
+    let mode = |path: &std::path::Path| fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+    assert_eq!(mode(&session_dir), 0o700);
+    assert_eq!(mode(&session_dir.join("derived")), 0o700);
+    assert_eq!(mode(&session_dir.join("index")), 0o700);
+    assert_eq!(mode(&session_dir.join("events.jsonl")), 0o600);
+    assert_eq!(mode(&session_dir.join("manifest.json")), 0o600);
+    assert_eq!(mode(&session_dir.join("index/turns.json")), 0o600);
+}
+
+#[test]
 fn scan_fallback_when_manifest_missing() {
     let dir = TempDir::new().expect("tempdir");
     // Write events directly to events.jsonl without manifest/index.

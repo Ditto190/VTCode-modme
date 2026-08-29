@@ -13,9 +13,12 @@
 - Return persistence errors to callers; do not silently discard cap-enforcement failures.
 - Retention may remove only validated direct child session directories; preserve active manifests and reject manifest-controlled paths or symlink entries.
 - `event_log.rs`: turn-lifecycle state machine is `LogState::apply_lifecycle_event` (single impl shared by `append` and `scan` via `LifecycleKind`). Serialization+rollback is `LogState::serialize_event`. Cap eviction planning is `LogState::plan_cap_eviction` (I/O stays in `enforce_event_cap`). Do not duplicate these state transitions inline.
+- Session event bytes are synced before metadata; compaction and metadata use private atomic replacement, and reopening rescans when metadata is malformed or offsets exceed the canonical log.
+- Session directories are `0700` and session files are `0600`; preserve the symlink-safe `vtcode-commons` filesystem primitives.
 
 ## Dependencies
 
+- `vtcode-commons` owns symlink-safe private directories/files and atomic writes.
 - `vtcode-exec-events` owns the `ThreadEvent` / `VersionedThreadEvent` contract; never reinvent event types.
 - `walkdir` handles directory-size and GC walks; `chrono`, `serde`, and `serde_json` handle persistence metadata.
 - `uuid` supports verifier-id generation for the goal tracker.

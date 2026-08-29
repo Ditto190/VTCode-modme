@@ -52,10 +52,11 @@ pub fn migrate_legacy(workspace: &Path, remove_legacy: bool) -> Result<Migration
             let session_id = name.to_string();
             let bytes = std::fs::read(&path).map_err(|e| SessionStoreError::io(path.clone(), e))?;
             let dir = session_dir(workspace, &session_id);
-            std::fs::create_dir_all(dir.join(crate::DERIVED_DIR))
-                .map_err(|e| SessionStoreError::CreateDir { path: dir.clone(), source: e })?;
+            crate::ensure_private_directory(&dir)?;
+            crate::ensure_private_directory(&dir.join(crate::DERIVED_DIR))?;
             let dest = dir.join(crate::DERIVED_DIR).join("memory.json");
-            std::fs::write(&dest, &bytes).map_err(|e| SessionStoreError::io(dest, e))?;
+            vtcode_commons::VtCodePaths::write_private_file_atomic(&dest, &bytes)
+                .map_err(|error| SessionStoreError::io(dest, std::io::Error::other(error)))?;
             write_manifest(&dir, &session_id, &path, "completed")?;
             report.sessions_created += 1;
             report.memory_imported += 1;
@@ -81,10 +82,11 @@ pub fn migrate_legacy(workspace: &Path, remove_legacy: bool) -> Result<Migration
             let session_id = format!("traj-{}", name.trim_start_matches("trajectory-"));
             let bytes = std::fs::read(&path).map_err(|e| SessionStoreError::io(path.clone(), e))?;
             let dir = session_dir(workspace, &session_id);
-            std::fs::create_dir_all(dir.join(crate::DERIVED_DIR))
-                .map_err(|e| SessionStoreError::CreateDir { path: dir.clone(), source: e })?;
+            crate::ensure_private_directory(&dir)?;
+            crate::ensure_private_directory(&dir.join(crate::DERIVED_DIR))?;
             let dest = dir.join(crate::DERIVED_DIR).join("trajectory.jsonl");
-            std::fs::write(&dest, &bytes).map_err(|e| SessionStoreError::io(dest, e))?;
+            vtcode_commons::VtCodePaths::write_private_file_atomic(&dest, &bytes)
+                .map_err(|error| SessionStoreError::io(dest, std::io::Error::other(error)))?;
             write_manifest(&dir, &session_id, &path, "completed")?;
             report.sessions_created += 1;
             report.trajectory_imported += 1;
@@ -113,6 +115,7 @@ fn write_manifest(dir: &Path, session_id: &str, source: &Path, status: &str) -> 
     manifest.status = status.to_string();
     let path = dir.join("manifest.json");
     let bytes = serde_json::to_vec(&manifest)?;
-    std::fs::write(&path, bytes).map_err(|e| SessionStoreError::io(path, e))?;
+    vtcode_commons::VtCodePaths::write_private_file_atomic(&path, &bytes)
+        .map_err(|error| SessionStoreError::io(path, std::io::Error::other(error)))?;
     Ok(())
 }

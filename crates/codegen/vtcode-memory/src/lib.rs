@@ -90,6 +90,24 @@ pub fn open(workspace: &Path, session_id: &str, max_events: usize) -> Result<Ses
     SessionEventLog::open(workspace, session_id, max_events)
 }
 
+/// Ensure a session-store directory exists with private permissions.
+pub(crate) fn ensure_private_directory(path: &Path) -> Result<(), SessionStoreError> {
+    vtcode_commons::VtCodePaths::ensure_user_dir(path).map_err(|error| SessionStoreError::CreateDir {
+        path: path.to_path_buf(),
+        source: std::io::Error::other(error),
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| SessionStoreError::io(path.to_path_buf(), error))?;
+    }
+
+    Ok(())
+}
+
 /// Sanitize a session id so it is safe to use as a directory name.
 fn sanitize_id(id: &str) -> String {
     let mut out = String::with_capacity(id.len());

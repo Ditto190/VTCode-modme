@@ -1,5 +1,5 @@
-use std::fs::{self, File};
-use std::io::BufReader;
+use std::fs;
+use std::path::Path;
 
 use crate::SessionManifest;
 use crate::TurnIndex;
@@ -33,45 +33,49 @@ impl ManifestStore {
     /// Load the manifest if it exists and is parseable.
     ///
     /// Returns `Ok(None)` when the file is missing (fresh session) or
-    /// unreadable, rather than erroring — the caller can fall back to
-    /// scanning the event log.
+    /// malformed, rather than erroring — the caller can fall back to scanning
+    /// the event log.
     pub(crate) fn load_manifest(&self) -> Result<Option<SessionManifest>, SessionStoreError> {
         let path = self.manifest_path();
-        if !path.exists() {
+        let Some(bytes) = read_optional_private_file(&path)? else {
             return Ok(None);
-        }
-        let file = File::open(&path).map_err(|e| SessionStoreError::io(path.clone(), e))?;
-        let reader = BufReader::new(file);
-        let manifest: SessionManifest =
-            serde_json::from_reader(reader).map_err(|e| SessionStoreError::io(path.clone(), e.into()))?;
-        Ok(Some(manifest))
+        };
+        Ok(serde_json::from_slice(&bytes).ok())
     }
 
     /// Load the turn index if it exists and is parseable.
     ///
-    /// Returns `Ok(None)` when the file is missing or unreadable.
+    /// Returns `Ok(None)` when the file is missing or malformed.
     pub(crate) fn load_turn_index(&self) -> Result<Option<TurnIndex>, SessionStoreError> {
         let path = self.turns_path();
-        if !path.exists() {
+        let Some(bytes) = read_optional_private_file(&path)? else {
             return Ok(None);
-        }
-        let file = File::open(&path).map_err(|e| SessionStoreError::io(path.clone(), e))?;
-        let reader = BufReader::new(file);
-        let index: TurnIndex =
-            serde_json::from_reader(reader).map_err(|e| SessionStoreError::io(path.clone(), e.into()))?;
-        Ok(Some(index))
+        };
+        Ok(serde_json::from_slice(&bytes).ok())
     }
     /// Atomically write the manifest. Parent directories must already exist.
     pub(crate) fn write_manifest(&self, manifest: &SessionManifest) -> Result<(), SessionStoreError> {
         let path = self.manifest_path();
         let bytes = serde_json::to_vec(manifest)?;
-        fs::write(&path, bytes).map_err(|e| SessionStoreError::io(path.clone(), e))
+        vtcode_commons::VtCodePaths::write_private_file_atomic(&path, &bytes)
+            .map_err(|error| SessionStoreError::io(path, std::io::Error::other(error)))
     }
 
     /// Atomically write the turn index. Parent directories must already exist.
     pub(crate) fn write_turn_index(&self, index: &TurnIndex) -> Result<(), SessionStoreError> {
         let path = self.turns_path();
         let bytes = serde_json::to_vec(index)?;
-        fs::write(&path, bytes).map_err(|e| SessionStoreError::io(path.clone(), e))
+        vtcode_commons::VtCodePaths::write_private_file_atomic(&path, &bytes)
+            .map_err(|error| SessionStoreError::io(path, std::io::Error::other(error)))
+    }
+}
+
+fn read_optional_private_file(path: &Path) -> Result<Option<Vec<u8>>, SessionStoreError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => vtcode_commons::VtCodePaths::read_file_no_follow(path)
+            .map(Some)
+            .map_err(|error| SessionStoreError::io(path.to_path_buf(), std::io::Error::other(error))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(SessionStoreError::io(path.to_path_buf(), error)),
     }
 }
