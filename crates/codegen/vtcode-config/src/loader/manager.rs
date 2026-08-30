@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -17,6 +18,20 @@ use vtcode_commons::VtCodePaths;
 use vtcode_commons::canonicalize;
 
 type CachedManager = Arc<ConfigManager>;
+
+#[derive(Debug)]
+struct RepositoryProviderSecurityViolation {
+    source: ConfigLayerSource,
+    message: String,
+}
+
+impl fmt::Display for RepositoryProviderSecurityViolation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RepositoryProviderSecurityViolation {}
 
 #[cfg(not(test))]
 static WORKSPACE_CACHE: Mutex<Option<HashMap<PathBuf, CachedManager>>> = Mutex::new(None);
@@ -136,7 +151,7 @@ impl ConfigManager {
             });
         }
 
-        Self::load_from_workspace(std::env::current_dir()?)
+        Self::load_from_workspace_with_repository_repair(std::env::current_dir()?)
     }
 
     /// Load configuration for an interactive session with an explicit config file.
@@ -303,6 +318,59 @@ impl ConfigManager {
         cache_insert(canonical_workspace, Arc::new(manager.clone()));
 
         Ok(manager)
+    }
+
+    /// Load a workspace configuration and repair provider settings left by
+    /// older versions that persisted the merged configuration into a
+    /// repository-controlled file.
+    ///
+    /// The strict loader still rejects repository-controlled provider
+    /// definitions and endpoint/credential overrides. This entry point only
+    /// handles that specific, already-validated violation by removing the
+    /// prohibited fields from the exact repository layer that introduced it,
+    /// then retrying the normal load. Explicit session files remain trusted
+    /// and are never repaired.
+    pub fn load_from_workspace_with_repository_repair(workspace: impl AsRef<Path>) -> Result<Self> {
+        let workspace = workspace.as_ref();
+        let mut error = match Self::load_from_workspace(workspace) {
+            Ok(manager) => return Ok(manager),
+            Err(error) => error,
+        };
+
+        // More than one repository layer can contain a stale flattened copy.
+        // Repair and retry until the strict loader succeeds or every known
+        // repository layer has had a chance to be cleaned.
+        let repository_paths = Self::repository_config_paths(workspace);
+        for _ in 0..=repository_paths.len() {
+            let Some(violation) = error.downcast_ref::<RepositoryProviderSecurityViolation>() else {
+                return Err(error);
+            };
+
+            let source = violation.source.clone();
+            let Some(path) = repository_paths
+                .iter()
+                .find(|candidate| Self::repository_source_matches_path(&source, candidate))
+            else {
+                return Err(error);
+            };
+
+            if !Self::repair_repository_config_file(path)? {
+                return Err(error);
+            }
+
+            tracing::warn!(
+                path = %path.display(),
+                "Removed prohibited provider settings left by an older repository configuration write"
+            );
+
+            Self::invalidate_workspace_cache(workspace);
+            match Self::load_from_workspace(workspace) {
+                Ok(manager) => return Ok(manager),
+                Err(next_error) => error = next_error,
+            }
+        }
+
+        Err(error).context("Failed to load workspace configuration after repairing prohibited provider settings")
     }
 
     fn load_from_workspace_impl(workspace: impl AsRef<Path>) -> Result<Self> {
@@ -683,6 +751,34 @@ impl ConfigManager {
         self.config_path.as_deref()
     }
 
+    /// Return whether a path belongs to a repository-controlled config layer.
+    ///
+    /// This keeps callers that persist a full config document from having to
+    /// duplicate layer-origin and explicit-session checks.
+    #[must_use]
+    pub fn is_repository_controlled_path(&self, path: &Path) -> bool {
+        if self.explicit_config_is_trusted {
+            return false;
+        }
+
+        if self
+            .layer_stack
+            .layers()
+            .iter()
+            .any(|layer| layer.is_enabled() && Self::repository_source_matches_path(&layer.source, path))
+        {
+            return true;
+        }
+
+        self.config_path.is_none()
+            && self.workspace_root.as_deref().is_some_and(|workspace| {
+                Self::repository_source_matches_path(
+                    &ConfigLayerSource::Workspace { file: workspace.join(&self.config_file_name) },
+                    path,
+                )
+            })
+    }
+
     /// Get the active workspace root for this manager.
     pub fn workspace_root(&self) -> Option<&Path> {
         self.workspace_root.as_deref()
@@ -799,6 +895,39 @@ impl ConfigManager {
         paths
     }
 
+    fn repository_config_paths(workspace: &Path) -> Vec<PathBuf> {
+        let provider = defaults::current_config_defaults();
+        let config_file_name = provider.config_file_name().to_string();
+        let workspace_paths = provider.workspace_paths_for(workspace);
+        let workspace_root = canonicalize_workspace_root(workspace_paths.workspace_root());
+        let config_dir = workspace_paths.config_dir();
+        let mut paths = Vec::with_capacity(3);
+
+        let mut push_unique = |path: PathBuf| {
+            if !paths.iter().any(|existing| existing == &path) {
+                paths.push(path);
+            }
+        };
+
+        if let Some(project_path) = Self::project_config_path(&config_dir, &workspace_root, &config_file_name) {
+            push_unique(project_path);
+        }
+        push_unique(config_dir.join(&config_file_name));
+        push_unique(workspace_root.join(&config_file_name));
+        paths
+    }
+
+    fn repository_source_matches_path(source: &ConfigLayerSource, path: &Path) -> bool {
+        let Some(source_file) = (match source {
+            ConfigLayerSource::Project { file } | ConfigLayerSource::Workspace { file } => Some(file),
+            ConfigLayerSource::System { .. } | ConfigLayerSource::User { .. } | ConfigLayerSource::Runtime => None,
+        }) else {
+            return false;
+        };
+
+        canonicalize_workspace_root(source_file) == canonicalize_workspace_root(path)
+    }
+
     /// Get the effective TOML configuration
     pub fn effective_config(&self) -> toml::Value {
         self.layer_stack.effective_config()
@@ -904,20 +1033,50 @@ impl ConfigManager {
         safe_config
     }
 
-    fn remove_repository_provider_settings(doc: &mut toml_edit::DocumentMut) {
+    fn repair_repository_config_file(path: &Path) -> Result<bool> {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                bail!("Refusing to repair symlinked config file: {}", path.display())
+            }
+            Ok(metadata) if !metadata.is_file() => {
+                bail!("Config path is not a regular file: {}", path.display())
+            }
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to inspect config: {}", path.display()));
+            }
+        };
+        debug_assert!(metadata.is_file());
+
+        let content = String::from_utf8(VtCodePaths::read_file_no_follow(path)?)
+            .with_context(|| format!("Failed to read existing config: {}", path.display()))?;
+        let mut doc = content
+            .parse::<toml_edit::DocumentMut>()
+            .with_context(|| format!("Failed to parse existing config: {}", path.display()))?;
+        if !Self::remove_repository_provider_settings(&mut doc) {
+            return Ok(false);
+        }
+
+        VtCodePaths::write_private_file_atomic(path, doc.to_string().as_bytes())
+            .with_context(|| format!("Failed to repair config file: {}", path.display()))?;
+        Ok(true)
+    }
+
+    fn remove_repository_provider_settings(doc: &mut toml_edit::DocumentMut) -> bool {
         let table = doc.as_table_mut();
-        table.remove("custom_providers");
+        let mut changed = table.remove("custom_providers").is_some();
 
         let remove_provider_overrides = {
             let Some(overrides_item) = table.get_mut("provider_overrides") else {
-                return;
+                return changed;
             };
 
             if let Some(overrides) = overrides_item.as_table_mut() {
-                Self::remove_provider_override_settings_from_table(overrides);
+                changed |= Self::remove_provider_override_settings_from_table(overrides);
                 overrides.is_empty()
             } else if let Some(overrides) = overrides_item.as_inline_table_mut() {
-                Self::remove_provider_override_settings_from_inline_table(overrides);
+                changed |= Self::remove_provider_override_settings_from_inline_table(overrides);
                 overrides.is_empty()
             } else {
                 false
@@ -925,13 +1084,15 @@ impl ConfigManager {
         };
 
         if remove_provider_overrides {
-            table.remove("provider_overrides");
+            changed |= table.remove("provider_overrides").is_some();
         }
+        changed
     }
 
-    fn remove_provider_override_settings_from_table(overrides: &mut toml_edit::Table) {
+    fn remove_provider_override_settings_from_table(overrides: &mut toml_edit::Table) -> bool {
         let provider_names = overrides.iter().map(|(name, _)| name.to_string()).collect::<Vec<_>>();
         let mut empty_providers = Vec::new();
+        let mut changed = false;
 
         for provider_name in provider_names {
             let Some(provider_item) = overrides.get_mut(&provider_name) else {
@@ -939,12 +1100,12 @@ impl ConfigManager {
             };
 
             let is_empty = if let Some(provider) = provider_item.as_table_mut() {
-                provider.remove("base_url");
-                provider.remove("api_key_env");
+                changed |= provider.remove("base_url").is_some();
+                changed |= provider.remove("api_key_env").is_some();
                 provider.is_empty()
             } else if let Some(provider) = provider_item.as_inline_table_mut() {
-                provider.remove("base_url");
-                provider.remove("api_key_env");
+                changed |= provider.remove("base_url").is_some();
+                changed |= provider.remove("api_key_env").is_some();
                 provider.is_empty()
             } else {
                 false
@@ -956,13 +1117,15 @@ impl ConfigManager {
         }
 
         for provider_name in empty_providers {
-            overrides.remove(&provider_name);
+            changed |= overrides.remove(&provider_name).is_some();
         }
+        changed
     }
 
-    fn remove_provider_override_settings_from_inline_table(overrides: &mut toml_edit::InlineTable) {
+    fn remove_provider_override_settings_from_inline_table(overrides: &mut toml_edit::InlineTable) -> bool {
         let provider_names = overrides.iter().map(|(name, _)| name.to_string()).collect::<Vec<_>>();
         let mut empty_providers = Vec::new();
+        let mut changed = false;
 
         for provider_name in provider_names {
             let Some(provider) = overrides
@@ -972,16 +1135,17 @@ impl ConfigManager {
                 continue;
             };
 
-            provider.remove("base_url");
-            provider.remove("api_key_env");
+            changed |= provider.remove("base_url").is_some();
+            changed |= provider.remove("api_key_env").is_some();
             if provider.is_empty() {
                 empty_providers.push(provider_name);
             }
         }
 
         for provider_name in empty_providers {
-            overrides.remove(&provider_name);
+            changed |= overrides.remove(&provider_name).is_some();
         }
+        changed
     }
 
     fn remove_deprecated_config_keys(doc: &mut toml_edit::DocumentMut) {
@@ -1179,10 +1343,14 @@ impl ConfigManager {
             && let Some(layer) = Self::enabled_layer_for_origin(layer_stack, origin)
             && Self::is_repository_controlled_source(&layer.source)
         {
-            bail!(
-                "repository-controlled configuration cannot define `custom_providers` (including `auth.command`); move custom provider settings to system, user, or an explicitly selected config file (source: {})",
-                layer.source.label()
-            );
+            return Err(RepositoryProviderSecurityViolation {
+                source: layer.source.clone(),
+                message: format!(
+                    "repository-controlled configuration cannot define `custom_providers` (including `auth.command`); move custom provider settings to system, user, or an explicitly selected config file (source: {})",
+                    layer.source.label()
+                ),
+            }
+            .into());
         }
 
         for (path, origin) in origins {
@@ -1194,10 +1362,14 @@ impl ConfigManager {
                 continue;
             };
             if Self::is_repository_controlled_source(&layer.source) {
-                bail!(
-                    "repository-controlled configuration cannot set `{path}`; provider endpoints and credential environment variables must be configured in system, user, or an explicitly selected config file (source: {})",
-                    layer.source.label()
-                );
+                return Err(RepositoryProviderSecurityViolation {
+                    source: layer.source.clone(),
+                    message: format!(
+                        "repository-controlled configuration cannot set `{path}`; provider endpoints and credential environment variables must be configured in system, user, or an explicitly selected config file (source: {})",
+                        layer.source.label()
+                    ),
+                }
+                .into());
             }
         }
 

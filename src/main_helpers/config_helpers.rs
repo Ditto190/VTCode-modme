@@ -3,7 +3,7 @@
 
 //! Shared helpers for loading workspace configuration with consistent error context.
 //!
-//! Every call to [`vtcode_config::loader::manager::ConfigManager::load_from_workspace`]
+//! Every call to [`vtcode_config::loader::manager::ConfigManager::load_from_workspace_with_repository_repair`]
 //! across the codebase produced a slightly different `.with_context(…)` string, making
 //! log searches unreliable and hiding the workspace path in some variants. This module
 //! centralises all loading paths behind a single function so the error message is
@@ -16,7 +16,8 @@ use vtcode_config::ConfigManager;
 
 /// Load the workspace configuration with a consistent, path-inclusive error context.
 ///
-/// This is the single canonical wrapper around `ConfigManager::load_from_workspace`.
+/// This is the single canonical wrapper around
+/// `ConfigManager::load_from_workspace_with_repository_repair`.
 /// All call sites in `src/` should use this function instead of calling the manager
 /// directly with an ad-hoc `.with_context(…)`.
 ///
@@ -28,6 +29,6 @@ use vtcode_config::ConfigManager;
 #[must_use = "loading the config has no effect unless the result is used"]
 pub(crate) fn load_workspace_config(workspace: impl AsRef<Path>) -> Result<ConfigManager> {
     let workspace = workspace.as_ref();
-    ConfigManager::load_from_workspace(workspace)
+    ConfigManager::load_from_workspace_with_repository_repair(workspace)
         .with_context(|| format!("Failed to load VT Code configuration for workspace '{}'", workspace.display()))
 }

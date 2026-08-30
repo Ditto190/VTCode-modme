@@ -60,7 +60,7 @@ impl ConfigBuilder {
         let mut manager = if let Some(config_file) = self.config_file {
             ConfigManager::load_from_file(config_file)?
         } else {
-            ConfigManager::load_from_workspace(workspace)?
+            ConfigManager::load_from_workspace_with_repository_repair(workspace)?
         };
 
         if !self.cli_overrides.is_empty() {

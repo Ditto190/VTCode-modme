@@ -40,7 +40,8 @@ where
 
 pub(crate) fn reload_state_from_disk(state: &mut SettingsPaletteState) -> Result<()> {
     ConfigManager::invalidate_workspace_cache(&state.workspace);
-    let manager = ConfigManager::load_from_workspace(&state.workspace).context("Failed to reload configuration")?;
+    let manager = ConfigManager::load_from_workspace_with_repository_repair(&state.workspace)
+        .context("Failed to reload configuration")?;
     state.draft = manager.config().clone();
     if let Some(source_path) = manager.config_path() {
         state.source_path = source_path.to_path_buf();
@@ -353,7 +354,8 @@ fn write_commented_config(path: &Path, config: &VTCodeConfig) -> Result<()> {
 
 fn persist_draft(state: &mut SettingsPaletteState, path: &str) -> Result<()> {
     let draft_value = TomlValue::try_from(state.draft.clone()).context("Failed to serialize draft configuration")?;
-    let (target_path, persisted_path, persisted_value) = persistence_target(state, path, &draft_value)?;
+    let (target_path, persisted_path, persisted_value, repository_controlled) =
+        persistence_target(state, path, &draft_value)?;
 
     let mut target_value = load_or_default_toml(&target_path)?;
     set_node(&mut target_value, &persisted_path, persisted_value)?;
@@ -365,8 +367,12 @@ fn persist_draft(state: &mut SettingsPaletteState, path: &str) -> Result<()> {
         .validate()
         .with_context(|| format!("Updated configuration at {} failed validation", target_path.display()))?;
 
-    write_commented_config(&target_path, &target_config)
-        .with_context(|| format!("Failed to save {}", target_path.display()))?;
+    if repository_controlled {
+        ConfigManager::save_repository_config_to_path(&target_path, &target_config)
+    } else {
+        write_commented_config(&target_path, &target_config)
+    }
+    .with_context(|| format!("Failed to save {}", target_path.display()))?;
     ConfigManager::invalidate_workspace_cache(&state.workspace);
     Ok(())
 }
@@ -375,18 +381,33 @@ fn persistence_target(
     state: &SettingsPaletteState,
     path: &str,
     draft: &TomlValue,
-) -> Result<(PathBuf, String, TomlValue)> {
+) -> Result<(PathBuf, String, TomlValue, bool)> {
     let value = get_node(draft, path)
         .cloned()
         .ok_or_else(|| anyhow!("Settings path '{path}' was not found after applying the change"))?;
     let normalized_path = normalize_config_path(path);
 
-    if !is_trusted_provider_path(path) || explicit_config_path().is_some() {
-        return Ok((state.source_path.clone(), path.to_string(), value));
+    if explicit_config_path().is_some() {
+        return Ok((state.source_path.clone(), path.to_string(), value, false));
     }
 
-    let manager = ConfigManager::load_from_workspace(&state.workspace)
-        .context("Failed to resolve the trusted configuration destination")?;
+    let manager = ConfigManager::load_from_workspace_with_repository_repair(&state.workspace).context(
+        if is_trusted_provider_path(path) {
+            "Failed to resolve the trusted configuration destination"
+        } else {
+            "Failed to resolve the configuration destination"
+        },
+    )?;
+
+    if !is_trusted_provider_path(path) {
+        return Ok((
+            state.source_path.clone(),
+            path.to_string(),
+            value,
+            manager.is_repository_controlled_path(&state.source_path),
+        ));
+    }
+
     let user_path = manager
         .preferred_user_config_path()
         .context("No canonical user configuration path is available for provider settings")?;
@@ -398,10 +419,10 @@ fn persistence_target(
         let providers = get_node(draft, "custom_providers")
             .cloned()
             .ok_or_else(|| anyhow!("Settings path 'custom_providers' was not found after applying the change"))?;
-        return Ok((user_path, "custom_providers".to_string(), providers));
+        return Ok((user_path, "custom_providers".to_string(), providers, false));
     }
 
-    Ok((user_path, path.to_string(), value))
+    Ok((user_path, path.to_string(), value, false))
 }
 
 fn is_trusted_provider_path(path: &str) -> bool {

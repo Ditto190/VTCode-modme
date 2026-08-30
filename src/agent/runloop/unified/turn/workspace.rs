@@ -36,7 +36,8 @@ async fn load_workspace_config_snapshot(workspace: &Path) -> Result<VTCodeConfig
     let workspace_buf = workspace.to_path_buf();
     blocking_task("workspace config load", move || {
         ConfigManager::invalidate_workspace_cache(&workspace_buf);
-        ConfigManager::load_from_workspace(&workspace_buf).map(|manager| manager.config().clone())
+        ConfigManager::load_from_workspace_with_repository_repair(&workspace_buf)
+            .map(|manager| manager.config().clone())
     })
     .await
 }

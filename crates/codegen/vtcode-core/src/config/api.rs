@@ -166,7 +166,7 @@ impl ConfigService {
     /// an explicit `--config` path, project profile, or canonical user path is
     /// never handled by a second path-resolution implementation.
     pub fn resolve_target_path(workspace: &Path, target: &ConfigWriteTarget) -> Result<PathBuf> {
-        match ConfigManager::load_from_workspace(workspace) {
+        match ConfigManager::load_from_workspace_with_repository_repair(workspace) {
             Ok(manager) => resolve_target_path_from_manager(&manager, workspace, target),
             Err(error) => resolve_target_path_without_manager(workspace, target)
                 .with_context(|| format!("Failed to resolve configuration target after load error: {error:#}")),
@@ -205,7 +205,7 @@ impl ConfigService {
             bail!("Config path cannot be empty");
         }
 
-        let manager = ConfigManager::load_from_workspace(&request.workspace)
+        let manager = ConfigManager::load_from_workspace_with_repository_repair(&request.workspace)
             .with_context(|| format!("Failed to load workspace config from {}", request.workspace.display()))?;
 
         let target_path = resolve_target_path_from_manager(&manager, &request.workspace, &request.target)?;
@@ -237,11 +237,11 @@ impl ConfigService {
             .with_context(|| format!("Updated configuration at {} could not be deserialized", target_path.display()))?;
         updated_config.validate().context("Updated configuration failed validation")?;
 
-        ConfigManager::save_config_to_path(&target_path, &updated_config)
+        save_config_for_target(request.target, &target_path, &updated_config)
             .with_context(|| format!("Failed to write updated configuration to {}", target_path.display()))?;
         ConfigManager::invalidate_workspace_cache(&request.workspace);
 
-        let reloaded_manager = ConfigManager::load_from_workspace(&request.workspace)
+        let reloaded_manager = ConfigManager::load_from_workspace_with_repository_repair(&request.workspace)
             .context("Failed to reload configuration after write")?;
         let (effective_toml, origins) = reloaded_manager.layer_stack().effective_config_with_origins();
 
@@ -291,7 +291,7 @@ impl ConfigService {
     /// used for normal configuration writes.
     pub fn reset(request: ConfigResetRequest) -> Result<ConfigResetResponse> {
         ConfigManager::invalidate_workspace_cache(&request.workspace);
-        let manager_result = ConfigManager::load_from_workspace(&request.workspace);
+        let manager_result = ConfigManager::load_from_workspace_with_repository_repair(&request.workspace);
         let (target, target_path) = match request.path.as_deref() {
             Some(requested_path) => {
                 resolve_requested_reset_path(&request.workspace, manager_result.as_ref().ok(), requested_path)?
@@ -348,7 +348,7 @@ impl ConfigService {
         }
 
         ConfigManager::invalidate_workspace_cache(&request.workspace);
-        let reloaded_manager = ConfigManager::load_from_workspace(&request.workspace)
+        let reloaded_manager = ConfigManager::load_from_workspace_with_repository_repair(&request.workspace)
             .context("Failed to reload configuration after reset")?;
         let (effective_toml, _) = reloaded_manager.layer_stack().effective_config_with_origins();
         let effective_config =
@@ -528,6 +528,23 @@ fn source_matches_target(source: &ConfigLayerSource, target: &ConfigWriteTarget,
     }
 }
 
+fn save_config_for_target(target: ConfigWriteTarget, path: &Path, config: &VTCodeConfig) -> Result<()> {
+    let explicit_session_path = explicit_config_path()
+        .as_deref()
+        .is_some_and(|explicit_path| same_config_path(explicit_path, path));
+    let repository_controlled = match target {
+        ConfigWriteTarget::Project => true,
+        ConfigWriteTarget::Workspace => !explicit_session_path,
+        ConfigWriteTarget::User => false,
+    };
+
+    if repository_controlled {
+        ConfigManager::save_repository_config_to_path(path, config)
+    } else {
+        ConfigManager::save_config_to_path(path, config)
+    }
+}
+
 fn same_config_path(left: &Path, right: &Path) -> bool {
     let left = canonicalize(left).unwrap_or_else(|_| normalize_path(left));
     let right = canonicalize(right).unwrap_or_else(|_| normalize_path(right));
@@ -674,6 +691,46 @@ mod tests {
 
             assert_eq!(response.effective_value, Some(TomlValue::String("gemini".to_string())));
             assert!(response.overridden_metadata.is_some());
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn repository_target_write_does_not_persist_provider_endpoint_or_credentials() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path();
+        let home_config = workspace.join("home/vtcode.toml");
+        let workspace_config = workspace.join("vtcode.toml");
+        fs::create_dir_all(home_config.parent().expect("home parent")).expect("home dir");
+
+        fs::write(
+            &home_config,
+            "[provider_overrides.openai]\nbase_url = \"https://trusted.example/v1\"\napi_key_env = \"TRUSTED_API_KEY\"\n",
+        )
+        .expect("home config");
+        fs::write(&workspace_config, "agent.provider = \"openai\"\n").expect("workspace config");
+
+        let static_paths = StaticWorkspacePaths::new(workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths))
+            .with_home_paths(vec![home_config])
+            .with_system_config_paths(Vec::new());
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let response = ConfigService::write(ConfigWriteRequest {
+                workspace: workspace.to_path_buf(),
+                target: ConfigWriteTarget::Workspace,
+                path: "provider_overrides.openai.base_url".to_string(),
+                value: TomlValue::String("https://attacker.example/v1".to_string()),
+                strategy: ConfigWriteStrategy::Replace,
+                expected_layer_version: None,
+            })
+            .expect("repository write should complete");
+
+            assert_eq!(response.effective_value, Some(TomlValue::String("https://trusted.example/v1".to_string())));
+            let workspace_content = fs::read_to_string(&workspace_config).expect("workspace config");
+            assert!(!workspace_content.contains("attacker.example"));
+            assert!(!workspace_content.contains("base_url"));
+            assert!(!workspace_content.contains("api_key_env"));
         });
     }
 

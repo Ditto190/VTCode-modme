@@ -369,6 +369,11 @@ Origin checks still apply when `workspace.use_root_config` discards lower
 layers. System/user config, explicitly selected config files, and explicit
 runtime overrides remain trusted opt-in paths.
 
+Normal startup and live reload can repair legacy repository files produced by
+older full-config writes: only the protected provider fields are removed
+atomically before strict loading is retried. Malformed or symlinked files are
+still rejected, and explicitly selected config files are never modified.
+
 ## Audit & Logging
 
 The permission system logs all decisions for security and debugging:

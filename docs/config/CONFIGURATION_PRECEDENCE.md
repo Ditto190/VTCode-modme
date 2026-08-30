@@ -127,6 +127,12 @@ configuration. Environment filtering on provider subprocesses is an
 additional defense and does not make a repository-supplied authentication
 command safe.
 
+Normal startup and live reload detect this specific legacy-file violation,
+remove only the protected repository fields atomically, and retry the strict
+load. Malformed or symlinked files still fail closed; strict loader APIs keep
+rejecting repository-controlled provider fields, and explicitly selected
+config files are never repaired.
+
 ## Environment Variables
 
 Environment variables such as `GEMINI_API_KEY` still participate in runtime behavior (API key selection), but they do not bypass validation. `VTCODE_CONFIG` and `VTCODE_DATA` select the canonical user config/data roots; `VTCODE_CONFIG_PATH` selects the explicit file layer described above. Once the configuration is constructed, the same validation rules are applied.
