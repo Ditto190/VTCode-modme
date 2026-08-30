@@ -2,6 +2,72 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.151.0 - 2026-08-30
+
+### Highlights
+#### Bug Fixes
+
+- Enforce symlink-aware workspace containment in file_ops path policy (c07ccc34) (@7jrxt42BxFZo4iAnN4CX)
+- Reject empty and workspace-root mutation targets (c4b3a7bd) (@7jrxt42BxFZo4iAnN4CX)
+- Scope session approval cache keys to command-scoped calls (163e2e64) (@7jrxt42BxFZo4iAnN4CX)
+- Close root-guard bypasses from review (6c6101c2) (@7jrxt42BxFZo4iAnN4CX)
+- Accept canonical workspace-root aliases in file_ops path containment (cb49fa64) (@7jrxt42BxFZo4iAnN4CX)
+- Apply PreToolUse rewrites to safety and approval paths (69e08a6e) (@7jrxt42BxFZo4iAnN4CX)
+- Restore hook deny semantics and close review gaps (f1bd10d7) (@7jrxt42BxFZo4iAnN4CX)
+- Run PreToolUse phase before safety on all tool paths (45b68f95) (@7jrxt42BxFZo4iAnN4CX)
+- Re-derive intent after rewrite and gate subagent engine (c687fe62) (@7jrxt42BxFZo4iAnN4CX)
+- Run arg guards after rewrite, tolerate render errors (bb51164f) (@7jrxt42BxFZo4iAnN4CX)
+- Honor CodeRabbit review on guards, denial UX, subagent gating (bb1eb625) (@7jrxt42BxFZo4iAnN4CX)
+- Re-validate rewritten args and cover review findings (fdabc335) (@7jrxt42BxFZo4iAnN4CX)
+- Validate PermissionRequest rewrites against tool schema (0d7ed91d) (@7jrxt42BxFZo4iAnN4CX)
+- Re-run mutation guard after rewrite on interactive paths (0f087c42) (@7jrxt42BxFZo4iAnN4CX)
+- Re-run safety on PermissionRequest rewritten args (7518ad3d) (@7jrxt42BxFZo4iAnN4CX)
+- Honor explicit config file across session reloads (42e68bce) (@7jrxt42BxFZo4iAnN4CX)
+- Apply explicit config path to startup and binary consumers (ea8409ca) (@7jrxt42BxFZo4iAnN4CX)
+- Drop unnecessary path qualification in settings override test (c8813d72) (@7jrxt42BxFZo4iAnN4CX)
+- Address review feedback on session override handling (f21cdf45) (@7jrxt42BxFZo4iAnN4CX)
+- Close shutdown race and align docs with CodeRabbit review (eb3b0699) (@7jrxt42BxFZo4iAnN4CX)
+- Use transient closing flag separate from permanent shutdown (6dc6bb3e) (@7jrxt42BxFZo4iAnN4CX)
+- Cascade resume to grandchildren and close spawn race (84f32431) (@7jrxt42BxFZo4iAnN4CX)
+- Restrict resume cascade to subtree and close spawn race window (e4a39033) (@7jrxt42BxFZo4iAnN4CX)
+- Log discarded nested cascade errors (2d513232) (@7jrxt42BxFZo4iAnN4CX)
+- Read-only gate, reused-controller context, shutdown notify (0a52392f) (@7jrxt42BxFZo4iAnN4CX)
+- Reject resume during shutdown (e366646f) (@7jrxt42BxFZo4iAnN4CX)
+- Cascade close to controllers created during teardown; docs (4f7e55f7) (@7jrxt42BxFZo4iAnN4CX)
+- Teardown nested controller on child completion; unify read-only gate (0cb23751) (@7jrxt42BxFZo4iAnN4CX)
+- Pass workspace_gated to nested controller config (595234ee) (@7jrxt42BxFZo4iAnN4CX)
+- Avoid panics on non-ASCII text boundaries (b64210ad) 
+- Enforce list_files path containment (6cfdf8d7) 
+- Harden session event-log durability (c2b252b4) 
+- Fail closed on unverified updates (46b45709) 
+- Secure server and webhook delivery (fa9037e4) 
+- Restore final summary after exit (a35e512a) 
+- Block untrusted native plugin loading (b266373a) 
+- Reject untrusted provider settings (312d0b1e) 
+- Resolve contextual persistent-memory saves (339809e9) 
+- Harden subprocess transport lifecycle (c9eabbfe) 
+#### Features
+
+- Add installer and repository links (a7ca24fd) (@vinhnx)
+- Support updatedInput in PreToolUse hook outcomes (9b6aee45) (@7jrxt42BxFZo4iAnN4CX)
+- Enable nested delegation via subagents.max_depth (e34303f7) (@7jrxt42BxFZo4iAnN4CX)
+- Add reset and live reload (7b58bd02) 
+- Add GLM-5.3 to HuggingFace and Ollama Cloud (93ce0136) 
+### Other Changes
+#### Other
+
+- Update README.md (1d565d9a) (@vinhnx)
+- Cargo fmt (cf8f10da) (@7jrxt42BxFZo4iAnN4CX)
+#### Performance
+
+- Defer unnecessary tool schema estimates (14dddaf2) 
+#### Refactors
+
+- Use CompactStr for pending rewrite keys (dbf22c98) (@7jrxt42BxFZo4iAnN4CX)
+- Extract shared nested-controller collection helper (10132661) (@7jrxt42BxFZo4iAnN4CX)
+#### Tests
+
+- Cover responsive table layouts (24947885) 
 ## 0.150.0 - 2026-08-29
 
 ### Highlights
