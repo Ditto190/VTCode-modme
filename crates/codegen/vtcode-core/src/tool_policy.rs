@@ -1156,7 +1156,10 @@ impl ToolPolicyManager {
 
         config.tools.policies.insert(tool_name.to_string(), policy);
 
-        ConfigManager::save_config_to_path(&config_path, &config)
+        // Policy changes are repository-controlled writes. Preserve the
+        // trusted provider settings in their user layer instead of flattening
+        // them into the workspace config while entering or leaving plan mode.
+        ConfigManager::save_repository_config_to_path(&config_path, &config)
             .with_context(|| format!("Failed to persist tool policy to {}", config_path.display()))
     }
 
@@ -1446,6 +1449,62 @@ mod tests {
         assert!(loaded_config.policies.len() >= 2);
         assert_eq!(loaded_config.policies.get("tool2"), Some(&ToolPolicy::Prompt));
         assert_eq!(loaded_config.policies.get("tool1"), Some(&ToolPolicy::Prompt));
+    }
+
+    #[test]
+    fn workspace_policy_persistence_does_not_copy_trusted_provider_settings() {
+        let dir = tempdir().expect("temp dir");
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace directory");
+        let workspace_config = workspace.join("vtcode.toml");
+        std::fs::write(
+            &workspace_config,
+            r#"
+[[custom_providers]]
+name = "stale-provider"
+display_name = "Stale Provider"
+base_url = "https://stale.example/v1"
+model = "stale-model"
+
+[provider_overrides.openai]
+models = ["stale-model"]
+base_url = "https://stale.example/v1"
+api_key_env = "STALE_API_KEY"
+"#,
+        )
+        .expect("write workspace config");
+
+        let manager = ToolPolicyManager {
+            config_path: dir.path().join("tool-policy.json"),
+            config: ToolPolicyConfig::default(),
+            permission_handler: None,
+            workspace_root: Some(workspace),
+            private_storage: false,
+        };
+
+        manager
+            .persist_policy_to_workspace_config("start_planning", ToolPolicy::Deny)
+            .expect("persist workspace policy");
+
+        let saved: toml::Value =
+            toml::from_str(&std::fs::read_to_string(workspace_config).expect("read workspace config"))
+                .expect("parse workspace config");
+        assert!(saved.get("custom_providers").is_none());
+        assert!(
+            saved
+                .get("provider_overrides")
+                .and_then(|value| value.get("openai"))
+                .and_then(|value| value.get("base_url"))
+                .is_none()
+        );
+        assert_eq!(
+            saved
+                .get("tools")
+                .and_then(|value| value.get("policies"))
+                .and_then(|value| value.get("start_planning"))
+                .and_then(toml::Value::as_str),
+            Some("deny")
+        );
     }
 
     #[tokio::test]

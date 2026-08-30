@@ -116,6 +116,11 @@ pub struct ConfigManager {
     canonical_user_config_path: Option<PathBuf>,
     tracked_user_config_paths: Vec<PathBuf>,
     write_global_config_to_canonical: bool,
+    /// Whether the associated file was explicitly selected by the user.
+    ///
+    /// Explicit files are trusted even when they are represented as a
+    /// workspace layer internally. Repository and project layers are not.
+    explicit_config_is_trusted: bool,
     workspace_root: Option<PathBuf>,
     config_file_name: String,
     pub(crate) layer_stack: ConfigLayerStack,
@@ -237,6 +242,7 @@ impl ConfigManager {
             canonical_user_config_path,
             tracked_user_config_paths,
             write_global_config_to_canonical: false,
+            explicit_config_is_trusted: false,
             workspace_root: None,
             config_file_name,
             layer_stack,
@@ -394,6 +400,7 @@ impl ConfigManager {
                 canonical_user_config_path,
                 tracked_user_config_paths,
                 write_global_config_to_canonical: false,
+                explicit_config_is_trusted: false,
                 workspace_root: Some(workspace_root),
                 config_file_name,
                 layer_stack,
@@ -481,6 +488,7 @@ impl ConfigManager {
             canonical_user_config_path,
             tracked_user_config_paths,
             write_global_config_to_canonical: false,
+            explicit_config_is_trusted: false,
             workspace_root: Some(workspace_root),
             config_file_name,
             layer_stack,
@@ -652,6 +660,7 @@ impl ConfigManager {
             canonical_user_config_path,
             tracked_user_config_paths,
             write_global_config_to_canonical,
+            explicit_config_is_trusted: true,
             workspace_root: path.parent().map(canonicalize_workspace_root),
             config_file_name,
             layer_stack,
@@ -800,11 +809,36 @@ impl ConfigManager {
         std::time::Duration::from_secs(60 * 60) // Default 1 hour
     }
 
-    /// Persist configuration to a specific path, preserving comments
+    /// Persist configuration to a specific path, preserving comments.
     pub fn save_config_to_path(path: impl AsRef<Path>, config: &VTCodeConfig) -> Result<()> {
+        Self::save_config_to_path_internal(path, config, false)
+    }
+
+    /// Persist configuration to a repository-controlled path.
+    ///
+    /// Repository and project files may contain ordinary settings, but they
+    /// must never receive trusted provider definitions or provider endpoint and
+    /// credential overrides from the merged configuration. Existing protected
+    /// keys are removed as well so this method can repair files written by an
+    /// older version that flattened the effective configuration.
+    pub fn save_repository_config_to_path(path: impl AsRef<Path>, config: &VTCodeConfig) -> Result<()> {
+        Self::save_config_to_path_internal(path, config, true)
+    }
+
+    fn save_config_to_path_internal(
+        path: impl AsRef<Path>,
+        config: &VTCodeConfig,
+        repository_controlled: bool,
+    ) -> Result<()> {
         let path = path.as_ref();
         ensure_private_parent_dir(path)?;
-        let sparse_value = Self::sparse_config_value(config).context("Failed to prepare sparse configuration")?;
+        let config_to_persist = if repository_controlled {
+            Self::repository_safe_config(config)
+        } else {
+            config.clone()
+        };
+        let sparse_value =
+            Self::sparse_config_value(&config_to_persist).context("Failed to prepare sparse configuration")?;
         let sparse_content =
             toml::to_string_pretty(&sparse_value).context("Failed to serialize sparse configuration")?;
 
@@ -833,6 +867,9 @@ impl ConfigManager {
                 .parse::<toml_edit::DocumentMut>()
                 .with_context(|| format!("Failed to parse existing config: {}", path.display()))?;
             Self::remove_deprecated_config_keys(&mut doc);
+            if repository_controlled {
+                Self::remove_repository_provider_settings(&mut doc);
+            }
 
             let new_doc: toml_edit::DocumentMut = sparse_content
                 .parse()
@@ -855,6 +892,96 @@ impl ConfigManager {
         }
 
         Ok(())
+    }
+
+    fn repository_safe_config(config: &VTCodeConfig) -> VTCodeConfig {
+        let mut safe_config = config.clone();
+        safe_config.custom_providers.clear();
+        for provider_override in safe_config.provider_overrides.values_mut() {
+            provider_override.base_url = None;
+            provider_override.api_key_env = None;
+        }
+        safe_config
+    }
+
+    fn remove_repository_provider_settings(doc: &mut toml_edit::DocumentMut) {
+        let table = doc.as_table_mut();
+        table.remove("custom_providers");
+
+        let remove_provider_overrides = {
+            let Some(overrides_item) = table.get_mut("provider_overrides") else {
+                return;
+            };
+
+            if let Some(overrides) = overrides_item.as_table_mut() {
+                Self::remove_provider_override_settings_from_table(overrides);
+                overrides.is_empty()
+            } else if let Some(overrides) = overrides_item.as_inline_table_mut() {
+                Self::remove_provider_override_settings_from_inline_table(overrides);
+                overrides.is_empty()
+            } else {
+                false
+            }
+        };
+
+        if remove_provider_overrides {
+            table.remove("provider_overrides");
+        }
+    }
+
+    fn remove_provider_override_settings_from_table(overrides: &mut toml_edit::Table) {
+        let provider_names = overrides.iter().map(|(name, _)| name.to_string()).collect::<Vec<_>>();
+        let mut empty_providers = Vec::new();
+
+        for provider_name in provider_names {
+            let Some(provider_item) = overrides.get_mut(&provider_name) else {
+                continue;
+            };
+
+            let is_empty = if let Some(provider) = provider_item.as_table_mut() {
+                provider.remove("base_url");
+                provider.remove("api_key_env");
+                provider.is_empty()
+            } else if let Some(provider) = provider_item.as_inline_table_mut() {
+                provider.remove("base_url");
+                provider.remove("api_key_env");
+                provider.is_empty()
+            } else {
+                false
+            };
+
+            if is_empty {
+                empty_providers.push(provider_name);
+            }
+        }
+
+        for provider_name in empty_providers {
+            overrides.remove(&provider_name);
+        }
+    }
+
+    fn remove_provider_override_settings_from_inline_table(overrides: &mut toml_edit::InlineTable) {
+        let provider_names = overrides.iter().map(|(name, _)| name.to_string()).collect::<Vec<_>>();
+        let mut empty_providers = Vec::new();
+
+        for provider_name in provider_names {
+            let Some(provider) = overrides
+                .get_mut(&provider_name)
+                .and_then(toml_edit::Value::as_inline_table_mut)
+            else {
+                continue;
+            };
+
+            provider.remove("base_url");
+            provider.remove("api_key_env");
+            if provider.is_empty() {
+                empty_providers.push(provider_name);
+            }
+        }
+
+        for provider_name in empty_providers {
+            overrides.remove(&provider_name);
+        }
     }
 
     fn remove_deprecated_config_keys(doc: &mut toml_edit::DocumentMut) {
@@ -1147,20 +1274,23 @@ impl ConfigManager {
 
     /// Persist configuration to the manager's associated path or workspace
     pub fn save_config(&mut self, config: &VTCodeConfig) -> Result<()> {
-        if let Some(path) = &self.config_path {
-            let target = if self.write_global_config_to_canonical || self.is_global_config_path(path) {
-                self.preferred_user_config_path().unwrap_or_else(|| path.clone())
+        let (target, repository_controlled) = if let Some(path) = &self.config_path {
+            if self.write_global_config_to_canonical || self.is_global_config_path(path) {
+                (self.preferred_user_config_path().unwrap_or_else(|| path.clone()), false)
             } else {
-                path.clone()
-            };
-            Self::save_config_to_path(target, config)?;
+                (path.clone(), !self.explicit_config_is_trusted)
+            }
         } else if let Some(workspace_root) = &self.workspace_root {
-            let path = workspace_root.join(&self.config_file_name);
-            Self::save_config_to_path(path, config)?;
+            (workspace_root.join(&self.config_file_name), !self.explicit_config_is_trusted)
         } else {
             let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
-            let path = cwd.join(&self.config_file_name);
-            Self::save_config_to_path(path, config)?;
+            (cwd.join(&self.config_file_name), !self.explicit_config_is_trusted)
+        };
+
+        if repository_controlled {
+            Self::save_repository_config_to_path(target, config)?;
+        } else {
+            Self::save_config_to_path(target, config)?;
         }
 
         #[cfg(not(test))]

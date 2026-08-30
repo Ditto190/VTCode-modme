@@ -40,6 +40,11 @@ written into a workspace `vtcode.toml` when a workspace-only setting changes.
 Provider definitions and endpoint/credential overrides are written to the
 canonical user layer unless the session selected an explicit config file.
 
+Planning-mode policy changes are repository writes too: entering or leaving
+Planning mode must persist only the tool-policy fields in the workspace layer.
+The shared repository-safe writer removes trusted custom providers and provider
+endpoint/credential overrides, including stale copies left by older releases.
+
 ## Verification
 
 Use nextest for focused checks:

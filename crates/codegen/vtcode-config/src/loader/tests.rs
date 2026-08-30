@@ -1061,6 +1061,171 @@ show_sidebar = false
 }
 
 #[test]
+fn repository_config_save_strips_trusted_provider_settings_and_repairs_existing_keys() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let config_path = temp_dir.path().join("vtcode.toml");
+    fs::write(
+        &config_path,
+        r#"
+[agent]
+default_model = "old-model"
+
+[[custom_providers]]
+name = "stale-provider"
+display_name = "Stale Provider"
+base_url = "https://stale.example/v1"
+model = "stale-model"
+
+[provider_overrides.openai]
+models = ["old-model"]
+base_url = "https://stale.example/v1"
+api_key_env = "STALE_API_KEY"
+"#,
+    )
+    .expect("write stale repository config");
+
+    let config: VTCodeConfig = toml::from_str(
+        r#"
+[agent]
+default_model = "new-model"
+
+[[custom_providers]]
+name = "trusted-provider"
+display_name = "Trusted Provider"
+base_url = "https://trusted.example/v1"
+model = "trusted-model"
+
+[provider_overrides.openai]
+models = ["trusted-model"]
+base_url = "https://trusted.example/v1"
+api_key_env = "TRUSTED_API_KEY"
+"#,
+    )
+    .expect("parse trusted effective config");
+
+    ConfigManager::save_repository_config_to_path(&config_path, &config).expect("save repository config");
+
+    let saved: toml::Value = toml::from_str(&fs::read_to_string(&config_path).expect("read repository config"))
+        .expect("parse saved repository config");
+    assert!(saved.get("custom_providers").is_none(), "custom providers must stay in trusted layers");
+    let openai_override = saved
+        .get("provider_overrides")
+        .and_then(|value| value.get("openai"))
+        .expect("model-list override should remain");
+    assert_eq!(openai_override.get("models").and_then(toml::Value::as_array).map(Vec::len), Some(1));
+    assert!(openai_override.get("base_url").is_none(), "repository endpoint must be removed");
+    assert!(openai_override.get("api_key_env").is_none(), "repository credential selector must be removed");
+    assert_eq!(
+        saved
+            .get("agent")
+            .and_then(|value| value.get("default_model"))
+            .and_then(toml::Value::as_str),
+        Some("new-model")
+    );
+}
+
+#[test]
+#[serial]
+fn save_config_does_not_flatten_trusted_provider_settings_into_workspace() {
+    let workspace = assert_fs::TempDir::new().expect("workspace");
+    let user_config = workspace.path().join("home/vtcode.toml");
+    fs::create_dir_all(user_config.parent().expect("user config parent")).expect("create user config directory");
+    fs::write(
+        &user_config,
+        r#"
+[[custom_providers]]
+name = "trusted-provider"
+display_name = "Trusted Provider"
+base_url = "https://trusted.example/v1"
+model = "trusted-model"
+
+[provider_overrides.openai]
+models = ["trusted-openai-model"]
+base_url = "https://trusted.example/v1"
+api_key_env = "TRUSTED_OPENAI_API_KEY"
+"#,
+    )
+    .expect("write user config");
+    let workspace_config = workspace.path().join("vtcode.toml");
+    fs::write(&workspace_config, "[agent]\ndefault_model = \"workspace-model\"\n").expect("write workspace config");
+
+    let paths = StaticWorkspacePaths::new(workspace.path(), workspace.path().join(".vtcode"));
+    let provider = WorkspacePathsDefaults::new(Arc::new(paths))
+        .with_home_paths(vec![user_config])
+        .with_system_config_paths(Vec::new());
+
+    defaults::provider::with_config_defaults_provider_for_test(Arc::new(provider), || {
+        let mut manager = ConfigManager::load_from_workspace(workspace.path()).expect("load layered config");
+        assert_eq!(manager.config().custom_providers.len(), 1);
+        assert_eq!(
+            manager.config().provider_overrides["openai"].base_url.as_deref(),
+            Some("https://trusted.example/v1")
+        );
+
+        let mut modified = manager.config().clone();
+        modified.agent.theme = "ansi".to_string();
+        manager.save_config(&modified).expect("save workspace setting");
+
+        let written = fs::read_to_string(&workspace_config).expect("read workspace config");
+        assert!(!written.contains("custom_providers"), "workspace must not receive trusted providers");
+        assert!(!written.contains("trusted.example"), "workspace must not receive trusted provider endpoints");
+        assert!(!written.contains("TRUSTED_OPENAI_API_KEY"), "workspace must not receive credential selectors");
+        assert!(written.contains("theme = \"ansi\""), "workspace setting should still be persisted");
+
+        let reloaded = ConfigManager::load_from_workspace(workspace.path()).expect("reload layered config");
+        assert_eq!(reloaded.config().custom_providers[0].name, "trusted-provider");
+        assert_eq!(
+            reloaded.config().provider_overrides["openai"].base_url.as_deref(),
+            Some("https://trusted.example/v1")
+        );
+        assert_eq!(reloaded.config().agent.theme, "ansi");
+    });
+}
+
+#[test]
+#[serial]
+fn explicitly_selected_config_save_preserves_custom_provider_settings() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let explicit_config = temp_dir.path().join("explicit.toml");
+    fs::write(
+        &explicit_config,
+        r#"
+[[custom_providers]]
+name = "explicit-provider"
+display_name = "Explicit Provider"
+base_url = "https://explicit.example/v1"
+model = "explicit-model"
+"#,
+    )
+    .expect("write explicit config");
+
+    let paths = StaticWorkspacePaths::new(temp_dir.path(), temp_dir.path().join(".vtcode"));
+    let provider = WorkspacePathsDefaults::new(Arc::new(paths))
+        .with_home_paths(Vec::new())
+        .with_system_config_paths(Vec::new());
+
+    defaults::provider::with_config_defaults_provider_for_test(Arc::new(provider), || {
+        let mut manager = ConfigManager::load_from_file(&explicit_config).expect("load explicit config");
+        let mut modified = manager.config().clone();
+        modified.agent.theme = "ansi".to_string();
+        manager.save_config(&modified).expect("save explicit config");
+
+        let saved: toml::Value = toml::from_str(&fs::read_to_string(&explicit_config).expect("read explicit config"))
+            .expect("parse explicit config");
+        assert_eq!(
+            saved
+                .get("custom_providers")
+                .and_then(toml::Value::as_array)
+                .and_then(|providers| providers.first())
+                .and_then(|provider| provider.get("name"))
+                .and_then(toml::Value::as_str),
+            Some("explicit-provider")
+        );
+        assert!(saved.to_string().contains("theme = \"ansi\""));
+    });
+}
+
+#[test]
 #[serial]
 fn save_config_writes_sparse_model_theme_and_permission_values() {
     let temp_dir = tempfile::tempdir().unwrap();
