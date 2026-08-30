@@ -18,7 +18,6 @@
 - `tui/config/constants/` holds TUI-specific defaults — keep them here, not in `vtcode-config`; snapshot tests live in `tui/core_tui/widgets/snapshots/`.
 
 ## Gotchas
-
 - `vtcode-commons` provides `anstyle_utils` gated behind a `tui` feature — the style bridging in `design/` depends on it.
 - The `crossterm` dependency enables `event-stream` and `osc52` features; do not duplicate these in downstream crates.
 - Standalone and core session defaults are inline; callers that need alternate-screen rendering must opt in explicitly.
@@ -27,5 +26,5 @@
 - `ActivityState` is the authoritative global busy/idle signal for fresh-thread handoffs; use it for input and mode-switch guards even when animation is disabled.
 - PTY/tool reflow must preserve explicit status color on the `•` prefix; apply action/tool styling only to the verb so success, failure, and warning remain visually distinct.
 - Tool and PTY blocks reserve at least one blank line above and below; shell syntax highlighting is accepted only when it produces distinct token colors, otherwise semantic token styles are the fallback.
-- Task-panel tree rows use the shared hanging-prefix wrapper in `session/text_utils.rs`; keep panel row heights derived from wrapped content so transcript and docked panel stay aligned. `toggle_tool_display_mode` is a rebindable session action (default `Alt+T`); dispatch it before the legacy `Alt+T` text-edit shortcut and invalidate transcript caches after toggling.
-- Grouped Info/Warning/Error transcript blocks must invalidate from their first line when a member changes or is appended, because later lines affect the cached block head; Info tool-summary lines are a boundary, not part of the box.
+- Task-panel tree rows use the shared hanging-prefix wrapper in `session/text_utils.rs`; keep panel row heights derived from wrapped content so transcript and docked panel stay aligned. `toggle_tool_display_mode` is a rebindable session action (default `Alt+T`); dispatch it before the legacy `Alt+T` text-edit shortcut and invalidate transcript caches after toggling. Grouped Info/Warning/Error transcript blocks must invalidate from their first line when a member changes or is appended, because later lines affect the cached block head; Info tool-summary lines are a boundary, not part of the box.
+- Panic-hook terminal mutation tracking is set only after a successful terminal mutation, so partial TUI setup errors do not emit restore sequences.

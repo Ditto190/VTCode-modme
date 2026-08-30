@@ -79,6 +79,18 @@ pub(crate) async fn await_terminal_palette_probe() {
         probe_and_cache_terminal_palette_harmony();
         return;
     }
+    wait_for_started_terminal_palette_probe().await;
+}
+
+/// Wait for a probe that was started during bootstrap without running a new
+/// probe when startup has already failed before the probe was scheduled.
+pub(crate) async fn finish_terminal_palette_probe() {
+    if PROBE_STARTED.load(Ordering::SeqCst) {
+        wait_for_started_terminal_palette_probe().await;
+    }
+}
+
+async fn wait_for_started_terminal_palette_probe() {
     if PROBE_DONE.load(Ordering::Acquire) {
         return;
     }

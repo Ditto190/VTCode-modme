@@ -49,9 +49,11 @@ pub(super) fn prepare_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Result
     terminal
         .hide_cursor()
         .map_err(|e| anyhow::anyhow!("failed to hide inline cursor: {e}"))?;
+    crate::tui::ui::tui::panic_hook::mark_terminal_modified();
     terminal
         .clear()
         .map_err(|e| anyhow::anyhow!("failed to clear inline terminal: {e}"))?;
+    crate::tui::ui::tui::panic_hook::mark_terminal_modified();
     Ok(())
 }
 

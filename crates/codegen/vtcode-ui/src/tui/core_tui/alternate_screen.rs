@@ -77,6 +77,7 @@ impl AlternateScreenSession {
 
         // Enter alternate screen first
         execute!(stdout, EnterAlternateScreen).context("failed to enter alternate screen for terminal app")?;
+        crate::tui::core_tui::panic_hook::mark_terminal_modified();
 
         let mut session = Self { original_state, entered: true };
 
@@ -88,11 +89,13 @@ impl AlternateScreenSession {
         // Enable bracketed paste (only if TTY)
         if is_tty && execute!(stdout, EnableBracketedPaste).is_ok() {
             session.original_state.bracketed_paste_enabled = true;
+            crate::tui::core_tui::panic_hook::mark_terminal_modified();
         }
 
         // Enable focus change events (only if TTY)
         if is_tty && execute!(stdout, EnableFocusChange).is_ok() {
             session.original_state.focus_change_enabled = true;
+            crate::tui::core_tui::panic_hook::mark_terminal_modified();
         }
 
         Ok(session)

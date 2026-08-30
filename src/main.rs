@@ -267,7 +267,19 @@ fn bootstrap_main() -> Result<BootstrapOutcome> {
         agent::probe::start_terminal_palette_probe(runtime.handle());
     }
 
-    let startup = runtime.block_on(resolve_startup_context(&args))?;
+    let startup = match runtime.block_on(resolve_startup_context(&args)) {
+        Ok(startup) => startup,
+        Err(error) => {
+            // The interactive palette probe runs concurrently with startup
+            // resolution. Finish it before returning an error so its raw-mode
+            // guard restores the TTY and no delayed terminal replies are
+            // printed by the user's shell after VT Code exits.
+            if startup_policy.run_terminal_probe() {
+                runtime.block_on(agent::probe::finish_terminal_palette_probe());
+            }
+            return Err(error);
+        }
+    };
     vtcode_commons::startup_trace::record_milestone("dispatch_ready");
     vtcode_commons::startup_trace::record_phase("bootstrap", bootstrap_phase);
     // For one-shot commands this is the last startup boundary before dispatch;

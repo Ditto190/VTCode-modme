@@ -91,7 +91,6 @@ pub(crate) fn mark_tui_initialized() {
     RESTORE_DONE.store(false, Ordering::SeqCst);
     // Fresh session: alternate-screen state is set by the runner when it enters one.
     ALTERNATE_SCREEN_ACTIVE.store(false, Ordering::SeqCst);
-    mark_terminal_modified();
 }
 
 pub(crate) fn mark_tui_deinitialized() {

@@ -51,7 +51,10 @@ impl TerminalModeState {
 
     pub(super) fn save_cursor_position(&mut self, stderr: &mut io::Stderr) {
         match execute!(stderr, SavePosition) {
-            Ok(_) => self.cursor_position_saved = true,
+            Ok(_) => {
+                self.cursor_position_saved = true;
+                crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+            }
             Err(error) => {
                 tracing::debug!(%error, "failed to save cursor position for inline session");
             }
@@ -62,6 +65,7 @@ impl TerminalModeState {
         execute!(stderr, EnterAlternateScreen)
             .map_err(|error| anyhow::anyhow!("failed to enter alternate inline screen: {error}"))?;
         self.alternate_screen_active = true;
+        crate::tui::ui::tui::panic_hook::mark_terminal_modified();
         Ok(())
     }
 
@@ -80,6 +84,7 @@ impl TerminalModeState {
             Ok(_) => {
                 self.keyboard_enhancements_pushed = true;
                 crate::tui::ui::tui::panic_hook::mark_keyboard_enhancements_pushed(true);
+                crate::tui::ui::tui::panic_hook::mark_terminal_modified();
             }
             Err(error) => {
                 tracing::debug!(%error, "failed to push keyboard enhancement flags");
@@ -102,7 +107,10 @@ pub(super) fn enable_terminal_modes(
 
     // Enable bracketed paste
     match execute!(stderr, EnableBracketedPaste) {
-        Ok(_) => state.bracketed_paste_enabled = true,
+        Ok(_) => {
+            state.bracketed_paste_enabled = true;
+            crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+        }
         Err(error) => {
             tracing::warn!(%error, "failed to enable bracketed paste");
         }
@@ -110,16 +118,21 @@ pub(super) fn enable_terminal_modes(
 
     // Enable raw mode
     match enable_raw_mode() {
-        Ok(_) => state.raw_mode_enabled = true,
+        Ok(_) => {
+            state.raw_mode_enabled = true;
+            crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+        }
         Err(error) => {
             return Err(anyhow::anyhow!("failed to enable raw mode: {error}"));
         }
     }
-    crate::tui::ui::tui::panic_hook::mark_terminal_modified();
 
     if fullscreen.mouse_capture {
         match execute!(stderr, EnableMouseCapture) {
-            Ok(_) => state.mouse_capture_enabled = true,
+            Ok(_) => {
+                state.mouse_capture_enabled = true;
+                crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+            }
             Err(error) => {
                 tracing::warn!(%error, "failed to enable mouse capture");
             }
@@ -128,7 +141,10 @@ pub(super) fn enable_terminal_modes(
 
     // Enable focus change events
     match execute!(stderr, EnableFocusChange) {
-        Ok(_) => state.focus_change_enabled = true,
+        Ok(_) => {
+            state.focus_change_enabled = true;
+            crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+        }
         Err(error) => {
             tracing::debug!(%error, "failed to enable focus change events");
         }

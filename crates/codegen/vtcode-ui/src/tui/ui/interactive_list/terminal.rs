@@ -33,6 +33,7 @@ impl TerminalModeGuard {
         match execute!(stderr, SavePosition) {
             Ok(_) => {
                 self.cursor_position_saved = true;
+                crate::tui::ui::tui::panic_hook::mark_terminal_modified();
             }
             Err(error) => {
                 tracing::debug!(%error, selector = %self.label, "failed to save cursor position");
@@ -60,6 +61,7 @@ impl TerminalModeGuard {
             .hide_cursor()
             .with_context(|| format!("Failed to hide cursor for {} selector", self.label))?;
         self.cursor_hidden = true;
+        crate::tui::ui::tui::panic_hook::mark_terminal_modified();
         Ok(())
     }
 

@@ -34,7 +34,7 @@ use vtcode_commons::color256_theme::set_harmonious_runtime_hint;
 #[cfg(unix)]
 const DA1_RESPONSE_PREFIX: [u8; 3] = [ESC_BYTE, b'[', b'?'];
 #[cfg(unix)]
-const RESPONSE_SETTLE_WINDOW: Duration = Duration::from_millis(15);
+const RESPONSE_SETTLE_WINDOW: Duration = Duration::from_millis(40);
 
 /// Run OSC probe once at startup and cache results in shared runtime hints.
 pub fn probe_and_cache_terminal_palette_harmony() {
@@ -102,11 +102,14 @@ fn probe_terminal_colors(timeout: Duration) -> Result<ProbeResult> {
         drain_tty_input(&mut tty);
     }
     let response = result?;
-    let parsed = parse_four_colors(&response);
-    if parsed.is_err() {
-        drain_tty_input(&mut tty);
-    }
-    let [fg, bg, c16, c231] = parsed?;
+    let parsed = match parse_four_colors(&response) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            drain_tty_input(&mut tty);
+            return Err(error);
+        }
+    };
+    let [fg, bg, c16, c231] = parsed;
 
     let is_term_light_theme = lightness(bg) > lightness(fg);
     let is_palette_light_theme = lightness(c16) > lightness(c231);
@@ -160,7 +163,7 @@ fn read_until_da1(tty: &mut File, timeout: Duration) -> Result<Vec<u8>> {
     let mut settle_deadline = None;
 
     loop {
-        if has_complete_da1_response(&buffer) && settle_deadline.is_none() {
+        if has_complete_probe_response(&buffer) && settle_deadline.is_none() {
             settle_deadline = Some(Instant::now() + RESPONSE_SETTLE_WINDOW);
         }
 
@@ -202,6 +205,11 @@ fn has_complete_da1_response(buffer: &[u8]) -> bool {
         .windows(DA1_RESPONSE_PREFIX.len())
         .position(|window| window == DA1_RESPONSE_PREFIX)
         .is_some_and(|pos| buffer[pos..].contains(&b'c'))
+}
+
+#[cfg(unix)]
+fn has_complete_probe_response(buffer: &[u8]) -> bool {
+    has_complete_da1_response(buffer) && parse_four_colors(buffer).is_ok()
 }
 
 #[cfg(unix)]
@@ -320,5 +328,17 @@ mod tests {
         assert!(!has_complete_da1_response(b"\x1b[?62;22"));
         assert!(has_complete_da1_response(b"\x1b[?62;22;52c"));
         assert!(has_complete_da1_response(b"noise\x1b[?1;2cmore"));
+    }
+
+    #[test]
+    fn waits_for_all_color_responses_before_settling() {
+        let da1_only = b"\x1b[?62;22;52c";
+        assert!(has_complete_da1_response(da1_only));
+        assert!(!has_complete_probe_response(da1_only));
+
+        let response = format!(
+            "{OSC}10;rgb:dddd/dddd/dddd{ST}{OSC}11;rgb:1111/1111/1111{ST}{OSC}4;16;rgb:1111/1111/1111{ST}{OSC}4;231;rgb:dddd/dddd/dddd{ST}{CSI}?62;4c"
+        );
+        assert!(has_complete_probe_response(response.as_bytes()));
     }
 }

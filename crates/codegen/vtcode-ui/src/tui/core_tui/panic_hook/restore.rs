@@ -166,11 +166,13 @@ mod tests {
     }
 
     #[test]
-    fn new_tui_session_marks_terminal_modified() {
+    fn new_tui_session_waits_for_terminal_mutation() {
         state::mark_terminal_restored();
         assert!(!state::is_terminal_modified());
         state::mark_tui_initialized();
-        assert!(state::is_terminal_modified(), "entering a TUI session must mark the terminal modified");
+        assert!(state::is_tui_initialized());
+        assert!(!state::is_terminal_modified(), "TUI registration must not claim terminal mutation");
+        state::mark_tui_deinitialized();
     }
 
     #[test]
