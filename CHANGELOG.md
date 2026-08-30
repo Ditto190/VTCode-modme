@@ -2,6 +2,15 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.151.2 - 2026-08-30
+
+### Highlights
+#### Bug Fixes
+
+- Preserve layered settings writes (0c2fd27b) 
+- Protect repository policy persistence (6df636c5) 
+- Recover stale repository provider settings (8196eb4f) 
+### Other Changes
 ## 0.151.1 - 2026-08-30
 
 ### Highlights
