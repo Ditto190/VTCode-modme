@@ -248,14 +248,14 @@ pub(crate) fn apply_settings_action(state: &mut SettingsPaletteState, action: &s
     }
 
     if let Some(path) = action.strip_prefix(ACTION_PREFIX_ARRAY_ADD) {
-        mutate_draft_and_persist(state, |draft| add_array_item(draft, path))?;
+        mutate_draft_and_persist(state, path, |draft| add_array_item(draft, path))?;
         outcome.saved = true;
         outcome.message = Some(describe_array_change(path, true));
         return Ok(outcome);
     }
 
     if let Some(path) = action.strip_prefix(ACTION_PREFIX_ARRAY_POP) {
-        mutate_draft_and_persist(state, |draft| pop_array_item(draft, path))?;
+        mutate_draft_and_persist(state, path, |draft| pop_array_item(draft, path))?;
         outcome.saved = true;
         outcome.message = Some(describe_array_change(path, false));
         return Ok(outcome);
@@ -275,7 +275,7 @@ pub(crate) fn apply_settings_action(state: &mut SettingsPaletteState, action: &s
             _ => bail!("Unsupported settings operation: {op}"),
         };
 
-        mutate_draft_and_persist(state, |draft| apply_scalar_operation(draft, path, operation))?;
+        mutate_draft_and_persist(state, path, |draft| apply_scalar_operation(draft, path, operation))?;
         outcome.saved = true;
         outcome.message = Some(describe_scalar_change(state, path, operation));
         return Ok(outcome);
@@ -365,6 +365,7 @@ mod tests {
     use vtcode_commons::reference::StaticWorkspacePaths;
     use vtcode_config::defaults::WorkspacePathsDefaults;
     use vtcode_config::defaults::provider::with_config_defaults_provider_for_test;
+    use vtcode_core::config::ConfigManager;
 
     #[test]
     fn parse_path_handles_arrays() {
@@ -976,35 +977,103 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn custom_providers_array_add_uses_valid_template() {
         let temp = tempfile::tempdir().expect("temp dir");
-        let source_path = temp.path().join("vtcode.toml");
-        let mut state = SettingsPaletteState {
-            workspace: temp.path().to_path_buf(),
-            source_path: source_path.clone(),
-            source_label: "test".to_string(),
-            draft: VTCodeConfig::default(),
-            view_path: Some("custom_providers".to_string()),
-            last_selection: None,
-            selection_by_view: BTreeMap::new(),
-        };
+        let user_path = temp.path().join("home").join("vtcode.toml");
+        std::fs::create_dir_all(user_path.parent().expect("user config parent")).expect("user config dir");
+        let paths = StaticWorkspacePaths::new(temp.path(), temp.path().join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(paths))
+            .with_home_paths(vec![user_path.clone()])
+            .with_system_config_paths(Vec::new());
 
-        let outcome = apply_settings_action(&mut state, "settings:array_add:custom_providers")
-            .expect("add custom provider template");
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let mut state = SettingsPaletteState {
+                workspace: temp.path().to_path_buf(),
+                source_path: temp.path().join("vtcode.toml"),
+                source_label: "test".to_string(),
+                draft: VTCodeConfig::default(),
+                view_path: Some("custom_providers".to_string()),
+                last_selection: None,
+                selection_by_view: BTreeMap::new(),
+            };
 
-        assert_eq!(outcome.message.as_deref(), Some("Added item to Custom Providers"));
-        assert!(outcome.saved);
+            let outcome = apply_settings_action(&mut state, "settings:array_add:custom_providers")
+                .expect("add custom provider template");
 
-        assert_eq!(state.draft.custom_providers.len(), 1);
-        let provider = &state.draft.custom_providers[0];
-        assert_eq!(provider.name, "custom-provider-1");
-        assert_eq!(provider.display_name, "Custom Provider 1");
-        assert_eq!(provider.base_url, "https://llm.example/v1");
-        assert_eq!(provider.api_key_env, "");
-        assert_eq!(provider.model, "");
+            assert_eq!(outcome.message.as_deref(), Some("Added item to Custom Providers"));
+            assert!(outcome.saved);
 
-        let persisted = std::fs::read_to_string(&source_path).expect("persisted config");
-        assert!(persisted.contains("custom_providers"));
+            assert_eq!(state.draft.custom_providers.len(), 1);
+            let provider = &state.draft.custom_providers[0];
+            assert_eq!(provider.name, "custom-provider-1");
+            assert_eq!(provider.display_name, "Custom Provider 1");
+            assert_eq!(provider.base_url, "https://llm.example/v1");
+            assert_eq!(provider.api_key_env, "");
+            assert_eq!(provider.model, "");
+
+            let persisted = std::fs::read_to_string(&user_path).expect("persisted config");
+            assert!(persisted.contains("custom_providers"));
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn settings_edit_does_not_copy_trusted_provider_into_workspace_config() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let workspace = temp.path();
+        let user_path = workspace.join("home").join("vtcode.toml");
+        let workspace_path = workspace.join("vtcode.toml");
+        std::fs::create_dir_all(user_path.parent().expect("user config parent")).expect("user config dir");
+        std::fs::write(
+            &user_path,
+            r#"
+[[custom_providers]]
+name = "trusted"
+display_name = "Trusted"
+base_url = "https://llm.example/v1"
+model = "model"
+api_key_env = "TRUSTED_API_KEY"
+"#,
+        )
+        .expect("user config");
+        std::fs::write(&workspace_path, "agent.provider = \"openai\"\n").expect("workspace config");
+
+        let paths = StaticWorkspacePaths::new(workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(paths))
+            .with_home_paths(vec![user_path.clone()])
+            .with_system_config_paths(Vec::new());
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let mut state = create_settings_palette_state(workspace, &None).expect("settings state");
+            assert_eq!(
+                canonicalize(&state.source_path).expect("canonical source path"),
+                canonicalize(&workspace_path).expect("canonical workspace path")
+            );
+            assert_eq!(state.draft.custom_providers.len(), 1);
+
+            apply_settings_action(&mut state, "settings:set:agent.todo_planning_mode:toggle")
+                .expect("workspace setting should persist");
+
+            let workspace_content = std::fs::read_to_string(&workspace_path).expect("workspace config content");
+            assert!(workspace_content.contains("todo_planning_mode = false"));
+            assert!(!workspace_content.contains("custom_providers"));
+            assert!(!workspace_content.contains("trusted"));
+
+            let manager = ConfigManager::load_from_workspace(workspace).expect("reloaded configuration");
+            assert_eq!(manager.config().custom_providers.len(), 1);
+            assert!(!manager.config().agent.todo_planning_mode);
+
+            apply_settings_action(&mut state, "settings:array_add:custom_providers")
+                .expect("custom provider should persist to the trusted layer");
+            let workspace_content = std::fs::read_to_string(&workspace_path).expect("workspace config content");
+            let user_content = std::fs::read_to_string(&user_path).expect("user config content");
+            assert!(!workspace_content.contains("custom_providers"));
+            assert!(user_content.contains("custom-provider-1"));
+
+            let manager = ConfigManager::load_from_workspace(workspace).expect("reloaded provider configuration");
+            assert_eq!(manager.config().custom_providers.len(), 2);
+        });
     }
 
     #[test]

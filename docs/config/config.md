@@ -47,6 +47,12 @@ requires confirmation. `/config reset` opens the same confirmation view. A
 reset clears only that target layer by replacing its contents with an empty
 TOML document. Lower-precedence layers and credentials are preserved.
 
+Saving a setting updates only the selected field in the target layer; it does
+not flatten the effective configuration into that file. Custom-provider and
+provider endpoint/credential fields are saved to the canonical user config
+unless an explicit `--config` file was selected, so trusted provider settings
+cannot be copied into repository-controlled configuration.
+
 The CLI exposes the same service for non-interactive repair and cleanup:
 
 ```bash

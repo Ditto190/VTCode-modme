@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashSet;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
 use vtcode_commons::VtCodePaths;
-use vtcode_core::config::loader::{ConfigManager, VTCodeConfig};
+use vtcode_core::config::loader::{ConfigManager, VTCodeConfig, explicit_config_path};
 use vtcode_core::config::{constants::defaults, constants::model_helpers};
 use vtcode_core::llm::{auto_lightweight_model, lightweight_model_choices};
 use vtcode_core::ui::theme;
@@ -13,7 +14,7 @@ use crate::agent::runloop::unified::config_section_headings::{heading_for_path, 
 
 use super::SettingsPaletteState;
 use super::docs::{FIELD_DOCS, FieldDoc};
-use super::path::{PathToken, get_node, get_node_mut, parse_path_tokens};
+use super::path::{PathToken, get_node, get_node_mut, parse_path_tokens, set_node};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScalarOperation {
@@ -24,13 +25,13 @@ pub(super) enum ScalarOperation {
     CyclePrev,
 }
 
-pub(super) fn mutate_draft_and_persist<F>(state: &mut SettingsPaletteState, mutator: F) -> Result<()>
+pub(super) fn mutate_draft_and_persist<F>(state: &mut SettingsPaletteState, path: &str, mutator: F) -> Result<()>
 where
     F: FnOnce(&mut TomlValue) -> Result<()>,
 {
     let previous_draft = state.draft.clone();
     mutate_draft(state, mutator)?;
-    if let Err(err) = persist_draft(state) {
+    if let Err(err) = persist_draft(state, path) {
         state.draft = previous_draft;
         return Err(err);
     }
@@ -350,11 +351,92 @@ fn write_commented_config(path: &Path, config: &VTCodeConfig) -> Result<()> {
         .with_context(|| format!("Failed to write configuration file {}", path.display()))
 }
 
-fn persist_draft(state: &mut SettingsPaletteState) -> Result<()> {
-    write_commented_config(&state.source_path, &state.draft)
-        .with_context(|| format!("Failed to save {}", state.source_path.display()))?;
+fn persist_draft(state: &mut SettingsPaletteState, path: &str) -> Result<()> {
+    let draft_value = TomlValue::try_from(state.draft.clone()).context("Failed to serialize draft configuration")?;
+    let (target_path, persisted_path, persisted_value) = persistence_target(state, path, &draft_value)?;
+
+    let mut target_value = load_or_default_toml(&target_path)?;
+    set_node(&mut target_value, &persisted_path, persisted_value)?;
+
+    let target_config: VTCodeConfig = target_value
+        .try_into()
+        .with_context(|| format!("Updated configuration at {} could not be deserialized", target_path.display()))?;
+    target_config
+        .validate()
+        .with_context(|| format!("Updated configuration at {} failed validation", target_path.display()))?;
+
+    write_commented_config(&target_path, &target_config)
+        .with_context(|| format!("Failed to save {}", target_path.display()))?;
     ConfigManager::invalidate_workspace_cache(&state.workspace);
     Ok(())
+}
+
+fn persistence_target(
+    state: &SettingsPaletteState,
+    path: &str,
+    draft: &TomlValue,
+) -> Result<(PathBuf, String, TomlValue)> {
+    let value = get_node(draft, path)
+        .cloned()
+        .ok_or_else(|| anyhow!("Settings path '{path}' was not found after applying the change"))?;
+    let normalized_path = normalize_config_path(path);
+
+    if !is_trusted_provider_path(path) || explicit_config_path().is_some() {
+        return Ok((state.source_path.clone(), path.to_string(), value));
+    }
+
+    let manager = ConfigManager::load_from_workspace(&state.workspace)
+        .context("Failed to resolve the trusted configuration destination")?;
+    let user_path = manager
+        .preferred_user_config_path()
+        .context("No canonical user configuration path is available for provider settings")?;
+
+    // A custom-provider array is replaced as a unit by the layered loader.
+    // Persist the complete effective array so editing a provider can create
+    // the trusted layer without manufacturing a partial array.
+    if normalized_path == "custom_providers" || normalized_path.starts_with("custom_providers[]") {
+        let providers = get_node(draft, "custom_providers")
+            .cloned()
+            .ok_or_else(|| anyhow!("Settings path 'custom_providers' was not found after applying the change"))?;
+        return Ok((user_path, "custom_providers".to_string(), providers));
+    }
+
+    Ok((user_path, path.to_string(), value))
+}
+
+fn is_trusted_provider_path(path: &str) -> bool {
+    let normalized = normalize_config_path(path);
+    if normalized == "custom_providers" || normalized.starts_with("custom_providers[]") {
+        return true;
+    }
+
+    let mut segments = normalized.split('.');
+    matches!(
+        (segments.next(), segments.next(), segments.next(), segments.next()),
+        (Some("provider_overrides"), Some(_), Some("base_url" | "api_key_env"), None)
+    )
+}
+
+fn load_or_default_toml(path: &Path) -> Result<TomlValue> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!("Refusing to read symlinked config file: {}", path.display())
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            bail!("Config path is not a regular file: {}", path.display())
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(TomlValue::Table(toml::Table::new()));
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("Failed to inspect config file {}", path.display()));
+        }
+    }
+
+    let content = String::from_utf8(VtCodePaths::read_file_no_follow(path)?)
+        .with_context(|| format!("Configuration file {} is not valid UTF-8", path.display()))?;
+    toml::from_str(&content).with_context(|| format!("Failed to parse config file {}", path.display()))
 }
 
 pub(super) fn render_commented_config(config: &VTCodeConfig) -> Result<String> {

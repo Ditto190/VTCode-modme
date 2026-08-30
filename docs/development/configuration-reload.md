@@ -33,6 +33,13 @@ stable; safe UI, policy, timeout, MCP, and custom-provider changes are applied
 to the active runtime. The open settings palette reloads its draft through the
 same layer stack and restores its remembered section/selection.
 
+The settings palette persists a mutation as a field-level update to the
+selected file instead of serializing the merged effective snapshot. This
+preserves lower-precedence layers: for example, a user custom provider is not
+written into a workspace `vtcode.toml` when a workspace-only setting changes.
+Provider definitions and endpoint/credential overrides are written to the
+canonical user layer unless the session selected an explicit config file.
+
 ## Verification
 
 Use nextest for focused checks:
