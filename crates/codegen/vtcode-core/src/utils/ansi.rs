@@ -1623,6 +1623,117 @@ mod tests {
         );
     }
 
+    fn collect_append_lines(
+        receiver: &mut tokio::sync::mpsc::UnboundedReceiver<crate::ui::InlineCommand>,
+    ) -> Vec<Vec<InlineSegment>> {
+        let mut lines = Vec::new();
+        while let Ok(command) = receiver.try_recv() {
+            if let crate::ui::InlineCommand::AppendLine { segments, .. } = command {
+                lines.push(segments);
+            }
+        }
+        lines
+    }
+
+    fn collect_replacement_lines(
+        receiver: &mut tokio::sync::mpsc::UnboundedReceiver<crate::ui::InlineCommand>,
+    ) -> Option<(usize, Vec<Vec<InlineSegment>>)> {
+        let mut replacement = None;
+        while let Ok(command) = receiver.try_recv() {
+            if let crate::ui::InlineCommand::ReplaceLast { count, lines, .. } = command {
+                replacement = Some((count, lines));
+            }
+        }
+        replacement
+    }
+
+    fn inline_line_texts(lines: &[Vec<InlineSegment>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| line.iter().map(|segment| segment.text.as_str()).collect::<String>())
+            .collect()
+    }
+
+    fn render_normal_markdown_fixture(source: &str, terminal_width: usize) -> Vec<Vec<InlineSegment>> {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        handle.set_message_labels(Some("Agent".to_owned()), None);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+        renderer.set_table_max_width(Some(terminal_width));
+        renderer
+            .render_markdown_output(MessageStyle::Response, source)
+            .expect("normal Markdown fixture should render");
+        collect_append_lines(&mut receiver)
+    }
+
+    fn render_streamed_markdown_fixture(
+        source: &str,
+        terminal_width: usize,
+    ) -> (usize, usize, Vec<Vec<InlineSegment>>) {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        handle.set_message_labels(Some("Agent".to_owned()), None);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+        renderer.set_table_max_width(Some(terminal_width));
+        let line_count = renderer
+            .stream_markdown_response(source, 2)
+            .expect("streamed Markdown fixture should render");
+        let (replaced_count, lines) = collect_replacement_lines(&mut receiver).expect("stream should replace lines");
+        (line_count, replaced_count, lines)
+    }
+
+    fn assert_markdown_table_fixture(
+        source: &str,
+        expected: &str,
+        terminal_width: usize,
+        expect_table_separators: bool,
+    ) {
+        let normal = render_normal_markdown_fixture(source, terminal_width);
+        let normal_text = inline_line_texts(&normal);
+        assert_eq!(normal_text.join("\n"), expected.trim_end_matches('\n'));
+
+        let (line_count, replaced_count, streamed) = render_streamed_markdown_fixture(source, terminal_width);
+        assert_eq!(line_count, streamed.len());
+        assert_eq!(replaced_count, 2);
+        assert_eq!(inline_line_texts(&streamed), normal_text);
+
+        let agent_frame_width = UnicodeWidthStr::width(" • ") + UnicodeWidthStr::width("Agent") + 1;
+        assert!(
+            normal_text
+                .iter()
+                .all(|line| UnicodeWidthStr::width(line.as_str()) + agent_frame_width <= terminal_width),
+            "a rendered line exceeded the framed terminal width: {normal_text:?}"
+        );
+        let has_table_separator = normal_text.iter().any(|line| line.contains('│'));
+        assert_eq!(has_table_separator, expect_table_separators, "unexpected table layout: {normal_text:?}");
+    }
+
+    #[test]
+    fn markdown_table_wide_layout_snapshot_matches_normal_and_streaming() {
+        assert_markdown_table_fixture(
+            include_str!("fixtures/markdown_table_wide.md"),
+            include_str!("fixtures/markdown_table_wide.snap"),
+            34,
+            true,
+        );
+    }
+
+    #[test]
+    fn markdown_table_narrow_layout_snapshot_matches_normal_and_streaming() {
+        let source = include_str!("fixtures/markdown_table_narrow.md");
+        let expected = include_str!("fixtures/markdown_table_narrow.snap");
+        assert_markdown_table_fixture(source, expected, 31, false);
+
+        let normal = render_normal_markdown_fixture(source, 31);
+        assert!(
+            normal
+                .iter()
+                .flat_map(|line| line.iter())
+                .any(|segment| segment.text.contains("Details:") && segment.style.effects.contains(Effects::BOLD)),
+            "fallback heading labels should be bold"
+        );
+    }
+
     #[test]
     fn markdown_table_width_accounts_for_agent_frame_and_indent() -> Result<()> {
         use crate::ui::InlineCommand;
