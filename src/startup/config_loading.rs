@@ -62,7 +62,25 @@ pub(super) async fn load_startup_config(args: &Cli) -> Result<LoadedStartupConfi
     }
 
     let config_phase = std::time::Instant::now();
-    let manager = builder.build().context("Failed to load configuration")?;
+    let manager = match builder.build() {
+        Ok(manager) => manager,
+        Err(error) if super::is_config_reset_command(args) => {
+            // The reset service can repair the selected malformed layer, so
+            // do not make a broken effective stack prevent `config reset`
+            // from reaching that service. Reset does not need provider auth,
+            // model validation, or any agent runtime initialization.
+            tracing::warn!("Configuration could not be loaded before reset: {error:#}");
+            return Ok(LoadedStartupConfig {
+                workspace,
+                config: VTCodeConfig::default(),
+                first_run_occurred: false,
+                full_auto_requested: false,
+                automation_prompt: None,
+                primary_agent_explicitly_configured: false,
+            });
+        }
+        Err(error) => return Err(error).context("Failed to load configuration"),
+    };
     let config_duration = config_phase.elapsed();
     if let Some(timing) = manager.phase_timing() {
         tracing::debug!(target = "vtcode.startup", ?timing, "configuration phases recorded");

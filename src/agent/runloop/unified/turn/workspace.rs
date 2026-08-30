@@ -6,7 +6,7 @@ use vtcode_core::SimpleIndexer;
 use vtcode_core::config::loader::{ConfigManager, VTCodeConfig};
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 
-use crate::agent::agents::apply_runtime_overrides;
+use crate::agent::agents::apply_live_reload_overrides;
 
 async fn blocking_task<F, R>(label: &str, f: F) -> Result<R>
 where
@@ -35,6 +35,7 @@ pub(crate) async fn build_workspace_index(workspace: PathBuf) -> Result<()> {
 async fn load_workspace_config_snapshot(workspace: &Path) -> Result<VTCodeConfig> {
     let workspace_buf = workspace.to_path_buf();
     blocking_task("workspace config load", move || {
+        ConfigManager::invalidate_workspace_cache(&workspace_buf);
         ConfigManager::load_from_workspace(&workspace_buf).map(|manager| manager.config().clone())
     })
     .await
@@ -45,8 +46,16 @@ pub(crate) async fn refresh_vt_config(
     runtime_cfg: &CoreAgentConfig,
     vt_cfg: &mut Option<VTCodeConfig>,
 ) -> Result<()> {
-    let mut snapshot = load_workspace_config_snapshot(workspace).await?;
-    apply_runtime_overrides(Some(&mut snapshot), runtime_cfg);
+    let snapshot = load_workspace_config_snapshot(workspace).await?;
+    apply_workspace_config_snapshot(snapshot, runtime_cfg, vt_cfg)
+}
+
+pub(crate) fn apply_workspace_config_snapshot(
+    mut snapshot: VTCodeConfig,
+    runtime_cfg: &CoreAgentConfig,
+    vt_cfg: &mut Option<VTCodeConfig>,
+) -> Result<()> {
+    apply_live_reload_overrides(Some(&mut snapshot), runtime_cfg);
     // Skip the remove+register cycle when custom providers haven't changed.
     // This function is called on every turn and on live-reload; re-registering
     // unchanged providers wastes factory lock + closure rebuild work and

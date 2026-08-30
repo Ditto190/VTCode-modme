@@ -214,6 +214,19 @@ pub(crate) fn apply_runtime_overrides(vt_cfg: Option<&mut VTCodeConfig>, runtime
     }
 }
 
+/// Apply only the runtime identity overrides that must remain stable while a
+/// session is alive. User-editable appearance, reasoning, and other safe
+/// settings remain sourced from the freshly loaded configuration so they can
+/// take effect without restarting the process.
+pub(crate) fn apply_live_reload_overrides(vt_cfg: Option<&mut VTCodeConfig>, runtime_cfg: &CoreAgentConfig) {
+    if let Some(cfg) = vt_cfg {
+        cfg.agent.provider = runtime_cfg.provider.clone();
+        if matches!(runtime_cfg.model_source, ModelSelectionSource::CliOverride) {
+            cfg.agent.default_model = runtime_cfg.model.clone();
+        }
+    }
+}
+
 pub(crate) fn apply_persisted_resume_metadata(
     runtime_cfg: &mut CoreAgentConfig,
     metadata: Option<&SessionArchiveMetadata>,
@@ -288,6 +301,46 @@ mod tests {
 
         assert_eq!(vt_cfg.agent.default_model, OVERRIDE_MODEL);
         assert_eq!(vt_cfg.agent.provider, "cli-provider");
+    }
+
+    #[test]
+    fn live_reload_preserves_session_identity_but_keeps_safe_settings() {
+        let mut vt_cfg = VTCodeConfig::default();
+        vt_cfg.agent.provider = "file-provider".to_string();
+        vt_cfg.agent.default_model = "file-model".to_string();
+        vt_cfg.agent.theme = "file-theme".to_string();
+        vt_cfg.agent.reasoning_effort = ReasoningEffortLevel::High;
+
+        let current_dir = std::env::current_dir().unwrap();
+        let runtime_cfg = CoreAgentConfig {
+            model: "session-model".to_string(),
+            api_key: String::new(),
+            provider: "session-provider".to_string(),
+            api_key_env: Provider::Gemini.default_api_key_env().to_string(),
+            workspace: current_dir,
+            verbose: false,
+            quiet: false,
+            theme: "session-theme".to_string(),
+            reasoning_effort: ReasoningEffortLevel::Low,
+            ui_surface: UiSurfacePreference::default(),
+            prompt_cache: PromptCachingConfig::default(),
+            model_source: ModelSelectionSource::CliOverride,
+            custom_api_keys: BTreeMap::new(),
+            checkpointing_enabled: DEFAULT_CHECKPOINTS_ENABLED,
+            checkpointing_storage_dir: None,
+            checkpointing_max_snapshots: DEFAULT_MAX_SNAPSHOTS,
+            checkpointing_max_age_days: Some(DEFAULT_MAX_AGE_DAYS),
+            max_conversation_turns: 1000,
+            model_behavior: None,
+            openai_chatgpt_auth: None,
+        };
+
+        apply_live_reload_overrides(Some(&mut vt_cfg), &runtime_cfg);
+
+        assert_eq!(vt_cfg.agent.provider, "session-provider");
+        assert_eq!(vt_cfg.agent.default_model, "session-model");
+        assert_eq!(vt_cfg.agent.theme, "file-theme");
+        assert_eq!(vt_cfg.agent.reasoning_effort, ReasoningEffortLevel::High);
     }
 
     #[test]

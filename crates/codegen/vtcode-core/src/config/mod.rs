@@ -26,8 +26,8 @@ pub use acp::{
     AgentClientProtocolZedToolsConfig, AgentClientProtocolZedWorkspaceTrustMode, WorkspaceTrustLevel,
 };
 pub use api::{
-    ConfigLayerView, ConfigReadRequest, ConfigReadResponse, ConfigService, ConfigWriteRequest, ConfigWriteResponse,
-    ConfigWriteStrategy, ConfigWriteTarget, OverrideMetadata,
+    ConfigLayerView, ConfigReadRequest, ConfigReadResponse, ConfigResetRequest, ConfigResetResponse, ConfigService,
+    ConfigWriteRequest, ConfigWriteResponse, ConfigWriteStrategy, ConfigWriteTarget, OverrideMetadata,
 };
 pub use api_keys::ApiKeySources;
 pub use context::{ContextFeaturesConfig, LedgerConfig};

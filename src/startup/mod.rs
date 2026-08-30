@@ -104,7 +104,9 @@ impl StartupPolicy {
         // `--print` is global, but it must not downgrade a tool-capable
         // subcommand to the tool-free Ask path. Doing so would skip the
         // runtime security initialization required by exec/review.
-        let kind = if matches!(args.command, Some(Commands::Exec { .. } | Commands::Review(_))) {
+        let kind = if is_config_reset_command(args) {
+            StartupCommandKind::CommandOwned
+        } else if matches!(args.command, Some(Commands::Exec { .. } | Commands::Review(_))) {
             StartupCommandKind::ToolCapable
         } else if args.print.is_some() {
             StartupCommandKind::Ask
@@ -255,6 +257,21 @@ impl StartupPolicy {
 #[must_use]
 pub(crate) fn command_startup_policy(args: &Cli) -> StartupPolicy {
     StartupPolicy::for_args(args)
+}
+
+/// Whether the invocation only needs the configuration reset service.
+///
+/// Reset must remain usable when the layer being cleared is malformed, so it
+/// cannot depend on the normal provider/auth startup path successfully
+/// deserializing the current effective configuration first.
+pub(crate) fn is_config_reset_command(args: &Cli) -> bool {
+    matches!(
+        args.command,
+        Some(Commands::Config {
+            command: Some(vtcode_core::cli::args::ConfigCommand::Reset(_)),
+            ..
+        })
+    )
 }
 
 impl StartupContext {
@@ -1002,6 +1019,15 @@ mod validation_tests {
     fn startup_policy_keeps_known_command_owned_paths_off_provider_runtime() {
         assert_policy(
             Cli::parse_from(["vtcode", "tool-policy", "status"]),
+            StartupCommandKind::CommandOwned,
+            true,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_policy(
+            Cli::parse_from(["vtcode", "config", "reset"]),
             StartupCommandKind::CommandOwned,
             true,
             false,

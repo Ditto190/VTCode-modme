@@ -1,11 +1,26 @@
 use anyhow::Result;
 use std::path::Path;
-use vtcode_core::config::{ConfigReadRequest, ConfigService, VTCodeConfig};
+use vtcode_core::cli::args::{ConfigCommand, ConfigResetArgs};
+use vtcode_core::config::{ConfigReadRequest, ConfigResetRequest, ConfigService, ConfigWriteTarget, VTCodeConfig};
 use vtcode_core::utils::colors::style;
 
 /// Handle the config command
-pub async fn handle_config_command(output: Option<&Path>, use_home_dir: bool) -> Result<()> {
+pub async fn handle_config_command(
+    output: Option<&Path>,
+    use_home_dir: bool,
+    command: Option<ConfigCommand>,
+    workspace: &Path,
+) -> Result<()> {
     println!("{}\n", style("[CONFIG]").cyan().bold());
+
+    if let Some(command) = command {
+        if output.is_some() {
+            anyhow::bail!("--output cannot be combined with a config subcommand");
+        }
+        match command {
+            ConfigCommand::Reset(args) => return handle_reset_command(args, use_home_dir, workspace),
+        }
+    }
 
     if use_home_dir {
         // Create config in user's home directory
@@ -33,6 +48,39 @@ pub async fn handle_config_command(output: Option<&Path>, use_home_dir: bool) ->
         // Print to stdout
         println!("\nGenerated configuration:\n");
         println!("{}", generate_default_config());
+    }
+
+    Ok(())
+}
+
+fn handle_reset_command(args: ConfigResetArgs, parent_global: bool, workspace: &Path) -> Result<()> {
+    if parent_global && args.project {
+        anyhow::bail!("Choose only one config reset target: --global or --project");
+    }
+
+    let target = if parent_global || args.global {
+        ConfigWriteTarget::User
+    } else if args.project {
+        ConfigWriteTarget::Project
+    } else {
+        ConfigWriteTarget::Workspace
+    };
+
+    let response = ConfigService::reset(ConfigResetRequest {
+        workspace: workspace.to_path_buf(),
+        target,
+        expected_layer_version: None,
+        path: None,
+    })?;
+
+    if response.had_file {
+        println!("Reset {} configuration layer at {}.", target.layer_name(), response.path.display());
+    } else {
+        println!(
+            "{} configuration layer is already empty (target: {}).",
+            target.layer_name(),
+            response.path.display()
+        );
     }
 
     Ok(())

@@ -11,8 +11,9 @@ use super::render::{
 };
 use super::{
     ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, ACTION_PREFIX_ARRAY_ADD, ACTION_PREFIX_ARRAY_POP,
-    ACTION_PREFIX_OPEN, ACTION_PREFIX_SET, OPTIONAL_DOC_FIELDS, SETTINGS_MODEL_CONFIG_MAIN_PATH,
-    SETTINGS_MODEL_CONFIG_PATH, SettingsPaletteState,
+    ACTION_PREFIX_OPEN, ACTION_PREFIX_SET, ACTION_RESET, ACTION_RESET_CANCEL, ACTION_RESET_CONFIRM,
+    OPTIONAL_DOC_FIELDS, RESET_CONFIRMATION_VIEW, SETTINGS_MODEL_CONFIG_MAIN_PATH, SETTINGS_MODEL_CONFIG_PATH,
+    SettingsPaletteState,
 };
 use crate::agent::runloop::unified::config_section_headings::humanize_identifier;
 
@@ -22,6 +23,23 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
     let mut items = Vec::new();
 
     items.push(section_item("Actions"));
+    if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
+        items.push(section_item("Confirm reset"));
+        items.push(action_item(
+            "Reset configuration",
+            &format!("Clear every setting in {}", state.source_path.display()),
+            Some("Confirm"),
+            ACTION_RESET_CONFIRM,
+        ));
+        items.push(action_item(
+            "Cancel reset",
+            "Return to the settings sections without changing configuration",
+            Some("Back"),
+            ACTION_RESET_CANCEL,
+        ));
+        return Ok(items);
+    }
+
     items.push(action_item(
         "Reload from disk",
         "Reload effective values from current configuration files",
@@ -44,6 +62,12 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
         let node = get_node(draft, view_path).ok_or_else(|| anyhow!("Could not resolve settings path {view_path}"))?;
         append_node_items(&mut items, view_path, node, draft)?;
     } else if let TomlValue::Table(table) = draft {
+        items.push(action_item(
+            "Reset configuration",
+            &format!("Clear every setting in {} (confirmation required)", state.source_path.display()),
+            Some("Action"),
+            ACTION_RESET,
+        ));
         items.push(section_item("Quick Access"));
         items.push(action_item(
             "Model Config",

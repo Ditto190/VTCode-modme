@@ -14,7 +14,8 @@ use vtcode_ui::tui::core::convert_style;
 use crate::agent::runloop::slash_commands::{SessionPaletteMode, ThemePaletteMode};
 use crate::agent::runloop::ui::build_inline_header_context;
 use crate::agent::runloop::unified::settings_interactive::{
-    SettingsPaletteState, apply_settings_action, parent_view_path, show_settings_palette,
+    ACTION_OPEN_ROOT, ACTION_RELOAD, ACTION_RESET, ACTION_RESET_CANCEL, ACTION_RESET_CONFIRM, SettingsPaletteState,
+    apply_settings_action, parent_view_path, show_settings_palette,
 };
 use crate::agent::runloop::unified::url_guard::UrlGuardPrompt;
 use crate::agent::runloop::welcome::SessionBootstrap;
@@ -318,15 +319,31 @@ pub(crate) async fn refresh_runtime_config_from_manager(
     session_bootstrap: &SessionBootstrap,
     _full_auto: bool,
 ) -> Result<()> {
+    ConfigManager::invalidate_workspace_cache(&config.workspace);
     let runtime_manager = ConfigManager::load_from_workspace(&config.workspace)?;
-    let runtime_config = runtime_manager.config().clone();
+    let mut runtime_config = runtime_manager.config().clone();
+    crate::agent::agents::apply_live_reload_overrides(Some(&mut runtime_config), config);
+    let custom_providers_unchanged = vt_cfg
+        .as_ref()
+        .is_some_and(|old| old.custom_providers == runtime_config.custom_providers);
+    if !custom_providers_unchanged {
+        vtcode_core::llm::factory::register_custom_providers(&runtime_config.custom_providers);
+    }
     *vt_cfg = Some(runtime_config.clone());
     config.reasoning_effort = runtime_config.agent.reasoning_effort;
+    config.theme.clone_from(&runtime_config.agent.theme);
     renderer.set_show_diagnostics_in_transcript(runtime_config.ui.show_diagnostics_in_transcript);
     renderer.set_tool_display_mode(runtime_config.ui.tool_display_mode);
     vtcode_ui::tui::panic_hook::set_show_diagnostics(runtime_config.ui.show_diagnostics_in_transcript);
 
-    let _ = theme::set_active_theme(&runtime_config.agent.theme);
+    theme::set_color_accessibility_config(theme::ColorAccessibilityConfig {
+        minimum_contrast: runtime_config.ui.minimum_contrast,
+        bold_is_bright: runtime_config.ui.bold_is_bright,
+        safe_colors_only: runtime_config.ui.safe_colors_only,
+    });
+    if theme::set_active_theme(&runtime_config.agent.theme).is_err() {
+        let _ = theme::set_active_theme(theme::DEFAULT_THEME_ID);
+    }
     let styles = theme::active_styles();
     handle.set_theme(inline_theme_from_core_styles(&styles));
     handle.set_appearance(to_tui_appearance(&runtime_config));
@@ -412,23 +429,41 @@ pub(crate) async fn handle_palette_selection(
         }
         ActivePalette::Settings { mut state, esc_armed: _ } => {
             let normalized_selection = normalize_config_selection(&selection);
+            let current_view = state.view_path.clone();
+            if should_remember_settings_selection(&normalized_selection) {
+                state.remember_selection(current_view.as_deref(), normalized_selection.clone());
+            }
 
             if let InlineListSelection::ConfigAction(action) = &selection {
-                let outcome = apply_settings_action(state.as_mut(), action)?;
-                if let Some(message) = outcome.message {
-                    renderer.line(MessageStyle::Info, &message)?;
-                }
-                if outcome.saved {
-                    refresh_runtime_config_from_manager(
-                        renderer,
-                        handle,
-                        config,
-                        vt_cfg,
-                        provider_client,
-                        session_bootstrap,
-                        full_auto,
-                    )
-                    .await?;
+                match apply_settings_action(state.as_mut(), action) {
+                    Ok(outcome) => {
+                        if let Some(message) = outcome.message {
+                            renderer.line(MessageStyle::Info, &message)?;
+                        }
+                        if outcome.saved
+                            && let Err(err) = refresh_runtime_config_from_manager(
+                                renderer,
+                                handle,
+                                config,
+                                vt_cfg,
+                                provider_client,
+                                session_bootstrap,
+                                full_auto,
+                            )
+                            .await
+                        {
+                            renderer.line(
+                                MessageStyle::Warning,
+                                &format!("Settings saved, but the running session kept its last valid runtime config: {err:#}"),
+                            )?;
+                        }
+                    }
+                    Err(err) => {
+                        renderer.line(
+                            MessageStyle::Warning,
+                            &format!("Could not apply settings change; keeping the last valid configuration: {err:#}"),
+                        )?;
+                    }
                 }
             }
 
@@ -487,6 +522,16 @@ fn normalize_config_selection(selection: &InlineListSelection) -> InlineListSele
     }
 }
 
+fn should_remember_settings_selection(selection: &InlineListSelection) -> bool {
+    match selection {
+        InlineListSelection::ConfigAction(action) => !matches!(
+            action.as_str(),
+            ACTION_OPEN_ROOT | ACTION_RELOAD | ACTION_RESET | ACTION_RESET_CANCEL | ACTION_RESET_CONFIRM
+        ),
+        _ => true,
+    }
+}
+
 pub(crate) fn handle_palette_cancel(
     palette: ActivePalette,
     renderer: &mut AnsiRenderer,
@@ -538,8 +583,14 @@ pub(crate) fn handle_palette_cancel(
                 return Ok(None);
             };
 
-            state.view_path = parent_view_path(&current_path);
-            if show_settings_palette(renderer, state.as_ref(), None)? {
+            let parent_path = if current_path == "__settings_reset_confirmation" {
+                None
+            } else {
+                parent_view_path(&current_path)
+            };
+            let selected = state.selection_for_view(parent_path.as_deref());
+            state.view_path = parent_path;
+            if show_settings_palette(renderer, state.as_ref(), selected)? {
                 Ok(Some(ActivePalette::Settings { state, esc_armed: true }))
             } else {
                 Ok(None)
@@ -591,6 +642,19 @@ mod tests {
         let selection = InlineListSelection::ConfigAction("context.max_context_tokens:dec".to_string());
         let normalized = normalize_config_selection(&selection);
         assert_eq!(normalized, InlineListSelection::ConfigAction("context.max_context_tokens:inc".to_string()));
+    }
+
+    #[test]
+    fn utility_settings_actions_do_not_replace_remembered_entry() {
+        for action in [
+            ACTION_OPEN_ROOT,
+            ACTION_RELOAD,
+            ACTION_RESET,
+            ACTION_RESET_CANCEL,
+            ACTION_RESET_CONFIRM,
+        ] {
+            assert!(!should_remember_settings_selection(&InlineListSelection::ConfigAction(action.to_string(),)));
+        }
     }
 
     #[test]

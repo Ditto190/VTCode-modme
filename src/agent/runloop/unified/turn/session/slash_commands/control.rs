@@ -33,6 +33,11 @@ pub(crate) async fn handle_show_settings(ctx: SlashCommandContext<'_>) -> Result
     show_settings_at_path_from_context(&mut ctx, None).await
 }
 
+pub(crate) async fn handle_show_settings_reset(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    let mut ctx = ctx;
+    show_settings_at_path_from_context_with_reset(&mut ctx, None, true).await
+}
+
 pub(crate) async fn handle_show_permissions(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
     let mut ctx = ctx;
     show_settings_at_path_from_context(&mut ctx, Some("permissions")).await
@@ -50,6 +55,14 @@ pub(crate) async fn show_settings_at_path_from_context(
     ctx: &mut SlashCommandContext<'_>,
     view_path: Option<&str>,
 ) -> Result<SlashCommandControl> {
+    show_settings_at_path_from_context_with_reset(ctx, view_path, false).await
+}
+
+async fn show_settings_at_path_from_context_with_reset(
+    ctx: &mut SlashCommandContext<'_>,
+    view_path: Option<&str>,
+    reset_confirmation: bool,
+) -> Result<SlashCommandControl> {
     if !ui::ensure_selection_ui_available(ctx, "configuring settings")? {
         return Ok(SlashCommandControl::Continue);
     }
@@ -66,6 +79,9 @@ pub(crate) async fn show_settings_at_path_from_context(
     let vt_snapshot = ctx.vt_cfg.clone();
     let mut settings_state = create_settings_palette_state(&workspace_path, &vt_snapshot)?;
     settings_state.view_path = view_path.map(resolve_settings_view_path);
+    if reset_confirmation {
+        settings_state.view_path = Some("__settings_reset_confirmation".to_string());
+    }
     if settings_state.view_path.as_deref() == Some("tools.editor") {
         return handle_configure_editor(ctx).await;
     }

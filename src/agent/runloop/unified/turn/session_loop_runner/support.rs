@@ -323,33 +323,6 @@ pub(super) fn take_pending_resumed_user_prompt(
     Some(prompt)
 }
 
-pub(super) fn live_reload_preserves_session_config(
-    initial_vt_cfg: Option<&VTCodeConfig>,
-    runtime_cfg: &CoreAgentConfig,
-) -> bool {
-    let Some(initial_vt_cfg) = initial_vt_cfg else {
-        return true;
-    };
-
-    let mut reloaded_vt_cfg = vtcode_core::config::loader::ConfigManager::load_from_workspace(&runtime_cfg.workspace)
-        .ok()
-        .map(|manager| manager.config().clone());
-    crate::agent::agents::apply_runtime_overrides(reloaded_vt_cfg.as_mut(), runtime_cfg);
-
-    let Some(reloaded_vt_cfg) = reloaded_vt_cfg else {
-        return false;
-    };
-
-    let Ok(initial_value) = serde_json::to_value(initial_vt_cfg) else {
-        return false;
-    };
-    let Ok(reloaded_value) = serde_json::to_value(reloaded_vt_cfg) else {
-        return false;
-    };
-
-    initial_value == reloaded_value
-}
-
 pub(super) fn prepare_resume_bootstrap_without_archive(
     resume: &ResumeSession,
     mut metadata: session_archive::SessionArchiveMetadata,

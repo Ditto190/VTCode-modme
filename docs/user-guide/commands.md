@@ -108,6 +108,23 @@ VT Code provides several quick actions directly in the chat input for faster wor
 -   **File Picker (`@`)** — Type `@` anywhere in your input to open the file picker and select files to reference in your message. This allows you to quickly mention files without typing full paths.
 -   **Slash Commands (`/`)** — Type `/` at the start of input to access all available slash commands including `/files`, `/stats`, and many more.
 
+## Configuration quick reference
+
+| Action | Command | Result |
+| --- | --- | --- |
+| Open settings | `/config` (or `/settings`) | Browse categorized settings and effective values |
+| Open a section | `/config <path>` | Jump directly to a settings section |
+| Reset the active layer | `/config reset` | Show the target file and request confirmation |
+| Generate configuration | `vtcode config` | Print a generated configuration document |
+| Reset workspace/explicit layer | `vtcode config reset` | Clear one workspace-layer file and reload the stack |
+| Reset user layer | `vtcode config reset --global` | Clear the canonical user config only |
+| Reset project layer | `vtcode config reset --project` | Clear the current project profile only |
+
+Configuration resets preserve lower-precedence values and secure credentials.
+Interactive sessions live-reload safe changes from watched layers; malformed
+edits retain the last valid snapshot and show a warning. See the [configuration
+guide](../config/config.md) for layer precedence and live-reload details.
+
 ### `/code-ide` (VS Code integration)
 
 Use the `/code-ide` slash command to trigger IDE-specific actions from within a VT Code chat session or the integrated terminal. When the VS Code extension is installed:

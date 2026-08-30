@@ -110,6 +110,7 @@ pub(crate) enum SlashCommandOutcome {
         force: bool,
     },
     ShowSettings,
+    ShowSettingsReset,
     ShowSettingsAtPath {
         path: String,
     },

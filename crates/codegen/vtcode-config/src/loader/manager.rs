@@ -732,6 +732,58 @@ impl ConfigManager {
         paths
     }
 
+    /// Return every configuration file location that can affect a workspace.
+    ///
+    /// The list intentionally includes files that do not exist yet. Polling
+    /// callers can therefore observe file creation as well as modification or
+    /// deletion. Paths retain their configured spelling so consumers that
+    /// write a target can still apply the no-follow file policy at the final
+    /// path component.
+    pub fn watched_config_paths(workspace: &Path) -> Vec<PathBuf> {
+        let provider = defaults::current_config_defaults();
+        let config_file_name = provider.config_file_name().to_string();
+        let workspace_paths = provider.workspace_paths_for(workspace);
+        let workspace_root = workspace_paths.workspace_root().to_path_buf();
+        let mut paths = Vec::new();
+
+        let mut push_unique = |path: PathBuf| {
+            if !paths.iter().any(|existing| existing == &path) {
+                paths.push(path);
+            }
+        };
+
+        if let Some(explicit_path) = session_override::explicit_config_path() {
+            push_unique(explicit_path);
+        }
+        if let Ok(system_paths) = provider.system_config_paths(&config_file_name) {
+            for path in system_paths {
+                push_unique(path);
+            }
+        }
+        for path in provider.home_config_paths(&config_file_name) {
+            push_unique(path);
+        }
+        if let Ok(Some(canonical_path)) = provider.canonical_user_config_path(&config_file_name) {
+            push_unique(canonical_path);
+        }
+
+        if let Some(project_name) = Self::current_project_name(&workspace_root) {
+            push_unique(
+                workspace_paths
+                    .config_dir()
+                    .join("projects")
+                    .join(project_name)
+                    .join("config")
+                    .join(&config_file_name),
+            );
+        }
+
+        push_unique(workspace_paths.config_dir().join(&config_file_name));
+        push_unique(workspace_root.join(&config_file_name));
+        push_unique(workspace_root.join(".vtcode").join("theme.toml"));
+        paths
+    }
+
     /// Get the effective TOML configuration
     pub fn effective_config(&self) -> toml::Value {
         self.layer_stack.effective_config()

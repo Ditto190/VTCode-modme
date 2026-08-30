@@ -18,6 +18,8 @@ use crate::agent::runloop::unified::inline_events::{
     InlineEventLoopResources, InlineInterruptCoordinator, poll_inline_loop_action,
 };
 use crate::agent::runloop::unified::model_selection::{ModelSwitchCompactionTargets, finalize_model_selection};
+use crate::agent::runloop::unified::palettes::ActivePalette;
+use crate::agent::runloop::unified::settings_interactive::{reload_state_from_disk, show_settings_palette};
 use crate::agent::runloop::unified::state::is_follow_up_prompt_like;
 use crate::agent::runloop::unified::turn::session::{
     mcp_lifecycle, memory_prompt, slash_command_handler, tool_dispatch,
@@ -55,6 +57,9 @@ pub(super) async fn run_interaction_loop_impl(
     let mut live_reload_watcher = SimpleConfigWatcher::new_with_user_config_paths(ctx.config.workspace.clone());
     live_reload_watcher.set_check_interval(1);
     live_reload_watcher.set_debounce_duration(200);
+    if let Some(initial_config) = ctx.vt_cfg.as_ref() {
+        live_reload_watcher.set_last_known_config(initial_config.clone());
+    }
     let mut last_status_refresh = Instant::now()
         .checked_sub(Duration::from_millis(500))
         .unwrap_or_else(Instant::now);
@@ -67,24 +72,48 @@ pub(super) async fn run_interaction_loop_impl(
             last_status_refresh = Instant::now();
         }
         if should_refresh_status && live_reload_watcher.should_reload() {
-            if let Err(err) = crate::agent::runloop::unified::turn::workspace::refresh_vt_config(
-                &ctx.config.workspace,
-                ctx.config,
-                ctx.vt_cfg,
-            )
-            .await
-            {
-                tracing::warn!("Failed to live-reload workspace configuration: {}", err);
-            } else if let Some(cfg) = ctx.vt_cfg.as_ref() {
-                if let Err(err) = crate::agent::runloop::unified::turn::workspace::apply_workspace_config_to_registry(
-                    ctx.tool_registry,
-                    cfg,
+            let reloaded = live_reload_watcher.load_config();
+            if let Some(error) = live_reload_watcher.take_reload_error() {
+                ctx.renderer.line(
+                    MessageStyle::Warning,
+                    &format!("Configuration reload rejected; keeping the last valid configuration: {error}"),
+                )?;
+            } else if let Some(reloaded) = reloaded {
+                if let Err(err) = crate::agent::runloop::unified::turn::workspace::apply_workspace_config_snapshot(
+                    reloaded, ctx.config, ctx.vt_cfg,
                 ) {
                     tracing::warn!("Failed to apply live-reloaded workspace config: {}", err);
+                } else if let Some(cfg) = ctx.vt_cfg.as_ref() {
+                    if let Err(err) =
+                        crate::agent::runloop::unified::turn::workspace::apply_workspace_config_to_registry(
+                            ctx.tool_registry,
+                            cfg,
+                        )
+                    {
+                        tracing::warn!("Failed to apply live-reloaded workspace config: {}", err);
+                    }
+                    apply_live_theme_and_appearance(ctx.handle, cfg);
+                    ctx.renderer
+                        .set_show_diagnostics_in_transcript(cfg.ui.show_diagnostics_in_transcript);
+                    ctx.renderer.set_tool_display_mode(cfg.ui.tool_display_mode);
+                    vtcode_ui::tui::panic_hook::set_show_diagnostics(cfg.ui.show_diagnostics_in_transcript);
+                    ctx.config.reasoning_effort = cfg.agent.reasoning_effort;
+                    ctx.config.theme.clone_from(&cfg.agent.theme);
+                    *ctx.permissions_state.write().await = cfg.permissions.clone();
+                    sync_mcp_approval_policy_for_context(ctx);
+                    if let Some(ActivePalette::Settings { state: palette_state, .. }) = state.palette_state.as_mut() {
+                        let selected = palette_state.selection_for_view(palette_state.view_path.as_deref());
+                        if let Err(err) = reload_state_from_disk(palette_state) {
+                            ctx.renderer.line(
+                                MessageStyle::Warning,
+                                &format!("Settings palette kept its last valid values after reload failure: {err:#}"),
+                            )?;
+                        } else {
+                            show_settings_palette(ctx.renderer, palette_state.as_ref(), selected)?;
+                        }
+                    }
+                    workspace_config_reloaded = true;
                 }
-                apply_live_theme_and_appearance(ctx.handle, cfg);
-                sync_mcp_approval_policy_for_context(ctx);
-                workspace_config_reloaded = true;
             }
         }
 

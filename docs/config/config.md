@@ -2,11 +2,13 @@
 
 VT Code configuration gives you fine-grained control over the model, execution environment, and integrations available to the CLI. Use this guide alongside the workflows in the extension, the participant system, and the tool approval mechanisms available in the application.
 
-VT Code uses a configuration file named `vtcode.toml` that can be placed at the root of your project workspace to customize behavior. The extension watches for changes to this file and will automatically update settings when it's modified.
+VT Code uses a configuration file named `vtcode.toml` that can be placed at the root of your project workspace to customize behavior. Interactive sessions poll the active workspace, project, user, and explicit config layers and apply safe changes without restarting.
 
 ## Quick navigation
 
 - [Feature flags](#feature-flags)
+- [Settings palette and reset](#settings-palette-and-reset)
+- [Live reload](#live-reload)
 - [Model selection](#model-selection)
 - [Instruction guidance and memory](#instruction-guidance-and-persistent-memory)
 - [External editor](#external-editor)
@@ -32,6 +34,54 @@ VT Code supports several mechanisms for setting config values:
 - Environment variables that can override certain configuration options.
 
 Both the workspace `vtcode.toml` and the main `vtcode.toml` file support the following options:
+
+## Settings palette and reset
+
+In an interactive session, `/config` opens the settings palette. Settings are
+grouped into sections with human-readable labels, descriptions, effective
+values, and source/target information. Use `/config <path>` to open a section
+directly; nested selections are restored when returning to a parent view.
+
+The palette's **Reset configuration** action shows the exact target file and
+requires confirmation. `/config reset` opens the same confirmation view. A
+reset clears only that target layer by replacing its contents with an empty
+TOML document. Lower-precedence layers and credentials are preserved.
+
+The CLI exposes the same service for non-interactive repair and cleanup:
+
+```bash
+# Clear the active workspace layer (or the explicit --config file)
+vtcode config reset
+
+# Clear the canonical user or current project-profile layer
+vtcode config reset --global
+vtcode config reset --project
+
+# Select an explicit workspace-layer file for this invocation
+vtcode --config ./nightly.toml config reset
+```
+
+`--global` and `--project` are mutually exclusive. The CLI prints the resolved
+file and does not remove secure credentials or any other layer.
+
+## Live reload
+
+While a session is running, changes to watched configuration files are
+debounced and reloaded through the normal layered configuration service. Safe
+runtime settings such as UI appearance and theme, status-line behavior,
+permissions, sandbox and timeout policy, MCP approval policy, and custom
+provider definitions are applied without restarting. A provider/model identity
+selected for the current session remains stable until a later turn or session
+when changing it would invalidate the active client.
+
+If a watched edit is malformed, inaccessible, or fails validation, VT Code
+keeps the last valid configuration and displays a warning. Fixing the file
+causes the next debounced reload to apply it. File creation and deletion are
+also observed, including user/project layers and an explicit `--config` file.
+
+The settings palette is refreshed from a successful reload while retaining its
+current section and selected entry; if an entry disappeared, selection falls
+back to the first available item.
 
 ## Feature flags
 

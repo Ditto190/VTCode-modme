@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
+use vtcode_commons::VtCodePaths;
 use vtcode_commons::canonicalize;
 use vtcode_commons::paths::normalize_path;
 use vtcode_config::defaults;
 use vtcode_config::loader::layers::{ConfigLayerMetadata, ConfigLayerSource};
-use vtcode_config::loader::{ConfigBuilder, ConfigManager, VTCodeConfig, fingerprint_str, merge_toml_values};
+use vtcode_config::loader::{
+    ConfigBuilder, ConfigManager, VTCodeConfig, explicit_config_path, fingerprint_str, merge_toml_values,
+};
 
 /// Request to read the effective configuration for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +62,18 @@ pub enum ConfigWriteTarget {
     Project,
 }
 
+impl ConfigWriteTarget {
+    /// Stable lower-case name used in user-facing reset diagnostics.
+    #[must_use]
+    pub const fn layer_name(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Workspace => "workspace",
+            Self::Project => "project",
+        }
+    }
+}
+
 /// Strategy for applying a value to the configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -102,9 +117,62 @@ pub struct ConfigWriteResponse {
     pub overridden_metadata: Option<OverrideMetadata>,
 }
 
+/// Request to clear one configuration layer.
+///
+/// Resetting a layer writes an empty TOML document to that layer's resolved
+/// path. Lower-precedence layers remain active, and credential storage is not
+/// touched. The optional expected version provides the same optimistic
+/// concurrency guard as [`ConfigWriteRequest`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigResetRequest {
+    /// Root directory of the workspace whose effective configuration should be
+    /// reloaded after the reset.
+    pub workspace: PathBuf,
+    /// Layer to clear. `User` is the target selected by the CLI's `--global`
+    /// flag; `Project` is selected by `--project`.
+    pub target: ConfigWriteTarget,
+    /// Optional expected version of the selected layer.
+    #[serde(default)]
+    pub expected_layer_version: Option<String>,
+    /// Optional exact path supplied by an already-open settings palette. The
+    /// service validates it against the resolved layer path before clearing it.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+}
+
+/// Result of clearing one configuration layer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigResetResponse {
+    /// Layer that was selected for reset.
+    pub target: ConfigWriteTarget,
+    /// Resolved configuration file that was cleared.
+    pub path: PathBuf,
+    /// Whether the target file existed before the reset.
+    pub had_file: bool,
+    /// Version of the selected layer before it was cleared, when loaded.
+    pub previous_layer_version: Option<String>,
+    /// Fingerprint of the effective layer stack after the reset.
+    pub merged_version: String,
+    /// Effective configuration after the reset.
+    pub effective_config: serde_json::Value,
+}
+
 pub struct ConfigService;
 
 impl ConfigService {
+    /// Resolve the file used by a configuration layer for a workspace.
+    ///
+    /// This is shared by interactive settings and non-interactive commands so
+    /// an explicit `--config` path, project profile, or canonical user path is
+    /// never handled by a second path-resolution implementation.
+    pub fn resolve_target_path(workspace: &Path, target: &ConfigWriteTarget) -> Result<PathBuf> {
+        match ConfigManager::load_from_workspace(workspace) {
+            Ok(manager) => resolve_target_path_from_manager(&manager, workspace, target),
+            Err(error) => resolve_target_path_without_manager(workspace, target)
+                .with_context(|| format!("Failed to resolve configuration target after load error: {error:#}")),
+        }
+    }
+
     pub fn read(request: ConfigReadRequest) -> Result<ConfigReadResponse> {
         let mut builder = ConfigBuilder::new().workspace(request.workspace.clone());
         if !request.runtime_overrides.is_empty() {
@@ -140,7 +208,7 @@ impl ConfigService {
         let manager = ConfigManager::load_from_workspace(&request.workspace)
             .with_context(|| format!("Failed to load workspace config from {}", request.workspace.display()))?;
 
-        let target_path = resolve_target_path(&manager, &request.workspace, &request.target)?;
+        let target_path = resolve_target_path_from_manager(&manager, &request.workspace, &request.target)?;
 
         let current_version = manager
             .layer_stack()
@@ -214,6 +282,87 @@ impl ConfigService {
             overridden_metadata,
         })
     }
+
+    /// Clear one configuration layer and reload the effective configuration.
+    ///
+    /// The selected file is replaced with an empty TOML document rather than
+    /// deleting a directory or touching credential storage. Existing symlinks
+    /// and non-regular files are rejected by the same private atomic writer
+    /// used for normal configuration writes.
+    pub fn reset(request: ConfigResetRequest) -> Result<ConfigResetResponse> {
+        ConfigManager::invalidate_workspace_cache(&request.workspace);
+        let manager_result = ConfigManager::load_from_workspace(&request.workspace);
+        let (target, target_path) = match request.path.as_deref() {
+            Some(requested_path) => {
+                resolve_requested_reset_path(&request.workspace, manager_result.as_ref().ok(), requested_path)?
+            }
+            None => {
+                let path = match &manager_result {
+                    Ok(manager) => resolve_target_path_from_manager(manager, &request.workspace, &request.target)?,
+                    Err(_) => resolve_target_path_without_manager(&request.workspace, &request.target)?,
+                };
+                (request.target, path)
+            }
+        };
+
+        let previous_layer_version = manager_result.as_ref().ok().and_then(|manager| {
+            manager
+                .layer_stack()
+                .layers()
+                .iter()
+                .find(|layer| source_matches_target(&layer.source, &target, &target_path))
+                .map(|layer| layer.metadata.version.clone())
+        });
+
+        if let Some(expected) = request.expected_layer_version.as_ref()
+            && previous_layer_version.as_ref() != Some(expected)
+        {
+            bail!(
+                "Layer version mismatch for {} (expected {}, got {})",
+                target_path.display(),
+                expected,
+                previous_layer_version.clone().unwrap_or_else(|| "<missing>".to_string())
+            );
+        }
+
+        let had_file = match fs::symlink_metadata(&target_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                bail!("Refusing to reset symlinked config file: {}", target_path.display())
+            }
+            Ok(metadata) if !metadata.is_file() => {
+                bail!("Config path is not a regular file: {}", target_path.display())
+            }
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to inspect config: {}", target_path.display()));
+            }
+        };
+
+        let is_explicit_session_path = explicit_config_path()
+            .as_deref()
+            .is_some_and(|explicit_path| same_config_path(explicit_path, &target_path));
+        if had_file || is_explicit_session_path {
+            VtCodePaths::write_private_file_atomic(&target_path, b"")
+                .with_context(|| format!("Failed to reset configuration file {}", target_path.display()))?;
+        }
+
+        ConfigManager::invalidate_workspace_cache(&request.workspace);
+        let reloaded_manager = ConfigManager::load_from_workspace(&request.workspace)
+            .context("Failed to reload configuration after reset")?;
+        let (effective_toml, _) = reloaded_manager.layer_stack().effective_config_with_origins();
+        let effective_config =
+            serde_json::to_value(&effective_toml).context("Failed to serialize effective configuration after reset")?;
+
+        Ok(ConfigResetResponse {
+            target,
+            path: target_path,
+            had_file,
+            previous_layer_version,
+            merged_version: merged_version(reloaded_manager.layer_stack().layers()),
+            effective_config,
+        })
+    }
 }
 
 fn merged_version(layers: &[vtcode_config::loader::layers::ConfigLayerEntry]) -> String {
@@ -227,14 +376,30 @@ fn merged_version(layers: &[vtcode_config::loader::layers::ConfigLayerEntry]) ->
     fingerprint_str(&parts.join("|"))
 }
 
-fn resolve_target_path(manager: &ConfigManager, workspace: &Path, target: &ConfigWriteTarget) -> Result<PathBuf> {
+fn resolve_target_path_from_manager(
+    manager: &ConfigManager,
+    workspace: &Path,
+    target: &ConfigWriteTarget,
+) -> Result<PathBuf> {
     match target {
         ConfigWriteTarget::Workspace => {
-            // Prefer the highest enabled Workspace layer of the loaded
-            // manager: with a session-explicit config file (`--config` /
-            // `VTCODE_CONFIG_PATH`) that layer is the override file itself,
-            // so writes land where the session actually reads from.
-            Ok(manager.preferred_workspace_config_path(workspace))
+            // Keep the configured spelling of the path instead of using the
+            // canonicalized layer metadata. That preserves the final symlink
+            // boundary for the no-follow writer to validate.
+            if let Some(path) = explicit_config_path() {
+                return Ok(path);
+            }
+
+            let provider = defaults::current_config_defaults();
+            let workspace_root = manager.workspace_root().unwrap_or(workspace);
+            let workspace_paths = provider.workspace_paths_for(workspace_root);
+            let fallback = workspace_paths.config_dir().join(manager.config_file_name());
+            let root = workspace_root.join(manager.config_file_name());
+            if path_entry_exists(&root) || !path_entry_exists(&fallback) {
+                Ok(root)
+            } else {
+                Ok(fallback)
+            }
         }
         ConfigWriteTarget::User => {
             let provider = defaults::current_config_defaults();
@@ -258,6 +423,102 @@ fn resolve_target_path(manager: &ConfigManager, workspace: &Path, target: &Confi
     }
 }
 
+fn resolve_target_path_without_manager(workspace: &Path, target: &ConfigWriteTarget) -> Result<PathBuf> {
+    let provider = defaults::current_config_defaults();
+    let config_file_name = provider.config_file_name().to_string();
+
+    match target {
+        ConfigWriteTarget::Workspace => {
+            if let Some(path) = explicit_config_path() {
+                return Ok(path);
+            }
+
+            let workspace_paths = provider.workspace_paths_for(workspace);
+            let fallback = workspace_paths.config_dir().join(&config_file_name);
+            let root = workspace.join(&config_file_name);
+            if path_entry_exists(&root) || !path_entry_exists(&fallback) {
+                Ok(root)
+            } else {
+                Ok(fallback)
+            }
+        }
+        ConfigWriteTarget::User => provider
+            .canonical_user_config_path(&config_file_name)?
+            .context("Could not resolve the canonical user configuration path"),
+        ConfigWriteTarget::Project => {
+            let workspace_paths = provider.workspace_paths_for(workspace);
+            let project_name = ConfigManager::current_project_name(workspace)
+                .context("Could not resolve project name for project-level config")?;
+            Ok(workspace_paths
+                .config_dir()
+                .join("projects")
+                .join(project_name)
+                .join("config")
+                .join(config_file_name))
+        }
+    }
+}
+
+fn resolve_requested_reset_path(
+    workspace: &Path,
+    manager: Option<&ConfigManager>,
+    requested_path: &Path,
+) -> Result<(ConfigWriteTarget, PathBuf)> {
+    let mut candidates = Vec::new();
+    let provider = defaults::current_config_defaults();
+    let config_file_name = manager
+        .map(|loaded| loaded.config_file_name().to_string())
+        .unwrap_or_else(|| provider.config_file_name().to_string());
+
+    if let Some(explicit_path) = explicit_config_path() {
+        candidates.push((ConfigWriteTarget::Workspace, explicit_path));
+    }
+
+    let workspace_root = manager.and_then(ConfigManager::workspace_root).unwrap_or(workspace);
+    let workspace_paths = provider.workspace_paths_for(workspace_root);
+    let fallback_path = workspace_paths.config_dir().join(&config_file_name);
+    let workspace_path = workspace_root.join(&config_file_name);
+    candidates.push((ConfigWriteTarget::Workspace, fallback_path));
+    candidates.push((ConfigWriteTarget::Workspace, workspace_path));
+
+    if let Some(project_name) = ConfigManager::current_project_name(workspace_root) {
+        candidates.push((
+            ConfigWriteTarget::Project,
+            workspace_paths
+                .config_dir()
+                .join("projects")
+                .join(project_name)
+                .join("config")
+                .join(&config_file_name),
+        ));
+    }
+
+    let mut user_paths = provider.home_config_paths(&config_file_name);
+    if let Some(canonical_path) = provider.canonical_user_config_path(&config_file_name)?
+        && !user_paths.iter().any(|path| same_config_path(path, &canonical_path))
+    {
+        user_paths.push(canonical_path);
+    }
+    if let Some(loaded) = manager {
+        user_paths.extend(loaded.user_config_paths());
+    }
+    for user_path in user_paths {
+        if !candidates.iter().any(|(_, existing)| same_config_path(existing, &user_path)) {
+            candidates.push((ConfigWriteTarget::User, user_path));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|(_, candidate)| same_config_path(requested_path, candidate))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Requested reset path {} is not a known writable VT Code configuration layer",
+                requested_path.display()
+            )
+        })
+}
+
 fn source_matches_target(source: &ConfigLayerSource, target: &ConfigWriteTarget, path: &Path) -> bool {
     match (source, target) {
         (ConfigLayerSource::User { file }, ConfigWriteTarget::User) => same_config_path(file, path),
@@ -271,6 +532,14 @@ fn same_config_path(left: &Path, right: &Path) -> bool {
     let left = canonicalize(left).unwrap_or_else(|_| normalize_path(left));
     let right = canonicalize(right).unwrap_or_else(|_| normalize_path(right));
     left == right
+}
+
+fn path_entry_exists(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    }
 }
 
 fn load_or_default_toml(path: &Path) -> Result<TomlValue> {
@@ -346,6 +615,7 @@ mod tests {
     use vtcode_commons::reference::StaticWorkspacePaths;
     use vtcode_config::defaults::WorkspacePathsDefaults;
     use vtcode_config::defaults::provider::with_config_defaults_provider_for_test;
+    use vtcode_config::loader::set_explicit_config_path;
 
     #[test]
     #[serial]
@@ -458,5 +728,250 @@ mod tests {
         assert!(response.is_err());
         let error = format!("{:#}", response.expect_err("expected stale version error"));
         assert!(error.contains("Layer version mismatch"));
+    }
+
+    #[test]
+    #[serial]
+    fn reset_workspace_layer_preserves_lower_precedence_user_values() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path();
+        let user_config = workspace.join("home").join("vtcode.toml");
+        let workspace_config = workspace.join("vtcode.toml");
+        fs::create_dir_all(user_config.parent().expect("user parent")).expect("user dir");
+        fs::write(&user_config, "agent.provider = \"openai\"\n").expect("user config");
+        fs::write(&workspace_config, "agent.provider = \"anthropic\"\n").expect("workspace config");
+
+        let static_paths = StaticWorkspacePaths::new(workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths)).with_home_paths(vec![user_config]);
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let response = ConfigService::reset(ConfigResetRequest {
+                workspace: workspace.to_path_buf(),
+                target: ConfigWriteTarget::Workspace,
+                expected_layer_version: None,
+                path: None,
+            })
+            .expect("workspace reset");
+
+            assert_eq!(response.target, ConfigWriteTarget::Workspace);
+            assert!(response.had_file);
+            assert!(fs::read_to_string(&workspace_config).expect("reset file").trim().is_empty());
+
+            let effective: VTCodeConfig = serde_json::from_value(response.effective_config).expect("effective config");
+            assert_eq!(effective.agent.provider, "openai");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn reset_canonical_user_layer_preserves_legacy_user_layer() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path();
+        let legacy_config = workspace.join("legacy").join("vtcode.toml");
+        let canonical_config = workspace.join("canonical").join("vtcode.toml");
+        fs::create_dir_all(legacy_config.parent().expect("legacy parent")).expect("legacy dir");
+        fs::create_dir_all(canonical_config.parent().expect("canonical parent")).expect("canonical dir");
+        fs::write(&legacy_config, "agent.provider = \"openai\"\n").expect("legacy config");
+        fs::write(&canonical_config, "agent.provider = \"anthropic\"\n").expect("canonical config");
+
+        let static_paths = StaticWorkspacePaths::new(workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths))
+            .with_home_paths(vec![legacy_config.clone(), canonical_config.clone()]);
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let response = ConfigService::reset(ConfigResetRequest {
+                workspace: workspace.to_path_buf(),
+                target: ConfigWriteTarget::User,
+                expected_layer_version: None,
+                path: None,
+            })
+            .expect("user reset");
+
+            assert_eq!(response.path, canonical_config);
+            assert!(canonical_config.exists());
+            assert_eq!(fs::read_to_string(&legacy_config).expect("legacy config"), "agent.provider = \"openai\"\n");
+            let effective: VTCodeConfig = serde_json::from_value(response.effective_config).expect("effective config");
+            assert_eq!(effective.agent.provider, "openai");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn reset_project_layer_preserves_workspace_values() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let config_dir = workspace.join(".vtcode");
+        let project_dir = config_dir.join("projects").join("demo").join("config");
+        fs::create_dir_all(&project_dir).expect("project config dir");
+        fs::write(workspace.join(".vtcode-project"), "demo\n").expect("project marker");
+        fs::write(workspace.join("vtcode.toml"), "agent.provider = \"openai\"\n").expect("workspace config");
+        let project_config = project_dir.join("vtcode.toml");
+        fs::write(&project_config, "agent.default_model = \"project-model\"\n").expect("project config");
+
+        let static_paths = StaticWorkspacePaths::new(&workspace, &config_dir);
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths))
+            .with_home_paths(Vec::new())
+            .with_system_config_paths(Vec::new());
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let response = ConfigService::reset(ConfigResetRequest {
+                workspace: workspace.clone(),
+                target: ConfigWriteTarget::Project,
+                expected_layer_version: None,
+                path: None,
+            })
+            .expect("project reset");
+
+            assert_eq!(response.target, ConfigWriteTarget::Project);
+            assert_eq!(response.path, project_config);
+            assert!(
+                fs::read_to_string(&project_config)
+                    .expect("reset project file")
+                    .trim()
+                    .is_empty()
+            );
+            let effective: VTCodeConfig = serde_json::from_value(response.effective_config).expect("effective config");
+            assert_eq!(effective.agent.provider, "openai");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn reset_workspace_target_uses_explicit_session_config_path() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        fs::create_dir_all(&workspace).expect("workspace dir");
+        let explicit_path = temp.path().join("night.toml");
+        fs::write(&explicit_path, "agent.provider = \"openai\"\n").expect("explicit config");
+
+        let static_paths = StaticWorkspacePaths::new(&workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths))
+            .with_home_paths(Vec::new())
+            .with_system_config_paths(Vec::new());
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            struct ExplicitConfigGuard(Option<PathBuf>);
+
+            impl Drop for ExplicitConfigGuard {
+                fn drop(&mut self) {
+                    set_explicit_config_path(self.0.take());
+                }
+            }
+
+            let _override = ExplicitConfigGuard(explicit_config_path());
+            set_explicit_config_path(Some(explicit_path.clone()));
+            let response = ConfigService::reset(ConfigResetRequest {
+                workspace,
+                target: ConfigWriteTarget::Workspace,
+                expected_layer_version: None,
+                path: None,
+            })
+            .expect("explicit config reset");
+
+            assert_eq!(response.target, ConfigWriteTarget::Workspace);
+            assert_eq!(response.path, explicit_path);
+            assert!(
+                fs::read_to_string(response.path)
+                    .expect("reset explicit file")
+                    .trim()
+                    .is_empty()
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn reset_creates_missing_explicit_session_config_path() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        fs::create_dir_all(&workspace).expect("workspace dir");
+        let explicit_path = temp.path().join("new-session.toml");
+
+        let static_paths = StaticWorkspacePaths::new(&workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths))
+            .with_home_paths(Vec::new())
+            .with_system_config_paths(Vec::new());
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            struct ExplicitConfigGuard(Option<PathBuf>);
+
+            impl Drop for ExplicitConfigGuard {
+                fn drop(&mut self) {
+                    set_explicit_config_path(self.0.take());
+                }
+            }
+
+            let _override = ExplicitConfigGuard(explicit_config_path());
+            set_explicit_config_path(Some(explicit_path.clone()));
+            let response = ConfigService::reset(ConfigResetRequest {
+                workspace,
+                target: ConfigWriteTarget::Workspace,
+                expected_layer_version: None,
+                path: None,
+            })
+            .expect("missing explicit config reset");
+
+            assert!(!response.had_file);
+            assert_eq!(fs::read_to_string(&explicit_path).expect("created config"), "");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn reset_rejects_symlinked_workspace_config() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let outside = temp.path().join("outside.toml");
+        fs::create_dir_all(&workspace).expect("workspace");
+        fs::write(&outside, "agent.provider = \"openai\"\n").expect("outside config");
+        symlink(&outside, workspace.join("vtcode.toml")).expect("config symlink");
+
+        let response = ConfigService::reset(ConfigResetRequest {
+            workspace,
+            target: ConfigWriteTarget::Workspace,
+            expected_layer_version: None,
+            path: None,
+        });
+
+        let error = format!("{:#}", response.expect_err("symlink reset must fail"));
+        assert!(error.contains("symlink"));
+        assert!(outside.exists(), "the symlink target must remain untouched");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn reset_rejects_dangling_workspace_symlink_instead_of_using_fallback() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let config_dir = workspace.join(".vtcode");
+        let fallback = config_dir.join("vtcode.toml");
+        let dangling_target = temp.path().join("missing.toml");
+        fs::create_dir_all(&config_dir).expect("workspace config dir");
+        fs::write(&fallback, "agent.provider = \"openai\"\n").expect("fallback config");
+        symlink(&dangling_target, workspace.join("vtcode.toml")).expect("dangling config symlink");
+
+        let static_paths = StaticWorkspacePaths::new(&workspace, &config_dir);
+        let provider = WorkspacePathsDefaults::new(Arc::new(static_paths))
+            .with_home_paths(Vec::new())
+            .with_system_config_paths(Vec::new());
+
+        with_config_defaults_provider_for_test(Arc::new(provider), || {
+            let response = ConfigService::reset(ConfigResetRequest {
+                workspace: workspace.clone(),
+                target: ConfigWriteTarget::Workspace,
+                expected_layer_version: None,
+                path: None,
+            });
+
+            let error = format!("{:#}", response.expect_err("dangling symlink reset must fail"));
+            assert!(error.contains("symlink"));
+            assert_eq!(fs::read_to_string(&fallback).expect("fallback config"), "agent.provider = \"openai\"\n");
+        });
     }
 }

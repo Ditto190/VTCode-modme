@@ -18,8 +18,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/config/CONFIGURATION_PRECEDENCE.md`
   - **Content**: Configuration Precedence in VT Code
-  - **Topics**: Resolution Order, Default Values, Validation, Environment Variables, Lifecycle Hooks Configuration
-  - **User Questions**: "What can you tell me about Configuration Precedence in VT Code?", "How does Resolution Order work?", "How does Default Values work?"
+  - **Topics**: Resolution Order, Resetting a configuration layer, Live reload and invalid edits, Default Values, Validation
+  - **User Questions**: "What can you tell me about Configuration Precedence in VT Code?", "How does Resolution Order work?", "How does Resetting a configuration layer work?"
 
 - **File**: `docs/config/TOOLS_CONFIG.md`
   - **Content**: Tools Configuration
@@ -28,8 +28,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/config/config.md`
   - **Content**: VT Code Configuration
-  - **Topics**: Quick navigation, Feature flags, Model selection, Instruction Guidance and Persistent Memory, External editor
-  - **User Questions**: "What can you tell me about VT Code Configuration?", "How does Quick navigation work?", "How does Feature flags work?"
+  - **Topics**: Quick navigation, Settings palette and reset, Live reload, Feature flags, Model selection
+  - **User Questions**: "What can you tell me about VT Code Configuration?", "How does Quick navigation work?", "How does Settings palette and reset work?"
 
 ### Development & Testing
 
@@ -82,6 +82,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Changelog Generation with git-cliff
   - **Topics**: Configuration, Usage, Integration with Release Process, Commit Message Format, Excluded Commits
   - **User Questions**: "What can you tell me about Changelog Generation with git-cliff?", "How does Configuration work?", "How does Usage work?"
+
+- **File**: `docs/development/configuration-reload.md`
+  - **Content**: Configuration reset and live reload
+  - **Topics**: Shared reset service, Runtime reload contract, Verification
+  - **User Questions**: "What can you tell me about Configuration reset and live reload?", "How does Shared reset service work?", "How does Runtime reload contract work?"
 
 - **File**: `docs/development/CGP_ARCHITECTURE.md`
   - **Content**: Context-Generic Programming (CGP) in VT Code

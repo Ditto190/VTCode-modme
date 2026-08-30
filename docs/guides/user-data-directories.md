@@ -95,6 +95,14 @@ malformed file, an explicit config path, or a workspace config error remains an
 actionable error. Writes always target the canonical user config directory,
 never whichever file happened to be read first.
 
+The reset command is the exception by design: `vtcode config reset` clears the
+active workspace file (or the explicit file selected with `--config`), while
+`vtcode config reset --global` clears the canonical user file and
+`vtcode config reset --project` clears the current project profile. Only the
+selected file is cleared; lower-precedence layers and credentials are retained.
+The settings palette shows its target path and asks for confirmation before
+running the same reset service.
+
 ## Migration from `~/.vtcode`
 
 Migration runs once during startup, before normal configuration loading.

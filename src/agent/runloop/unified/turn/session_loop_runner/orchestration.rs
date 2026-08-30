@@ -39,9 +39,8 @@ use super::plan_seed::load_active_plan_seed;
 use super::support::{
     ExecutionSummaryStatus, append_transient_turn_notes, approved_plan_execution_summary,
     build_unrelated_dirty_worktree_note, checkpoint_session_archive_start, force_reload_workspace_config_for_execution,
-    format_workspace_relative_paths, latest_assistant_result_text, live_reload_preserves_session_config,
-    prepare_resume_bootstrap_without_archive, prompt_startup_planning_workflow, remove_transient_system_notes,
-    take_pending_resumed_user_prompt,
+    format_workspace_relative_paths, latest_assistant_result_text, prepare_resume_bootstrap_without_archive,
+    prompt_startup_planning_workflow, remove_transient_system_notes, take_pending_resumed_user_prompt,
 };
 use crate::agent::runloop::ResumeSession;
 use crate::agent::runloop::git::{compute_session_code_change_delta, normalize_workspace_path};
@@ -91,11 +90,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
     let mut config_watcher = SimpleConfigWatcher::new_with_user_config_paths(config.workspace.clone());
     config_watcher.set_check_interval(15);
     config_watcher.set_debounce_duration(500);
-    let live_reload_enabled = live_reload_preserves_session_config(initial_vt_cfg.as_ref(), &config);
-    if !live_reload_enabled {
-        tracing::debug!(
-            "Configuration live reload disabled because startup overrides cannot be reproduced from workspace config"
-        );
+    if let Some(initial_config) = initial_vt_cfg.as_ref() {
+        config_watcher.set_last_known_config(initial_config.clone());
     }
     let mut vt_cfg = initial_vt_cfg.or_else(|| config_watcher.load_config());
     let mut idle_config = extract_idle_config(vt_cfg.as_ref());
@@ -1516,11 +1512,19 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             continue;
         }
         if matches!(session_end_reason, SessionEndReason::NewSession) {
-            if live_reload_enabled && config_watcher.should_reload() {
-                vt_cfg = config_watcher.load_config();
-                crate::agent::agents::apply_runtime_overrides(vt_cfg.as_mut(), &config);
-                idle_config = extract_idle_config(vt_cfg.as_ref());
-                tracing::debug!("Configuration reloaded due to file changes");
+            if config_watcher.should_reload() {
+                if let Some(reloaded) = config_watcher.load_config() {
+                    vt_cfg = Some(reloaded);
+                    crate::agent::agents::apply_live_reload_overrides(vt_cfg.as_mut(), &config);
+                    idle_config = extract_idle_config(vt_cfg.as_ref());
+                    tracing::debug!("Configuration reloaded due to file changes");
+                }
+                if let Some(error) = config_watcher.take_reload_error() {
+                    renderer.line(
+                        MessageStyle::Warning,
+                        &format!("Configuration reload rejected; keeping the last valid configuration: {error}"),
+                    )?;
+                }
             }
 
             refresh_runtime_debug_context_for_next_session(config.workspace.as_path(), None).await?;
@@ -1529,11 +1533,19 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             _consecutive_idle_cycles = 0;
             continue;
         }
-        if live_reload_enabled && config_watcher.should_reload() {
-            vt_cfg = config_watcher.load_config();
-            crate::agent::agents::apply_runtime_overrides(vt_cfg.as_mut(), &config);
-            idle_config = extract_idle_config(vt_cfg.as_ref());
-            tracing::debug!("Configuration reloaded during idle period");
+        if config_watcher.should_reload() {
+            if let Some(reloaded) = config_watcher.load_config() {
+                vt_cfg = Some(reloaded);
+                crate::agent::agents::apply_live_reload_overrides(vt_cfg.as_mut(), &config);
+                idle_config = extract_idle_config(vt_cfg.as_ref());
+                tracing::debug!("Configuration reloaded during idle period");
+            }
+            if let Some(error) = config_watcher.take_reload_error() {
+                renderer.line(
+                    MessageStyle::Warning,
+                    &format!("Configuration reload rejected; keeping the last valid configuration: {error}"),
+                )?;
+            }
         }
         if idle_config.enabled
             && let Some(last_activity) = last_activity_time

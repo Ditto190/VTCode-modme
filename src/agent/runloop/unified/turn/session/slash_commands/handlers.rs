@@ -50,8 +50,8 @@ pub(super) use apps::{handle_launch_editor, handle_new_session, handle_open_docs
 pub(super) use compact::handle_compact_conversation;
 pub(super) use control::{
     handle_clear_conversation, handle_clear_screen, handle_copy_latest_assistant_reply, handle_exit, handle_notify,
-    handle_show_permissions, handle_show_settings, handle_show_settings_at_path, handle_stop_agent,
-    show_settings_at_path_from_context,
+    handle_show_permissions, handle_show_settings, handle_show_settings_at_path, handle_show_settings_reset,
+    handle_stop_agent, show_settings_at_path_from_context,
 };
 pub(super) use diagnostics::{
     handle_run_checkup, handle_show_memory, handle_show_memory_config, handle_show_status,

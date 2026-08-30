@@ -29,7 +29,10 @@ pub use ask::{AskCommandOptions, AskOutputFormat};
 pub use background::BackgroundSubagentArgs;
 pub use bench::BenchAllocatorArgs;
 pub use check::CheckSubcommand;
-pub use config::{ConfigFile, ContextConfig, LoggingConfig, PerformanceConfig, SecurityConfig, ToolConfig};
+pub use config::{
+    ConfigCommand, ConfigFile, ConfigResetArgs, ContextConfig, LoggingConfig, PerformanceConfig, SecurityConfig,
+    ToolConfig,
+};
 pub use dependencies::{DependenciesSubcommand, ManagedDependency};
 pub use exec::{ExecEvalArgs, ExecResumeArgs, ExecSubcommand};
 pub use models::ModelCommands;
@@ -547,16 +550,22 @@ pub enum Commands {
         migrate: bool,
     },
 
-    /// Generate configuration file
+    /// Generate or manage configuration files
     ///
-    /// Create a vtcode.toml configuration file with default settings.
+    /// Create a vtcode.toml configuration file with default settings, or use
+    /// `reset` to clear one configuration layer.
     /// Use --global to create in the canonical user config directory or specify an output path.
     ///
     /// Examples:
     ///   vtcode config
     ///   vtcode config --global
     ///   vtcode config --output ./my-vtcode.toml
+    ///   vtcode config reset
+    ///   vtcode config reset --global
+    ///   vtcode config reset --project
     Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommand>,
         /// Output file path
         #[arg(
             long,
@@ -1090,5 +1099,61 @@ mod tests {
                 partial: Some(ref scope)
             }) if scope == "code"
         ));
+    }
+
+    #[test]
+    fn parses_config_reset_workspace_target_by_default() {
+        let cli = Cli::parse_from(["vtcode", "config", "reset"]);
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Config {
+                command: Some(ConfigCommand::Reset(ConfigResetArgs { global: false, project: false })),
+                global: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_config_reset_global_and_project_targets() {
+        let global = Cli::parse_from(["vtcode", "config", "reset", "--global"]);
+        assert!(matches!(
+            global.command,
+            Some(Commands::Config {
+                command: Some(ConfigCommand::Reset(ConfigResetArgs { global: true, project: false })),
+                ..
+            })
+        ));
+
+        let project = Cli::parse_from(["vtcode", "config", "reset", "--project"]);
+        assert!(matches!(
+            project.command,
+            Some(Commands::Config {
+                command: Some(ConfigCommand::Reset(ConfigResetArgs { global: false, project: true })),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_parent_global_flag_for_config_reset() {
+        let cli = Cli::parse_from(["vtcode", "config", "--global", "reset"]);
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Config {
+                command: Some(ConfigCommand::Reset(ConfigResetArgs { global: false, project: false })),
+                global: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_config_reset_with_conflicting_layer_flags() {
+        let result = Cli::try_parse_from(["vtcode", "config", "reset", "--global", "--project"]);
+
+        assert!(result.is_err());
     }
 }

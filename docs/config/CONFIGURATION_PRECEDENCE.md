@@ -50,6 +50,39 @@ Relative config paths passed via `--config path/to/vtcode.toml` remain supported
 and are resolved against the workspace before falling back to the current
 working directory.
 
+## Resetting a configuration layer
+
+Reset clears one file layer by writing an empty TOML document to the resolved
+target. It does not delete the file's parent directory, remove credentials, or
+change lower-precedence layers:
+
+| Command | Layer cleared |
+| --- | --- |
+| `vtcode config reset` | Active workspace file, or the explicit `--config path` |
+| `vtcode config reset --global` | Canonical user configuration |
+| `vtcode config reset --project` | Current project's `.vtcode/projects/<project>/config/vtcode.toml` |
+| `/config reset` | The target file shown by the settings palette, after confirmation |
+
+`--global` and `--project` cannot be combined. The reset service validates
+targets against known configuration paths and rejects symlinked or non-regular
+files before writing. The effective stack is reloaded and its cache is
+invalidated after a successful reset. If the layer is already absent, reset is
+a no-op followed by the same effective-config reload.
+
+## Live reload and invalid edits
+
+Interactive sessions poll all active configuration sources, including user,
+project, workspace fallback/root, explicit session, and theme paths. A valid
+change is debounced and applied to safe runtime settings. Provider/model
+identity selected for the current session stays stable until a later turn or
+session when switching the active client would be unsafe.
+
+Malformed, inaccessible, or otherwise invalid edits fail closed: the last valid
+runtime snapshot remains active and VT Code displays a warning. Once the file
+is repaired, the next reload applies it. The open settings palette refreshes its
+values from the effective stack while retaining its section and selected entry
+when that entry still exists.
+
 ## Default Values
 
 Layered defaults are defined in the Rust sources so the application can generate a baseline configuration and reason about missing fields:

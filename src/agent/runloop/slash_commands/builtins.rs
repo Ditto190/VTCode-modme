@@ -78,15 +78,48 @@ fn handle_init_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashC
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
-fn handle_config_command(args: &str) -> Result<SlashCommandOutcome> {
-    if args.is_empty() {
+fn handle_config_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
+    let trimmed = args.trim();
+    if trimmed.is_empty() {
         Ok(SlashCommandOutcome::ShowSettings)
     } else {
-        match args.to_ascii_lowercase().as_str() {
-            "memory" | "agent.persistent_memory" => Ok(SlashCommandOutcome::ShowMemoryConfig),
-            "permissions" => Ok(SlashCommandOutcome::ShowPermissions),
-            "model" | "model.main" => Ok(SlashCommandOutcome::ShowSettingsAtPath { path: args.to_string() }),
-            _ => Ok(SlashCommandOutcome::ShowSettingsAtPath { path: args.to_string() }),
+        let mut tokens = trimmed.split_whitespace();
+        let command = tokens.next().unwrap_or_default();
+        let normalized = command.to_ascii_lowercase();
+        match normalized.as_str() {
+            "reset" | "clear" => {
+                if tokens.next().is_some() {
+                    renderer.line(MessageStyle::Error, "Usage: /config reset")?;
+                    return Ok(SlashCommandOutcome::Handled);
+                }
+                Ok(SlashCommandOutcome::ShowSettingsReset)
+            }
+            "memory" | "agent.persistent_memory" => {
+                if tokens.next().is_some() {
+                    renderer.line(MessageStyle::Error, "Usage: /config [memory|permissions|model|<path>|reset]")?;
+                    return Ok(SlashCommandOutcome::Handled);
+                }
+                Ok(SlashCommandOutcome::ShowMemoryConfig)
+            }
+            "permissions" => {
+                if tokens.next().is_some() {
+                    renderer.line(MessageStyle::Error, "Usage: /config [memory|permissions|model|<path>|reset]")?;
+                    return Ok(SlashCommandOutcome::Handled);
+                }
+                Ok(SlashCommandOutcome::ShowPermissions)
+            }
+            "model" | "model.main" => {
+                if tokens.next().is_some() {
+                    renderer.line(MessageStyle::Error, "Usage: /config [memory|permissions|model|<path>|reset]")?;
+                    return Ok(SlashCommandOutcome::Handled);
+                }
+                Ok(SlashCommandOutcome::ShowSettingsAtPath { path: command.to_string() })
+            }
+            _ if tokens.next().is_none() => Ok(SlashCommandOutcome::ShowSettingsAtPath { path: command.to_string() }),
+            _ => {
+                renderer.line(MessageStyle::Error, "Usage: /config [memory|permissions|model|<path>|reset]")?;
+                Ok(SlashCommandOutcome::Handled)
+            }
         }
     }
 }
@@ -537,7 +570,7 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "donate" => handle_donate_command(renderer),
         "theme" => handle_theme_command(args, renderer),
         "init" => handle_init_command(args, renderer),
-        "config" | "settings" | "setttings" => handle_config_command(args),
+        "config" | "settings" | "setttings" => handle_config_command(args, renderer),
         "permissions" => Ok(SlashCommandOutcome::ShowPermissions),
         "memory" => Ok(SlashCommandOutcome::ShowMemory),
         "advisor" => handle_advisor_command(args, renderer),

@@ -1,4 +1,23 @@
+use clap::{Args, Subcommand};
 use std::path::PathBuf;
+
+/// Configuration subcommands.
+#[derive(Debug, Clone, Subcommand)]
+pub enum ConfigCommand {
+    /// Clear one configuration layer and reload the effective settings.
+    Reset(ConfigResetArgs),
+}
+
+/// Arguments for `vtcode config reset`.
+#[derive(Debug, Clone, Args)]
+pub struct ConfigResetArgs {
+    /// Clear the canonical user-level configuration layer.
+    #[arg(long, conflicts_with = "project")]
+    pub global: bool,
+    /// Clear the current workspace's project-profile configuration layer.
+    #[arg(long, conflicts_with = "global")]
+    pub project: bool,
+}
 
 /// Configuration file structure with latest features
 #[derive(Debug)]

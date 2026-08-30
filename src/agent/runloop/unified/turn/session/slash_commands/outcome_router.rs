@@ -27,6 +27,7 @@ pub(super) async fn route_outcome(
         | SlashCommandOutcome::ToggleIdeContext
         | SlashCommandOutcome::InitializeWorkspace { .. }
         | SlashCommandOutcome::ShowSettings
+        | SlashCommandOutcome::ShowSettingsReset
         | SlashCommandOutcome::ShowSettingsAtPath { .. }
         | SlashCommandOutcome::ShowMemoryConfig
         | SlashCommandOutcome::ShowPermissions
@@ -102,6 +103,7 @@ async fn route_ui_and_settings_outcome(
         SlashCommandOutcome::ToggleIdeContext => handlers::handle_toggle_ide_context(ctx).await,
         SlashCommandOutcome::InitializeWorkspace { force } => handlers::handle_initialize_workspace(ctx, force).await,
         SlashCommandOutcome::ShowSettings => handlers::handle_show_settings(ctx).await,
+        SlashCommandOutcome::ShowSettingsReset => handlers::handle_show_settings_reset(ctx).await,
         SlashCommandOutcome::ShowSettingsAtPath { path } => {
             handlers::handle_show_settings_at_path(ctx, Some(&path)).await
         }

@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use super::{ConfigManager, VTCodeConfig};
-use crate::defaults;
 
 /// Configuration watcher that monitors config files for changes
 /// and automatically reloads them when modifications are detected.
@@ -164,6 +163,7 @@ pub struct SimpleConfigWatcher {
     debounce_duration: Duration,
     last_reload_attempt: Option<Instant>,
     last_known_config: Option<VTCodeConfig>,
+    last_reload_error: Option<String>,
 }
 
 impl SimpleConfigWatcher {
@@ -179,6 +179,7 @@ impl SimpleConfigWatcher {
             debounce_duration: Duration::from_millis(1000),
             last_reload_attempt: None,
             last_known_config: None,
+            last_reload_error: None,
         }
     }
 
@@ -197,19 +198,12 @@ impl SimpleConfigWatcher {
         if let Some(override_path) = super::session_override::explicit_config_path() {
             watcher.add_watch_path(override_path);
         }
+        for path in ConfigManager::watched_config_paths(&workspace_path) {
+            watcher.add_watch_path(path);
+        }
         if let Ok(manager) = ConfigManager::load_from_workspace(&workspace_path) {
             for path in manager.user_config_paths() {
                 watcher.add_watch_path(path);
-            }
-        } else {
-            let defaults = defaults::current_config_defaults();
-            for path in defaults.home_config_paths(defaults.config_file_name()) {
-                watcher.add_watch_path(path);
-            }
-            if let Ok(paths) = defaults.system_config_paths(defaults.config_file_name()) {
-                for path in paths {
-                    watcher.add_watch_path(path);
-                }
             }
         }
         watcher.seed_current_mtimes();
@@ -287,22 +281,25 @@ impl SimpleConfigWatcher {
 
     pub fn load_config(&mut self) -> Option<VTCodeConfig> {
         ConfigManager::invalidate_workspace_cache(&self.workspace_path);
-        let reloaded = ConfigManager::load_from_workspace(&self.workspace_path)
-            .ok()
-            .map(|manager| manager.config().clone());
+        let reloaded = ConfigManager::load_from_workspace(&self.workspace_path).map(|manager| manager.config().clone());
 
-        if reloaded.is_none() {
-            let override_path = super::session_override::explicit_config_path();
-            tracing::warn!(
-                path = %override_path.as_deref().map(|p| p.display().to_string()).unwrap_or_default(),
-                "Failed to reload config; keeping the last known configuration"
-            );
+        match &reloaded {
+            Ok(_) => self.last_reload_error = None,
+            Err(error) => {
+                let override_path = super::session_override::explicit_config_path();
+                let message = format!("{error:#}");
+                self.last_reload_error = Some(message.clone());
+                tracing::warn!(
+                    path = %override_path.as_deref().map(|p| p.display().to_string()).unwrap_or_default(),
+                    "Failed to reload config; keeping the last known configuration: {message}"
+                );
+            }
         }
 
         // Fail-safe: on reload errors keep the last known config so the
         // session does not silently lose its effective configuration (e.g.
         // when the explicit override file was deleted mid-session).
-        if let Some(config) = reloaded {
+        if let Ok(config) = reloaded {
             self.last_known_config = Some(config.clone());
         }
 
@@ -313,6 +310,20 @@ impl SimpleConfigWatcher {
         }
 
         self.last_known_config.clone()
+    }
+
+    /// Take the most recent reload error, if a malformed or inaccessible layer
+    /// was observed. Callers can surface this warning without replacing the
+    /// last valid runtime configuration.
+    pub fn take_reload_error(&mut self) -> Option<String> {
+        self.last_reload_error.take()
+    }
+
+    /// Seed the fail-closed reload value with the configuration already used
+    /// to start a session. This keeps command-line/runtime overrides active if
+    /// a watched file becomes malformed or temporarily unavailable.
+    pub fn set_last_known_config(&mut self, config: VTCodeConfig) {
+        self.last_known_config = Some(config);
     }
 
     pub fn set_check_interval(&mut self, seconds: u64) {
@@ -340,10 +351,7 @@ fn is_relevant_config_event(event: &notify::Event) -> bool {
 }
 
 fn get_config_file_paths(workspace_path: &Path) -> Vec<PathBuf> {
-    vec![
-        workspace_path.join("vtcode.toml"),
-        workspace_path.join(".vtcode").join("theme.toml"),
-    ]
+    ConfigManager::watched_config_paths(workspace_path)
 }
 
 fn latest_modified(path: &Path) -> Option<SystemTime> {
@@ -352,10 +360,25 @@ fn latest_modified(path: &Path) -> Option<SystemTime> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use crate::defaults::WorkspacePathsDefaults;
+    use crate::defaults::provider::with_config_defaults_provider_for_test;
+    use crate::loader::ConfigManager;
+    use serial_test::serial;
+    use vtcode_commons::reference::StaticWorkspacePaths;
+
     use super::SimpleConfigWatcher;
+
+    fn with_isolated_defaults<T>(workspace: &Path, action: impl FnOnce() -> T) -> T {
+        let paths = StaticWorkspacePaths::new(workspace, workspace.join(".vtcode"));
+        let provider = WorkspacePathsDefaults::new(Arc::new(paths))
+            .with_home_paths(Vec::new())
+            .with_system_config_paths(Vec::new());
+        with_config_defaults_provider_for_test(Arc::new(provider), action)
+    }
 
     fn open_check_window(watcher: &mut SimpleConfigWatcher) {
         // Advance the internal poll clock past the check interval so a change is
@@ -463,5 +486,57 @@ mod tests {
         watcher.set_debounce_duration(0);
         open_check_window(&mut watcher);
         assert!(watcher.should_reload(), "debounced change remains observable");
+    }
+
+    #[test]
+    #[serial]
+    fn reload_keeps_last_valid_config_after_malformed_edit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join("vtcode.toml");
+        std::fs::write(&config_path, "agent.provider = \"openai\"\n").expect("write config");
+
+        with_isolated_defaults(dir.path(), || {
+            let mut watcher = SimpleConfigWatcher::new(dir.path().to_path_buf());
+            let initial = watcher.load_config().expect("initial config");
+            assert_eq!(initial.agent.provider, "openai");
+
+            std::fs::write(&config_path, "agent.provider = [\n").expect("write malformed config");
+            let retained = watcher.load_config().expect("last valid config");
+            assert_eq!(retained.agent.provider, "openai");
+            assert!(
+                watcher
+                    .take_reload_error()
+                    .is_some_and(|error| error.contains("Failed to parse"))
+            );
+
+            std::fs::write(&config_path, "agent.provider = \"anthropic\"\n").expect("repair config");
+            let repaired = watcher.load_config().expect("repaired config");
+            assert_eq!(repaired.agent.provider, "anthropic");
+            assert!(watcher.take_reload_error().is_none());
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn watcher_detects_workspace_config_creation_and_deletion() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join("vtcode.toml");
+
+        with_isolated_defaults(dir.path(), || {
+            let mut watcher = SimpleConfigWatcher::new_with_user_config_paths(dir.path().to_path_buf());
+            watcher.set_debounce_duration(0);
+            open_check_window(&mut watcher);
+            assert!(!watcher.should_reload(), "initial poll establishes missing-file baselines");
+
+            std::fs::write(&config_path, "agent.provider = \"openai\"\n").expect("create config");
+            open_check_window(&mut watcher);
+            assert!(watcher.should_reload(), "config creation must trigger a reload");
+            assert_eq!(watcher.load_config().expect("created config").agent.provider, "openai");
+
+            std::fs::remove_file(&config_path).expect("delete config");
+            open_check_window(&mut watcher);
+            assert!(watcher.should_reload(), "config deletion must trigger a reload");
+            assert_ne!(watcher.load_config().expect("default config").agent.provider, "openai");
+        });
     }
 }

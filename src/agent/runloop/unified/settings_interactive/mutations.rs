@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::Path;
 use toml::Value as TomlValue;
+use vtcode_commons::VtCodePaths;
 use vtcode_core::config::loader::{ConfigManager, VTCodeConfig};
-use vtcode_core::config::{ConfigReadRequest, ConfigService};
 use vtcode_core::config::{constants::defaults, constants::model_helpers};
 use vtcode_core::llm::{auto_lightweight_model, lightweight_model_choices};
 use vtcode_core::ui::theme;
@@ -37,32 +37,17 @@ where
     Ok(())
 }
 
-pub(super) fn reload_state_from_disk(state: &mut SettingsPaletteState) -> Result<()> {
-    if let Ok(response) = ConfigService::read(ConfigReadRequest {
-        workspace: state.workspace.clone(),
-        runtime_overrides: Vec::new(),
-    }) && let Ok(config) = serde_json::from_value::<VTCodeConfig>(response.effective_config)
-    {
-        state.draft = config;
-        if state.source_path.exists() {
-            state.source_label = format!("Configuration source: {}", state.source_path.display());
-        } else {
-            state.source_label = no_config_source_label(&state.workspace);
-        }
-        return Ok(());
-    }
-
-    if state.source_path.exists() {
-        let manager = ConfigManager::load_from_file(&state.source_path)
-            .with_context(|| format!("Failed to load {}", state.source_path.display()))?;
-        state.draft = manager.config().clone();
-        state.source_label = format!("Configuration source: {}", state.source_path.display());
-        return Ok(());
-    }
-
-    let manager = ConfigManager::load_from_workspace(&state.workspace).context("Failed to reload runtime defaults")?;
+pub(crate) fn reload_state_from_disk(state: &mut SettingsPaletteState) -> Result<()> {
+    ConfigManager::invalidate_workspace_cache(&state.workspace);
+    let manager = ConfigManager::load_from_workspace(&state.workspace).context("Failed to reload configuration")?;
     state.draft = manager.config().clone();
-    state.source_label = no_config_source_label(&state.workspace);
+    if let Some(source_path) = manager.config_path() {
+        state.source_path = source_path.to_path_buf();
+        state.source_label = format!("Configuration source: {}", source_path.display());
+    } else {
+        state.source_path = state.workspace.join("vtcode.toml");
+        state.source_label = no_config_source_label(&state.workspace);
+    }
     Ok(())
 }
 
@@ -361,15 +346,14 @@ where
 
 fn write_commented_config(path: &Path, config: &VTCodeConfig) -> Result<()> {
     let content = render_commented_config(config)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-    std::fs::write(path, content).with_context(|| format!("Failed to write configuration file {}", path.display()))
+    VtCodePaths::write_private_file_atomic(path, content.as_bytes())
+        .with_context(|| format!("Failed to write configuration file {}", path.display()))
 }
 
 fn persist_draft(state: &mut SettingsPaletteState) -> Result<()> {
     write_commented_config(&state.source_path, &state.draft)
         .with_context(|| format!("Failed to save {}", state.source_path.display()))?;
+    ConfigManager::invalidate_workspace_cache(&state.workspace);
     Ok(())
 }
 

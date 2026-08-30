@@ -150,8 +150,8 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     ),
     built_in_command_spec!(
         "config",
-        "Browse settings sections or focused memory controls (usage: /config [path|memory])",
-        "/config [path|memory]",
+        "Browse categorized settings, focused memory controls, or reset the active layer (usage: /config [path|memory|reset])",
+        "/config [path|memory|reset]",
         "configuration"
     ),
     built_in_command_spec!(

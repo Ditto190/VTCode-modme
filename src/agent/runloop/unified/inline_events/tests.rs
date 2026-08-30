@@ -560,6 +560,8 @@ async fn settings_editor_selection_submits_editor_config_command() {
             source_label: "test".to_string(),
             draft: VTCodeConfig::default(),
             view_path: Some("tools".to_string()),
+            last_selection: None,
+            selection_by_view: BTreeMap::new(),
         }),
         esc_armed: false,
     });

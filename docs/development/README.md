@@ -29,6 +29,7 @@ Entry point for VT Code contributor workflows.
 - [Performance Hasher Policy](./performance-hasher-policy.md) - `rustc_hash` usage policy.
 - [Async Performance Audit](./async-performance-audit.md) - Async architecture performance findings.
 - [Session Event Persistence](./session-persistence.md) - Canonical session events, exporter boundaries, retention, and verification.
+- [Configuration reset and live reload](./configuration-reload.md) - Shared reset service, watcher contract, runtime application, and verification.
 
 ## Model Management
 

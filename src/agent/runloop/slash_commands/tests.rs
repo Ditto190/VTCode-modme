@@ -265,6 +265,42 @@ async fn config_model_opens_model_settings_tree() {
 }
 
 #[tokio::test]
+async fn config_reset_opens_confirmed_settings_reset_flow() {
+    let workspace = std::env::current_dir().expect("workspace");
+    let mut renderer = renderer_for_tests();
+
+    let outcome = handle_slash_command("config reset", &mut renderer, &workspace)
+        .await
+        .expect("config reset command should parse");
+
+    assert!(matches!(outcome, SlashCommandOutcome::ShowSettingsReset));
+}
+
+#[tokio::test]
+async fn settings_alias_accepts_config_reset() {
+    let workspace = std::env::current_dir().expect("workspace");
+    let mut renderer = renderer_for_tests();
+
+    let outcome = handle_slash_command("settings reset", &mut renderer, &workspace)
+        .await
+        .expect("settings alias should parse");
+
+    assert!(matches!(outcome, SlashCommandOutcome::ShowSettingsReset));
+}
+
+#[tokio::test]
+async fn config_reset_rejects_extra_arguments() {
+    let workspace = std::env::current_dir().expect("workspace");
+    let mut renderer = renderer_for_tests();
+
+    let outcome = handle_slash_command("config reset now", &mut renderer, &workspace)
+        .await
+        .expect("invalid config reset should be handled");
+
+    assert!(matches!(outcome, SlashCommandOutcome::Handled));
+}
+
+#[tokio::test]
 async fn ide_command_rejects_arguments() {
     let workspace = std::env::current_dir().expect("workspace");
     let mut renderer = renderer_for_tests();

@@ -465,8 +465,12 @@ export GEMINI_API_KEY=your_key_here
 # Validate configuration
 vtcode config --validate
 
-# Reset to defaults
-vtcode config --reset
+# Clear the active workspace configuration layer
+vtcode config reset
+
+# Clear a global or project layer instead
+vtcode config reset --global
+vtcode config reset --project
 ```
 
 #### Build Issues

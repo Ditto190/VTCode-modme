@@ -171,8 +171,8 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
         Commands::Init { force } => {
             init::handle_init_command(&startup.workspace, force, false).await?;
         }
-        Commands::Config { output, global } => {
-            config::handle_config_command(output.as_deref(), global).await?;
+        Commands::Config { command, output, global } => {
+            config::handle_config_command(output.as_deref(), global, command, &startup.workspace).await?;
         }
         Commands::Login { provider, device_code, from_codex } => {
             crate::cli::auth::handle_login_command(Some(cfg), &provider, device_code, from_codex).await?;
