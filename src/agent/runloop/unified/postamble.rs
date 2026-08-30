@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::time::Duration;
 use vtcode_commons::ansi_codes::{BOLD, DIM, RESET, fg_256};
 use vtcode_commons::color256_theme::rgb_to_ansi256_for_theme;
+use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::ui::theme;
 
 /// Zero-allocation exit data — all borrowed, no clones.
@@ -27,11 +28,34 @@ pub(crate) struct ExitData<'a> {
     pub cache_hit_rate_percent: Option<f64>,
     pub code_additions: u64,
     pub code_deletions: u64,
+    pub final_response: Option<&'a str>,
     pub resume_identifier: Option<&'a str>,
     pub budget_limit: Option<(f64, f64)>,
 }
 
 pub(crate) fn print_exit_summary(data: ExitData<'_>) {
+    render_exit_postamble(data, render_final_response, print_exit_metrics);
+}
+
+fn render_exit_postamble(
+    data: ExitData<'_>,
+    mut render_response: impl FnMut(&str),
+    mut render_metrics: impl FnMut(&ExitData<'_>),
+) {
+    if let Some(response) = data.final_response.filter(|response| !response.trim().is_empty()) {
+        render_response(response);
+    }
+    render_metrics(&data);
+}
+
+fn render_final_response(response: &str) {
+    let mut renderer = AnsiRenderer::stdout();
+    if let Err(error) = renderer.line(MessageStyle::Response, response) {
+        tracing::warn!(%error, "failed to render final response during session exit");
+    }
+}
+
+fn print_exit_metrics(data: &ExitData<'_>) {
     let is_light = theme::is_light_theme(&theme::active_theme_id());
 
     const TITLE_RGB: (u8, u8, u8) = (0xAE, 0xA4, 0x7F);
@@ -55,7 +79,7 @@ pub(crate) fn print_exit_summary(data: ExitData<'_>) {
 
     print_model_line(data.model, data.provider, data.reasoning, &model_style);
 
-    let stats_line = build_stats_line(&data);
+    let stats_line = build_stats_line(data);
     println!("{DIM}{stats_line}{RESET}");
 
     if let Some((max_budget_usd, actual_cost_usd)) = data.budget_limit {
@@ -240,6 +264,7 @@ mod tests {
             cache_hit_rate_percent,
             code_additions,
             code_deletions,
+            final_response: None,
             resume_identifier: None,
             budget_limit: None,
         }
@@ -267,5 +292,22 @@ mod tests {
         let data = stats_test_data(Duration::from_secs(10), 500, 100, 400, 0, Some(80.0), 0, 0);
         let line = build_stats_line(&data);
         assert_eq!(line, "Session 10s | 500 in / 100 out | Cache 400 read (80.0% hit rate)");
+    }
+
+    #[test]
+    fn final_response_is_rendered_before_exit_metrics() {
+        let data = ExitData {
+            final_response: Some("final response"),
+            ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
+        };
+        let rendered = std::cell::RefCell::new(Vec::new());
+
+        render_exit_postamble(
+            data,
+            |response| rendered.borrow_mut().push(format!("response: {response}")),
+            |data| rendered.borrow_mut().push(format!("metrics: {}", build_stats_line(data))),
+        );
+
+        assert_eq!(rendered.into_inner(), ["response: final response", "metrics: Session 30s"]);
     }
 }

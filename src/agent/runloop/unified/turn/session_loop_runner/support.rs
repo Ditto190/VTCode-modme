@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use vtcode_config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
-use vtcode_core::llm::provider::MessageRole;
+use vtcode_core::llm::provider::{AssistantPhase, MessageRole};
 use vtcode_core::tools::registry::ToolRegistry;
 use vtcode_core::utils::session_archive;
 use vtcode_core::utils::session_archive::{SessionMessage, SessionProgressArgs};
@@ -167,12 +167,18 @@ pub(super) fn append_transient_turn_notes(
 }
 
 pub(super) fn latest_assistant_result_text(messages: &[vtcode_core::llm::provider::Message]) -> Option<String> {
-    messages
-        .iter()
-        .rev()
-        .find(|message| message.role == MessageRole::Assistant)
-        .map(|message| message.content.as_text().trim().to_string())
-        .filter(|text| !text.is_empty())
+    messages.iter().rev().find_map(|message| {
+        if message.role != MessageRole::Assistant
+            || message.tool_calls.is_some()
+            || message.phase == Some(AssistantPhase::Commentary)
+        {
+            return None;
+        }
+
+        let text = message.content.as_text();
+        let trimmed = text.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

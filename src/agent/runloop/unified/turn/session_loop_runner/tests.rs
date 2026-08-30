@@ -19,7 +19,7 @@ use tempfile::TempDir;
 use vtcode_core::core::threads::ArchivedSessionIntent;
 use vtcode_core::exec::events::ThreadCompletionSubtype;
 use vtcode_core::hooks::SessionEndReason;
-use vtcode_core::llm::provider::MessageRole;
+use vtcode_core::llm::provider::{AssistantPhase, MessageRole, ToolCall};
 use vtcode_core::utils::session_archive::{
     SessionArchive, SessionArchiveMetadata, SessionListing, SessionMessage, SessionSnapshot,
 };
@@ -387,15 +387,38 @@ fn thread_completion_status_matches_public_contract() {
 }
 
 #[test]
-fn latest_assistant_result_text_uses_latest_nonempty_assistant_message() {
+fn latest_assistant_result_text_uses_latest_substantive_final_assistant_message() {
+    let tool_call =
+        ToolCall::function("call-1".to_string(), "read_file".to_string(), r#"{"path":"README.md"}"#.to_string());
     let messages = vec![
         vtcode_core::llm::provider::Message::user("hello".to_string()),
-        vtcode_core::llm::provider::Message::assistant(" first ".to_string()),
-        vtcode_core::llm::provider::Message::tool_response("call-1".to_string(), "{\"ok\":true}".to_string()),
-        vtcode_core::llm::provider::Message::assistant(" final answer ".to_string()),
+        vtcode_core::llm::provider::Message::assistant(" older answer ".to_string())
+            .with_phase(Some(AssistantPhase::FinalAnswer)),
+        vtcode_core::llm::provider::Message::assistant(" commentary only ".to_string())
+            .with_phase(Some(AssistantPhase::Commentary)),
+        vtcode_core::llm::provider::Message::assistant_with_tools("tool call only".to_string(), vec![tool_call])
+            .with_phase(Some(AssistantPhase::FinalAnswer)),
+        vtcode_core::llm::provider::Message::assistant(" final answer ".to_string())
+            .with_phase(Some(AssistantPhase::FinalAnswer)),
+        vtcode_core::llm::provider::Message::assistant("  \n  ".to_string())
+            .with_phase(Some(AssistantPhase::FinalAnswer)),
     ];
 
     assert_eq!(latest_assistant_result_text(&messages), Some("final answer".to_string()));
+}
+
+#[test]
+fn latest_assistant_result_text_returns_none_without_substantive_final_response() {
+    let tool_call =
+        ToolCall::function("call-2".to_string(), "read_file".to_string(), r#"{"path":"README.md"}"#.to_string());
+    let messages = vec![
+        vtcode_core::llm::provider::Message::assistant("  ".to_string()),
+        vtcode_core::llm::provider::Message::assistant("commentary".to_string())
+            .with_phase(Some(AssistantPhase::Commentary)),
+        vtcode_core::llm::provider::Message::assistant_with_tools("tool call".to_string(), vec![tool_call]),
+    ];
+
+    assert_eq!(latest_assistant_result_text(&messages), None);
 }
 
 #[tokio::test]

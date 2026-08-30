@@ -1484,6 +1484,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             }
         }
 
+        // Capture the response before finalization shuts down the inline TUI
+        // and clears its screen. The owned copy remains available for the
+        // plain stdout postamble after terminal restoration.
+        let final_response = latest_assistant_result_text(&runtime.state.messages);
         let finalization_output = match finalize_session(
             &mut renderer,
             lifecycle_hooks.as_ref(),
@@ -1613,6 +1617,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             cache_hit_rate_percent: session_total_usage.cache_hit_rate().map(|rate| rate * 100.0),
             code_additions,
             code_deletions,
+            final_response: final_response.as_deref(),
             resume_identifier,
             budget_limit: session_stats.budget_limit(),
         });
