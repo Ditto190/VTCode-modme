@@ -325,7 +325,13 @@ impl<'a> SessionWidget<'a> {
     }
 
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer, mode: LayoutMode) {
-        let left_status = self.session.status_left_text().unwrap_or("");
+        // Git status is displayed in the header metadata. Do not mirror it in
+        // the footer; the footer should contain only transient activity text.
+        let left_status = self
+            .session
+            .status_left_text()
+            .filter(|status| !status.trim_start().starts_with("git:"))
+            .unwrap_or("");
         let right_status = self.session.status_right_text().unwrap_or("");
 
         let hint = if let Some(hint) = self.footer_hint_override {

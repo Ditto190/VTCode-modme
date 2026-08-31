@@ -4,6 +4,8 @@
 )]
 use super::super::*;
 use super::helpers::*;
+use crate::tui::core_tui::widgets::{LayoutMode, SessionWidget};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use unicode_width::UnicodeWidthStr;
 
 #[test]
@@ -262,6 +264,24 @@ fn stage_states_keep_input_enabled() {
         assert_eq!(session.status_left_text(), state.status());
         assert!(!session.is_running_activity(), "{state:?} with no tool should not spin");
     }
+}
+
+#[test]
+fn git_status_is_not_rendered_in_footer() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.handle_command(InlineCommand::SetInputStatus {
+        left: Some("git: main*".to_string()),
+        right: Some("10:30".to_string()),
+    });
+
+    let area = Rect::new(0, 0, VIEW_WIDTH, 1);
+    let mut buffer = Buffer::empty(area);
+    SessionWidget::new(&mut session)
+        .layout_mode(LayoutMode::Compact)
+        .render(area, &mut buffer);
+
+    let rendered = buffer.content().iter().map(|cell| cell.symbol()).collect::<String>();
+    assert!(!rendered.contains("main*"), "git status should not appear in footer: {rendered}");
 }
 
 #[test]

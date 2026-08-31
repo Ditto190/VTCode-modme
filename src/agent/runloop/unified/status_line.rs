@@ -81,12 +81,6 @@ struct BottomStatusLayout {
 }
 
 impl BottomStatusLayout {
-    fn push_left(&mut self, value: Option<String>) {
-        if let Some(value) = value {
-            push_unique(&mut self.left, value);
-        }
-    }
-
     fn into_status(self) -> (Option<String>, Option<String>) {
         (join_status_components(self.left), join_status_components(self.right))
     }
@@ -386,7 +380,6 @@ pub(crate) async fn update_input_status_if_changed(
 
 fn auto_status_layout(state: &InputStatusState) -> BottomStatusLayout {
     let mut layout = BottomStatusLayout::default();
-    layout.push_left(state.git_left.clone());
     layout.right =
         auto_status_components(state.thread_context.as_deref(), state.is_cancelling, state.spooled_files_count, state);
     layout
