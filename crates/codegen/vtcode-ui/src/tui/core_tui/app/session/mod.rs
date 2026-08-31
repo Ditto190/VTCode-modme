@@ -639,6 +639,9 @@ impl AppSession {
                 self.core.handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
                 self.update_input_triggers();
             }
+            InlineCommand::SetPtyTranscript { lines } => {
+                self.core.set_last_pty_transcript(lines);
+            }
             InlineCommand::CloseTransient => self.close_transient(),
             InlineCommand::ShowTransient { request } => self.show_transient(*request),
             InlineCommand::UpdateFilePaletteSearch { files } => {
@@ -688,6 +691,7 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
             lines: lines.clone(),
             link_ranges: link_ranges.clone(),
         },
+        InlineCommand::SetPtyTranscript { .. } => return None,
         InlineCommand::SetPrompt { prefix, style } => {
             CoreCommand::SetPrompt { prefix: prefix.clone(), style: style.clone() }
         }

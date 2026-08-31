@@ -8,6 +8,7 @@ use anstyle::Color as AnsiColorEnum;
 /// - Message styling and prefixes
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use super::super::types::{InlineMessageKind, InlineSegment, InlineTextStyle};
 use super::{CollapsedPaste, Session, message::MessageLine};
@@ -92,7 +93,7 @@ impl Session {
                     line_changed = true;
                 }
                 if line_changed {
-                    segment.style = std::sync::Arc::new(updated_style);
+                    segment.style = Arc::new(updated_style);
                 }
             }
             if line_changed {
@@ -143,8 +144,13 @@ impl Session {
         let previous_max_offset = self.current_max_scroll_offset();
         let revision = self.next_revision();
         let index = self.lines.len();
-        self.lines
-            .push(MessageLine { kind, segments, link_ranges: Vec::new(), revision });
+        self.lines.push(MessageLine {
+            kind,
+            segments,
+            link_ranges: Vec::new(),
+            revision,
+            pty_transcript: None,
+        });
         self.mark_line_dirty(index);
         if !self.is_streaming_final_answer {
             self.invalidate_scroll_metrics();
@@ -212,20 +218,14 @@ impl Session {
                 kind,
                 vec![InlineSegment {
                     text: preview,
-                    style: std::sync::Arc::new(InlineTextStyle::default()),
+                    style: Arc::new(InlineTextStyle::default()),
                 }],
             );
             self.collapsed_pastes.push(CollapsedPaste { line_index, full_text: text });
             return;
         }
 
-        self.push_line(
-            kind,
-            vec![InlineSegment {
-                text,
-                style: std::sync::Arc::new(InlineTextStyle::default()),
-            }],
-        );
+        self.push_line(kind, vec![InlineSegment { text, style: Arc::new(InlineTextStyle::default()) }]);
     }
 
     /// Append a segment to the transcript, handling newlines and control characters
@@ -299,6 +299,7 @@ impl Session {
                 segments,
                 link_ranges: link_ranges.next().unwrap_or_default(),
                 revision,
+                pty_transcript: None,
             });
         }
         self.mark_line_dirty(first_dirty);
@@ -313,6 +314,37 @@ impl Session {
         } else if kind != InlineMessageKind::Policy {
             self.thinking_runs.end_run();
         }
+    }
+
+    /// Attach a complete PTY capture to the most recent PTY message block.
+    ///
+    /// The visible PTY lines are deliberately bounded while a command runs;
+    /// the transcript-review overlay reads this sidecar when the full capture
+    /// is available.
+    pub(crate) fn set_last_pty_transcript(&mut self, lines: Vec<String>) {
+        if lines.is_empty() {
+            return;
+        }
+
+        let Some(last_pty) = self.lines.iter().rposition(|line| line.kind == InlineMessageKind::Pty) else {
+            return;
+        };
+        let first_pty = self.lines[..=last_pty]
+            .iter()
+            .rposition(|line| line.kind != InlineMessageKind::Pty)
+            .map_or(0, |index| index + 1);
+        let previous_max_offset = self.current_max_scroll_offset();
+        let revision = self.next_revision();
+        if let Some(line) = self.lines.get_mut(first_pty) {
+            line.pty_transcript = Some(Arc::new(lines));
+        }
+        for line in self.lines.iter_mut().skip(first_pty).take(last_pty - first_pty + 1) {
+            line.revision = revision;
+        }
+        self.mark_line_dirty(first_pty);
+        self.invalidate_transcript_cache();
+        self.invalidate_scroll_metrics();
+        self.adjust_scroll_after_change(previous_max_offset);
     }
 
     pub(crate) fn expand_collapsed_paste_at_line_index(&mut self, line_index: usize) -> bool {
@@ -332,7 +364,7 @@ impl Session {
 
         line.segments = vec![InlineSegment {
             text: collapsed.full_text,
-            style: std::sync::Arc::new(InlineTextStyle::default()),
+            style: Arc::new(InlineTextStyle::default()),
         }];
         line.link_ranges.clear();
         line.revision = revision;
@@ -489,14 +521,16 @@ impl Session {
                     && &*last.style == style
                 {
                     last.text.push_str(text);
+                    line.pty_transcript = None;
                     appended = true;
                     mark_revision = true;
                 }
                 if !appended {
                     line.segments.push(InlineSegment {
                         text: text.to_owned(),
-                        style: std::sync::Arc::new(style.clone()),
+                        style: Arc::new(style.clone()),
                     });
+                    line.pty_transcript = None;
                     appended = true;
                     mark_revision = true;
                 }
@@ -531,8 +565,9 @@ impl Session {
             if let Some(line) = self.lines.last_mut() {
                 line.segments.push(InlineSegment {
                     text: text.to_owned(),
-                    style: std::sync::Arc::new(style.clone()),
+                    style: Arc::new(style.clone()),
                 });
+                line.pty_transcript = None;
                 line.revision = revision;
             }
             self.mark_line_dirty(index);
@@ -548,10 +583,11 @@ impl Session {
             kind,
             segments: vec![InlineSegment {
                 text: text.to_owned(),
-                style: std::sync::Arc::new(style.clone()),
+                style: Arc::new(style.clone()),
             }],
             link_ranges: Vec::new(),
             revision,
+            pty_transcript: None,
         });
 
         // Start tracking a new reasoning run when the first `Policy` line
@@ -596,6 +632,7 @@ impl Session {
                 && line.kind == kind
             {
                 line.segments.clear();
+                line.pty_transcript = None;
                 cleared = true;
             }
         }

@@ -315,6 +315,27 @@ fn append_unique_line(lines: &mut Vec<String>, line: &str) {
     }
 }
 
+fn contains_line_block(container: &str, candidate: &str) -> bool {
+    let container_lines = container.lines().collect::<Vec<_>>();
+    let candidate_lines = candidate.lines().collect::<Vec<_>>();
+    !candidate_lines.is_empty()
+        && candidate_lines.len() <= container_lines.len()
+        && container_lines
+            .windows(candidate_lines.len())
+            .any(|window| window == candidate_lines.as_slice())
+}
+
+fn append_stream_text(lines: &mut Vec<String>, text: &str) {
+    if lines.iter().any(|existing| contains_line_block(existing, text)) {
+        return;
+    }
+    if let Some(existing) = lines.iter_mut().find(|existing| contains_line_block(text, existing)) {
+        *existing = text.to_string();
+        return;
+    }
+    lines.push(text.to_string());
+}
+
 /// Extract a [`ToolOutputPayload`] from a tool result JSON value, preferring
 /// spool path references and falling back to inline text aggregation.
 pub fn tool_output_payload_from_value(output: &Value) -> ToolOutputPayload {
@@ -332,7 +353,7 @@ pub fn tool_output_payload_from_value(output: &Value) -> ToolOutputPayload {
     let mut primary_text = Vec::new();
     for key in ["output", "stdout", "stderr", "content"] {
         if let Some(text) = trimmed_string_field(output, key) {
-            append_unique_line(&mut primary_text, text);
+            append_stream_text(&mut primary_text, text);
         }
     }
 
@@ -1186,6 +1207,17 @@ mod tests {
         assert!(payload.aggregated_output.contains("No matches found"));
         assert!(payload.aggregated_output.contains("Pattern looks like a code fragment."));
         assert!(payload.aggregated_output.contains("Retry with a larger parseable pattern."));
+    }
+
+    #[test]
+    fn tool_output_payload_preserves_distinct_stream_aliases_once() {
+        let payload = tool_output_payload_from_value(&json!({
+            "output": "merged stdout\nmerged stderr",
+            "stdout": "merged stdout",
+            "stderr": "merged stderr"
+        }));
+
+        assert_eq!(payload.aggregated_output, "merged stdout\nmerged stderr");
     }
 
     #[test]

@@ -24,9 +24,9 @@ pub enum ToolOutputMode {
 #[derive(Default)]
 pub enum ToolDisplayMode {
     /// Render each tool transition summary independently.
-    #[default]
     Expanded,
-    /// Group adjacent semantically equivalent successful summaries.
+    /// Group adjacent command summaries and render a bounded live view.
+    #[default]
     Compact,
     /// Catch-all for unknown modes added by future versions.
     #[serde(other)]
@@ -670,8 +670,8 @@ mod tests {
     }
 
     #[test]
-    fn tool_display_mode_defaults_to_expanded() {
-        assert_eq!(UiConfig::default().tool_display_mode, ToolDisplayMode::Expanded);
+    fn tool_display_mode_defaults_to_compact() {
+        assert_eq!(UiConfig::default().tool_display_mode, ToolDisplayMode::Compact);
     }
 
     #[test]
@@ -908,7 +908,7 @@ fn default_tool_output_mode() -> ToolOutputMode {
 }
 
 fn default_tool_display_mode() -> ToolDisplayMode {
-    ToolDisplayMode::Expanded
+    ToolDisplayMode::Compact
 }
 
 fn default_tool_output_max_lines() -> usize {

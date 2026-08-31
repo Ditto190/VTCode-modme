@@ -5,6 +5,8 @@ use anyhow::Result;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
+use vtcode_commons::paths::ensure_path_within_workspace_resolved;
+use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::tools::tool_intent;
@@ -228,19 +230,129 @@ fn record_summary_line(name: &str, args: &serde_json::Value, _output: &serde_jso
 
 /// Record the tool output content (stdout/stderr) to the transcript only.
 fn record_output_lines(output: &serde_json::Value) {
-    for key in ["output", "stdout", "stderr"] {
-        if let Some(text) = output.get(key).and_then(serde_json::Value::as_str)
-            && !text.trim().is_empty()
-        {
-            for line in text.lines() {
-                transcript::append(line);
-            }
+    for text in ordered_stream_texts(output) {
+        for line in text.lines() {
+            transcript::append(line);
         }
     }
 }
 
+fn contains_line_block(container: &str, candidate: &str) -> bool {
+    let container_lines = container.lines().collect::<Vec<_>>();
+    let candidate_lines = candidate.lines().collect::<Vec<_>>();
+    !candidate_lines.is_empty()
+        && candidate_lines.len() <= container_lines.len()
+        && container_lines
+            .windows(candidate_lines.len())
+            .any(|window| window == candidate_lines.as_slice())
+}
+
+fn ordered_stream_texts(output: &serde_json::Value) -> Vec<&str> {
+    let mut texts: Vec<&str> = Vec::new();
+    for key in ["output", "stdout", "stderr"] {
+        let Some(text) = output.get(key).and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let text = text.trim_end();
+        if text.trim().is_empty() {
+            continue;
+        }
+        if texts.iter().any(|existing| contains_line_block(existing, text)) {
+            continue;
+        }
+        if let Some(index) = texts.iter().position(|existing| contains_line_block(text, existing)) {
+            texts[index] = text;
+        } else {
+            texts.push(text);
+        }
+    }
+    texts
+}
+
+async fn load_pty_capture(output: &serde_json::Value, workspace_root: Option<&Path>) -> Option<String> {
+    if let Some(spool_path) = output.get("spool_path").and_then(serde_json::Value::as_str) {
+        let root = workspace_root?;
+        let candidate = if Path::new(spool_path).is_absolute() {
+            PathBuf::from(spool_path)
+        } else {
+            root.join(spool_path)
+        };
+        let resolved = match ensure_path_within_workspace_resolved(&candidate, root).await {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::warn!(path = %candidate.display(), %error, "Rejected PTY transcript spool path");
+                return None;
+            }
+        };
+        return match tokio::fs::read_to_string(&resolved).await {
+            Ok(content) => Some(content),
+            Err(error) => {
+                tracing::warn!(path = %resolved.display(), %error, "Failed to read PTY transcript spool");
+                None
+            }
+        };
+    }
+
+    let texts = ordered_stream_texts(output);
+    (!texts.is_empty()).then(|| texts.join("\n"))
+}
+
+fn normalize_pty_capture_lines(capture: &str) -> Vec<String> {
+    let capture = vtcode_core::utils::ansi_parser::strip_ansi(capture);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut chars = capture.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    let _ = chars.next();
+                    lines.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+            }
+            '\n' => lines.push(std::mem::take(&mut current)),
+            _ => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn build_pty_transcript_lines(
+    name: &str,
+    args: &serde_json::Value,
+    capture: &str,
+    workspace_root: Option<&Path>,
+) -> Vec<String> {
+    let command = extract_command_line(args)
+        .map(|command| vtcode_commons::formatting::collapse_whitespace(&command))
+        .filter(|command| !command.is_empty())
+        .map(|command| {
+            crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths(&command, workspace_root)
+        });
+    let header = command
+        .map(|command| format!("• Ran {command}"))
+        .unwrap_or_else(|| format!("• Ran {}", name));
+    let output_lines = normalize_pty_capture_lines(capture);
+    let mut lines = Vec::with_capacity(output_lines.len() + 1);
+    lines.push(header);
+    for (index, line) in output_lines.into_iter().enumerate() {
+        if index == 0 {
+            lines.push(format!("  └ {line}"));
+        } else {
+            lines.push(format!("    {line}"));
+        }
+    }
+    lines
+}
+
 async fn render_tool_output_common(
     renderer: &mut AnsiRenderer,
+    handle: &InlineHandle,
     name: &str,
     args_val: &serde_json::Value,
     output: &serde_json::Value,
@@ -258,12 +370,23 @@ async fn render_tool_output_common(
         // Record the command summary to transcript (TUI already showed it via PTY block)
         record_summary_line(name, args_val, output, command_success);
 
-        // Record streamed output content to transcript
-        record_output_lines(output);
+        // Prefer the complete PTY spool (or the complete inline result) for
+        // transcript review. The live PTY block remains bounded separately.
+        if let Some(capture) = load_pty_capture(output, workspace_root).await {
+            let review_lines = build_pty_transcript_lines(name, args_val, &capture, workspace_root);
+            for line in normalize_pty_capture_lines(&capture) {
+                transcript::append(&line);
+            }
+            handle.set_pty_transcript(review_lines);
+        } else if output.get("spool_path").is_none() {
+            record_output_lines(output);
+        }
 
         let status = ToolDisplayStatus::from_command_output(output, command_success);
         if !has_renderable_stream_content(output) && matches!(status, ToolDisplayStatus::Success) {
-            renderer.line(MessageStyle::Info, "(no output)")?;
+            if renderer.tool_display_mode() != ToolDisplayMode::Compact {
+                renderer.line(MessageStyle::Info, "(no output)")?;
+            }
             return Ok(());
         }
 
@@ -373,6 +496,7 @@ async fn handle_success_common(
     } else {
         render_tool_output_common(
             ctx.renderer,
+            ctx.handle,
             name,
             args_val,
             payload.output,
@@ -508,7 +632,10 @@ pub(crate) async fn handle_pipeline_output(
     outcome: &ToolPipelineOutcome,
     vt_config: Option<&VTCodeConfig>,
 ) -> Result<(Vec<PathBuf>, Option<String>)> {
-    let workspace_root = ctx.auto_permission.as_ref().map(|a| a.config.workspace.as_path());
+    // The registry owns the workspace used by the executor and the spooler.
+    // Use it here even on the Copilot path, whose lightweight run-loop
+    // context intentionally does not carry an auto-permission context.
+    let workspace_root = Some(ctx.tool_registry.workspace_root().as_path());
     let mut output_ctx = OutcomeContext {
         session_stats: ctx.session_stats,
         renderer: ctx.renderer,
@@ -708,6 +835,64 @@ mod tests {
                 .is_some()
         );
         assert!(compact_run_completion_line(&serde_json::json!({}), ToolDisplayStatus::Success).is_none());
+    }
+
+    #[test]
+    fn ordered_stream_texts_deduplicates_merged_output_aliases() {
+        let output = serde_json::json!({
+            "output": "stdout line\nstderr line",
+            "stdout": "stdout line",
+            "stderr": "stderr line"
+        });
+
+        assert_eq!(ordered_stream_texts(&output), vec!["stdout line\nstderr line"]);
+    }
+
+    #[test]
+    fn ordered_stream_texts_preserves_distinct_pipe_streams() {
+        let output = serde_json::json!({
+            "output": "merged line",
+            "stdout": "stdout line",
+            "stderr": "stderr line"
+        });
+
+        assert_eq!(ordered_stream_texts(&output), vec!["merged line", "stdout line", "stderr line"]);
+    }
+
+    #[tokio::test]
+    async fn pty_capture_reads_complete_workspace_spool() {
+        let workspace = TempDir::new().expect("workspace temp dir");
+        let spool_path = workspace.path().join(".vtcode/context/tool_outputs/pty.txt");
+        tokio::fs::create_dir_all(spool_path.parent().expect("spool parent"))
+            .await
+            .expect("create spool parent");
+        tokio::fs::write(&spool_path, "first complete line\nsecond complete line\n")
+            .await
+            .expect("write spool");
+
+        let output = serde_json::json!({
+            "spool_path": ".vtcode/context/tool_outputs/pty.txt",
+            "output": "first preview line"
+        });
+
+        assert_eq!(
+            load_pty_capture(&output, Some(workspace.path())).await.as_deref(),
+            Some("first complete line\nsecond complete line\n")
+        );
+    }
+
+    #[tokio::test]
+    async fn pty_capture_rejects_spool_outside_workspace() {
+        let workspace = TempDir::new().expect("workspace temp dir");
+        let outside = TempDir::new().expect("outside temp dir");
+        let spool_path = outside.path().join("pty.txt");
+        tokio::fs::write(&spool_path, "secret outside workspace")
+            .await
+            .expect("write outside spool");
+
+        let output = serde_json::json!({ "spool_path": spool_path });
+
+        assert!(load_pty_capture(&output, Some(workspace.path())).await.is_none());
     }
 
     #[tokio::test]

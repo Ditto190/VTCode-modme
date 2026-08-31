@@ -22,6 +22,7 @@ fn inline_command_variant_name(command: &InlineCommand) -> &'static str {
         InlineCommand::AppendPastedMessage { .. } => "AppendPastedMessage",
         InlineCommand::Inline { .. } => "Inline",
         InlineCommand::ReplaceLast { .. } => "ReplaceLast",
+        InlineCommand::SetPtyTranscript { .. } => "SetPtyTranscript",
         InlineCommand::SetPrompt { .. } => "SetPrompt",
         InlineCommand::SetPlaceholder { .. } => "SetPlaceholder",
         InlineCommand::SetMessageLabels { .. } => "SetMessageLabels",

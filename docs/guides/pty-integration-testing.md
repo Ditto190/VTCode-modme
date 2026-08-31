@@ -19,7 +19,7 @@ This guide shows how to exercise the portable-pty powered terminal path so you c
 Run the focused PTY smoke tests directly:
 
 ```bash
-cargo test --test pty_tests
+cargo nextest run --test pty_tests
 ```
 
 To execute the same checks plus external tool availability in one pass, use the helper script:
@@ -46,7 +46,7 @@ The script runs the PTY tests and prints the captured log if any PTY assertion f
 
 3. Watch the transcript pane: you should see the command summary, streamed PTY output (including ANSI sequences), and the final exit status. Resize the terminal window to confirm `portable-pty` propagates the new dimensions without breaking the screen buffer.
 
-4. To inspect the preserved output after the command completes, open the transcript detail view (`Tab` → select the latest `run_pty_cmd` entry). The scrollback includes the multi-line PTY output exactly as captured by the parser.
+4. To inspect the preserved output after the command completes, press `Ctrl+T` in fullscreen mode (or use the `Alt+O` compatibility alias). The review surface includes the complete multi-line PTY output, while the live transcript keeps only the configured bounded preview.
 
 ## Troubleshooting
 

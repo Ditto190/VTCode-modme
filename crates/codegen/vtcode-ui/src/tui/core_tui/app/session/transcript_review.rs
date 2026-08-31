@@ -3,11 +3,13 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 use ratatui_cheese::input::{Input, InputState};
+use unicode_width::UnicodeWidthChar;
 
 use super::Session;
 use crate::tui::config::constants::ui;
 use crate::tui::core_tui::session::TranscriptLine;
 use crate::tui::core_tui::session::list_panel::input_styles_from_theme;
+use crate::tui::core_tui::types::InlineMessageKind;
 
 #[derive(Clone, Debug, Default)]
 struct TranscriptReviewSearchState {
@@ -315,14 +317,18 @@ impl TranscriptReviewState {
             return None;
         }
 
-        let message_index = match self.row_offsets.binary_search(&row) {
-            Ok(index) => index,
-            Err(0) => 0,
-            Err(index) => index - 1,
-        };
-        let message = self.messages.get(message_index)?;
-        let local_index = row.saturating_sub(self.row_offsets[message_index]);
-        message.lines.get(local_index).map(String::as_str)
+        let mut message_index = self.row_offsets.partition_point(|offset| *offset <= row).saturating_sub(1);
+        loop {
+            let message = self.messages.get(message_index)?;
+            let local_index = row.saturating_sub(self.row_offsets[message_index]);
+            if let Some(line) = message.lines.get(local_index) {
+                return Some(line.as_str());
+            }
+            if message_index == 0 {
+                return None;
+            }
+            message_index -= 1;
+        }
     }
 
     fn current_match_line(&self) -> Option<usize> {
@@ -386,6 +392,21 @@ impl TranscriptReviewState {
 }
 
 fn collect_review_message_lines(session: &Session, index: usize, width: u16) -> Vec<String> {
+    if let Some(owner) = pty_transcript_owner(session, index) {
+        if owner != index {
+            return Vec::new();
+        }
+
+        let max_width = usize::from(width.max(1));
+        return session.core.lines[index]
+            .pty_transcript
+            .as_deref()
+            .into_iter()
+            .flatten()
+            .flat_map(|line| wrap_pty_line(line, max_width))
+            .collect();
+    }
+
     let mut lines: Vec<String> = session
         .reflow_message_lines_for_review(index, width)
         .into_iter()
@@ -397,6 +418,42 @@ fn collect_review_message_lines(session: &Session, index: usize, width: u16) -> 
     }
 
     lines
+}
+
+fn pty_transcript_owner(session: &Session, index: usize) -> Option<usize> {
+    let line = session.core.lines.get(index)?;
+    if line.kind != InlineMessageKind::Pty {
+        return None;
+    }
+
+    let mut first = index;
+    while first > 0 && session.core.lines[first - 1].kind == InlineMessageKind::Pty {
+        first -= 1;
+    }
+    session.core.lines[first].pty_transcript.as_ref().map(|_| first)
+}
+
+fn wrap_pty_line(line: &str, width: usize) -> Vec<String> {
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut wrapped = Vec::new();
+    let mut current = String::new();
+    let mut current_width: usize = 0;
+    for ch in line.chars() {
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if !current.is_empty() && current_width.saturating_add(char_width) > width {
+            wrapped.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width = current_width.saturating_add(char_width);
+    }
+    if !current.is_empty() {
+        wrapped.push(current);
+    }
+    wrapped
 }
 
 fn transcript_line_text(line: TranscriptLine) -> String {
@@ -553,5 +610,28 @@ mod tests {
         let refreshed = review.export_text();
         assert!(refreshed.contains("alpha"));
         assert!(refreshed.contains("beta"));
+    }
+
+    #[test]
+    fn review_uses_complete_pty_sidecar_instead_of_live_preview() {
+        let mut session = test_session();
+        session
+            .core
+            .push_line(InlineMessageKind::Pty, vec![text_segment("  └ preview")]);
+        session.core.push_line(InlineMessageKind::Pty, vec![text_segment("    tail")]);
+        session.core.set_last_pty_transcript(vec![
+            "• Ran cargo check".to_string(),
+            "  └ first complete line".to_string(),
+            "    second complete line".to_string(),
+            "    final complete line".to_string(),
+        ]);
+
+        let review = TranscriptReviewState::open(&session, 80, 10);
+        let export = review.clone().export_text();
+
+        assert!(export.contains("first complete line"));
+        assert!(export.contains("final complete line"));
+        assert!(!export.contains("preview"));
+        assert_eq!(review.messages.iter().skip(1).map(|message| message.lines.len()).sum::<usize>(), 0);
     }
 }

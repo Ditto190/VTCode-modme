@@ -369,7 +369,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                     Binding::new("Ctrl+W", "delete prev word"),
                     Binding::new("Alt+D", "delete next word"),
                     Binding::new("Ctrl+U/K", "delete to edge"),
-                    Binding::new("Ctrl+T", "transpose"),
+                    Binding::new("Ctrl+T", "transpose outside review"),
                     Binding::new("Alt+U/L/C", "case change"),
                 ],
                 vec![
@@ -382,7 +382,8 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                     Binding::new("Ctrl+O", "copy response"),
                     Binding::new("Alt+P", "prompt suggest"),
                     Binding::new("Alt+T", "toggle tool summaries"),
-                    Binding::new("Alt+O", "transcript review"),
+                    Binding::new("Ctrl+T", "transcript review"),
+                    Binding::new("Alt+O", "transcript review alias"),
                     Binding::new("Ctrl+I", "lists"),
                     Binding::new("Ctrl+G", "editor"),
                     Binding::new("Ctrl+Z/Y", "undo/redo"),

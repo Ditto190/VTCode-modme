@@ -50,6 +50,10 @@ pub enum InlineCommand {
         lines: Vec<Vec<InlineSegment>>,
         link_ranges: Option<Vec<Vec<InlineLinkRange>>>,
     },
+    /// Attach the complete capture for the most recent streamed PTY block.
+    SetPtyTranscript {
+        lines: Vec<String>,
+    },
     SetPrompt {
         prefix: String,
         style: InlineTextStyle,
@@ -296,6 +300,10 @@ impl InlineHandle {
         link_ranges: Vec<Vec<InlineLinkRange>>,
     ) {
         self.send_command(InlineCommand::ReplaceLast { count, kind, lines, link_ranges: Some(link_ranges) });
+    }
+
+    pub fn set_pty_transcript(&self, lines: Vec<String>) {
+        self.send_command(InlineCommand::SetPtyTranscript { lines });
     }
 
     pub fn suspend_event_loop(&self) {

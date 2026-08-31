@@ -116,6 +116,23 @@ mod tests {
     }
 
     #[test]
+    fn compact_pty_stream_state_uses_transcript_hint() {
+        let mut state =
+            PtyStreamState::new_with_display_mode(Some("cargo check".to_string()), test_pty_config(), None, true);
+        state.apply_chunk("first\nsecond\nthird\n", 2);
+
+        assert_eq!(
+            state.render_lines(2),
+            vec![
+                "• Ran command · Ctrl+T to view transcript".to_string(),
+                "    … +1 line".to_string(),
+                "  └ second".to_string(),
+                "    third".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn pty_stream_state_keeps_command_prompt_with_truncated_tail() {
         let mut state = PtyStreamState::new(Some("cargo check".to_string()), test_pty_config(), None);
         state.apply_chunk("a\nb\nc\nd\ne\nf\ng\n", 5);

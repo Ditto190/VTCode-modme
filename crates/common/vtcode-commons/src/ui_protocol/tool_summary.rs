@@ -52,9 +52,10 @@ fn can_join(left: &CompactToolSummaryCall, right: &CompactToolSummaryCall) -> bo
         && !right.output_boundary
         && left.status == CompactToolSummaryStatus::Success
         && right.status == CompactToolSummaryStatus::Success
-        && left.canonical_tool_name == right.canonical_tool_name
         && left.semantic_action == right.semantic_action
-        && left.stable_arguments == right.stable_arguments
+        && (left.semantic_action == "Run command"
+            || (left.canonical_tool_name == right.canonical_tool_name
+                && left.stable_arguments == right.stable_arguments))
 }
 
 pub fn adjacent_compact_summary_groups(calls: Vec<CompactToolSummaryCall>) -> Vec<CompactToolSummaryGroup> {
@@ -170,12 +171,36 @@ mod tests {
         }
     }
 
+    fn command_call(tool_name: &str, command: &str) -> CompactToolSummaryCall {
+        CompactToolSummaryCall {
+            canonical_tool_name: tool_name.to_string(),
+            semantic_action: "Run command".to_string(),
+            stable_arguments: format!("{{\"command\":\"{command}\"}}"),
+            headline: format!("Ran {command}"),
+            details: Vec::new(),
+            output_boundary: false,
+            status: CompactToolSummaryStatus::Success,
+            expanded_lines: Vec::new(),
+        }
+    }
+
     #[test]
     fn groups_identical_adjacent_calls() {
         let groups = adjacent_compact_summary_groups(vec![call("{}", "30"), call("{}", "100")]);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].calls.len(), 2);
         assert_eq!(compact_detail_values(&groups[0])[0].value, "30, 100");
+    }
+
+    #[test]
+    fn adjacent_commands_group_across_tools_and_arguments() {
+        let groups = adjacent_compact_summary_groups(vec![
+            command_call("exec", "printf one"),
+            command_call("run_pty_cmd", "printf two"),
+        ]);
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].calls.len(), 2);
     }
 
     #[test]

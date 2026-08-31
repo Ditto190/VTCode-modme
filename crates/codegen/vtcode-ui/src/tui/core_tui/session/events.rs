@@ -138,6 +138,9 @@ fn dispatch_action(session: &mut Session, action: Action) -> Option<InlineEvent>
             session.toggle_logs();
             None
         }
+        // Transcript review is owned by the AppSession layer, which has the
+        // fullscreen overlay and its cache/search state.
+        Action::OpenTranscriptReview => None,
         Action::ToggleToolDisplayMode => {
             session.invalidate_transcript_cache();
             session.mark_dirty();

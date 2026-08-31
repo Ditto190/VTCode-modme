@@ -41,7 +41,7 @@ allocator, or request assembly.
 - Emit `plan.approval.requested` and `plan.approval.resolved` for every decision using the canonical `ThreadEvent` contract and preserve Open Responses parity.
 - Enter/exit phrase literals live in `vtcode_core::planning` and are shared by the runloop and Codex bridge; add a phrase once, never fork consumer-specific aliases.
 - Tool-summary renderers receive `ToolSummaryRenderContext` at their public render entry points; pure helpers may remain `Option<&Path>`-driven internally.
-- Compact tool-summary grouping is session-local and batch-scoped; expanded mode remains the default, and failures, warnings, PTY output, diffs, and result bodies stay ungrouped.
+- Compact tool-summary grouping is session-local and batch-scoped; compact mode is the default, command calls use a counted transcript hint, and failures, warnings, PTY output, diffs, and result bodies retain their boundaries.
 - Ordinary completed turns publish a non-empty final assistant response through both renderer and `ThreadEvent` harness paths. The approved-plan handoff is the control-flow exception: its outer loop creates the implementation request, so it must remain `Completed { plan_approved_execution_pending: true }` without synthesizing a final response. Recovery fallbacks remain visible but produce a blocked outcome; approved-plan summaries retain changed files, verification, and blockers.
 
 For prompt/runtime source boundaries, see [runtime guidance](./runtime-guidance.md).

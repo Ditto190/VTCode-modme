@@ -156,7 +156,7 @@ impl AnsiRenderer {
             reasoning_visible: true,
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
-            tool_display_mode: ToolDisplayMode::Expanded,
+            tool_display_mode: ToolDisplayMode::Compact,
             compact_tool_summary_batch: None,
         }
     }

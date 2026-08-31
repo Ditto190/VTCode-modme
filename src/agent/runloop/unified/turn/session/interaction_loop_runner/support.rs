@@ -42,7 +42,8 @@ use vtcode_core::core::interfaces::session::PlanningEntrySource;
 use super::super::interaction_loop::{InteractionLoopContext, InteractionOutcome, InteractionState};
 
 const FALLBACK_ARGS_PREVIEW_LIMIT: usize = 240;
-const REVIEW_SCROLLBACK_EXIT_HINT: &str = "[Native scrollback view. Press Esc, q, or Alt+O to return to fullscreen.]";
+const REVIEW_SCROLLBACK_EXIT_HINT: &str =
+    "[Native scrollback view. Press Esc, q, Ctrl+T, or Alt+O to return to fullscreen.]";
 
 #[derive(Debug, Deserialize)]
 struct ToolErrorPayloadHint {

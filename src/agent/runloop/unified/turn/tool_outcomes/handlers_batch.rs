@@ -139,7 +139,6 @@ async fn execute_parallel_group<'a, 'b>(
     // This admitted execution is real progress; validation-only denials never
     // reach this boundary and therefore retain the assistant-response streak.
     t_ctx.ctx.harness_state.reset_assistant_text_response_streak();
-    t_ctx.ctx.renderer.begin_compact_tool_summary_batch();
 
     let progress_reporter = ProgressReporter::new();
     let _spinner = crate::agent::runloop::unified::ui_interaction::PlaceholderSpinner::with_progress(
@@ -359,6 +358,10 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
     if validated_calls.is_empty() {
         return Ok(None);
     }
+
+    // Keep the compact presentation scoped to the complete assistant batch so
+    // sequential calls and multiple execution groups collapse together.
+    t_ctx.ctx.renderer.begin_compact_tool_summary_batch();
 
     let max_parallel_tool_calls = t_ctx
         .ctx

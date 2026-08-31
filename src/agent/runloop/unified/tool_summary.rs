@@ -272,9 +272,16 @@ fn compact_summary_call(
     workspace_root: Option<&Path>,
 ) -> CompactToolSummaryCall {
     let data = prepare_summary_data(tool_name, args, workspace_root);
+    let semantic_action = if tool_intent::is_command_run_tool_call(tool_name, args)
+        || tool_intent::is_command_run_tool_call(&canonical_summary_tool_name(tool_name), args)
+    {
+        "Run command".to_string()
+    } else {
+        tool_action_label(tool_name, args).into_owned()
+    };
     CompactToolSummaryCall {
         canonical_tool_name: canonical_summary_tool_name(tool_name),
-        semantic_action: tool_action_label(tool_name, args).into_owned(),
+        semantic_action,
         stable_arguments: stable_arguments_json(args),
         headline: data.summary.clone(),
         details: compact_summary_details(&data.details),
@@ -304,6 +311,18 @@ fn render_compact_summary_group(
     let Some(first) = group.calls.first() else {
         return Ok(());
     };
+
+    if first.semantic_action == "Run command" {
+        let count = group.calls.len();
+        let noun = if count == 1 { "command" } else { "commands" };
+        renderer.line_with_override_style(
+            MessageStyle::Info,
+            AnsiStyle::new(),
+            &format!("• Ran {count} {noun} · Ctrl+T to view transcript"),
+        )?;
+        return Ok(());
+    }
+
     if group.calls.len() == 1 {
         for line in &first.expanded_lines {
             match line.kind {
@@ -1110,5 +1129,75 @@ mod tests {
             .join("\n");
         assert!(text.contains("×2"));
         assert!(text.contains("30, 100"));
+    }
+
+    #[test]
+    fn compact_command_summary_uses_count_and_transcript_hint() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+        renderer.set_tool_display_mode(vtcode_core::config::ToolDisplayMode::Compact);
+        renderer.begin_compact_tool_summary_batch();
+        let context = ToolSummaryRenderContext { workspace_root: None };
+
+        for command in ["printf one", "printf two"] {
+            render_tool_call_summary(
+                &mut renderer,
+                tool_names::UNIFIED_EXEC,
+                &json!({"action": "run", "command": command}),
+                None,
+                &context,
+                anstyle::Color::Ansi(anstyle::AnsiColor::Green),
+            )
+            .expect("summary should queue");
+        }
+        flush_compact_tool_summary_batch(&mut renderer).expect("summary group should render");
+
+        let text = std::iter::from_fn(|| receiver.try_recv().ok())
+            .filter_map(|command| match command {
+                InlineCommand::AppendLine { segments, .. } => {
+                    Some(segments.into_iter().map(|segment| segment.text).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("• Ran 2 commands · Ctrl+T to view transcript"));
+        assert!(!text.contains("printf one"));
+        assert!(!text.contains("printf two"));
+    }
+
+    #[test]
+    fn compact_command_summary_groups_command_tool_aliases() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+        renderer.set_tool_display_mode(vtcode_core::config::ToolDisplayMode::Compact);
+        renderer.begin_compact_tool_summary_batch();
+        let context = ToolSummaryRenderContext { workspace_root: None };
+
+        for (tool_name, command) in [("exec", "printf one"), ("container.exec", "printf two")] {
+            render_tool_call_summary(
+                &mut renderer,
+                tool_name,
+                &json!({"command": command}),
+                None,
+                &context,
+                anstyle::Color::Ansi(anstyle::AnsiColor::Green),
+            )
+            .expect("summary should queue");
+        }
+        flush_compact_tool_summary_batch(&mut renderer).expect("summary aliases should group");
+
+        let text = std::iter::from_fn(|| receiver.try_recv().ok())
+            .filter_map(|command| match command {
+                InlineCommand::AppendLine { segments, .. } => {
+                    Some(segments.into_iter().map(|segment| segment.text).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("• Ran 2 commands · Ctrl+T to view transcript"));
     }
 }

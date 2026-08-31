@@ -1,8 +1,8 @@
 use anyhow::Result;
 use serde_json::Value;
-use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
+use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::tools::tool_intent;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
@@ -108,7 +108,10 @@ pub(crate) async fn render_terminal_command_panel(
         is_completed && tool_intent::should_use_spool_reference_only(None, unwrapped_payload);
 
     if !render_spool_reference_only && stdout.trim().is_empty() && stderr.trim().is_empty() && critical_note.is_none() {
-        if !inline_streaming && (!is_pty_session || is_completed) {
+        if !inline_streaming
+            && (!is_pty_session || is_completed)
+            && renderer.tool_display_mode() != ToolDisplayMode::Compact
+        {
             renderer.line(MessageStyle::ToolDetail, "(no output)")?;
         } else if is_pty_session && !is_completed {
             // For running PTY sessions with no output yet, don't show "no output"

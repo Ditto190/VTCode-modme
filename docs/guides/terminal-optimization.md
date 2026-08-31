@@ -137,12 +137,12 @@ VT Code can compact, truncate, or spool large tool output depending on your conf
 ```toml
 [ui]
 tool_output_mode = "compact"
-tool_display_mode = "expanded"
+tool_display_mode = "compact"
 tool_output_max_lines = 50
 tool_output_spool_bytes = 200000
 ```
 
-`ui.tool_output_mode` controls result bodies. `ui.tool_display_mode` controls the transition summaries that precede them: `"expanded"` keeps one summary per call, while `"compact"` groups adjacent successful summaries with the same semantic action and stable arguments. `Alt+T` toggles the session-only display mode; `/config` persists it.
+`ui.tool_output_mode` controls result bodies. `ui.tool_display_mode` controls the transition summaries that precede them: `"compact"` is the default and groups adjacent command calls into a counted summary, while `"expanded"` keeps one summary per call. `Alt+T` toggles the session-only display mode; `/config` persists it.
 
 ## Troubleshooting
 

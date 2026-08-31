@@ -711,6 +711,10 @@ impl<'a> CopilotRuntimeHost<'a> {
             command_display,
             initial_output,
             pty_config: self.tool_registry.pty_config().clone(),
+            compact_mode: self
+                .vt_cfg
+                .map(|config| config.ui.tool_display_mode == vtcode_core::config::ToolDisplayMode::Compact)
+                .unwrap_or(true),
         }));
 
         self.local_terminal_sessions.insert(
@@ -803,7 +807,16 @@ impl<'a> CopilotRuntimeHost<'a> {
                 .observed_tool_calls
                 .entry(tool_call_id.clone())
                 .or_insert_with(|| ObservedToolCallState::new(update.tool_name.clone()));
-            process_observed_tool_state(state, &update, tail_limit, self.handle, self.tool_registry)
+            process_observed_tool_state(
+                state,
+                &update,
+                tail_limit,
+                self.handle,
+                self.tool_registry,
+                self.vt_cfg
+                    .map(|config| config.ui.tool_display_mode == vtcode_core::config::ToolDisplayMode::Compact)
+                    .unwrap_or(true),
+            )
         };
 
         if tool_update.started {
@@ -962,6 +975,7 @@ fn process_observed_tool_state(
     tail_limit: usize,
     handle: &InlineHandle,
     tool_registry: &ToolRegistry,
+    compact_mode: bool,
 ) -> ObservedToolUpdate {
     if state.tool_name == "copilot_tool" && update.tool_name != "copilot_tool" {
         state.tool_name = update.tool_name.clone();
@@ -978,8 +992,13 @@ fn process_observed_tool_state(
         && state.pty_stream.is_none()
         && let Some(cmd) = observed_tool_command_display(update)
     {
-        state.pty_stream =
-            Some(ObservedToolPtyStream::start(handle, tail_limit, cmd, tool_registry.pty_config().clone()));
+        state.pty_stream = Some(ObservedToolPtyStream::start(
+            handle,
+            tail_limit,
+            cmd,
+            tool_registry.pty_config().clone(),
+            compact_mode,
+        ));
     }
 
     let output_delta = if let Some(output) = update.output.as_deref().filter(|t| !t.trim().is_empty())
@@ -1015,7 +1034,13 @@ struct ObservedToolPtyStream {
 }
 
 impl ObservedToolPtyStream {
-    fn start(handle: &InlineHandle, tail_limit: usize, command_display: String, pty_config: PtyConfig) -> Self {
+    fn start(
+        handle: &InlineHandle,
+        tail_limit: usize,
+        command_display: String,
+        pty_config: PtyConfig,
+        compact_mode: bool,
+    ) -> Self {
         let progress_reporter = ProgressReporter::new();
         let spinner = PlaceholderSpinner::with_progress(
             handle,
@@ -1032,6 +1057,7 @@ impl ObservedToolPtyStream {
             Some(command_display),
             pty_config,
             None,
+            compact_mode,
         );
 
         Self {
@@ -1137,6 +1163,7 @@ struct LocalTerminalTaskContext {
     command_display: String,
     initial_output: Option<String>,
     pty_config: PtyConfig,
+    compact_mode: bool,
 }
 
 impl LocalTerminalSession {
@@ -1339,9 +1366,11 @@ async fn run_local_terminal_session(task: LocalTerminalTaskContext) {
         command_display,
         initial_output,
         pty_config,
+        compact_mode,
     } = task;
 
-    let (pty_stream, _elapsed_guard) = setup_terminal_stream(&handle, tail_limit, &command_display, pty_config).await;
+    let (pty_stream, _elapsed_guard) =
+        setup_terminal_stream(&handle, tail_limit, &command_display, pty_config, compact_mode).await;
     let mut final_status = None;
 
     if let Some(output) = initial_output.as_deref() {
@@ -1448,6 +1477,7 @@ async fn setup_terminal_stream(
     tail_limit: usize,
     command_display: &str,
     pty_config: PtyConfig,
+    compact_mode: bool,
 ) -> (TerminalStream, ProgressUpdateGuard) {
     let progress_reporter = ProgressReporter::new();
     progress_reporter.set_total(100).await;
@@ -1478,6 +1508,7 @@ async fn setup_terminal_stream(
         Some(command_display.to_string()),
         pty_config,
         None,
+        compact_mode,
     );
 
     (

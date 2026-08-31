@@ -570,7 +570,7 @@ VT Code also honors these environment variables for default fullscreen behavior:
 
 Interactive fullscreen review uses the same rendering surface:
 
-- `Alt+O` opens a transcript review overlay with search, paging, and export controls.
+- `Ctrl+T` opens a transcript review overlay with search, paging, and export controls. `Alt+O` remains a compatibility alias.
 - `[` hands the expanded transcript to native terminal scrollback until you return.
 - `v` opens the expanded transcript in your configured editor.
 

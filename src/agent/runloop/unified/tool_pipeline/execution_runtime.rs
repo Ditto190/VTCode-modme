@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Notify;
 use tracing::warn;
+use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::tools::registry::{ExecSettlementMode, ToolProgressCallback, ToolRegistry};
 use vtcode_core::tools::result_cache::{ToolCacheKey, ToolResultCache};
@@ -270,6 +271,9 @@ async fn execute_with_cache_and_streaming_inner(
             stream_command,
             registry.pty_config().clone(),
             Some(registry.workspace_root()),
+            vt_cfg
+                .map(|config| config.ui.tool_display_mode == ToolDisplayMode::Compact)
+                .unwrap_or(true),
         );
         let (callback, coalescer) =
             build_streaming_progress_callback(callback, harness_emitter, tool_item_id, tool_call_id);

@@ -66,6 +66,7 @@ impl PtyStreamRuntime {
         command_prompt: Option<String>,
         pty_config: PtyConfig,
         workspace_root: Option<&Path>,
+        compact_mode: bool,
     ) -> (Self, ToolProgressCallback) {
         let owned_root = workspace_root.map(Path::to_path_buf);
         let (tx, mut rx) = mpsc::channel::<PtyStreamMessage>(256);
@@ -75,7 +76,8 @@ impl PtyStreamRuntime {
         let effective_tail_limit = tail_limit.clamp(1, Self::MAX_LIVE_STREAM_LINES);
 
         let task = tokio::spawn(async move {
-            let mut state = PtyStreamState::new(command_prompt, pty_config, owned_root.as_deref());
+            let mut state =
+                PtyStreamState::new_with_display_mode(command_prompt, pty_config, owned_root.as_deref(), compact_mode);
             let (replace_count, segments, link_ranges, _) = state.render_segments("", effective_tail_limit);
             if !segments.is_empty() && worker_active.load(Ordering::Relaxed) {
                 handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);

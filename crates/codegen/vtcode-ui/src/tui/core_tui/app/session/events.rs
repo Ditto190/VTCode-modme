@@ -650,8 +650,9 @@ pub(super) fn process_key_with_clipboard_image_reader(
             }
             None
         }
-        KeyCode::Char('t') if has_control && !has_alt && !has_command => {
-            // Ctrl+T: Transpose characters (Readline)
+        KeyCode::Char('t') | KeyCode::Char('T') if has_control && !has_alt && !has_command => {
+            // Ctrl+T: open transcript review in fullscreen; otherwise
+            // transpose characters (Readline).
             if session.core.input_enabled() {
                 session.transpose_chars();
                 session.update_input_triggers();
@@ -1083,10 +1084,6 @@ pub(super) fn process_key_with_clipboard_image_reader(
             session.mark_dirty();
             Some(InlineEvent::Submit("/copy".into()))
         }
-        KeyCode::Char('t') | KeyCode::Char('T') if has_control => {
-            session.toggle_logs();
-            None
-        }
         KeyCode::Char(ch) => {
             if !session.core.input_enabled() {
                 return None;
@@ -1282,8 +1279,13 @@ fn handle_transcript_review_key(
     has_alt: bool,
     has_command: bool,
 ) -> TranscriptReviewKeyResult {
-    let open_shortcut =
+    let compatibility_alias =
         has_alt && !has_control && !has_command && matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O'));
+    let configured_shortcut = session
+        .core
+        .resolve_rebindable_action(key)
+        .is_some_and(|action| action == Action::OpenTranscriptReview);
+    let open_shortcut = compatibility_alias || configured_shortcut;
     if session.transcript_review_state().is_none() {
         if !session.core.fullscreen.active || !open_shortcut {
             return TranscriptReviewKeyResult::NotHandled;
@@ -1678,6 +1680,7 @@ mod tests {
     use super::*;
     use crate::tui::config::constants::ui;
     use crate::tui::core_tui::app::types::{ModalOverlayRequest, TransientRequest};
+    use crate::tui::core_tui::session::action::BindingStore;
     use crate::tui::core_tui::types::{
         InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, SecurePromptConfig,
     };
@@ -1735,6 +1738,73 @@ mod tests {
                 .is_none()
         );
         assert!(session.transcript_review_state().is_none());
+    }
+
+    #[test]
+    fn ctrl_t_opens_and_closes_transcript_review_in_fullscreen() {
+        let mut session = build_session();
+        session
+            .core
+            .push_line(InlineMessageKind::Agent, vec![text_segment("hello review")]);
+
+        let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
+        assert!(session.process_key(key).is_none());
+        assert!(session.transcript_review_state().is_some());
+
+        assert!(session.process_key(key).is_none());
+        assert!(session.transcript_review_state().is_none());
+    }
+
+    #[test]
+    fn ctrl_t_transposes_text_outside_fullscreen() {
+        let mut session = Session::new(InlineTheme::default(), None, 24);
+        session.core.input_manager.set_content("abc".to_string());
+        session.core.input_manager.set_cursor(1);
+
+        let result = session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+
+        assert!(result.is_none());
+        assert_eq!(session.core.input_manager.content(), "bac");
+        assert!(session.transcript_review_state().is_none());
+    }
+
+    #[test]
+    fn rebound_transcript_review_action_opens_review() {
+        let mut bindings = hashbrown::HashMap::new();
+        bindings.insert("open_transcript_review".to_string(), vec!["ctrl+x".to_string()]);
+        let mut session = Session::new_with_logs_and_bindings(
+            InlineTheme::default(),
+            None,
+            24,
+            true,
+            None,
+            Vec::new(),
+            "Agent TUI".to_string(),
+            BindingStore::new(bindings),
+        );
+        session.core.set_fullscreen_active(true);
+        session.core.apply_transcript_rows(8);
+        session.core.apply_transcript_width(60);
+        session
+            .core
+            .push_line(InlineMessageKind::Agent, vec![text_segment("hello review")]);
+
+        assert!(
+            session
+                .process_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL))
+                .is_none()
+        );
+        assert!(session.transcript_review_state().is_some());
+    }
+
+    #[test]
+    fn alt_t_still_toggles_tool_display_mode() {
+        let mut session = build_session();
+
+        assert!(matches!(
+            session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT)),
+            Some(InlineEvent::ToggleToolDisplayMode)
+        ));
     }
 
     #[test]

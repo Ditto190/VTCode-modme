@@ -13,10 +13,11 @@ The VT Code terminal UI includes an interactive mode that combines keyboard-firs
 | `Ctrl+C`                                    | Cancel the current generation or command. Press twice to terminate the session. | Works during prompts, tool execution, and streaming replies.                                                                              |
 | `Ctrl+D`                                    | Exit VT Code interactive mode.                                                  | Sends EOF to the shell integration.                                                                                                       |
 | `Ctrl+L`                                    | Clear the terminal screen while keeping the conversation history.               | Useful for refreshing when output is cluttered.                                                                                           |
-| `Ctrl+T`                                    | Toggle verbose tool output and diagnostics.                                     | Reveals detailed tool invocation logs without affecting the TODO panel.                                                                   |
+| `Ctrl+T`                                    | Open or close fullscreen transcript review; transpose input otherwise.           | In fullscreen, reviews the complete transcript. Outside fullscreen, keeps the readline transpose shortcut.                                |
+| `Alt+T`                                     | Toggle compact or expanded tool summaries.                                      | Rebindable; the default compact presentation keeps live command output bounded.                                                         |
 | `Alt+G`                                     | Toggle the TODO task panel.                                                     | Rebindable via `toggle_task_panel`; works even when `ui.show_task_panel` is off.                                                          |
 | `Ctrl+O`                                    | Copy last agent response as markdown to clipboard.                              | Available after the agent has produced at least one response.                                                                             |
-| `Alt+O`                                     | Open or close fullscreen transcript review.                                     | Available when VT Code is using alternate-screen rendering.                                                                               |
+| `Alt+O`                                     | Compatibility alias for transcript review.                                      | Available when VT Code is using alternate-screen rendering.                                                                               |
 | `Ctrl+A`                                    | Move cursor to start of input line.                                             | UNIX/readline-style editing.                                                                                                              |
 | `Ctrl+E`                                    | Move cursor to end of input line (or open external editor when input is empty). | Uses `tools.editor` config, then `VISUAL`/`EDITOR`. Configure it with `/config tools.editor`.                                             |
 | `Ctrl+Home`                                 | Jump to the oldest visible transcript content.                                  | Fullscreen rendering only.                                                                                                                |
@@ -80,7 +81,7 @@ When VT Code is running in alternate-screen mode, the transcript and composer us
 
 ### Transcript Review Surface
 
-Press `Alt+O` to open the fullscreen transcript review surface. It builds a plain-text view of the full conversation, including expanded collapsed tool payloads, so search and export operate on the complete transcript rather than only the visible viewport.
+Press `Ctrl+T` to open or close the fullscreen transcript review surface. `Alt+O` remains a compatibility alias. The review builds a plain-text view of the full conversation, including complete PTY captures and expanded collapsed tool payloads, so search and export operate on the complete transcript rather than only the visible viewport.
 
 | Shortcut                   | Description                                                                              |
 | :------------------------- | :--------------------------------------------------------------------------------------- |
@@ -96,7 +97,7 @@ Press `Alt+O` to open the fullscreen transcript review surface. It builds a plai
 | `G` / `End`                | Jump to the bottom.                                                                      |
 | `[`                        | Hand the expanded transcript to the terminal's native scrollback until you return.       |
 | `v`                        | Write the expanded transcript to a temporary file and open it in your configured editor. |
-| `q` or `Alt+O`             | Close transcript review.                                                                 |
+| `q`, `Ctrl+T`, or `Alt+O`  | Close transcript review.                                                                 |
 
 ### Mouse Capture, Copy, and tmux
 
@@ -153,7 +154,7 @@ VT Code supports an optional Vim-style prompt editor.
 - VT Code routes prompt suggestion generation through `agent.prompt_suggestions` and falls back to deterministic local suggestions when the provider, model, or endpoint cannot service the request.
 - LLM-backed prompt suggestions can consume tokens. When `agent.prompt_suggestions.show_cost_notice = true`, VT Code shows a one-time reminder in the session before the first LLM-backed inline suggestion.
 - Picking a suggestion inserts it into the composer. Empty drafts are replaced; non-empty drafts keep their content and append the suggestion after a blank line.
-- `/tasks` toggles the dedicated TODO panel. It is fed directly from `task_tracker` output and remains independent from the `Ctrl+T` log toggle. Successful updates use the same compact tree in the transcript and panel; the panel header carries the checklist title and `completed/total` progress while step metadata remains available in structured tracker data. `Alt+G` toggles the panel from anywhere, and `ui.show_task_panel` controls whether it auto-shows when a plan is approved.
+- `/tasks` toggles the dedicated TODO panel. It is fed directly from `task_tracker` output and remains independent from the tool-summary display mode. Successful updates use the same compact tree in the transcript and panel; the panel header carries the checklist title and `completed/total` progress while step metadata remains available in structured tracker data. `Alt+G` toggles the panel from anywhere, and `ui.show_task_panel` controls whether it auto-shows when a plan is approved.
 - `/jobs` opens the active/background jobs picker for PTY-backed command sessions.
 - In `/jobs`, `Enter` or `Ctrl+R` focuses the selected job output, `Ctrl+P` previews a snapshot modal, and `Ctrl+X` sends an interrupt to the selected job.
 - Pressing `Enter` on an empty draft opens `/jobs` when active jobs exist; otherwise VT Code keeps the normal empty-enter behavior.

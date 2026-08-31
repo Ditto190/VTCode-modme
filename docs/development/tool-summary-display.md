@@ -3,15 +3,15 @@
 VT Code has two independent tool-display settings:
 
 - `ui.tool_output_mode` controls how command and tool result bodies are truncated or spooled.
-- `ui.tool_display_mode` controls the transition summaries shown before those bodies. It defaults to `expanded`; `compact` groups adjacent successful summaries only when their tool, semantic action, and stable arguments match.
+- `ui.tool_display_mode` controls the transition summaries shown before those bodies. It defaults to `compact`; adjacent command calls collapse into one counted summary with a `Ctrl+T` transcript hint, while non-command tools retain their compact tree formatting.
 
 ```toml
 [ui]
 tool_display_mode = "compact"
 ```
 
-Compact groups retain shared parameters and list pagination-only differences such as `max_results`, `limit`, `offset`, `page`, and `cursor`. A group is rendered only for two or more compatible calls and uses a bounded `+N more` suffix for long distinct-value lists. Failures, warnings, cancellations, PTY blocks, diffs, and result bodies remain individually visible.
+Compact command groups suppress repeated command bodies, `$` detail rows, empty-output markers, and duplicate completion noise in the live view. The complete PTY capture remains available in transcript review. Plan updates, non-command tools, failures, warnings, cancellations, diffs, and result bodies retain their existing boundaries and compact tree formatting.
 
 The runtime mode can be changed for the current session with `Alt+T`. This action is rebindable through the existing keybinding configuration. Use `/config` to cycle `ui.tool_display_mode` and persist the choice to `vtcode.toml`.
 
-Expanded mode is the compatibility default and preserves the existing per-call summary layout.
+Explicit `expanded` mode preserves the existing per-call summary layout.

@@ -885,9 +885,9 @@ auto_apply_detected_patches = false
 tool_output_mode = "compact"
 
 # Tool transition summary display mode
+# "compact" - Count adjacent command summaries and keep live output bounded
 # "expanded" - Render each successful tool summary separately
-# "compact" - Group adjacent semantically equivalent successful summaries
-tool_display_mode = "expanded"
+tool_display_mode = "compact"
 
 # Maximum number of lines to display in tool output (prevents transcript flooding)
 # Lines beyond this limit are truncated to a tail preview
