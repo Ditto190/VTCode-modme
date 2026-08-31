@@ -300,8 +300,8 @@ pub(crate) struct HarnessTurnState {
     pub turn_id: TurnId,
     pub phase: TurnPhase,
     pub turn_started_at: Instant,
-    /// Time spent in explicit command waits is excluded from the ordinary
-    /// per-turn harness wall-clock budget.
+    /// Time spent waiting for explicit user input or an already-running
+    /// command is excluded from the ordinary per-turn harness wall-clock budget.
     wait_started_at: Option<Instant>,
     excluded_wait_duration: Duration,
     pub tool_calls: usize,
@@ -320,11 +320,13 @@ pub(crate) struct HarnessTurnState {
     /// Counts consecutive malformed/schema-invalid tool calls independently
     /// from policy denials. A valid admitted call resets this streak.
     pub consecutive_preflight_failures: usize,
-    /// Counts how many times the agent emitted an assistant *text* response
-    /// (no tool calls) in this turn.  Used to short-circuit the recovery
-    /// loop when the model has already produced a final answer but recovery
-    /// iteration keeps re-prompting it.  Reset every turn.
-    pub assistant_text_responses_in_turn: u32,
+    /// Counts consecutive assistant *text-only* responses in this turn.
+    /// Admitted tool execution resets the streak so productive progress is
+    /// not mistaken for a tool-free regeneration loop. Reset every turn.
+    pub consecutive_assistant_text_responses: u32,
+    /// Copilot/runtime tool progress that occurs inside a provider request and
+    /// therefore has no ordinary `MessageRole::Tool` entry in history.
+    out_of_band_tool_progress: bool,
     /// Whether a non-empty final assistant response was rendered for this turn.
     /// This is separate from conversation history because recovery code can
     /// append a message without sending it through the user-facing renderer.
@@ -471,7 +473,8 @@ impl HarnessTurnState {
             blocked_tool_calls: 0,
             consecutive_blocked_tool_calls: 0,
             consecutive_preflight_failures: 0,
-            assistant_text_responses_in_turn: 0,
+            consecutive_assistant_text_responses: 0,
+            out_of_band_tool_progress: false,
             final_response_rendered: false,
             final_response_event_emitted: false,
             streamed_response_event_emitted: false,
@@ -543,15 +546,15 @@ impl HarnessTurnState {
         elapsed.saturating_sub(self.excluded_wait_duration.saturating_add(active_wait))
     }
 
-    /// Pause ordinary turn wall-clock accounting around an explicit command
+    /// Pause ordinary turn wall-clock accounting around an explicit external
     /// wait. This does not alter tool ceilings or cancellation behavior.
-    pub(crate) fn begin_long_running_command_wait(&mut self) {
+    pub(crate) fn begin_budget_excluded_wait(&mut self) {
         if self.wait_started_at.is_none() {
             self.wait_started_at = Some(Instant::now());
         }
     }
 
-    pub(crate) fn end_long_running_command_wait(&mut self) {
+    pub(crate) fn end_budget_excluded_wait(&mut self) {
         if let Some(started) = self.wait_started_at.take() {
             self.excluded_wait_duration = self.excluded_wait_duration.saturating_add(started.elapsed());
         }
@@ -654,14 +657,30 @@ impl HarnessTurnState {
         self.record_tool_call_with_warning(TOOL_BUDGET_WARNING_THRESHOLD)
     }
 
-    /// Record that the agent emitted a text response (no tool calls) in this
-    /// turn.  The turn loop also counts existing assistant messages in
-    /// `working_history` for the anti-runaway guard; this method exists
-    /// for symmetry with the other `record_*` helpers and is incremented
-    /// alongside the in-message tracking.
+    /// Record that the agent emitted a text-only response in this turn.
+    /// This state is authoritative and survives history compaction, including
+    /// inline tool boundaries that are not represented in `working_history`.
     pub(crate) fn record_assistant_text_response(&mut self) -> u32 {
-        self.assistant_text_responses_in_turn = self.assistant_text_responses_in_turn.saturating_add(1);
-        self.assistant_text_responses_in_turn
+        self.consecutive_assistant_text_responses = self.consecutive_assistant_text_responses.saturating_add(1);
+        self.consecutive_assistant_text_responses
+    }
+
+    /// Break the text-only response streak after a tool call passes admission.
+    /// Blocked and malformed attempts are not progress and retain the streak;
+    /// their dedicated safeguards remain responsible for those failure loops.
+    pub(crate) fn reset_assistant_text_response_streak(&mut self) {
+        self.consecutive_assistant_text_responses = 0;
+    }
+
+    /// Record productive tool execution that is not represented by a normal
+    /// tool-result message, such as an inline Copilot runtime call.
+    pub(crate) fn record_out_of_band_tool_progress(&mut self) {
+        self.out_of_band_tool_progress = true;
+        self.reset_assistant_text_response_streak();
+    }
+
+    pub(crate) fn has_out_of_band_tool_progress(&self) -> bool {
+        self.out_of_band_tool_progress
     }
 
     pub(crate) fn record_tool_budget_exhaustion_notice(&mut self) -> Option<ToolBudgetExhaustionNotice> {
@@ -1451,6 +1470,19 @@ mod tests {
         assert_eq!(state.wall_clock_budget_exhaustion(), None);
         state.turn_started_at = Instant::now().checked_sub(Duration::from_secs(11)).unwrap();
         assert_eq!(state.wall_clock_budget_exhaustion(), Some(ToolWallClockExhaustion { max_secs: 10 }));
+    }
+
+    #[test]
+    fn harness_state_excludes_active_external_wait_from_wall_clock_budget() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 4, 10, 1);
+        let wait_started_at = Instant::now().checked_sub(Duration::from_secs(11)).unwrap();
+        state.turn_started_at = wait_started_at;
+        state.wait_started_at = Some(wait_started_at);
+
+        assert_eq!(state.wall_clock_budget_exhaustion(), None);
+
+        state.end_budget_excluded_wait();
+        assert_eq!(state.wall_clock_budget_exhaustion(), None);
     }
 
     #[test]

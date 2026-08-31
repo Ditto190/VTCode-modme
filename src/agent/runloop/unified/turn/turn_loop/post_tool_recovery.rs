@@ -111,6 +111,7 @@ pub(crate) fn prepare_post_tool_tool_free_recovery(working_history: &mut Vec<uni
     ensure_recent_system_message(working_history, reason);
 }
 
+#[cfg(test)]
 pub(super) fn maybe_recover_after_post_tool_llm_failure(
     renderer: &mut AnsiRenderer,
     working_history: &mut Vec<uni::Message>,
@@ -121,6 +122,32 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
     allow_tool_free_retry: bool,
     allow_tool_enabled_retry: bool,
     planning_active: bool,
+) -> Result<PostToolFailureRecovery> {
+    maybe_recover_after_post_tool_llm_failure_with_progress(
+        renderer,
+        working_history,
+        err,
+        step_count,
+        turn_history_start_len,
+        failure_stage,
+        allow_tool_free_retry,
+        allow_tool_enabled_retry,
+        planning_active,
+        false,
+    )
+}
+
+fn maybe_recover_after_post_tool_llm_failure_with_progress(
+    renderer: &mut AnsiRenderer,
+    working_history: &mut Vec<uni::Message>,
+    err: &anyhow::Error,
+    step_count: usize,
+    turn_history_start_len: usize,
+    failure_stage: &'static str,
+    allow_tool_free_retry: bool,
+    allow_tool_enabled_retry: bool,
+    planning_active: bool,
+    out_of_band_tool_progress: bool,
 ) -> Result<PostToolFailureRecovery> {
     if is_unmatched_tool_result_error(&err.to_string()) {
         // A repaired retry has already been attempted, or the request was
@@ -135,7 +162,8 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
         return Ok(PostToolFailureRecovery::StopAfterDirective);
     }
 
-    let has_partial_tool_progress = has_tool_response_since(working_history, turn_history_start_len);
+    let has_partial_tool_progress =
+        out_of_band_tool_progress || has_tool_response_since(working_history, turn_history_start_len);
     if !has_partial_tool_progress {
         return Ok(PostToolFailureRecovery::NotApplicable);
     }
@@ -696,7 +724,7 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
         plan_session.as_deref(),
         harness_state,
     );
-    let recovery = maybe_recover_after_post_tool_llm_failure(
+    let recovery = maybe_recover_after_post_tool_llm_failure_with_progress(
         renderer,
         working_history,
         err,
@@ -708,6 +736,7 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
             && !harness_state.post_tool_tool_enabled_retry_used()
             && !harness_state.recovery_pass_used(),
         planning_active,
+        harness_state.has_out_of_band_tool_progress(),
     )?;
 
     match recovery {
@@ -996,6 +1025,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn out_of_band_copilot_progress_enables_post_tool_recovery_without_tool_history() {
+        let mut renderer = AnsiRenderer::stdout();
+        let mut working_history = vec![uni::Message::user("finish the plan after the interview".to_string())];
+
+        let recovery = maybe_recover_after_post_tool_llm_failure_with_progress(
+            &mut renderer,
+            &mut working_history,
+            &transient_err(),
+            2,
+            0,
+            "execute_llm_request",
+            true,
+            true,
+            true,
+            true,
+        )
+        .expect("inline Copilot progress should activate bounded post-tool recovery");
+
+        assert_eq!(recovery, PostToolFailureRecovery::RetryToolEnabled);
+        assert!(working_history.iter().any(|message| {
+            message.role == uni::MessageRole::System
+                && message.content.as_text() == POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE
+        }));
+    }
+
+    #[tokio::test]
     async fn context_capacity_failure_selects_compacting_tool_enabled_retry() {
         let mut renderer = AnsiRenderer::stdout();
         let mut working_history = vec![uni::Message::tool_response(
@@ -1096,6 +1151,40 @@ mod tests {
         .expect("second recovery dispatch should produce a truthful handoff");
 
         assert!(matches!(second, PostToolFailureAction::Break(TurnLoopResult::Blocked { reason: Some(_) })));
+    }
+
+    #[tokio::test]
+    async fn dispatch_recovers_plan_follow_up_after_inline_copilot_interview() {
+        use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, TurnId, TurnRunId};
+
+        let mut renderer = AnsiRenderer::stdout();
+        let mut working_history = vec![uni::Message::user("plan the requested runtime fix".to_string())];
+        let mut harness_state =
+            HarnessTurnState::new(TurnRunId("test-run".to_string()), TurnId("test-turn".to_string()), 4, 600, 0);
+        harness_state.record_out_of_band_tool_progress();
+        harness_state.switch_to_tool_free_recovery();
+        assert!(harness_state.consume_recovery_pass());
+        let mut plan_session = PlanningWorkflowSessionState::default();
+        let err = transient_err();
+
+        let action = dispatch_post_tool_failure(PostToolRecoveryContext {
+            renderer: &mut renderer,
+            working_history: &mut working_history,
+            harness_state: &mut harness_state,
+            harness_emitter: None,
+            plan_session: Some(&mut plan_session),
+            plan_state: None,
+            err: &err,
+            step_count: 2,
+            turn_history_start_len: 0,
+            stage: "execute_llm_request",
+            tool_free_recovery: true,
+        })
+        .await
+        .expect("inline interview progress should schedule bounded synthesis recovery");
+
+        assert!(matches!(action, PostToolFailureAction::Continue));
+        assert_eq!(harness_state.recovery_retry_count(), 1);
     }
 
     #[tokio::test]

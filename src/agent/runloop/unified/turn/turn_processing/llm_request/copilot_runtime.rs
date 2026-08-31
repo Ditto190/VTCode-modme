@@ -374,6 +374,9 @@ impl<'a> CopilotRuntimeHost<'a> {
 
             if let Some(loop_tracker) = self.loop_tracker.as_deref_mut() {
                 update_repetition_tracker(loop_tracker, &pipeline_outcome, &canonical_tool_name, &effective_arguments);
+                run_loop_ctx
+                    .session_stats
+                    .set_verification_pending(loop_tracker.verification_is_pending());
                 if let Some(signal) = self.suppress_output_signal.as_ref() {
                     signal.store(loop_tracker.verification_is_pending(), Ordering::Release);
                 }
@@ -609,6 +612,11 @@ impl<'a> CopilotRuntimeHost<'a> {
     }
 
     fn record_tool_use(&mut self, tool_name: &str) {
+        // Copilot executes VTCode tools inside the streaming request, so its
+        // progress boundary is absent from `working_history`. Record it in the
+        // authoritative turn state only after admission; denied calls never
+        // reach this method and cannot erase the response streak.
+        self.harness_state.record_out_of_band_tool_progress();
         self.session_stats.record_tool(tool_name);
     }
 

@@ -7,6 +7,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use vtcode_core::config::CommandsConfig;
 use vtcode_core::copilot::{
     CopilotObservedToolCall, CopilotObservedToolCallStatus, CopilotPermissionRequest, CopilotTerminalCreateRequest,
     CopilotTerminalEnvVar, CopilotToolCallResponse,
@@ -434,6 +435,9 @@ async fn copilot_terminal_sessions_bind_local_pty_output_and_release_cleanly() {
     let harness_path = workspace.join("harness-terminal.jsonl");
 
     let mut tool_registry = ToolRegistry::new(workspace.clone()).await;
+    let mut commands_config = CommandsConfig::default();
+    commands_config.allow_list.push("/usr/bin/printenv".to_string());
+    tool_registry.apply_commands_config(&commands_config);
     let tool_result_cache = Arc::new(RwLock::new(ToolResultCache::new(8)));
     let mut session = create_headless_session();
     let handle = session.clone_inline_handle();
@@ -484,8 +488,8 @@ async fn copilot_terminal_sessions_bind_local_pty_output_and_release_cleanly() {
     let response = runtime_host
         .handle_terminal_create(CopilotTerminalCreateRequest {
             session_id: "session-terminal".to_string(),
-            command: "/bin/sh".to_string(),
-            args: vec!["-c".to_string(), "printf \"$ACP_TEST_TOKEN\"".to_string()],
+            command: "/usr/bin/printenv".to_string(),
+            args: vec!["ACP_TEST_TOKEN".to_string()],
             env: vec![CopilotTerminalEnvVar {
                 name: "ACP_TEST_TOKEN".to_string(),
                 value: "vtcode-terminal".to_string(),
@@ -506,7 +510,7 @@ async fn copilot_terminal_sessions_bind_local_pty_output_and_release_cleanly() {
         .handle_terminal_output(&response.terminal_id)
         .await
         .expect("read local terminal output");
-    assert_eq!(output.output, "vtcode-terminal");
+    assert_eq!(output.output.trim(), "vtcode-terminal");
     assert!(!output.truncated);
     assert_eq!(output.exit_status, Some(exit_status.clone()));
 
@@ -534,13 +538,17 @@ async fn copilot_terminal_sessions_bind_local_pty_output_and_release_cleanly() {
     assert!(events.iter().any(|entry| {
         entry["event"]["type"] == "item.updated"
             && entry["event"]["item"]["type"] == "tool_output"
-            && entry["event"]["item"]["output"] == "vtcode-terminal"
+            && entry["event"]["item"]["output"]
+                .as_str()
+                .is_some_and(|output| output.trim() == "vtcode-terminal")
     }));
     assert!(events.iter().any(|entry| {
         entry["event"]["type"] == "item.completed"
             && entry["event"]["item"]["type"] == "tool_output"
             && entry["event"]["item"]["status"] == "completed"
-            && entry["event"]["item"]["output"] == "vtcode-terminal"
+            && entry["event"]["item"]["output"]
+                .as_str()
+                .is_some_and(|output| output.trim() == "vtcode-terminal")
     }));
 
     runtime_host
@@ -671,11 +679,20 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
     let traj = TrajectoryLogger::new(temp.path());
     let mut harness_state =
         HarnessTurnState::new(TurnRunId("run-test".to_string()), TurnId("turn-test".to_string()), 8, 60, 0);
-    let tools = Arc::new(vec![ToolDefinition::function(
-        vtcode_core::config::constants::tools::APPLY_PATCH.to_string(),
-        "Apply a patch".to_string(),
-        json!({"type": "object"}),
-    )]);
+    harness_state.record_assistant_text_response();
+    harness_state.record_assistant_text_response();
+    let tools = Arc::new(vec![
+        ToolDefinition::function(
+            vtcode_core::config::constants::tools::APPLY_PATCH.to_string(),
+            "Apply a patch".to_string(),
+            json!({"type": "object"}),
+        ),
+        ToolDefinition::function(
+            vtcode_core::config::constants::tools::EXEC_COMMAND.to_string(),
+            "Run a command".to_string(),
+            json!({"type": "object"}),
+        ),
+    ]);
     let mut loop_tracker = LoopTracker::new();
     loop_tracker.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD - 1;
@@ -740,8 +757,11 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
             .as_deref()
             .is_some_and(|tracker| tracker.verification_is_pending())
     );
+    assert_eq!(runtime_host.harness_state.consecutive_assistant_text_responses, 0);
+    assert!(runtime_host.harness_state.has_out_of_band_tool_progress());
     assert!(suppress_output_signal_for_assertion.load(Ordering::Acquire));
 
+    runtime_host.harness_state.record_assistant_text_response();
     let response = runtime_host
         .handle_vtcode_tool_call(
             &mut renderer,
@@ -763,4 +783,49 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
         other => panic!("unexpected Copilot response: {other:?}"),
     }
     assert!(!blocked_target.exists(), "blocked mutation must not reach the tool pipeline");
+    assert_eq!(
+        runtime_host.harness_state.consecutive_assistant_text_responses, 1,
+        "a denied inline mutation is not a productive response-streak boundary"
+    );
+
+    assert!(runtime_host.session_stats.verification_pending());
+    let response = runtime_host
+        .handle_vtcode_tool_call(
+            &mut renderer,
+            vtcode_core::copilot::CopilotToolCallRequest {
+                tool_call_id: "verification-call".to_string(),
+                tool_name: vtcode_core::config::constants::tools::EXEC_COMMAND.to_string(),
+                arguments: json!({
+                    "action": "run",
+                    "command": "rustc --version"
+                }),
+            },
+        )
+        .await
+        .expect("successful Copilot verifier should return a tool response");
+
+    match response {
+        CopilotToolCallResponse::Success(_) => {}
+        other => panic!("unexpected verification response: {other:?}"),
+    }
+    assert!(
+        runtime_host
+            .loop_tracker
+            .as_deref()
+            .is_some_and(|tracker| !tracker.verification_is_pending())
+    );
+    assert!(!runtime_host.session_stats.verification_pending());
+    assert_eq!(
+        runtime_host.harness_state.consecutive_assistant_text_responses, 0,
+        "successful inline verification must remain visible in authoritative turn state"
+    );
+
+    let resumed_tracker = LoopTracker::with_verification_pending(runtime_host.session_stats.verification_pending());
+    assert!(!mutation_blocked_until_verification(
+        &resumed_tracker,
+        vtcode_core::config::constants::tools::APPLY_PATCH,
+        &json!({
+            "patch": "*** Begin Patch\n*** Add File: resumed.txt\n+mutation is unblocked\n*** End Patch\n"
+        }),
+    ));
 }
