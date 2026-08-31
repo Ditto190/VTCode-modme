@@ -380,9 +380,8 @@ pub(crate) async fn update_input_status_if_changed(
 
 fn auto_status_layout(state: &InputStatusState) -> BottomStatusLayout {
     let mut layout = BottomStatusLayout::default();
-    layout.right.push(state.git_left.clone().unwrap_or_default());
     layout.right = [
-        layout.right,
+        state.git_left.clone().into_iter().collect(),
         auto_status_components(state.thread_context.as_deref(), state.is_cancelling, state.spooled_files_count, state),
     ]
     .into_iter()
