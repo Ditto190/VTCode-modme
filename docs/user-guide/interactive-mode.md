@@ -13,11 +13,10 @@ The VT Code terminal UI includes an interactive mode that combines keyboard-firs
 | `Ctrl+C`                                    | Cancel the current generation or command. Press twice to terminate the session. | Works during prompts, tool execution, and streaming replies.                                                                              |
 | `Ctrl+D`                                    | Exit VT Code interactive mode.                                                  | Sends EOF to the shell integration.                                                                                                       |
 | `Ctrl+L`                                    | Clear the terminal screen while keeping the conversation history.               | Useful for refreshing when output is cluttered.                                                                                           |
-| `Ctrl+T`                                    | Open or close fullscreen transcript review; transpose input otherwise.           | In fullscreen, reviews the complete transcript. Outside fullscreen, keeps the readline transpose shortcut.                                |
+| `Ctrl+T`                                    | Open or close the fullscreen tool-output viewer; transpose input otherwise.      | In fullscreen, reviews complete command output. Outside fullscreen, keeps the readline transpose shortcut.                                |
 | `Alt+T`                                     | Toggle compact or expanded tool summaries.                                      | Rebindable; the default compact presentation keeps live command output bounded.                                                         |
 | `Alt+G`                                     | Toggle the TODO task panel.                                                     | Rebindable via `toggle_task_panel`; works even when `ui.show_task_panel` is off.                                                          |
 | `Ctrl+O`                                    | Copy last agent response as markdown to clipboard.                              | Available after the agent has produced at least one response.                                                                             |
-| `Alt+O`                                     | Compatibility alias for transcript review.                                      | Available when VT Code is using alternate-screen rendering.                                                                               |
 | `Ctrl+A`                                    | Move cursor to start of input line.                                             | UNIX/readline-style editing.                                                                                                              |
 | `Ctrl+E`                                    | Move cursor to end of input line (or open external editor when input is empty). | Uses `tools.editor` config, then `VISUAL`/`EDITOR`. Configure it with `/config tools.editor`.                                             |
 | `Ctrl+Home`                                 | Jump to the oldest visible transcript content.                                  | Fullscreen rendering only.                                                                                                                |
@@ -68,7 +67,7 @@ The VT Code terminal UI includes an interactive mode that combines keyboard-firs
 
 ## Fullscreen Rendering
 
-When VT Code is running in alternate-screen mode, the transcript and composer use a fixed fullscreen layout similar to terminal applications such as `vim` or `less`. The input stays pinned at the bottom, mouse handling is internal to VT Code, and transcript review/search happens inside the app instead of your terminal scrollback.
+When VT Code is running in alternate-screen mode, the transcript and composer use a fixed fullscreen layout similar to terminal applications such as `vim` or `less`. The input stays pinned at the bottom, mouse handling is internal to VT Code, and the tool-output viewer/search happens inside the app instead of your terminal scrollback.
 
 ### Fullscreen Navigation
 
@@ -79,15 +78,15 @@ When VT Code is running in alternate-screen mode, the transcript and composer us
 | `Ctrl+End`      | Jump to the latest transcript content and resume auto-follow. |
 | Mouse wheel     | Scroll the live transcript when mouse capture is enabled.     |
 
-### Transcript Review Surface
+### Tool-Output Viewer
 
-Press `Ctrl+T` to open or close the fullscreen transcript review surface. `Alt+O` remains a compatibility alias. The review builds a plain-text view of the full conversation, including complete PTY captures and expanded collapsed tool payloads, so search and export operate on the complete transcript rather than only the visible viewport.
+Press `Ctrl+T` to open or close the fullscreen tool-output viewer. The viewer builds a session-local plain-text view of complete command output, including PTY captures and separate pipe stdout/stderr streams, so search and export operate on the full tool output rather than only the bounded live viewport.
 
 | Shortcut                   | Description                                                                              |
 | :------------------------- | :--------------------------------------------------------------------------------------- |
-| `/`                        | Start a case-insensitive transcript search.                                              |
+| `/`                        | Start a case-insensitive tool-output search.                                             |
 | `Enter`                    | Commit the current search and jump to the first match.                                   |
-| `Esc`                      | Cancel the active search, or close transcript review when search is idle.                |
+| `Esc`                      | Cancel the active search, or close the viewer when search is idle.                        |
 | `n` / `N`                  | Jump to the next or previous search match.                                               |
 | `j` / `k` or `Up` / `Down` | Scroll one line.                                                                         |
 | `Ctrl+U` / `Ctrl+D`        | Scroll half a page.                                                                      |
@@ -95,9 +94,9 @@ Press `Ctrl+T` to open or close the fullscreen transcript review surface. `Alt+O
 | `Ctrl+F` / `Space`         | Scroll a full page down.                                                                 |
 | `g` / `Home`               | Jump to the top.                                                                         |
 | `G` / `End`                | Jump to the bottom.                                                                      |
-| `[`                        | Hand the expanded transcript to the terminal's native scrollback until you return.       |
-| `v`                        | Write the expanded transcript to a temporary file and open it in your configured editor. |
-| `q`, `Ctrl+T`, or `Alt+O`  | Close transcript review.                                                                 |
+| `[`                        | Hand the complete tool output to the terminal's native scrollback until you return.      |
+| `v`                        | Write the complete tool output to a temporary file and open it in your configured editor.|
+| `q` or `Ctrl+T`            | Close the tool-output viewer.                                                            |
 
 ### Mouse Capture, Copy, and tmux
 

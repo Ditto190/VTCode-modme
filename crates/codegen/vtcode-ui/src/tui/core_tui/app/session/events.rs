@@ -49,10 +49,10 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
         return Some(InlineEvent::Submit(submitted.into()));
     }
 
-    if let Some(review) = session.transcript_review_state_mut()
-        && review.search_active()
+    if let Some(viewer) = session.tool_output_viewer_state_mut()
+        && viewer.search_active()
     {
-        review.insert_search_text(content);
+        viewer.insert_search_text(content);
         session.mark_dirty();
     } else if session.core.input_enabled() {
         session.insert_paste_text(content);
@@ -490,10 +490,10 @@ pub(super) fn process_key_with_clipboard_image_reader(
         return None;
     }
 
-    match handle_transcript_review_key(session, &key, has_control, has_alt, has_command) {
-        TranscriptReviewKeyResult::Emit(event) => return Some(event),
-        TranscriptReviewKeyResult::Handled => return None,
-        TranscriptReviewKeyResult::NotHandled => {}
+    match handle_tool_output_viewer_key(session, &key, has_control, has_alt, has_command) {
+        ToolOutputViewerKeyResult::Emit(event) => return Some(event),
+        ToolOutputViewerKeyResult::Handled => return None,
+        ToolOutputViewerKeyResult::NotHandled => {}
     }
 
     if let Some(event) = handle_diff_preview_key(session, &key) {
@@ -651,8 +651,9 @@ pub(super) fn process_key_with_clipboard_image_reader(
             None
         }
         KeyCode::Char('t') | KeyCode::Char('T') if has_control && !has_alt && !has_command => {
-            // Ctrl+T: open transcript review in fullscreen; otherwise
-            // transpose characters (Readline).
+            // Ctrl+T opens the full tool-output viewer in fullscreen. When the
+            // viewer is not active, the viewer handler leaves this key to the
+            // readline transpose behavior.
             if session.core.input_enabled() {
                 session.transpose_chars();
                 session.update_input_triggers();
@@ -1266,169 +1267,164 @@ fn maybe_show_help_modal(session: &mut Session) -> bool {
     true
 }
 
-enum TranscriptReviewKeyResult {
+enum ToolOutputViewerKeyResult {
     NotHandled,
     Handled,
     Emit(InlineEvent),
 }
 
-fn handle_transcript_review_key(
+fn handle_tool_output_viewer_key(
     session: &mut Session,
     key: &KeyEvent,
     has_control: bool,
     has_alt: bool,
     has_command: bool,
-) -> TranscriptReviewKeyResult {
-    let compatibility_alias =
-        has_alt && !has_control && !has_command && matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O'));
-    let configured_shortcut = session
-        .core
-        .resolve_rebindable_action(key)
-        .is_some_and(|action| action == Action::OpenTranscriptReview);
-    let open_shortcut = compatibility_alias || configured_shortcut;
-    if session.transcript_review_state().is_none() {
-        if !session.core.fullscreen.active || !open_shortcut {
-            return TranscriptReviewKeyResult::NotHandled;
+) -> ToolOutputViewerKeyResult {
+    let toggle_shortcut =
+        has_control && !has_alt && !has_command && matches!(key.code, KeyCode::Char('t') | KeyCode::Char('T'));
+    if session.tool_output_viewer_state().is_none() {
+        if !session.core.fullscreen.active || !toggle_shortcut {
+            return ToolOutputViewerKeyResult::NotHandled;
         }
 
         let width = session.core.transcript_width.max(1);
         let height = session.core.transcript_rows.max(1);
-        session.open_transcript_review(width, height);
-        return TranscriptReviewKeyResult::Handled;
+        session.open_tool_output_viewer(width, height);
+        return ToolOutputViewerKeyResult::Handled;
     }
 
-    if open_shortcut {
-        session.close_transcript_review();
-        return TranscriptReviewKeyResult::Handled;
+    if toggle_shortcut {
+        session.close_tool_output_viewer();
+        return ToolOutputViewerKeyResult::Handled;
     }
 
-    let review_copy_shortcut =
+    let viewer_copy_shortcut =
         matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('\u{3}')) && has_control;
-    if review_copy_shortcut && session.core.mouse_selection.has_selection {
+    if viewer_copy_shortcut && session.core.mouse_selection.has_selection {
         session.core.mouse_selection.request_copy();
         session.mark_dirty();
-        return TranscriptReviewKeyResult::Handled;
+        return ToolOutputViewerKeyResult::Handled;
     }
 
     let viewport_height = session.core.transcript_rows.max(1);
-    let Some(review) = session.transcript_review_state_mut() else {
-        return TranscriptReviewKeyResult::Handled;
+    let Some(viewer) = session.tool_output_viewer_state_mut() else {
+        return ToolOutputViewerKeyResult::Handled;
     };
 
-    if review.search_active() {
+    if viewer.search_active() {
         match key.code {
             KeyCode::Esc => {
-                review.cancel_search();
+                viewer.cancel_search();
                 session.mark_dirty();
-                return TranscriptReviewKeyResult::Handled;
+                return ToolOutputViewerKeyResult::Handled;
             }
             KeyCode::Enter => {
-                review.commit_search(viewport_height);
+                viewer.commit_search(viewport_height);
                 session.mark_dirty();
-                return TranscriptReviewKeyResult::Handled;
+                return ToolOutputViewerKeyResult::Handled;
             }
             KeyCode::Backspace => {
-                review.backspace_search();
+                viewer.backspace_search();
                 session.mark_dirty();
-                return TranscriptReviewKeyResult::Handled;
+                return ToolOutputViewerKeyResult::Handled;
             }
             KeyCode::Char(ch) if !has_control && !has_alt && !has_command => {
-                review.insert_search_text(&ch.to_string());
+                viewer.insert_search_text(&ch.to_string());
                 session.mark_dirty();
-                return TranscriptReviewKeyResult::Handled;
+                return ToolOutputViewerKeyResult::Handled;
             }
             _ => {
-                return TranscriptReviewKeyResult::Handled;
+                return ToolOutputViewerKeyResult::Handled;
             }
         }
     }
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-            session.close_transcript_review();
-            TranscriptReviewKeyResult::Handled
+            session.close_tool_output_viewer();
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('/') if !has_control && !has_alt && !has_command => {
-            review.start_search();
+            viewer.start_search();
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('n') if !has_control && !has_alt && !has_command => {
-            review.jump_next_match(viewport_height);
+            viewer.jump_next_match(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('N') if !has_control && !has_alt && !has_command => {
-            review.jump_previous_match(viewport_height);
+            viewer.jump_previous_match(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Up | KeyCode::Char('k') if !has_control && !has_alt && !has_command => {
-            review.scroll_line_up(viewport_height);
+            viewer.scroll_line_up(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Down | KeyCode::Char('j') if !has_control && !has_alt && !has_command => {
-            review.scroll_line_down(viewport_height);
+            viewer.scroll_line_down(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::PageUp => {
-            review.scroll_half_page_up(viewport_height);
+            viewer.scroll_half_page_up(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::PageDown => {
-            review.scroll_half_page_down(viewport_height);
+            viewer.scroll_half_page_down(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('u') | KeyCode::Char('U') if has_control && !has_alt && !has_command => {
-            review.scroll_half_page_up(viewport_height);
+            viewer.scroll_half_page_up(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('d') | KeyCode::Char('D') if has_control && !has_alt && !has_command => {
-            review.scroll_half_page_down(viewport_height);
+            viewer.scroll_half_page_down(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('b') | KeyCode::Char('B') if !has_alt && !has_command => {
-            review.scroll_full_page_up(viewport_height);
+            viewer.scroll_full_page_up(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('f') | KeyCode::Char('F') if has_control && !has_alt && !has_command => {
-            review.scroll_full_page_down(viewport_height);
+            viewer.scroll_full_page_down(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char(' ') if !has_control && !has_alt && !has_command => {
-            review.scroll_full_page_down(viewport_height);
+            viewer.scroll_full_page_down(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Home | KeyCode::Char('g') if !has_control && !has_alt && !has_command => {
-            review.scroll_to_top();
+            viewer.scroll_to_top();
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::End | KeyCode::Char('G') if !has_control && !has_alt && !has_command => {
-            review.scroll_to_bottom(viewport_height);
+            viewer.scroll_to_bottom(viewport_height);
             session.mark_dirty();
-            TranscriptReviewKeyResult::Handled
+            ToolOutputViewerKeyResult::Handled
         }
         KeyCode::Char('[') if !has_control && !has_alt && !has_command => {
-            TranscriptReviewKeyResult::Emit(InlineEvent::OpenTranscriptReviewScrollback(review.export_text()))
+            ToolOutputViewerKeyResult::Emit(InlineEvent::OpenToolOutputScrollback(viewer.export_text()))
         }
         KeyCode::Char('v') | KeyCode::Char('V') if !has_control && !has_alt && !has_command => {
-            TranscriptReviewKeyResult::Emit(InlineEvent::OpenTranscriptReviewInEditor(review.export_text()))
+            ToolOutputViewerKeyResult::Emit(InlineEvent::OpenToolOutputInEditor(viewer.export_text()))
         }
         // Let Ctrl+O (copy response) pass through to the main key handler
         _ if has_control && !has_alt && !has_command && matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O')) => {
-            TranscriptReviewKeyResult::NotHandled
+            ToolOutputViewerKeyResult::NotHandled
         }
-        _ => TranscriptReviewKeyResult::Handled,
+        _ => ToolOutputViewerKeyResult::Handled,
     }
 }
 
@@ -1678,9 +1674,7 @@ fn handle_diff_preview_key(session: &mut Session, key: &KeyEvent) -> Option<Inli
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::config::constants::ui;
     use crate::tui::core_tui::app::types::{ModalOverlayRequest, TransientRequest};
-    use crate::tui::core_tui::session::action::BindingStore;
     use crate::tui::core_tui::types::{
         InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, SecurePromptConfig,
     };
@@ -1717,42 +1711,19 @@ mod tests {
     }
 
     #[test]
-    fn alt_o_opens_and_closes_transcript_review() {
+    fn ctrl_t_opens_and_closes_tool_output_viewer_in_fullscreen() {
         let mut session = build_session();
-        session
-            .core
-            .push_line(InlineMessageKind::Agent, vec![text_segment("hello review")]);
-
-        assert!(session.transcript_review_state().is_none());
-
-        assert!(
-            session
-                .process_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT))
-                .is_none()
-        );
-        assert!(session.transcript_review_state().is_some());
-
-        assert!(
-            session
-                .process_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT))
-                .is_none()
-        );
-        assert!(session.transcript_review_state().is_none());
-    }
-
-    #[test]
-    fn ctrl_t_opens_and_closes_transcript_review_in_fullscreen() {
-        let mut session = build_session();
-        session
-            .core
-            .push_line(InlineMessageKind::Agent, vec![text_segment("hello review")]);
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: vec!["• Ran echo hello".to_string(), "  └ hello".to_string()],
+        });
+        session.tool_output_revision = 1;
 
         let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
         assert!(session.process_key(key).is_none());
-        assert!(session.transcript_review_state().is_some());
+        assert!(session.tool_output_viewer_state().is_some());
 
         assert!(session.process_key(key).is_none());
-        assert!(session.transcript_review_state().is_none());
+        assert!(session.tool_output_viewer_state().is_none());
     }
 
     #[test]
@@ -1765,36 +1736,6 @@ mod tests {
 
         assert!(result.is_none());
         assert_eq!(session.core.input_manager.content(), "bac");
-        assert!(session.transcript_review_state().is_none());
-    }
-
-    #[test]
-    fn rebound_transcript_review_action_opens_review() {
-        let mut bindings = hashbrown::HashMap::new();
-        bindings.insert("open_transcript_review".to_string(), vec!["ctrl+x".to_string()]);
-        let mut session = Session::new_with_logs_and_bindings(
-            InlineTheme::default(),
-            None,
-            24,
-            true,
-            None,
-            Vec::new(),
-            "Agent TUI".to_string(),
-            BindingStore::new(bindings),
-        );
-        session.core.set_fullscreen_active(true);
-        session.core.apply_transcript_rows(8);
-        session.core.apply_transcript_width(60);
-        session
-            .core
-            .push_line(InlineMessageKind::Agent, vec![text_segment("hello review")]);
-
-        assert!(
-            session
-                .process_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL))
-                .is_none()
-        );
-        assert!(session.transcript_review_state().is_some());
     }
 
     #[test]
@@ -1839,13 +1780,18 @@ mod tests {
     }
 
     #[test]
-    fn transcript_review_search_accept_and_cancel_work() {
+    fn tool_output_viewer_search_accept_and_cancel_work() {
         let mut session = build_session();
-        for line in ["alpha", "beta alpha", "gamma alpha"] {
-            session.core.push_line(InlineMessageKind::Agent, vec![text_segment(line)]);
-        }
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: vec![
+                "• Ran alpha".to_string(),
+                "  └ beta alpha".to_string(),
+                "  └ gamma alpha".to_string(),
+            ],
+        });
+        session.tool_output_revision = 1;
 
-        let _ = session.process_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT));
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
         let _ = session.process_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
         for ch in ['a', 'l', 'p', 'h', 'a'] {
             let _ = session.process_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
@@ -1853,7 +1799,7 @@ mod tests {
         let _ = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = session.process_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
 
-        let status = session.transcript_review_state().expect("review open").status_label();
+        let status = session.tool_output_viewer_state().expect("viewer open").status_label();
         assert!(status.contains("search 'alpha'"));
         assert!(status.contains("(2/3)"));
 
@@ -1861,42 +1807,99 @@ mod tests {
         let _ = session.process_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
         let _ = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
-        let status = session.transcript_review_state().expect("review open").status_label();
+        let status = session.tool_output_viewer_state().expect("viewer open").status_label();
         assert!(status.contains("search 'alpha'"));
     }
 
     #[test]
-    fn transcript_review_exports_expanded_collapsed_content() {
+    fn tool_output_viewer_exports_complete_tool_output() {
         let mut session = build_session();
-        let line_total = ui::INLINE_JSON_COLLAPSE_LINE_THRESHOLD + 5;
-        let payload = format!(
-            "[\n{}\n]",
-            (0..line_total)
-                .map(|index| format!("  {{\"line\": {index}}}"))
-                .collect::<Vec<_>>()
-                .join(",\n")
-        );
-        session
-            .core
-            .append_pasted_message(InlineMessageKind::Tool, payload.clone(), line_total);
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: vec![
+                "• Ran printf complete".to_string(),
+                "  └ first complete line".to_string(),
+                "    second complete line".to_string(),
+            ],
+        });
+        session.tool_output_revision = 1;
 
-        let _ = session.process_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT));
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
 
         match session.process_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)) {
-            Some(InlineEvent::OpenTranscriptReviewInEditor(text)) => {
-                assert!(text.contains("\"line\": 0"));
-                assert!(text.contains(&format!("\"line\": {}", line_total - 1)));
+            Some(InlineEvent::OpenToolOutputInEditor(text)) => {
+                assert!(text.contains("first complete line"));
+                assert!(text.contains("second complete line"));
             }
-            other => panic!("unexpected review editor event: {other:?}"),
+            other => panic!("unexpected viewer editor event: {other:?}"),
         }
 
         match session.process_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE)) {
-            Some(InlineEvent::OpenTranscriptReviewScrollback(text)) => {
-                assert!(text.contains("\"line\": 0"));
-                assert!(text.contains(&format!("\"line\": {}", line_total - 1)));
+            Some(InlineEvent::OpenToolOutputScrollback(text)) => {
+                assert!(text.contains("first complete line"));
+                assert!(text.contains("second complete line"));
             }
-            other => panic!("unexpected review scrollback event: {other:?}"),
+            other => panic!("unexpected viewer scrollback event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn tool_output_viewer_scrolls_copies_selection_and_closes() {
+        let mut session = build_session();
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: (0..20).map(|index| format!("output line {index}")).collect(),
+        });
+        session.tool_output_revision = 1;
+
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        let initial_status = session.tool_output_viewer_state().expect("viewer open").status_label();
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let top_status = session.tool_output_viewer_state().expect("viewer open").status_label();
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let next_status = session.tool_output_viewer_state().expect("viewer open").status_label();
+
+        assert!(initial_status.contains("line 13/20"));
+        assert!(top_status.contains("line 1/20"));
+        assert!(next_status.contains("line 2/20"));
+
+        session.core.mouse_selection.set_selection((1, 1), (8, 1));
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(session.core.mouse_selection.has_copy_request());
+
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(session.tool_output_viewer_state().is_none());
+    }
+
+    #[test]
+    fn tool_output_viewer_mouse_scroll_does_not_move_transcript() {
+        let mut session = build_session();
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: (0..20).map(|index| format!("output line {index}")).collect(),
+        });
+        session.tool_output_revision = 1;
+        for index in 0..20 {
+            session
+                .core
+                .push_line(InlineMessageKind::Agent, vec![text_segment(format!("transcript line {index}"))]);
+        }
+
+        let _ = session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        let transcript_offset = session.core.scroll_offset();
+        let viewer_status = session.tool_output_viewer_state().expect("viewer open").status_label();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        session.handle_event(
+            CrosstermEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            }),
+            &tx,
+            None,
+        );
+
+        assert_eq!(session.core.scroll_offset(), transcript_offset);
+        assert_ne!(session.tool_output_viewer_state().expect("viewer open").status_label(), viewer_status);
     }
 
     #[test]

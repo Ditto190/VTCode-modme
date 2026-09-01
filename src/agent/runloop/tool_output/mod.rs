@@ -559,6 +559,7 @@ pub(crate) fn collect_inline_output(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use vtcode_core::config::ToolDisplayMode;
     use vtcode_core::ui::InlineHandle;
     use vtcode_core::utils::ansi::AnsiRenderer;
 
@@ -747,6 +748,7 @@ mod tests {
     async fn render_tool_output_exec_command_renders_terminal_panel_with_output() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        renderer.set_tool_display_mode(ToolDisplayMode::Expanded);
         let payload = json!({
             "command": "cargo check",
             "output": "Compiling vtcode v0.135.9",
@@ -769,6 +771,24 @@ mod tests {
             !inline_output.contains("(no output)"),
             "exec_command output must not fall through to the no-output status renderer"
         );
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_exec_command_compact_hides_completed_stdout() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "command": "cargo check",
+            "stdout": "verbose completed output",
+            "stderr": ""
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::EXEC_COMMAND), &payload, None)
+            .await
+            .expect("exec_command payload should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(!inline_output.contains("verbose completed output"));
     }
 
     #[tokio::test]

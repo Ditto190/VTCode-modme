@@ -45,6 +45,21 @@ impl Session {
         })
     }
 
+    fn handle_tool_output_viewer_scroll(&mut self, down: bool) -> bool {
+        let viewport_height = self.core.transcript_rows.max(1);
+        let Some(viewer) = self.tool_output_viewer_state_mut() else {
+            return false;
+        };
+
+        if down {
+            viewer.scroll_line_down(viewport_height);
+        } else {
+            viewer.scroll_line_up(viewport_height);
+        }
+        self.mark_dirty();
+        true
+    }
+
     fn panel_row_index(&self, layout: &list_panel::ListPanelLayout, column: u16, row: u16) -> Option<usize> {
         let area = self.core.bottom_panel_area()?;
         layout.row_index(area, column, row)
@@ -496,7 +511,8 @@ impl Session {
                     MouseEventKind::ScrollDown => {
                         self.core.clear_pending_link_click();
                         self.core.mouse_selection.clear_click_history();
-                        if !self.handle_active_overlay_scroll(mouse_event, true, events, callback)
+                        if !self.handle_tool_output_viewer_scroll(true)
+                            && !self.handle_active_overlay_scroll(mouse_event, true, events, callback)
                             && !self.handle_bottom_panel_scroll(true)
                         {
                             self.scroll_line_down();
@@ -506,7 +522,8 @@ impl Session {
                     MouseEventKind::ScrollUp => {
                         self.core.clear_pending_link_click();
                         self.core.mouse_selection.clear_click_history();
-                        if !self.handle_active_overlay_scroll(mouse_event, false, events, callback)
+                        if !self.handle_tool_output_viewer_scroll(false)
+                            && !self.handle_active_overlay_scroll(mouse_event, false, events, callback)
                             && !self.handle_bottom_panel_scroll(false)
                         {
                             self.scroll_line_up();

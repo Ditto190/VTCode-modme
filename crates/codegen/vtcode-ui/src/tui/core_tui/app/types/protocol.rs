@@ -50,8 +50,8 @@ pub enum InlineCommand {
         lines: Vec<Vec<InlineSegment>>,
         link_ranges: Option<Vec<Vec<InlineLinkRange>>>,
     },
-    /// Attach the complete capture for the most recent streamed PTY block.
-    SetPtyTranscript {
+    /// Retain one complete tool-call capture for the session-local viewer.
+    RecordToolOutput {
         lines: Vec<String>,
     },
     SetPrompt {
@@ -171,8 +171,8 @@ pub enum InlineEvent {
     LaunchEditor {
         draft: String,
     },
-    OpenTranscriptReviewInEditor(String),
-    OpenTranscriptReviewScrollback(String),
+    OpenToolOutputInEditor(String),
+    OpenToolOutputScrollback(String),
     ForceCancelPtySession,
     RequestInlinePromptSuggestion(String),
     CyclePrimaryAgent,
@@ -302,8 +302,8 @@ impl InlineHandle {
         self.send_command(InlineCommand::ReplaceLast { count, kind, lines, link_ranges: Some(link_ranges) });
     }
 
-    pub fn set_pty_transcript(&self, lines: Vec<String>) {
-        self.send_command(InlineCommand::SetPtyTranscript { lines });
+    pub fn record_tool_output(&self, lines: Vec<String>) {
+        self.send_command(InlineCommand::RecordToolOutput { lines });
     }
 
     pub fn suspend_event_loop(&self) {

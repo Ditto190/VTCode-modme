@@ -31,9 +31,7 @@ pub enum Action {
     HistoryNext,
     /// Toggle the log panel visibility.
     ToggleLogs,
-    /// Open or close the fullscreen transcript review.
-    OpenTranscriptReview,
-    /// Toggle compact grouping for tool transition summaries.
+    /// Toggle compact per-call tool summaries.
     ToggleToolDisplayMode,
     /// Toggle the task panel visibility.
     ToggleTaskPanel,
@@ -56,7 +54,6 @@ impl Action {
             Action::HistoryPrevious => "history_previous",
             Action::HistoryNext => "history_next",
             Action::ToggleLogs => "toggle_logs",
-            Action::OpenTranscriptReview => "open_transcript_review",
             Action::ToggleToolDisplayMode => "toggle_tool_display_mode",
             Action::ToggleTaskPanel => "toggle_task_panel",
             Action::GeneratePromptSuggestion => "generate_prompt_suggestion",
@@ -77,7 +74,6 @@ impl Action {
             Action::HistoryPrevious,
             Action::HistoryNext,
             Action::ToggleLogs,
-            Action::OpenTranscriptReview,
             Action::ToggleToolDisplayMode,
             Action::ToggleTaskPanel,
             Action::GeneratePromptSuggestion,
@@ -226,12 +222,8 @@ fn default_bindings() -> HashMap<Action, Vec<(KeyCode, KeyModifiers)>> {
     m.insert(HistoryPrevious, vec![(KeyCode::Up, KeyModifiers::empty())]);
     m.insert(HistoryNext, vec![(KeyCode::Down, KeyModifiers::empty())]);
 
-    // Ctrl+T is reserved for transcript review in fullscreen.  Character
-    // transpose remains available outside fullscreen through the hardcoded
-    // editor dispatch, and ToggleLogs remains rebindable for compatibility.
-    m.insert(ToggleLogs, Vec::new());
     m.insert(
-        OpenTranscriptReview,
+        ToggleLogs,
         vec![
             (KeyCode::Char('t'), KeyModifiers::CONTROL),
             (KeyCode::Char('T'), KeyModifiers::CONTROL),
@@ -443,26 +435,6 @@ mod tests {
         let store = BindingStore::defaults();
         let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT);
         assert_eq!(store.resolve(&key), Some(Action::ToggleToolDisplayMode));
-    }
-
-    #[test]
-    fn test_default_transcript_review_binding_is_ctrl_t() {
-        let store = BindingStore::defaults();
-        let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
-        assert_eq!(store.resolve(&key), Some(Action::OpenTranscriptReview));
-    }
-
-    #[test]
-    fn test_transcript_review_binding_can_be_rebound() {
-        let mut overlay = HashMap::new();
-        overlay.insert("open_transcript_review".to_string(), vec!["ctrl+x".to_string()]);
-        let store = BindingStore::new(overlay);
-
-        assert_eq!(
-            store.resolve(&KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL)),
-            Some(Action::OpenTranscriptReview)
-        );
-        assert_eq!(store.resolve(&KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL)), None);
     }
 
     #[test]

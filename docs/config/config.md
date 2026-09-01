@@ -568,11 +568,11 @@ VT Code also honors these environment variables for default fullscreen behavior:
 - `VTCODE_FULLSCREEN_COPY_ON_SELECT=0|1`
 - `VTCODE_FULLSCREEN_SCROLL_SPEED=<1-20>`
 
-Interactive fullscreen review uses the same rendering surface:
+The fullscreen tool-output viewer uses the same rendering surface:
 
-- `Ctrl+T` opens a transcript review overlay with search, paging, and export controls. `Alt+O` remains a compatibility alias.
-- `[` hands the expanded transcript to native terminal scrollback until you return.
-- `v` opens the expanded transcript in your configured editor.
+- `Ctrl+T` opens a session-local tool-output viewer with search, paging, copy, and export controls.
+- `[` hands the complete tool output to native terminal scrollback until you return.
+- `v` opens the complete tool output in your configured editor.
 
 For the full shortcut list and tmux notes, see [Interactive Mode Reference](../user-guide/interactive-mode.md).
 

@@ -154,6 +154,7 @@ mod headless {
         pub fn replace_last(&self, count: usize, kind: InlineMessageKind, lines: Vec<Vec<InlineSegment>>) {
             self.send_command(InlineCommand::ReplaceLast { count, kind, lines });
         }
+        pub fn record_tool_output(&self, _lines: Vec<String>) {}
         pub fn force_redraw(&self) {
             self.send_command(InlineCommand::ForceRedraw);
         }

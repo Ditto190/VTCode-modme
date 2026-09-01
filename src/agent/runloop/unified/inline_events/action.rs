@@ -13,8 +13,8 @@ pub(crate) enum InlineLoopAction {
         name: Option<String>,
     },
     RequestInlinePromptSuggestion(String),
-    OpenTranscriptReviewInEditor(String),
-    OpenTranscriptReviewScrollback(String),
+    OpenToolOutputInEditor(String),
+    OpenToolOutputScrollback(String),
     Exit(SessionEndReason),
     ResumeSession(String), // Session identifier to resume
     ForkSession {

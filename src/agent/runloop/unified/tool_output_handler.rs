@@ -119,6 +119,12 @@ fn is_run_pty_tool(name: &str, args_val: &serde_json::Value) -> bool {
     renders_pty_command_header(name, args_val)
 }
 
+fn is_command_output_call(name: &str, args_val: &serde_json::Value) -> bool {
+    name == tools::EXECUTE_CODE
+        || tool_intent::is_command_run_tool_call(name, args_val)
+        || is_run_pty_tool(name, args_val)
+}
+
 fn compact_run_completion_line(output: &serde_json::Value, status: ToolDisplayStatus) -> Option<String> {
     if let Some(exit_code) = output.get("exit_code").and_then(serde_json::Value::as_i64) {
         if matches!(status, ToolDisplayStatus::Success) && exit_code == 0 {
@@ -228,15 +234,6 @@ fn record_summary_line(name: &str, args: &serde_json::Value, _output: &serde_jso
     transcript::append(&headline);
 }
 
-/// Record the tool output content (stdout/stderr) to the transcript only.
-fn record_output_lines(output: &serde_json::Value) {
-    for text in ordered_stream_texts(output) {
-        for line in text.lines() {
-            transcript::append(line);
-        }
-    }
-}
-
 fn contains_line_block(container: &str, candidate: &str) -> bool {
     let container_lines = container.lines().collect::<Vec<_>>();
     let candidate_lines = candidate.lines().collect::<Vec<_>>();
@@ -247,16 +244,24 @@ fn contains_line_block(container: &str, candidate: &str) -> bool {
             .any(|window| window == candidate_lines.as_slice())
 }
 
+fn streams_are_aliases(left: &str, right: &str) -> bool {
+    contains_line_block(left, right) || contains_line_block(right, left)
+}
+
+fn output_text<'a>(output: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    output
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim_end)
+        .filter(|text| !text.trim().is_empty())
+}
+
 fn ordered_stream_texts(output: &serde_json::Value) -> Vec<&str> {
     let mut texts: Vec<&str> = Vec::new();
     for key in ["output", "stdout", "stderr"] {
-        let Some(text) = output.get(key).and_then(serde_json::Value::as_str) else {
+        let Some(text) = output_text(output, key) else {
             continue;
         };
-        let text = text.trim_end();
-        if text.trim().is_empty() {
-            continue;
-        }
         if texts.iter().any(|existing| contains_line_block(existing, text)) {
             continue;
         }
@@ -269,8 +274,77 @@ fn ordered_stream_texts(output: &serde_json::Value) -> Vec<&str> {
     texts
 }
 
-async fn load_pty_capture(output: &serde_json::Value, workspace_root: Option<&Path>) -> Option<String> {
-    if let Some(spool_path) = output.get("spool_path").and_then(serde_json::Value::as_str) {
+#[derive(Clone, Copy)]
+struct CanonicalOutputStream<'a> {
+    label: Option<&'static str>,
+    text: &'a str,
+}
+
+fn canonical_pipe_streams(output: &serde_json::Value) -> Vec<CanonicalOutputStream<'_>> {
+    let merged = output_text(output, "output");
+    let stdout = output_text(output, "stdout");
+    let stderr = output_text(output, "stderr");
+    let mut streams = Vec::new();
+
+    if let Some(merged) = merged {
+        let stdout_is_in_merged = stdout.is_some_and(|text| contains_line_block(merged, text));
+        let stderr_is_in_merged = stderr.is_some_and(|text| contains_line_block(merged, text));
+
+        // A combined `output` field is authoritative when it contains both
+        // named streams. The named fields are aliases in that case and must
+        // not be appended a second time.
+        if stdout_is_in_merged && stderr_is_in_merged {
+            streams.push(CanonicalOutputStream { label: None, text: merged });
+            return streams;
+        }
+
+        // If `output` only mirrors one named stream, keep the merged text under
+        // that source label so expanded content is not lost and the alias is
+        // not appended a second time. Also handle a short `output` preview
+        // nested inside a named stream by preferring the longer named value.
+        let stdout_is_alias = stdout.is_some_and(|text| streams_are_aliases(merged, text));
+        let stderr_is_alias = stderr.is_some_and(|text| streams_are_aliases(merged, text));
+        if stdout_is_alias {
+            let text = stdout.filter(|text| contains_line_block(text, merged)).unwrap_or(merged);
+            streams.push(CanonicalOutputStream { label: Some("stdout"), text });
+        } else if stderr_is_alias {
+            let text = stderr.filter(|text| contains_line_block(text, merged)).unwrap_or(merged);
+            streams.push(CanonicalOutputStream { label: Some("stderr"), text });
+        } else {
+            streams.push(CanonicalOutputStream { label: None, text: merged });
+        }
+
+        if let Some(stdout) = stdout
+            && !stdout_is_alias
+            && !streams_are_aliases(stdout, merged)
+        {
+            streams.push(CanonicalOutputStream { label: Some("stdout"), text: stdout });
+        }
+        if let Some(stderr) = stderr
+            && !stderr_is_alias
+            && !streams_are_aliases(stderr, merged)
+        {
+            streams.push(CanonicalOutputStream { label: Some("stderr"), text: stderr });
+        }
+        return streams;
+    }
+
+    if let Some(stdout) = stdout {
+        streams.push(CanonicalOutputStream { label: Some("stdout"), text: stdout });
+    }
+    if let Some(stderr) = stderr {
+        streams.push(CanonicalOutputStream { label: Some("stderr"), text: stderr });
+    }
+    streams
+}
+
+async fn load_complete_output(output: &serde_json::Value, workspace_root: Option<&Path>) -> Option<String> {
+    if output.get("spool_path").is_some() {
+        let spool_path = output
+            .get("spool_path")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())?;
         let root = workspace_root?;
         let candidate = if Path::new(spool_path).is_absolute() {
             PathBuf::from(spool_path)
@@ -280,14 +354,14 @@ async fn load_pty_capture(output: &serde_json::Value, workspace_root: Option<&Pa
         let resolved = match ensure_path_within_workspace_resolved(&candidate, root).await {
             Ok(path) => path,
             Err(error) => {
-                tracing::warn!(path = %candidate.display(), %error, "Rejected PTY transcript spool path");
+                tracing::warn!(path = %candidate.display(), %error, "Rejected tool output spool path");
                 return None;
             }
         };
         return match tokio::fs::read_to_string(&resolved).await {
             Ok(content) => Some(content),
             Err(error) => {
-                tracing::warn!(path = %resolved.display(), %error, "Failed to read PTY transcript spool");
+                tracing::warn!(path = %resolved.display(), %error, "Failed to read tool output spool");
                 None
             }
         };
@@ -297,13 +371,54 @@ async fn load_pty_capture(output: &serde_json::Value, workspace_root: Option<&Pa
     (!texts.is_empty()).then(|| texts.join("\n"))
 }
 
-fn normalize_pty_capture_lines(capture: &str) -> Vec<String> {
-    let capture = vtcode_core::utils::ansi_parser::strip_ansi(capture);
+fn normalize_terminal_output_lines(capture: &str) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = String::new();
     let mut chars = capture.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
+            '\x1b' => match chars.next() {
+                Some('[') => {
+                    let mut params = String::new();
+                    let final_byte = loop {
+                        let Some(next) = chars.next() else {
+                            break None;
+                        };
+                        if ('@'..='~').contains(&next) {
+                            break Some(next);
+                        }
+                        params.push(next);
+                    };
+
+                    match final_byte {
+                        // Clear-screen sequences mean that the earlier text
+                        // was only a stale terminal frame, not command output
+                        // that should remain in the readable viewer.
+                        Some('J') if params.starts_with('2') || params.starts_with('3') => {
+                            lines.clear();
+                            current.clear();
+                        }
+                        // Erase the current line for the common progress-bar
+                        // rewrite sequence. Styling and cursor movement are
+                        // intentionally omitted from the plain-text viewer.
+                        Some('K') if params.starts_with('2') => current.clear(),
+                        _ => {}
+                    }
+                }
+                Some(']') => {
+                    // Skip OSC title/hyperlink sequences through BEL or ST.
+                    while let Some(next) = chars.next() {
+                        if next == '\x07' {
+                            break;
+                        }
+                        if next == '\x1b' && chars.peek() == Some(&'\\') {
+                            let _ = chars.next();
+                            break;
+                        }
+                    }
+                }
+                Some(_) | None => {}
+            },
             '\r' => {
                 if chars.peek() == Some(&'\n') {
                     let _ = chars.next();
@@ -313,6 +428,9 @@ fn normalize_pty_capture_lines(capture: &str) -> Vec<String> {
                 }
             }
             '\n' => lines.push(std::mem::take(&mut current)),
+            '\u{8}' => {
+                let _ = current.pop();
+            }
             _ => current.push(ch),
         }
     }
@@ -322,24 +440,19 @@ fn normalize_pty_capture_lines(capture: &str) -> Vec<String> {
     lines
 }
 
-fn build_pty_transcript_lines(
-    name: &str,
-    args: &serde_json::Value,
-    capture: &str,
-    workspace_root: Option<&Path>,
-) -> Vec<String> {
+fn command_output_header(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> String {
     let command = extract_command_line(args)
         .map(|command| vtcode_commons::formatting::collapse_whitespace(&command))
         .filter(|command| !command.is_empty())
         .map(|command| {
             crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths(&command, workspace_root)
         });
-    let header = command
+    command
         .map(|command| format!("• Ran {command}"))
-        .unwrap_or_else(|| format!("• Ran {}", name));
-    let output_lines = normalize_pty_capture_lines(capture);
-    let mut lines = Vec::with_capacity(output_lines.len() + 1);
-    lines.push(header);
+        .unwrap_or_else(|| format!("• Ran {name}"))
+}
+
+fn append_merged_output_lines(lines: &mut Vec<String>, output_lines: impl IntoIterator<Item = String>) {
     for (index, line) in output_lines.into_iter().enumerate() {
         if index == 0 {
             lines.push(format!("  └ {line}"));
@@ -347,6 +460,64 @@ fn build_pty_transcript_lines(
             lines.push(format!("    {line}"));
         }
     }
+}
+
+fn append_labeled_output_lines(lines: &mut Vec<String>, label: &str, output_lines: impl IntoIterator<Item = String>) {
+    lines.push(format!("  {label}:"));
+    for line in output_lines {
+        lines.push(format!("    {line}"));
+    }
+}
+
+fn append_viewer_status_line(lines: &mut Vec<String>, output: &serde_json::Value, status: ToolDisplayStatus) {
+    if !matches!(status, ToolDisplayStatus::Success)
+        && let Some(completion) = compact_run_completion_line(output, status)
+    {
+        lines.push(format!("    {completion}"));
+    }
+}
+
+fn build_merged_command_output_lines(
+    name: &str,
+    args: &serde_json::Value,
+    capture: &str,
+    workspace_root: Option<&Path>,
+    output: &serde_json::Value,
+    status: ToolDisplayStatus,
+) -> Vec<String> {
+    let output_lines = normalize_terminal_output_lines(capture);
+    let mut lines = vec![command_output_header(name, args, workspace_root)];
+    append_merged_output_lines(&mut lines, output_lines);
+    if let Some(note) = output_text(output, "critical_note") {
+        lines.push(format!("    {note}"));
+    }
+    append_viewer_status_line(&mut lines, output, status);
+    lines
+}
+
+fn build_pipe_command_output_lines(
+    name: &str,
+    args: &serde_json::Value,
+    output: &serde_json::Value,
+    workspace_root: Option<&Path>,
+    status: ToolDisplayStatus,
+) -> Vec<String> {
+    let mut lines = vec![command_output_header(name, args, workspace_root)];
+    for stream in canonical_pipe_streams(output) {
+        let output_lines = normalize_terminal_output_lines(stream.text);
+        if output_lines.is_empty() {
+            continue;
+        }
+        if let Some(label) = stream.label {
+            append_labeled_output_lines(&mut lines, label, output_lines);
+        } else {
+            append_merged_output_lines(&mut lines, output_lines);
+        }
+    }
+    if let Some(note) = output_text(output, "critical_note") {
+        lines.push(format!("    {note}"));
+    }
+    append_viewer_status_line(&mut lines, output, status);
     lines
 }
 
@@ -362,27 +533,47 @@ async fn render_tool_output_common(
 ) -> Result<()> {
     let inline_run_tool = renderer.supports_inline_ui() && streams_pty_output(name, args_val);
     let git_diff_payload = is_git_diff_payload(output);
+    let status = ToolDisplayStatus::from_command_output(output, command_success);
+    let has_spool_path = output.get("spool_path").is_some();
+    let complete_capture = if renderer.supports_inline_ui()
+        && is_command_output_call(name, args_val)
+        && (inline_run_tool || has_spool_path)
+    {
+        load_complete_output(output, workspace_root).await
+    } else {
+        None
+    };
 
     // For streamed inline PTY tools: the pre-execution Pty block already
     // shows "• Ran ..." and output. Skip duplicating the output in the TUI,
-    // but still record the summary and output content to the transcript.
+    // but still record the summary and complete output for the viewer.
     if inline_run_tool && !git_diff_payload {
         // Record the command summary to transcript (TUI already showed it via PTY block)
         record_summary_line(name, args_val, output, command_success);
 
         // Prefer the complete PTY spool (or the complete inline result) for
-        // transcript review. The live PTY block remains bounded separately.
-        if let Some(capture) = load_pty_capture(output, workspace_root).await {
-            let review_lines = build_pty_transcript_lines(name, args_val, &capture, workspace_root);
-            for line in normalize_pty_capture_lines(&capture) {
-                transcript::append(&line);
-            }
-            handle.set_pty_transcript(review_lines);
-        } else if output.get("spool_path").is_none() {
-            record_output_lines(output);
+        // the session-local tool-output viewer. The live PTY block remains
+        // bounded separately.
+        if let Some(capture) = complete_capture.as_deref() {
+            let viewer_lines =
+                build_merged_command_output_lines(name, args_val, capture, workspace_root, output, status);
+            handle.record_tool_output(viewer_lines);
+        } else {
+            // A rejected or unavailable spool must not fall back to a
+            // potentially untrusted path. Keep the command call visible in
+            // the viewer while retaining fail-closed spool handling.
+            handle.record_tool_output(if has_spool_path {
+                build_merged_command_output_lines(name, args_val, "", workspace_root, output, status)
+            } else {
+                build_pipe_command_output_lines(name, args_val, output, workspace_root, status)
+            });
         }
 
-        let status = ToolDisplayStatus::from_command_output(output, command_success);
+        if let Some(note) = output_text(output, "critical_note") {
+            renderer.line(MessageStyle::ToolError, note)?;
+            transcript::append(note);
+        }
+
         if !has_renderable_stream_content(output) && matches!(status, ToolDisplayStatus::Success) {
             if renderer.tool_display_mode() != ToolDisplayMode::Compact {
                 renderer.line(MessageStyle::Info, "(no output)")?;
@@ -402,6 +593,18 @@ async fn render_tool_output_common(
         return Ok(());
     }
 
+    if renderer.supports_inline_ui() && is_command_output_call(name, args_val) {
+        let viewer_lines = if inline_run_tool || has_spool_path {
+            complete_capture.map_or_else(
+                || build_merged_command_output_lines(name, args_val, "", workspace_root, output, status),
+                |capture| build_merged_command_output_lines(name, args_val, &capture, workspace_root, output, status),
+            )
+        } else {
+            build_pipe_command_output_lines(name, args_val, output, workspace_root, status)
+        };
+        handle.record_tool_output(viewer_lines);
+    }
+
     // Render the summary header for non-streamed tools.
     // (streamed PTY tools with git_diff_payload also skip summary here,
     //  falling through to the full render_tool_output path.)
@@ -409,7 +612,6 @@ async fn render_tool_output_common(
         let stream_label =
             crate::agent::runloop::unified::tool_summary::stream_label_from_output(output, command_success);
         let summary_ctx = crate::agent::runloop::unified::tool_summary::ToolSummaryRenderContext { workspace_root };
-        let status = ToolDisplayStatus::from_command_output(output, command_success);
         let bullet_color = status.color(ColorPalette::default());
         if matches!(status, ToolDisplayStatus::Success) {
             crate::agent::runloop::unified::tool_summary::render_tool_call_summary(
@@ -421,7 +623,6 @@ async fn render_tool_output_common(
                 bullet_color,
             )?;
         } else {
-            crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(renderer)?;
             crate::agent::runloop::unified::tool_summary::render_expanded_tool_call_summary(
                 renderer,
                 name,
@@ -533,6 +734,21 @@ fn handle_non_success_common(
 
     match status {
         ToolExecutionStatus::Failure { error } | ToolExecutionStatus::Timeout { error } => {
+            let user_message = error.user_message();
+            if ctx.renderer.supports_inline_ui() && is_command_output_call(name, args_val) {
+                ctx.handle.record_tool_output(vec![
+                    command_output_header(name, args_val, ctx.workspace_root),
+                    format!(
+                        "    {}: {}",
+                        if matches!(status, ToolExecutionStatus::Timeout { .. }) {
+                            "timed out"
+                        } else {
+                            "failed"
+                        },
+                        user_message
+                    ),
+                ]);
+            }
             if !is_pty {
                 render_non_success_summary(
                     ctx.renderer,
@@ -546,7 +762,7 @@ fn handle_non_success_common(
             render_error_common(
                 ctx.renderer,
                 name,
-                &error.user_message(),
+                &user_message,
                 if matches!(status, ToolExecutionStatus::Timeout { .. }) {
                     "timed out"
                 } else {
@@ -555,6 +771,12 @@ fn handle_non_success_common(
             )?;
         }
         ToolExecutionStatus::Cancelled => {
+            if ctx.renderer.supports_inline_ui() && is_command_output_call(name, args_val) {
+                ctx.handle.record_tool_output(vec![
+                    command_output_header(name, args_val, ctx.workspace_root),
+                    "    warning: tool execution cancelled".to_string(),
+                ]);
+            }
             if !is_pty {
                 render_non_success_summary(
                     ctx.renderer,
@@ -582,7 +804,6 @@ fn render_non_success_summary(
     status: ToolDisplayStatus,
 ) -> Result<()> {
     let summary_ctx = crate::agent::runloop::unified::tool_summary::ToolSummaryRenderContext { workspace_root };
-    crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(renderer)?;
     crate::agent::runloop::unified::tool_summary::render_expanded_tool_call_summary(
         renderer,
         name,
@@ -859,6 +1080,112 @@ mod tests {
         assert_eq!(ordered_stream_texts(&output), vec!["merged line", "stdout line", "stderr line"]);
     }
 
+    #[test]
+    fn canonical_pipe_streams_keep_merged_output_once() {
+        let output = serde_json::json!({
+            "output": "stdout line\nstderr line",
+            "stdout": "stdout line",
+            "stderr": "stderr line"
+        });
+
+        let streams = canonical_pipe_streams(&output);
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].label, None);
+        assert_eq!(streams[0].text, "stdout line\nstderr line");
+    }
+
+    #[test]
+    fn canonical_pipe_streams_label_separate_streams() {
+        let output = serde_json::json!({
+            "stdout": "stdout line",
+            "stderr": "stderr line"
+        });
+
+        let streams = canonical_pipe_streams(&output);
+        assert_eq!(
+            streams.iter().map(|stream| (stream.label, stream.text)).collect::<Vec<_>>(),
+            vec![(Some("stdout"), "stdout line"), (Some("stderr"), "stderr line")]
+        );
+    }
+
+    #[test]
+    fn canonical_pipe_streams_preserve_full_named_alias() {
+        let output = serde_json::json!({
+            "output": "stdout line",
+            "stdout": "stdout line\nsecond stdout line",
+            "stderr": "stderr line"
+        });
+
+        let streams = canonical_pipe_streams(&output);
+        assert_eq!(
+            streams.iter().map(|stream| (stream.label, stream.text)).collect::<Vec<_>>(),
+            vec![
+                (Some("stdout"), "stdout line\nsecond stdout line"),
+                (Some("stderr"), "stderr line")
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_terminal_output_lines_handles_ansi_rewrites_and_blanks() {
+        let capture = "stale\n\x1b[2J\x1b[H\x1b[31mred\x1b[0m\rfinal\n\nlast\n";
+
+        assert_eq!(normalize_terminal_output_lines(capture), vec!["final", "", "last"]);
+        assert_eq!(normalize_terminal_output_lines("abc\x08d\n"), vec!["abd"]);
+    }
+
+    #[test]
+    fn build_pipe_command_output_lines_labels_stderr_once() {
+        let output = serde_json::json!({
+            "stdout": "normal output",
+            "stderr": "diagnostic output",
+            "exit_code": 1
+        });
+
+        assert_eq!(
+            build_pipe_command_output_lines(
+                tools::EXECUTE_CODE,
+                &serde_json::json!({"command": "printf test"}),
+                &output,
+                None,
+                ToolDisplayStatus::Failure,
+            ),
+            vec![
+                "• Ran printf test",
+                "  stdout:",
+                "    normal output",
+                "  stderr:",
+                "    diagnostic output",
+                "    ✗ run error, exit code: 1",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_merged_command_output_lines_keeps_complete_capture_and_status_once() {
+        let output = serde_json::json!({
+            "exit_code": 2,
+            "critical_note": "output was retained in the current session"
+        });
+        let capture = "stdout line\nstderr line\n";
+
+        let lines = build_merged_command_output_lines(
+            tools::RUN_PTY_CMD,
+            &serde_json::json!({"command": "long command"}),
+            capture,
+            None,
+            &output,
+            ToolDisplayStatus::Failure,
+        );
+
+        assert_eq!(lines[0], "• Ran long command");
+        assert!(lines.contains(&"  └ stdout line".to_string()));
+        assert!(lines.contains(&"    stderr line".to_string()));
+        assert!(lines.contains(&"    output was retained in the current session".to_string()));
+        assert_eq!(lines.iter().filter(|line| line.contains("stderr line")).count(), 1);
+        assert_eq!(lines.iter().filter(|line| line.contains("exit code: 2")).count(), 1);
+    }
+
     #[tokio::test]
     async fn pty_capture_reads_complete_workspace_spool() {
         let workspace = TempDir::new().expect("workspace temp dir");
@@ -876,7 +1203,7 @@ mod tests {
         });
 
         assert_eq!(
-            load_pty_capture(&output, Some(workspace.path())).await.as_deref(),
+            load_complete_output(&output, Some(workspace.path())).await.as_deref(),
             Some("first complete line\nsecond complete line\n")
         );
     }
@@ -892,7 +1219,18 @@ mod tests {
 
         let output = serde_json::json!({ "spool_path": spool_path });
 
-        assert!(load_pty_capture(&output, Some(workspace.path())).await.is_none());
+        assert!(load_complete_output(&output, Some(workspace.path())).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn pty_capture_rejects_malformed_spool_metadata_without_inline_fallback() {
+        let workspace = TempDir::new().expect("workspace temp dir");
+        let output = serde_json::json!({
+            "spool_path": null,
+            "output": "untrusted inline fallback"
+        });
+
+        assert!(load_complete_output(&output, Some(workspace.path())).await.is_none());
     }
 
     #[tokio::test]
@@ -982,6 +1320,72 @@ mod tests {
         assert!(stripped_text.contains("Large output was spooled to"), "Transcript: {stripped_text:?}");
         assert!(!stripped_text.contains("preview text that should stay out of transcript persistence"));
 
+        transcript::clear();
+    }
+
+    #[tokio::test]
+    async fn inline_tool_output_viewer_retains_complete_spooled_capture() {
+        let workspace = TempDir::new().expect("workspace temp dir");
+        let spool_path = workspace.path().join(".vtcode/context/tool_outputs/exec_command_1.txt");
+        tokio::fs::create_dir_all(spool_path.parent().expect("spool parent"))
+            .await
+            .expect("create spool parent");
+        tokio::fs::write(&spool_path, "first complete line\nsecond complete line\n")
+            .await
+            .expect("write spool");
+
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle.clone(), Default::default());
+        let mut stats = SessionStats::default();
+        let mut mcp = McpPanelState::default();
+        let mut harness_state = build_harness_state();
+        transcript::clear();
+        let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "output": "preview line",
+                "spool_path": ".vtcode/context/tool_outputs/exec_command_1.txt",
+                "exit_code": 0,
+                "is_exited": true
+            }),
+            stdout: Some("preview line".to_string()),
+            modified_files: vec![],
+            command_success: true,
+        });
+        let mut output_ctx = OutcomeContext {
+            workspace_root: Some(workspace.path()),
+            session_stats: &mut stats,
+            renderer: &mut renderer,
+            handle: &handle,
+            harness_state: &mut harness_state,
+            mcp_panel_state: &mut mcp,
+            vt_config: None::<&VTCodeConfig>,
+        };
+
+        process_outcome_common(
+            &mut output_ctx,
+            tools::RUN_PTY_CMD,
+            &serde_json::json!({"command": "cargo check"}),
+            &outcome,
+        )
+        .await
+        .expect("render should succeed");
+
+        let mut recorded = None;
+        while let Ok(command) = receiver.try_recv() {
+            if let InlineCommand::RecordToolOutput { lines } = command {
+                recorded = Some(lines);
+            }
+        }
+        let lines = recorded.expect("the complete output should be recorded for the viewer");
+        assert_eq!(lines[0], "• Ran cargo check");
+        assert!(lines.iter().any(|line| line == "  └ first complete line"));
+        assert!(lines.iter().any(|line| line == "    second complete line"));
+        assert!(!lines.iter().any(|line| line.contains("preview line")));
+
+        let transcript_text = transcript::snapshot().join("\n");
+        assert!(!transcript_text.contains("first complete line"));
+        assert!(!transcript_text.contains("second complete line"));
         transcript::clear();
     }
 

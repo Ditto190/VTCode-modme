@@ -144,13 +144,8 @@ impl Session {
         let previous_max_offset = self.current_max_scroll_offset();
         let revision = self.next_revision();
         let index = self.lines.len();
-        self.lines.push(MessageLine {
-            kind,
-            segments,
-            link_ranges: Vec::new(),
-            revision,
-            pty_transcript: None,
-        });
+        self.lines
+            .push(MessageLine { kind, segments, link_ranges: Vec::new(), revision });
         self.mark_line_dirty(index);
         if !self.is_streaming_final_answer {
             self.invalidate_scroll_metrics();
@@ -299,7 +294,6 @@ impl Session {
                 segments,
                 link_ranges: link_ranges.next().unwrap_or_default(),
                 revision,
-                pty_transcript: None,
             });
         }
         self.mark_line_dirty(first_dirty);
@@ -314,37 +308,6 @@ impl Session {
         } else if kind != InlineMessageKind::Policy {
             self.thinking_runs.end_run();
         }
-    }
-
-    /// Attach a complete PTY capture to the most recent PTY message block.
-    ///
-    /// The visible PTY lines are deliberately bounded while a command runs;
-    /// the transcript-review overlay reads this sidecar when the full capture
-    /// is available.
-    pub(crate) fn set_last_pty_transcript(&mut self, lines: Vec<String>) {
-        if lines.is_empty() {
-            return;
-        }
-
-        let Some(last_pty) = self.lines.iter().rposition(|line| line.kind == InlineMessageKind::Pty) else {
-            return;
-        };
-        let first_pty = self.lines[..=last_pty]
-            .iter()
-            .rposition(|line| line.kind != InlineMessageKind::Pty)
-            .map_or(0, |index| index + 1);
-        let previous_max_offset = self.current_max_scroll_offset();
-        let revision = self.next_revision();
-        if let Some(line) = self.lines.get_mut(first_pty) {
-            line.pty_transcript = Some(Arc::new(lines));
-        }
-        for line in self.lines.iter_mut().skip(first_pty).take(last_pty - first_pty + 1) {
-            line.revision = revision;
-        }
-        self.mark_line_dirty(first_pty);
-        self.invalidate_transcript_cache();
-        self.invalidate_scroll_metrics();
-        self.adjust_scroll_after_change(previous_max_offset);
     }
 
     pub(crate) fn expand_collapsed_paste_at_line_index(&mut self, line_index: usize) -> bool {
@@ -521,7 +484,6 @@ impl Session {
                     && &*last.style == style
                 {
                     last.text.push_str(text);
-                    line.pty_transcript = None;
                     appended = true;
                     mark_revision = true;
                 }
@@ -530,7 +492,6 @@ impl Session {
                         text: text.to_owned(),
                         style: Arc::new(style.clone()),
                     });
-                    line.pty_transcript = None;
                     appended = true;
                     mark_revision = true;
                 }
@@ -567,7 +528,6 @@ impl Session {
                     text: text.to_owned(),
                     style: Arc::new(style.clone()),
                 });
-                line.pty_transcript = None;
                 line.revision = revision;
             }
             self.mark_line_dirty(index);
@@ -587,7 +547,6 @@ impl Session {
             }],
             link_ranges: Vec::new(),
             revision,
-            pty_transcript: None,
         });
 
         // Start tracking a new reasoning run when the first `Policy` line
@@ -632,7 +591,6 @@ impl Session {
                 && line.kind == kind
             {
                 line.segments.clear();
-                line.pty_transcript = None;
                 cleared = true;
             }
         }

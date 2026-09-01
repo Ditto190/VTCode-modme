@@ -35,7 +35,8 @@ pub(crate) mod slash;
 /// Slash command palette widget.
 pub mod slash_palette;
 mod task_panel;
-mod transcript_review;
+#[path = "transcript_review.rs"]
+mod tool_output_viewer;
 mod transient;
 /// Workspace trust state management.
 pub mod trust;
@@ -44,10 +45,15 @@ use self::file_palette::FilePalette;
 use self::history_picker::HistoryPickerState;
 use self::local_agents::LocalAgentsState;
 use self::slash_palette::SlashPalette;
-use self::transcript_review::TranscriptReviewState;
+use self::tool_output_viewer::ToolOutputViewerState;
 use self::transient::{TransientFocusPolicy, TransientHost, TransientSurface, TransientVisibilityChange};
 use crate::tui::options::FullscreenInteractionSettings;
 use agent_palette::AgentPalette;
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ToolOutputBlock {
+    pub(crate) lines: Vec<String>,
+}
 
 /// App-level session that layers VT Code features on top of the core session.
 pub struct AppSession {
@@ -65,7 +71,9 @@ pub struct AppSession {
     pub(crate) task_panel_lines: Vec<String>,
     pub(crate) task_panel_metadata: Option<TaskPanelMetadata>,
     diff_preview_state: Option<DiffPreviewState>,
-    transcript_review_state: Option<TranscriptReviewState>,
+    tool_output_viewer_state: Option<ToolOutputViewerState>,
+    pub(crate) tool_output_blocks: Vec<ToolOutputBlock>,
+    pub(crate) tool_output_revision: u64,
     diff_overlay_queue: VecDeque<DiffOverlayRequest>,
     transient_host: TransientHost,
     preview_callback: Option<crate::tui::core_tui::types::PreviewCallback>,
@@ -101,7 +109,9 @@ impl AppSession {
             task_panel_lines: Vec::new(),
             task_panel_metadata: None,
             diff_preview_state: None,
-            transcript_review_state: None,
+            tool_output_viewer_state: None,
+            tool_output_blocks: Vec::new(),
+            tool_output_revision: 0,
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
             preview_callback: None,
@@ -144,7 +154,9 @@ impl AppSession {
             task_panel_lines: Vec::new(),
             task_panel_metadata: None,
             diff_preview_state: None,
-            transcript_review_state: None,
+            tool_output_viewer_state: None,
+            tool_output_blocks: Vec::new(),
+            tool_output_revision: 0,
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
             preview_callback: None,
@@ -321,18 +333,18 @@ impl AppSession {
         self.diff_preview_state.as_mut()
     }
 
-    fn transcript_review_state(&self) -> Option<&TranscriptReviewState> {
+    fn tool_output_viewer_state(&self) -> Option<&ToolOutputViewerState> {
         self.transient_host
-            .is_visible(TransientSurface::TranscriptReview)
+            .is_visible(TransientSurface::ToolOutputViewer)
             .then_some(())
-            .and(self.transcript_review_state.as_ref())
+            .and(self.tool_output_viewer_state.as_ref())
     }
 
-    fn transcript_review_state_mut(&mut self) -> Option<&mut TranscriptReviewState> {
-        if !self.transient_host.is_visible(TransientSurface::TranscriptReview) {
+    fn tool_output_viewer_state_mut(&mut self) -> Option<&mut ToolOutputViewerState> {
+        if !self.transient_host.is_visible(TransientSurface::ToolOutputViewer) {
             return None;
         }
-        self.transcript_review_state.as_mut()
+        self.tool_output_viewer_state.as_mut()
     }
 
     pub(crate) fn show_diff_overlay(&mut self, request: DiffOverlayRequest) {
@@ -377,18 +389,18 @@ impl AppSession {
         self.mark_dirty();
     }
 
-    fn open_transcript_review(&mut self, width: u16, height: u16) {
-        self.transcript_review_state = Some(TranscriptReviewState::open(self, width, height));
-        self.show_transient_surface(TransientSurface::TranscriptReview);
+    fn open_tool_output_viewer(&mut self, width: u16, height: u16) {
+        self.tool_output_viewer_state = Some(ToolOutputViewerState::open(self, width, height));
+        self.show_transient_surface(TransientSurface::ToolOutputViewer);
         self.core.mark_dirty();
     }
 
-    fn close_transcript_review(&mut self) {
-        if self.transcript_review_state.is_none() {
+    fn close_tool_output_viewer(&mut self) {
+        if self.tool_output_viewer_state.is_none() {
             return;
         }
-        self.transcript_review_state = None;
-        self.close_transient_surface(TransientSurface::TranscriptReview);
+        self.tool_output_viewer_state = None;
+        self.close_transient_surface(TransientSurface::ToolOutputViewer);
         self.core.mark_dirty();
     }
 
@@ -508,7 +520,7 @@ impl AppSession {
         match self.visible_transient_surface() {
             Some(TransientSurface::FloatingOverlay) => self.close_overlay(),
             Some(TransientSurface::DiffPreview) => self.close_diff_overlay(),
-            Some(TransientSurface::TranscriptReview) => self.close_transcript_review(),
+            Some(TransientSurface::ToolOutputViewer) => self.close_tool_output_viewer(),
             Some(TransientSurface::HistoryPicker) => self.close_history_picker(),
             Some(TransientSurface::AgentPalette) => self.close_agent_palette(),
             Some(TransientSurface::FilePalette) => self.close_file_palette(),
@@ -639,8 +651,12 @@ impl AppSession {
                 self.core.handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
                 self.update_input_triggers();
             }
-            InlineCommand::SetPtyTranscript { lines } => {
-                self.core.set_last_pty_transcript(lines);
+            InlineCommand::RecordToolOutput { lines } => {
+                if !lines.is_empty() {
+                    self.tool_output_blocks.push(ToolOutputBlock { lines });
+                    self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
+                    self.core.mark_dirty();
+                }
             }
             InlineCommand::CloseTransient => self.close_transient(),
             InlineCommand::ShowTransient { request } => self.show_transient(*request),
@@ -691,7 +707,7 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
             lines: lines.clone(),
             link_ranges: link_ranges.clone(),
         },
-        InlineCommand::SetPtyTranscript { .. } => return None,
+        InlineCommand::RecordToolOutput { .. } => return None,
         InlineCommand::SetPrompt { prefix, style } => {
             CoreCommand::SetPrompt { prefix: prefix.clone(), style: style.clone() }
         }

@@ -24,7 +24,6 @@ use unicode_width::UnicodeWidthStr;
 use url::Url;
 use vtcode_commons::color_policy::{self, ColorOutputPolicySource};
 use vtcode_commons::diff_paths::looks_like_diff_content;
-use vtcode_commons::ui_protocol::CompactToolSummaryCall;
 use vtcode_commons::{parse_editor_target, resolve_editor_path};
 
 static FILE_OPENER: OnceLock<Mutex<vtcode_config::FileOpener>> = OnceLock::new();
@@ -114,7 +113,6 @@ pub struct AnsiRenderer {
     screen_reader_mode: bool,
     show_diagnostics_in_transcript: bool,
     tool_display_mode: ToolDisplayMode,
-    compact_tool_summary_batch: Option<Vec<CompactToolSummaryCall>>,
 }
 
 impl AnsiRenderer {
@@ -157,7 +155,6 @@ impl AnsiRenderer {
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
             tool_display_mode: ToolDisplayMode::Compact,
-            compact_tool_summary_batch: None,
         }
     }
 
@@ -243,26 +240,6 @@ impl AnsiRenderer {
         };
         self.tool_display_mode = next;
         next
-    }
-
-    pub fn begin_compact_tool_summary_batch(&mut self) {
-        if self.tool_display_mode == ToolDisplayMode::Compact {
-            self.compact_tool_summary_batch = Some(Vec::new());
-        }
-    }
-
-    pub fn compact_tool_summary_batch_active(&self) -> bool {
-        self.compact_tool_summary_batch.is_some()
-    }
-
-    pub fn queue_compact_tool_summary(&mut self, summary: CompactToolSummaryCall) {
-        if let Some(batch) = &mut self.compact_tool_summary_batch {
-            batch.push(summary);
-        }
-    }
-
-    pub fn take_compact_tool_summary_batch(&mut self) -> Vec<CompactToolSummaryCall> {
-        self.compact_tool_summary_batch.take().unwrap_or_default()
     }
 
     /// Set an explicit terminal width used when deciding how to render markdown
@@ -1844,7 +1821,6 @@ mod tests {
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
             tool_display_mode: ToolDisplayMode::default(),
-            compact_tool_summary_batch: None,
         };
 
         // This should not create an extra empty line after "line 2"

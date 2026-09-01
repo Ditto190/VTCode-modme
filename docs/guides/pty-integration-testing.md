@@ -24,9 +24,9 @@ cargo nextest run --test pty_tests
 
 The regression surface includes ANSI and carriage-return output, large
 output, command errors, labeled stdout/stderr pipe results, callback pressure,
-and the complete transcript sidecar. A full sidecar remains available to
-`Ctrl+T` review after shutdown while the compact live view keeps only its
-bounded preview; review must not show duplicate output aliases. When the live
+and the complete session-local tool-output viewer. Complete output remains
+available to `Ctrl+T` in fullscreen mode while the compact live view keeps only
+its bounded preview; the viewer must not show duplicate output aliases. When the live
 preview queue is full, tests should observe a bounded coalesced/drop notice
 instead of silent loss. Use the same environment workaround as CI-local
 iteration when needed:
@@ -59,7 +59,7 @@ The script runs the PTY tests and prints the captured log if any PTY assertion f
 
 3. Watch the transcript pane: you should see the command summary, streamed PTY output (including ANSI sequences), and the final exit status. Resize the terminal window to confirm `portable-pty` propagates the new dimensions without breaking the screen buffer.
 
-4. To inspect the preserved output after the command completes, press `Ctrl+T` in fullscreen mode (or use the `Alt+O` compatibility alias). The review surface includes the complete multi-line PTY output, while the live transcript keeps only the configured bounded preview.
+4. To inspect the preserved output after the command completes, press `Ctrl+T` in fullscreen mode. The tool-output viewer includes the complete multi-line PTY output, while the live transcript keeps only the configured bounded preview.
 
 ## Troubleshooting
 

@@ -255,7 +255,7 @@ pub struct UiConfig {
     pub tool_output_mode: ToolOutputMode,
 
     /// Tool transition summary display mode
-    /// Options: "expanded" (each summary rendered separately) or "compact" (adjacent semantically equivalent successful summaries grouped)
+    /// Options: "expanded" (expanded summary layout) or "compact" (one compact summary per tool call)
     #[serde(default = "default_tool_display_mode")]
     pub tool_display_mode: ToolDisplayMode,
 

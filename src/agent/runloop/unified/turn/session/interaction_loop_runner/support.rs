@@ -42,8 +42,7 @@ use vtcode_core::core::interfaces::session::PlanningEntrySource;
 use super::super::interaction_loop::{InteractionLoopContext, InteractionOutcome, InteractionState};
 
 const FALLBACK_ARGS_PREVIEW_LIMIT: usize = 240;
-const REVIEW_SCROLLBACK_EXIT_HINT: &str =
-    "[Native scrollback view. Press Esc, q, Ctrl+T, or Alt+O to return to fullscreen.]";
+const TOOL_OUTPUT_SCROLLBACK_EXIT_HINT: &str = "[Native tool-output view. Press Esc or q to return to fullscreen.]";
 
 #[derive(Debug, Deserialize)]
 struct ToolErrorPayloadHint {
@@ -146,7 +145,7 @@ fn review_editor_launch_config(editor_config: &EditorToolConfig) -> EditorLaunch
     }
 }
 
-async fn open_transcript_review_in_editor(ctx: &mut InteractionLoopContext<'_>, text: String) -> Result<()> {
+async fn open_tool_output_in_editor(ctx: &mut InteractionLoopContext<'_>, text: String) -> Result<()> {
     let editor_config = ctx
         .vt_cfg
         .as_ref()
@@ -174,16 +173,16 @@ async fn open_transcript_review_in_editor(ctx: &mut InteractionLoopContext<'_>, 
 
     match result {
         Ok(_) => {
-            ctx.renderer.line(MessageStyle::Info, "Transcript review opened in editor.")?;
+            ctx.renderer.line(MessageStyle::Info, "Tool output opened in editor.")?;
         }
         Err(err) => {
             ctx.renderer
-                .line(MessageStyle::Error, &format!("Failed to open transcript review in editor: {err}"))?;
+                .line(MessageStyle::Error, &format!("Failed to open tool output in editor: {err}"))?;
         }
     }
 
     if let Err(err) = cleanup {
-        tracing::debug!(%err, path = %path_for_cleanup.display(), "failed to remove transcript review temp file");
+        tracing::debug!(%err, path = %path_for_cleanup.display(), "failed to remove tool output temp file");
     }
 
     Ok(())
@@ -232,11 +231,11 @@ async fn launch_input_editor_with_draft(ctx: &mut InteractionLoopContext<'_>, dr
     Ok(())
 }
 
-fn show_transcript_review_in_scrollback(text: &str, mouse_capture: bool) -> Result<()> {
+fn show_tool_output_in_scrollback(text: &str, mouse_capture: bool) -> Result<()> {
     use ratatui::crossterm::{
         event::{
             self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-            EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+            EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEventKind,
         },
         execute,
         terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
@@ -253,16 +252,14 @@ fn show_transcript_review_in_scrollback(text: &str, mouse_capture: bool) -> Resu
         writeln!(stderr)?;
     }
     writeln!(stderr)?;
-    writeln!(stderr, "{REVIEW_SCROLLBACK_EXIT_HINT}")?;
+    writeln!(stderr, "{TOOL_OUTPUT_SCROLLBACK_EXIT_HINT}")?;
     stderr.flush()?;
 
     loop {
         match event::read()? {
             Event::Key(key)
                 if matches!(key.kind, KeyEventKind::Press)
-                    && (matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q'))
-                        || (key.modifiers.contains(KeyModifiers::ALT)
-                            && matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O')))) =>
+                    && matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')) =>
             {
                 break;
             }
@@ -279,20 +276,20 @@ fn show_transcript_review_in_scrollback(text: &str, mouse_capture: bool) -> Resu
     Ok(())
 }
 
-async fn open_transcript_review_scrollback(ctx: &mut InteractionLoopContext<'_>, text: String) -> Result<()> {
+async fn open_tool_output_scrollback(ctx: &mut InteractionLoopContext<'_>, text: String) -> Result<()> {
     let mouse_capture = ctx
         .vt_cfg
         .as_ref()
         .map(|config| config.ui.fullscreen.mouse_capture)
         .unwrap_or(true);
     let result = run_blocking_with_event_loop_suspended(ctx.handle, true, move || {
-        show_transcript_review_in_scrollback(&text, mouse_capture)
+        show_tool_output_in_scrollback(&text, mouse_capture)
     })
     .await;
     ctx.handle.force_redraw();
     if let Err(err) = result {
         ctx.renderer
-            .line(MessageStyle::Error, &format!("Failed to open transcript in native scrollback: {err}"))?;
+            .line(MessageStyle::Error, &format!("Failed to open tool output in native scrollback: {err}"))?;
     }
     Ok(())
 }
@@ -816,12 +813,12 @@ pub(super) async fn resolve_inline_loop_action(
             handle_inline_prompt_suggestion_request(ctx, state, &draft).await?;
             InlineLoopActionResolution::ContinueLoop
         }
-        InlineLoopAction::OpenTranscriptReviewInEditor(text) => {
-            open_transcript_review_in_editor(ctx, text).await?;
+        InlineLoopAction::OpenToolOutputInEditor(text) => {
+            open_tool_output_in_editor(ctx, text).await?;
             InlineLoopActionResolution::ContinueLoop
         }
-        InlineLoopAction::OpenTranscriptReviewScrollback(text) => {
-            open_transcript_review_scrollback(ctx, text).await?;
+        InlineLoopAction::OpenToolOutputScrollback(text) => {
+            open_tool_output_scrollback(ctx, text).await?;
             InlineLoopActionResolution::ContinueLoop
         }
         InlineLoopAction::Exit(reason) => InlineLoopActionResolution::Outcome(InteractionOutcome::Exit { reason }),

@@ -94,8 +94,8 @@ pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 
 /// Maximum aggregate tool-result preview bytes copied into the provider-facing
 /// history for one turn. Complete output remains in the internal spool and
-/// transcript sidecar; this only bounds the diagnostic surface seen by a
-/// model during a recovery-heavy turn.
+/// current-session tool-output viewer; this only bounds the diagnostic surface
+/// seen by a model during a recovery-heavy turn.
 pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize = 32 * 1024;
 
 const TOOL_PREVIEW_METADATA_STRING_LIMIT: usize = 512;
@@ -1238,7 +1238,7 @@ fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> Stri
         .unwrap_or("unknown");
 
     let note = if spool_path.is_some() {
-        "Aggregate tool preview budget exhausted; complete output remains in the internal spool and transcript sidecar."
+        "Aggregate tool preview budget exhausted; complete output remains in the internal spool and current-session tool-output viewer."
     } else {
         "Aggregate tool preview budget exhausted; use a targeted bounded read or retry the request for more detail."
     };

@@ -137,27 +137,13 @@ pub(super) struct PtyStreamState {
 }
 
 impl PtyStreamState {
-    #[cfg(test)]
     pub(super) fn new(command_prompt: Option<String>, pty_config: PtyConfig, workspace_root: Option<&Path>) -> Self {
-        Self::new_with_display_mode(command_prompt, pty_config, workspace_root, false)
-    }
-
-    pub(super) fn new_with_display_mode(
-        command_prompt: Option<String>,
-        pty_config: PtyConfig,
-        workspace_root: Option<&Path>,
-        compact_mode: bool,
-    ) -> Self {
         let preview = PtyPreviewRenderer::from_config(&pty_config);
         Self {
             pty_config,
-            command_header: if compact_mode {
-                vec!["• Ran command · Ctrl+T to view transcript".to_string()]
-            } else {
-                normalize_command_prompt(command_prompt)
-                    .map(|command| format_command_header_lines(&command, workspace_root))
-                    .unwrap_or_default()
-            },
+            command_header: normalize_command_prompt(command_prompt)
+                .map(|command| format_command_header_lines(&command, workspace_root))
+                .unwrap_or_default(),
             line_styles: PtyLineStyles::new(),
             legacy: LegacyPtyStreamState::new(),
             preview,

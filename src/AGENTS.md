@@ -15,7 +15,7 @@
 - Keep transcript/modal editor opens on the bounded runtime coordinator, not queued `/edit` submissions.
 - Keep `/secret` provider/key validation and storage selection, including gateway providers, behind `turn/session/slash_commands/secrets/storage.rs` and the central resolver.
 - Route batched tool metrics through the shared execution helper so every executed status is recorded; checkpoint diagnostics use canonical `Usage` plus saturating per-turn counters.
-- Keep PTY status handoff during stream shutdown separate from output rendering; preserve complete merged sidecar output for `Ctrl+T`, labeled pipe streams, and visible bounded queue-pressure diagnostics without duplicate aliases.
+- Keep PTY status handoff during stream shutdown separate from output rendering; preserve complete current-session tool output for the fullscreen `Ctrl+T` viewer, label distinct pipe streams, and keep bounded queue-pressure diagnostics visible without duplicate aliases.
 - `agent/runloop/unified/turn/compaction/` delegates to `vtcode-core::compaction`; reserve segment boundaries with the shared transition helper.
 - Updates own asset selection, checksum verification, safe extraction, and `self_replace`; TUI installs thread `UpdateProgress` callbacks through `install_update_reported` for real-time download/extract feedback; `main_helpers` owns relaunch context, pre-config legacy migration, and runtime initialization.
 - Centralize provider-noise sanitization in `turn::provider_noise` and `stream_sanitization::StreamSanitizer`.

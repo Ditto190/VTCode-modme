@@ -875,7 +875,7 @@ python3 scripts/generate_config_field_reference.py
 | `ui.terminal_title.items` | `array \| null` | no | `null` | - |
 | `ui.terminal_title.items[]` | `string` | no | `-` | - |
 | `ui.thinking_display` | `string` | no | `"collapsed"` | Default collapse state of agent thinking/reasoning blocks ("collapsed" or "extended") |
-| `ui.tool_display_mode` | `string` | no | `"compact"` | Tool transition summary display mode. Options: "compact" (the default counted command summaries and existing compact tree formatting) or "expanded" (each summary rendered separately). |
+| `ui.tool_display_mode` | `string` | no | `"compact"` | Tool transition summary display mode. Options: "compact" (one compact summary per call, with bounded live command output) or "expanded" (the expanded summary layout per call). |
 | `ui.tool_output_max_lines` | `integer` | no | `30` | Maximum number of lines to display in tool output (prevents transcript flooding) |
 | `ui.tool_output_mode` | `string` | no | `"compact"` | Tool output display mode ("compact" or "full") |
 | `ui.tool_output_spool_bytes` | `integer` | no | `80000` | Maximum bytes of output to display before auto-spooling to disk |

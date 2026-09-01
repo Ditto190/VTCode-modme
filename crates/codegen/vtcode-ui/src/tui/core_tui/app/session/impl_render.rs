@@ -86,12 +86,12 @@ impl Session {
         if self.diff_preview_state().is_some() {
             diff_preview::render_diff_preview(self, frame, layout.viewport);
         }
-        if let Some(mut state) = self.transcript_review_state.take() {
-            let width = transcript_review::review_content_width(layout.viewport);
+        if let Some(mut state) = self.tool_output_viewer_state.take() {
+            let width = tool_output_viewer::viewer_content_width(layout.viewport);
             let height = layout.viewport.height.saturating_sub(4);
             state.refresh(self, width, height);
-            transcript_review::render_transcript_review(self, frame, layout.viewport, &state);
-            self.transcript_review_state = Some(state);
+            tool_output_viewer::render_tool_output_viewer(self, frame, layout.viewport, &state);
+            self.tool_output_viewer_state = Some(state);
         }
         self.core.finalize_mouse_selection(frame, layout.viewport);
     }

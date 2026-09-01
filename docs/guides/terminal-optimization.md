@@ -142,7 +142,7 @@ tool_output_max_lines = 50
 tool_output_spool_bytes = 200000
 ```
 
-`ui.tool_output_mode` controls result bodies. `ui.tool_display_mode` controls the transition summaries that precede them: `"compact"` is the default and groups adjacent command calls into a counted summary, while `"expanded"` keeps one summary per call. `Alt+T` toggles the session-only display mode; `/config` persists it.
+`ui.tool_output_mode` controls result bodies. `ui.tool_display_mode` controls the transition summaries that precede them: `"compact"` is the default and keeps one compact summary per call with bounded live command output, while `"expanded"` keeps the expanded summary layout per call. `Alt+T` toggles the session-only display mode; `/config` persists it.
 
 ## Troubleshooting
 

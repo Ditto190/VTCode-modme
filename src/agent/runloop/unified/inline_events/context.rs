@@ -239,13 +239,13 @@ impl<'a> InlineEventContext<'a> {
                     .line(MessageStyle::Status, &format!("Tool summaries: {label}"))?;
                 InlineLoopAction::Continue
             }
-            InlineEvent::OpenTranscriptReviewInEditor(text) => {
+            InlineEvent::OpenToolOutputInEditor(text) => {
                 self.state.reset_interrupt_state();
-                InlineLoopAction::OpenTranscriptReviewInEditor(text)
+                InlineLoopAction::OpenToolOutputInEditor(text)
             }
-            InlineEvent::OpenTranscriptReviewScrollback(text) => {
+            InlineEvent::OpenToolOutputScrollback(text) => {
                 self.state.reset_interrupt_state();
-                InlineLoopAction::OpenTranscriptReviewScrollback(text)
+                InlineLoopAction::OpenToolOutputScrollback(text)
             }
             InlineEvent::OpenFileInEditor(path) => {
                 self.state.reset_interrupt_state();

@@ -359,10 +359,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
         return Ok(None);
     }
 
-    // Keep the compact presentation scoped to the complete assistant batch so
-    // sequential calls and multiple execution groups collapse together.
-    t_ctx.ctx.renderer.begin_compact_tool_summary_batch();
-
     let max_parallel_tool_calls = t_ctx
         .ctx
         .vt_cfg
@@ -387,7 +383,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
         match kind {
             PreparedToolBatchKind::ParallelReadonly => {
                 if let Some(outcome) = execute_parallel_group(t_ctx, group, &mut batch_tracker).await? {
-                    crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(t_ctx.ctx.renderer)?;
                     if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
                         for remaining in validated_calls.by_ref() {
                             super::push_blocked_tool_recovery_response(t_ctx.ctx, remaining.tool_call);
@@ -422,9 +417,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
                     )
                     .await?
                     {
-                        crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(
-                            t_ctx.ctx.renderer,
-                        )?;
                         if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
                             for (_, remaining) in group_iter {
                                 super::push_blocked_tool_recovery_response(t_ctx.ctx, remaining.tool_call);
@@ -455,8 +447,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
             "tool batch outcome"
         );
     }
-
-    crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(t_ctx.ctx.renderer)?;
 
     Ok(None)
 }

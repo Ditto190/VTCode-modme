@@ -5,14 +5,12 @@ use ratatui::{
 use ratatui_cheese::input::{Input, InputState};
 use unicode_width::UnicodeWidthChar;
 
-use super::Session;
+use super::{Session, ToolOutputBlock};
 use crate::tui::config::constants::ui;
-use crate::tui::core_tui::session::TranscriptLine;
 use crate::tui::core_tui::session::list_panel::input_styles_from_theme;
-use crate::tui::core_tui::types::InlineMessageKind;
 
 #[derive(Clone, Debug, Default)]
-struct TranscriptReviewSearchState {
+struct ToolOutputSearchState {
     active: bool,
     pending_query: String,
     query: String,
@@ -24,25 +22,25 @@ struct TranscriptReviewSearchState {
 }
 
 #[derive(Clone, Debug, Default)]
-struct CachedReviewMessage {
+struct CachedToolOutputBlock {
     revision: u64,
     lines: Vec<String>,
     lowered_lines: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct TranscriptReviewState {
+pub(crate) struct ToolOutputViewerState {
     width: u16,
     source_revision: u64,
-    messages: Vec<CachedReviewMessage>,
+    messages: Vec<CachedToolOutputBlock>,
     row_offsets: Vec<usize>,
     total_lines: usize,
     cached_export_text: Option<String>,
     scroll_top: usize,
-    search: TranscriptReviewSearchState,
+    search: ToolOutputSearchState,
 }
 
-impl TranscriptReviewState {
+impl ToolOutputViewerState {
     pub(crate) fn open(session: &Session, width: u16, height: u16) -> Self {
         let mut state = Self::default();
         state.refresh(session, width, height);
@@ -52,7 +50,7 @@ impl TranscriptReviewState {
 
     pub(crate) fn refresh(&mut self, session: &Session, width: u16, height: u16) {
         let width = width.max(1);
-        let revision = session.current_transcript_revision();
+        let revision = session.tool_output_revision;
         if self.width == width && self.source_revision == revision {
             self.clamp_scroll(height);
             return;
@@ -251,9 +249,9 @@ impl TranscriptReviewState {
     }
 
     fn refresh_messages(&mut self, session: &Session, width: u16) {
-        let session_lines = &session.core.lines;
+        let tool_output_blocks = &session.tool_output_blocks;
         let previous_len = self.messages.len();
-        let current_len = session_lines.len();
+        let current_len = tool_output_blocks.len();
         let width_changed = self.width != width;
 
         if current_len < previous_len {
@@ -261,7 +259,7 @@ impl TranscriptReviewState {
             self.cached_export_text = None;
         }
         while self.messages.len() < current_len {
-            self.messages.push(CachedReviewMessage::default());
+            self.messages.push(CachedToolOutputBlock::default());
         }
 
         let first_dirty = if width_changed {
@@ -269,18 +267,14 @@ impl TranscriptReviewState {
         } else if current_len > previous_len {
             previous_len
         } else {
-            session_lines
-                .iter()
-                .zip(self.messages.iter())
-                .position(|(line, cached)| cached.revision != line.revision)
-                .unwrap_or(current_len)
+            current_len
         };
 
-        for (index, line) in session_lines.iter().enumerate().skip(first_dirty) {
-            if width_changed || self.messages[index].revision != line.revision {
-                self.messages[index] = CachedReviewMessage {
-                    revision: line.revision,
-                    lines: collect_review_message_lines(session, index, width),
+        for (index, block) in tool_output_blocks.iter().enumerate().skip(first_dirty) {
+            if width_changed || self.messages[index].revision != session.tool_output_revision {
+                self.messages[index] = CachedToolOutputBlock {
+                    revision: session.tool_output_revision,
+                    lines: collect_tool_output_lines(block, width),
                     lowered_lines: None,
                 };
                 self.cached_export_text = None;
@@ -391,49 +385,20 @@ impl TranscriptReviewState {
     }
 }
 
-fn collect_review_message_lines(session: &Session, index: usize, width: u16) -> Vec<String> {
-    if let Some(owner) = pty_transcript_owner(session, index) {
-        if owner != index {
-            return Vec::new();
-        }
-
-        let max_width = usize::from(width.max(1));
-        return session.core.lines[index]
-            .pty_transcript
-            .as_deref()
-            .into_iter()
-            .flatten()
-            .flat_map(|line| wrap_pty_line(line, max_width))
-            .collect();
-    }
-
-    let mut lines: Vec<String> = session
-        .reflow_message_lines_for_review(index, width)
-        .into_iter()
-        .map(transcript_line_text)
-        .collect();
-
+fn collect_tool_output_lines(block: &ToolOutputBlock, width: u16) -> Vec<String> {
+    let max_width = usize::from(width.max(1));
+    let mut lines = block
+        .lines
+        .iter()
+        .flat_map(|line| wrap_output_line(line, max_width))
+        .collect::<Vec<_>>();
     if lines.is_empty() {
         lines.push(String::new());
     }
-
     lines
 }
 
-fn pty_transcript_owner(session: &Session, index: usize) -> Option<usize> {
-    let line = session.core.lines.get(index)?;
-    if line.kind != InlineMessageKind::Pty {
-        return None;
-    }
-
-    let mut first = index;
-    while first > 0 && session.core.lines[first - 1].kind == InlineMessageKind::Pty {
-        first -= 1;
-    }
-    session.core.lines[first].pty_transcript.as_ref().map(|_| first)
-}
-
-fn wrap_pty_line(line: &str, width: usize) -> Vec<String> {
+fn wrap_output_line(line: &str, width: usize) -> Vec<String> {
     if line.is_empty() {
         return vec![String::new()];
     }
@@ -456,22 +421,18 @@ fn wrap_pty_line(line: &str, width: usize) -> Vec<String> {
     wrapped
 }
 
-fn transcript_line_text(line: TranscriptLine) -> String {
-    line.line.spans.iter().map(|span| span.content.as_ref()).collect()
-}
-
-pub(crate) fn render_transcript_review(
+pub(crate) fn render_tool_output_viewer(
     session: &Session,
     frame: &mut Frame<'_>,
     area: Rect,
-    state: &TranscriptReviewState,
+    state: &ToolOutputViewerState,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
     let title = Line::from(vec![
-        Span::styled(" Transcript Review ", session.core.section_title_style().add_modifier(Modifier::BOLD)),
+        Span::styled(" Tool Output Viewer ", session.core.section_title_style().add_modifier(Modifier::BOLD)),
         Span::raw(" "),
         Span::styled(state.status_label(), session.core.header_secondary_style()),
     ]);
@@ -512,7 +473,7 @@ pub(crate) fn render_transcript_review(
     }
 }
 
-pub(crate) fn review_content_width(area: Rect) -> u16 {
+pub(crate) fn viewer_content_width(area: Rect) -> u16 {
     area.width.saturating_sub(2).min(ui::TUI_MAX_VIEWPORT_WIDTH)
 }
 
@@ -520,118 +481,110 @@ pub(crate) fn review_content_width(area: Rect) -> u16 {
 mod tests {
     use super::*;
     use crate::tui::core_tui::app::session::AppSession;
-    use crate::tui::core_tui::types::{InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme};
-    use std::sync::Arc;
+    use crate::tui::core_tui::types::InlineTheme;
 
     fn test_session() -> AppSession {
         AppSession::new(InlineTheme::default(), None, 24)
     }
 
-    fn text_segment(text: impl Into<String>) -> InlineSegment {
-        InlineSegment {
-            text: text.into(),
-            style: Arc::new(InlineTextStyle::default()),
-        }
+    fn add_block(session: &mut AppSession, lines: &[&str]) {
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: lines.iter().map(|line| (*line).to_string()).collect(),
+        });
+        session.tool_output_revision += 1;
     }
 
     #[test]
-    fn refresh_appends_without_rebuilding_unchanged_messages() {
+    fn refresh_appends_without_rebuilding_unchanged_blocks() {
         let mut session = test_session();
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("alpha")]);
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("beta")]);
+        add_block(&mut session, &["• Ran first", "  └ alpha"]);
+        add_block(&mut session, &["• Ran second", "  └ beta"]);
 
-        let mut review = TranscriptReviewState::open(&session, 40, 10);
-        let original_first = review.messages[0].revision;
+        let mut viewer = ToolOutputViewerState::open(&session, 40, 10);
+        let original_first = viewer.messages[0].revision;
 
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("gamma")]);
-        review.refresh(&session, 40, 10);
+        add_block(&mut session, &["• Ran third", "  └ gamma"]);
+        viewer.refresh(&session, 40, 10);
 
-        assert_eq!(review.messages[0].revision, original_first);
-        assert_eq!(review.messages.len(), 3);
-        assert_eq!(review.line_count(), 3);
+        assert_eq!(viewer.messages[0].revision, original_first);
+        assert_eq!(viewer.messages.len(), 3);
+        assert!(viewer.export_text().contains("gamma"));
     }
 
     #[test]
-    fn refresh_rebuilds_from_first_dirty_message() {
+    fn refresh_reflows_blocks_when_width_changes() {
         let mut session = test_session();
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("alpha")]);
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("beta")]);
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("gamma")]);
+        add_block(&mut session, &["• Ran a command with a long output line"]);
 
-        let mut review = TranscriptReviewState::open(&session, 40, 10);
-        let old_revisions: Vec<u64> = review.messages.iter().map(|message| message.revision).collect();
+        let mut viewer = ToolOutputViewerState::open(&session, 80, 10);
+        let wide_lines = viewer.messages[0].lines.len();
+        viewer.refresh(&session, 12, 10);
 
-        let revision = session.core.next_revision();
-        session.core.lines[1].segments = vec![text_segment("beta updated")];
-        session.core.lines[1].revision = revision;
-        session.core.mark_line_dirty(1);
-        session.core.invalidate_transcript_cache();
-        review.refresh(&session, 40, 10);
-
-        assert_eq!(review.messages[0].revision, old_revisions[0]);
-        assert_ne!(review.messages[1].revision, old_revisions[1]);
-        assert_eq!(review.line_count(), 3);
+        assert!(viewer.messages[0].lines.len() > wide_lines);
     }
 
     #[test]
     fn search_uses_cached_lowercase_lines() {
         let mut session = test_session();
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("Alpha")]);
-        session
-            .core
-            .push_line(InlineMessageKind::Agent, vec![text_segment("beta alpha")]);
+        add_block(&mut session, &["• Ran Alpha"]);
+        add_block(&mut session, &["  └ beta alpha"]);
 
-        let mut review = TranscriptReviewState::open(&session, 40, 10);
-        review.search.query = "alpha".to_string();
-        review.recompute_matches();
-        let lowered = review.messages[0].lowered_lines.as_ref().expect("lowered lines cached")[0].clone();
+        let mut viewer = ToolOutputViewerState::open(&session, 40, 10);
+        viewer.search.query = "alpha".to_string();
+        viewer.recompute_matches();
+        let lowered = viewer.messages[0].lowered_lines.as_ref().expect("lowered lines cached")[0].clone();
 
-        review.jump_next_match(10);
-        review.recompute_matches();
+        viewer.jump_next_match(10);
+        viewer.recompute_matches();
 
         assert!(lowered.contains("alpha"));
-        assert_eq!(review.search.matches, vec![0, 1]);
+        assert_eq!(viewer.search.matches, vec![0, 1]);
     }
 
     #[test]
-    fn export_text_is_cached_until_refresh_changes_content() {
+    fn export_text_is_cached_until_a_new_block_arrives() {
         let mut session = test_session();
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("alpha")]);
+        add_block(&mut session, &["• Ran alpha"]);
 
-        let mut review = TranscriptReviewState::open(&session, 40, 10);
-        let exported = review.export_text();
+        let mut viewer = ToolOutputViewerState::open(&session, 40, 10);
+        let exported = viewer.export_text();
         assert!(exported.contains("alpha"));
-        assert_eq!(review.cached_export_text.as_deref(), Some(exported.as_str()));
+        assert_eq!(viewer.cached_export_text.as_deref(), Some(exported.as_str()));
 
-        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("beta")]);
-        review.refresh(&session, 40, 10);
+        add_block(&mut session, &["• Ran beta"]);
+        viewer.refresh(&session, 40, 10);
 
-        assert_eq!(review.cached_export_text, None);
-        let refreshed = review.export_text();
+        assert_eq!(viewer.cached_export_text, None);
+        let refreshed = viewer.export_text();
         assert!(refreshed.contains("alpha"));
         assert!(refreshed.contains("beta"));
     }
 
     #[test]
-    fn review_uses_complete_pty_sidecar_instead_of_live_preview() {
+    fn viewer_keeps_complete_output_for_each_tool_call() {
         let mut session = test_session();
-        session
-            .core
-            .push_line(InlineMessageKind::Pty, vec![text_segment("  └ preview")]);
-        session.core.push_line(InlineMessageKind::Pty, vec![text_segment("    tail")]);
-        session.core.set_last_pty_transcript(vec![
-            "• Ran cargo check".to_string(),
-            "  └ first complete line".to_string(),
-            "    second complete line".to_string(),
-            "    final complete line".to_string(),
-        ]);
+        add_block(
+            &mut session,
+            &[
+                "• Ran cargo check",
+                "  └ first complete line",
+                "    final complete line",
+            ],
+        );
+        add_block(&mut session, &["• Ran cargo fmt", "  └ fmt complete"]);
 
-        let review = TranscriptReviewState::open(&session, 80, 10);
-        let export = review.clone().export_text();
+        let viewer = ToolOutputViewerState::open(&session, 80, 10);
+        let export = viewer.clone().export_text();
 
         assert!(export.contains("first complete line"));
         assert!(export.contains("final complete line"));
-        assert!(!export.contains("preview"));
-        assert_eq!(review.messages.iter().skip(1).map(|message| message.lines.len()).sum::<usize>(), 0);
+        assert!(export.contains("• Ran cargo fmt"));
+        assert!(!export.contains("Ran 2 commands"));
+    }
+
+    #[test]
+    fn wrapping_preserves_blank_output_lines() {
+        assert_eq!(wrap_output_line("", 20), vec![String::new()]);
+        assert_eq!(wrap_output_line("abcdef", 3), vec!["abc", "def"]);
     }
 }

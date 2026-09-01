@@ -885,8 +885,8 @@ auto_apply_detected_patches = false
 tool_output_mode = "compact"
 
 # Tool transition summary display mode
-# "compact" - Count adjacent command summaries and keep live output bounded
-# "expanded" - Render each successful tool summary separately
+# "compact" - Render one compact summary per call and keep live PTY output bounded
+# "expanded" - Render the expanded summary layout per call
 tool_display_mode = "compact"
 
 # Maximum number of lines to display in tool output (prevents transcript flooding)
