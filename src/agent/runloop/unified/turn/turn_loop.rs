@@ -1307,6 +1307,7 @@ pub(crate) async fn run_turn_loop(
         // tool calls that get discarded), retry with a more explicit directive
         // rather than immediately falling back to the deterministic final answer.
         if tool_free_recovery
+            && !turn_processing_ctx.is_planning_active()
             && matches!(processing_result, TurnProcessingResult::Empty)
             && response.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty())
             && turn_processing_ctx.recovery_retry_count() < MAX_RECOVERY_RETRIES
@@ -1499,6 +1500,7 @@ pub(crate) async fn run_turn_loop(
                     } if reason == RECOVERY_CONTRACT_VIOLATION_REASON
                 );
                 if tool_free_recovery
+                    && !ctx.is_planning_active()
                     && contract_violation
                     && ctx.harness_state.recovery_retry_count() < MAX_RECOVERY_RETRIES
                     && ctx.harness_state.retry_recovery_pass()

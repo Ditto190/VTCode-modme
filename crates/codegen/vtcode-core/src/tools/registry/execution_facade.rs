@@ -1711,10 +1711,16 @@ impl ToolRegistry {
                 self.record_tool_latency(timeout_category, execution_started_at.elapsed());
                 // Dynamic context discovery: spool large outputs to files
                 let mut value = value;
-                if crate::tools::tool_intent::is_spool_file_read_command(&tool_name_owned, &args_for_recording)
-                    && let Some(output) = value.as_object_mut()
-                {
-                    output.insert("no_spool".to_string(), json!(true));
+                if crate::tools::tool_intent::is_spool_file_read_command(&tool_name_owned, &args_for_recording) {
+                    if let Some(output) = value.as_object_mut() {
+                        output.insert("no_spool".to_string(), json!(true));
+                    } else {
+                        // `process_tool_output` can spool scalar/array values
+                        // based on their serialized size. Wrap an unusual
+                        // scalar result before that boundary so a safe spool
+                        // inspection can never create a nested spool reference.
+                        value = json!({"output": value, "no_spool": true});
+                    }
                 }
                 let processed_value = self
                     .process_tool_output(&tool_name_owned, value, is_mcp_tool, max_output_tokens)

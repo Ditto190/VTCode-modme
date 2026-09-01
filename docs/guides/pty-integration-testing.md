@@ -22,6 +22,19 @@ Run the focused PTY smoke tests directly:
 cargo nextest run --test pty_tests
 ```
 
+The regression surface includes ANSI and carriage-return output, large
+output, command errors, labeled stdout/stderr pipe results, callback pressure,
+and the complete transcript sidecar. A full sidecar remains available to
+`Ctrl+T` review after shutdown while the compact live view keeps only its
+bounded preview; review must not show duplicate output aliases. When the live
+preview queue is full, tests should observe a bounded coalesced/drop notice
+instead of silent loss. Use the same environment workaround as CI-local
+iteration when needed:
+
+```bash
+RUSTC_WRAPPER= cargo nextest run --locked --test pty_tests
+```
+
 To execute the same checks plus external tool availability in one pass, use the helper script:
 
 ```bash

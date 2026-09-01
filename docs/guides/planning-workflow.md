@@ -206,6 +206,23 @@ the repository evidence already gathered. If that retry does not produce a
 validated persisted plan, the session stays in planning and shows a keep-planning
 message; it does not advertise implementation or emit approval events.
 
+### Empty-response recovery
+
+Two consecutive empty model responses in planning have one deterministic
+recovery path. The first empty response receives the ordinary tool-enabled
+retry. The second schedules exactly one tool-free synthesis using the latest
+request and bounded recent evidence; the synthesis must contain exactly one
+canonical `<proposed_plan>...</proposed_plan>` block and no tools, questions, or
+approval prose. The runtime validates and persists the block before exposing
+approval controls.
+
+If synthesis is empty, malformed, contains tool markup, fails validation, or
+cannot be persisted, the runtime preserves any rejected draft, emits a
+concise actionable blocked handoff, and keeps planning active. It does not
+inject another interactive question, claim completion, or emit
+`thread.completed`; the blocked turn is resumable and the session is finalized
+only during shutdown.
+
 ## Plan Output Format
 
 Planning output should stay decision-complete but sparse — treat it like a

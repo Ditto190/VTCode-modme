@@ -92,6 +92,14 @@ pub(crate) struct ToolWallClockExhaustionNotice {
 
 pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 
+/// Maximum aggregate tool-result preview bytes copied into the provider-facing
+/// history for one turn. Complete output remains in the internal spool and
+/// transcript sidecar; this only bounds the diagnostic surface seen by a
+/// model during a recovery-heavy turn.
+pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize = 32 * 1024;
+
+const TOOL_PREVIEW_METADATA_STRING_LIMIT: usize = 512;
+
 impl ToolBudgetWarning {
     pub(crate) fn system_message(self) -> String {
         format!(
@@ -314,6 +322,8 @@ pub(crate) struct HarnessTurnState {
     spooled_results: u32,
     raw_spooled_bytes: u64,
     model_visible_output_bytes: u64,
+    model_visible_tool_preview_bytes: usize,
+    model_visible_tool_preview_budget_exhausted: bool,
     recovery_activations: u32,
     pub blocked_tool_calls: usize,
     pub consecutive_blocked_tool_calls: usize,
@@ -469,6 +479,8 @@ impl HarnessTurnState {
             spooled_results: 0,
             raw_spooled_bytes: 0,
             model_visible_output_bytes: 0,
+            model_visible_tool_preview_bytes: 0,
+            model_visible_tool_preview_budget_exhausted: false,
             recovery_activations: 0,
             blocked_tool_calls: 0,
             consecutive_blocked_tool_calls: 0,
@@ -608,6 +620,32 @@ impl HarnessTurnState {
         self.model_visible_output_bytes = self
             .model_visible_output_bytes
             .saturating_add(u64::try_from(model_visible_output_bytes).unwrap_or(u64::MAX));
+    }
+
+    /// Bound the tool response before it enters provider-facing history.
+    ///
+    /// Tool output processing already applies a per-result preview limit, but
+    /// a turn can still accumulate many independent previews (or repeatedly
+    /// inspect a spool file). Once the aggregate budget is exhausted, retain
+    /// only bounded metadata so recovery cannot amplify one diagnostic into a
+    /// recursively growing prompt.
+    pub(crate) fn bound_model_visible_tool_preview(&mut self, tool_name: Option<&str>, content: String) -> String {
+        if content.is_empty() {
+            return content;
+        }
+
+        let remaining = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES.saturating_sub(self.model_visible_tool_preview_bytes);
+        if !self.model_visible_tool_preview_budget_exhausted && content.len() <= remaining {
+            self.model_visible_tool_preview_bytes = self.model_visible_tool_preview_bytes.saturating_add(content.len());
+            if self.model_visible_tool_preview_bytes >= MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES {
+                self.model_visible_tool_preview_budget_exhausted = true;
+            }
+            return content;
+        }
+
+        self.model_visible_tool_preview_bytes = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+        self.model_visible_tool_preview_budget_exhausted = true;
+        bounded_tool_preview_metadata(tool_name, &content)
     }
 
     pub(crate) fn replace_model_visible_output_bytes(&mut self, previous_len: usize, new_len: usize) {
@@ -1170,6 +1208,62 @@ impl HarnessTurnState {
     }
 }
 
+fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> String {
+    let parsed = serde_json::from_str::<serde_json::Value>(content).ok();
+    let object = parsed.as_ref().and_then(serde_json::Value::as_object);
+
+    let spool_path = object
+        .and_then(|value| value.get("spool_path"))
+        .and_then(serde_json::Value::as_str)
+        .map(|path| bounded_preview_string(path, TOOL_PREVIEW_METADATA_STRING_LIMIT));
+    let byte_count = object
+        .and_then(|value| {
+            ["original_bytes", "spooled_bytes", "output_bytes", "bytes"]
+                .into_iter()
+                .find_map(|key| value.get(key).and_then(serde_json::Value::as_u64))
+        })
+        .unwrap_or_else(|| u64::try_from(content.len()).unwrap_or(u64::MAX));
+    let completion_state = object
+        .and_then(|value| {
+            if value.get("spool_pending").and_then(serde_json::Value::as_bool) == Some(true) {
+                Some("pending")
+            } else if value.get("spool_complete").and_then(serde_json::Value::as_bool) == Some(true)
+                || value.get("is_exited").and_then(serde_json::Value::as_bool) == Some(true)
+            {
+                Some("complete")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("unknown");
+
+    let note = if spool_path.is_some() {
+        "Aggregate tool preview budget exhausted; complete output remains in the internal spool and transcript sidecar."
+    } else {
+        "Aggregate tool preview budget exhausted; use a targeted bounded read or retry the request for more detail."
+    };
+    serde_json::json!({
+        "tool": tool_name.map(|name| bounded_preview_string(name, TOOL_PREVIEW_METADATA_STRING_LIMIT)),
+        "spool_path": spool_path,
+        "byte_count": byte_count,
+        "completion_state": completion_state,
+        "preview_budget_exhausted": true,
+        "note": note,
+    })
+    .to_string()
+}
+
+fn bounded_preview_string(value: &str, limit: usize) -> String {
+    if value.len() <= limit {
+        return value.to_string();
+    }
+    let mut end = limit;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &value[..end])
+}
+
 pub(crate) struct RunLoopContext<'a> {
     pub renderer: &'a mut AnsiRenderer,
     pub handle: &'a InlineHandle,
@@ -1318,10 +1412,42 @@ mod tests {
     use hashbrown::HashSet;
 
     use super::{
-        CrossTurnTracker, HarnessTurnState, RecoveryMode, TOOL_BUDGET_WARNING_THRESHOLD, ToolBudgetExhaustion,
-        ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion, ToolWallClockExhaustionNotice,
-        TurnExecutionPhase, TurnId, TurnPhase, TurnRunId,
+        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode,
+        TOOL_BUDGET_WARNING_THRESHOLD, ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning,
+        ToolWallClockExhaustion, ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId,
     };
+
+    #[test]
+    fn model_visible_tool_preview_budget_returns_bounded_metadata_after_exhaustion() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        let first = state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(20 * 1024));
+        assert_eq!(first.len(), 20 * 1024);
+
+        let second = state.bound_model_visible_tool_preview(
+            Some("run_pty_cmd"),
+            serde_json::json!({
+                "output": "b".repeat(20 * 1024),
+                "spool_path": ".vtcode/context/tool_outputs/run-1.txt",
+                "spooled_bytes": 20 * 1024,
+                "spool_complete": true,
+            })
+            .to_string(),
+        );
+
+        assert!(second.len() < 2 * 1024);
+        assert!(second.contains(".vtcode/context/tool_outputs/run-1.txt"));
+        assert!(second.contains("\"byte_count\":20480"));
+        assert!(second.contains("\"completion_state\":\"complete\""));
+        assert!(second.contains("preview_budget_exhausted"));
+        let repeated_b = "b".repeat(128);
+        assert!(!second.contains(repeated_b.as_str()));
+        assert_eq!(state.model_visible_tool_preview_bytes, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES);
+        assert!(state.model_visible_tool_preview_budget_exhausted);
+
+        let later = state.bound_model_visible_tool_preview(Some("cat"), "later output".to_string());
+        assert!(later.contains("Aggregate tool preview budget exhausted"));
+        assert!(!later.contains("later output"));
+    }
 
     #[test]
     fn harness_state_tracks_phase_transitions() {

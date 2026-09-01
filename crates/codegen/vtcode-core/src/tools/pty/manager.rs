@@ -648,7 +648,8 @@ impl PtyManager {
         let reader_completed = Arc::new(AtomicBool::new(false));
         let reader_completed_clone = Arc::clone(&reader_completed);
         let session_name = session_id.clone();
-        let output_spool_tx_for_reader = output_spool_tx;
+        let output_spool_failed_for_reader = Arc::clone(&output_spool_failed);
+        let mut output_spool_tx_for_reader = Some(output_spool_tx);
         // Start unicode monitoring for this session
         UNICODE_MONITOR.start_session();
 
@@ -675,7 +676,17 @@ Ok(0) => {
                             let chunk = &buffer[..bytes_read];
                             total_bytes += bytes_read;
                             output_total_bytes_for_reader.fetch_add(bytes_read as u64, Ordering::Relaxed);
-                            let _ = output_spool_tx_for_reader.blocking_send(chunk.to_vec());
+                            let send_result = output_spool_tx_for_reader
+                                .as_ref()
+                                .map(|sender| sender.blocking_send(chunk.to_vec()));
+                            if matches!(send_result, Some(Err(_))) {
+                                output_spool_failed_for_reader.store(true, Ordering::Release);
+                                warn!(
+                                    "PTY session '{}' spool receiver closed after {} bytes; retaining screen and scrollback output",
+                                    session_name, total_bytes
+                                );
+                                output_spool_tx_for_reader = None;
+                            }
 
     // Quick unicode detection heuristic
     let likely_unicode = chunk.iter().any(|&b| b >= 0x80);
