@@ -129,6 +129,14 @@ pub(crate) fn try_claim_restore() -> bool {
     !RESTORE_DONE.swap(true, Ordering::SeqCst)
 }
 
+/// Whether terminal restoration has already been claimed (by this task, the
+/// host, or a panic hook). Once true, the TUI must not draw any more frames:
+/// the main screen buffer is live and a straggler frame would leak transcript
+/// content into the CLI scrollback.
+pub(crate) fn is_restore_claimed() -> bool {
+    RESTORE_DONE.load(Ordering::SeqCst)
+}
+
 /// Install color-eyre's eyre hook for richer top-level error rendering in dev/debug mode.
 #[cfg(debug_assertions)]
 pub(crate) fn maybe_prepare_color_eyre_hooks() {
@@ -168,5 +176,15 @@ mod tests {
         assert!(is_color_eyre_enabled());
 
         COLOR_EYRE_ENABLED.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn is_restore_claimed_tracks_restore_claim() {
+        RESTORE_DONE.store(false, Ordering::SeqCst);
+        assert!(!is_restore_claimed());
+        assert!(try_claim_restore());
+        assert!(is_restore_claimed());
+        assert!(!try_claim_restore(), "second claim must fail");
+        RESTORE_DONE.store(false, Ordering::SeqCst);
     }
 }

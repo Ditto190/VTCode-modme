@@ -94,6 +94,7 @@ fn create_headless_session() -> InlineSession {
     InlineSession {
         handle: InlineHandle::new_for_tests(command_tx),
         events: event_rx,
+        worker: None,
     }
 }
 

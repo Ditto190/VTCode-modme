@@ -12,7 +12,7 @@ use vtcode_core::ui::set_tui_mode;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_core::utils::session_archive::{SessionArchive, SessionMessage};
 use vtcode_core::utils::transcript;
-use vtcode_ui::tui::app::InlineHandle;
+use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
 use crate::agent::runloop::unified::async_mcp_manager::AsyncMcpManager;
 use crate::agent::runloop::unified::state::SessionStats;
@@ -44,6 +44,7 @@ pub(super) async fn finalize_session(
     linked_directories: Vec<LinkedDirectory>,
     async_mcp_manager: Option<&AsyncMcpManager>,
     handle: &InlineHandle,
+    session: &mut InlineSession,
 ) -> Result<FinalizationOutput> {
     let transcript_lines = transcript::snapshot();
     let mut archive_path: Option<PathBuf> = None;
@@ -116,12 +117,17 @@ pub(super) async fn finalize_session(
     set_global_notification_hook_engine(None);
     set_global_terminal_focused(false);
 
-    // Give the TUI a brief moment to shut down cleanly before we forcefully restore
-    // The TUI runs in a background task and may need a moment to clean up
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    // The TUI task owns the terminal: wait for it to run its own canonical
+    // teardown (final render on the alternate screen, leave, drain, disable
+    // raw mode) before touching the terminal from the host side. Restoring
+    // earlier flips the screen back while the TUI is still drawing, which
+    // paints transcript frames onto the main CLI screen.
+    if !session.wait_for_exit(std::time::Duration::from_millis(1000)).await {
+        tracing::warn!("TUI task did not exit after shutdown; forcing terminal restore");
+    }
 
-    // Ensure terminal is properly restored in case TUI didn't exit cleanly
-    // This is critical because the TUI task may still be holding terminal state
+    // Backstop restore in case the TUI task hung or never ran. This is a
+    // no-op when the TUI already restored itself (restore_tui is idempotent).
     let _ = restore_terminal_on_exit();
 
     transcript::clear_inline_handle();

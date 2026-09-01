@@ -241,6 +241,12 @@ mod headless {
             self.events.recv().await
         }
 
+        /// Headless stub: there is no TUI task to await, so shutdown is
+        /// always considered complete immediately.
+        pub async fn wait_for_exit(&mut self, _timeout: std::time::Duration) -> bool {
+            true
+        }
+
         pub fn clone_inline_handle(&self) -> InlineHandle {
             self.handle.clone()
         }

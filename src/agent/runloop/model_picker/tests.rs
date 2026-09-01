@@ -395,7 +395,11 @@ fn session_with_channels() -> (InlineHandle, InlineSession) {
     let (command_tx, _command_rx) = mpsc::unbounded_channel();
     let (_event_tx, event_rx) = mpsc::unbounded_channel();
     let handle = InlineHandle::new_for_tests(command_tx);
-    let session = InlineSession { handle: handle.clone(), events: event_rx };
+    let session = InlineSession {
+        handle: handle.clone(),
+        events: event_rx,
+        worker: None,
+    };
     (handle, session)
 }
 

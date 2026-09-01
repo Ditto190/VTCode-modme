@@ -51,7 +51,11 @@ mod tests {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(command_tx);
-        let mut session = InlineSession { handle: handle.clone(), events: event_rx };
+        let mut session = InlineSession {
+            handle: handle.clone(),
+            events: event_rx,
+            worker: None,
+        };
         let ctrl_c_state = Arc::new(CtrlCState::new());
         let ctrl_c_notify = Arc::new(Notify::new());
 

@@ -1512,6 +1512,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             linked_directories,
             async_mcp_manager.as_deref(),
             &handle,
+            &mut session,
         )
         .await
         {

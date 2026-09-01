@@ -614,6 +614,10 @@ impl InlineHandle {
 pub struct InlineSession {
     pub handle: InlineHandle,
     pub events: UnboundedReceiver<InlineEvent>,
+    /// Background task running the terminal event loop. The host must await
+    /// it after `shutdown()` before restoring terminal state itself;
+    /// otherwise the task's final frames are painted onto the main screen.
+    pub worker: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl InlineSession {
@@ -622,6 +626,18 @@ impl InlineSession {
             return Some(event);
         }
         self.events.recv().await
+    }
+
+    /// Wait for the TUI task to finish its own terminal teardown.
+    ///
+    /// Returns `true` when the task exited (or no task was spawned); `false`
+    /// when it was still running after `timeout`, in which case the caller
+    /// should force-restore the terminal as a backstop.
+    pub async fn wait_for_exit(&mut self, timeout: std::time::Duration) -> bool {
+        match self.worker.take() {
+            Some(worker) => tokio::time::timeout(timeout, worker).await.is_ok(),
+            None => true,
+        }
     }
 
     pub fn set_skip_confirmations(&mut self, skip: bool) {

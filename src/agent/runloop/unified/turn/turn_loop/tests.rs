@@ -2419,7 +2419,11 @@ async fn explicit_build_and_auto_approval_selections_handoff_persisted_plan_with
         let (command_tx, _command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(command_tx);
-        let mut session = InlineSession { handle: handle.clone(), events: event_rx };
+        let mut session = InlineSession {
+            handle: handle.clone(),
+            events: event_rx,
+            worker: None,
+        };
         event_tx
             .send(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Selection(selection))))
             .expect("submit explicit plan approval selection");

@@ -253,7 +253,11 @@ mod tests {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(command_tx);
-        let session = InlineSession { handle: handle.clone(), events: event_rx };
+        let session = InlineSession {
+            handle: handle.clone(),
+            events: event_rx,
+            worker: None,
+        };
         (handle, command_rx, event_tx, session)
     }
 

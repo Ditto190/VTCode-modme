@@ -38,6 +38,7 @@ fn create_headless_session() -> InlineSession {
     InlineSession {
         handle: InlineHandle::new_for_tests(command_tx),
         events: event_rx,
+        worker: None,
     }
 }
 
@@ -346,6 +347,7 @@ async fn observed_shell_tool_calls_stream_into_inline_pty_ui() {
     let mut session = InlineSession {
         handle: InlineHandle::new_for_tests(command_tx),
         events: event_rx,
+        worker: None,
     };
     let handle = session.clone_inline_handle();
     let approval_recorder = ApprovalRecorder::new(workspace.clone());
