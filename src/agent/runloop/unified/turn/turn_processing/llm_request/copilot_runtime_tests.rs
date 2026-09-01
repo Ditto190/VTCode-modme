@@ -645,7 +645,10 @@ async fn vtcode_tool_calls_render_transcript_output_via_shared_pipeline() {
     let transcript_text = transcript::snapshot().join("\n");
     let stripped_text = vtcode_core::utils::ansi_parser::strip_ansi(&transcript_text);
     assert!(runtime_host.harness_state.tool_calls >= 1);
-    assert!(stripped_text.contains("hello from acp"), "STRIPPED TEXT: {stripped_text:?}");
+    assert!(
+        !stripped_text.contains("hello from acp"),
+        "successful command output should be compacted in the live transcript: {stripped_text:?}"
+    );
     assert!(
         stripped_text.contains("Ran cat") || stripped_text.contains("Run command"),
         "expected command preview in transcript, got: {stripped_text}"

@@ -37,6 +37,7 @@ use crate::startup::{auto_grant_tui_full_auto_workspace_trust, ensure_full_auto_
 
 use crate::agent::runloop::unified::planning_workflow::PlanningFinishReason;
 use crate::agent::runloop::unified::planning_workflow_state::transition_to_planning_workflow;
+use crate::agent::runloop::welcome::SessionBootstrap;
 use vtcode_core::core::interfaces::session::PlanningEntrySource;
 
 use super::super::interaction_loop::{InteractionLoopContext, InteractionOutcome, InteractionState};
@@ -638,7 +639,11 @@ pub(super) fn refresh_ide_context_before_user_turn(ctx: &mut InteractionLoopCont
     );
 }
 
-pub(super) fn apply_live_theme_and_appearance(handle: &vtcode_ui::tui::app::InlineHandle, cfg: &VTCodeConfig) {
+pub(super) fn apply_live_theme_and_appearance(
+    handle: &vtcode_ui::tui::app::InlineHandle,
+    cfg: &VTCodeConfig,
+    session_bootstrap: &SessionBootstrap,
+) {
     let color_config = theme::ColorAccessibilityConfig {
         minimum_contrast: cfg.ui.minimum_contrast,
         bold_is_bright: cfg.ui.bold_is_bright,
@@ -664,6 +669,7 @@ pub(super) fn apply_live_theme_and_appearance(handle: &vtcode_ui::tui::app::Inli
     let styles = theme::active_styles();
     handle.set_theme(inline_theme_from_core_styles(&styles));
     handle.set_appearance(to_tui_appearance(cfg));
+    handle.set_key_bindings(session_bootstrap.effective_key_bindings(cfg));
     crate::agent::runloop::unified::palettes::apply_prompt_style(handle);
     handle.force_redraw();
 }

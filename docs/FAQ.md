@@ -122,14 +122,32 @@ VT Code suspends the event loop, drains pending terminal events, leaves alternat
 
 This prevents terminal artifacts and ensures external apps get clean input/output.
 
-### How does the fullscreen tool-output viewer work?
+### How does fullscreen Transcript Review work?
 
-Press `Ctrl+T` while fullscreen rendering is active to open the tool-output viewer. VT Code builds a session-local plain-text cache of complete command output, including PTY captures and distinguishable pipe stdout/stderr streams, then lets you:
+Press the configured Transcript Review shortcut (default `Ctrl+T`) to open or
+close Transcript Review. VT Code composes the ordered session conversation
+with complete command output, including PTY captures and distinguishable pipe
+stdout/stderr streams. The live view stays compact, while the review retains
+the full capture. Rich rendering is the default; press the configured render
+toggle (default `R`) for ANSI-free raw text. You can:
 
 - search with `/`, `n`, and `N`
-- page through the captured tool output with `Ctrl+U`, `Ctrl+D`, `Ctrl+B`, and `Ctrl+F`
-- export to native terminal scrollback with `[`
-- open the complete tool output in your editor with `v`
+- page through the conversation with `Ctrl+U`, `Ctrl+D`, `Ctrl+B`, and `Ctrl+F`
+- export the complete conversation to native terminal scrollback with `[`
+- open the complete conversation in your editor with `v`
+- copy the complete ANSI-free conversation with `Ctrl+O`
+
+Successful command rows are grouped only while they are contiguous. Their
+styled shortcut and `click to expand or collapse` suffix is clickable with
+mouse capture; clicking a grouped row opens the review at its first command.
+Failures,
+warnings, stderr, diffs, and meaningful artifacts remain inline.
+
+The Transcript Review title includes a clickable `[close]` control, and its
+footer lists the active open/close, rich/raw, search, and scrolling shortcuts.
+These hints and controls can be disabled independently in `ui.transcript_review`.
+`Alt+O` remains available as a compatibility alias. If the review action is
+explicitly unbound, `Ctrl+T` falls back to readline transpose behavior.
 
 ### What should I configure for tmux?
 

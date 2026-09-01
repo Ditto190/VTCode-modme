@@ -288,6 +288,13 @@ fn render_compact_tool_summary_data(
     data: &SummaryData,
     stream_label: Option<&str>,
 ) -> Result<()> {
+    if let Some(command) = data.summary.strip_prefix("Ran ") {
+        return renderer.render_compact_command_activity(command.to_string(), 0, None, None);
+    }
+
+    // A non-command result is a hard grouping boundary. Its own detail lines
+    // remain visible in compact mode, so the next command starts a fresh row.
+    renderer.flush_compact_command_group();
     for line in compact_summary_expanded_lines(data, stream_label) {
         match line.kind {
             CompactToolSummaryLineKind::Info => {
@@ -952,6 +959,7 @@ mod tests {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+        renderer.set_tool_display_mode(vtcode_core::config::ToolDisplayMode::Expanded);
         let context = ToolSummaryRenderContext { workspace_root: None };
 
         render_tool_call_summary(
@@ -1038,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_command_summary_keeps_each_call_and_command_visible() {
+    fn compact_command_summary_groups_contiguous_commands() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
@@ -1057,22 +1065,23 @@ mod tests {
             .expect("summary should render");
         }
 
-        let text = std::iter::from_fn(|| receiver.try_recv().ok())
+        let activities = std::iter::from_fn(|| receiver.try_recv().ok())
             .filter_map(|command| match command {
-                InlineCommand::AppendLine { segments, .. } => {
-                    Some(segments.into_iter().map(|segment| segment.text).collect::<String>())
+                InlineCommand::AppendCompactActivity(activity) | InlineCommand::ReplaceCompactActivity(activity) => {
+                    Some(activity)
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("• Ran printf one"));
-        assert!(text.contains("• Ran printf two"));
-        assert!(!text.contains("Ran 2 commands"));
+            .collect::<Vec<_>>();
+        assert_eq!(activities.len(), 2);
+        assert_eq!(activities[0].command_count, 1);
+        assert_eq!(activities[0].display_text(), "• Ran printf one");
+        assert_eq!(activities[1].command_count, 2);
+        assert_eq!(activities[1].display_text(), "• Ran 2 commands");
     }
 
     #[test]
-    fn compact_command_summary_does_not_group_command_tool_aliases() {
+    fn compact_command_summary_groups_command_tool_aliases() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
@@ -1091,17 +1100,52 @@ mod tests {
             .expect("summary should render");
         }
 
-        let text = std::iter::from_fn(|| receiver.try_recv().ok())
+        let activities = std::iter::from_fn(|| receiver.try_recv().ok())
             .filter_map(|command| match command {
-                InlineCommand::AppendLine { segments, .. } => {
-                    Some(segments.into_iter().map(|segment| segment.text).collect::<String>())
+                InlineCommand::AppendCompactActivity(activity) | InlineCommand::ReplaceCompactActivity(activity) => {
+                    Some(activity)
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("• Ran printf one"));
-        assert!(text.contains("• Ran printf two"));
-        assert!(!text.contains("Ran 2 commands"));
+            .collect::<Vec<_>>();
+        assert_eq!(activities.len(), 2);
+        assert_eq!(activities[1].command_count, 2);
+        assert_eq!(activities[1].display_text(), "• Ran 2 commands");
+    }
+
+    #[test]
+    fn compact_command_summary_flushes_before_non_command_results() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+        renderer.set_tool_display_mode(vtcode_core::config::ToolDisplayMode::Compact);
+        let context = ToolSummaryRenderContext { workspace_root: None };
+
+        for (tool_name, args) in [
+            (tool_names::UNIFIED_EXEC, json!({"action": "run", "command": "printf one"})),
+            (tool_names::LIST_FILES, json!({"path": "."})),
+            (tool_names::UNIFIED_EXEC, json!({"action": "run", "command": "printf two"})),
+        ] {
+            render_tool_call_summary(
+                &mut renderer,
+                tool_name,
+                &args,
+                None,
+                &context,
+                anstyle::Color::Ansi(anstyle::AnsiColor::Green),
+            )
+            .expect("summary should render");
+        }
+
+        let activities = std::iter::from_fn(|| receiver.try_recv().ok())
+            .filter_map(|command| match command {
+                InlineCommand::AppendCompactActivity(activity) | InlineCommand::ReplaceCompactActivity(activity) => {
+                    Some(activity)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(activities.len(), 2);
+        assert!(activities.iter().all(|activity| activity.command_count == 1));
     }
 }

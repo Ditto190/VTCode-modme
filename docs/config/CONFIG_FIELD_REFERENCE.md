@@ -832,6 +832,8 @@ python3 scripts/generate_config_field_reference.py
 | `ui.fullscreen.scroll_speed` | `integer` | no | `3` | Multiplier applied to mouse wheel transcript scrolling in fullscreen mode. Values are clamped to the range 1..=20. Can also be controlled via VTCODE_FULLSCREEN_SCROLL_SPEED. |
 | `ui.hide_header` | `boolean` | no | `true` | Hide the full TUI header, showing only version info in a compact line. |
 | `ui.inline_viewport_rows` | `integer` | no | `16` | Number of rows to allocate for inline UI viewport |
+| `ui.keybindings` | `object` | no | `{}` | Override session action bindings; an empty array explicitly unbinds an action. |
+| `ui.keybindings.*` | `array` | no | `[]` | Key specifications for a named session action, such as `open_transcript_review` or `toggle_transcript_render_mode`. |
 | `ui.keyboard_protocol.disambiguate_escape_codes` | `boolean` | no | `true` | Resolve Esc key ambiguity (recommended for performance) |
 | `ui.keyboard_protocol.enabled` | `boolean` | no | `true` | Enable keyboard protocol enhancements (master toggle) |
 | `ui.keyboard_protocol.mode` | `string` | no | `"default"` | Preset mode: default, full, minimal, or custom |
@@ -875,6 +877,9 @@ python3 scripts/generate_config_field_reference.py
 | `ui.terminal_title.items` | `array \| null` | no | `null` | - |
 | `ui.terminal_title.items[]` | `string` | no | `-` | - |
 | `ui.thinking_display` | `string` | no | `"collapsed"` | Default collapse state of agent thinking/reasoning blocks ("collapsed" or "extended") |
+| `ui.transcript_review.show_close_button` | `boolean` | no | `true` | Show the mouse-clickable close control in the Transcript Review title. |
+| `ui.transcript_review.show_hints` | `boolean` | no | `true` | Show the keyboard and click affordance on compact command rows. |
+| `ui.transcript_review.show_shortcut_guide` | `boolean` | no | `true` | Show the keyboard shortcut guide inside Transcript Review. |
 | `ui.tool_display_mode` | `string` | no | `"compact"` | Tool transition summary display mode. Options: "compact" (one compact summary per call, with bounded live command output) or "expanded" (the expanded summary layout per call). |
 | `ui.tool_output_max_lines` | `integer` | no | `30` | Maximum number of lines to display in tool output (prevents transcript flooding) |
 | `ui.tool_output_mode` | `string` | no | `"compact"` | Tool output display mode ("compact" or "full") |

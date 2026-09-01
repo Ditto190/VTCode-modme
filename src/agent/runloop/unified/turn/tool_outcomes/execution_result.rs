@@ -200,6 +200,9 @@ async fn handle_success<'a>(
 
     // Update blocked-streak and record tool response in grouped context form.
     t_ctx.ctx.reset_blocked_tool_call_streak();
+    // This provider-facing history update intentionally precedes UI rendering.
+    // Compact rendering may collapse or return early, but it must never affect
+    // the model or harness context.
     let content_for_model = prepare_tool_response_content(t_ctx.ctx, tool_name, args_val, output).await;
     push_tool_response_with_auto_permission_probe(t_ctx, tool_call_id.clone(), tool_name, content_for_model).await?;
     // Skip signature recording for loop-detected stubs: a loop-detected result is

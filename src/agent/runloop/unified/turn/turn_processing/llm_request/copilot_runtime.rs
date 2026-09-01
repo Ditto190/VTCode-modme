@@ -1032,6 +1032,7 @@ impl ObservedToolPtyStream {
             Some(command_display),
             pty_config,
             None,
+            true,
         );
 
         Self {
@@ -1478,6 +1479,7 @@ async fn setup_terminal_stream(
         Some(command_display.to_string()),
         pty_config,
         None,
+        true,
     );
 
     (

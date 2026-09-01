@@ -1,13 +1,42 @@
+use std::collections::{HashMap, HashSet};
+
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, Paragraph},
 };
 use ratatui_cheese::input::{Input, InputState};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::{Session, ToolOutputBlock};
 use crate::tui::config::constants::ui;
+use crate::tui::core_tui::session::action::Action;
 use crate::tui::core_tui::session::list_panel::input_styles_from_theme;
+use crate::tui::core_tui::session::text_utils::strip_ansi_codes;
+use crate::tui::core_tui::style::{ratatui_color_from_ansi, ratatui_style_from_inline};
+use crate::tui::core_tui::types::InlineMessageKind;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TranscriptRenderMode {
+    #[default]
+    Rich,
+    Raw,
+}
+
+impl TranscriptRenderMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Rich => "rich",
+            Self::Raw => "raw",
+        }
+    }
+
+    fn toggle(self) -> Self {
+        match self {
+            Self::Rich => Self::Raw,
+            Self::Raw => Self::Rich,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 struct ToolOutputSearchState {
@@ -21,52 +50,198 @@ struct ToolOutputSearchState {
     restore_match: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+enum ReviewBlockKey {
+    Core(usize),
+    Tool(u64),
+    OrphanTool(usize),
+}
+
+impl Default for ReviewBlockKey {
+    fn default() -> Self {
+        Self::Core(0)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ReviewSourceKind {
+    Core(usize),
+    Tool(usize),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReviewSource {
+    key: ReviewBlockKey,
+    revision: u64,
+    kind: ReviewSourceKind,
+}
+
 #[derive(Clone, Debug, Default)]
 struct CachedToolOutputBlock {
+    key: ReviewBlockKey,
     revision: u64,
+    /// ANSI-free lines used for search, copying, editor handoff, and raw export.
     lines: Vec<String>,
+    /// Width-aware styled lines used by the default rich review mode.
+    rich_lines: Vec<Line<'static>>,
     lowered_lines: Option<Vec<String>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ReviewRevision {
+    transcript: u64,
+    tool_output: u64,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToolOutputViewerState {
     width: u16,
-    source_revision: u64,
+    height: u16,
+    source_revision: ReviewRevision,
     messages: Vec<CachedToolOutputBlock>,
     row_offsets: Vec<usize>,
     total_lines: usize,
     cached_export_text: Option<String>,
     scroll_top: usize,
     search: ToolOutputSearchState,
+    mode: TranscriptRenderMode,
+    focus_target: Option<u64>,
+    viewer_area: Rect,
+    content_area: Rect,
+    title_mode_hit_region: Option<Rect>,
+    hovered_mode_control: bool,
+    title_close_hit_region: Option<Rect>,
+    hovered_close_control: bool,
 }
 
 impl ToolOutputViewerState {
     pub(crate) fn open(session: &Session, width: u16, height: u16) -> Self {
-        let mut state = Self::default();
+        Self::open_focused(session, width, height, None)
+    }
+
+    pub(crate) fn open_focused(session: &Session, width: u16, height: u16, focus_target: Option<u64>) -> Self {
+        let mut state = Self { focus_target, ..Self::default() };
         state.refresh(session, width, height);
-        state.scroll_to_bottom(height);
+        if focus_target.is_none() {
+            state.scroll_to_bottom(height);
+        }
         state
     }
 
     pub(crate) fn refresh(&mut self, session: &Session, width: u16, height: u16) {
         let width = width.max(1);
-        let revision = session.tool_output_revision;
-        if self.width == width && self.source_revision == revision {
+        let height = height.max(1);
+        let revision = ReviewRevision {
+            transcript: session.core.current_transcript_revision(),
+            tool_output: session.tool_output_revision,
+        };
+        if self.width == width && self.height == height && self.source_revision == revision {
+            self.focus_pending_target(height);
             self.clamp_scroll(height);
             return;
         }
 
         let was_at_bottom = self.is_at_bottom(height);
-        self.refresh_messages(session, width);
+        let width_changed = self.width != width;
+        self.refresh_messages(session, width, width_changed);
         self.width = width;
+        self.height = height;
         self.source_revision = revision;
         self.recompute_matches();
 
+        let focused = self.focus_pending_target(height);
+        if focused {
+            return;
+        }
         if was_at_bottom {
             self.scroll_to_bottom(height);
         } else {
             self.clamp_scroll(height);
         }
+    }
+
+    pub(crate) fn toggle_render_mode(&mut self) {
+        self.mode = self.mode.toggle();
+        for message in &mut self.messages {
+            // Search rows are derived from the active render mode. Invalidate
+            // the lowercase cache when rich wrapping and raw lines switch.
+            message.lowered_lines = None;
+        }
+        self.update_row_offsets();
+        self.recompute_matches();
+        self.clamp_scroll(self.height);
+    }
+
+    fn focus_pending_target(&mut self, height: u16) -> bool {
+        let Some(target) = self.focus_target else {
+            return false;
+        };
+        let Some(message_index) = self
+            .messages
+            .iter()
+            .position(|message| message.key == ReviewBlockKey::Tool(target))
+        else {
+            return false;
+        };
+        self.scroll_top = self.row_offsets.get(message_index).copied().unwrap_or_default();
+        self.scroll_top = self.scroll_top.min(self.max_scroll(height));
+        self.focus_target = None;
+        true
+    }
+
+    pub(crate) fn set_viewer_area(&mut self, area: Rect) {
+        self.viewer_area = area;
+    }
+
+    pub(crate) fn viewer_contains(&self, column: u16, row: u16) -> bool {
+        (self.viewer_area.width == 0 || self.viewer_area.height == 0)
+            || self.viewer_area.contains(Position { x: column, y: row })
+    }
+
+    pub(crate) fn body_contains(&self, column: u16, row: u16) -> bool {
+        (self.content_area.width == 0 || self.content_area.height == 0)
+            || self.content_area.contains(Position { x: column, y: row })
+    }
+
+    pub(crate) fn content_height_or(&self, fallback: u16) -> u16 {
+        if self.content_area.height == 0 {
+            fallback.max(1)
+        } else {
+            self.content_area.height
+        }
+    }
+
+    pub(crate) fn mode_control_contains(&self, column: u16, row: u16) -> bool {
+        self.title_mode_hit_region
+            .is_some_and(|area| area.contains(Position { x: column, y: row }))
+    }
+
+    pub(crate) fn close_control_contains(&self, column: u16, row: u16) -> bool {
+        self.title_close_hit_region
+            .is_some_and(|area| area.contains(Position { x: column, y: row }))
+    }
+
+    pub(crate) fn update_mode_hover(&mut self, column: u16, row: u16) -> bool {
+        let hovered = self.mode_control_contains(column, row);
+        if self.hovered_mode_control == hovered {
+            return false;
+        }
+        self.hovered_mode_control = hovered;
+        true
+    }
+
+    pub(crate) fn update_close_hover(&mut self, column: u16, row: u16) -> bool {
+        let hovered = self.close_control_contains(column, row);
+        if self.hovered_close_control == hovered {
+            return false;
+        }
+        self.hovered_close_control = hovered;
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_mode(&self) -> TranscriptRenderMode {
+        self.mode
     }
 
     fn line_count(&self) -> usize {
@@ -101,13 +276,12 @@ impl ToolOutputViewerState {
         let mut visible = Vec::with_capacity(height);
 
         for row in self.scroll_top..end {
-            let style = if current_match_line == Some(row) {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            };
-            let line = self.line_text_at(row).map_or_else(String::new, str::to_string);
-            visible.push(Line::styled(line, style));
+            let mut line = self.line_for_mode_at(row).unwrap_or_default();
+            if current_match_line == Some(row) {
+                let style = line.style.add_modifier(Modifier::REVERSED);
+                line = line.style(style);
+            }
+            visible.push(line);
         }
 
         while visible.len() < height {
@@ -245,83 +419,73 @@ impl ToolOutputViewerState {
             let current = self.search.current_match.unwrap_or(0) + 1;
             format!("search '{}' ({}/{})", self.search.query, current, self.search.matches.len())
         };
-        format!("line {line}/{total} • {match_status}")
+        format!("line {line}/{total} • {} • {match_status}", self.mode.label())
     }
 
-    fn refresh_messages(&mut self, session: &Session, width: u16) {
-        let tool_output_blocks = &session.tool_output_blocks;
-        let previous_len = self.messages.len();
-        let current_len = tool_output_blocks.len();
-        let width_changed = self.width != width;
+    fn refresh_messages(&mut self, session: &Session, width: u16, width_changed: bool) {
+        let previous = self
+            .messages
+            .drain(..)
+            .map(|message| (message.key, message))
+            .collect::<HashMap<_, _>>();
+        let mut previous = previous;
+        let sources = collect_review_sources(session);
+        let mut messages = Vec::with_capacity(sources.len());
 
-        if current_len < previous_len {
-            self.messages.truncate(current_len);
-            self.cached_export_text = None;
-        }
-        while self.messages.len() < current_len {
-            self.messages.push(CachedToolOutputBlock::default());
-        }
-
-        let first_dirty = if width_changed {
-            0
-        } else if current_len > previous_len {
-            previous_len
-        } else {
-            current_len
-        };
-
-        for (index, block) in tool_output_blocks.iter().enumerate().skip(first_dirty) {
-            if width_changed || self.messages[index].revision != session.tool_output_revision {
-                self.messages[index] = CachedToolOutputBlock {
-                    revision: session.tool_output_revision,
-                    lines: collect_tool_output_lines(block, width),
-                    lowered_lines: None,
-                };
-                self.cached_export_text = None;
-            }
+        for source in sources {
+            let cached = previous
+                .remove(&source.key)
+                .filter(|message| !width_changed && message.revision == source.revision);
+            messages.push(cached.unwrap_or_else(|| build_cached_block(session, source, width)));
         }
 
-        self.update_row_offsets_from(first_dirty.min(current_len));
+        self.messages = messages;
+        self.cached_export_text = None;
+        self.update_row_offsets();
     }
 
-    fn update_row_offsets_from(&mut self, start_index: usize) {
-        if start_index == 0 {
-            self.row_offsets.clear();
-            self.row_offsets.reserve(self.messages.len());
-        } else {
-            self.row_offsets.truncate(start_index);
-        }
+    fn update_row_offsets(&mut self) {
+        self.row_offsets.clear();
+        self.row_offsets.reserve(self.messages.len());
 
-        let mut current_offset = self
-            .row_offsets
-            .last()
-            .map(|offset| offset + self.messages[self.row_offsets.len() - 1].lines.len())
-            .unwrap_or(0);
-
-        for message in self.messages.iter().skip(self.row_offsets.len()) {
+        let mut current_offset = 0;
+        for message in &self.messages {
             self.row_offsets.push(current_offset);
-            current_offset += message.lines.len();
+            current_offset += self.message_line_count(message);
         }
 
         self.total_lines = current_offset;
     }
 
-    fn line_text_at(&self, row: usize) -> Option<&str> {
-        if row >= self.total_lines {
+    fn message_line_count(&self, message: &CachedToolOutputBlock) -> usize {
+        let count = match self.mode {
+            TranscriptRenderMode::Rich => message.rich_lines.len(),
+            TranscriptRenderMode::Raw => message.lines.len(),
+        };
+        count.max(1)
+    }
+
+    fn message_index_at(&self, row: usize) -> Option<(usize, usize)> {
+        if row >= self.total_lines || self.row_offsets.is_empty() {
             return None;
         }
 
-        let mut message_index = self.row_offsets.partition_point(|offset| *offset <= row).saturating_sub(1);
-        loop {
-            let message = self.messages.get(message_index)?;
-            let local_index = row.saturating_sub(self.row_offsets[message_index]);
-            if let Some(line) = message.lines.get(local_index) {
-                return Some(line.as_str());
-            }
-            if message_index == 0 {
-                return None;
-            }
-            message_index -= 1;
+        let message_index = self.row_offsets.partition_point(|offset| *offset <= row).saturating_sub(1);
+        let local_index = row.saturating_sub(self.row_offsets[message_index]);
+        Some((message_index, local_index))
+    }
+
+    fn line_text_at(&self, row: usize) -> Option<&str> {
+        let (message_index, local_index) = self.message_index_at(row)?;
+        self.messages.get(message_index)?.lines.get(local_index).map(String::as_str)
+    }
+
+    fn line_for_mode_at(&self, row: usize) -> Option<Line<'static>> {
+        let (message_index, local_index) = self.message_index_at(row)?;
+        let message = self.messages.get(message_index)?;
+        match self.mode {
+            TranscriptRenderMode::Rich => message.rich_lines.get(local_index).cloned(),
+            TranscriptRenderMode::Raw => message.lines.get(local_index).map(|line| Line::raw(line.clone())),
         }
     }
 
@@ -346,11 +510,18 @@ impl ToolOutputViewerState {
         }
 
         let needle = self.search.query.to_ascii_lowercase();
+        let mode = self.mode;
         let mut row_index = 0usize;
         for message in &mut self.messages {
-            let lowered_lines = message
-                .lowered_lines
-                .get_or_insert_with(|| message.lines.iter().map(|line| line.to_ascii_lowercase()).collect());
+            let lowered_lines = message.lowered_lines.get_or_insert_with(|| match mode {
+                TranscriptRenderMode::Rich => message
+                    .rich_lines
+                    .iter()
+                    .map(line_text)
+                    .map(|line| line.to_ascii_lowercase())
+                    .collect(),
+                TranscriptRenderMode::Raw => message.lines.iter().map(|line| line.to_ascii_lowercase()).collect(),
+            });
             for line in lowered_lines {
                 if line.contains(&needle) {
                     self.search.matches.push(row_index);
@@ -385,12 +556,271 @@ impl ToolOutputViewerState {
     }
 }
 
+pub(super) fn compact_activity_hint_text(session: &Session) -> Option<String> {
+    if !session.core.transcript_review_hints_visible() {
+        return None;
+    }
+    session
+        .core
+        .primary_binding_label(Action::OpenTranscriptReview)
+        .map(|binding| format!("{binding} to view transcript · click to expand or collapse"))
+}
+
+pub(super) fn compact_activity_segments(
+    session: &Session,
+    metadata: &vtcode_commons::ui_protocol::CompactActivityMetadata,
+) -> Vec<crate::tui::core_tui::types::InlineSegment> {
+    let base_style = session.core.styles.accent_inline_style().bold();
+    let mut segments = vec![crate::tui::core_tui::types::InlineSegment {
+        text: metadata.display_text(),
+        style: std::sync::Arc::new(base_style),
+    }];
+
+    if let Some(hint) = compact_activity_hint_text(session) {
+        let separator_style = session.core.styles.default_inline_style().dim();
+        let hint_style = session.core.styles.accent_inline_style().underline();
+        segments.push(crate::tui::core_tui::types::InlineSegment {
+            text: " · ".to_string(),
+            style: std::sync::Arc::new(separator_style),
+        });
+        segments
+            .push(crate::tui::core_tui::types::InlineSegment { text: hint, style: std::sync::Arc::new(hint_style) });
+    }
+
+    segments
+}
+
+fn collect_review_sources(session: &Session) -> Vec<ReviewSource> {
+    let core_lines = session
+        .core
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, _)| rendered_message_text(session, index))
+        .collect::<Vec<_>>();
+    let mut anchored_blocks = HashMap::<usize, Vec<usize>>::new();
+    let mut positioned_orphans = Vec::<(usize, usize)>::new();
+
+    for (block_index, block) in session.tool_output_blocks.iter().enumerate() {
+        let Some(anchor) = block.anchor_line else {
+            if let Some(recorded_at_line) = block.recorded_at_line {
+                positioned_orphans.push((recorded_at_line, block_index));
+            }
+            continue;
+        };
+        // The app session sets this line from a per-call identity marker (or
+        // from the live PTY header). Never reverse-match the rendered command
+        // text here: identical commands are valid consecutive calls, and rich
+        // wrapping can legitimately change their visible text.
+        anchored_blocks.entry(anchor).or_default().push(block_index);
+    }
+    positioned_orphans.sort_unstable();
+
+    let mut used_blocks = HashSet::new();
+    let mut sources = Vec::with_capacity(core_lines.len() + session.tool_output_blocks.len());
+    let mut index = 0usize;
+    let mut next_positioned_orphan = 0usize;
+    while index < core_lines.len() {
+        while let Some(&(recorded_at_line, block_index)) = positioned_orphans.get(next_positioned_orphan)
+            && recorded_at_line <= index
+        {
+            let block = &session.tool_output_blocks[block_index];
+            sources.push(ReviewSource {
+                key: ReviewBlockKey::OrphanTool(block_index),
+                revision: block.id,
+                kind: ReviewSourceKind::Tool(block_index),
+            });
+            used_blocks.insert(block_index);
+            next_positioned_orphan += 1;
+        }
+
+        if let Some(block_indices) = anchored_blocks.get(&index) {
+            for &block_index in block_indices {
+                let block = &session.tool_output_blocks[block_index];
+                sources.push(ReviewSource {
+                    key: ReviewBlockKey::Tool(block.id),
+                    revision: block.id,
+                    kind: ReviewSourceKind::Tool(block_index),
+                });
+                used_blocks.insert(block_index);
+            }
+            index = tool_output_body_end(session, &core_lines, index, &anchored_blocks);
+        } else {
+            sources.push(ReviewSource {
+                key: ReviewBlockKey::Core(index),
+                revision: session.core.lines[index].revision,
+                kind: ReviewSourceKind::Core(index),
+            });
+            index += 1;
+        }
+    }
+
+    for &(_, block_index) in positioned_orphans.iter().skip(next_positioned_orphan) {
+        let block = &session.tool_output_blocks[block_index];
+        sources.push(ReviewSource {
+            key: ReviewBlockKey::OrphanTool(block_index),
+            revision: block.id,
+            kind: ReviewSourceKind::Tool(block_index),
+        });
+        used_blocks.insert(block_index);
+    }
+
+    for (block_index, block) in session.tool_output_blocks.iter().enumerate() {
+        if used_blocks.contains(&block_index) {
+            continue;
+        }
+        sources.push(ReviewSource {
+            key: ReviewBlockKey::OrphanTool(block_index),
+            revision: block.id,
+            kind: ReviewSourceKind::Tool(block_index),
+        });
+    }
+
+    sources
+}
+
+fn rendered_message_text(session: &Session, index: usize) -> String {
+    let Some(line) = session.core.lines.get(index) else {
+        return String::new();
+    };
+    if let Some(activity) = session.compact_activity_for_line(index) {
+        return activity.display_text();
+    }
+    session
+        .core
+        .render_message_spans_for_line(line)
+        .into_iter()
+        .map(|span| strip_ansi_codes(span.content.as_ref()).into_owned())
+        .collect()
+}
+
+fn tool_output_body_end(
+    session: &Session,
+    core_lines: &[String],
+    anchor: usize,
+    anchored_blocks: &HashMap<usize, Vec<usize>>,
+) -> usize {
+    let Some(anchor_line) = session.core.lines.get(anchor) else {
+        return anchor.saturating_add(1);
+    };
+    let anchor_kind = anchor_line.kind;
+    let mut end = anchor.saturating_add(1);
+    while let Some(line) = session.core.lines.get(end) {
+        // A following PTY/Tool line may be the next command's live output,
+        // not detail belonging to this summary. Identity anchors are the
+        // unambiguous boundary; text and message kind alone are not.
+        if anchored_blocks.contains_key(&end) {
+            break;
+        }
+        let text = core_lines.get(end).map(String::as_str).unwrap_or_default();
+        let is_detail = line.kind == InlineMessageKind::Info && (text.starts_with("  ") || text.starts_with("    "));
+        let belongs_to_tool = match anchor_kind {
+            InlineMessageKind::Pty => line.kind == InlineMessageKind::Pty,
+            InlineMessageKind::Tool => matches!(line.kind, InlineMessageKind::Tool | InlineMessageKind::Pty),
+            InlineMessageKind::Info => {
+                is_detail || matches!(line.kind, InlineMessageKind::Tool | InlineMessageKind::Pty)
+            }
+            _ => false,
+        };
+        if !belongs_to_tool {
+            break;
+        }
+        end += 1;
+    }
+    end
+}
+
+fn build_cached_block(session: &Session, source: ReviewSource, width: u16) -> CachedToolOutputBlock {
+    match source.kind {
+        ReviewSourceKind::Core(index) => {
+            if let Some(activity) = session.compact_activity_for_line(index) {
+                let lines = wrap_output_line(&activity.display_text(), usize::from(width.max(1)));
+                let style = ratatui_style_from_inline(
+                    &session.core.styles.accent_inline_style().bold(),
+                    session.core.theme.foreground,
+                );
+                let rich_lines = lines.iter().map(|line| Line::styled(line.clone(), style)).collect::<Vec<_>>();
+                return CachedToolOutputBlock {
+                    key: source.key,
+                    revision: source.revision,
+                    lines,
+                    rich_lines,
+                    lowered_lines: None,
+                };
+            }
+            let mut rich_lines = session
+                .core
+                .reflow_message_lines_for_review(index, width)
+                .into_iter()
+                .map(|line| line.line)
+                .collect::<Vec<_>>();
+            if rich_lines.is_empty() {
+                rich_lines.push(Line::default());
+            }
+            let lines = rich_lines.iter().map(line_text).collect::<Vec<_>>();
+            CachedToolOutputBlock {
+                key: source.key,
+                revision: source.revision,
+                lines,
+                rich_lines,
+                lowered_lines: None,
+            }
+        }
+        ReviewSourceKind::Tool(index) => {
+            let block = &session.tool_output_blocks[index];
+            let lines = collect_tool_output_lines(block, width);
+            let rich_lines = lines
+                .iter()
+                .map(|line| Line::styled(line.clone(), tool_output_line_style(session, line)))
+                .collect();
+            CachedToolOutputBlock {
+                key: source.key,
+                revision: source.revision,
+                lines,
+                rich_lines,
+                lowered_lines: None,
+            }
+        }
+    }
+}
+
+fn line_text(line: &Line<'static>) -> String {
+    line.spans
+        .iter()
+        .map(|span| strip_ansi_codes(span.content.as_ref()).into_owned())
+        .collect()
+}
+
+fn tool_output_line_style(session: &Session, line: &str) -> Style {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("• ") {
+        return session.core.styles.accent_style().add_modifier(Modifier::BOLD);
+    }
+
+    let lowercase = trimmed.to_ascii_lowercase();
+    let kind = if lowercase.contains("run error") || lowercase.contains("exit code") {
+        InlineMessageKind::Error
+    } else if lowercase.contains("warning") {
+        InlineMessageKind::Warning
+    } else {
+        InlineMessageKind::Pty
+    };
+    let mut style = session.core.styles.default_style();
+    if let Some(color) = session.core.text_fallback(kind) {
+        style = style.fg(ratatui_color_from_ansi(color));
+    }
+    if kind == InlineMessageKind::Pty {
+        style = style.add_modifier(Modifier::DIM);
+    }
+    style
+}
+
 fn collect_tool_output_lines(block: &ToolOutputBlock, width: u16) -> Vec<String> {
     let max_width = usize::from(width.max(1));
     let mut lines = block
         .lines
         .iter()
-        .flat_map(|line| wrap_output_line(line, max_width))
+        .flat_map(|line| wrap_output_line(strip_ansi_codes(line).as_ref(), max_width))
         .collect::<Vec<_>>();
     if lines.is_empty() {
         lines.push(String::new());
@@ -425,16 +855,53 @@ pub(crate) fn render_tool_output_viewer(
     session: &Session,
     frame: &mut Frame<'_>,
     area: Rect,
-    state: &ToolOutputViewerState,
+    state: &mut ToolOutputViewerState,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
+    let title_prefix = " Transcript Review ";
+    let status = format!(" {}", state.status_label());
+    let mode_label = format!(" [{}] ", state.mode.label());
+    let mode_x = area
+        .x
+        .saturating_add(1)
+        .saturating_add(UnicodeWidthStr::width(title_prefix) as u16)
+        .saturating_add(UnicodeWidthStr::width(status.as_str()) as u16);
+    let mode_width = UnicodeWidthStr::width(mode_label.as_str()) as u16;
+    state.title_mode_hit_region = (mode_width > 0 && mode_x < area.right())
+        .then(|| Rect::new(mode_x, area.y, mode_width.min(area.right().saturating_sub(mode_x)), 1));
+    let close_label = if session.core.transcript_review_close_button_visible() {
+        " [close] "
+    } else {
+        ""
+    };
+    let close_x = mode_x.saturating_add(mode_width);
+    let close_width = UnicodeWidthStr::width(close_label) as u16;
+    state.title_close_hit_region = (close_width > 0 && close_x < area.right())
+        .then(|| Rect::new(close_x, area.y, close_width.min(area.right().saturating_sub(close_x)), 1));
+    state.set_viewer_area(area);
+
+    let mode_style = session.core.header_secondary_style().add_modifier(Modifier::BOLD).add_modifier(
+        if state.hovered_mode_control {
+            Modifier::REVERSED | Modifier::UNDERLINED
+        } else {
+            Modifier::empty()
+        },
+    );
+    let close_style = session.core.header_secondary_style().add_modifier(Modifier::BOLD).add_modifier(
+        if state.hovered_close_control {
+            Modifier::REVERSED | Modifier::UNDERLINED
+        } else {
+            Modifier::empty()
+        },
+    );
     let title = Line::from(vec![
-        Span::styled(" Tool Output Viewer ", session.core.section_title_style().add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-        Span::styled(state.status_label(), session.core.header_secondary_style()),
+        Span::styled(title_prefix, session.core.section_title_style().add_modifier(Modifier::BOLD)),
+        Span::styled(status, session.core.header_secondary_style()),
+        Span::styled(mode_label, mode_style),
+        Span::styled(close_label, close_style),
     ]);
     let block = Block::default().borders(Borders::ALL).title(title);
     frame.render_widget(Clear, area);
@@ -445,12 +912,18 @@ pub(crate) fn render_tool_output_viewer(
     }
 
     let show_search = state.search_active();
-    let chunks = if show_search {
-        Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).split(inner)
-    } else {
-        Layout::vertical([Constraint::Min(1)]).split(inner)
-    };
+    let show_footer =
+        session.core.transcript_review_shortcut_guide_visible() && inner.height >= if show_search { 3 } else { 2 };
+    let mut constraints = vec![Constraint::Min(1)];
+    if show_search {
+        constraints.push(Constraint::Length(2));
+    }
+    if show_footer {
+        constraints.push(Constraint::Length(1));
+    }
+    let chunks = Layout::vertical(constraints).split(inner);
     let content_height = chunks[0].height;
+    state.content_area = chunks[0];
     let lines = state.visible_lines(usize::from(content_height));
     frame.render_widget(Paragraph::new(lines).style(session.core.styles.default_style()), chunks[0]);
 
@@ -471,27 +944,86 @@ pub(crate) fn render_tool_output_viewer(
 
         frame.render_stateful_widget(&input_widget, chunks[1], &mut input_state);
     }
+
+    if show_footer {
+        if let Some(hint) = transcript_review_shortcut_hint(session) {
+            let footer_index = chunks.len().saturating_sub(1);
+            frame.render_widget(
+                Paragraph::new(Line::styled(hint, session.core.styles.default_style().dim())),
+                chunks[footer_index],
+            );
+        }
+    }
+}
+
+fn transcript_review_shortcut_hint(session: &Session) -> Option<String> {
+    if !session.core.transcript_review_shortcut_guide_visible() {
+        return None;
+    }
+
+    let mut hints = Vec::with_capacity(5);
+    if let Some(binding) = session.core.primary_binding_label(Action::OpenTranscriptReview) {
+        hints.push(format!("{binding} open/close"));
+    }
+    if let Some(binding) = session.core.primary_binding_label(Action::ToggleTranscriptRenderMode) {
+        hints.push(format!("{binding} rich/raw"));
+    }
+    hints.extend(["Esc close", "/ search", "↑/↓ scroll"].map(str::to_string));
+    Some(hints.join(" · "))
 }
 
 pub(crate) fn viewer_content_width(area: Rect) -> u16 {
     area.width.saturating_sub(2).min(ui::TUI_MAX_VIEWPORT_WIDTH)
 }
 
+pub(crate) fn viewer_content_height(session: &Session, state: &ToolOutputViewerState, area: Rect) -> u16 {
+    let inner_height = area.height.saturating_sub(2);
+    let show_search = state.search_active();
+    let show_footer =
+        session.core.transcript_review_shortcut_guide_visible() && inner_height >= if show_search { 3 } else { 2 };
+    let reserved_rows = usize::from(show_search) * 2 + usize::from(show_footer);
+    inner_height.saturating_sub(reserved_rows as u16).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tui::core_tui::app::session::AppSession;
-    use crate::tui::core_tui::types::InlineTheme;
+    use crate::tui::core_tui::app::types::InlineCommand;
+    use crate::tui::core_tui::session::config::AppearanceConfig;
+    use crate::tui::core_tui::types::{InlineSegment, InlineTextStyle, InlineTheme};
+    use std::sync::Arc;
 
     fn test_session() -> AppSession {
         AppSession::new(InlineTheme::default(), None, 24)
     }
 
+    fn text_segment(text: impl Into<String>) -> InlineSegment {
+        InlineSegment {
+            text: text.into(),
+            style: Arc::new(InlineTextStyle::default()),
+        }
+    }
+
     fn add_block(session: &mut AppSession, lines: &[&str]) {
         session.tool_output_blocks.push(ToolOutputBlock {
             lines: lines.iter().map(|line| (*line).to_string()).collect(),
+            ..Default::default()
         });
         session.tool_output_revision += 1;
+    }
+
+    #[test]
+    fn unanchored_capture_stays_at_its_recorded_transcript_position() {
+        let mut session = test_session();
+        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("before")]);
+        session.handle_command(InlineCommand::RecordToolOutput { id: 91, lines: vec!["captured output".to_string()] });
+        session.core.push_line(InlineMessageKind::Agent, vec![text_segment("after")]);
+
+        let mut viewer = ToolOutputViewerState::open(&session, 60, 8);
+        let export = viewer.export_text();
+        assert!(export.find("before").unwrap() < export.find("captured output").unwrap());
+        assert!(export.find("captured output").unwrap() < export.find("after").unwrap());
     }
 
     #[test]
@@ -580,6 +1112,375 @@ mod tests {
         assert!(export.contains("final complete line"));
         assert!(export.contains("• Ran cargo fmt"));
         assert!(!export.contains("Ran 2 commands"));
+    }
+
+    #[test]
+    fn raw_export_strips_ansi_from_complete_captures() {
+        let mut session = test_session();
+        add_block(&mut session, &["\u{1b}[31m• Ran colored\u{1b}[0m", "\u{1b}[32mcomplete\u{1b}[0m"]);
+
+        let mut viewer = ToolOutputViewerState::open(&session, 80, 10);
+        let export = viewer.export_text();
+
+        assert_eq!(export, "• Ran colored\ncomplete");
+        assert!(!export.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn whole_conversation_export_preserves_order_and_complete_tool_output() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::AppendPastedMessage {
+            kind: InlineMessageKind::User,
+            text: "user request".to_string(),
+            line_count: 1,
+        });
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![text_segment("assistant before tool")],
+        });
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Policy,
+            segments: vec![text_segment("reasoning")],
+        });
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 0,
+            lines: vec![
+                "• Ran cargo check".to_string(),
+                "  └ complete stdout".to_string(),
+                "    complete stderr".to_string(),
+            ],
+        });
+        session.handle_command(InlineCommand::AppendToolOutputLine {
+            id: 0,
+            kind: InlineMessageKind::Info,
+            segments: vec![text_segment("• Ran cargo check")],
+        });
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Warning,
+            segments: vec![text_segment("warning after tool")],
+        });
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Error,
+            segments: vec![text_segment("error after tool")],
+        });
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![text_segment("assistant after tool")],
+        });
+
+        let mut viewer = ToolOutputViewerState::open(&session, 100, 20);
+        let export = viewer.export_text();
+        let ordered = [
+            "user request",
+            "assistant before tool",
+            "reasoning",
+            "• Ran cargo check",
+            "complete stdout",
+            "complete stderr",
+            "warning after tool",
+            "error after tool",
+            "assistant after tool",
+        ];
+        let positions = ordered
+            .iter()
+            .map(|needle| export.find(needle).expect("conversation entry in export"))
+            .collect::<Vec<_>>();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            viewer
+                .messages
+                .iter()
+                .filter(|message| message.key == ReviewBlockKey::Tool(0))
+                .count(),
+            1
+        );
+
+        let rich_mode = viewer.render_mode();
+        viewer.toggle_render_mode();
+        assert_eq!(rich_mode, TranscriptRenderMode::Rich);
+        assert_eq!(viewer.render_mode(), TranscriptRenderMode::Raw);
+        assert_eq!(viewer.export_text(), export);
+    }
+
+    #[test]
+    fn whole_review_stops_before_following_anchored_pty_call() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 1,
+            lines: vec!["• Ran first".to_string(), "  └ first output".to_string()],
+        });
+        session.handle_command(InlineCommand::AppendCompactActivity(
+            vtcode_commons::ui_protocol::CompactActivityMetadata {
+                group_id: 1,
+                command_count: 1,
+                command: Some("first".to_string().into()),
+                hidden_line_count: 1,
+                suffix: None,
+                review_anchor: Some(1),
+                review_anchors: vec![1],
+            },
+        ));
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Pty,
+            segments: vec![text_segment("• Ran second")],
+        });
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 2,
+            lines: vec!["• Ran second".to_string(), "  └ second output".to_string()],
+        });
+
+        let mut viewer = ToolOutputViewerState::open(&session, 100, 20);
+        let export = viewer.export_text();
+        assert!(export.find("first output").unwrap() < export.find("second output").unwrap());
+        assert_eq!(export.matches("• Ran second").count(), 1);
+    }
+
+    #[test]
+    fn whole_conversation_export_keeps_follow_up_guidance() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 7,
+            lines: vec![
+                "• Ran cargo check".to_string(),
+                "  └ complete output".to_string(),
+                "    Review the result before continuing.".to_string(),
+            ],
+        });
+        session.handle_command(InlineCommand::AppendToolOutputLine {
+            id: 7,
+            kind: InlineMessageKind::Info,
+            segments: vec![text_segment("• Ran cargo check")],
+        });
+
+        let mut viewer = ToolOutputViewerState::open(&session, 100, 20);
+        assert!(viewer.export_text().contains("Review the result before continuing."));
+    }
+
+    #[test]
+    fn active_transcript_updates_refresh_without_reopening() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![text_segment("initial response")],
+        });
+        let mut viewer = ToolOutputViewerState::open(&session, 80, 10);
+        assert!(viewer.export_text().contains("initial response"));
+
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Agent,
+            segments: vec![text_segment("streamed continuation")],
+        });
+        viewer.refresh(&session, 80, 10);
+        let export = viewer.export_text();
+        assert!(export.contains("streamed continuation"));
+    }
+
+    #[test]
+    fn focused_review_jumps_to_the_requested_capture_in_a_group() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 11,
+            lines: vec!["• Ran first".to_string(), "  └ first output".to_string()],
+        });
+        session.handle_command(InlineCommand::AppendCompactActivity(
+            vtcode_commons::ui_protocol::CompactActivityMetadata {
+                group_id: 1,
+                command_count: 1,
+                command: Some("first".to_string().into()),
+                hidden_line_count: 1,
+                suffix: None,
+                review_anchor: Some(11),
+                review_anchors: vec![11],
+            },
+        ));
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 12,
+            lines: vec!["• Ran second".to_string(), "  └ second output".to_string()],
+        });
+        session.handle_command(InlineCommand::ReplaceCompactActivity(
+            vtcode_commons::ui_protocol::CompactActivityMetadata {
+                group_id: 1,
+                command_count: 2,
+                command: None,
+                hidden_line_count: 2,
+                suffix: None,
+                review_anchor: Some(11),
+                review_anchors: vec![11, 12],
+            },
+        ));
+
+        let viewer = ToolOutputViewerState::open_focused(&session, 80, 2, Some(12));
+
+        assert_eq!(
+            viewer.messages.iter().map(|message| message.key).collect::<Vec<_>>(),
+            vec![ReviewBlockKey::Tool(11), ReviewBlockKey::Tool(12)]
+        );
+        assert_eq!(viewer.scroll_top, 2);
+        assert_eq!(viewer.focus_target, None);
+    }
+
+    #[test]
+    fn compact_activity_hint_uses_the_primary_review_binding() {
+        let session = test_session();
+        let hint = compact_activity_hint_text(&session).expect("default review binding should have a hint");
+        assert_eq!(hint, "Ctrl+T to view transcript · click to expand or collapse");
+    }
+
+    #[test]
+    fn compact_activity_hint_refreshes_when_review_binding_changes() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 12,
+            lines: vec!["• Ran printf hint".to_string(), "  └ output".to_string()],
+        });
+        session.handle_command(InlineCommand::AppendCompactActivity(
+            vtcode_commons::ui_protocol::CompactActivityMetadata {
+                group_id: 12,
+                command_count: 1,
+                command: Some("printf hint".to_string().into()),
+                hidden_line_count: 1,
+                suffix: None,
+                review_anchor: Some(12),
+                review_anchors: vec![12],
+            },
+        ));
+
+        let initial = session.core.lines[0]
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>();
+        assert!(initial.contains("Ctrl+T"));
+
+        let mut bindings = hashbrown::HashMap::new();
+        bindings.insert("open_transcript_review".to_string(), vec!["ctrl+x".to_string()]);
+        session.handle_command(InlineCommand::SetKeyBindings { bindings });
+
+        let refreshed = session.core.lines[0]
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>();
+        assert!(refreshed.contains("Ctrl+X"));
+        assert!(!refreshed.contains("Ctrl+T"));
+    }
+
+    #[test]
+    fn transcript_review_controls_follow_appearance_configuration() {
+        let appearance = AppearanceConfig {
+            show_transcript_review_hints: false,
+            show_transcript_review_shortcut_guide: false,
+            show_transcript_review_close_button: false,
+            ..AppearanceConfig::default()
+        };
+        let session = AppSession::new_with_logs(
+            InlineTheme::default(),
+            None,
+            24,
+            true,
+            Some(appearance),
+            Vec::new(),
+            "Agent TUI".to_string(),
+        );
+
+        assert!(compact_activity_hint_text(&session).is_none());
+        assert!(transcript_review_shortcut_hint(&session).is_none());
+        assert!(!session.core.transcript_review_close_button_visible());
+        let metadata = vtcode_commons::ui_protocol::CompactActivityMetadata {
+            group_id: 1,
+            command_count: 1,
+            command: Some("printf configured".to_string().into()),
+            hidden_line_count: 1,
+            suffix: None,
+            review_anchor: Some(1),
+            review_anchors: vec![1],
+        };
+        assert_eq!(compact_activity_segments(&session, &metadata).len(), 1);
+    }
+
+    #[test]
+    fn compact_activity_hint_updates_when_appearance_is_reloaded() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 48,
+            lines: vec!["• Ran printf reload".to_string(), "  └ complete output".to_string()],
+        });
+        session.handle_command(InlineCommand::AppendCompactActivity(
+            vtcode_commons::ui_protocol::CompactActivityMetadata {
+                group_id: 48,
+                command_count: 1,
+                command: Some("printf reload".to_string().into()),
+                hidden_line_count: 1,
+                suffix: None,
+                review_anchor: Some(48),
+                review_anchors: vec![48],
+            },
+        ));
+        assert_eq!(session.core.lines[0].segments.len(), 3);
+
+        let mut appearance = session.core.appearance.clone();
+        appearance.show_transcript_review_hints = false;
+        session.handle_command(InlineCommand::SetAppearance { appearance });
+
+        assert_eq!(session.core.lines[0].segments.len(), 1);
+        assert!(!session.core.lines[0].segments[0].text.contains("click to expand"));
+    }
+
+    #[test]
+    fn repeated_command_captures_keep_their_identity_and_order() {
+        let mut session = test_session();
+        for (id, output) in [(1, "first capture"), (2, "second capture")] {
+            session.handle_command(InlineCommand::RecordToolOutput {
+                id,
+                lines: vec![format!("capture block {id}"), format!("  └ {output}")],
+            });
+            session.handle_command(InlineCommand::AppendToolOutputLine {
+                id,
+                kind: InlineMessageKind::Info,
+                segments: vec![text_segment("• Ran cargo check")],
+            });
+        }
+
+        let viewer = ToolOutputViewerState::open(&session, 100, 20);
+        let export = viewer.clone().export_text();
+        assert!(
+            export.find("first capture").expect("first capture")
+                < export.find("second capture").expect("second capture")
+        );
+    }
+
+    #[test]
+    fn unanchored_failed_capture_stays_before_following_compact_activity() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 21,
+            lines: vec![
+                "• Ran failed command".to_string(),
+                "    failed: command exited with status 1".to_string(),
+            ],
+        });
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 22,
+            lines: vec!["• Ran successful command".to_string(), "  └ success output".to_string()],
+        });
+        session.handle_command(InlineCommand::AppendCompactActivity(
+            vtcode_commons::ui_protocol::CompactActivityMetadata {
+                group_id: 22,
+                command_count: 1,
+                command: Some("successful command".to_string().into()),
+                hidden_line_count: 1,
+                suffix: None,
+                review_anchor: Some(22),
+                review_anchors: vec![22],
+            },
+        ));
+
+        let mut viewer = ToolOutputViewerState::open(&session, 100, 20);
+        let export = viewer.export_text();
+        assert!(
+            export.find("failed: command exited").expect("failed capture")
+                < export.find("success output").expect("successful capture")
+        );
     }
 
     #[test]

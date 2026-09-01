@@ -1,8 +1,8 @@
 use anyhow::Result;
 use serde_json::Value;
 use vtcode_commons::preview;
-use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::constants::tools;
+use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::render_tree_detail;
@@ -29,6 +29,18 @@ fn get_u64(val: &Value, key: &str) -> Option<u64> {
     val.get(key).and_then(|v| v.as_u64())
 }
 
+fn compact_file_glance_enabled(renderer: &AnsiRenderer) -> bool {
+    renderer.supports_inline_ui() && renderer.tool_display_mode() == ToolDisplayMode::Compact
+}
+
+fn render_file_heading(renderer: &mut AnsiRenderer, heading: &str) -> Result<()> {
+    if compact_file_glance_enabled(renderer) {
+        renderer.line(MessageStyle::Info, &format!("• {heading}"))
+    } else {
+        renderer.line(MessageStyle::ToolDetail, heading)
+    }
+}
+
 pub(crate) fn render_write_file_preview(
     renderer: &mut AnsiRenderer,
     payload: &Value,
@@ -39,7 +51,13 @@ pub(crate) fn render_write_file_preview(
 
     // Show basic metadata (compact format)
     if get_bool(payload, "created") && diffs.is_empty() {
-        renderer.line(MessageStyle::ToolDetail, "File created")?;
+        if compact_file_glance_enabled(renderer) {
+            let heading = get_string(payload, "path")
+                .map_or_else(|| "File created".to_string(), |path| format!("Created {path}"));
+            render_file_heading(renderer, &heading)?;
+        } else {
+            renderer.line(MessageStyle::ToolDetail, "File created")?;
+        }
     }
 
     if let Some(encoding) = get_string(payload, "encoding") {
@@ -109,7 +127,7 @@ fn render_diff_preview_entries(
         if additions.is_some() || deletions.is_some() {
             heading.push_str(&format!(" (+{} -{})", additions.unwrap_or_default(), deletions.unwrap_or_default()));
         }
-        renderer.line(MessageStyle::ToolDetail, &heading)?;
+        render_file_heading(renderer, &heading)?;
 
         if get_bool(diff, "skipped") {
             let reason = get_string(diff, "reason").unwrap_or("skipped");

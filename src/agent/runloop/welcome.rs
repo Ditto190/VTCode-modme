@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use hashbrown::HashMap;
 use tracing::warn;
 use vtcode_commons::terminal_detection::{TerminalFeature, TerminalType};
 use vtcode_core::config::AgentClientProtocolZedWorkspaceTrustMode;
@@ -23,10 +24,21 @@ pub(crate) struct SessionBootstrap {
     pub header_highlights: Vec<InlineHeaderHighlight>,
     pub acp_workspace_trust: Option<AgentClientProtocolZedWorkspaceTrustMode>,
     pub release_highlights: Option<(semver::Version, Vec<String>)>,
+    /// Legacy dot-file bindings retained as a separate layer so live VT Code
+    /// config reloads do not discard them.
+    pub legacy_key_bindings: HashMap<String, Vec<String>>,
     /// Token-budget report for the composed system prompt. Populated after
     /// `read_system_prompt` runs (session_setup/init.rs); defaults to an
     /// under-budget report until then.
     pub system_prompt_report: vtcode_core::prompts::system::SystemPromptReport,
+}
+
+impl SessionBootstrap {
+    pub(crate) fn effective_key_bindings(&self, config: &VTCodeConfig) -> HashMap<String, Vec<String>> {
+        let mut bindings = self.legacy_key_bindings.clone();
+        bindings.extend(config.ui.keybindings.clone());
+        bindings
+    }
 }
 
 pub(crate) async fn prepare_session_bootstrap(
@@ -106,6 +118,7 @@ pub(crate) async fn prepare_session_bootstrap(
         // tool prompt policy.
         acp_workspace_trust: None,
         release_highlights: None,
+        legacy_key_bindings: HashMap::new(),
         system_prompt_report: Default::default(),
     }
 }

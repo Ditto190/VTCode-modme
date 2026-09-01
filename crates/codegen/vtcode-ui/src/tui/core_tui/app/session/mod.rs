@@ -8,8 +8,9 @@ pub(super) use ratatui::widgets::Clear;
 pub(super) use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::tui::core_tui::app::types::{
-    DiffOverlayRequest, DiffPreviewState, InlineCommand, InlineEvent, LocalAgentsTransientRequest, SlashCommandItem,
-    TaskPanelMetadata, TaskPanelTransientRequest, TransientRequest,
+    CompactActivityMetadata, DiffOverlayRequest, DiffPreviewState, InlineCommand, InlineEvent, InlineMessageKind,
+    InlineSegment, LocalAgentsTransientRequest, SlashCommandItem, TaskPanelMetadata, TaskPanelTransientRequest,
+    ToolOutputId, TransientRequest,
 };
 use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::Session as CoreSessionState;
@@ -52,7 +53,34 @@ use agent_palette::AgentPalette;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToolOutputBlock {
+    /// Session-local identifier used to keep a completed capture tied to its
+    /// corresponding transcript entry while the overlay is refreshed.
+    pub(crate) id: u64,
+    /// Index of the summary line when the capture was recorded. The review
+    /// layer uses this identity anchor without reverse-matching command text,
+    /// which is ambiguous when the same command runs more than once.
+    pub(crate) anchor_line: Option<usize>,
+    /// Number of core transcript lines present when this capture was queued.
+    /// PTY previews may use this boundary to find their already-rendered
+    /// header without searching through earlier calls.
+    pub(crate) anchor_search_start: usize,
+    /// Original transcript position for a capture that has no identity anchor.
+    /// `None` is retained for blocks constructed by older callers/tests, which
+    /// are appended as genuine orphan content.
+    pub(crate) recorded_at_line: Option<usize>,
     pub(crate) lines: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CompactActivityEntry {
+    pub(crate) line_index: usize,
+    pub(crate) metadata: CompactActivityMetadata,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactActivityHitRegion {
+    pub(crate) area: Rect,
+    pub(crate) review_anchor: ToolOutputId,
 }
 
 /// App-level session that layers VT Code features on top of the core session.
@@ -74,6 +102,8 @@ pub struct AppSession {
     tool_output_viewer_state: Option<ToolOutputViewerState>,
     pub(crate) tool_output_blocks: Vec<ToolOutputBlock>,
     pub(crate) tool_output_revision: u64,
+    pub(crate) compact_activity_entries: Vec<CompactActivityEntry>,
+    pub(crate) compact_activity_hit_regions: Vec<CompactActivityHitRegion>,
     diff_overlay_queue: VecDeque<DiffOverlayRequest>,
     transient_host: TransientHost,
     preview_callback: Option<crate::tui::core_tui::types::PreviewCallback>,
@@ -112,6 +142,8 @@ impl AppSession {
             tool_output_viewer_state: None,
             tool_output_blocks: Vec::new(),
             tool_output_revision: 0,
+            compact_activity_entries: Vec::new(),
+            compact_activity_hit_regions: Vec::new(),
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
             preview_callback: None,
@@ -157,6 +189,8 @@ impl AppSession {
             tool_output_viewer_state: None,
             tool_output_blocks: Vec::new(),
             tool_output_revision: 0,
+            compact_activity_entries: Vec::new(),
+            compact_activity_hit_regions: Vec::new(),
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
             preview_callback: None,
@@ -389,10 +423,198 @@ impl AppSession {
         self.mark_dirty();
     }
 
-    fn open_tool_output_viewer(&mut self, width: u16, height: u16) {
-        self.tool_output_viewer_state = Some(ToolOutputViewerState::open(self, width, height));
+    fn open_tool_output_viewer(&mut self, width: u16, height: u16, review_anchor: Option<ToolOutputId>) {
+        self.tool_output_viewer_state = Some(ToolOutputViewerState::open_focused(self, width, height, review_anchor));
         self.show_transient_surface(TransientSurface::ToolOutputViewer);
         self.core.mark_dirty();
+    }
+
+    fn record_tool_output_block(&mut self, id: ToolOutputId, lines: Vec<String>) {
+        if lines.is_empty() {
+            return;
+        }
+
+        // A non-PTY capture is recorded after the live PTY stream has rendered
+        // its command header. Restrict the fallback search to the current
+        // trailing PTY block so repeated commands cannot borrow an older
+        // header from the conversation.
+        let recorded_at_line = self.core.lines.len();
+        let mut anchor_search_start = recorded_at_line;
+        while anchor_search_start > 0
+            && self
+                .core
+                .lines
+                .get(anchor_search_start - 1)
+                .is_some_and(|line| line.kind == InlineMessageKind::Pty)
+        {
+            anchor_search_start -= 1;
+        }
+        let anchor_line = self.find_live_pty_anchor(lines.first(), anchor_search_start);
+
+        self.tool_output_blocks.push(ToolOutputBlock {
+            id,
+            anchor_line,
+            anchor_search_start,
+            recorded_at_line: Some(recorded_at_line),
+            lines,
+        });
+        self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
+        self.core.mark_dirty();
+    }
+
+    fn find_live_pty_anchor(&self, header: Option<&String>, search_start: usize) -> Option<usize> {
+        let header = header.map(|header| normalize_tool_output_header(header))?;
+        let mut index = self.core.lines.len();
+        while index > search_start {
+            let line_index = index - 1;
+            let line = self.core.lines.get(line_index)?;
+            if line.kind != InlineMessageKind::Pty {
+                break;
+            }
+            if rendered_core_line_text(&self.core, line_index).trim_end() == header.trim_end() {
+                return Some(line_index);
+            }
+            index = line_index;
+        }
+        None
+    }
+
+    fn append_tool_output_line(&mut self, id: ToolOutputId, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
+        self.core
+            .handle_command(crate::tui::core_tui::types::InlineCommand::AppendLine { kind, segments });
+        let line_index = self.core.lines.len().saturating_sub(1);
+        if let Some(block) = self.tool_output_blocks.iter_mut().find(|block| block.id == id)
+            && block.anchor_line.is_none()
+        {
+            block.anchor_line = Some(line_index);
+            self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
+            self.core.mark_dirty();
+        }
+    }
+
+    fn update_tool_output_anchors(&mut self, metadata: &CompactActivityMetadata, line_index: usize) {
+        let mut ids = metadata.review_anchors.clone();
+        if ids.is_empty()
+            && let Some(review_anchor) = metadata.review_anchor
+        {
+            ids.push(review_anchor);
+        }
+        for id in ids {
+            if let Some(block) = self.tool_output_blocks.iter_mut().find(|block| block.id == id) {
+                block.anchor_line = Some(line_index);
+            }
+        }
+    }
+
+    fn refresh_compact_activity_presentations(&mut self) {
+        let entries = self.compact_activity_entries.clone();
+        for entry in entries {
+            let is_compact_line = self
+                .core
+                .lines
+                .get(entry.line_index)
+                .is_some_and(|line| line.kind == InlineMessageKind::Info);
+            if !is_compact_line {
+                continue;
+            }
+
+            let segments = tool_output_viewer::compact_activity_segments(self, &entry.metadata);
+            let revision = self.core.next_revision();
+            if let Some(line) = self.core.lines.get_mut(entry.line_index) {
+                line.segments = segments;
+                line.link_ranges.clear();
+                line.revision = revision;
+                self.core.mark_line_dirty(entry.line_index);
+            }
+        }
+        self.core.invalidate_scroll_metrics();
+    }
+
+    fn append_compact_activity(&mut self, metadata: CompactActivityMetadata) {
+        let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
+        self.core
+            .handle_command(crate::tui::core_tui::types::InlineCommand::AppendLine {
+                kind: InlineMessageKind::Info,
+                segments,
+            });
+        let line_index = self.core.lines.len().saturating_sub(1);
+        self.compact_activity_entries
+            .push(CompactActivityEntry { line_index, metadata: metadata.clone() });
+        self.update_tool_output_anchors(&metadata, line_index);
+    }
+
+    fn replace_compact_activity(&mut self, metadata: CompactActivityMetadata) {
+        let can_replace = self
+            .compact_activity_entries
+            .last()
+            .is_some_and(|entry| entry.line_index + 1 == self.core.lines.len());
+        if !can_replace {
+            self.append_compact_activity(metadata);
+            return;
+        }
+
+        let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
+        self.core
+            .handle_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
+                count: 1,
+                kind: InlineMessageKind::Info,
+                lines: vec![segments],
+                link_ranges: None,
+            });
+        if let Some(entry) = self.compact_activity_entries.last_mut() {
+            entry.metadata = metadata.clone();
+            entry.line_index = self.core.lines.len().saturating_sub(1);
+        }
+        let line_index = self.core.lines.len().saturating_sub(1);
+        self.update_tool_output_anchors(&metadata, line_index);
+    }
+
+    fn collapse_pty_block(&mut self, metadata: CompactActivityMetadata) {
+        let pty_count = self
+            .core
+            .lines
+            .iter()
+            .rev()
+            .take_while(|line| line.kind == InlineMessageKind::Pty)
+            .count();
+        if pty_count == 0 {
+            self.replace_compact_activity(metadata);
+            return;
+        }
+
+        let old_first_removed = self.core.lines.len().saturating_sub(pty_count);
+        let preceding_activity = self.compact_activity_entries.last().is_some_and(|entry| {
+            entry.line_index + 1 == old_first_removed && entry.metadata.group_id == metadata.group_id
+        });
+        let remove_count = pty_count + usize::from(preceding_activity);
+        let first_removed = self.core.lines.len().saturating_sub(remove_count);
+        let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
+        self.core
+            .handle_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
+                count: remove_count,
+                kind: InlineMessageKind::Info,
+                lines: vec![segments],
+                link_ranges: None,
+            });
+        self.compact_activity_entries.retain(|entry| entry.line_index < first_removed);
+        let line_index = self.core.lines.len().saturating_sub(1);
+        self.compact_activity_entries
+            .push(CompactActivityEntry { line_index, metadata: metadata.clone() });
+        self.update_tool_output_anchors(&metadata, line_index);
+    }
+
+    pub(crate) fn compact_activity_for_line(&self, line_index: usize) -> Option<&CompactActivityMetadata> {
+        self.compact_activity_entries
+            .iter()
+            .find(|entry| entry.line_index == line_index)
+            .map(|entry| &entry.metadata)
+    }
+
+    pub(crate) fn compact_activity_review_anchor_at(&self, column: u16, row: u16) -> Option<ToolOutputId> {
+        self.compact_activity_hit_regions
+            .iter()
+            .find(|region| region.area.contains(Position { x: column, y: row }))
+            .map(|region| region.review_anchor)
     }
 
     fn close_tool_output_viewer(&mut self) {
@@ -651,12 +873,49 @@ impl AppSession {
                 self.core.handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
                 self.update_input_triggers();
             }
-            InlineCommand::RecordToolOutput { lines } => {
-                if !lines.is_empty() {
-                    self.tool_output_blocks.push(ToolOutputBlock { lines });
-                    self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
-                    self.core.mark_dirty();
-                }
+            InlineCommand::RecordToolOutput { id, lines } => {
+                self.record_tool_output_block(id, lines);
+            }
+            InlineCommand::AppendToolOutputLine { id, kind, segments } => {
+                self.append_tool_output_line(id, kind, segments);
+            }
+            InlineCommand::AppendCompactActivity(metadata) => {
+                self.append_compact_activity(metadata);
+            }
+            InlineCommand::ReplaceCompactActivity(metadata) => {
+                self.replace_compact_activity(metadata);
+            }
+            InlineCommand::CollapsePtyBlock(metadata) => {
+                self.collapse_pty_block(metadata);
+            }
+            InlineCommand::SetKeyBindings { bindings } => {
+                self.core.set_bindings(BindingStore::new(bindings));
+                self.refresh_compact_activity_presentations();
+            }
+            InlineCommand::SetAppearance { appearance } => {
+                self.core
+                    .handle_command(crate::tui::core_tui::types::InlineCommand::SetAppearance { appearance });
+                self.refresh_compact_activity_presentations();
+            }
+            InlineCommand::ReplaceLast { count, kind, lines, link_ranges } => {
+                let remove_count = count.min(self.core.lines.len());
+                let first_removed = self.core.lines.len().saturating_sub(remove_count);
+                self.compact_activity_entries.retain(|entry| entry.line_index < first_removed);
+                self.core
+                    .handle_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
+                        count,
+                        kind,
+                        lines,
+                        link_ranges,
+                    });
+            }
+            InlineCommand::ClearScreen => {
+                self.tool_output_blocks.clear();
+                self.compact_activity_entries.clear();
+                self.compact_activity_hit_regions.clear();
+                self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
+                self.core
+                    .handle_command(crate::tui::core_tui::types::InlineCommand::ClearScreen);
             }
             InlineCommand::CloseTransient => self.close_transient(),
             InlineCommand::ShowTransient { request } => self.show_transient(*request),
@@ -672,6 +931,22 @@ impl AppSession {
             }
         }
     }
+}
+
+fn normalize_tool_output_header(header: &str) -> String {
+    crate::tui::core_tui::session::text_utils::strip_ansi_codes(header)
+        .trim_end()
+        .to_owned()
+}
+
+fn rendered_core_line_text(core: &CoreSessionState, line_index: usize) -> String {
+    let Some(line) = core.lines.get(line_index) else {
+        return String::new();
+    };
+    core.render_message_spans_for_line(line)
+        .into_iter()
+        .map(|span| crate::tui::core_tui::session::text_utils::strip_ansi_codes(span.content.as_ref()).into_owned())
+        .collect()
 }
 
 impl std::ops::Deref for AppSession {
@@ -707,7 +982,12 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
             lines: lines.clone(),
             link_ranges: link_ranges.clone(),
         },
-        InlineCommand::RecordToolOutput { .. } => return None,
+        InlineCommand::RecordToolOutput { .. }
+        | InlineCommand::AppendToolOutputLine { .. }
+        | InlineCommand::AppendCompactActivity(_)
+        | InlineCommand::ReplaceCompactActivity(_)
+        | InlineCommand::CollapsePtyBlock(_)
+        | InlineCommand::SetKeyBindings { .. } => return None,
         InlineCommand::SetPrompt { prefix, style } => {
             CoreCommand::SetPrompt { prefix: prefix.clone(), style: style.clone() }
         }

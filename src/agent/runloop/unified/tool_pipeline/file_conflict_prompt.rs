@@ -62,6 +62,7 @@ pub(super) async fn resolve_file_conflict_status<S>(
     vt_cfg: Option<&VTCodeConfig>,
     max_tool_retries: usize,
     safety_prevalidated: bool,
+    show_live_pty_preview: bool,
 ) -> Result<ToolExecutionStatus>
 where
     S: UiSession + ?Sized,
@@ -85,6 +86,7 @@ where
         vt_cfg,
         max_tool_retries,
         safety_prevalidated,
+        show_live_pty_preview,
     )
     .await
 }
@@ -113,6 +115,7 @@ async fn resolve_file_conflict_status_inner<S>(
     vt_cfg: Option<&VTCodeConfig>,
     max_tool_retries: usize,
     safety_prevalidated: bool,
+    show_live_pty_preview: bool,
 ) -> Result<ToolExecutionStatus>
 where
     S: UiSession + ?Sized,
@@ -177,6 +180,7 @@ where
                     max_tool_retries,
                     ExecSettlementMode::Manual,
                     safety_prevalidated,
+                    show_live_pty_preview,
                 )
                 .await;
             }
@@ -481,6 +485,7 @@ mod tests {
             None,
             0,
             false,
+            true,
         )
         .await?;
 
@@ -530,6 +535,7 @@ mod tests {
             None,
             0,
             false,
+            true,
         )
         .await?;
 
@@ -580,6 +586,7 @@ mod tests {
             None,
             0,
             false,
+            true,
         )
         .await?;
 
@@ -633,6 +640,7 @@ mod tests {
             None,
             0,
             false,
+            true,
         )
         .await?;
 

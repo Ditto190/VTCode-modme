@@ -9,7 +9,6 @@
 - Filesystem: `fs/`, `paths/`, `vtcode_paths/`, `diff/`, `diff_paths/`, `vtcodegitignore/`, `workspace_snapshot/`; text: `tokens/`, `unicode/`, `sanitizer/`, `slug/`, `formatting/`.
 - Async: `async_utils/`, `thread_safety/`; interjection: `interjection/`; UI protocol: `ui_protocol/` (including global activity state); other: `editor/`, `http/`, `project/`, `validation/`, `serde_helpers/`, `env_lock/`.
 ## Rules
-
 - Re-export key types from `lib.rs`: `WorkspacePaths`, `TelemetrySink`, `ErrorFormatter`, `BackendKind`, etc.
 - `reference.rs` provides in-memory test adapters: `StaticWorkspacePaths`, `MemoryTelemetry`, `MemoryErrorReporter`.
 - `ui_protocol/` is a submodule, not a flat module.
@@ -27,4 +26,4 @@
 - `VtCodePaths::open_private_append_file` opens a symlink-safe `0600` read/write append handle for private logs that also need seek/read access.
 - `formatting/` owns the canonical middle-truncation helpers `truncate_middle` (head+tail, control chars sanitized) and `truncate_path_middle` (separator-aware, for path display). Downstream crates delegate here — do not re-implement per crate.
 - `ui_protocol::SessionSurface` defaults to `Inline`; callers requiring alternate-screen detection must request `Auto` or `Alternate` explicitly. `diff::compute_diff` preserves CR, CRLF, and LF line records and derives hunk starts from the first represented record; downstream formatters own newline normalization and EOF markers.
-- `ui_protocol::tool_summary` contains renderer-independent compact per-call summary data; keep output boundaries independent of TUI/runtime types. `MessageMetadata.intent_id` is optional wire metadata for durable steering recovery; preserve it through message serialization.
+- `ui_protocol::tool_summary` contains renderer-independent compact activity metadata; keep grouping/output boundaries independent of TUI/runtime types and out of `ThreadEvent`. `MessageMetadata.intent_id` is optional wire metadata for durable steering recovery; preserve it through message serialization.

@@ -651,6 +651,10 @@ pub(crate) async fn run_turn_loop(
         crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current;
     *ctx.auto_finish_planning_attempted = false;
 
+    // Compact command rows are a presentation-only active tail. A new turn
+    // must start a fresh contiguous group even when the renderer is reused by
+    // the session loop.
+    ctx.renderer.flush_compact_command_group();
     ctx.set_phase(TurnPhase::Preparing);
     if let Some(Err(e)) = ctx.harness_emitter.map(|e| e.emit(turn_started_event())) {
         tracing::debug!(error = %e, "harness turn_started event emission failed");
@@ -1589,6 +1593,7 @@ pub(crate) async fn run_turn_loop(
         }
     }
 
+    ctx.renderer.flush_compact_command_group();
     ctx.set_phase(TurnPhase::Finalizing);
     finalize_turn(&mut ctx, working_history, &result, &turn_usage).await;
 

@@ -94,12 +94,17 @@ async fn process_output(
     state: &mut PtyStreamState,
     output: String,
     tail_limit: usize,
+    show_live_preview: bool,
 ) {
     if output.is_empty() {
         return;
     }
 
     state.apply_chunk(&output, tail_limit);
+    if !show_live_preview {
+        return;
+    }
+
     let visible_output = vtcode_core::utils::ansi_parser::strip_ansi(&output);
     if visible_output.trim().is_empty() {
         return;
@@ -128,6 +133,7 @@ impl PtyStreamRuntime {
         command_prompt: Option<String>,
         pty_config: PtyConfig,
         workspace_root: Option<&Path>,
+        show_live_preview: bool,
     ) -> (Self, ToolProgressCallback) {
         let owned_root = workspace_root.map(Path::to_path_buf);
         let (tx, mut rx) = mpsc::channel::<PtyStreamMessage>(256);
@@ -140,9 +146,11 @@ impl PtyStreamRuntime {
 
         let task = tokio::spawn(async move {
             let mut state = PtyStreamState::new(command_prompt, pty_config, owned_root.as_deref());
-            let (replace_count, segments, link_ranges, _) = state.render_segments("", effective_tail_limit);
-            if !segments.is_empty() && worker_active.load(Ordering::Relaxed) {
-                handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);
+            if show_live_preview {
+                let (replace_count, segments, link_ranges, _) = state.render_segments("", effective_tail_limit);
+                if !segments.is_empty() && worker_active.load(Ordering::Relaxed) {
+                    handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);
+                }
             }
 
             let mut finish_requested = None;
@@ -159,19 +167,50 @@ impl PtyStreamRuntime {
                     while let Ok(message) = rx.try_recv() {
                         let PtyStreamMessage::Output(output) = message;
                         if let Some(coalesced) = worker_drop_state.take_pending() {
-                            process_output(&handle, &progress_reporter, &mut state, coalesced, effective_tail_limit)
-                                .await;
+                            process_output(
+                                &handle,
+                                &progress_reporter,
+                                &mut state,
+                                coalesced,
+                                effective_tail_limit,
+                                show_live_preview,
+                            )
+                            .await;
                         }
-                        process_output(&handle, &progress_reporter, &mut state, output, effective_tail_limit).await;
+                        process_output(
+                            &handle,
+                            &progress_reporter,
+                            &mut state,
+                            output,
+                            effective_tail_limit,
+                            show_live_preview,
+                        )
+                        .await;
                     }
                     if let Some(coalesced) = worker_drop_state.take_pending() {
-                        process_output(&handle, &progress_reporter, &mut state, coalesced, effective_tail_limit).await;
+                        process_output(
+                            &handle,
+                            &progress_reporter,
+                            &mut state,
+                            coalesced,
+                            effective_tail_limit,
+                            show_live_preview,
+                        )
+                        .await;
                     }
 
-                    state.set_header_color(final_color);
-                    let (replace_count, segments, link_ranges, _) = state.render_current_segments(effective_tail_limit);
-                    if !segments.is_empty() {
-                        handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);
+                    if show_live_preview {
+                        state.set_header_color(final_color);
+                        let (replace_count, segments, link_ranges, _) =
+                            state.render_current_segments(effective_tail_limit);
+                        if !segments.is_empty() {
+                            handle.replace_last_with_links(
+                                replace_count,
+                                InlineMessageKind::Pty,
+                                segments,
+                                link_ranges,
+                            );
+                        }
                     }
                     break;
                 }
@@ -194,6 +233,7 @@ impl PtyStreamRuntime {
                                         &mut state,
                                         coalesced,
                                         effective_tail_limit,
+                                        show_live_preview,
                                     )
                                     .await;
                                 }
@@ -203,6 +243,7 @@ impl PtyStreamRuntime {
                                     &mut state,
                                     output,
                                     effective_tail_limit,
+                                    show_live_preview,
                                 )
                                 .await;
                             }

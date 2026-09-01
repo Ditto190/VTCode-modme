@@ -65,7 +65,7 @@ pub use validator::ConfigValidator;
 pub use vtcode_config::WebmcpConfig;
 pub use vtcode_config::root::{
     KeyboardProtocolConfig, KeyboardProtocolMode, LayoutModeOverride, PtyConfig, ReasoningDisplayMode, ToolDisplayMode,
-    ToolOutputMode, UiConfig, UiDisplayMode,
+    ToolOutputMode, UiConfig, UiDisplayMode, UiTranscriptReviewConfig,
 };
 pub use vtcode_config::status_line::{StatusLineConfig, StatusLineMode};
 pub use vtcode_config::terminal_title::{DEFAULT_TERMINAL_TITLE_ITEMS, TerminalTitleConfig};

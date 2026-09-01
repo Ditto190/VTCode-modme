@@ -568,11 +568,34 @@ VT Code also honors these environment variables for default fullscreen behavior:
 - `VTCODE_FULLSCREEN_COPY_ON_SELECT=0|1`
 - `VTCODE_FULLSCREEN_SCROLL_SPEED=<1-20>`
 
-The fullscreen tool-output viewer uses the same rendering surface:
+Transcript Review uses the same fullscreen rendering surface:
 
-- `Ctrl+T` opens a session-local tool-output viewer with search, paging, copy, and export controls.
-- `[` hands the complete tool output to native terminal scrollback until you return.
-- `v` opens the complete tool output in your configured editor.
+- The configured `open_transcript_review` binding (default `Ctrl+T`) opens or closes a session-local whole-conversation review with search, paging, complete copy, and export controls, including from inline mode.
+- The configured `toggle_transcript_render_mode` binding (default `R`) toggles rich rendering and ANSI-free raw rendering.
+- Compact successful command rows are contiguous-only; their styled shortcut and `click to expand or collapse` suffix is clickable when mouse capture is enabled and focuses the first capture in a group.
+- `[` hands the complete conversation to native terminal scrollback until you return.
+- `v` opens the complete conversation in your configured editor.
+- The title's `[close]` control and the footer shortcut guide are mouse/keyboard affordances for the review panel.
+- `open_transcript_review` and `toggle_transcript_render_mode` can be rebound through the existing keybinding configuration.
+- `Alt+O` remains a compatibility alias. If the review action is unbound, `Ctrl+T` remains readline transpose.
+- The review hint uses the primary `open_transcript_review` binding and is omitted when that action is unbound.
+
+The compact review UX can be configured independently:
+
+```toml
+[ui.transcript_review]
+show_hints = true
+show_shortcut_guide = true
+show_close_button = true
+
+[ui.keybindings]
+open_transcript_review = ["ctrl+t"]
+toggle_transcript_render_mode = ["r"]
+```
+
+All three review controls default to enabled, while `ui.tool_display_mode`
+defaults to `"compact"`. These settings affect only presentation; complete
+captures and raw exports remain unchanged.
 
 For the full shortcut list and tmux notes, see [Interactive Mode Reference](../user-guide/interactive-mode.md).
 

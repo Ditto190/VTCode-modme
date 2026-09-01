@@ -5,6 +5,7 @@ use crate::tui::config::constants::ui;
 use crate::tui::core_tui::app::session::transient::TransientSurface;
 use crate::tui::core_tui::session::render as core_render;
 use crate::tui::core_tui::session::{list_panel, message_renderer};
+use ratatui::{buffer::Buffer, style::Modifier};
 
 impl Session {
     pub fn render(&mut self, frame: &mut Frame<'_>) {
@@ -52,6 +53,10 @@ impl Session {
             };
         self.core.set_bottom_panel_area(bottom_panel_area);
         self.core.render_base_frame(frame, &layout, transcript_area);
+        {
+            let buffer = &*frame.buffer_mut();
+            self.rebuild_compact_activity_hit_regions(buffer, transcript_area);
+        }
         self.core.render_input(frame, input_area);
         if let Some(panel_area) = bottom_panel_area {
             match panel.kind {
@@ -88,9 +93,9 @@ impl Session {
         }
         if let Some(mut state) = self.tool_output_viewer_state.take() {
             let width = tool_output_viewer::viewer_content_width(layout.viewport);
-            let height = layout.viewport.height.saturating_sub(4);
+            let height = tool_output_viewer::viewer_content_height(self, &state, layout.viewport);
             state.refresh(self, width, height);
-            tool_output_viewer::render_tool_output_viewer(self, frame, layout.viewport, &state);
+            tool_output_viewer::render_tool_output_viewer(self, frame, layout.viewport, &mut state);
             self.tool_output_viewer_state = Some(state);
         }
         self.core.finalize_mouse_selection(frame, layout.viewport);
@@ -113,6 +118,73 @@ impl Session {
             |kind| self.core.text_fallback(kind),
         )
     }
+}
+
+impl Session {
+    fn rebuild_compact_activity_hit_regions(&mut self, buffer: &Buffer, area: Rect) {
+        self.compact_activity_hit_regions.clear();
+        if tool_output_viewer::compact_activity_hint_text(self).is_none() {
+            return;
+        }
+        if area.width == 0 || area.height == 0 || self.core.transcript_width == 0 {
+            return;
+        }
+
+        let activity_ranges = self
+            .compact_activity_entries
+            .iter()
+            .filter_map(|entry| entry.metadata.review_anchor.map(|anchor| (entry.line_index, anchor)))
+            .collect::<Vec<_>>();
+        let transcript_width = self.core.transcript_width;
+        let view_top = self.core.transcript_view_top;
+
+        for (line_index, review_anchor) in activity_ranges {
+            let Some((start_row, end_row)) = self.core.transcript_message_row_range(transcript_width, line_index)
+            else {
+                continue;
+            };
+            for transcript_row in start_row..end_row {
+                let Some(screen_row) = transcript_row
+                    .checked_sub(view_top)
+                    .and_then(|row| u16::try_from(row).ok())
+                    .and_then(|row| area.y.checked_add(row))
+                else {
+                    continue;
+                };
+                if screen_row >= area.bottom() {
+                    continue;
+                }
+                for hit_area in find_underlined_text_regions(buffer, area, screen_row) {
+                    self.compact_activity_hit_regions
+                        .push(CompactActivityHitRegion { area: hit_area, review_anchor });
+                }
+            }
+        }
+    }
+}
+
+fn find_underlined_text_regions(buffer: &Buffer, area: Rect, row: u16) -> Vec<Rect> {
+    if area.width == 0 || area.height == 0 || row < area.y || row >= area.bottom() {
+        return Vec::new();
+    }
+
+    let mut regions = Vec::new();
+    let mut start = None;
+    for column in area.x..area.right() {
+        let underlined = buffer[(column, row)].style().add_modifier.contains(Modifier::UNDERLINED);
+        match (start, underlined) {
+            (None, true) => start = Some(column),
+            (Some(start_column), false) => {
+                regions.push(Rect::new(start_column, row, column.saturating_sub(start_column), 1));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(start_column) = start {
+        regions.push(Rect::new(start_column, row, area.right().saturating_sub(start_column), 1));
+    }
+    regions
 }
 
 fn render_task_panel(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {

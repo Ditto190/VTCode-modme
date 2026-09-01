@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow, bail};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::status_line::StatusLineConfig;
@@ -247,6 +248,35 @@ impl Default for UiFullscreenConfig {
     }
 }
 
+/// Presentation controls for the session-local Transcript Review overlay.
+/// These settings affect only the interactive UI; captured transcript content
+/// and exported output remain complete and independent of the controls.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UiTranscriptReviewConfig {
+    /// Show the click/keyboard affordance on compact command rows.
+    #[serde(default = "default_transcript_review_control")]
+    pub show_hints: bool,
+
+    /// Show the keyboard guide footer inside Transcript Review.
+    #[serde(default = "default_transcript_review_control")]
+    pub show_shortcut_guide: bool,
+
+    /// Show the mouse-clickable close control in the Transcript Review title.
+    #[serde(default = "default_transcript_review_control")]
+    pub show_close_button: bool,
+}
+
+impl Default for UiTranscriptReviewConfig {
+    fn default() -> Self {
+        Self {
+            show_hints: default_transcript_review_control(),
+            show_shortcut_guide: default_transcript_review_control(),
+            show_close_button: default_transcript_review_control(),
+        }
+    }
+}
+
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UiConfig {
@@ -258,6 +288,15 @@ pub struct UiConfig {
     /// Options: "expanded" (expanded summary layout) or "compact" (one compact summary per tool call)
     #[serde(default = "default_tool_display_mode")]
     pub tool_display_mode: ToolDisplayMode,
+
+    /// Session action bindings. Each action maps to one or more key specs;
+    /// an empty list explicitly unbinds the built-in action.
+    #[serde(default, alias = "key_bindings")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::BTreeMap<String, Vec<String>>")
+    )]
+    pub keybindings: HashMap<String, Vec<String>>,
 
     /// Maximum number of lines to display in tool output (prevents transcript flooding)
     #[serde(default = "default_tool_output_max_lines")]
@@ -400,6 +439,10 @@ pub struct UiConfig {
     /// Hide the full TUI header, showing only version info in a compact line.
     #[serde(default = "default_hide_header")]
     pub hide_header: bool,
+
+    /// Transcript Review presentation controls.
+    #[serde(default)]
+    pub transcript_review: UiTranscriptReviewConfig,
 }
 
 /// Color scheme mode for theme selection
@@ -564,6 +607,10 @@ fn default_hide_header() -> bool {
     true
 }
 
+fn default_transcript_review_control() -> bool {
+    true
+}
+
 fn default_show_task_panel() -> bool {
     false
 }
@@ -577,6 +624,7 @@ impl Default for UiConfig {
         Self {
             tool_output_mode: default_tool_output_mode(),
             tool_display_mode: default_tool_display_mode(),
+            keybindings: HashMap::new(),
             tool_output_max_lines: default_tool_output_max_lines(),
             tool_output_spool_bytes: default_tool_output_spool_bytes(),
             tool_output_spool_dir: None,
@@ -608,6 +656,7 @@ impl Default for UiConfig {
             reduce_motion_mode: default_reduce_motion_mode(),
             reduce_motion_keep_progress_animation: default_reduce_motion_keep_progress_animation(),
             hide_header: default_hide_header(),
+            transcript_review: UiTranscriptReviewConfig::default(),
         }
     }
 }
@@ -671,7 +720,33 @@ mod tests {
 
     #[test]
     fn tool_display_mode_defaults_to_compact() {
-        assert_eq!(UiConfig::default().tool_display_mode, ToolDisplayMode::Compact);
+        let ui = UiConfig::default();
+        assert_eq!(ui.tool_display_mode, ToolDisplayMode::Compact);
+        assert!(ui.keybindings.is_empty());
+        assert!(ui.transcript_review.show_hints);
+        assert!(ui.transcript_review.show_shortcut_guide);
+        assert!(ui.transcript_review.show_close_button);
+    }
+
+    #[test]
+    fn transcript_review_controls_and_keybindings_parse() {
+        let ui: UiConfig = toml::from_str(
+            r#"
+            [keybindings]
+            open_transcript_review = ["ctrl+x"]
+
+            [transcript_review]
+            show_hints = false
+            show_shortcut_guide = false
+            show_close_button = false
+            "#,
+        )
+        .expect("transcript review settings parse");
+
+        assert_eq!(ui.keybindings.get("open_transcript_review"), Some(&vec!["ctrl+x".to_string()]));
+        assert!(!ui.transcript_review.show_hints);
+        assert!(!ui.transcript_review.show_shortcut_guide);
+        assert!(!ui.transcript_review.show_close_button);
     }
 
     #[test]

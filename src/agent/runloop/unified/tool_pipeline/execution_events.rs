@@ -5,8 +5,20 @@ use vtcode_core::core::agent::events::{
     tool_output_payload_from_value,
 };
 use vtcode_core::exec::events::{ToolCallStatus, tool_outcome_from_status};
+use vtcode_core::tools::registry::ToolExecutionError;
 
 use super::status::ToolExecutionStatus;
+
+fn tool_error_output_payload(error: &ToolExecutionError) -> ToolOutputPayload {
+    let mut payload = tool_output_payload_from_value(&error.to_json_value());
+    let user_message = error.user_message();
+    if payload.aggregated_output.is_empty() {
+        payload.aggregated_output = user_message;
+    } else {
+        payload.aggregated_output = format!("{user_message}\n{}", payload.aggregated_output);
+    }
+    payload
+}
 
 #[allow(
     clippy::too_many_arguments,
@@ -78,22 +90,8 @@ pub(super) fn emit_tool_completion_for_status(
                 .and_then(|code| i32::try_from(code).ok()),
             tool_output_payload_from_value(output),
         ),
-        ToolExecutionStatus::Failure { error } => (
-            ToolCallStatus::Failed,
-            None,
-            ToolOutputPayload {
-                aggregated_output: error.user_message(),
-                spool_path: None,
-            },
-        ),
-        ToolExecutionStatus::Timeout { error } => (
-            ToolCallStatus::Failed,
-            None,
-            ToolOutputPayload {
-                aggregated_output: error.user_message(),
-                spool_path: None,
-            },
-        ),
+        ToolExecutionStatus::Failure { error } => (ToolCallStatus::Failed, None, tool_error_output_payload(error)),
+        ToolExecutionStatus::Timeout { error } => (ToolCallStatus::Failed, None, tool_error_output_payload(error)),
         ToolExecutionStatus::Cancelled => (
             ToolCallStatus::Failed,
             None,
@@ -132,7 +130,7 @@ mod tests {
         });
 
         let payload = tool_output_payload_from_value(&output);
-        assert_eq!(payload.aggregated_output, "same\nwarn");
+        assert_eq!(payload.aggregated_output, "same\n[stderr]\nwarn");
         assert_eq!(payload.spool_path, None);
     }
 
@@ -144,7 +142,8 @@ mod tests {
         });
 
         let payload = tool_output_payload_from_value(&output);
-        assert_eq!(payload.aggregated_output, "file body");
+        assert!(payload.aggregated_output.starts_with("file body\nStructured output:"));
+        assert!(payload.aggregated_output.contains("\"path\": \"README.md\""));
         assert_eq!(payload.spool_path, None);
     }
 
@@ -208,5 +207,25 @@ mod tests {
         assert_eq!(exit_code, Some(1));
         assert_eq!(output_payload.aggregated_output, "boom");
         assert_eq!(output_payload.spool_path, None);
+    }
+
+    #[test]
+    fn failure_payload_preserves_structured_error_context() {
+        let error = ToolExecutionError::new(
+            "write_file",
+            vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+            "write failed",
+        )
+        .with_partial_state(true, false)
+        .with_surface("unified_runloop")
+        .with_attempt(2);
+        let payload = tool_error_output_payload(&error);
+
+        assert!(payload.aggregated_output.contains(&error.user_message()));
+        assert!(payload.aggregated_output.contains("\"partial_state_possible\": true"));
+        assert!(payload.aggregated_output.contains("\"surface\": \"unified_runloop\""));
+        assert!(payload.aggregated_output.contains("\"attempt\": 2"));
+        assert!(payload.aggregated_output.contains("\"original_error\": null"));
+        assert_eq!(payload.spool_path, None);
     }
 }

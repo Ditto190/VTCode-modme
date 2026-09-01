@@ -106,6 +106,18 @@ pub struct AppearanceConfig {
     #[serde(default)]
     pub hide_header: bool,
 
+    /// Show the clickable/keyboard affordance on compact command rows.
+    #[serde(default = "default_transcript_review_control")]
+    pub show_transcript_review_hints: bool,
+
+    /// Show the keyboard guide footer inside Transcript Review.
+    #[serde(default = "default_transcript_review_control")]
+    pub show_transcript_review_shortcut_guide: bool,
+
+    /// Show the mouse-clickable close control in the Transcript Review title.
+    #[serde(default = "default_transcript_review_control")]
+    pub show_transcript_review_close_button: bool,
+
     /// Customization settings
     pub customization: CustomizationConfig,
 }
@@ -133,9 +145,16 @@ impl Default for AppearanceConfig {
             reduce_motion_mode: false,
             reduce_motion_keep_progress_animation: false,
             hide_header: true,
+            show_transcript_review_hints: default_transcript_review_control(),
+            show_transcript_review_shortcut_guide: default_transcript_review_control(),
+            show_transcript_review_close_button: default_transcript_review_control(),
             customization: CustomizationConfig::default(),
         }
     }
+}
+
+fn default_transcript_review_control() -> bool {
+    true
 }
 
 impl AppearanceConfig {

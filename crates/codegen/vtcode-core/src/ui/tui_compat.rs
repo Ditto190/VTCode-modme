@@ -154,6 +154,9 @@ pub fn to_tui_appearance(config: &VTCodeConfig) -> SessionAppearanceConfig {
         reduce_motion_mode,
         reduce_motion_keep_progress_animation: config.ui.reduce_motion_keep_progress_animation,
         hide_header: config.ui.hide_header,
+        show_transcript_review_hints: config.ui.transcript_review.show_hints,
+        show_transcript_review_shortcut_guide: config.ui.transcript_review.show_shortcut_guide,
+        show_transcript_review_close_button: config.ui.transcript_review.show_close_button,
         customization: Default::default(),
     }
 }

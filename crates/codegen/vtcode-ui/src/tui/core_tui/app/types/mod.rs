@@ -24,3 +24,4 @@ pub use crate::tui::core_tui::types::{
     LocalAgentEntry, LocalAgentKind, OpenAIServiceTierChoice, OverlayEvent, OverlaySelectionChange, PreviewCallback,
     RewindAction, SecurePromptConfig, WizardModalMode, WizardStep,
 };
+pub use vtcode_commons::ui_protocol::{CompactActivityMetadata, ToolOutputId};

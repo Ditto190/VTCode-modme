@@ -347,6 +347,7 @@ pub(crate) async fn refresh_runtime_config_from_manager(
     let styles = theme::active_styles();
     handle.set_theme(inline_theme_from_core_styles(&styles));
     handle.set_appearance(to_tui_appearance(&runtime_config));
+    handle.set_key_bindings(session_bootstrap.effective_key_bindings(&runtime_config));
 
     let provider_label = {
         let label =
