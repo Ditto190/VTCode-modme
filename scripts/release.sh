@@ -1554,6 +1554,7 @@ main() {
 	print_info "  • macOS binaries: built locally (no CI cost)"
 	print_info "  • Linux/Windows binaries: built on GitHub Actions (free for public repo)"
 	print_info ""
+	# Fixed: previous line 1561 had truncated `nfo` (from `print_info`) -> `nfo: command not found`
 	print_info "Tip: Use --full-ci to build ALL platforms on GitHub Actions"
 }
 

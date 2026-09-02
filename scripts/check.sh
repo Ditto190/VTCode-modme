@@ -254,6 +254,36 @@ run_agent_legibility_checks() {
     fi
 }
 
+run_shell_scripts_lint() {
+    print_status "Running shell script lint (bash -n + nfo typo check)..."
+    local failed=0
+    local script
+    for script in scripts/*.sh scripts/**/*.sh; do
+        [ -f "$script" ] || continue
+        if ! bash -n "$script" 2>&1; then
+            print_error "bash -n failed for $script"
+            failed=1
+        fi
+        if grep -Eq '^[[:space:]]*nfo\b' "$script"; then
+            print_error "Found truncated 'nfo' command in $script (should be print_info):"
+            grep -n '^[[:space:]]*nfo\b' "$script" >&2
+            failed=1
+        fi
+        if command -v shellcheck >/dev/null 2>&1; then
+            if ! shellcheck "$script" >/dev/null 2>&1; then
+                print_warning "shellcheck warnings in $script (run shellcheck $script for details)"
+            fi
+        fi
+    done
+    if [ $failed -eq 0 ]; then
+        print_success "Shell scripts passed lint!"
+        return 0
+    else
+        print_error "Shell script lint failed."
+        return 1
+    fi
+}
+
 # Run Miri (detect undefined behavior)
 #
 # Methodology: Shnatsel, "The unreasonable effectiveness of LLMs for auditing
@@ -314,6 +344,7 @@ main() {
 
     # Run all checks
     run_rustfmt || ((failed_checks++))
+    run_shell_scripts_lint || ((failed_checks++))
     run_workflow_security_lint || ((failed_checks++))
     run_structured_logging_lint || ((failed_checks++))
     run_zen_governance || ((failed_checks++))

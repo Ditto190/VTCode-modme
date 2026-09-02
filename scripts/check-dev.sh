@@ -246,6 +246,36 @@ run_agent_legibility_lint() {
     fi
 }
 
+run_shell_scripts_lint() {
+    print_status "Running shell script lint (bash -n + nfo typo check)..."
+    local failed=0
+    local script
+    for script in scripts/*.sh scripts/**/*.sh; do
+        [ -f "$script" ] || continue
+        if ! bash -n "$script" 2>&1; then
+            print_error "bash -n failed for $script"
+            failed=1
+        fi
+        if grep -Eq '^[[:space:]]*nfo\b' "$script"; then
+            print_error "Found truncated 'nfo' command in $script (should be print_info):"
+            grep -n '^[[:space:]]*nfo\b' "$script" >&2
+            failed=1
+        fi
+        if command -v shellcheck >/dev/null 2>&1; then
+            if ! shellcheck "$script" >/dev/null 2>&1; then
+                print_warning "shellcheck warnings in $script (run shellcheck $script for details)"
+            fi
+        fi
+    done
+    if [ $failed -eq 0 ]; then
+        print_success "Shell scripts passed lint!"
+        return 0
+    else
+        print_error "Shell script lint failed."
+        return 1
+    fi
+}
+
 print_usage() {
     echo "VT Code Fast Development Check Script"
     echo ""
@@ -336,7 +366,11 @@ main() {
     if [ "$RUN_EXTRA_LINTS" = true ]; then
         run_structured_logging_lint || ((FAILED_CHECKS++))
         run_agent_legibility_lint || ((FAILED_CHECKS++))
+        run_shell_scripts_lint || ((FAILED_CHECKS++))
     fi
+
+    # Always run shell script syntax check (fast, no extra deps)
+    run_shell_scripts_lint || ((FAILED_CHECKS++))
 
     # Run tests if requested (always last, as they're the slowest)
     if [ "$RUN_TESTS" = true ]; then
