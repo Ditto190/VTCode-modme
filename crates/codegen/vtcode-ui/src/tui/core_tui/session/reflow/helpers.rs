@@ -64,6 +64,16 @@ pub(super) fn is_tool_summary_line(message: &MessageLine) -> bool {
     has_summary_prefix(&text)
 }
 
+pub(super) fn is_bullet_summary_text(text: &str) -> bool {
+    let stripped = super::super::text_utils::strip_ansi_codes(text);
+    stripped.starts_with("• ")
+}
+
+pub(super) fn is_tree_detail_text(text: &str) -> bool {
+    let stripped = super::super::text_utils::strip_ansi_codes(text);
+    stripped.starts_with("  └ ") || stripped.starts_with("  ├ ") || stripped.starts_with("  │ ")
+}
+
 pub(super) fn agent_code_continuation_prefix(message: &MessageLine) -> Option<String> {
     let first_segment = message.segments.iter().find(|segment| !segment.text.is_empty())?;
     if !first_segment.style.effects.contains(Effects::DIMMED) {

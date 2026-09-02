@@ -10,7 +10,10 @@ use super::super::super::types::{InlineLinkRange, InlineMessageKind, InlineTextS
 use super::super::message::RenderedTranscriptLink;
 use super::super::styling::tool_inline_style_for;
 use super::super::{Session, TranscriptLine, render, text_utils};
-use super::helpers::{has_summary_prefix, is_tool_summary_line, parse_tool_call_prefix, split_tool_spans};
+use super::helpers::{
+    has_summary_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text, parse_tool_call_prefix,
+    split_tool_spans,
+};
 use crate::tui::config::constants::ui;
 
 impl Session {
@@ -251,11 +254,21 @@ impl Session {
         };
         let is_start = !prev_is_tool;
 
-        let next_is_tool = self
-            .lines
-            .get(index + 1)
-            .map(|next| next.kind == InlineMessageKind::Tool)
-            .unwrap_or(false);
+        let next_is_tool = self.lines.get(index + 1).is_some_and(|next| {
+            if next.kind == InlineMessageKind::Tool {
+                return true;
+            }
+            // A Tool header followed by its Info tree details (e.g. "• Search code"
+            // -> "  └ File types:") should be treated as a single visual block
+            // without an extra blank line between header and details.
+            if next.kind == InlineMessageKind::Info {
+                let text: String = next.segments.iter().map(|s| s.text.as_str()).collect();
+                if is_tree_detail_text(&text) {
+                    return true;
+                }
+            }
+            false
+        });
         let is_end = !next_is_tool;
 
         let mut lines = Vec::new();
@@ -270,8 +283,10 @@ impl Session {
 
         let content = render::render_tool_segments(self, line);
         let split_lines = split_tool_spans(content);
-        let summary_prefix = "    ";
-        let detail_prefix = summary_prefix;
+        let summary_prefix = ui::INLINE_TOOL_HEADER_GUTTER;
+        let summary_continuation = ui::INLINE_TOOL_HEADER_CONTINUATION;
+        let detail_prefix = ui::INLINE_TOOL_DETAIL_GUTTER;
+        let detail_continuation = ui::INLINE_TOOL_DETAIL_CONTINUATION;
         let detail_border_style = border_style.add_modifier(Modifier::DIM);
 
         for line_spans in split_lines {
@@ -315,20 +330,22 @@ impl Session {
                 }
                 lines.extend(self.wrap_block_lines(
                     summary_prefix,
-                    summary_prefix,
+                    summary_continuation,
                     styled_spans,
                     max_width,
                     border_style,
                 ));
             } else {
                 // Dim tool output and avoid right-side padding borders.
+                // Detail rows are nested under their header with an extra indent,
+                // and wrapped lines keep the tree marker aligned via hanging indent.
                 let mut detail_spans = line_spans;
                 for span in &mut detail_spans {
                     span.style = span.style.add_modifier(Modifier::DIM);
                 }
                 lines.extend(self.wrap_block_lines_no_right_border(
                     detail_prefix,
-                    detail_prefix,
+                    detail_continuation,
                     detail_spans,
                     max_width,
                     detail_border_style,
@@ -499,7 +516,7 @@ impl Session {
             body_spans.push(Span::styled(stripped_text.into_owned(), style));
         }
 
-        let body_prefix = "  ";
+        let body_prefix = ui::INLINE_PTY_BODY_GUTTER;
         let continuation_prefix = text_utils::pty_wrapped_continuation_prefix(body_prefix, combined.as_str());
         lines.extend(self.wrap_block_lines_no_right_border(
             body_prefix,

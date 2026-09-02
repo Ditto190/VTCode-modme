@@ -55,7 +55,22 @@ pub(crate) fn wrap_line_preserving_urls(line: Line<'static>, max_width: usize) -
     }
     // URL too wide - fall through to wrap it
 
-    // Mixed content - split around URLs and wrap each segment
+    // Mixed content - split around URLs and wrap each segment.
+    // For bullet / tree list items (e.g. "• Ran", "  └ ") preserve hanging
+    // indent via the standard wrapper, which already handles bullet/tree
+    // continuation. This fixes long tool headers like
+    // "• Ran cat docs/guides/agent-loop-contract.md '2> /dev/null' ..." that
+    // contain file paths and would otherwise lose hanging indent in the
+    // URL-aware path. We sacrifice URL atomicity for these structured lines;
+    // the hanging indent is more valuable for readability.
+    let stripped = crate::tui::core_tui::session::text_utils::strip_ansi_codes(&text);
+    let is_structured_bullet_or_tree = stripped.trim_start().starts_with("• ")
+        || stripped.trim_start().starts_with("  └ ")
+        || stripped.trim_start().starts_with("  ├ ")
+        || stripped.trim_start().starts_with("  │ ");
+    if is_structured_bullet_or_tree {
+        return super::text_utils::wrap_line(line, max_width);
+    }
     wrap_mixed_content(line, &text, max_width, &urls)
 }
 

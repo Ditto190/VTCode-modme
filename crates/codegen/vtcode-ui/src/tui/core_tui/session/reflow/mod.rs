@@ -27,7 +27,9 @@ mod helpers;
 mod thinking;
 
 pub(super) use helpers::parse_tool_call_prefix;
-use helpers::{agent_code_continuation_prefix, is_tool_summary_line, rule_fill};
+use helpers::{
+    agent_code_continuation_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text, rule_fill,
+};
 
 pub(super) fn is_info_box_line(message: &MessageLine) -> bool {
     matches!(message.kind, InlineMessageKind::Error | InlineMessageKind::Warning)
@@ -174,7 +176,9 @@ impl Session {
                 let skip_spacing = is_tool_summary_line(message)
                     && match next_line {
                         Some(next) if next.kind == InlineMessageKind::Info => is_tool_summary_line(next),
-                        Some(next) if next.kind == InlineMessageKind::Tool => true,
+                        Some(next) if next.kind == InlineMessageKind::Tool || next.kind == InlineMessageKind::Pty => {
+                            true
+                        }
                         _ => false,
                     };
                 if !skip_spacing {
@@ -224,12 +228,10 @@ impl Session {
         let Some(previous) = index.checked_sub(1).and_then(|previous| self.lines.get(previous)) else {
             return true;
         };
-
-        match previous.kind {
-            InlineMessageKind::Agent | InlineMessageKind::Tool | InlineMessageKind::Pty => false,
-            InlineMessageKind::Info => !is_tool_summary_line(previous),
-            _ => true,
-        }
+        let Some(current) = self.lines.get(index) else {
+            return true;
+        };
+        should_add_tool_block_top_spacing_for_kinds(previous, current)
     }
 
     pub(crate) fn reflow_message_lines_for_review(&self, index: usize, width: u16) -> Vec<TranscriptLine> {
@@ -311,9 +313,9 @@ impl Session {
         // horizontal rule, content with no vertical sides, and a closing rule.
         // The fill pattern is chosen per message kind (Error → Slash, Info →
         // Dash, Warning → Thick) and respects terminal Unicode capabilities.
-        let rule_indent = "  ";
+        let rule_indent = "";
         let rule_indent_width = UnicodeWidthStr::width(rule_indent);
-        let content_indent = "    ";
+        let content_indent = "";
         let content_indent_width = UnicodeWidthStr::width(content_indent);
         let rule_width = max_width.saturating_sub(rule_indent_width);
         let content_width = max_width.saturating_sub(content_indent_width);
@@ -500,6 +502,44 @@ impl Session {
         }
 
         lines
+    }
+}
+
+/// Pure, independently testable policy for tool-block top spacing.
+///
+/// Returns `true` if a blank-line gap should be inserted before `current`
+/// given `previous`. This isolates the intricate bullet/tree grouping logic
+/// from `Session` state so it can be unit-tested without constructing a full
+/// transcript.
+pub(crate) fn should_add_tool_block_top_spacing_for_kinds(previous: &MessageLine, current: &MessageLine) -> bool {
+    match previous.kind {
+        InlineMessageKind::Tool | InlineMessageKind::Pty => false,
+        InlineMessageKind::Agent => false,
+        InlineMessageKind::Info => {
+            if !is_tool_summary_line(previous) {
+                return true;
+            }
+            let prev_text: String = previous.segments.iter().map(|s| s.text.as_str()).collect();
+            let curr_text: String = current.segments.iter().map(|s| s.text.as_str()).collect();
+            let prev_is_bullet = is_bullet_summary_text(&prev_text);
+            let prev_is_tree = is_tree_detail_text(&prev_text);
+            let curr_is_tree = is_tree_detail_text(&curr_text);
+
+            match current.kind {
+                InlineMessageKind::Info => {
+                    // Tight within a single tool's detail block:
+                    // bullet -> tree, tree -> tree. Otherwise gap.
+                    !(curr_is_tree && (prev_is_bullet || prev_is_tree))
+                }
+                InlineMessageKind::Tool | InlineMessageKind::Pty => {
+                    // A Tool/Pty block after an Info bullet/tree should start
+                    // with a gap (separate visual block).
+                    true
+                }
+                _ => true,
+            }
+        }
+        _ => true,
     }
 }
 

@@ -134,7 +134,10 @@ impl Default for AppearanceConfig {
             transcript_bottom_padding: 0,
             dim_completed_todos: true,
             show_task_panel: false,
-            message_block_spacing: 0,
+            // Default 1 provides a single blank line between blocks (unified vertical rhythm).
+            // `tool_block_spacing` clamps 1..2, so tool blocks remain visually grouped even when
+            // this is 0. Previously 0 produced a cramped transcript; 1 matches the approved UX.
+            message_block_spacing: 1,
             layout_mode: LayoutModeOverride::Auto,
             reasoning_display_mode: ReasoningDisplayMode::Toggle,
             reasoning_visible_default: crate::tui::config::constants::ui::DEFAULT_REASONING_VISIBLE,

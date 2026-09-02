@@ -38,9 +38,20 @@ pub const INLINE_PASTE_COLLAPSE_LINE_THRESHOLD: usize = 10;
 pub const INLINE_JSON_TAIL_LINES: usize = 30;
 pub const INLINE_JSON_COLLAPSE_LINE_THRESHOLD: usize = 200;
 pub const HEADER_HIGHLIGHT_PREVIEW_MAX_CHARS: usize = 48;
-pub const INLINE_AGENT_MESSAGE_LEFT_PADDING: &str = " ";
-pub const INLINE_AGENT_QUOTE_PREFIX: &str = " •";
+pub const INLINE_AGENT_MESSAGE_LEFT_PADDING: &str = "";
+pub const INLINE_AGENT_QUOTE_PREFIX: &str = "• ";
 pub const INLINE_USER_MESSAGE_DIVIDER_SYMBOL: &str = "─";
+
+/// Left gutter before tool summary headers (`• Ran`, `• Search code`, …).
+pub const INLINE_TOOL_HEADER_GUTTER: &str = "";
+/// Continuation indent for wrapped tool headers — hanging indent for bullet width (`• ` = 2).
+pub const INLINE_TOOL_HEADER_CONTINUATION: &str = "  ";
+/// Left gutter before tool detail rows (`└ Path:`, `└ Result types:`).
+pub const INLINE_TOOL_DETAIL_GUTTER: &str = "";
+/// Continuation indent for wrapped detail rows (aligned with tree prefix `  └ ` = 4).
+pub const INLINE_TOOL_DETAIL_CONTINUATION: &str = "    ";
+/// Base gutter for PTY body blocks.
+pub const INLINE_PTY_BODY_GUTTER: &str = "";
 
 /// Scroll percentage format in status bar
 pub const SCROLL_INDICATOR_FORMAT: &str = "↕";
@@ -55,7 +66,7 @@ pub const INLINE_BLOCK_BOTTOM_LEFT: &str = "╰";
 pub const INLINE_BLOCK_BOTTOM_RIGHT: &str = "╯";
 
 /// Left indent applied to expanded thinking/reasoning body lines.
-pub const INLINE_THINKING_BODY_INDENT: &str = "  ";
+pub const INLINE_THINKING_BODY_INDENT: &str = "";
 pub const INLINE_BLOCK_HORIZONTAL: &str = "─";
 pub const INLINE_TOOL_HEADER_LABEL: &str = "Tool";
 pub const INLINE_TOOL_ACTION_PREFIX: &str = "→";
@@ -104,7 +115,7 @@ pub const HEADER_MESSAGES_LABEL: &str = "Messages";
 pub const HEADER_INPUT_LABEL: &str = "Input";
 pub const HEADER_INPUT_ENABLED: &str = "Enabled";
 pub const HEADER_INPUT_DISABLED: &str = "Disabled";
-pub const INLINE_USER_PREFIX: &str = " ";
+pub const INLINE_USER_PREFIX: &str = "";
 pub const CHAT_INPUT_PLACEHOLDER_BOOTSTRAP: &str = vtcode_config::constants::ui::CHAT_INPUT_PLACEHOLDER_BOOTSTRAP;
 pub const CHAT_INPUT_PLACEHOLDER_FOLLOW_UP: &str = vtcode_config::constants::ui::CHAT_INPUT_PLACEHOLDER_FOLLOW_UP;
 pub const HEADER_SHORTCUT_HINT: &str = "Shortcuts: Alt+P suggest • Tab next agent • Shift+Tab previous agent • Enter queue • Ctrl+Enter run • Shift+Enter newline • Esc cancel • Ctrl+C interrupt";

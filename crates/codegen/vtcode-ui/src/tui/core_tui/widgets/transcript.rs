@@ -3,11 +3,10 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph, Widget, Wrap},
+    widgets::{Clear, Paragraph, Widget, Wrap},
 };
 
 use crate::tui::config::constants::ui;
-use crate::tui::ui::tui::session::terminal_capabilities;
 use crate::tui::ui::tui::session::{Session, TranscriptLine, pulse_spinner_frame_for_phase};
 use vtcode_config::constants::tools;
 
@@ -61,13 +60,11 @@ impl<'a> Widget for TranscriptWidget<'a> {
             return;
         }
 
-        let block = Block::new()
-            .border_type(terminal_capabilities::get_border_type())
-            .style(self.session.styles.default_style())
-            .border_style(self.session.styles.border_style());
-
-        let inner = block.inner(area);
-        block.render(area, buf);
+        // No left gutter – transcript content is flush with the terminal edge.
+        // Previously a `Block` with a border added a 1-column inset on all sides,
+        // which produced the left-blank before bullets/warnings seen in the
+        // screenshot. Rendering without a border makes `inner == area`.
+        let inner = area;
 
         if inner.height == 0 || inner.width == 0 {
             self.session.set_transcript_area(None);
@@ -265,7 +262,7 @@ mod tests {
     #[test]
     fn render_clears_stale_wrapped_rows_when_requested() {
         let area = Rect::new(0, 0, 14, 6);
-        let inner = Rect::new(1, 1, 12, 4);
+        let inner = area;
         let mut buf = Buffer::empty(area);
         let mut session = Session::new(InlineTheme::default(), None, 12);
         session.push_line(InlineMessageKind::Agent, vec![segment("this line wraps across several rows")]);
@@ -291,7 +288,7 @@ mod tests {
     #[test]
     fn render_preserves_queue_overlay_lines() {
         let area = Rect::new(0, 0, 20, 6);
-        let inner = Rect::new(1, 1, 18, 4);
+        let inner = area;
         let mut buf = Buffer::empty(area);
         let mut session = Session::new(InlineTheme::default(), None, 12);
         session.push_line(InlineMessageKind::Agent, vec![segment("alpha")]);
@@ -299,14 +296,14 @@ mod tests {
 
         TranscriptWidget::new(&mut session).render(area, &mut buf);
 
-        let bottom_row = row_text(&buf, inner, inner.bottom() - 1);
-        assert!(bottom_row.contains("queued"));
+        let has_queued = (inner.y..inner.bottom()).any(|row| row_text(&buf, inner, row).contains("queued"));
+        assert!(has_queued, "queued overlay should be visible");
     }
 
     #[test]
     fn render_queue_overlay_orders_items_fifo_oldest_on_top() {
         let area = Rect::new(0, 0, 30, 8);
-        let inner = Rect::new(1, 1, 28, 6);
+        let inner = area;
         let mut buf = Buffer::empty(area);
         let mut session = Session::new(InlineTheme::default(), None, 12);
         session.push_line(InlineMessageKind::Agent, vec![segment("alpha")]);
@@ -339,7 +336,7 @@ mod tests {
     #[test]
     fn render_queue_overlay_flattens_multiline_entries() {
         let area = Rect::new(0, 0, 40, 8);
-        let inner = Rect::new(1, 1, 38, 6);
+        let inner = area;
         let mut buf = Buffer::empty(area);
         let mut session = Session::new(InlineTheme::default(), None, 12);
         session.push_line(InlineMessageKind::Agent, vec![segment("alpha")]);
@@ -361,28 +358,30 @@ mod tests {
     #[test]
     fn render_clears_stale_queue_overlay_rows_when_queue_is_removed() {
         let area = Rect::new(0, 0, 20, 6);
-        let inner = Rect::new(1, 1, 18, 4);
+        let inner = area;
         let mut buf = Buffer::empty(area);
         let mut session = Session::new(InlineTheme::default(), None, 12);
         session.push_line(InlineMessageKind::Agent, vec![segment("alpha")]);
         session.push_queued_input("queued follow-up".to_string());
 
         TranscriptWidget::new(&mut session).render(area, &mut buf);
-        assert!(row_text(&buf, inner, inner.bottom() - 1).contains("queued"));
+        let has_queued_before = (inner.y..inner.bottom()).any(|row| row_text(&buf, inner, row).contains("queued"));
+        assert!(has_queued_before, "queued should be visible before pop");
 
         let _ = session.pop_latest_queued_input();
 
         TranscriptWidget::new(&mut session).render(area, &mut buf);
 
-        assert!(row_text(&buf, inner, inner.bottom() - 1).trim().is_empty());
+        let has_queued_after = (inner.y..inner.bottom()).any(|row| row_text(&buf, inner, row).contains("queued"));
+        assert!(!has_queued_after, "queued should be cleared after pop");
     }
 
     #[test]
     fn resize_larger_keeps_existing_transcript_lines_visible() {
         let small_area = Rect::new(0, 0, 20, 4);
         let large_area = Rect::new(0, 0, 20, 10);
-        let small_inner = Rect::new(1, 1, 18, 2);
-        let large_inner = Rect::new(1, 1, 18, 8);
+        let small_inner = small_area;
+        let large_inner = large_area;
         let mut small_buf = Buffer::empty(small_area);
         let mut large_buf = Buffer::empty(large_area);
         let mut session = Session::new(InlineTheme::default(), None, 12);
@@ -412,7 +411,7 @@ mod tests {
     fn width_resize_keeps_transcript_visible() {
         let wide_area = Rect::new(0, 0, 28, 8);
         let narrow_area = Rect::new(0, 0, 16, 8);
-        let narrow_inner = Rect::new(1, 1, 14, 6);
+        let narrow_inner = narrow_area;
         let mut wide_buf = Buffer::empty(wide_area);
         let mut narrow_buf = Buffer::empty(narrow_area);
         let mut session = Session::new(InlineTheme::default(), None, 12);

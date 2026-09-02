@@ -77,8 +77,14 @@ pub(super) fn pty_wrapped_continuation_prefix(base_prefix: &str, line_text: &str
     let hang_width = if stripped.starts_with("  └ ") || stripped.starts_with("  │ ") || stripped.starts_with("    ")
     {
         4
+    } else if stripped.trim_start().starts_with("└ ")
+        || stripped.trim_start().starts_with("│ ")
+        || stripped.trim_start().starts_with("├ ")
+    {
+        // Tree detail without leading gutter: "└ " width 2
+        2
     } else if let Some((_, prefix)) = super::reflow::parse_tool_call_prefix(&stripped) {
-        prefix.chars().count() + 1
+        UnicodeWidthStr::width(prefix) + 1
     } else {
         0
     };
@@ -395,6 +401,10 @@ fn wrapped_continuation_prefix(line: &Line<'static>) -> String {
     structural_continuation_prefix(&text)
 }
 
+pub(crate) fn hanging_prefix_for_text(text: &str) -> String {
+    structural_continuation_prefix(text)
+}
+
 fn structural_continuation_prefix(text: &str) -> String {
     let stripped = strip_ansi_codes(text);
     let text = stripped.as_ref();
@@ -425,8 +435,37 @@ fn structural_continuation_prefix(text: &str) -> String {
         Some(UnicodeWidthStr::width("* "))
     } else if remaining.starts_with("+ ") {
         Some(UnicodeWidthStr::width("+ "))
-    } else if remaining.starts_with("• ") {
-        Some(UnicodeWidthStr::width("• "))
+    } else if let Some(after_bullet) = remaining.strip_prefix("• ") {
+        let verb_end = after_bullet.find(|c: char| c.is_whitespace()).unwrap_or(after_bullet.len());
+        let verb = &after_bullet[..verb_end];
+        let is_tool_verb = !verb.is_empty()
+            && after_bullet.len() > verb_end
+            && after_bullet[verb_end..].starts_with(' ')
+            && matches!(
+                verb.to_ascii_lowercase().as_str(),
+                "ran"
+                    | "run"
+                    | "read"
+                    | "write"
+                    | "edit"
+                    | "search"
+                    | "grep"
+                    | "find"
+                    | "glob"
+                    | "list"
+                    | "exec"
+                    | "bash"
+                    | "update"
+                    | "create"
+                    | "delete"
+                    | "move"
+            );
+        if is_tool_verb {
+            // "• Verb " → include verb plus trailing space
+            Some(UnicodeWidthStr::width(&remaining[.."• ".len() + verb.len() + 1]))
+        } else {
+            Some(UnicodeWidthStr::width("• "))
+        }
     } else if remaining.starts_with("◦ ") {
         Some(UnicodeWidthStr::width("◦ "))
     } else if remaining.starts_with("▪ ") {

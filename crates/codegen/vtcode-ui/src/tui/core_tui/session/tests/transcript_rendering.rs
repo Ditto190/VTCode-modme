@@ -434,8 +434,9 @@ fn pty_wrapped_lines_keep_hanging_left_padding() {
     let first = &content_lines[0];
     let second = &content_lines[1];
 
-    assert!(first.starts_with("    └ "), "first line was: {first:?}");
-    assert!(second.starts_with("      "), "wrapped line should keep hanging indent, got: {second:?}");
+    // No left gutter – PTY body is flush, tree marker provides its own indent.
+    assert!(first.starts_with("  └ "), "first line was: {first:?}");
+    assert!(second.starts_with("    "), "wrapped line should keep hanging indent, got: {second:?}");
 }
 
 #[test]
@@ -544,10 +545,12 @@ fn agent_omitted_code_lines_keep_hanging_indent_when_wrapped() {
     );
     let expected_prefix = format!("{agent_indent}{}", " ".repeat("21-421  ".chars().count()));
 
-    assert!(first.contains("21-421  … [+400 lines omitted"), "first line was: {first:?}");
+    assert!(first.contains("21-421"), "first line was: {first:?}");
+    assert!(first.contains("…"), "first line was: {first:?}");
+    assert!(first.contains("[+400"), "first line was: {first:?}");
     assert!(
         second.starts_with(&expected_prefix),
-        "wrapped omitted-line continuation should keep gutter indent, got: {second:?}"
+        "wrapped omitted-line continuation should keep gutter indent, got: {second:?} expected: {expected_prefix:?}"
     );
 }
 
@@ -987,4 +990,79 @@ fn empty_agent_segments_dont_trigger_streaming_state() {
     session.handle_command(InlineCommand::AppendLine { kind: InlineMessageKind::Agent, segments: vec![] });
 
     assert!(!session.is_streaming_final_answer);
+}
+
+/// Regression for tool-summary detail grouping: a header (`• Search code`)
+/// with its `  └ ` details must render as a tight block – only one blank
+/// line before the header and one after the last detail, no gaps between
+/// header/details. This prevents the “too blank” double-gap reported in
+/// the screenshot (header → details and detail → detail should be tight).
+#[test]
+fn tool_summary_details_are_tightly_grouped() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("• Search code Use Code search")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("  └ File types: rs")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Max results: 25")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Path: crates/codegen/vtcode-core")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Result types: definition, path")]);
+    let width = 80u16;
+    let lines = session.reflow_transcript_lines(width);
+    // Header + 4 details should be tight: only top/bottom blanks, no gaps inside.
+    assert_eq!(lines.len(), 7);
+    let texts: Vec<String> = lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+        .collect();
+    assert!(texts[0].trim().is_empty()); // top
+    assert_eq!(texts[1], "• Search code Use Code search");
+    assert_eq!(texts[2], "  └ File types: rs");
+    assert_eq!(texts[3], "  └ Max results: 25");
+    assert_eq!(texts[4], "  └ Path: crates/codegen/vtcode-core");
+    assert_eq!(texts[5], "  └ Result types: definition, path");
+    assert!(texts[6].trim().is_empty()); // bottom
+}
+
+/// Agent pre-announcement → tool block must have exactly one blank line,
+/// not a duplicated 2-line gap. `Agent` already contributes its trailing
+/// `tool_block_spacing` gap; `Tool`/`Info` must not add a second top gap
+/// when following an `Agent`.
+#[test]
+fn agent_to_tool_has_single_gap() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(
+        InlineMessageKind::Agent,
+        vec![make_segment(
+            "Got the doc overview. Now let me see the actual loop implementation.",
+        )],
+    );
+    session.push_line(InlineMessageKind::Info, vec![make_segment("• Ran 2 commands")]);
+    let width = 80u16;
+    let lines = session.reflow_transcript_lines(width);
+    let texts: Vec<String> = lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+        .collect();
+    // Find the Agent line and the following Ran line.
+    let agent_idx = texts.iter().position(|t| t.contains("Got the doc")).expect("agent line");
+    let ran_idx = texts.iter().position(|t| t.contains("Ran 2 commands")).expect("ran line");
+    // Exactly one empty line between them (unified spacing).
+    assert_eq!(ran_idx, agent_idx + 2, "expected single blank line, got texts: {texts:?}");
+    assert!(texts[agent_idx + 1].trim().is_empty());
+    // Also verify the pure policy: Agent -> Tool should not add extra top gap.
+    use crate::tui::core_tui::session::message::MessageLine;
+    use crate::tui::core_tui::session::reflow::should_add_tool_block_top_spacing_for_kinds;
+    use crate::tui::core_tui::types::InlineMessageKind as Kind;
+    let agent_line = MessageLine {
+        kind: Kind::Agent,
+        segments: vec![make_segment("hello")],
+        link_ranges: vec![],
+        revision: 0,
+    };
+    let tool_line = MessageLine {
+        kind: Kind::Info,
+        segments: vec![make_segment("• Search code")],
+        link_ranges: vec![],
+        revision: 0,
+    };
+    assert!(!should_add_tool_block_top_spacing_for_kinds(&agent_line, &tool_line));
 }

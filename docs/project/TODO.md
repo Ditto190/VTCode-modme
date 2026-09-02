@@ -75,3 +75,22 @@ improve coloring of grouped tool call commands and wording higlight
 ---
 
 improve and fix UI '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.00.54.png'
+
+---
+
+check and fix
+
+• The turn is blocked before success could be
+confirmed. The available history and outputs are
+retained; resume the request to continue.
+------------------------ Info -------------------------
+Recovery tool-call limit reached after 3 blocked
+calls. Last blocked call: 'Run command'. Tools remain
+disabled while the recovery response is finalized.
+Blocked handoff:
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+Blocked handoff:
+
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260902t14281-3z_732254-54385-20260902T144229Z.md
+
+note: i want you to fix and improve vtcode harness based on the session run log. The harness should be able to handle blocked calls more gracefully, provide better feedback to the user, and ensure that the session can resume smoothly after a blockage. Additionally, improve the UI to clearly indicate when a turn is blocked and what actions the user can take to resolve it. not do it yourself
