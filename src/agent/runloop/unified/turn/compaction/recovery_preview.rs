@@ -141,12 +141,12 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
     fn structured_tool_preview(raw_text: &str, workspace_root: Option<&Path>) -> Option<(String, u8)> {
         let value = serde_json::from_str::<Value>(raw_text).ok()?;
         let obj = value.as_object()?;
-        let guidance = obj.get("error").and_then(Value::as_object).unwrap_or(&obj);
+        let guidance = obj.get("error").and_then(Value::as_object).unwrap_or(obj);
         let mut parts = Vec::new();
         let mut priority = 0u8;
         let matches_array = obj.get("matches").or_else(|| obj.get("results")).and_then(Value::as_array);
         if let Some(matches) = matches_array {
-            let path = trimmed_json_str(&obj, "path");
+            let path = trimmed_json_str(obj, "path");
             let summary = if matches.is_empty() {
                 path.map_or_else(|| "No matches found".to_string(), |p| format!("No matches found in {p}"))
             } else {
@@ -173,9 +173,9 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
             push_unique(&mut parts, Some(format!("Listed {total} files")));
             priority = priority.max(10);
         }
-        push_unique(&mut parts, error_preview_text(&obj));
+        push_unique(&mut parts, error_preview_text(obj));
         for key in ["critical_note", "message", "hint"] {
-            push_unique(&mut parts, trimmed_json_str(&obj, key).or_else(|| trimmed_json_str(guidance, key)));
+            push_unique(&mut parts, trimmed_json_str(obj, key).or_else(|| trimmed_json_str(guidance, key)));
         }
         if parts
             .iter()
@@ -185,7 +185,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
         }
         push_unique(
             &mut parts,
-            trimmed_json_str(&obj, "next_action")
+            trimmed_json_str(obj, "next_action")
                 .or_else(|| trimmed_json_str(guidance, "next_action"))
                 .map(|n| format!("Next action: {n}")),
         );
@@ -193,7 +193,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
             priority = priority.max(60);
         }
         if let Some(tool) =
-            trimmed_json_str(&obj, "fallback_tool").or_else(|| trimmed_json_str(guidance, "fallback_tool"))
+            trimmed_json_str(obj, "fallback_tool").or_else(|| trimmed_json_str(guidance, "fallback_tool"))
         {
             let fallback = obj
                 .get("fallback_tool_args")
@@ -213,7 +213,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
         }
         if parts.is_empty() {
             for key in ["output", "content", "stdout", "stderr"] {
-                push_unique(&mut parts, trimmed_json_str(&obj, key));
+                push_unique(&mut parts, trimmed_json_str(obj, key));
                 if !parts.is_empty() {
                     priority = priority.max(90);
                     break;

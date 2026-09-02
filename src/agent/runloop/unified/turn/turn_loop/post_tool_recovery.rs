@@ -123,7 +123,7 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
     allow_tool_enabled_retry: bool,
     planning_active: bool,
 ) -> Result<PostToolFailureRecovery> {
-    maybe_recover_after_post_tool_llm_failure_with_progress(
+    maybe_recover_after_post_tool_llm_failure_with_progress(PostToolLlmRecoveryInputs {
         renderer,
         working_history,
         err,
@@ -133,14 +133,17 @@ pub(super) fn maybe_recover_after_post_tool_llm_failure(
         allow_tool_free_retry,
         allow_tool_enabled_retry,
         planning_active,
-        false,
-    )
+        out_of_band_tool_progress: false,
+    })
 }
 
-fn maybe_recover_after_post_tool_llm_failure_with_progress(
-    renderer: &mut AnsiRenderer,
-    working_history: &mut Vec<uni::Message>,
-    err: &anyhow::Error,
+/// Bundled inputs for the post-tool LLM-failure recovery decision. Follows the
+/// `PostToolRecoveryContext` guard-rail pattern: one named struct instead of
+/// ten positional parameters at the call sites.
+struct PostToolLlmRecoveryInputs<'a> {
+    renderer: &'a mut AnsiRenderer,
+    working_history: &'a mut Vec<uni::Message>,
+    err: &'a anyhow::Error,
     step_count: usize,
     turn_history_start_len: usize,
     failure_stage: &'static str,
@@ -148,6 +151,21 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     allow_tool_enabled_retry: bool,
     planning_active: bool,
     out_of_band_tool_progress: bool,
+}
+
+fn maybe_recover_after_post_tool_llm_failure_with_progress(
+    PostToolLlmRecoveryInputs {
+        renderer,
+        working_history,
+        err,
+        step_count,
+        turn_history_start_len,
+        failure_stage,
+        allow_tool_free_retry,
+        allow_tool_enabled_retry,
+        planning_active,
+        out_of_band_tool_progress,
+    }: PostToolLlmRecoveryInputs<'_>,
 ) -> Result<PostToolFailureRecovery> {
     if is_unmatched_tool_result_error(&err.to_string()) {
         // A repaired retry has already been attempted, or the request was
@@ -371,6 +389,56 @@ fn planning_finalize_notice(outcome: PlanningRecoveryOutcome) -> &'static str {
     }
 }
 
+/// Outcome of the best-effort salvaged-plan persistence in plan-mode recovery.
+struct SalvagedPlanPersistence {
+    /// The salvaged prose, kept only when persistence passed the readiness gate.
+    persisted_salvage: Option<String>,
+    /// The recovered `<proposed_plan>` text, when one was persisted.
+    recovered_plan_text: Option<String>,
+    /// Whether the session plan file holds a validated, ready draft.
+    persisted_plan_ready: bool,
+}
+
+/// Best-effort persistence of a salvaged `<proposed_plan>`: write failures are
+/// logged and never dead-end the turn, and the salvaged prose is only surfaced
+/// when persistence passed the readiness gate.
+async fn persist_salvaged_plan(
+    plan_state: Option<&PlanningWorkflowState>,
+    salvaged_text: Option<&str>,
+) -> SalvagedPlanPersistence {
+    let mut persisted_salvage = None;
+    let mut recovered_plan_text = None;
+    if let (Some(state), Some(salvaged)) = (plan_state, salvaged_text)
+        && let Some(plan_text) = ready_plan_text(salvaged)
+    {
+        match persist_plan_draft(state, &plan_text).await {
+            Ok(persisted) if persisted.validation.is_ready() && persisted_plan_is_ready(state).await => {
+                persisted_salvage = Some(salvaged.to_string());
+                recovered_plan_text = Some(plan_text);
+            }
+            Ok(_) => {
+                tracing::warn!("plan-mode recovery: persisted salvage failed the readiness gate");
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "plan-mode recovery: failed to persist salvaged plan to session plan file"
+                );
+            }
+        }
+    }
+    let persisted_plan_ready = if let Some(state) = plan_state {
+        persisted_plan_is_ready(state).await
+    } else {
+        false
+    };
+    SalvagedPlanPersistence {
+        persisted_salvage,
+        recovered_plan_text,
+        persisted_plan_ready,
+    }
+}
+
 #[cfg(test)]
 pub(super) async fn complete_turn_after_failed_tool_free_recovery(
     working_history: &mut Vec<uni::Message>,
@@ -408,32 +476,11 @@ pub(super) async fn complete_turn_after_failed_tool_free_recovery_with_events(
     // "preserved in the session plan file (.vtcode/plans/)". Best-effort: a
     // write failure is logged and must never dead-end the turn.
     let mut plan_session = plan_session;
-    let mut persisted_salvage = None;
-    let mut recovered_plan_text = None;
-    if let (Some(state), Some(salvaged)) = (plan_state, salvaged_text.as_ref())
-        && let Some(plan_text) = ready_plan_text(salvaged)
-    {
-        match persist_plan_draft(state, &plan_text).await {
-            Ok(persisted) if persisted.validation.is_ready() && persisted_plan_is_ready(state).await => {
-                persisted_salvage = Some(salvaged.clone());
-                recovered_plan_text = Some(plan_text);
-            }
-            Ok(_) => {
-                tracing::warn!("plan-mode recovery: persisted salvage failed the readiness gate");
-            }
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "plan-mode recovery: failed to persist salvaged plan to session plan file"
-                );
-            }
-        }
-    }
-    let persisted_plan_ready = if let Some(state) = plan_state {
-        persisted_plan_is_ready(state).await
-    } else {
-        false
-    };
+    let SalvagedPlanPersistence {
+        persisted_salvage,
+        recovered_plan_text,
+        persisted_plan_ready,
+    } = persist_salvaged_plan(plan_state, salvaged_text.as_deref()).await;
 
     if let Some(event_context) = events
         && let (Some(session), Some(state), Some(plan_text)) =
@@ -661,6 +708,32 @@ pub(super) struct PostToolRecoveryContext<'a> {
     pub tool_free_recovery: bool,
 }
 
+/// Shared tail of the tool-free salvage paths: compose the stage label and
+/// hand the rejected synthesis to `complete_turn_after_failed_tool_free_recovery_with_events`
+/// with plan persistence and recovery events attached.
+async fn complete_turn_with_salvage(
+    working_history: &mut Vec<uni::Message>,
+    stage: &str,
+    stage_suffix: &str,
+    err: Option<&anyhow::Error>,
+    salvaged: Option<String>,
+    plan_session: Option<&mut PlanningWorkflowSessionState>,
+    plan_state: Option<&PlanningWorkflowState>,
+    event_context: PlanRecoveryEventContext<'_>,
+) -> TurnLoopResult {
+    let composite_stage = concat_compact(stage, stage_suffix);
+    complete_turn_after_failed_tool_free_recovery_with_events(
+        working_history,
+        &composite_stage,
+        err,
+        salvaged,
+        plan_session,
+        plan_state,
+        Some(event_context),
+    )
+    .await
+}
+
 /// Dispatch the post-tool failure recovery match block, deduplicating the
 /// near-identical 3× match in `run_turn_loop`.
 ///
@@ -724,20 +797,20 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
         plan_session.as_deref(),
         harness_state,
     );
-    let recovery = maybe_recover_after_post_tool_llm_failure_with_progress(
-        renderer,
-        working_history,
+    let recovery = maybe_recover_after_post_tool_llm_failure_with_progress(PostToolLlmRecoveryInputs {
+        renderer: &mut *renderer,
+        working_history: &mut *working_history,
         err,
         step_count,
         turn_history_start_len,
-        stage,
-        (!tool_free_recovery && !post_tool_retry_exhausted) || planning_synthesis_retry,
-        !tool_free_recovery
+        failure_stage: stage,
+        allow_tool_free_retry: (!tool_free_recovery && !post_tool_retry_exhausted) || planning_synthesis_retry,
+        allow_tool_enabled_retry: !tool_free_recovery
             && !harness_state.post_tool_tool_enabled_retry_used()
             && !harness_state.recovery_pass_used(),
         planning_active,
-        harness_state.has_out_of_band_tool_progress(),
-    )?;
+        out_of_band_tool_progress: harness_state.has_out_of_band_tool_progress(),
+    })?;
 
     match recovery {
         PostToolFailureRecovery::NotApplicable => {
@@ -746,15 +819,15 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
             // fallback. Blocks B and C never reach this path.
             if tool_free_recovery {
                 let salvaged = harness_state.take_recovery_rejected_synthesis();
-                let direct_stage = concat_compact(stage, ".direct_tool_free_failure");
-                let result = complete_turn_after_failed_tool_free_recovery_with_events(
+                let result = complete_turn_with_salvage(
                     working_history,
-                    &direct_stage,
+                    stage,
+                    ".direct_tool_free_failure",
                     Some(err),
                     salvaged,
                     plan_session,
                     plan_state,
-                    Some(event_context),
+                    event_context,
                 )
                 .await;
                 Ok(PostToolFailureAction::Break(result))
@@ -826,15 +899,15 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
                 }
             } else if tool_free_recovery {
                 let salvaged = harness_state.take_recovery_rejected_synthesis();
-                let directive_stage = concat_compact(stage, ".stop_after_directive");
-                complete_turn_after_failed_tool_free_recovery_with_events(
+                complete_turn_with_salvage(
                     working_history,
-                    &directive_stage,
+                    stage,
+                    ".stop_after_directive",
                     Some(err),
                     salvaged,
                     plan_session,
                     plan_state,
-                    Some(event_context),
+                    event_context,
                 )
                 .await
             } else {
@@ -1029,18 +1102,18 @@ mod tests {
         let mut renderer = AnsiRenderer::stdout();
         let mut working_history = vec![uni::Message::user("finish the plan after the interview".to_string())];
 
-        let recovery = maybe_recover_after_post_tool_llm_failure_with_progress(
-            &mut renderer,
-            &mut working_history,
-            &transient_err(),
-            2,
-            0,
-            "execute_llm_request",
-            true,
-            true,
-            true,
-            true,
-        )
+        let recovery = maybe_recover_after_post_tool_llm_failure_with_progress(PostToolLlmRecoveryInputs {
+            renderer: &mut renderer,
+            working_history: &mut working_history,
+            err: &transient_err(),
+            step_count: 2,
+            turn_history_start_len: 0,
+            failure_stage: "execute_llm_request",
+            allow_tool_free_retry: true,
+            allow_tool_enabled_retry: true,
+            planning_active: true,
+            out_of_band_tool_progress: true,
+        })
         .expect("inline Copilot progress should activate bounded post-tool recovery");
 
         assert_eq!(recovery, PostToolFailureRecovery::RetryToolEnabled);

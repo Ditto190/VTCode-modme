@@ -74,7 +74,7 @@ pub(crate) struct InputStatusState {
 
 const GIT_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct BottomStatusLayout {
     left: Vec<String>,
     right: Vec<String>,
@@ -379,11 +379,9 @@ pub(crate) async fn update_input_status_if_changed(
 }
 
 fn auto_status_layout(state: &InputStatusState) -> BottomStatusLayout {
-    let mut layout = BottomStatusLayout::default();
-    layout.left = state.git_left.clone().into_iter().collect();
     let right_components =
         auto_status_components(state.thread_context.as_deref(), state.is_cancelling, state.spooled_files_count, state);
-    layout.right = right_components
+    let right = right_components
         .into_iter()
         .filter(|component| {
             state
@@ -392,7 +390,10 @@ fn auto_status_layout(state: &InputStatusState) -> BottomStatusLayout {
                 .is_none_or(|summary| !component.trim().eq_ignore_ascii_case(summary.branch.trim()))
         })
         .collect();
-    layout
+    BottomStatusLayout {
+        left: state.git_left.clone().into_iter().collect(),
+        right,
+    }
 }
 
 /// Build model status with all context indicators including spooled files
