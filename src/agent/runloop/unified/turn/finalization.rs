@@ -122,7 +122,7 @@ pub(super) async fn finalize_session(
     // raw mode) before touching the terminal from the host side. Restoring
     // earlier flips the screen back while the TUI is still drawing, which
     // paints transcript frames onto the main CLI screen.
-    if !session.wait_for_exit(std::time::Duration::from_millis(1000)).await {
+    if !session.wait_for_exit(std::time::Duration::from_millis(2000)).await {
         tracing::warn!("TUI task did not exit after shutdown; forcing terminal restore");
     }
 

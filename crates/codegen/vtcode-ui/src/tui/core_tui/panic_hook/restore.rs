@@ -1,3 +1,4 @@
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::sync::atomic::Ordering;
 
@@ -45,6 +46,34 @@ fn emit_restore_sequence(writer: &mut impl Write, clear_full_screen: bool) -> io
     Ok(())
 }
 
+fn open_tty_writer() -> Option<std::fs::File> {
+    OpenOptions::new().write(true).open("/dev/tty").ok()
+}
+
+fn emit_restore_to_all_targets(clear_full_screen: bool) -> Option<io::Error> {
+    let mut first_error: Option<io::Error> = None;
+
+    let mut stderr = io::stderr();
+    if let Err(error) = emit_restore_sequence(&mut stderr, clear_full_screen) {
+        first_error.get_or_insert(error);
+    }
+    if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
+        first_error.get_or_insert_with(|| io::Error::other(error.to_string()));
+    }
+    let _ = stderr.flush();
+    crate::tui::core_tui::runner::terminal_io::reset_mouse_pointer_shape();
+
+    if let Some(mut tty) = open_tty_writer() {
+        let _ = emit_restore_sequence(&mut tty, clear_full_screen);
+        let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show, RestorePosition);
+        let _ = tty.flush();
+        let _ = write!(tty, "\x1b]22;default\x07");
+        let _ = tty.flush();
+    }
+
+    first_error
+}
+
 /// Restore terminal to a usable state after a panic or error.
 ///
 /// This is the single canonical function for terminal restoration.
@@ -64,43 +93,48 @@ pub fn restore_tui() -> io::Result<()> {
 
     state::mark_tui_deinitialized();
 
-    // Never emit restore sequences when no component modified the terminal:
-    // error reports for non-TUI runs (failed startup, one-shot commands)
-    // would otherwise spray raw escape sequences before the message.
-    if !state::is_terminal_modified() {
+    let terminal_modified = state::is_terminal_modified();
+    let alternate_active = state::is_alternate_screen_active();
+
+    // Never emit restore sequences when no component modified the terminal
+    // and no alternate screen is active: error reports for non-TUI runs
+    // (failed startup, one-shot commands) would otherwise spray raw escape
+    // sequences before the message. If alternate screen is active we must
+    // still leave it even when TERMINAL_MODIFIED was not yet set (partial
+    // init failure that succeeded to enter alt screen but failed before
+    // flagging modification).
+    if !terminal_modified && !alternate_active {
         return Ok(());
     }
     state::mark_terminal_restored();
+    if alternate_active {
+        state::mark_alternate_screen_active(false);
+    }
 
     let mut first_error: Option<io::Error> = None;
 
     crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
-    let mut stderr = io::stderr();
-
-    if let Err(error) = emit_restore_sequence(&mut stderr, !state::is_alternate_screen_active()) {
-        first_error.get_or_insert(error);
-    }
-
-    crate::tui::core_tui::runner::terminal_io::reset_mouse_pointer_shape();
-
-    // Ensure cursor state is restored
-    if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
+    let clear_full_screen = !alternate_active;
+    if let Some(error) = emit_restore_to_all_targets(clear_full_screen) {
         first_error.get_or_insert(error);
     }
 
     // Drain terminal responses from restore sequences while raw mode still active
     crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
-    // Disable raw mode LAST
+    // Disable raw mode LAST — must run even if emit failed
     if let Err(error) = disable_raw_mode() {
         first_error.get_or_insert(error);
     }
 
-    // Flush to ensure all escape sequences are processed
-    if let Err(error) = stderr.flush() {
-        first_error.get_or_insert(error);
+    // Best-effort stty sane equivalent for /dev/tty when disable_raw_mode
+    // succeeded but tty still has echo off due to cargo wrapping stderr.
+    if let Some(mut tty) = open_tty_writer() {
+        let _ = tty.flush();
     }
+    // Ensure stderr is flushed after raw mode restore
+    let _ = io::stderr().flush();
 
     match first_error {
         Some(error) => Err(error),

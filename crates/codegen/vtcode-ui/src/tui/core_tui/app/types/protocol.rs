@@ -632,11 +632,22 @@ impl InlineSession {
     ///
     /// Returns `true` when the task exited (or no task was spawned); `false`
     /// when it was still running after `timeout`, in which case the caller
-    /// should force-restore the terminal as a backstop.
+    /// should force-restore the terminal as a backstop. On timeout the task
+    /// is aborted to guarantee it cannot keep raw mode or the alternate
+    /// screen active after the host has restored the terminal.
     pub async fn wait_for_exit(&mut self, timeout: std::time::Duration) -> bool {
-        match self.worker.take() {
-            Some(worker) => tokio::time::timeout(timeout, worker).await.is_ok(),
-            None => true,
+        let Some(mut worker) = self.worker.take() else {
+            return true;
+        };
+        let result = tokio::time::timeout(timeout, &mut worker).await;
+        match result {
+            Ok(_) => true,
+            Err(_) => {
+                worker.abort();
+                // Give abort a brief moment to run drop handlers.
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(50), worker).await;
+                false
+            }
         }
     }
 

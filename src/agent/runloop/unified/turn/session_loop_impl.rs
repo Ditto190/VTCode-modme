@@ -1,5 +1,6 @@
+use std::io::Write as _;
+
 use anyhow::Result;
-use std::io::Write;
 
 use tokio_util::sync::CancellationToken;
 
@@ -83,8 +84,8 @@ impl TerminalCleanupGuard {
 impl Drop for TerminalCleanupGuard {
     fn drop(&mut self) {
         let _ = vtcode_ui::tui::panic_hook::restore_tui();
-        let mut stdout = std::io::stdout();
-        let _ = stdout.flush();
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
     }
 }
 

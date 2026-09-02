@@ -6,9 +6,12 @@
 set -eo pipefail
 
 restore_terminal_state() {
-	if [[ -t 1 ]]; then
+	if [[ -t 1 || -t 2 ]]; then
 		# Best-effort restore for raw/alternate-screen/mouse modes in case vtcode aborts.
-		printf '\r\033[K\033[?1049l\033[?2004l\033[?1004l\033[?1006l\033[?1015l\033[?1003l\033[?1002l\033[?1000l\033[<1u\033[?25h' >/dev/tty 2>/dev/null || true
+		# Order mirrors vtcode_ui::tui::panic_hook::restore_tui: LeaveAlternateScreen first,
+		# then bracketed paste/focus/mouse, pop keyboard flags, reset OSC 22 pointer,
+		# default cursor shape, show cursor.
+		printf '\r\033[K\033[?1049l\033[?2004l\033[?1004l\033[?1006l\033[?1015l\033[?1003l\033[?1002l\033[?1000l\033[<1u\033]22;default\007\033[0 q\033[?25h' >/dev/tty 2>/dev/null || true
 		stty sane </dev/tty >/dev/tty 2>/dev/null || true
 	fi
 }
@@ -25,16 +28,16 @@ unset MallocNanoZone
 
 if [[ -z "${VT_SESSION_DIR:-}" ]]; then
 	case "$(uname -s)" in
-		Darwin)
-			VT_STATE_DIR="$HOME/Library/Application Support/com.vinhnx.vtcode/state"
-			;;
-		*)
-			if [[ "${XDG_STATE_HOME:-}" = /* ]]; then
-				VT_STATE_DIR="$XDG_STATE_HOME/vtcode"
-			else
-				VT_STATE_DIR="$HOME/.local/state/vtcode"
-			fi
-			;;
+	Darwin)
+		VT_STATE_DIR="$HOME/Library/Application Support/com.vinhnx.vtcode/state"
+		;;
+	*)
+		if [[ "${XDG_STATE_HOME:-}" = /* ]]; then
+			VT_STATE_DIR="$XDG_STATE_HOME/vtcode"
+		else
+			VT_STATE_DIR="$HOME/.local/state/vtcode"
+		fi
+		;;
 	esac
 	export VT_SESSION_DIR="$VT_STATE_DIR/sessions"
 fi

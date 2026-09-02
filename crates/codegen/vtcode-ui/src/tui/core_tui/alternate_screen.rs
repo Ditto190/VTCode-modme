@@ -147,9 +147,7 @@ impl AlternateScreenSession {
 
         // Drain any pending crossterm events BEFORE leaving alternate screen and disabling raw mode
         // to prevent them from leaking to the shell.
-        while let Ok(true) = crossterm::event::poll(std::time::Duration::from_millis(0)) {
-            let _ = crossterm::event::read();
-        }
+        crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
         let mut stdout = io::stdout();
 

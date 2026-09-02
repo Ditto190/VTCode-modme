@@ -107,10 +107,16 @@ fn main() -> std::process::ExitCode {
         Ok(Ok(_)) => std::process::ExitCode::SUCCESS,
         Ok(Err(err)) => {
             panic_hook::print_error_report(err);
+            // Fallback if print_error_report was a no-op (non-TUI run that
+            // still touched raw mode via palette probe).
+            let _ = panic_hook::restore_tui();
+            let _ = std::io::Write::flush(&mut std::io::stderr());
             std::process::ExitCode::FAILURE
         }
         Err(_) => {
+            let _ = panic_hook::restore_tui();
             eprintln!("Error: vtcode main thread panicked");
+            let _ = std::io::Write::flush(&mut std::io::stderr());
             std::process::ExitCode::FAILURE
         }
     }

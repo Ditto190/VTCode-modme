@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::cursor::{MoveToColumn, RestorePosition, SavePosition, SetCursorStyle, Show};
-use ratatui::crossterm::event;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -69,9 +68,7 @@ impl TerminalModeGuard {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stderr>>,
     ) -> Result<()> {
-        while let Ok(true) = event::poll(std::time::Duration::from_millis(0)) {
-            let _ = event::read();
-        }
+        crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
         let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
 
@@ -117,9 +114,7 @@ impl TerminalModeGuard {
 
 impl Drop for TerminalModeGuard {
     fn drop(&mut self) {
-        while let Ok(true) = event::poll(std::time::Duration::from_millis(0)) {
-            let _ = event::read();
-        }
+        crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
         let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
 
