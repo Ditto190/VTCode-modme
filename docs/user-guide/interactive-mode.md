@@ -88,7 +88,7 @@ normal transcript remains compact and bounded while the review retains full
 PTY captures and distinct pipe stdout/stderr streams.
 
 Successful command rows are grouped only when they are contiguous in rendered
-order. The visible shortcut and `click to expand or collapse` suffix is styled
+order. The visible shortcut and `click to expand` suffix is styled
 and clickable when mouse capture is enabled; clicking it focuses the first
 command in that group. Other transcript clicks continue to support selection
 and links. Successful file writes and edits end the command group and show a

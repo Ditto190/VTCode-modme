@@ -223,12 +223,14 @@ fn extract_command_line(args: &serde_json::Value) -> Option<String> {
 }
 
 fn compact_command_text(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-    extract_command_line(args)
-        .map(|command| vtcode_commons::formatting::collapse_whitespace(&command))
-        .filter(|command| !command.is_empty())
+    // Display join (no shell_words quoting) plus a first-line head-truncated
+    // preview: the collapsed row must stay readable, not executable-looking.
+    crate::agent::runloop::unified::tool_summary_helpers::display_command_text(args)
         .map(|command| {
             crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths(&command, workspace_root)
         })
+        .map(|command| crate::agent::runloop::unified::tool_summary_helpers::preview_command(&command, 120))
+        .filter(|command| !command.is_empty())
         .unwrap_or_else(|| name.to_string())
 }
 

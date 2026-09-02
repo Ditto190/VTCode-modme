@@ -14,7 +14,7 @@ Compact mode keeps one concise activity row for each contiguous run of
 successful command/PTY calls. A single command can show its command and hidden
 line count, for example `• Ran cargo check · … +12 lines`; consecutive calls
 collapse to `• Ran 2 commands`. The review suffix includes the configured
-shortcut and a styled `click to expand or collapse` affordance. In expanded
+shortcut and a styled `click to expand` affordance. In expanded
 mode, running PTY blocks show a bounded live tail; after completion, successful
 bodies collapse to the activity row.
 Failures, non-zero exits, cancellations, warnings, stderr diagnostics,

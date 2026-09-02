@@ -572,7 +572,7 @@ Transcript Review uses the same fullscreen rendering surface:
 
 - The configured `open_transcript_review` binding (default `Ctrl+T`) opens or closes a session-local whole-conversation review with search, paging, complete copy, and export controls, including from inline mode.
 - The configured `toggle_transcript_render_mode` binding (default `R`) toggles rich rendering and ANSI-free raw rendering.
-- Compact successful command rows are contiguous-only; their styled shortcut and `click to expand or collapse` suffix is clickable when mouse capture is enabled and focuses the first capture in a group.
+- Compact successful command rows are contiguous-only; their styled shortcut and `click to expand` suffix is clickable when mouse capture is enabled and focuses the first capture in a group.
 - `[` hands the complete conversation to native terminal scrollback until you return.
 - `v` opens the complete conversation in your configured editor.
 - The title's `[close]` control and the footer shortcut guide are mouse/keyboard affordances for the review panel.

@@ -1103,8 +1103,15 @@ main() {
 			chmod +x "$SCRIPT_DIR/publish_extracted_crates.sh" 2>/dev/null || true
 		fi
 		if ! bash "$SCRIPT_DIR/publish_extracted_crates.sh" --skip-tests --skip-tags --skip-follow-up; then
-			print_error "Crate publishing failed. Remaining release steps (GitHub Release, binaries, Homebrew) will continue."
+			print_error "Crate publishing failed."
 			print_info "You can resume crate publishing with: bash ./scripts/publish_extracted_crates.sh --start-from <crate> --skip-tests --skip-tags --skip-follow-up"
+			if [[ "${RELEASE_CONTINUE_ON_PUBLISH_FAIL:-0}" == "1" ]]; then
+				print_warning "RELEASE_CONTINUE_ON_PUBLISH_FAIL=1 — continuing to GitHub Release/binaries/Homebrew despite publish failure."
+			else
+				print_error "Aborting release. Remaining steps (GitHub Release, binaries, Homebrew) will NOT run until crates.io publish succeeds."
+				print_info "Fix crates.io connectivity, then resume publishing. To force continuation despite failure, re-run with RELEASE_CONTINUE_ON_PUBLISH_FAIL=1"
+				exit 1
+			fi
 		fi
 	fi
 

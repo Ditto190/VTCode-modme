@@ -10,20 +10,19 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # same script can be used for validation ahead of the real release window.
 
 usage() {
-	cat <<USAGE
+	cat <<'USAGE'
 Usage: $0 [--dry-run] [--start-from <crate>] [--skip-tests] [--skip-docs] [--skip-tags] [--skip-follow-up]
 
 Options:
-  --dry-run          Use $(cargo publish --dry-run) for each crate instead of
+  --dry-run          Use `cargo publish --dry-run` for each crate instead of
                      performing the real publish. This is the default when the
-                     VT_RELEASE_DRY_RUN environment variable is set to $(1).
+                     VT_RELEASE_DRY_RUN environment variable is set to 1.
   --start-from CRATE Resume publishing from the provided crate name. Valid
                      crates: vtcode-commons, vtcode-auth, vtcode-exec-events,
-                     vtcode-webmcp,
-                     vtcode-macros, vtcode-config,
+                     vtcode-memory, vtcode-macros, vtcode-config,
                      vtcode-indexer, vtcode-bash-runner, vtcode-utility-tool-specs,
-                     vtcode-eval, vtcode-safety, vtcode-a2a, vtcode-llm,
-                     vtcode-skills, vtcode-ui, vtcode-mcp, vtcode-core,
+                     vtcode-eval, vtcode-safety, vtcode-webmcp, vtcode-a2a, vtcode-llm,
+                     vtcode-skills, vtcode-agent-plugins, vtcode-ui, vtcode-mcp, vtcode-core,
                      vtcode-acp, vtcode.
   --skip-tests       Skip running the workspace fmt/clippy/test checks. Use with
                      caution; the release plan expects the validation suite to
@@ -35,12 +34,12 @@ Options:
   -h, --help         Show this help message and exit.
 
 Environment variables:
-  VT_RELEASE_DRY_RUN When set to $(1), the script defaults to performing a dry
-                     run. Passing $(--dry-run) or providing $(--start-from) still
+  VT_RELEASE_DRY_RUN When set to 1, the script defaults to performing a dry
+                     run. Passing `--dry-run` or providing `--start-from` still
                      works while the variable is set.
   VT_RELEASE_SKIP_DOCS
-                     When set to $(1), skip regenerating API docs even if
-                     $(--skip-docs) is not passed.
+                     When set to 1, skip regenerating API docs even if
+                     `--skip-docs` is not passed.
 USAGE
 }
 
@@ -98,7 +97,6 @@ CRATES=(
 	vtcode-commons
 	vtcode-auth
 	vtcode-exec-events
-	vtcode-webmcp
 	vtcode-memory
 	vtcode-macros
 	vtcode-config
@@ -107,6 +105,7 @@ CRATES=(
 	vtcode-utility-tool-specs
 	vtcode-eval
 	vtcode-safety
+	vtcode-webmcp
 	vtcode-a2a
 	vtcode-llm
 	vtcode-skills
@@ -118,29 +117,76 @@ CRATES=(
 	vtcode
 )
 
-# Validate that all workspace path dependencies of crates in the publish list
-# are also in the publish list. This catches missing crates early.
+# Validate that all workspace dependencies of crates in the publish list
+# are also in the publish list and appear earlier (topological order). This
+# catches missing crates and out-of-order publishes (e.g. vtcode-webmcp
+# requiring vtcode-safety) before hitting crates.io 400 errors.
 validate_publish_order() {
 	local errors=0
-	# Build a set of crates in the publish list for fast lookup
 	local crate_set=""
 	for crate in "${CRATES[@]}"; do
 		crate_set="${crate_set} ${crate}"
 	done
 
+	# Build index map for order checking (bash 3.2 compatible)
+	get_crate_index() {
+		local needle="$1"
+		local idx=0
+		for c in "${CRATES[@]}"; do
+			if [[ "$c" == "$needle" ]]; then
+				echo "$idx"
+				return 0
+			fi
+			idx=$((idx + 1))
+		done
+		echo "999"
+		return 0
+	}
+
 	for crate in "${CRATES[@]}"; do
-		local cargo_toml="${crate}/Cargo.toml"
-		if [[ ! -f "$cargo_toml" ]]; then
-			continue
+		# Resolve Cargo.toml path via workspace resolver (handles re-aliased crates like vtcode-commons)
+		local cargo_toml=""
+		if [[ -f "${crate}/Cargo.toml" ]]; then
+			cargo_toml="${crate}/Cargo.toml"
+		else
+			# Fallback: resolve via cargo metadata for crates with non-trivial path layout
+			local manifest_path
+			manifest_path=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c "import sys,json; m=json.load(sys.stdin); m={p['name']:p['manifest_path'] for p in m['packages']}; print(m.get('${crate}',''))" 2>/dev/null || echo "")
+			if [[ -n "$manifest_path" && -f "$manifest_path" ]]; then
+				cargo_toml="$manifest_path"
+			else
+				continue
+			fi
 		fi
-		# Extract workspace path dependencies
+
+		# Extract vtcode workspace dependencies: handles both `workspace = true` and `path =` forms
 		local deps
-		deps=$(grep -E 'path\s*=' "$cargo_toml" | grep -oE 'path\s*=\s*"\.\./([^"]+)"' | sed 's|path\s*=\s*"\.\./||;s|"||g' | sort -u || true)
+		deps=$(grep -E 'vtcode-[a-z0-9_-]+\s*=' "$cargo_toml" | grep -oE 'vtcode-[a-z0-9_-]+' | sort -u || true)
+
 		for dep in $deps; do
-			if [[ -n "$dep" && "$crate_set" != *" $dep "* ]]; then
-				# Check if it's actually a workspace member
-				if [[ -d "$dep" && -f "$dep/Cargo.toml" ]]; then
+			# Skip self-dependency
+			if [[ "$dep" == "$crate" ]]; then
+				continue
+			fi
+			if [[ "$crate_set" != *" $dep "* ]]; then
+				# Check if it's actually a workspace member before erroring
+				local dep_manifest=""
+				dep_manifest=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c "import sys,json; m=json.load(sys.stdin); m={p['name']:p['manifest_path'] for p in m['packages']}; print(m.get('${dep}',''))" 2>/dev/null || echo "")
+				if [[ -n "$dep_manifest" ]]; then
 					echo "ERROR: ${crate} depends on workspace member '${dep}' which is not in the CRATES publish list" >&2
+					errors=$((errors + 1))
+				elif [[ -d "$dep" && -f "$dep/Cargo.toml" ]]; then
+					echo "ERROR: ${crate} depends on workspace member '${dep}' which is not in the CRATES publish list" >&2
+					errors=$((errors + 1))
+				fi
+			else
+				# Dependency is in list — ensure it appears earlier for crates.io resolution
+				local dep_idx
+				dep_idx=$(get_crate_index "$dep")
+				local crate_pos
+				crate_pos=$(get_crate_index "$crate")
+				if [[ $dep_idx -gt $crate_pos ]]; then
+					echo "ERROR: ${crate} depends on '${dep}' which appears later in CRATES (index $dep_idx > $crate_pos). Publish order violates dependency graph; move '${dep}' before '${crate}'." >&2
 					errors=$((errors + 1))
 				fi
 			fi
@@ -148,7 +194,7 @@ validate_publish_order() {
 	done
 
 	if [[ $errors -gt 0 ]]; then
-		echo "Found $errors missing dependency(ies) in the publish list. Aborting." >&2
+		echo "Found $errors publish-order error(s). Aborting." >&2
 		exit 1
 	fi
 }
@@ -178,13 +224,111 @@ run_cmd() {
 	eval "$@"
 }
 
+is_version_published() {
+	local crate="$1"
+	local version="$2"
+	local endpoint="https://crates.io/api/v1/crates/${crate}/${version}"
+	if curl --silent --show-error --fail --location --user-agent "vtcode-publish-script" "$endpoint" >/dev/null 2>&1; then
+		return 0
+	fi
+	if cargo info --registry crates-io --quiet "${crate}@${version}" >/dev/null 2>&1; then
+		return 0
+	fi
+	return 1
+}
+
 publish_cmd() {
 	local crate="$1"
+	local version="${CURRENT_VERSION}"
 	if [[ $DRY_RUN -eq 1 ]]; then
 		run_cmd "cargo publish --dry-run -p $crate"
-	else
-		run_cmd "cargo publish -p $crate"
+		return 0
 	fi
+
+	# Idempotency: skip if already published (handles retry after transient 503)
+	if is_version_published "$crate" "$version"; then
+		print_info "${crate} ${version} already published on crates.io — skipping cargo publish."
+		return 0
+	fi
+
+	local max_retries=5
+	local attempt=1
+	local backoff=10
+	local last_status=0
+
+	while [[ $attempt -le $max_retries ]]; do
+		print_info "Publishing ${crate} ${version} (attempt ${attempt}/${max_retries})..."
+		# Capture output to detect transient 5xx
+		local tmp_out
+		tmp_out=$(mktemp)
+		set +e
+		cargo publish -p "$crate" 2>&1 | tee "$tmp_out"
+		last_status=${PIPESTATUS[0]}
+		set -e
+
+		if [[ $last_status -eq 0 ]]; then
+			rm -f "$tmp_out"
+			return 0
+		fi
+
+		# If crate is now published despite non-zero exit (e.g. 503 after ingest), treat as success
+		if is_version_published "$crate" "$version"; then
+			print_warning "cargo publish exited with ${last_status} but ${crate} ${version} is now available — treating as success."
+			rm -f "$tmp_out"
+			return 0
+		fi
+
+		# Handle dirty working directory for vtcode binary (cargo publish requires clean tree)
+		if grep -qi "uncommitted changes" "$tmp_out" || grep -qi "allow-dirty" "$tmp_out"; then
+			print_warning "cargo publish blocked by dirty working directory for ${crate}. Retrying with --allow-dirty..."
+			rm -f "$tmp_out"
+			tmp_out=$(mktemp)
+			set +e
+			cargo publish -p "$crate" --allow-dirty 2>&1 | tee "$tmp_out"
+			last_status=${PIPESTATUS[0]}
+			set -e
+			if [[ $last_status -eq 0 ]]; then
+				rm -f "$tmp_out"
+				return 0
+			fi
+			# Check if now published despite exit code
+			if is_version_published "$crate" "$version"; then
+				print_warning "cargo publish --allow-dirty exited with ${last_status} but ${crate} ${version} is now available — treating as success."
+				rm -f "$tmp_out"
+				return 0
+			fi
+			# Fall through to transient/non-transient handling with new tmp_out
+		fi
+
+		# Detect transient errors: 503/502/500/429, timeout, "failed to get a 200 OK", "503", "429 Too Many Requests"
+		local is_transient=0
+		if grep -qiE "503|502|500|429|timeout|failed to get a 200 OK|Service Unavailable|Too Many Requests|connection.*timed out|http.*503" "$tmp_out"; then
+			is_transient=1
+		fi
+		rm -f "$tmp_out"
+
+		if [[ $is_transient -eq 0 ]]; then
+			print_error "cargo publish for ${crate} failed with non-transient error (exit ${last_status}) — not retrying."
+			return $last_status
+		fi
+
+		if [[ $attempt -lt $max_retries ]]; then
+			print_warning "Transient crates.io error for ${crate} (attempt ${attempt} failed). Retrying in ${backoff}s..."
+			sleep "$backoff"
+			backoff=$((backoff * 2))
+			# cap backoff at 60s
+			if [[ $backoff -gt 60 ]]; then
+				backoff=60
+			fi
+		else
+			print_error "cargo publish for ${crate} failed after ${max_retries} attempts (last exit ${last_status})."
+			return $last_status
+		fi
+
+		attempt=$((attempt + 1))
+	done
+
+	return $last_status
 }
 
 wait_for_crates_io_version() {
@@ -297,7 +441,12 @@ for crate in "${CRATES[@]}"; do
 		echo "Re-running vtcode-bash-runner dry run now that vtcode-exec-events is published..."
 		run_cmd "cargo publish --dry-run -p vtcode-bash-runner"
 	fi
-	publish_cmd "$crate"
+	if ! publish_cmd "$crate"; then
+		print_error "Failed to publish ${crate} ${CURRENT_VERSION}. Aborting remaining publishes."
+		print_info "Resume with: bash ./scripts/publish_extracted_crates.sh --start-from ${crate} --skip-tests --skip-tags --skip-follow-up"
+		print_info "Or retry this crate alone: cargo publish -p ${crate}"
+		exit 1
+	fi
 	wait_for_crates_io_version "$crate" "$CURRENT_VERSION"
 	tag="${crate}-${CURRENT_VERSION}"
 	maybe_tag "${tag}"

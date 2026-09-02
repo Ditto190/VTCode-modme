@@ -19,9 +19,9 @@ use vtcode_ui::tui::ui::syntax_highlight;
 
 use crate::agent::runloop::tool_output::render_tree_detail;
 use crate::agent::runloop::unified::tool_summary_helpers::{
-    collect_param_details, command_line_for_args, describe_fetch_action, describe_grep_file, describe_list_files,
-    describe_path_action, describe_shell_command, highlight_texts_for_summary, relativize_command_paths,
-    relativize_to_workspace, should_render_command_line, truncate_path_middle,
+    collect_param_details, command_line_for_args, describe_code_search, describe_fetch_action, describe_grep_file,
+    describe_list_files, describe_path_action, describe_shell_command, highlight_texts_for_summary,
+    relativize_command_paths, relativize_to_workspace, should_render_command_line, truncate_path_middle,
 };
 
 /// Ambient context required to render tool-call summaries.
@@ -552,11 +552,22 @@ fn build_tool_summary(action_label: &str, headline: &str) -> String {
         return normalized.to_string();
     }
     if let Some(stripped) = normalized.strip_prefix("Use ")
-        && stripped == action_label
+        && same_words_ignoring_case(stripped, action_label)
     {
         return action_label.to_string();
     }
     format!("{action_label} {normalized}")
+}
+
+/// Case- and word-order-insensitive equality for short display phrases, so a
+/// headline like "Use Code search" still collapses against the label
+/// "Search code" instead of concatenating into "Search code Use Code search".
+fn same_words_ignoring_case(a: &str, b: &str) -> bool {
+    let mut left: Vec<&str> = a.split_whitespace().collect();
+    let mut right: Vec<&str> = b.split_whitespace().collect();
+    left.sort_unstable_by_key(|word| word.to_ascii_lowercase());
+    right.sort_unstable_by_key(|word| word.to_ascii_lowercase());
+    left.len() == right.len() && left.iter().zip(right.iter()).all(|(l, r)| l.eq_ignore_ascii_case(r))
 }
 
 fn run_summary_is_placeholder(summary: &str) -> bool {
@@ -651,6 +662,9 @@ pub(crate) fn describe_tool_action(
         actual_name if actual_name == tool_names::GREP_FILE => describe_grep_file(args, workspace_root)
             .map(|(desc, used)| with_mcp(desc, used))
             .unwrap_or_else(|| fallback("Search with grep")),
+        actual_name if actual_name == tool_names::CODE_SEARCH => describe_code_search(args)
+            .map(|(desc, used)| with_mcp(desc, used))
+            .unwrap_or_else(|| fallback("Search code")),
         actual_name if actual_name == tool_names::READ_FILE => {
             describe_path_action(args, "Read file", &["path"], workspace_root)
                 .map(|(desc, used)| with_mcp(desc, used))
@@ -751,6 +765,30 @@ mod tests {
     #[test]
     fn build_tool_summary_formats_run_command_as_ran() {
         assert_eq!(build_tool_summary("Run command", "cargo check -p vtcode"), "Ran cargo check -p vtcode");
+    }
+
+    #[test]
+    fn build_tool_summary_collapses_use_prefix_with_word_order_drift() {
+        assert_eq!(build_tool_summary("Search code", "Use Code search"), "Search code");
+        assert_eq!(build_tool_summary("Read file", "Use read file"), "Read file");
+        assert_eq!(build_tool_summary("Search code", "Use Code search workspace"), "Search code Use Code search workspace");
+    }
+
+    #[test]
+    fn describe_tool_action_code_search_describes_query() {
+        let (description, used_keys) = describe_tool_action(
+            tool_names::CODE_SEARCH,
+            &json!({
+                "query": "core agent loop",
+                "file_types": ["rs"],
+                "max_results": 15
+            }),
+            None,
+        );
+
+        assert_eq!(description, "Search code for core agent loop");
+        assert!(used_keys.contains("query"));
+        assert!(!used_keys.contains("max_results"));
     }
 
     #[test]

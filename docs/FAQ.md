@@ -138,7 +138,7 @@ toggle (default `R`) for ANSI-free raw text. You can:
 - copy the complete ANSI-free conversation with `Ctrl+O`
 
 Successful command rows are grouped only while they are contiguous. Their
-styled shortcut and `click to expand or collapse` suffix is clickable with
+styled shortcut and `click to expand` suffix is clickable with
 mouse capture; clicking a grouped row opens the review at its first command.
 Failures,
 warnings, stderr, diffs, and meaningful artifacts remain inline.

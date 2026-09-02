@@ -155,7 +155,7 @@ session-only display mode; `/config` persists it.
 For a quiet live terminal without losing evidence, use compact tool display
 mode and open Transcript Review with the configured review shortcut (default
 `Ctrl+T`). The review keeps the original conversation order and complete PTY or
-pipe output. The styled shortcut and `click to expand or collapse` suffix on a
+pipe output. The styled shortcut and `click to expand` suffix on a
 compact activity row are clickable when mouse capture is enabled and focus that
 row's first command. Rich rendering reuses normal transcript styling; press the
 configured render toggle (default `R`) for ANSI-free raw text before copying,

@@ -23,6 +23,11 @@ pub struct ShellLineStyles {
     pub string: Arc<InlineTextStyle>,
     pub option: Arc<InlineTextStyle>,
     pub truncation: Arc<InlineTextStyle>,
+    /// Structural tokens (`|`, `;`, `&&`, redirections) — muted so command
+    /// words and args carry the color hierarchy.
+    pub separator: Arc<InlineTextStyle>,
+    /// Grouped `N commands` counts — subtle accent, one step below the verb.
+    pub count: Arc<InlineTextStyle>,
 }
 
 impl ShellLineStyles {
@@ -73,6 +78,8 @@ impl ShellLineStyles {
             string: yellow,
             option: Arc::new(convert_style(AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Red))))),
             truncation: Arc::new(convert_style(pty_output)),
+            separator: Arc::new(convert_style(pty_output | Effects::DIMMED)),
+            count: Arc::new(convert_style(primary | Effects::DIMMED)),
         }
     }
 }
@@ -111,6 +118,13 @@ fn is_bash_keyword(token: &str) -> bool {
 
 fn is_command_separator(token: &str) -> bool {
     matches!(token, "|" | "||" | "&&" | ";" | ";;" | "&")
+}
+
+/// Redirection operators, including fd-prefixed and target-attached forms:
+/// `>`, `>>`, `2>`, `2>&1`, `2>/dev/null`, `<`, `<<`.
+fn is_redirection_token(token: &str) -> bool {
+    let body = token.trim_start_matches(|c: char| c.is_ascii_digit());
+    body.starts_with('>') || body.starts_with('<')
 }
 
 pub fn tokenize_preserve_whitespace(text: &str) -> Vec<&str> {
@@ -161,7 +175,12 @@ fn style_for_token<'a>(token: &'a str, expect_command: &mut bool, styles: &'a Sh
 
     if is_command_separator(token) {
         *expect_command = true;
-        return Arc::clone(&styles.args);
+        return Arc::clone(&styles.separator);
+    }
+
+    if is_redirection_token(token) {
+        *expect_command = false;
+        return Arc::clone(&styles.separator);
     }
 
     if token.starts_with('"') || token.starts_with('\'') || token.ends_with('"') || token.ends_with('\'') {
@@ -279,15 +298,10 @@ pub fn line_to_compact_segments(
     });
 
     if metadata.command_count > 1 {
-        // Grouped: dim count for hierarchy — keeps •/Ran prominent, count subtle.
-        let count_style = Arc::new(InlineTextStyle {
-            color: None,
-            bg_color: None,
-            effects: Effects::DIMMED,
-        });
+        // Grouped: subtle accent count for hierarchy — keeps •/Ran prominent.
         segments.push(InlineSegment {
             text: format!("{} commands", metadata.command_count),
-            style: count_style,
+            style: Arc::clone(&styles.count),
         });
     } else if let Some(cmd) = metadata.command.as_deref() {
         segments.extend(shell_syntax_segments(cmd, styles, true));

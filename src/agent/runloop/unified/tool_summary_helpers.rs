@@ -3,8 +3,9 @@ use hashbrown::HashSet;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::path::Path;
-use vtcode_commons::formatting::truncate_middle;
 pub(super) use vtcode_commons::formatting::truncate_path_middle;
+use vtcode_commons::formatting::{collapse_whitespace, truncate_middle};
+use vtcode_core::tools::command_args;
 
 pub(super) fn humanize_tool_name(name: &str) -> String {
     humanize_key(name)
@@ -58,7 +59,69 @@ pub(super) fn describe_shell_command(args: &Value) -> Option<(String, HashSet<St
     let (command, key) = extract_command(args)?;
     let mut used = HashSet::new();
     used.insert(key.to_string());
-    Some((truncate_middle(&command, 70), used))
+    Some((preview_command(&command, 70), used))
+}
+
+/// Join command words for display, quoting only words that contain whitespace.
+///
+/// Unlike `shell_words::join`, shell metacharacters (`|`, `>`, `;`) are left
+/// bare: this string is rendered, never executed, and quoting every operator
+/// made the `• Ran` headers read as broken shell.
+fn display_join_words(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|word| {
+            if word.chars().any(char::is_whitespace) {
+                format!("'{word}'")
+            } else {
+                word.as_str().to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Readable one-line display text for a command's arguments.
+///
+/// Words come from the `command` array/string (plus the `args` array when
+/// present) and are joined with [`display_join_words`].
+pub(super) fn display_command_text(args: &Value) -> Option<String> {
+    let words = command_args::command_words(args).ok().flatten()?;
+    let joined = display_join_words(&words);
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// Compact single-line preview of a command for `• Ran …` headers.
+///
+/// Multi-line commands preview only their first non-empty line; long commands
+/// are head-truncated at a word boundary with a trailing ellipsis. The
+/// mid-string ellipsis of `truncate_middle` is avoided on purpose: cutting
+/// `checkpoints/turn_1032` into `tur…ool_calls` reads as a rendering bug.
+pub(super) fn preview_command(command: &str, max_len: usize) -> String {
+    if max_len == 0 {
+        return String::new();
+    }
+    let first_line = command
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(collapse_whitespace)
+        .unwrap_or_default();
+    if first_line.chars().count() <= max_len {
+        return first_line;
+    }
+
+    let budget = max_len.saturating_sub(1);
+    let mut head: String = first_line.chars().take(budget).collect();
+    if let Some(last_space) = head.rfind(char::is_whitespace) {
+        // Only honor the word boundary when it keeps at least half the budget,
+        // so a late first space does not collapse the preview to almost nothing.
+        if last_space >= budget / 2 {
+            head.truncate(last_space);
+            head.truncate(head.trim_end().len());
+        }
+    }
+    format!("{head}…")
 }
 
 pub(super) fn describe_list_files(args: &Value, workspace_root: Option<&Path>) -> Option<(String, HashSet<String>)> {
@@ -110,6 +173,13 @@ pub(super) fn describe_grep_file(args: &Value, workspace_root: Option<&Path>) ->
         }
         _ => None,
     }
+}
+
+pub(super) fn describe_code_search(args: &Value) -> Option<(String, HashSet<String>)> {
+    let query = lookup_string(args, "query")?;
+    let mut used = HashSet::new();
+    used.insert("query".to_string());
+    Some((format!("Search code for {}", truncate_middle(&query, 40)), used))
 }
 
 pub(super) fn describe_path_action(
@@ -558,5 +628,74 @@ mod tests {
         let path = "src/main.rs";
         let truncated = truncate_path_middle(path, 40);
         assert_eq!(truncated, "src/main.rs");
+    }
+
+    #[test]
+    fn preview_command_multi_line_shows_first_line_only() {
+        let command = "python3 -c \"\nimport json\nwith open('.vtcode/checkpoints/turn_1032.json') as f:\n    pass\n\"";
+        let preview = preview_command(command, 70);
+        assert_eq!(preview, "python3 -c \"");
+        assert!(!preview.contains('…'));
+        assert!(!preview.contains("ool_calls"));
+    }
+
+    #[test]
+    fn preview_command_long_command_head_truncates_at_word_boundary() {
+        let command = "echo one two three four five six seven eight nine ten eleven twelve thirteen";
+        let preview = preview_command(command, 30);
+        assert!(preview.ends_with('…'), "long preview should end with ellipsis: {preview}");
+        let without_ellipsis = preview.trim_end_matches('…');
+        assert!(
+            without_ellipsis.ends_with(|c: char| c.is_whitespace())
+                || command.starts_with(without_ellipsis),
+            "ellipsis should follow a word boundary: {preview}"
+        );
+        assert!(preview.chars().count() <= 30);
+    }
+
+    #[test]
+    fn preview_command_short_command_unchanged() {
+        assert_eq!(preview_command("git status --short", 70), "git status --short");
+        assert_eq!(preview_command("   ", 70), "");
+        assert_eq!(preview_command("echo hi", 0), "");
+    }
+
+    #[test]
+    fn display_command_text_leaves_operators_unquoted() {
+        let args = json!({
+            "command": ["cat", "docs/guides/agent-loop-contract.md", "2>/dev/null", "|", "head", "-120", ";", "echo", "---"]
+        });
+        let display = display_command_text(&args).expect("command display text");
+        assert_eq!(
+            display,
+            "cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120 ; echo ---"
+        );
+    }
+
+    #[test]
+    fn display_command_text_quotes_only_whitespace_words() {
+        let args = json!({ "command": ["echo", "hello world", "|", "tr", "a-z", "A-Z"] });
+        let display = display_command_text(&args).expect("command display text");
+        assert_eq!(display, "echo 'hello world' | tr a-z A-Z");
+    }
+
+    #[test]
+    fn describe_shell_command_no_mid_string_ellipsis() {
+        let args = json!({
+            "command": "python3 -c \"\nimport json\nwith open('.vtcode/checkpoints/turn_1032.json') as f: d = json.load(f)\""
+        });
+        let (summary, used) = describe_shell_command(&args).expect("shell command summary");
+        assert_eq!(used.iter().collect::<Vec<_>>(), ["command"]);
+        assert!(!summary.contains("tur…ool"), "mid-string ellipsis leaked: {summary}");
+        assert!(summary.starts_with("python3"));
+    }
+
+    #[test]
+    fn describe_code_search_marks_query_used() {
+        let args = json!({ "query": "agent loop implementation", "max_results": 15 });
+        let (summary, used) = describe_code_search(&args).expect("code search summary");
+        assert_eq!(summary, "Search code for agent loop implementation");
+        assert!(used.contains("query"));
+        assert!(!used.contains("max_results"));
     }
 }
