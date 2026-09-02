@@ -2,6 +2,39 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.152.0 - 2026-09-02
+
+### Highlights
+#### Bug Fixes
+
+- Show git branch status only once (e9b725ba) 
+- Retain git indicator in single status entry (49888101) 
+- Deduplicate git branch display (d3002abd) 
+- Prevent duplicate git branch status (8ed88acc) 
+- Preserve tool progress boundaries (1e8463ed) 
+- Stabilize recovery diagnostics and PTY output (25193cad) 
+- Join TUI task before host terminal restore on exit (198201dd) 
+- Unify grep outcome classification (1cad7bed) 
+#### Documentation
+
+- Sync 7jrxt42BxFZo4iAnN4CX to 40 commits (e5870916) 
+- Update contributors list (2bfe937c) 
+#### Features
+
+- Compact tool output and transcript review (eb8370f0) 
+- Restore per-call compact tool output viewer (7c46e284) 
+- Refine compact transcript review UX (905ee4fc) 
+- Add expected-outcomes and dependencies sections to plan template (cbe74e2c) 
+- Add bounded tool failure diagnosis (ff2c5d3e) 
+- Add Claude Fable 5.1 and Claude Mythos 5.1 (a5fa9efa) 
+### Other Changes
+#### Other
+
+- Update TODO (c3c1dd51) 
+- Update TODO (2e7c84ff) 
+#### Refactors
+
+- Resolve clippy 1.93 lints and bundle recovery inputs (c02987ba) 
 ## 0.151.2 - 2026-08-30
 
 ### Highlights
