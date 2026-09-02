@@ -135,7 +135,8 @@ fn test_anthropic_tool_call_format() {
         tools: Some(Arc::new(vec![tool])),
         model: models::CLAUDE_SONNET_5.to_string(),
         max_tokens: None,
-        temperature: Some(0.7),
+        // Claude Sonnet 5 rejects explicit sampling parameters; keep them unset.
+        temperature: None,
         stream: false,
         tool_choice: None,
         parallel_tool_calls: None,

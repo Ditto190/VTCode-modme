@@ -494,9 +494,10 @@ mod tests {
             .expect("cycle tool display mode");
 
         assert!(outcome.saved);
-        assert_eq!(state.draft.ui.tool_display_mode, vtcode_core::config::ToolDisplayMode::Compact);
+        // The default is compact; cycling advances to expanded.
+        assert_eq!(state.draft.ui.tool_display_mode, vtcode_core::config::ToolDisplayMode::Expanded);
         let persisted = std::fs::read_to_string(&source_path).expect("persisted config");
-        assert!(persisted.contains("tool_display_mode = \"compact\""));
+        assert!(persisted.contains("tool_display_mode = \"expanded\""));
     }
 
     #[test]

@@ -741,7 +741,8 @@ mod tests {
         let vt_cfg = VTCodeConfig::default();
         let routes = resolve_prompt_suggestion_routes(&config, Some(&vt_cfg));
         assert_eq!(routes.primary.provider_name, "openai");
-        assert_eq!(routes.primary.model, ModelId::GPT56Luna.as_str());
+        // Lightweight routing steps down one tier: Sol -> Terra (not straight to Luna).
+        assert_eq!(routes.primary.model, ModelId::GPT56Terra.as_str());
     }
 
     #[test]

@@ -93,10 +93,12 @@ fn subagent_dynamic_model_filter_keeps_only_parseable_model_ids() {
 fn subagent_reasoning_levels_only_enable_xhigh_when_supported() {
     let supported = subagent_reasoning_levels("gpt-5.6-sol", true);
     assert!(supported.contains(&ReasoningEffortLevel::XHigh));
-    assert!(!supported.contains(&ReasoningEffortLevel::Max));
+    // The GPT-5.6 family also supports Max adaptive reasoning.
+    assert!(supported.contains(&ReasoningEffortLevel::Max));
 
     let sonnet = subagent_reasoning_levels("claude-sonnet-5", true);
-    assert!(!sonnet.contains(&ReasoningEffortLevel::XHigh));
+    // Claude Sonnet 5 supports both XHigh and Max reasoning.
+    assert!(sonnet.contains(&ReasoningEffortLevel::XHigh));
     assert!(sonnet.contains(&ReasoningEffortLevel::Max));
 
     let shortcut = subagent_reasoning_levels("haiku", true);
@@ -151,7 +153,7 @@ fn model_search_value_includes_provider_model_aliases() {
             .to_ascii_lowercase();
 
     assert!(value.contains("openai gpt-5.4"));
-    assert!(value.contains("openai/gpt-5.4"));
+    assert!(value.contains("openai/gpt-5.6-sol"));
     assert!(value.contains("reasoning"));
     assert!(value.contains("tools"));
     assert!(value.contains("image"));
@@ -349,7 +351,7 @@ fn dynamic_model_subtitle_stays_conservative_for_unknown_local_models() {
 #[test]
 fn current_model_line_shows_effective_anthropic_context_window() {
     let line = rendering::current_model_line("anthropic", "claude-sonnet-5");
-    assert_eq!(line, "Current: anthropic / claude-sonnet-4-6 • 1M");
+    assert_eq!(line, "Current: anthropic / claude-sonnet-5 • 1M");
 }
 
 #[test]
@@ -423,9 +425,9 @@ fn static_picker_indexes_resolve_provider_models() {
     let openai_indexes = option_indexes_for_provider(Provider::OpenAI);
     assert!(!openai_indexes.is_empty());
 
-    let gpt54_index = find_option_index(Provider::OpenAI, "GPT-5.4", &MODEL_OPTIONS)
-        .expect("gpt-5.4 should be indexed case-insensitively");
-    let option = MODEL_OPTIONS.get(gpt54_index).expect("indexed option should exist");
+    let gpt56_sol_index = find_option_index(Provider::OpenAI, "GPT-5.6-SOL", &MODEL_OPTIONS)
+        .expect("gpt-5.6-sol should be indexed case-insensitively");
+    let option = MODEL_OPTIONS.get(gpt56_sol_index).expect("indexed option should exist");
     assert_eq!(option.id, "gpt-5.6-sol");
     assert_eq!(option.provider, Provider::OpenAI);
 }
@@ -526,7 +528,6 @@ fn openai_codex_reasoning_helpers_match_supported_variants() {
     assert!(supports_gpt5_none_reasoning("gpt-5.2-codex"));
     assert!(supports_gpt5_none_reasoning("gpt-5-codex"));
     assert!(!supports_gpt5_none_reasoning("gpt-5.1-codex"));
-    assert!(!supports_gpt5_none_reasoning("gpt-5-codex"));
 
     assert!(!supports_xhigh_reasoning("gpt"));
     assert!(supports_xhigh_reasoning("gpt-5.6-sol"));
@@ -543,8 +544,8 @@ fn openai_codex_reasoning_helpers_match_supported_variants() {
     assert!(supports_max_reasoning("claude-sonnet-5"));
     assert!(supports_max_reasoning("claude-fable-5"));
     assert!(supports_max_reasoning("claude-mythos-5"));
-    assert!(supports_max_reasoning("claude-sonnet-5"));
-    assert!(!supports_max_reasoning("gpt-5.6-sol"));
+    // The GPT-5.6 family supports Max adaptive reasoning.
+    assert!(supports_max_reasoning("gpt-5.6-sol"));
 }
 
 #[test]

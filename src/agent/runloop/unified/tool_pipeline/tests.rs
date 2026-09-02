@@ -65,7 +65,10 @@ struct TestContext {
 impl TestContext {
     async fn new() -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
-        let workspace = tmp.path().to_path_buf();
+        // Canonicalize so the workspace, registry, and file fixtures share one
+        // prefix; on macOS TempDir returns a /var/folders alias of
+        // /private/var/folders and mixed prefixes trip workspace containment.
+        let workspace = vtcode_commons::canonicalize(tmp.path()).unwrap();
 
         let registry = create_test_registry(&workspace).await;
         let active_styles = theme::active_styles();

@@ -659,8 +659,12 @@ mod tests {
     #[tokio::test]
     async fn prevalidated_execution_does_not_consume_safety_budget_twice() {
         let temp_dir = TempDir::new().expect("temp dir");
-        let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
-        let read_path = temp_dir.path().join("README.md");
+        // Canonicalize so the workspace root and file path share one prefix;
+        // on macOS TempDir returns a /var/folders alias of /private/var/folders
+        // and mixed prefixes trip the workspace containment check.
+        let workspace = vtcode_commons::canonicalize(temp_dir.path()).expect("canonicalize temp dir");
+        let registry = ToolRegistry::new(workspace.clone()).await;
+        let read_path = workspace.join("README.md");
         tokio::fs::write(&read_path, "hello").await.expect("write file");
 
         let gateway = registry.safety_gateway();
