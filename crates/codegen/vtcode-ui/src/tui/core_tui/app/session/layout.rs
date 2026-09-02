@@ -73,7 +73,7 @@ pub(super) fn resolve_bottom_panel_spec(
             render::split_inline_local_agents_area,
         ),
         Some(
-            TransientSurface::FloatingOverlay | TransientSurface::DiffPreview | TransientSurface::TranscriptReview,
+            TransientSurface::FloatingOverlay | TransientSurface::DiffPreview | TransientSurface::ToolOutputViewer,
         )
         | None => None,
     };

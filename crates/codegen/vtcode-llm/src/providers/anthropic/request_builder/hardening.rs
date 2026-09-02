@@ -215,6 +215,7 @@ pub(crate) fn guard_trailing_assistant_message(messages: &mut Vec<AnthropicMessa
             citations: None,
             cache_control: None,
         }],
+        clear_at: None,
     });
 }
 
@@ -232,6 +233,7 @@ mod tests {
                 citations: None,
                 cache_control: None,
             }],
+            clear_at: None,
         }
     }
 
@@ -244,6 +246,7 @@ mod tests {
                 input: json!({}),
                 cache_control: None,
             }))],
+            clear_at: None,
         }
     }
 
@@ -256,6 +259,7 @@ mod tests {
                 is_error: None,
                 cache_control: None,
             }))],
+            clear_at: None,
         }
     }
 
@@ -320,6 +324,7 @@ mod tests {
                     cache_control: None,
                 })),
             ],
+            clear_at: None,
         }];
         hoist_tool_results_to_front(&mut messages);
         assert!(matches!(messages[0].content[0], AnthropicContentBlock::ToolResult(_)));

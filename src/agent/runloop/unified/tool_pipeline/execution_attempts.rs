@@ -506,7 +506,8 @@ fn retry_delay_for_status(
 
 fn status_label(status: &ToolExecutionStatus) -> &'static str {
     match status {
-        ToolExecutionStatus::Success { .. } => "success",
+        ToolExecutionStatus::Success { command_success, .. } if *command_success => "success",
+        ToolExecutionStatus::Success { .. } => "failure",
         ToolExecutionStatus::Failure { .. } => "failure",
         ToolExecutionStatus::Timeout { .. } => "timeout",
         ToolExecutionStatus::Cancelled => "cancelled",
@@ -520,7 +521,7 @@ fn emit_tool_retry_outcome_metric(
     max_tool_retries: usize,
     retry_allowed: bool,
 ) {
-    let success = matches!(status, ToolExecutionStatus::Success { .. });
+    let success = matches!(status, ToolExecutionStatus::Success { command_success: true, .. });
     if retries_used == 0 && success {
         return;
     }
@@ -624,6 +625,18 @@ mod tests {
 
         assert!(retry_delay_for_status(&network, 0, true, &policy).is_some());
         assert!(retry_delay_for_status(&rate_limit, 0, true, &policy).is_some());
+    }
+
+    #[test]
+    fn non_zero_command_is_failure_in_retry_metrics() {
+        let status = ToolExecutionStatus::Success {
+            output: json!({"exit_code": 1}),
+            stdout: None,
+            modified_files: Vec::new(),
+            command_success: false,
+        };
+
+        assert_eq!(status_label(&status), "failure");
     }
 
     #[tokio::test]

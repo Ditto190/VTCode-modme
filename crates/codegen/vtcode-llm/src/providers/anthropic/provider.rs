@@ -445,6 +445,17 @@ impl AnthropicProvider {
                 .is_some_and(|arr| !arr.is_empty()),
             include_fallback_credit: request.fallback_credit_token.is_some(),
             include_mid_conversation_tool_changes: false,
+            include_mid_conversation_system_clear_at: capabilities::supports_turn_scoped_system_messages(
+                self.resolved_request_model(request),
+                &self.model,
+            ) && anthropic_request
+                .get("messages")
+                .and_then(Value::as_array)
+                .is_some_and(|messages| {
+                    messages
+                        .iter()
+                        .any(|message| message.get("clear_at").and_then(Value::as_str) == Some("next_user_message"))
+                }),
         };
 
         headers::combined_beta_header_value(self.prompt_cache_enabled, &self.prompt_cache_settings, &beta_config)
@@ -601,6 +612,10 @@ impl LLMProvider for AnthropicProvider {
         true
     }
 
+    fn supports_turn_scoped_system_messages(&self, model: &str) -> bool {
+        capabilities::supports_turn_scoped_system_messages(model, &self.model)
+    }
+
     fn supports_responses_compaction(&self, model: &str) -> bool {
         // Anthropic server-side compaction is supported on Claude Opus 4.x
         // and Sonnet 4.6+ models via context_management.edits.
@@ -693,7 +708,7 @@ impl LLMClient for AnthropicProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::{AnthropicProvider, code_execution_beta_name};
+    use super::{AnthropicProvider, capabilities, code_execution_beta_name, headers};
     use crate::provider::{ContentPart, LLMRequest, Message, MessageContent, ToolDefinition};
     use serde_json::json;
     use vtcode_config::constants::models;
@@ -1040,5 +1055,93 @@ mod tests {
         assert_eq!(code_execution_beta_name("code_execution_20250825").as_deref(), Some("code-execution-2025-08-25"));
         assert_eq!(code_execution_beta_name("code_execution_20250522").as_deref(), Some("code-execution-2025-05-22"));
         assert!(code_execution_beta_name("code_execution_latest").is_none());
+    }
+
+    #[test]
+    fn turn_scoped_system_notice_is_emitted_after_tool_result() {
+        let model = models::anthropic::CLAUDE_FABLE_5;
+        let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![
+                Message::assistant_with_tools(
+                    String::new(),
+                    vec![crate::provider::ToolCall::function(
+                        "toolu_1".to_string(),
+                        "exec_command".to_string(),
+                        "{}".to_string(),
+                    )],
+                ),
+                Message::tool_response("toolu_1".to_string(), "exit 1".to_string()),
+                Message::turn_scoped_system("Only you see that command's output".to_string()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert_eq!(payload["messages"][1]["role"], "user");
+        assert_eq!(payload["messages"][2]["role"], "system");
+        assert_eq!(payload["messages"][2]["clear_at"], "next_user_message");
+        assert_eq!(payload["messages"][2]["content"][0]["type"], "text");
+        assert_eq!(payload["messages"][2]["content"][0]["text"], "Only you see that command's output");
+        assert!(
+            !payload
+                .get("system")
+                .is_some_and(|system| { system.to_string().contains("Only you see that command's output") })
+        );
+
+        let beta_header = provider
+            .beta_header_for_request(&request, &payload, false, None)
+            .expect("turn-scoped beta header");
+        assert_eq!(
+            beta_header
+                .split(", ")
+                .filter(|beta| *beta == headers::MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn turn_scoped_system_notice_is_promoted_for_unsupported_sonnet() {
+        let model = models::CLAUDE_SONNET_5;
+        let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![
+                Message::user("continue".to_string()),
+                Message::turn_scoped_system("do not leak output".to_string()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert!(
+            payload["messages"]
+                .as_array()
+                .is_some_and(|messages| { messages.iter().all(|message| message.get("clear_at").is_none()) })
+        );
+        assert!(
+            payload
+                .get("system")
+                .is_some_and(|system| { system.to_string().contains("do not leak output") })
+        );
+        let beta_header = provider.beta_header_for_request(&request, &payload, false, None);
+        assert!(!beta_header.is_some_and(|header| {
+            header
+                .split(", ")
+                .any(|beta| beta == headers::MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA)
+        }));
+    }
+
+    #[test]
+    fn turn_scoped_system_capability_matches_supported_model_families() {
+        assert!(capabilities::supports_turn_scoped_system_messages(models::anthropic::CLAUDE_FABLE_5, ""));
+        assert!(capabilities::supports_turn_scoped_system_messages(models::anthropic::CLAUDE_MYTHOS_5, ""));
+        assert!(capabilities::supports_turn_scoped_system_messages("claude-opus-4-8", ""));
+        assert!(capabilities::supports_turn_scoped_system_messages(models::anthropic::CLAUDE_OPUS_5, ""));
+        assert!(!capabilities::supports_turn_scoped_system_messages(models::anthropic::CLAUDE_SONNET_5, ""));
     }
 }

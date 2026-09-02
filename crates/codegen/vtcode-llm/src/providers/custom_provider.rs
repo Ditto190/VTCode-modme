@@ -266,6 +266,12 @@ impl LLMProvider for CustomProviderBackendRouter {
         )
     }
 
+    fn supports_turn_scoped_system_messages(&self, model: &str) -> bool {
+        let resolved = self.resolved_model(model);
+        matches!(self.profile_for_model(resolved).api_format, Some(CustomProviderApiFormat::AnthropicMessages))
+            && self.backend_for_model(model).supports_turn_scoped_system_messages(resolved)
+    }
+
     fn supports_manual_openai_compaction(&self, model: &str) -> bool {
         let resolved = self.resolved_model(model);
         let profile = self.profile_for_model(resolved);
@@ -335,7 +341,11 @@ impl LLMProvider for CustomProviderBackendRouter {
         let resolved_model = self.resolved_model(&request.model);
         match self.profile_for_model(resolved_model).api_format {
             Some(CustomProviderApiFormat::AnthropicMessages) => {
-                validate_request_common(request, &self.display_name, &self.provider_key, Some(&self.supported_models))?;
+                // Anthropic-shaped custom profiles use the Anthropic message
+                // contract, including its turn-scoped system marker. Keep the
+                // custom display name for diagnostics, but validate message roles
+                // against the backend contract so the marker is not rejected.
+                validate_request_common(request, &self.display_name, "anthropic", Some(&self.supported_models))?;
                 anthropic::validation::validate_request(
                     request,
                     &self.default_model,
@@ -454,6 +464,86 @@ mod tests {
 
         // Level "none"/"unknown" is not active reasoning anywhere.
         assert!(!profile_anthropic.suppresses_sampling(false, false));
+    }
+
+    #[test]
+    fn turn_scoped_system_capability_follows_selected_api_profile() {
+        let mut profiles = std::collections::BTreeMap::new();
+        profiles.insert(
+            models::anthropic::CLAUDE_FABLE_5.to_string(),
+            CustomProviderProfileConfig {
+                api_format: CustomProviderApiFormat::AnthropicMessages,
+                ..Default::default()
+            },
+        );
+
+        let router = CustomProviderBackendRouter::from_config(
+            CustomProviderConfig {
+                name: "profiled-transport-test".to_string(),
+                display_name: "Profiled Transport Test".to_string(),
+                base_url: "https://llm.example/v1".to_string(),
+                model: models::anthropic::CLAUDE_FABLE_5.to_string(),
+                models: vec![
+                    models::anthropic::CLAUDE_FABLE_5.to_string(),
+                    "openai-shaped".to_string(),
+                ],
+                profiles,
+                ..Default::default()
+            },
+            Some("test-key".to_string()),
+            None,
+            "https://llm.example/v1".to_string(),
+            None,
+            None,
+            None,
+            Some(AnthropicConfig::default()),
+            None,
+            None,
+        );
+
+        assert!(router.supports_turn_scoped_system_messages(models::anthropic::CLAUDE_FABLE_5));
+        assert!(!router.supports_turn_scoped_system_messages("openai-shaped"));
+    }
+
+    #[test]
+    fn anthropic_profile_accepts_turn_scoped_system_marker() {
+        let mut profiles = std::collections::BTreeMap::new();
+        profiles.insert(
+            models::anthropic::CLAUDE_FABLE_5.to_string(),
+            CustomProviderProfileConfig {
+                api_format: CustomProviderApiFormat::AnthropicMessages,
+                ..Default::default()
+            },
+        );
+        let router = CustomProviderBackendRouter::from_config(
+            CustomProviderConfig {
+                name: "profiled-validation-test".to_string(),
+                display_name: "Profiled Validation Test".to_string(),
+                base_url: "https://llm.example/v1".to_string(),
+                model: models::anthropic::CLAUDE_FABLE_5.to_string(),
+                models: vec![models::anthropic::CLAUDE_FABLE_5.to_string()],
+                profiles,
+                ..Default::default()
+            },
+            Some("test-key".to_string()),
+            None,
+            "https://llm.example/v1".to_string(),
+            None,
+            None,
+            None,
+            Some(AnthropicConfig::default()),
+            None,
+            None,
+        );
+        let request = LLMRequest {
+            model: models::anthropic::CLAUDE_FABLE_5.to_string(),
+            messages: vec![Message::turn_scoped_system("visible-output notice".to_string())].into(),
+            ..Default::default()
+        };
+
+        router
+            .validate_request(&request)
+            .expect("custom Anthropic profile should accept native marker");
     }
 
     fn write_tokens_file(dir: &Path, tokens: &[&str]) {

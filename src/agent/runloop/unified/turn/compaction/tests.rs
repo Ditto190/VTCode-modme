@@ -925,11 +925,6 @@ fn recovery_context_previews_extract_structured_tool_guidance() {
 #[test]
 fn recovery_context_previews_extract_nested_error_guidance_and_spool_excerpt() {
     let temp = tempdir().expect("tempdir");
-    let spool_dir = temp.path().join(".vtcode/context/tool_outputs");
-    fs::create_dir_all(&spool_dir).expect("spool dir");
-    let spool_path = spool_dir.join("read_1.txt");
-    fs::write(&spool_path, (1..=40).map(|idx| format!("spooled-line-{idx}")).collect::<Vec<_>>().join("\n"))
-        .expect("spool file");
 
     let history = vec![
         Message::user("review the read failure".to_string()),
@@ -938,6 +933,7 @@ fn recovery_context_previews_extract_nested_error_guidance_and_spool_excerpt() {
             json!({
                 "path": "src/main.rs",
                 "spool_path": ".vtcode/context/tool_outputs/read_1.txt",
+                "preview": "spooled-line-1\nspooled-line-2\nSpool excerpt: nested diagnostic",
                 "error": {
                     "message": "Read failed",
                     "hint": "Inspect the spooled content.",
@@ -957,6 +953,8 @@ fn recovery_context_previews_extract_nested_error_guidance_and_spool_excerpt() {
     assert!(previews[1].contains("source_path: src/main.rs"));
     assert!(previews[1].contains("Spool excerpt:"));
     assert!(previews[1].contains("spooled-line-1"));
+    assert_eq!(previews[1].matches("Spool excerpt:").count(), 1);
+    assert!(previews[1].contains("Output excerpt: nested diagnostic"));
 }
 
 #[test]

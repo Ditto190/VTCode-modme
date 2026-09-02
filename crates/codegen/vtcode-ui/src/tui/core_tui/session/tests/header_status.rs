@@ -34,6 +34,29 @@ fn clear_shimmer_session(session: &mut Session) {
     session.handle_command(InlineCommand::SetInputStatus { left: None, right: None });
 }
 
+#[test]
+fn footer_git_status_does_not_repeat_git_label() {
+    let mut session = fresh_session();
+    setup_shimmer_session(&mut session, "git: feature/login | ✓");
+
+    let rendered = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let text = rendered.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert_eq!(text.matches("git:").count(), 0);
+    assert!(text.contains("feature/login ✓"), "unexpected footer: {text}");
+}
+
+#[test]
+fn footer_git_status_without_separator_does_not_repeat_git_label() {
+    let mut session = fresh_session();
+    setup_shimmer_session(&mut session, "git: main*");
+
+    let rendered = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let text = rendered.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert_eq!(text, "main*");
+}
+
 fn input_data(session: &mut Session) -> input::InputWidgetData {
     session.build_input_widget_data(VIEW_WIDTH, 1)
 }

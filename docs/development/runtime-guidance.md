@@ -13,6 +13,21 @@ content from repository instruction files. Profile-specific operating details
 remain in the prompt builder; correctness-critical behavior belongs in runtime
 policy, schemas, tests, or lints.
 
+## User-facing progress contract
+
+For non-trivial or tool-using work, the compiled guidance asks the model to
+announce the next phase in one brief line before its first tool call. During
+long or multi-step work it should post one or two concise sentences only when
+the phase or next action changes, then close with a standalone recap of what it
+found, changed, and verified, plus what comes next. These are user-facing
+status updates, not a transcript of every call or hidden chain-of-thought.
+
+Compact transcript mode may collapse successful command bodies while retaining
+complete output in Transcript Review. The model must not rerun commands merely
+to reveal hidden output; material findings belong in a visible progress update
+or the final reply. The provider-neutral collapsed-output disclosure reinforces
+this after each affected tool result.
+
 ## Continuity and long-running work
 
 ### Runtime observability and cancellation

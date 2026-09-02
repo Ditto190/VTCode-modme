@@ -13,12 +13,30 @@ pub enum LLMStreamEvent {
 
 #[derive(Debug, Clone)]
 pub enum NormalizedStreamEvent {
-    TextDelta { delta: String },
-    ReasoningDelta { delta: String },
-    ToolCallStart { call_id: String, name: Option<String> },
-    ToolCallDelta { call_id: String, delta: String },
-    Usage { usage: Usage },
-    Done { response: Box<LLMResponse> },
+    TextDelta {
+        delta: String,
+    },
+    ReasoningDelta {
+        delta: String,
+    },
+    /// A provider-native reasoning stage transition.
+    ReasoningStage {
+        stage: String,
+    },
+    ToolCallStart {
+        call_id: String,
+        name: Option<String>,
+    },
+    ToolCallDelta {
+        call_id: String,
+        delta: String,
+    },
+    Usage {
+        usage: Usage,
+    },
+    Done {
+        response: Box<LLMResponse>,
+    },
 }
 
 pub type LLMStream = Pin<Box<dyn futures::Stream<Item = Result<LLMStreamEvent, LLMError>> + Send>>;
@@ -31,7 +49,7 @@ impl LLMStreamEvent {
             Self::Token { delta } => vec![NormalizedStreamEvent::TextDelta { delta }],
             Self::Reasoning { delta } => vec![NormalizedStreamEvent::ReasoningDelta { delta }],
             Self::ReasoningSignature { .. } => Vec::new(),
-            Self::ReasoningStage { .. } => Vec::new(),
+            Self::ReasoningStage { stage } => vec![NormalizedStreamEvent::ReasoningStage { stage }],
             Self::Completed { response } => {
                 let mut events = Vec::new();
                 if let Some(usage) = response.usage.clone() {
@@ -86,6 +104,16 @@ mod tests {
         assert!(matches!(
             events.as_slice(),
             [NormalizedStreamEvent::TextDelta { delta }] if delta == "hello"
+        ));
+    }
+
+    #[test]
+    fn reasoning_stage_is_preserved_by_normalization() {
+        let events = LLMStreamEvent::ReasoningStage { stage: "analysis".to_string() }.into_normalized();
+
+        assert!(matches!(
+            events.as_slice(),
+            [NormalizedStreamEvent::ReasoningStage { stage }] if stage == "analysis"
         ));
     }
 }

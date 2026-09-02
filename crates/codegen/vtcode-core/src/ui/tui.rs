@@ -9,11 +9,12 @@
 // ── Shared data types (always available from vtcode-commons) ────────────────
 
 pub use vtcode_commons::ui_protocol::{
-    InlineHeaderContext, InlineHeaderHighlight, InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineLinkRange,
-    InlineLinkTarget, InlineListItem, InlineListSearchConfig, InlineListSelection, InlineMessageKind, InlineSegment,
-    InlineTextStyle, InlineTheme, LayoutModeOverride, PlanContent, PlanPhase, PlanStep, ReasoningDisplayMode,
-    RewindAction, SecurePromptConfig, SessionSurface, SlashCommandItem, ThinkingBlockState, UiMode, WizardModalMode,
-    WizardStep, convert_style, theme_from_color_fields,
+    CompactActivityMetadata, InlineHeaderContext, InlineHeaderHighlight, InlineHeaderStatusBadge,
+    InlineHeaderStatusTone, InlineLinkRange, InlineLinkTarget, InlineListItem, InlineListSearchConfig,
+    InlineListSelection, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, LayoutModeOverride,
+    PlanContent, PlanPhase, PlanStep, ReasoningDisplayMode, RewindAction, SecurePromptConfig, SessionSurface,
+    SlashCommandItem, ThinkingBlockState, ToolOutputId, UiMode, WizardModalMode, WizardStep, convert_style,
+    theme_from_color_fields,
 };
 
 pub use vtcode_commons::ui_protocol::KeyboardProtocolSettings;
@@ -28,13 +29,15 @@ pub use vtcode_ui::tui::app::*;
 #[cfg(not(feature = "tui"))]
 mod headless {
     use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
+    use hashbrown::HashMap;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
     use super::{
-        InlineListItem, InlineListSearchConfig, InlineListSelection, InlineMessageKind, InlineSegment,
-        SecurePromptConfig,
+        CompactActivityMetadata, InlineListItem, InlineListSearchConfig, InlineListSelection, InlineMessageKind,
+        InlineSegment, SecurePromptConfig, ToolOutputId,
     };
 
     use crate::ui::theme::ThemeStyles;
@@ -90,6 +93,21 @@ mod headless {
             kind: InlineMessageKind,
             lines: Vec<Vec<InlineSegment>>,
         },
+        RecordToolOutput {
+            id: ToolOutputId,
+            lines: Vec<String>,
+        },
+        AppendToolOutputLine {
+            id: ToolOutputId,
+            kind: InlineMessageKind,
+            segments: Vec<InlineSegment>,
+        },
+        AppendCompactActivity(CompactActivityMetadata),
+        ReplaceCompactActivity(CompactActivityMetadata),
+        CollapsePtyBlock(CompactActivityMetadata),
+        SetKeyBindings {
+            bindings: HashMap<String, Vec<String>>,
+        },
         SetImageInputEnabled(bool),
         RestoreInputDraft(SubmittedInput),
         ForceRedraw,
@@ -99,11 +117,12 @@ mod headless {
         SetReasoningStage(Option<String>),
     }
 
-    /// No-op handle for headless builds. All methods silently discard.
+    /// Headless handle; commands go to an optional test sink and otherwise discard.
     #[derive(Clone, Debug)]
     pub struct InlineHandle {
         sender: Option<UnboundedSender<InlineCommand>>,
         deferred_events: Arc<Mutex<VecDeque<InlineEvent>>>,
+        next_tool_output_id: Arc<AtomicU64>,
     }
 
     const MAX_DEFERRED_EVENTS: usize = 32;
@@ -113,6 +132,7 @@ mod headless {
             Self {
                 sender: Some(sender),
                 deferred_events: Arc::new(Mutex::new(VecDeque::new())),
+                next_tool_output_id: Arc::new(AtomicU64::new(0)),
             }
         }
 
@@ -153,6 +173,26 @@ mod headless {
         }
         pub fn replace_last(&self, count: usize, kind: InlineMessageKind, lines: Vec<Vec<InlineSegment>>) {
             self.send_command(InlineCommand::ReplaceLast { count, kind, lines });
+        }
+        pub fn record_tool_output(&self, lines: Vec<String>) -> ToolOutputId {
+            let id = self.next_tool_output_id.fetch_add(1, Ordering::Relaxed);
+            self.send_command(InlineCommand::RecordToolOutput { id, lines });
+            id
+        }
+        pub fn append_tool_output_line(&self, id: ToolOutputId, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
+            self.send_command(InlineCommand::AppendToolOutputLine { id, kind, segments });
+        }
+        pub fn append_compact_activity(&self, activity: CompactActivityMetadata) {
+            self.send_command(InlineCommand::AppendCompactActivity(activity));
+        }
+        pub fn replace_compact_activity(&self, activity: CompactActivityMetadata) {
+            self.send_command(InlineCommand::ReplaceCompactActivity(activity));
+        }
+        pub fn collapse_pty_block(&self, activity: CompactActivityMetadata) {
+            self.send_command(InlineCommand::CollapsePtyBlock(activity));
+        }
+        pub fn set_key_bindings(&self, bindings: HashMap<String, Vec<String>>) {
+            self.send_command(InlineCommand::SetKeyBindings { bindings });
         }
         pub fn force_redraw(&self) {
             self.send_command(InlineCommand::ForceRedraw);
@@ -201,6 +241,12 @@ mod headless {
             self.events.recv().await
         }
 
+        /// Headless stub: there is no TUI task to await, so shutdown is
+        /// always considered complete immediately.
+        pub async fn wait_for_exit(&mut self, _timeout: std::time::Duration) -> bool {
+            true
+        }
+
         pub fn clone_inline_handle(&self) -> InlineHandle {
             self.handle.clone()
         }
@@ -226,6 +272,9 @@ mod headless {
         pub screen_reader_mode: bool,
         pub reduce_motion_mode: bool,
         pub reduce_motion_keep_progress_animation: bool,
+        pub show_transcript_review_hints: bool,
+        pub show_transcript_review_shortcut_guide: bool,
+        pub show_transcript_review_close_button: bool,
         pub customization: (),
     }
 

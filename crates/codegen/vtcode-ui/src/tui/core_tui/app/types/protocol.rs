@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_width::UnicodeWidthStr;
+use vtcode_commons::ui_protocol::{CompactActivityMetadata, ToolOutputId};
 
 use super::overlay::{
     AgentPaletteItem, AgentPaletteTransientRequest, FilePaletteTransientRequest, ListOverlayRequest,
@@ -50,6 +52,26 @@ pub enum InlineCommand {
         lines: Vec<Vec<InlineSegment>>,
         link_ranges: Option<Vec<Vec<InlineLinkRange>>>,
     },
+    /// Retain one complete tool-call capture for the session-local viewer.
+    RecordToolOutput {
+        id: ToolOutputId,
+        lines: Vec<String>,
+    },
+    /// Append a summary line and associate it with a previously recorded
+    /// capture. This is a UI-only identity edge, not a transcript event.
+    AppendToolOutputLine {
+        id: ToolOutputId,
+        kind: InlineMessageKind,
+        segments: Vec<InlineSegment>,
+    },
+    /// Append a compact successful-command activity row.
+    AppendCompactActivity(CompactActivityMetadata),
+    /// Replace the current compact successful-command activity row with an
+    /// updated contiguous group.
+    ReplaceCompactActivity(CompactActivityMetadata),
+    /// Replace the live PTY preview block with a compact activity row after
+    /// the command has completed. Complete output is retained separately.
+    CollapsePtyBlock(CompactActivityMetadata),
     SetPrompt {
         prefix: String,
         style: InlineTextStyle,
@@ -84,6 +106,10 @@ pub enum InlineCommand {
     },
     SetAppearance {
         appearance: AppearanceConfig,
+    },
+    /// Replace the live action bindings after a valid configuration reload.
+    SetKeyBindings {
+        bindings: HashMap<String, Vec<String>>,
     },
     SetVimModeEnabled(bool),
     SetQueuedInputs {
@@ -167,8 +193,8 @@ pub enum InlineEvent {
     LaunchEditor {
         draft: String,
     },
-    OpenTranscriptReviewInEditor(String),
-    OpenTranscriptReviewScrollback(String),
+    OpenToolOutputInEditor(String),
+    OpenToolOutputScrollback(String),
     ForceCancelPtySession,
     RequestInlinePromptSuggestion(String),
     CyclePrimaryAgent,
@@ -229,6 +255,7 @@ pub struct InlineHandle {
     pub(crate) sender: UnboundedSender<InlineCommand>,
     message_layout: Arc<InlineLayoutState>,
     deferred_events: Arc<Mutex<VecDeque<InlineEvent>>>,
+    next_tool_output_id: Arc<AtomicU64>,
 }
 
 impl InlineHandle {
@@ -241,6 +268,7 @@ impl InlineHandle {
             sender,
             message_layout: Arc::new(InlineLayoutState::default()),
             deferred_events: Arc::new(Mutex::new(VecDeque::new())),
+            next_tool_output_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -296,6 +324,28 @@ impl InlineHandle {
         link_ranges: Vec<Vec<InlineLinkRange>>,
     ) {
         self.send_command(InlineCommand::ReplaceLast { count, kind, lines, link_ranges: Some(link_ranges) });
+    }
+
+    pub fn record_tool_output(&self, lines: Vec<String>) -> ToolOutputId {
+        let id = self.next_tool_output_id.fetch_add(1, Ordering::Relaxed);
+        self.send_command(InlineCommand::RecordToolOutput { id, lines });
+        id
+    }
+
+    pub fn append_tool_output_line(&self, id: ToolOutputId, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
+        self.send_command(InlineCommand::AppendToolOutputLine { id, kind, segments });
+    }
+
+    pub fn append_compact_activity(&self, activity: CompactActivityMetadata) {
+        self.send_command(InlineCommand::AppendCompactActivity(activity));
+    }
+
+    pub fn replace_compact_activity(&self, activity: CompactActivityMetadata) {
+        self.send_command(InlineCommand::ReplaceCompactActivity(activity));
+    }
+
+    pub fn collapse_pty_block(&self, activity: CompactActivityMetadata) {
+        self.send_command(InlineCommand::CollapsePtyBlock(activity));
     }
 
     pub fn suspend_event_loop(&self) {
@@ -377,6 +427,10 @@ impl InlineHandle {
 
     pub fn set_appearance(&self, appearance: AppearanceConfig) {
         self.send_command(InlineCommand::SetAppearance { appearance });
+    }
+
+    pub fn set_key_bindings(&self, bindings: HashMap<String, Vec<String>>) {
+        self.send_command(InlineCommand::SetKeyBindings { bindings });
     }
 
     pub fn set_vim_mode_enabled(&self, enabled: bool) {
@@ -560,6 +614,10 @@ impl InlineHandle {
 pub struct InlineSession {
     pub handle: InlineHandle,
     pub events: UnboundedReceiver<InlineEvent>,
+    /// Background task running the terminal event loop. The host must await
+    /// it after `shutdown()` before restoring terminal state itself;
+    /// otherwise the task's final frames are painted onto the main screen.
+    pub worker: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl InlineSession {
@@ -568,6 +626,18 @@ impl InlineSession {
             return Some(event);
         }
         self.events.recv().await
+    }
+
+    /// Wait for the TUI task to finish its own terminal teardown.
+    ///
+    /// Returns `true` when the task exited (or no task was spawned); `false`
+    /// when it was still running after `timeout`, in which case the caller
+    /// should force-restore the terminal as a backstop.
+    pub async fn wait_for_exit(&mut self, timeout: std::time::Duration) -> bool {
+        match self.worker.take() {
+            Some(worker) => tokio::time::timeout(timeout, worker).await.is_ok(),
+            None => true,
+        }
     }
 
     pub fn set_skip_confirmations(&mut self, skip: bool) {

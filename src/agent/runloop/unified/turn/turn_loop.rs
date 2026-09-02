@@ -90,18 +90,20 @@ const RECOVERY_SYNTHESIS_MAX_TOKENS: u32 = 4096;
 /// forces the user to nudge "continue". The extra pass only fires when the
 /// model keeps emitting tool calls during a tool-free recovery window.
 const MAX_RECOVERY_RETRIES: u8 = 3;
-/// Hard cap on how many assistant text responses the model may emit in a
-/// single turn.  Without this, the recovery / continuation logic can loop
-/// forever when the model has already produced a substantive final answer
-/// but the system keeps re-prompting it (e.g. tool-free recovery activates
-/// on a transient LLM stream timeout, the model re-summarizes the same
-/// outline 4+ times, wasting context and tokens).
+/// Hard cap on consecutive assistant text-only responses. Without this, the
+/// recovery / continuation logic can loop forever when the model has already
+/// produced a substantive final answer but the system keeps re-prompting it
+/// (e.g. tool-free recovery activates on a transient LLM stream timeout, the
+/// model re-summarizes the same outline 4+ times, wasting context and tokens).
+/// Admitted tool execution resets the streak. Blocked and malformed attempts
+/// retain it because they are not productive progress; their dedicated
+/// safeguards still bound those failure paths.
 ///
 /// Observed in checkpoint turn_594: a simple "what functions/structs are
 /// defined in crates/codegen/vtcode-core/src/tools/registry?" task produced 4 identical
 /// 6500-token outline responses and burned ~90 seconds.  Capping at 2
-/// responses terminates the runaway loop while still allowing one retry
-/// for genuine recovery scenarios.
+/// consecutive responses terminate the runaway loop while still allowing one
+/// retry for genuine recovery scenarios.
 pub(crate) const MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN: u32 = 2;
 pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
     "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.";
@@ -215,40 +217,6 @@ const POST_TOOL_RECOVERY_REASON_PLAN_MODE: &str = "Planning research completed, 
 /// loops emitting `<invoke>` research calls during the tool-free recovery pass.
 const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE_PLAN_MODE: &str = "Recovery: in plan mode, tools are disabled and you must finalize the plan. Emit ONLY the `<proposed_plan>` now from the research already gathered in this conversation — each step on a single line (`Action -> files: [path] -> verify: [command]`), no prose, no tool calls, and no `<tool_call>`/`<invoke>`/`<function=...>` markup.";
 const APPROVED_PLAN_STALE_PAUSE_RECOVERY_DIRECTIVE: &str = "Approved-plan execution recovery: the previous response incorrectly claimed that tools were disabled or implementation was paused. The planning approval is complete and the write-capable build agent is active. Continue with the next concrete implementation action now; use task_tracker and execute an edit or verification command. Do not respond with a pause/status message and do not ask for another confirmation.";
-
-/// Count how many assistant text responses the model has emitted in this
-/// turn so far.  Used by the anti-runaway guard to short-circuit when the
-/// recovery / continuation loop regenerates the same answer repeatedly.
-///
-/// Counts messages appended after `turn_history_start_len` with
-/// `role == Assistant`, no `tool_calls`, and a non-empty trimmed text body.
-/// System-recovery messages are ignored.
-fn count_assistant_text_responses_in_turn(history: &[uni::Message], turn_history_start_len: usize) -> u32 {
-    history
-        .get(turn_history_start_len..)
-        .unwrap_or_default()
-        .iter()
-        .filter(|message| {
-            message.role == uni::MessageRole::Assistant
-                && message.tool_calls.is_none()
-                && !message.content.as_text().trim().is_empty()
-        })
-        .count() as u32
-}
-
-/// Count assistant text responses for the anti-runaway guard.
-///
-/// The history slice excludes assistant replies from earlier turns and, after
-/// compaction rebases `turn_history_start_len`, promptly counts new assistant
-/// text appended after compaction. The per-turn counter is a compaction-safe
-/// floor for assistant text already emitted earlier in this turn.
-fn count_assistant_text_responses_for_guard(
-    history: &[uni::Message],
-    turn_history_start_len: usize,
-    recorded_text_responses_in_turn: u32,
-) -> u32 {
-    count_assistant_text_responses_in_turn(history, turn_history_start_len).max(recorded_text_responses_in_turn)
-}
 
 fn latest_final_assistant_response(history: &[uni::Message], turn_history_start_len: usize) -> Option<String> {
     history
@@ -683,6 +651,10 @@ pub(crate) async fn run_turn_loop(
         crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current;
     *ctx.auto_finish_planning_attempted = false;
 
+    // Compact command rows are a presentation-only active tail. A new turn
+    // must start a fresh contiguous group even when the renderer is reused by
+    // the session loop.
+    ctx.renderer.flush_compact_command_group();
     ctx.set_phase(TurnPhase::Preparing);
     if let Some(Err(e)) = ctx.harness_emitter.map(|e| e.emit(turn_started_event())) {
         tracing::debug!(error = %e, "harness turn_started event emission failed");
@@ -923,27 +895,26 @@ pub(crate) async fn run_turn_loop(
         let restore_status_right = ctx.input_status_state.right.clone();
 
         // Anti-runaway guard: if the model has already emitted
-        // MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN text responses in this turn,
-        // the recovery / continuation loop is regenerating the same answer
-        // over and over.  Conclude the turn with the last response stored
-        // in working_history and emit a warning so users can see what
-        // happened.  See MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN for the
-        // observed failure mode (checkpoint turn_594: 4 identical 6500-token
-        // outline responses, ~90s of wasted context).
-        let text_responses_so_far = count_assistant_text_responses_for_guard(
-            working_history,
-            turn_history_start_len,
-            ctx.harness_state.assistant_text_responses_in_turn,
-        );
+        // MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN consecutive text-only
+        // responses without admitted tool progress, the recovery / continuation
+        // loop is regenerating the same answer. Conclude the turn with the
+        // last response stored in working_history and emit a warning so users
+        // can see what happened. See MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN for
+        // the observed failure mode (checkpoint turn_594: 4 identical
+        // 6500-token outline responses, ~90s of wasted context).
+        // Harness state is authoritative. History cannot represent Copilot's
+        // inline VTCode tool calls, while compaction does not discard this
+        // turn-scoped counter.
+        let text_response_streak = ctx.harness_state.consecutive_assistant_text_responses;
         // A pending validation repair is a deliberate extra candidate, so
         // allow the next request through the generic text-response cap. This
         // allowance is queued independently of the response count because a
         // repair can be scheduled after an ordinary planning response.
         let plan_validation_repair_follow_up =
             ctx.is_planning_active() && ctx.plan_session.plan_validation_repair_follow_up_allowed();
-        if text_responses_so_far >= MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN && !plan_validation_repair_follow_up {
+        if text_response_streak >= MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN && !plan_validation_repair_follow_up {
             tracing::warn!(
-                text_responses = text_responses_so_far,
+                text_response_streak,
                 cap = MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN,
                 "Assistant text-response cap reached; ending turn to prevent runaway regeneration loop"
             );
@@ -1340,6 +1311,7 @@ pub(crate) async fn run_turn_loop(
         // tool calls that get discarded), retry with a more explicit directive
         // rather than immediately falling back to the deterministic final answer.
         if tool_free_recovery
+            && !turn_processing_ctx.is_planning_active()
             && matches!(processing_result, TurnProcessingResult::Empty)
             && response.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty())
             && turn_processing_ctx.recovery_retry_count() < MAX_RECOVERY_RETRIES
@@ -1532,6 +1504,7 @@ pub(crate) async fn run_turn_loop(
                     } if reason == RECOVERY_CONTRACT_VIOLATION_REASON
                 );
                 if tool_free_recovery
+                    && !ctx.is_planning_active()
                     && contract_violation
                     && ctx.harness_state.recovery_retry_count() < MAX_RECOVERY_RETRIES
                     && ctx.harness_state.retry_recovery_pass()
@@ -1620,6 +1593,7 @@ pub(crate) async fn run_turn_loop(
         }
     }
 
+    ctx.renderer.flush_compact_command_group();
     ctx.set_phase(TurnPhase::Finalizing);
     finalize_turn(&mut ctx, working_history, &result, &turn_usage).await;
 

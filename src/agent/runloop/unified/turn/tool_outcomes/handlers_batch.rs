@@ -135,7 +135,10 @@ async fn execute_parallel_group<'a, 'b>(
         return Ok(None);
     }
 
-    t_ctx.ctx.renderer.begin_compact_tool_summary_batch();
+    // Every call in this group passed the final argument-dependent guards.
+    // This admitted execution is real progress; validation-only denials never
+    // reach this boundary and therefore retain the assistant-response streak.
+    t_ctx.ctx.harness_state.reset_assistant_text_response_streak();
 
     let progress_reporter = ProgressReporter::new();
     let _spinner = crate::agent::runloop::unified::ui_interaction::PlaceholderSpinner::with_progress(
@@ -380,7 +383,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
         match kind {
             PreparedToolBatchKind::ParallelReadonly => {
                 if let Some(outcome) = execute_parallel_group(t_ctx, group, &mut batch_tracker).await? {
-                    crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(t_ctx.ctx.renderer)?;
                     if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
                         for remaining in validated_calls.by_ref() {
                             super::push_blocked_tool_recovery_response(t_ctx.ctx, remaining.tool_call);
@@ -415,9 +417,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
                     )
                     .await?
                     {
-                        crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(
-                            t_ctx.ctx.renderer,
-                        )?;
                         if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
                             for (_, remaining) in group_iter {
                                 super::push_blocked_tool_recovery_response(t_ctx.ctx, remaining.tool_call);
@@ -448,8 +447,6 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
             "tool batch outcome"
         );
     }
-
-    crate::agent::runloop::unified::tool_summary::flush_compact_tool_summary_batch(t_ctx.ctx.renderer)?;
 
     Ok(None)
 }
@@ -487,6 +484,11 @@ async fn execute_and_handle_tool_call_inner<'a>(
     if block_mutation_until_verification(ctx, repeated_tool_attempts, tool_call_id.as_str(), tool_name, &args_val)? {
         return Ok(None);
     }
+
+    // Reset only after the final mutation guard. Permission or hook rewrites
+    // can change a call's intent after initial preflight; a rewritten mutation
+    // blocked above must not be mistaken for productive tool progress.
+    ctx.harness_state.reset_assistant_text_response_streak();
 
     // Show pre-execution indicator for file modification operations
     if crate::agent::runloop::unified::tool_summary::is_file_modification_tool(tool_name, &args_val) {

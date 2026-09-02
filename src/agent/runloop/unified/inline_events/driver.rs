@@ -315,8 +315,8 @@ impl<'a> InlineEventLoop<'a> {
             InlineLoopAction::CyclePrimaryAgentPrevious => None,
             InlineLoopAction::SelectPrimaryAgent { .. } => None,
             InlineLoopAction::RequestInlinePromptSuggestion(_) => None,
-            InlineLoopAction::OpenTranscriptReviewInEditor(_) => None,
-            InlineLoopAction::OpenTranscriptReviewScrollback(_) => None,
+            InlineLoopAction::OpenToolOutputInEditor(_) => None,
+            InlineLoopAction::OpenToolOutputScrollback(_) => None,
             InlineLoopAction::ResumeSession(_) => None,
             InlineLoopAction::ForkSession { .. } => None,
             InlineLoopAction::PlanApproved { .. } => None,
@@ -502,7 +502,11 @@ mod tests {
         let (command_tx, _command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<InlineEvent>();
         let handle = InlineHandle::new_for_tests(command_tx);
-        let mut session = InlineSession { handle: handle.clone(), events: event_rx };
+        let mut session = InlineSession {
+            handle: handle.clone(),
+            events: event_rx,
+            worker: None,
+        };
         let mut renderer = AnsiRenderer::with_inline_ui(handle.clone(), Default::default());
         let ctrl_c_state = Arc::new(CtrlCState::new());
         let interrupts = InlineInterruptCoordinator::new(ctrl_c_state.as_ref());
@@ -573,7 +577,11 @@ mod tests {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<InlineEvent>();
         drop(event_tx); // drop the sender so the stream is closed from the start
         let handle = InlineHandle::new_for_tests(command_tx);
-        let mut session = InlineSession { handle: handle.clone(), events: event_rx };
+        let mut session = InlineSession {
+            handle: handle.clone(),
+            events: event_rx,
+            worker: None,
+        };
         let mut renderer = AnsiRenderer::with_inline_ui(handle.clone(), Default::default());
         let ctrl_c_state = Arc::new(CtrlCState::new());
         let interrupts = InlineInterruptCoordinator::new(ctrl_c_state.as_ref());

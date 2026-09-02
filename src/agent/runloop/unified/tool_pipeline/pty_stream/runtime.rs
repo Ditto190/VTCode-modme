@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use anstyle::Color;
 use tokio::{
@@ -19,6 +20,67 @@ enum PtyStreamMessage {
     Output(String),
 }
 
+const MAX_COALESCED_LIVE_PREVIEW_BYTES: usize = 32 * 1024;
+
+/// Records output that could not enter the bounded live-preview queue. The
+/// complete PTY transcript is captured separately; this small coalescing
+/// buffer keeps the visible preview honest about pressure without allowing a
+/// fast producer to grow memory without bound.
+struct LivePreviewDropState {
+    pending: StdMutex<String>,
+    dropped_chunks: AtomicU64,
+    dropped_bytes: AtomicU64,
+}
+
+impl LivePreviewDropState {
+    fn new() -> Self {
+        Self {
+            pending: StdMutex::new(String::new()),
+            dropped_chunks: AtomicU64::new(0),
+            dropped_bytes: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, output: &str) {
+        self.dropped_chunks.fetch_add(1, Ordering::Relaxed);
+        self.dropped_bytes
+            .fetch_add(u64::try_from(output.len()).unwrap_or(u64::MAX), Ordering::Relaxed);
+
+        let Ok(mut pending) = self.pending.lock() else {
+            return;
+        };
+        let remaining = MAX_COALESCED_LIVE_PREVIEW_BYTES.saturating_sub(pending.len());
+        if remaining == 0 {
+            return;
+        }
+        pending.push_str(&truncate_to_byte_limit(output, remaining));
+    }
+
+    fn take_pending(&self) -> Option<String> {
+        let chunks = self.dropped_chunks.swap(0, Ordering::AcqRel);
+        let bytes = self.dropped_bytes.swap(0, Ordering::AcqRel);
+        let Ok(mut pending) = self.pending.lock() else {
+            return (chunks > 0).then(|| format!("\n[live preview coalesced {chunks} chunks / {bytes} bytes]\n"));
+        };
+        let output = std::mem::take(&mut *pending);
+        if chunks == 0 {
+            return (!output.is_empty()).then_some(output);
+        }
+        Some(format!("\n[live preview coalesced {chunks} chunks / {bytes} bytes]\n{output}"))
+    }
+}
+
+fn truncate_to_byte_limit(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let mut end = limit;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
 pub(crate) struct PtyStreamRuntime {
     sender: Option<mpsc::Sender<PtyStreamMessage>>,
     finish_sender: Option<oneshot::Sender<Color>>,
@@ -32,12 +94,17 @@ async fn process_output(
     state: &mut PtyStreamState,
     output: String,
     tail_limit: usize,
+    show_live_preview: bool,
 ) {
     if output.is_empty() {
         return;
     }
 
     state.apply_chunk(&output, tail_limit);
+    if !show_live_preview {
+        return;
+    }
+
     let visible_output = vtcode_core::utils::ansi_parser::strip_ansi(&output);
     if visible_output.trim().is_empty() {
         return;
@@ -66,19 +133,24 @@ impl PtyStreamRuntime {
         command_prompt: Option<String>,
         pty_config: PtyConfig,
         workspace_root: Option<&Path>,
+        show_live_preview: bool,
     ) -> (Self, ToolProgressCallback) {
         let owned_root = workspace_root.map(Path::to_path_buf);
         let (tx, mut rx) = mpsc::channel::<PtyStreamMessage>(256);
         let (finish_tx, mut finish_rx) = oneshot::channel::<Color>();
         let active = Arc::new(AtomicBool::new(true));
         let worker_active = Arc::clone(&active);
+        let drop_state = Arc::new(LivePreviewDropState::new());
+        let worker_drop_state = Arc::clone(&drop_state);
         let effective_tail_limit = tail_limit.clamp(1, Self::MAX_LIVE_STREAM_LINES);
 
         let task = tokio::spawn(async move {
             let mut state = PtyStreamState::new(command_prompt, pty_config, owned_root.as_deref());
-            let (replace_count, segments, link_ranges, _) = state.render_segments("", effective_tail_limit);
-            if !segments.is_empty() && worker_active.load(Ordering::Relaxed) {
-                handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);
+            if show_live_preview {
+                let (replace_count, segments, link_ranges, _) = state.render_segments("", effective_tail_limit);
+                if !segments.is_empty() && worker_active.load(Ordering::Relaxed) {
+                    handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);
+                }
             }
 
             let mut finish_requested = None;
@@ -94,13 +166,51 @@ impl PtyStreamRuntime {
                     // before applying the final color to the complete block.
                     while let Ok(message) = rx.try_recv() {
                         let PtyStreamMessage::Output(output) = message;
-                        process_output(&handle, &progress_reporter, &mut state, output, effective_tail_limit).await;
+                        if let Some(coalesced) = worker_drop_state.take_pending() {
+                            process_output(
+                                &handle,
+                                &progress_reporter,
+                                &mut state,
+                                coalesced,
+                                effective_tail_limit,
+                                show_live_preview,
+                            )
+                            .await;
+                        }
+                        process_output(
+                            &handle,
+                            &progress_reporter,
+                            &mut state,
+                            output,
+                            effective_tail_limit,
+                            show_live_preview,
+                        )
+                        .await;
+                    }
+                    if let Some(coalesced) = worker_drop_state.take_pending() {
+                        process_output(
+                            &handle,
+                            &progress_reporter,
+                            &mut state,
+                            coalesced,
+                            effective_tail_limit,
+                            show_live_preview,
+                        )
+                        .await;
                     }
 
-                    state.set_header_color(final_color);
-                    let (replace_count, segments, link_ranges, _) = state.render_current_segments(effective_tail_limit);
-                    if !segments.is_empty() {
-                        handle.replace_last_with_links(replace_count, InlineMessageKind::Pty, segments, link_ranges);
+                    if show_live_preview {
+                        state.set_header_color(final_color);
+                        let (replace_count, segments, link_ranges, _) =
+                            state.render_current_segments(effective_tail_limit);
+                        if !segments.is_empty() {
+                            handle.replace_last_with_links(
+                                replace_count,
+                                InlineMessageKind::Pty,
+                                segments,
+                                link_ranges,
+                            );
+                        }
                     }
                     break;
                 }
@@ -116,12 +226,24 @@ impl PtyStreamRuntime {
                     message = rx.recv() => {
                         match message {
                             Some(PtyStreamMessage::Output(output)) => {
+                                if let Some(coalesced) = worker_drop_state.take_pending() {
+                                    process_output(
+                                        &handle,
+                                        &progress_reporter,
+                                        &mut state,
+                                        coalesced,
+                                        effective_tail_limit,
+                                        show_live_preview,
+                                    )
+                                    .await;
+                                }
                                 process_output(
                                     &handle,
                                     &progress_reporter,
                                     &mut state,
                                     output,
                                     effective_tail_limit,
+                                    show_live_preview,
                                 )
                                 .await;
                             }
@@ -134,11 +256,20 @@ impl PtyStreamRuntime {
 
         let callback_active = Arc::clone(&active);
         let callback_tx = tx.clone();
+        let callback_drop_state = Arc::clone(&drop_state);
         let callback: ToolProgressCallback = Arc::new(move |_name: &str, output: &str| {
             if !callback_active.load(Ordering::Relaxed) || output.is_empty() {
                 return;
             }
-            let _ = callback_tx.try_send(PtyStreamMessage::Output(output.to_string()));
+            match callback_tx.try_send(PtyStreamMessage::Output(output.to_string())) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(PtyStreamMessage::Output(output))) => {
+                    callback_drop_state.record(&output);
+                }
+                Err(mpsc::error::TrySendError::Closed(PtyStreamMessage::Output(output))) => {
+                    callback_drop_state.record(&output);
+                }
+            }
         });
 
         (
@@ -182,5 +313,22 @@ impl Drop for PtyStreamRuntime {
         if let Some(task) = self.task.take() {
             task.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LivePreviewDropState;
+
+    #[test]
+    fn live_preview_drop_state_coalesces_and_reports_pressure() {
+        let state = LivePreviewDropState::new();
+        state.record("first\n");
+        state.record("second\n");
+
+        let pending = state.take_pending().expect("coalesced preview");
+        assert!(pending.contains("live preview coalesced 2 chunks / 13 bytes"));
+        assert!(pending.contains("first\nsecond\n"));
+        assert!(state.take_pending().is_none());
     }
 }

@@ -198,7 +198,9 @@ impl TerminalModeRestoreGuard {
 
     fn restore_silently(&mut self) {
         if self.state.is_some() {
-            let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
+            if !crate::tui::core_tui::panic_hook::is_restore_claimed() {
+                let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
+            }
             if let Err(error) = self.restore() {
                 tracing::warn!(%error, "failed to restore terminal modes");
             }
@@ -346,10 +348,17 @@ where
     // Drain any pending events before finalizing terminal and disabling modes
     drain_terminal_events();
 
-    // Clear current line to remove any echoed characters (like ^C)
-    let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
+    // When another party already restored the terminal (host backstop or panic
+    // hook), the main screen buffer is live: writes here (line clear, cursor
+    // show, clear) would land there instead of on the alternate screen.
+    let finalize_result = if crate::tui::core_tui::panic_hook::is_restore_claimed() {
+        Ok(())
+    } else {
+        // Clear current line to remove any echoed characters (like ^C)
+        let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
 
-    let finalize_result = finalize_terminal(&mut terminal);
+        finalize_terminal(&mut terminal)
+    };
 
     // Restore terminal modes (handles all modes including raw mode)
     if let Err(error) = mode_restore_guard.restore() {

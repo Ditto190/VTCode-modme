@@ -74,7 +74,11 @@ mod tests {
         let (command_sender, _command_receiver) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(command_sender);
         let (_event_sender, event_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let mut session = InlineSession { handle: handle.clone(), events: event_receiver };
+        let mut session = InlineSession {
+            handle: handle.clone(),
+            events: event_receiver,
+            worker: None,
+        };
 
         handle
             .defer_event(InlineEvent::WebmcpSubmit("/exit".into()))

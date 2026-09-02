@@ -3,7 +3,9 @@ use vtcode_core::llm::providers::split_reasoning_from_text;
 use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_core::utils::ansi::MessageStyle;
 
-use crate::agent::runloop::unified::plan_blocks::{extract_any_plan, strip_plan_persistence_policy_line};
+use crate::agent::runloop::unified::plan_blocks::{
+    extract_any_plan, has_exactly_one_proposed_plan_block, strip_plan_persistence_policy_line,
+};
 use crate::agent::runloop::unified::planning_workflow::validate_plan_content;
 use crate::agent::runloop::unified::turn::context::{PreparedAssistantToolCall, TurnProcessingResult};
 use crate::agent::runloop::unified::turn::guards::validate_tool_args_security;
@@ -83,17 +85,37 @@ pub(crate) fn process_llm_response(
 
     if planning_active && let Some(ref text) = final_text {
         let extraction = extract_any_plan(text);
+        let strict_recovery_plan_shape = !allow_tool_calls;
+        let plan_shape_is_valid = !strict_recovery_plan_shape || has_exactly_one_proposed_plan_block(text);
         // The plan is rendered once by the approval flow below. Keep only the
         // non-plan prose in the normal assistant response; retaining the plan
         // body here makes the transcript render it a second time before the
         // approval heading is emitted.
-        let stripped_text = if extraction.plan_text.is_some() {
+        let stripped_text = if strict_recovery_plan_shape && !plan_shape_is_valid {
+            // Keep malformed/duplicate/alternate plan markup available to the
+            // recovery handoff. The handler stores it as a bounded rejected
+            // draft instead of silently reducing the failure to "no answer".
+            text.to_string()
+        } else if extraction.plan_text.is_some() {
             strip_plan_persistence_policy_line(&extraction.stripped_text)
         } else {
             extraction.stripped_text
         };
+        proposed_plan = if plan_shape_is_valid {
+            extraction.plan_text
+        } else {
+            None
+        };
         final_text = Some(stripped_text);
-        proposed_plan = extraction.plan_text;
+    }
+
+    // A provider response that includes native tool calls is not a valid
+    // tool-free synthesis, even when it also contains a seemingly complete
+    // plan. Do not silently accept the plan while dropping the forbidden
+    // calls; the recovery handler must produce the resumable blocked handoff.
+    if planning_active && !allow_tool_calls && response.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty()) {
+        final_text = None;
+        proposed_plan = None;
     }
 
     // Providers occasionally omit the plan tags while still returning a
@@ -104,6 +126,7 @@ pub(crate) fn process_llm_response(
         && proposed_plan.is_none()
         && let Some(text) = final_text.as_deref()
         && looks_like_structured_plan(text)
+        && allow_tool_calls
     {
         proposed_plan = Some(text.trim().to_string());
         // Untagged structured responses are themselves the plan. They are
@@ -1002,6 +1025,75 @@ Outro"#
             }
             _ => panic!("Expected text response with extracted proposed plan"),
         }
+    }
+
+    #[test]
+    fn tool_free_planning_recovery_accepts_only_one_canonical_plan_block() {
+        let valid_plan = "<proposed_plan>\n## Summary\nKeep recovery deterministic.\n\n## Implementation Steps\n1. Update src/lib.rs -> files: [src/lib.rs] -> verify: [cargo check --locked]\n\n## Test Cases and Validation\n- Run the focused nextest suite.\n\n## Assumptions and Defaults\n- Preserve the existing event contract.\n</proposed_plan>";
+        let response = |content: &str| LLMResponse::new("test", content);
+
+        let mut renderer = AnsiRenderer::stdout();
+        let valid =
+            process_llm_response(&response(valid_plan), &mut renderer, 0, true, false, false, false, None, None)
+                .expect("valid recovery plan should process");
+        assert!(matches!(
+            valid,
+            TurnProcessingResult::TextResponse { proposed_plan: Some(_), text, .. } if text.trim().is_empty()
+        ));
+
+        let mut renderer = AnsiRenderer::stdout();
+        let alternate = process_llm_response(
+            &response(&valid_plan.replace("proposed_plan", "plan")),
+            &mut renderer,
+            0,
+            true,
+            false,
+            false,
+            false,
+            None,
+            None,
+        )
+        .expect("alternate marker should be handled");
+        assert!(matches!(
+            alternate,
+            TurnProcessingResult::TextResponse { proposed_plan: None, text, .. } if text.contains("<plan>")
+        ));
+
+        let mut renderer = AnsiRenderer::stdout();
+        let duplicate = process_llm_response(
+            &response(&format!("{valid_plan}\n{valid_plan}")),
+            &mut renderer,
+            0,
+            true,
+            false,
+            false,
+            false,
+            None,
+            None,
+        )
+        .expect("duplicate marker should be handled");
+        assert!(matches!(
+            duplicate,
+            TurnProcessingResult::TextResponse { proposed_plan: None, text, .. } if text.matches("<proposed_plan>").count() == 2
+        ));
+    }
+
+    #[test]
+    fn tool_free_planning_recovery_rejects_native_tool_calls_even_with_a_plan() {
+        let mut response = LLMResponse::new(
+            "test",
+            "<proposed_plan>\n## Summary\nDo the work.\n\n## Implementation Steps\n1. Update src/lib.rs -> files: [src/lib.rs] -> verify: [cargo check --locked]\n\n## Test Cases and Validation\n- Run nextest.\n\n## Assumptions and Defaults\n- Preserve the contract.\n</proposed_plan>",
+        );
+        response.tool_calls = Some(vec![vtcode_core::llm::provider::ToolCall::function(
+            "call-forbidden".to_string(),
+            "code_search".to_string(),
+            r#"{"query":"must not execute"}"#.to_string(),
+        )]);
+
+        let mut renderer = AnsiRenderer::stdout();
+        let result = process_llm_response(&response, &mut renderer, 0, true, false, false, false, None, None)
+            .expect("forbidden tool call should be handled as an empty recovery result");
+        assert!(matches!(result, TurnProcessingResult::Empty));
     }
 
     #[test]

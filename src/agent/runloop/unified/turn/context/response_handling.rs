@@ -31,6 +31,47 @@ pub(super) fn looks_like_clarifying_question(text: &str) -> bool {
 }
 
 impl<'a> TurnProcessingContext<'a> {
+    /// End a failed plan-mode recovery pass with an explicit resumable
+    /// handoff. This path intentionally emits a `Blocked` outcome: no plan
+    /// was approved, but the planning session and its bounded evidence remain
+    /// available for a later `keep planning`/restatement turn.
+    pub(crate) fn break_planning_recovery_with_handoff(
+        &mut self,
+        detail: &str,
+        rejected_plan: Option<&str>,
+    ) -> anyhow::Result<TurnHandlerOutcome> {
+        let detail = detail.trim();
+        let detail = if detail.is_empty() {
+            "the synthesis pass failed"
+        } else {
+            detail
+        };
+        let detail = if detail.len() > 240 {
+            let mut end = 240;
+            while end > 0 && !detail.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}…", &detail[..end])
+        } else {
+            detail.to_string()
+        };
+        let message = format!(
+            "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan ({detail}). The latest request and bounded evidence are preserved. Re-state the planning request or type `keep planning` to try again; no changes were applied."
+        );
+
+        self.harness_state.mark_final_response_fallback();
+        self.handle_assistant_response(message, Vec::new(), None, false, Some(uni::AssistantPhase::FinalAnswer))?;
+        if let Some(rejected_plan) = rejected_plan {
+            append_rejected_plan_draft_to_last_assistant(self.working_history, rejected_plan);
+        }
+        self.finish_recovery_pass();
+        Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+            reason: Some(
+                "planning recovery did not produce an approval-ready plan; planning remains active".to_string(),
+            ),
+        }))
+    }
+
     fn reject_plan_artifact(
         &mut self,
         error: PlanArtifactError,
@@ -38,6 +79,13 @@ impl<'a> TurnProcessingContext<'a> {
         allow_repair: bool,
     ) -> anyhow::Result<TurnHandlerOutcome> {
         use vtcode_core::utils::ansi::MessageStyle;
+
+        if self.recovery_is_tool_free() && self.is_planning_active() {
+            return self.break_planning_recovery_with_handoff(
+                &format!("the synthesized draft failed validation: {error}"),
+                Some(plan_text),
+            );
+        }
 
         if allow_repair && self.plan_session.plan_validation_repair_allowed() {
             self.plan_session.mark_plan_validation_repair_used();
@@ -271,6 +319,24 @@ impl<'a> TurnProcessingContext<'a> {
         } else {
             text
         };
+        if tool_free_recovery_pass && self.is_planning_active() {
+            if proposed_plan.is_none() {
+                let rejected_plan = text
+                    .contains("<proposed_plan>")
+                    .then_some(text.as_str())
+                    .or_else(|| text.contains("<plan>").then_some(text.as_str()));
+                return self.break_planning_recovery_with_handoff(
+                    "the response did not contain exactly one completed <proposed_plan> block",
+                    rejected_plan,
+                );
+            }
+            if !text.trim().is_empty() {
+                return self.break_planning_recovery_with_handoff(
+                    "the response included prose outside the required <proposed_plan> block",
+                    proposed_plan.as_deref(),
+                );
+            }
+        }
         let denied_interview_plan_retry = self.is_planning_active()
             && !tool_free_recovery_pass
             && proposed_plan.is_none()
@@ -281,6 +347,7 @@ impl<'a> TurnProcessingContext<'a> {
             && proposed_plan.is_none()
             && self.plan_session.plan_synthesis_retry_allowed();
         let denied_interview_without_ready_plan = self.is_planning_active()
+            && !tool_free_recovery_pass
             && self.plan_session.is_interview_denied()
             && proposed_plan.is_none()
             && !persisted_plan_is_ready(&self.tool_registry.planning_workflow_state()).await
@@ -303,6 +370,7 @@ impl<'a> TurnProcessingContext<'a> {
         // also excluded: the plan-validation/persistence branch owns their
         // terminal messaging.
         let defer_no_ready_plan_hint = self.is_planning_active()
+            && !tool_free_recovery_pass
             && proposed_plan.is_none()
             && should_render_no_ready_plan_hint(denied_interview_without_ready_plan, &text)
             && !persisted_plan_is_ready(&self.tool_registry.planning_workflow_state()).await;

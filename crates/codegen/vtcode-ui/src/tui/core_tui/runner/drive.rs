@@ -311,6 +311,14 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
     let mut cursor_steady = false;
     let mut mouse_pointer = MousePointerShape::Default;
     'main: loop {
+        // If terminal restoration was claimed by someone else (host backstop or
+        // panic hook), the main screen buffer is live: drawing another frame
+        // would leak transcript content into the CLI scrollback.
+        if crate::tui::core_tui::panic_hook::is_restore_claimed() {
+            session.request_exit();
+            break 'main;
+        }
+
         // Drain a bounded number of pending commands to prevent unbounded latency
         // under load (e.g., during heavy PTY output or tool execution).
         for _ in 0..MAX_COMMANDS_PER_TURN {

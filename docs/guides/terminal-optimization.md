@@ -9,6 +9,7 @@ This guide covers the terminal-specific settings that matter most when using VT 
 - [Paste Handling](#paste-handling)
 - [Notification Setup](#notification-setup)
 - [Handling Large Inputs](#handling-large-inputs)
+- [Transcript Review](#transcript-review)
 
 ## Theme and Appearance
 
@@ -137,12 +138,29 @@ VT Code can compact, truncate, or spool large tool output depending on your conf
 ```toml
 [ui]
 tool_output_mode = "compact"
-tool_display_mode = "expanded"
+tool_display_mode = "compact"
 tool_output_max_lines = 50
 tool_output_spool_bytes = 200000
 ```
 
-`ui.tool_output_mode` controls result bodies. `ui.tool_display_mode` controls the transition summaries that precede them: `"expanded"` keeps one summary per call, while `"compact"` groups adjacent successful summaries with the same semantic action and stable arguments. `Alt+T` toggles the session-only display mode; `/config` persists it.
+`ui.tool_output_mode` controls result bodies. `ui.tool_display_mode` controls
+the transition summaries that precede them: `"compact"` is the default and
+groups only contiguous successful command calls while keeping live PTY output
+bounded. Failures, warnings, stderr, diffs, and artifacts remain inline;
+`"expanded"` keeps the existing per-call layout. `Alt+T` toggles the
+session-only display mode; `/config` persists it.
+
+## Transcript Review
+
+For a quiet live terminal without losing evidence, use compact tool display
+mode and open Transcript Review with the configured review shortcut (default
+`Ctrl+T`). The review keeps the original conversation order and complete PTY or
+pipe output. The styled shortcut and `click to expand or collapse` suffix on a
+compact activity row are clickable when mouse capture is enabled and focus that
+row's first command. Rich rendering reuses normal transcript styling; press the
+configured render toggle (default `R`) for ANSI-free raw text before copying,
+opening the editor with `v`, or handing the transcript to native scrollback with
+`[`. The title's `[close]` control and the shortcut guide are also configurable.
 
 ## Troubleshooting
 

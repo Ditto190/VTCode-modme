@@ -17,7 +17,7 @@ pub(super) const PLAN_TRACKER_END: &str = "<!-- vtcode:plan-tracker:end -->";
 /// the same contract from every prompt surface.
 pub const CANONICAL_STEP_FORMAT: &str = "1. Action -> files: [path/to/file.rs] -> verify: [cargo check]";
 
-const PLACEHOLDER_TOKENS: [&str; 18] = [
+const PLACEHOLDER_TOKENS: [&str; 21] = [
     "[step]",
     "[paths]",
     "[check]",
@@ -25,6 +25,7 @@ const PLACEHOLDER_TOKENS: [&str; 18] = [
     "[default chosen when user did not specify]",
     "[out-of-scope items intentionally not changed]",
     "[file, symbol, or behavior confirmed from the repo]",
+    "[observed command output -> the insight it establishes]",
     "[existing pattern or constraint verified before planning]",
     "[if any], otherwise: no remaining scope decisions",
     "[project build and lint command",
@@ -32,6 +33,8 @@ const PLACEHOLDER_TOKENS: [&str; 18] = [
     "[2-4 lines: goal, user impact, what will change, what will not]",
     "[explicit commands/manual checks]",
     "[what must not break]",
+    "[observable end state the implementation must produce]",
+    "[required tooling, configuration, or prior work]",
     "[todo]",
     "todo:",
     "[decision needed]",

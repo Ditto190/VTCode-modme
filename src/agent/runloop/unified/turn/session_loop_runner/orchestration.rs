@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use hashbrown::HashSet;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep, timeout};
@@ -1446,19 +1446,32 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 total_cost_usd,
                 session_stats.total_turns(),
             );
-            harness_try!(emitter.emit(event).context("failed to emit canonical thread.completed event"));
+            // Always attempt exporter finalization after the terminal event.
+            // Optional exporters are isolated inside `HarnessEventEmitter`,
+            // while a canonical persistence error is retained and returned
+            // only after `finish()` has had a chance to drain/close the sink.
+            let terminal_event_error = emitter
+                .emit(event)
+                .err()
+                .map(|error| error.context("failed to emit canonical thread.completed event"));
             // Fire one best-effort session-completion notification, mirroring the
             // per-turn outcome helper. Reuses the same completion_success/failure
             // gates as turn completion (no separate session config).
             super::notifications::emit_session_completion_notification(subtype, session_stats.total_turns()).await;
-        }
-        if let Some(emitter) = harness_emitter.as_ref() {
-            harness_try!(
-                emitter
-                    .finish()
-                    .await
-                    .context("failed to finalize canonical session persistence")
-            );
+            if let Err(error) = emitter.finish().await {
+                tracing::error!(
+                    target: "vtcode.harness",
+                    phase = "canonical_finish",
+                    error = %error,
+                    "failed to finalize canonical session persistence"
+                );
+                if terminal_event_error.is_none() {
+                    return Err(error.context("failed to finalize canonical session persistence"));
+                }
+            }
+            if let Some(error) = terminal_event_error {
+                return Err(error);
+            }
         }
         agent_touched_paths.extend(context_manager.tracked_instruction_activity_paths());
         // Skip persistent memory on interrupt-exits (it makes LLM API calls which
@@ -1499,6 +1512,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             linked_directories,
             async_mcp_manager.as_deref(),
             &handle,
+            &mut session,
         )
         .await
         {

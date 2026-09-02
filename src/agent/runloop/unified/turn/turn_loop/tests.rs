@@ -7,10 +7,9 @@ use super::{
     POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON, POST_TOOL_RECOVERY_REASON, POST_TOOL_RECOVERY_REASON_PLAN_MODE,
     POST_TOOL_RESUME_DIRECTIVE, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE, PostToolFailureRecovery,
     RECOVERY_CONTRACT_VIOLATION_REASON, RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER, accumulate_turn_usage,
-    blocked_turn_final_response, completed_turn_requires_final_response, count_assistant_text_responses_for_guard,
-    count_assistant_text_responses_in_turn, current_turn_preserve_index, ensure_blocked_turn_response, finalize_turn,
-    has_turn_usage, maybe_recover_after_post_tool_llm_failure, normalize_tool_free_recovery_break_outcome,
-    run_turn_loop,
+    blocked_turn_final_response, completed_turn_requires_final_response, current_turn_preserve_index,
+    ensure_blocked_turn_response, finalize_turn, has_turn_usage, maybe_recover_after_post_tool_llm_failure,
+    normalize_tool_free_recovery_break_outcome, run_turn_loop,
 };
 use std::fs;
 use std::path::Path;
@@ -1181,6 +1180,162 @@ async fn response_cap_preserves_commentary_as_one_blocked_final_harness_message(
 }
 
 #[tokio::test]
+async fn successful_tool_round_resets_consecutive_text_response_cap() {
+    const FIRST_COMMENTARY: &str = "Let me continue by inspecting the first result.";
+    const SECOND_COMMENTARY: &str = "Let me continue by checking the tool result.";
+    const FINAL_RESPONSE: &str = "The requested inspection is complete and validation passed";
+
+    #[derive(Clone)]
+    struct CommentaryWithToolProgressProvider {
+        requests: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for CommentaryWithToolProgressProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            let request_number = self.requests.fetch_add(1, Ordering::SeqCst);
+            let (content, tool_calls) = match request_number {
+                0 => (Some(FIRST_COMMENTARY.to_string()), None),
+                1 => (
+                    None,
+                    Some(vec![uni::ToolCall::function(
+                        "productive-tool-call".to_string(),
+                        tool_names::APPLY_PATCH.to_string(),
+                        json!({
+                            "patch": "*** Begin Patch\n*** Add File: productive-tool-progress.txt\n+tool progress\n*** End Patch\n"
+                        })
+                        .to_string(),
+                    )]),
+                ),
+                2 => (Some(SECOND_COMMENTARY.to_string()), None),
+                3 => (Some(FINAL_RESPONSE.to_string()), None),
+                _ => panic!("unexpected request after final response"),
+            };
+            Ok(uni::LLMResponse {
+                content,
+                model: request.model,
+                tool_calls,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    backing.set_provider(Box::new(CommentaryWithToolProgressProvider { requests: requests.clone() }));
+
+    let mut history = vec![uni::Message::user(
+        "inspect the workspace and finish the analysis".to_string(),
+    )];
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("tool progress should break the text-only response streak");
+
+    assert!(matches!(outcome.result, TurnLoopResult::Completed { plan_approved_execution_pending: false }));
+    assert_eq!(requests.load(Ordering::SeqCst), 4, "the final request must run after tool progress");
+    assert_eq!(final_answer_text(&history), FINAL_RESPONSE);
+    assert!(backing.workspace_path().join("productive-tool-progress.txt").exists());
+}
+
+#[tokio::test]
+async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
+    #[derive(Clone)]
+    struct TextBlockedMutationTextProvider {
+        requests: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for TextBlockedMutationTextProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            let request_number = self.requests.fetch_add(1, Ordering::SeqCst);
+            let (content, tool_calls) = match request_number {
+                0 => (Some("The unverified change is complete.".to_string()), None),
+                1 => (
+                    None,
+                    Some(vec![uni::ToolCall::function(
+                        "blocked-mutation".to_string(),
+                        tool_names::APPLY_PATCH.to_string(),
+                        json!({
+                            "patch": "*** Begin Patch\n*** Add File: must-not-exist.txt\n+blocked\n*** End Patch\n"
+                        })
+                        .to_string(),
+                    )]),
+                ),
+                2 => (Some("The unverified change is still complete.".to_string()), None),
+                _ => panic!("blocked mutation incorrectly reset the response streak"),
+            };
+            Ok(uni::LLMResponse {
+                content,
+                model: request.model,
+                tool_calls,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    backing.set_provider(Box::new(TextBlockedMutationTextProvider { requests: requests.clone() }));
+
+    let mut history = vec![uni::Message::user("finish the pending change".to_string())];
+    let turn_context = backing.turn_loop_context();
+    turn_context.session_stats.set_verification_pending(true);
+    let outcome = run_turn_loop(&mut history, turn_context)
+        .await
+        .expect("blocked mutation should retain the text-response streak");
+
+    assert!(matches!(outcome.result, TurnLoopResult::Blocked { .. }));
+    assert_eq!(requests.load(Ordering::SeqCst), 3, "the second text response must reach the cap");
+    assert!(!backing.workspace_path().join("must-not-exist.txt").exists());
+}
+
+#[tokio::test]
 async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_responses() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1651,183 +1806,6 @@ async fn stale_plan_pause_without_mutations_consumes_text_response_budget() {
             .as_text()
             .contains("Implementation is paused because tool use is disabled.")
     }));
-}
-
-#[test]
-fn count_assistant_text_responses_in_turn_zero_for_empty_history() {
-    let history: Vec<uni::Message> = Vec::new();
-    assert_eq!(count_assistant_text_responses_in_turn(&history, 0), 0);
-}
-
-#[test]
-#[allow(
-    clippy::vec_init_then_push,
-    reason = "Intentional compatibility, platform, or test-only suppression."
-)]
-fn count_assistant_text_responses_in_turn_skips_tool_call_messages() {
-    let mut history: Vec<uni::Message> = Vec::new();
-    // First assistant message has a tool call -> not counted
-    history.push(uni::Message::assistant_with_tools(
-        String::new(),
-        vec![uni::ToolCall::function(
-            "tool_call_0".to_string(),
-            "code_search".to_string(),
-            "{}".to_string(),
-        )],
-    ));
-    // Second assistant message is plain text -> counted
-    history.push(uni::Message::assistant("Functions and structs.".to_string()));
-    // System message -> not counted
-    history.push(uni::Message::system("Tools disabled.".to_string()));
-    // Third assistant message is plain text -> counted
-    history.push(uni::Message::assistant("Functions and structs again.".to_string()));
-    // Empty assistant content -> not counted
-    history.push(uni::Message::assistant(String::new()));
-    // Whitespace-only assistant content -> not counted
-    history.push(uni::Message::assistant("   \n  ".to_string()));
-
-    assert_eq!(count_assistant_text_responses_in_turn(&history, 0), 2);
-}
-
-#[test]
-fn count_assistant_text_responses_in_turn_ignores_history_before_baseline() {
-    let mut history = vec![
-        uni::Message::user("previous request".to_string()),
-        uni::Message::assistant("previous answer one".to_string()),
-        uni::Message::assistant("previous answer two".to_string()),
-    ];
-    let turn_history_start_len = history.len();
-
-    assert_eq!(
-        count_assistant_text_responses_in_turn(&history, turn_history_start_len),
-        0,
-        "historical assistant text before the current turn must not count"
-    );
-    assert_eq!(
-        count_assistant_text_responses_for_guard(&history, turn_history_start_len, 0),
-        0,
-        "the guard must not count historical assistant text when the per-turn floor is empty"
-    );
-
-    history.push(uni::Message::assistant("current answer one".to_string()));
-    assert_eq!(count_assistant_text_responses_in_turn(&history, turn_history_start_len), 1);
-
-    history.push(uni::Message::assistant_with_tools(
-        String::new(),
-        vec![uni::ToolCall::function(
-            "tool_call_0".to_string(),
-            "code_search".to_string(),
-            "{}".to_string(),
-        )],
-    ));
-    history.push(uni::Message::assistant("current answer two".to_string()));
-
-    assert_eq!(
-        count_assistant_text_responses_in_turn(&history, turn_history_start_len),
-        super::MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN,
-        "current-turn assistant text after the baseline still trips the cap"
-    );
-}
-
-#[test]
-fn count_assistant_text_responses_in_turn_counts_after_compaction_rebase() {
-    let stale_turn_history_start_len = 5;
-    let mut compacted_history = vec![
-        uni::Message::system("Compacted history summary.".to_string()),
-        uni::Message::user("current request".to_string()),
-    ];
-    let rebased_turn_history_start_len = compacted_history.len();
-
-    compacted_history.push(uni::Message::assistant("current answer after compaction".to_string()));
-
-    assert_eq!(
-        count_assistant_text_responses_in_turn(&compacted_history, stale_turn_history_start_len),
-        0,
-        "a stale pre-compaction baseline misses newly appended assistant text"
-    );
-    assert_eq!(
-        count_assistant_text_responses_in_turn(&compacted_history, rebased_turn_history_start_len),
-        1,
-        "rebasing to the compacted length counts current-turn assistant text promptly"
-    );
-}
-
-#[test]
-fn count_assistant_text_responses_for_guard_preserves_pre_compaction_turn_floor() {
-    let compacted_history = vec![
-        uni::Message::system("Compacted history summary.".to_string()),
-        uni::Message::user("current request".to_string()),
-    ];
-    let rebased_turn_history_start_len = compacted_history.len();
-    let recorded_text_responses_in_turn = 1;
-
-    assert_eq!(
-        count_assistant_text_responses_in_turn(&compacted_history, rebased_turn_history_start_len),
-        0,
-        "history slice cannot see same-turn assistant text removed by compaction"
-    );
-    assert_eq!(
-        count_assistant_text_responses_for_guard(
-            &compacted_history,
-            rebased_turn_history_start_len,
-            recorded_text_responses_in_turn,
-        ),
-        recorded_text_responses_in_turn,
-        "guard uses the per-turn counter as a compaction-safe floor"
-    );
-}
-
-#[test]
-fn count_assistant_text_responses_for_guard_counts_post_compaction_growth_above_floor() {
-    let mut compacted_history = vec![
-        uni::Message::system("Compacted history summary.".to_string()),
-        uni::Message::user("current request".to_string()),
-    ];
-    let rebased_turn_history_start_len = compacted_history.len();
-    let recorded_text_responses_in_turn = 1;
-
-    compacted_history.push(uni::Message::assistant("current answer after compaction".to_string()));
-    compacted_history.push(uni::Message::assistant("second current answer after compaction".to_string()));
-
-    assert_eq!(
-        count_assistant_text_responses_for_guard(
-            &compacted_history,
-            rebased_turn_history_start_len,
-            recorded_text_responses_in_turn,
-        ),
-        2,
-        "new assistant text appended after compaction still counts promptly"
-    );
-}
-
-#[test]
-fn count_assistant_text_responses_in_turn_matches_observed_pattern() {
-    // Reproduces the checkpoint turn_594 failure mode: 4 long identical
-    // outline responses in a single turn.  The count must be 4 so the
-    // anti-runaway guard at MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN (2) trips
-    // on the third iteration.
-    let mut history: Vec<uni::Message> = Vec::new();
-    for _ in 0..4 {
-        history.push(uni::Message::assistant(
-            "# Functions and Structs in crates/codegen/vtcode-core/src/tools/registry\n\
-             \n\
-             The directory has 70 files, 23 structs, 69 functions, 11 enums.\n\
-             \n\
-             ## Structs (23)\n\
-             \n\
-             | File | Struct |\n\
-             |---|---|\n\
-             | mod.rs | ToolRegistry |\n\
-             | distributed.rs | ToolConfigSnapshot |\n\
-             ... (and many more rows)\n"
-                .to_string(),
-        ));
-    }
-    assert_eq!(count_assistant_text_responses_in_turn(&history, 0), 4);
-    assert!(
-        count_assistant_text_responses_in_turn(&history, 0) >= super::MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN,
-        "anti-runaway guard would trip on this history"
-    );
 }
 
 /// End-to-end regression test for the tool-free recovery contract-violation
@@ -2441,7 +2419,11 @@ async fn explicit_build_and_auto_approval_selections_handoff_persisted_plan_with
         let (command_tx, _command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(command_tx);
-        let mut session = InlineSession { handle: handle.clone(), events: event_rx };
+        let mut session = InlineSession {
+            handle: handle.clone(),
+            events: event_rx,
+            worker: None,
+        };
         event_tx
             .send(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Selection(selection))))
             .expect("submit explicit plan approval selection");

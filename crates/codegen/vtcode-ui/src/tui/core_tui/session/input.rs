@@ -961,10 +961,13 @@ impl Session {
     }
 
     fn create_git_status_spans(&self, text: &str, default_style: Style) -> Vec<Span<'static>> {
+        let text = text.strip_prefix(ui::HEADER_GIT_PREFIX).unwrap_or(text).trim_start();
         if let Some((branch_part, indicator_part)) = text.rsplit_once(" | ") {
             let mut spans = Vec::new();
             let branch_trim = branch_part.trim_end();
             if !branch_trim.is_empty() {
+                // Status values may already include the header's `git: `
+                // label. The footer is the compact view, so omit that label.
                 spans.push(Span::styled(branch_trim.to_owned(), default_style));
             }
             spans.push(Span::raw(" "));

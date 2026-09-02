@@ -209,6 +209,12 @@ impl Session {
         transcript_hover_changed || modal_hover_changed
     }
 
+    pub(crate) fn clear_transcript_file_link_hover(&mut self) -> bool {
+        let changed = self.hovered_transcript_file_link.is_some();
+        self.hovered_transcript_file_link = None;
+        changed
+    }
+
     pub(crate) fn transcript_file_link_click_action(
         &self,
         column: u16,

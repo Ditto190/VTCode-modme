@@ -8,6 +8,7 @@ use vtcode_core::tools::tool_intent::{ShellActivity, classify_shell_activity};
 
 use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
 use crate::agent::runloop::unified::turn::tool_outcomes::read_extent;
+use crate::agent::runloop::unified::turn::tool_outcomes::{is_grep_style_no_match, output_field_is_empty};
 
 /// Threshold: number of consecutive file mutations before the Anti-Blind-Editing
 /// warning fires. NL2Repo-Bench recommends verifying after every few edits.
@@ -332,10 +333,11 @@ fn output_has_empty_search_results(output: &serde_json::Value) -> bool {
         .and_then(serde_json::Value::as_array)
         .is_some_and(|results| results.is_empty())
         && !output_has_actionable_recovery_guidance(output)
+        && !output_has_error_signal(output)
 }
 
 fn output_has_actionable_recovery_guidance(output: &serde_json::Value) -> bool {
-    ["hint", "next_action", "critical_note"].iter().any(|key| {
+    ["hint", "next_action", "critical_note", "warning"].iter().any(|key| {
         output
             .get(*key)
             .and_then(serde_json::Value::as_str)
@@ -344,6 +346,17 @@ fn output_has_actionable_recovery_guidance(output: &serde_json::Value) -> bool {
         .get("fallback_tool")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|value| !value.trim().is_empty())
+        || output.get("hints").and_then(serde_json::Value::as_array).is_some_and(|hints| {
+            hints
+                .iter()
+                .any(|hint| hint.as_str().is_some_and(|value| !value.trim().is_empty()))
+        })
+}
+
+fn output_has_error_signal(output: &serde_json::Value) -> bool {
+    ["error", "error_type", "stderr", "stderr_preview", "message"]
+        .iter()
+        .any(|key| !output_field_is_empty(output.get(*key)))
 }
 
 fn output_reuses_recent_result(output: &serde_json::Value) -> bool {
@@ -355,27 +368,6 @@ fn output_reuses_recent_result(output: &serde_json::Value) -> bool {
     ]
     .iter()
     .any(|key| output.get(*key).and_then(serde_json::Value::as_bool) == Some(true))
-}
-
-fn looks_like_grep_style_command(command: &str) -> bool {
-    let lower = command.trim().to_ascii_lowercase();
-    lower.starts_with("grep ") || lower.starts_with("rg ") || lower.contains("/grep ") || lower.contains("/rg ")
-}
-
-fn output_is_grep_style_miss(output: &serde_json::Value, command_success: bool) -> bool {
-    if command_success {
-        return false;
-    }
-
-    let exit_code = output.get("exit_code").and_then(serde_json::Value::as_i64);
-    let command = output.get("command").and_then(serde_json::Value::as_str).unwrap_or_default();
-    let stdout_empty = output
-        .get("stdout")
-        .or_else(|| output.get("output"))
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|text| text.trim().is_empty());
-
-    stdout_empty && matches!(exit_code, Some(1 | 2)) && looks_like_grep_style_command(command)
 }
 
 fn error_is_missing_resource(error: &str) -> bool {
@@ -391,7 +383,7 @@ fn error_is_missing_resource(error: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
-fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &str) -> bool {
+fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &str, args: &serde_json::Value) -> bool {
     match &outcome.status {
         ToolExecutionStatus::Success { output, command_success, .. } => {
             output_has_empty_search_results(output)
@@ -400,7 +392,8 @@ fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &st
                     canonical_tool_name,
                     vtcode_core::config::constants::tools::UNIFIED_EXEC
                         | vtcode_core::config::constants::tools::EXEC_COMMAND
-                ) && output_is_grep_style_miss(output, *command_success))
+                ) && !*command_success
+                    && is_grep_style_no_match(canonical_tool_name, args, output))
         }
         ToolExecutionStatus::Failure { error } => error_is_missing_resource(&error.message),
         ToolExecutionStatus::Timeout { .. } | ToolExecutionStatus::Cancelled => false,
@@ -457,6 +450,9 @@ where
     if let Some(index) = overwrite_index {
         let previous_text_len = history[index].content.as_text().len();
         history[index].content = uni::MessageContent::Text(content);
+        if let Some(tool_name) = tool_name {
+            history[index].origin_tool = Some(tool_name.to_string());
+        }
         return ToolResponseHistoryUpdate::Replaced { previous_text_len };
     }
 
@@ -676,7 +672,7 @@ pub(crate) fn update_repetition_tracker(
     loop_tracker.record(signature_key.clone());
     let low_signal_family =
         crate::agent::runloop::unified::turn::tool_outcomes::handlers::low_signal_family_key(canonical_name, args)
-            .filter(|_| is_low_signal_outcome(outcome, canonical_name));
+            .filter(|_| is_low_signal_outcome(outcome, canonical_name, args));
     let is_low_signal_navigation = low_signal_family.is_some();
     if let Some(low_signal_family) = low_signal_family.as_ref() {
         loop_tracker.record_low_signal(low_signal_family.clone());
@@ -817,6 +813,16 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].origin_tool.as_deref(), Some("read_file"));
         assert_eq!(update, ToolResponseHistoryUpdate::Appended);
+    }
+
+    #[test]
+    fn push_tool_response_refreshes_origin_tool_when_replacing_same_call() {
+        let mut history = vec![uni::Message::tool_response("call_1".to_string(), "old".to_string())];
+
+        let update = push_tool_response(&mut history, "call_1".to_string(), Some("exec_command"), "new".to_string());
+
+        assert_eq!(update, ToolResponseHistoryUpdate::Replaced { previous_text_len: 3 });
+        assert_eq!(history[0].origin_tool.as_deref(), Some("exec_command"));
     }
 
     #[test]
@@ -1602,6 +1608,30 @@ mod tests {
     }
 
     #[test]
+    fn low_signal_tracker_does_not_hide_structured_search_errors_as_empty_results() {
+        let mut tracker = LoopTracker::new();
+        let failure_like = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "results": [],
+                "error": "permission denied while searching the workspace"
+            }),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        update_repetition_tracker(
+            &mut tracker,
+            &failure_like,
+            tools::CODE_SEARCH,
+            &json!({"query":"secret", "path":"src"}),
+        );
+
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
+    }
+
+    #[test]
     fn low_signal_tracker_counts_missing_read_failures() {
         let mut tracker = LoopTracker::new();
         let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
@@ -1667,8 +1697,8 @@ mod tests {
         let mut tracker = LoopTracker::new();
         let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: serde_json::json!({
-                "command": "grep -n '-> Result' vtcode-tui/src/main.rs",
-                "exit_code": 2,
+                "command": "grep -n 'missing' vtcode-tui/src/main.rs",
+                "exit_code": 1,
                 "output": ""
             }),
             stdout: None,
@@ -1679,18 +1709,60 @@ mod tests {
             &mut tracker,
             &miss,
             tools::EXEC_COMMAND,
-            &json!({"cmd":"grep -n '-> Result' vtcode-tui/src/main.rs"}),
+            &json!({"cmd":"grep -n 'missing' vtcode-tui/src/main.rs"}),
         );
         update_repetition_tracker(
             &mut tracker,
             &miss,
             tools::EXEC_COMMAND,
-            &json!({"cmd":"grep -n \"-> Result\" vtcode-tui/src/main.rs"}),
+            &json!({"cmd":"grep -n \"missing\" vtcode-tui/src/main.rs"}),
         );
 
         assert_eq!(tracker.max_low_signal_count(), 2);
         assert_eq!(tracker.consecutive_low_signal_navigations, 2);
         assert_eq!(tracker.total_low_signal_navigations, 2);
+    }
+
+    #[test]
+    fn low_signal_tracker_does_not_count_grep_style_errors_as_no_match() {
+        let mut tracker = LoopTracker::new();
+        let error = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "command": "rg missing restricted",
+                "exit_code": 2,
+                "output": ""
+            }),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+
+        update_repetition_tracker(&mut tracker, &error, tools::EXEC_COMMAND, &json!({"cmd":"rg missing restricted"}));
+
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
+        assert_eq!(tracker.total_low_signal_navigations, 0);
+    }
+
+    #[test]
+    fn low_signal_tracker_does_not_hide_grep_errors_as_no_match() {
+        let mut tracker = LoopTracker::new();
+        let failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "command": "rg missing restricted",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "permission denied",
+            }),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+
+        update_repetition_tracker(&mut tracker, &failure, tools::EXEC_COMMAND, &json!({"cmd":"rg missing restricted"}));
+
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
     }
 
     // --- read_normalized_signature_key tests ---

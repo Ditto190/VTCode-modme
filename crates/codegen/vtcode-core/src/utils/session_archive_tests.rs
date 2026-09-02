@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::constants::tools as tool_names;
-use crate::llm::provider::{ContentPart, ToolCall};
+use crate::llm::provider::{ContentPart, MessageClearAt, ToolCall};
 use anyhow::anyhow;
 use chrono::{TimeZone, Timelike};
 use std::mem::size_of;
@@ -139,6 +139,18 @@ fn session_message_roundtrip_preserves_commentary_phase() {
 
     assert_eq!(stored.phase, Some(AssistantPhase::Commentary));
     assert_eq!(restored.phase, Some(AssistantPhase::Commentary));
+}
+
+#[test]
+fn session_message_roundtrip_preserves_turn_scoped_clear_scope() {
+    let original = Message::turn_scoped_system("Only you see the output".to_owned());
+    let stored = SessionMessage::from(&original);
+    let encoded = serde_json::to_vec(&stored).expect("session message serialization");
+    let decoded: SessionMessage = serde_json::from_slice(&encoded).expect("session message deserialization");
+    let restored = Message::from(&decoded);
+
+    assert_eq!(decoded.clear_at, Some(MessageClearAt::NextUserMessage));
+    assert_eq!(restored.clear_at, Some(MessageClearAt::NextUserMessage));
 }
 
 #[test]
@@ -964,6 +976,7 @@ fn snapshot_compaction_shrinks_large_single_message_payloads() -> Result<()> {
             phase: None,
             origin_tool: Some(Box::new("command_session".repeat(50))),
             metadata: None,
+            clear_at: None,
         }],
         progress: Some(Box::new(SessionProgress {
             turn_number: 1,

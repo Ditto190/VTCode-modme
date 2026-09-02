@@ -74,7 +74,7 @@ fn handle_interrupt(session: &mut Session) -> Option<InlineEvent> {
     Some(InlineEvent::Interrupt)
 }
 
-fn dispatch_action(session: &mut Session, action: Action) -> Option<InlineEvent> {
+pub(crate) fn dispatch_rebindable_action(session: &mut Session, action: Action) -> Option<InlineEvent> {
     match action {
         Action::Interrupt => handle_interrupt(session),
         Action::Exit => {
@@ -146,6 +146,11 @@ fn dispatch_action(session: &mut Session, action: Action) -> Option<InlineEvent>
         // Task panel visibility lives on the AppSession layer, which dispatches
         // `ToggleTaskPanel` before the core action dispatch.
         Action::ToggleTaskPanel => None,
+        // Transcript review visibility lives on the AppSession layer, which
+        // handles this action before delegating to the core session.
+        Action::OpenTranscriptReview => None,
+        // Transcript review render mode is also owned by the AppSession layer.
+        Action::ToggleTranscriptRenderMode => None,
         Action::GeneratePromptSuggestion => {
             if !session.input_enabled {
                 return None;
@@ -158,6 +163,7 @@ fn dispatch_action(session: &mut Session, action: Action) -> Option<InlineEvent>
 }
 
 pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<InlineEvent> {
+    let key = action::normalize_terminal_control_event(key);
     let modifiers = key.modifiers;
     let has_control = modifiers.contains(KeyModifiers::CONTROL);
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
@@ -286,44 +292,13 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
         }
     }
 
-    // Binding store: resolve user-rebindable actions first.
-    // Readline keybindings (Ctrl+F/B/P/N/T, Alt+D/U/L/C/\) are hardcoded
-    // editing shortcuts and take priority over the binding store.
+    // Binding store: resolve user-rebindable actions first. Readline editing
+    // shortcuts remain owned by the hardcoded composer paths below.
     if let Some(action) = session.bindings.resolve(&key) {
-        // Skip binding store for Readline keybindings that are hardcoded below
-        let is_readline_key = has_control
-            && !has_command
-            && !has_alt
-            && matches!(
-                key.code,
-                KeyCode::Char('f')
-                    | KeyCode::Char('F')
-                    | KeyCode::Char('b')
-                    | KeyCode::Char('B')
-                    | KeyCode::Char('p')
-                    | KeyCode::Char('P')
-                    | KeyCode::Char('n')
-                    | KeyCode::Char('N')
-                    | KeyCode::Char('t')
-                    | KeyCode::Char('T')
-            );
-        let is_alt_key = has_alt
-            && !has_control
-            && !has_command
-            && matches!(
-                key.code,
-                KeyCode::Char('d')
-                    | KeyCode::Char('D')
-                    | KeyCode::Char('u')
-                    | KeyCode::Char('U')
-                    | KeyCode::Char('l')
-                    | KeyCode::Char('L')
-                    | KeyCode::Char('c')
-                    | KeyCode::Char('C')
-                    | KeyCode::Char('\\')
-            );
-        if !is_readline_key && !is_alt_key {
-            return dispatch_action(session, action);
+        let is_readline_key = action::is_readline_editing_key(&key);
+        let is_app_owned_action = matches!(action, Action::OpenTranscriptReview | Action::ToggleTranscriptRenderMode);
+        if !is_readline_key && !is_app_owned_action {
+            return dispatch_rebindable_action(session, action);
         }
     }
 

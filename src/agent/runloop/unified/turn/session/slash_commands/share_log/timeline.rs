@@ -272,6 +272,7 @@ mod tests {
             tool_call_id: None,
             phase: None,
             origin_tool: None,
+            clear_at: None,
         }];
 
         let export = build_timeline_export(

@@ -95,7 +95,7 @@ pub fn spawn_session_with_options(theme: InlineTheme, options: SessionOptions) -
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
     let show_logs = log::is_tui_log_capture_enabled();
 
-    tokio::spawn(async move {
+    let worker = tokio::spawn(async move {
         if let Err(error) = run_tui(
             command_rx,
             event_tx,
@@ -147,6 +147,7 @@ pub fn spawn_session_with_options(theme: InlineTheme, options: SessionOptions) -
     Ok(InlineSession {
         handle: InlineHandle::new(command_tx),
         events: event_rx,
+        worker: Some(worker),
     })
 }
 

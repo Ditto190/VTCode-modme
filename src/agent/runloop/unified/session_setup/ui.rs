@@ -214,7 +214,7 @@ pub(crate) async fn initialize_session_ui(
             load_user_config().await.ok()
         }
     };
-    let user_key_bindings: HashMap<String, Vec<String>> = match user_dot_config {
+    let legacy_key_bindings: HashMap<String, Vec<String>> = match user_dot_config {
         Some(dot) => dot
             .preferences
             .keybindings
@@ -223,6 +223,11 @@ pub(crate) async fn initialize_session_ui(
             .collect(),
         None => HashMap::new(),
     };
+    let mut user_key_bindings = legacy_key_bindings.clone();
+    if let Some(vt_config) = vt_cfg {
+        user_key_bindings.extend(vt_config.ui.keybindings.clone());
+    }
+    session_state.session_bootstrap.legacy_key_bindings = legacy_key_bindings;
 
     // Synchronous preview callback that applies the theme preview on the TUI
     // side before rendering, eliminating the one-frame lag between cursor

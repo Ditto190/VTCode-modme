@@ -164,6 +164,7 @@ pub(super) async fn execute_with_cache_and_streaming(
     max_tool_retries: usize,
     exec_settlement_mode: ExecSettlementMode,
     safety_prevalidated: bool,
+    show_live_pty_preview: bool,
 ) -> RuntimeToolExecution {
     let tokens = CancellationTokens {
         state: ctrl_c_state.clone(),
@@ -183,6 +184,7 @@ pub(super) async fn execute_with_cache_and_streaming(
         max_tool_retries,
         exec_settlement_mode,
         safety_prevalidated,
+        show_live_pty_preview,
     )
     .await
 }
@@ -205,6 +207,7 @@ async fn execute_with_cache_and_streaming_inner(
     max_tool_retries: usize,
     exec_settlement_mode: ExecSettlementMode,
     safety_prevalidated: bool,
+    show_live_pty_preview: bool,
 ) -> RuntimeToolExecution {
     let is_cacheable_tool = is_tool_cacheable(name, args_val);
     let cache_target = cache_target_path(name, args_val);
@@ -270,6 +273,7 @@ async fn execute_with_cache_and_streaming_inner(
             stream_command,
             registry.pty_config().clone(),
             Some(registry.workspace_root()),
+            show_live_pty_preview,
         );
         let (callback, coalescer) =
             build_streaming_progress_callback(callback, harness_emitter, tool_item_id, tool_call_id);

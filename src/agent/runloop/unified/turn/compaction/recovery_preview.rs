@@ -1,28 +1,9 @@
 use super::*;
-use std::fs;
+use vtcode_core::tools::SpooledOutputReference;
 
-fn resolve_workspace_spool_path(workspace_root: &Path, raw_path: &str) -> Option<PathBuf> {
-    let trimmed = raw_path.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let path = Path::new(trimmed);
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        workspace_root.join(path)
-    };
-    let normalized = vtcode_core::utils::path::normalize_path(&absolute);
-    let normalized_workspace = vtcode_core::utils::path::normalize_path(workspace_root);
-    normalized.starts_with(&normalized_workspace).then_some(normalized)
-}
-
-fn structured_tool_preview_from_spool(obj: &serde_json::Map<String, Value>, workspace_root: &Path) -> Option<String> {
-    let spool_path = obj.get("spool_path")?.as_str()?.trim();
-    let resolved = resolve_workspace_spool_path(workspace_root, spool_path)?;
-    let spool_content = String::from_utf8_lossy(&fs::read(&resolved).ok()?).into_owned();
-
+fn structured_tool_preview_from_spool(value: &Value, _workspace_root: &Path) -> Option<String> {
+    let reference = SpooledOutputReference::from_value(value)?;
+    let obj = value.as_object()?;
     let mut parts = Vec::new();
     if let Some(stderr) = obj
         .get("stderr_preview")
@@ -39,14 +20,11 @@ fn structured_tool_preview_from_spool(obj: &serde_json::Map<String, Value>, work
         || obj.get("spool_ref_only").and_then(Value::as_bool) == Some(true);
 
     if is_exec_like {
-        parts.push(format!(
-            "Spool excerpt: {}",
-            normalize_whitespace(&tail_preview_text(
-                &spool_content,
-                RECOVERY_PREVIEW_SPOOL_EXEC_TAIL_BYTES,
-                RECOVERY_PREVIEW_SPOOL_EXEC_MAX_LINES
-            ))
-        ));
+        if let Some(preview) = reference.preview {
+            parts.push(format!("Spool excerpt: {}", normalize_spool_preview(preview)));
+        } else {
+            parts.push(format_spool_reference(&reference, obj));
+        }
     } else {
         let mut excerpt_parts = Vec::new();
         if let Some(path) = obj
@@ -58,17 +36,35 @@ fn structured_tool_preview_from_spool(obj: &serde_json::Map<String, Value>, work
         {
             excerpt_parts.push(format!("source_path: {path}"));
         }
-        excerpt_parts.push(format!(
-            "Spool excerpt: {}",
-            normalize_whitespace(&condense_text_bytes(
-                &spool_content,
-                RECOVERY_PREVIEW_SPOOL_READ_HEAD_BYTES,
-                RECOVERY_PREVIEW_SPOOL_READ_TAIL_BYTES
-            ))
-        ));
+        if let Some(preview) = reference.preview {
+            excerpt_parts.push(format!("Spool excerpt: {}", normalize_spool_preview(preview)));
+        } else {
+            excerpt_parts.push(format_spool_reference(&reference, obj));
+        }
         parts.push(excerpt_parts.join(" | "));
     }
     (!parts.is_empty()).then(|| parts.join(" | "))
+}
+
+fn normalize_spool_preview(preview: &str) -> String {
+    // A preview may itself have come from an older recovery diagnostic. Keep
+    // one stable label at the outer boundary so repeated recovery passes do
+    // not amplify "Spool excerpt" markers.
+    normalize_whitespace(&preview.replace("Spool excerpt:", "Output excerpt:"))
+}
+
+fn format_spool_reference(reference: &SpooledOutputReference<'_>, obj: &serde_json::Map<String, Value>) -> String {
+    let bytes = reference
+        .original_bytes
+        .map_or_else(|| "unknown byte count".to_string(), |bytes| format!("{bytes} bytes"));
+    let state = if obj.get("spool_pending").and_then(Value::as_bool) == Some(true) {
+        "pending"
+    } else if obj.get("spool_complete").and_then(Value::as_bool) == Some(true) {
+        "complete"
+    } else {
+        "state unknown"
+    };
+    format!("Spool reference: {} ({bytes}; {state})", reference.spool_path)
 }
 
 pub(crate) fn build_recovery_context_previews_with_workspace(
@@ -90,6 +86,18 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
 
     fn preview_line(label: &str, text: &str) -> String {
         format!("{label}: {}", truncate_preview(text))
+    }
+
+    fn truncate_to_char_limit(text: &str, limit: usize) -> String {
+        if text.chars().count() <= limit {
+            return text.to_string();
+        }
+        if limit <= 3 {
+            return text.chars().take(limit).collect();
+        }
+        let mut truncated = text.chars().take(limit - 3).collect::<String>();
+        truncated.push_str("...");
+        truncated
     }
 
     fn trimmed_json_str(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
@@ -131,13 +139,14 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
     }
 
     fn structured_tool_preview(raw_text: &str, workspace_root: Option<&Path>) -> Option<(String, u8)> {
-        let obj = serde_json::from_str::<Value>(raw_text).ok()?.as_object()?.clone();
-        let guidance = obj.get("error").and_then(Value::as_object).unwrap_or(&obj);
+        let value = serde_json::from_str::<Value>(raw_text).ok()?;
+        let obj = value.as_object()?;
+        let guidance = obj.get("error").and_then(Value::as_object).unwrap_or(obj);
         let mut parts = Vec::new();
         let mut priority = 0u8;
         let matches_array = obj.get("matches").or_else(|| obj.get("results")).and_then(Value::as_array);
         if let Some(matches) = matches_array {
-            let path = trimmed_json_str(&obj, "path");
+            let path = trimmed_json_str(obj, "path");
             let summary = if matches.is_empty() {
                 path.map_or_else(|| "No matches found".to_string(), |p| format!("No matches found in {p}"))
             } else {
@@ -164,9 +173,9 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
             push_unique(&mut parts, Some(format!("Listed {total} files")));
             priority = priority.max(10);
         }
-        push_unique(&mut parts, error_preview_text(&obj));
+        push_unique(&mut parts, error_preview_text(obj));
         for key in ["critical_note", "message", "hint"] {
-            push_unique(&mut parts, trimmed_json_str(&obj, key).or_else(|| trimmed_json_str(guidance, key)));
+            push_unique(&mut parts, trimmed_json_str(obj, key).or_else(|| trimmed_json_str(guidance, key)));
         }
         if parts
             .iter()
@@ -176,7 +185,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
         }
         push_unique(
             &mut parts,
-            trimmed_json_str(&obj, "next_action")
+            trimmed_json_str(obj, "next_action")
                 .or_else(|| trimmed_json_str(guidance, "next_action"))
                 .map(|n| format!("Next action: {n}")),
         );
@@ -184,7 +193,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
             priority = priority.max(60);
         }
         if let Some(tool) =
-            trimmed_json_str(&obj, "fallback_tool").or_else(|| trimmed_json_str(guidance, "fallback_tool"))
+            trimmed_json_str(obj, "fallback_tool").or_else(|| trimmed_json_str(guidance, "fallback_tool"))
         {
             let fallback = obj
                 .get("fallback_tool_args")
@@ -196,7 +205,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
             priority = priority.max(60);
         }
         if let Some(ws) = workspace_root {
-            let spool = structured_tool_preview_from_spool(&obj, ws);
+            let spool = structured_tool_preview_from_spool(&value, ws);
             if spool.is_some() {
                 priority = priority.max(100);
             }
@@ -204,7 +213,7 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
         }
         if parts.is_empty() {
             for key in ["output", "content", "stdout", "stderr"] {
-                push_unique(&mut parts, trimmed_json_str(&obj, key));
+                push_unique(&mut parts, trimmed_json_str(obj, key));
                 if !parts.is_empty() {
                     priority = priority.max(90);
                     break;
@@ -270,5 +279,21 @@ pub(crate) fn build_recovery_context_previews_with_workspace(
     {
         previews.push(text);
     }
-    previews
+    let mut bounded_previews = Vec::with_capacity(previews.len());
+    let mut total_chars = 0usize;
+    for preview in previews {
+        let separator_chars = usize::from(!bounded_previews.is_empty());
+        let available = RECOVERY_PREVIEW_MAX_TOTAL_CHARS
+            .saturating_sub(total_chars)
+            .saturating_sub(separator_chars);
+        if available == 0 {
+            break;
+        }
+        let preview = truncate_to_char_limit(&preview, available);
+        total_chars = total_chars
+            .saturating_add(separator_chars)
+            .saturating_add(preview.chars().count());
+        bounded_previews.push(preview);
+    }
+    bounded_previews
 }

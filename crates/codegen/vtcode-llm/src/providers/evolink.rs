@@ -7,6 +7,7 @@ use vtcode_config::constants::{env_vars, models, urls};
 use vtcode_config::core::PromptCachingConfig;
 use vtcode_config::types::ReasoningEffortLevel;
 
+use super::common::{collect_history_system_directives, merge_system_prompt_with_history_directives};
 use super::error_handling::{format_network_error, handle_openai_http_error};
 use super::extract_reasoning_trace;
 use super::openai_compat::{OpenAiCompatCore, OpenAiCompatSpec};
@@ -135,8 +136,15 @@ impl EvolinkProvider {
         let model = normalize(&request.model).to_string();
         payload.insert("model".to_owned(), Value::String(model));
 
-        // Anthropic uses top-level `system` field, not a system message
-        if let Some(system_prompt) = &request.system_prompt {
+        // Anthropic uses a top-level `system` field, so promote the same
+        // canonical history directives that the direct Anthropic adapter uses.
+        let history_system_directives = collect_history_system_directives(request);
+        let system_prompt = merge_system_prompt_with_history_directives(
+            request.system_prompt.as_deref(),
+            &history_system_directives,
+            "[History Directives]",
+        );
+        if let Some(system_prompt) = system_prompt {
             let trimmed = system_prompt.trim();
             if !trimmed.is_empty() {
                 payload.insert("system".to_owned(), Value::String(trimmed.to_string()));
@@ -459,6 +467,31 @@ mod tests {
         assert_eq!(payload["max_tokens"], 8192);
         assert_eq!(payload["temperature"], 0.5);
         assert!(payload.get("stream").is_none());
+    }
+
+    #[test]
+    fn anthropic_payload_promotes_history_system_directives() {
+        let provider = EvolinkProvider::new("test-key".to_string());
+        let payload = provider
+            .convert_to_anthropic_format(&LLMRequest {
+                model: "evolink/claude-x".to_string(),
+                messages: vec![
+                    Message::user("run a command".to_string()),
+                    Message::system("Only you see that command's output".to_string()),
+                    Message::user("continue".to_string()),
+                ]
+                .into(),
+                system_prompt: Some(Arc::from("system guidance")),
+                ..Default::default()
+            })
+            .expect("payload should promote history directives");
+
+        assert!(payload["system"].as_str().is_some_and(|system| {
+            system.contains("system guidance") && system.contains("Only you see that command's output")
+        }));
+        let messages = payload.get("messages").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(messages.iter().all(|message| message["role"] != "system"));
     }
 
     impl EvolinkProvider {

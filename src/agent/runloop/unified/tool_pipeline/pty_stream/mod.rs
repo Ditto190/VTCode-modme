@@ -10,10 +10,10 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tokio::sync::oneshot;
+    use tokio::sync::{mpsc, oneshot};
     use tokio::time::timeout;
     use vtcode_core::config::PtyConfig;
-    use vtcode_ui::tui::app::InlineSegment;
+    use vtcode_ui::tui::app::{InlineCommand, InlineHandle, InlineSegment};
 
     use super::runtime::PtyStreamRuntime;
     use super::segments::{PtyLineStyles, line_to_segments, tokenize_preserve_whitespace};
@@ -113,6 +113,22 @@ mod tests {
         let state = PtyStreamState::new(Some("cargo check".to_string()), test_pty_config(), None);
         let rendered = state.render_lines(5);
         assert_eq!(rendered, vec!["• Ran cargo check".to_string()]);
+    }
+
+    #[test]
+    fn pty_stream_state_uses_bounded_live_preview() {
+        let mut state = PtyStreamState::new(Some("cargo check".to_string()), test_pty_config(), None);
+        state.apply_chunk("first\nsecond\nthird\n", 2);
+
+        assert_eq!(
+            state.render_lines(2),
+            vec![
+                "• Ran cargo check".to_string(),
+                "    … +1 line".to_string(),
+                "  └ second".to_string(),
+                "    third".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -250,6 +266,58 @@ mod tests {
         assert_eq!(flatten_text(&segments[0]), "  └ docs");
         assert_eq!(link_ranges.len(), 1);
         assert_eq!(link_ranges[0].len(), 1);
+    }
+
+    #[tokio::test]
+    async fn compact_pty_runtime_does_not_emit_live_preview() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let (runtime, callback) = PtyStreamRuntime::start(
+            handle,
+            Default::default(),
+            8,
+            Some("cargo check".to_string()),
+            test_pty_config(),
+            None,
+            false,
+        );
+
+        callback("run_pty_cmd", "first\nsecond\n");
+        runtime.shutdown(anstyle::Color::Ansi(AnsiColor::Green)).await;
+
+        let commands = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, InlineCommand::ReplaceLast { .. })),
+            "compact PTY execution must not emit a transient live row"
+        );
+    }
+
+    #[tokio::test]
+    async fn enabled_pty_runtime_emits_live_preview() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let (runtime, callback) = PtyStreamRuntime::start(
+            handle,
+            Default::default(),
+            8,
+            Some("cargo check".to_string()),
+            test_pty_config(),
+            None,
+            true,
+        );
+
+        callback("run_pty_cmd", "first\nsecond\n");
+        runtime.shutdown(anstyle::Color::Ansi(AnsiColor::Green)).await;
+
+        let commands = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, InlineCommand::ReplaceLast { .. })),
+            "expanded PTY execution should retain its live preview"
+        );
     }
 
     #[tokio::test]

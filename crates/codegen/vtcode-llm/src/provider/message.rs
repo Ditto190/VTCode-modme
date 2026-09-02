@@ -11,6 +11,17 @@ pub enum AssistantPhase {
     FinalAnswer,
 }
 
+/// Controls when an Anthropic mid-conversation system message is cleared.
+///
+/// This is intentionally a typed message property instead of a provider-wide
+/// request flag so the message remains in persisted history and can be replayed
+/// verbatim on the next request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageClearAt {
+    NextUserMessage,
+}
+
 impl AssistantPhase {
     #[must_use]
     pub(crate) const fn as_str(self) -> &'static str {
@@ -299,6 +310,9 @@ pub struct Message {
     /// Optional per-message metadata (timestamp, importance, compression status, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MessageMetadata>,
+    /// Optional provider-specific clear scope for a mid-conversation system message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_at: Option<MessageClearAt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -525,6 +539,7 @@ impl Message {
             phase: None,
             origin_tool: None,
             metadata: None,
+            clear_at: None,
         }
     }
 
@@ -590,6 +605,20 @@ impl Message {
     #[inline]
     pub fn system(content: String) -> Self {
         Self::base(MessageRole::System, MessageContent::Text(content))
+    }
+
+    /// Create a system message whose lifecycle is scoped to the current turn.
+    /// Provider/model routes that advertise native support let Anthropic clear
+    /// it when the next user turn arrives. Other routes receive the same text
+    /// as an ordinary system/history directive after the runtime removes the
+    /// Anthropic-only lifecycle field; canonical history retains the typed
+    /// marker for replay fidelity.
+    #[inline]
+    pub fn turn_scoped_system(content: String) -> Self {
+        Self {
+            clear_at: Some(MessageClearAt::NextUserMessage),
+            ..Self::system(content)
+        }
     }
 
     /// Create a tool response message
@@ -697,6 +726,22 @@ impl Message {
     /// Validate this message for a specific provider
     /// Based on official API documentation constraints
     pub(crate) fn validate_for_provider(&self, provider: &str) -> Result<(), String> {
+        if self.clear_at.is_some() {
+            if self.role != MessageRole::System {
+                return Err("clear_at is only valid on system messages".to_owned());
+            }
+            let text_only = match &self.content {
+                MessageContent::Text(_) => true,
+                MessageContent::Parts(parts) => parts.iter().all(|part| matches!(part, ContentPart::Text { .. })),
+            };
+            if !text_only {
+                return Err("clear_at system messages must contain text-only content".to_owned());
+            }
+            if !provider.eq_ignore_ascii_case("anthropic") {
+                return Err(format!("clear_at system messages are only supported by Anthropic, got {provider}"));
+            }
+        }
+
         // Check role-specific constraints
         self.role.validate_for_provider(provider, self.tool_call_id.is_some())?;
 
@@ -888,7 +933,7 @@ impl MessageRole {
 
 #[cfg(test)]
 mod tests {
-    use super::{AssistantPhase, ContentPart, Message, MessageContent, MessageRole, ToolCall};
+    use super::{AssistantPhase, ContentPart, Message, MessageClearAt, MessageContent, MessageRole, ToolCall};
 
     #[test]
     fn message_content_parts_concatenate_without_extra_spaces() {
@@ -935,6 +980,25 @@ mod tests {
         assert!(user.phase.is_none());
         assert_eq!(tool.role, MessageRole::Tool);
         assert!(tool.phase.is_none());
+    }
+
+    #[test]
+    fn turn_scoped_system_message_round_trips_clear_scope() {
+        let message = Message::turn_scoped_system("Only you see the output".to_string());
+        let encoded = serde_json::to_value(&message).expect("message serialization");
+
+        assert_eq!(encoded["role"], "System");
+        assert_eq!(encoded["clear_at"], "next_user_message");
+        assert_eq!(message.clear_at, Some(MessageClearAt::NextUserMessage));
+        assert_eq!(serde_json::from_value::<Message>(encoded).expect("message deserialization"), message);
+    }
+
+    #[test]
+    fn turn_scoped_system_message_requires_non_anthropic_wire_translation() {
+        let error = Message::turn_scoped_system("notice".to_string())
+            .validate_for_provider("openai")
+            .expect_err("raw Anthropic lifecycle fields are not valid on an OpenAI wire");
+        assert!(error.contains("only supported by Anthropic"));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
 use crate::agent::runloop::unified::turn::tool_outcomes::execution_result::handle_tool_execution_result;
+use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::tools::registry::ToolExecutionError;
 
 #[tokio::test]
@@ -168,6 +169,146 @@ async fn denied_execution_result_uses_planning_total_fuse() {
 
     assert!(matches!(outcome, Some(TurnHandlerOutcome::Continue)));
     assert!(outcome_ctx.ctx.harness_state.blocked_tool_recovery_pending());
+}
+
+async fn successful_tool_history_for_display_mode(mode: ToolDisplayMode) -> Vec<(Option<String>, String)> {
+    let mut backing = TestContextBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    ctx.renderer.set_tool_display_mode(mode);
+
+    let output = json!({
+        "command": "printf context",
+        "output": "stdout context",
+        "stdout": "stdout context",
+        "stderr": "stderr context",
+        "exit_code": 0,
+        "critical_note": "critical context",
+        "next_action": "next context",
+        "generated_files": {
+            "files": ["src/generated.rs"]
+        },
+        "metadata_flag": false,
+        "metadata_count": 0,
+        "fallback_tool": "read_file",
+        "fallback_tool_args": {"path": "src/generated.rs"}
+    });
+    let pipeline_outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+        output,
+        stdout: Some("stdout context".to_string()),
+        modified_files: Vec::new(),
+        command_success: true,
+    });
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    {
+        let mut outcome_ctx = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+        };
+
+        handle_tool_execution_result(
+            &mut outcome_ctx,
+            "context_call".to_string(),
+            tool_names::EXECUTE_CODE,
+            &json!({"command": "printf context"}),
+            &pipeline_outcome,
+            Instant::now(),
+        )
+        .await
+        .expect("successful command result should be handled");
+    }
+
+    ctx.working_history
+        .iter()
+        .filter(|message| message.role == uni::MessageRole::Tool)
+        .map(|message| (message.tool_call_id.clone(), message.content.as_text().into_owned()))
+        .collect()
+}
+
+#[tokio::test]
+async fn compact_display_keeps_provider_history_identical_to_expanded_display() {
+    let compact_history = successful_tool_history_for_display_mode(ToolDisplayMode::Compact).await;
+    let expanded_history = successful_tool_history_for_display_mode(ToolDisplayMode::Expanded).await;
+
+    assert_eq!(compact_history, expanded_history);
+    assert_eq!(compact_history.len(), 1);
+    let content = &compact_history[0].1;
+    for expected in [
+        "stdout context",
+        "stderr context",
+        "critical context",
+        "next context",
+        "src/generated.rs",
+        "metadata_flag",
+        "metadata_count",
+        "read_file",
+        "fallback_tool_args",
+    ] {
+        assert!(content.contains(expected), "provider history lost {expected:?}: {content}");
+    }
+    assert!(!content.contains("Ctrl+T"));
+    assert!(!content.contains("click to expand"));
+}
+
+#[tokio::test]
+async fn non_zero_read_result_is_diagnosed_without_successful_readonly_signature() {
+    let mut backing = TestContextBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    let args = json!({"path": "missing.rs"});
+    let output = json!({
+        "path": "missing.rs",
+        "stderr": "No such file or directory",
+        "exit_code": 1
+    });
+    let pipeline_outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+        output,
+        stdout: None,
+        modified_files: Vec::new(),
+        command_success: false,
+    });
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+
+    handle_tool_execution_result(
+        &mut outcome_ctx,
+        "missing-read".to_string(),
+        tool_names::READ_FILE,
+        &args,
+        &pipeline_outcome,
+        Instant::now(),
+    )
+    .await
+    .expect("non-zero result should be handled");
+
+    let tool_response = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .find(|message| message.role == uni::MessageRole::Tool)
+        .expect("tool response should be recorded");
+    let response: serde_json::Value =
+        serde_json::from_str(&tool_response.content.as_text()).expect("tool response should remain JSON");
+    assert_eq!(
+        response["diagnosis"]["observed"],
+        "'read_file' returned exit code 1. Stderr: No such file or directory"
+    );
+    assert_eq!(
+        outcome_ctx
+            .ctx
+            .harness_state
+            .snapshot_turn_diagnostics(Default::default(), 0)
+            .failed_tool_calls,
+        1
+    );
+    let signature =
+        crate::agent::runloop::unified::turn::tool_outcomes::helpers::signature_key_for(tool_names::READ_FILE, &args);
+    assert!(!outcome_ctx.ctx.harness_state.has_successful_readonly_signature(&signature));
 }
 
 #[tokio::test]

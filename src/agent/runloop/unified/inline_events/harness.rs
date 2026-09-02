@@ -17,10 +17,12 @@ use vtcode_core::core::agent::events::{
 use vtcode_core::exec::events::ThreadStartedEvent;
 use vtcode_core::exec::events::{
     AgentMessageItem, CompactionMode, CompactionTrigger, HarnessEventItem, HarnessEventKind, ItemCompletedEvent,
-    ThreadCompactBoundaryEvent, ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadItem,
+    ReasoningItem, ThreadCompactBoundaryEvent, ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadItem,
     ThreadItemDetails, ToolCallStatus, ToolOutcome, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent, Usage,
     VersionedThreadEvent,
 };
+#[cfg(test)]
+use vtcode_webmcp::EventHubConfig;
 use vtcode_webmcp::WebmcpEventHub;
 
 mod atif;
@@ -196,14 +198,33 @@ impl HarnessEventEmitter {
         }
 
         {
-            let webmcp_hub = self
-                .inner
-                .webmcp_event_hub
-                .lock()
-                .map_err(|error| anyhow::anyhow!("WebMCP event hub lock poisoned: {error}"))?;
-            if let Some(hub) = webmcp_hub.as_ref() {
-                hub.publish(VersionedThreadEvent::new(event.clone()))
-                    .context("publish runtime event to WebMCP")?;
+            match self.inner.webmcp_event_hub.lock() {
+                Ok(webmcp_hub) => {
+                    if let Some(hub) = webmcp_hub.as_ref()
+                        && let Err(error) = hub.publish(VersionedThreadEvent::new(event.clone()))
+                    {
+                        // WebMCP is an optional replay consumer. A browser
+                        // disconnect or a full bridge queue must not prevent
+                        // the canonical event (already persisted above) or
+                        // the remaining exporters from observing this event.
+                        tracing::warn!(
+                            target: "vtcode.harness",
+                            phase = "webmcp_export",
+                            path = %self.inner.path.display(),
+                            error = %error,
+                            "optional WebMCP event publish failed"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        target: "vtcode.harness",
+                        phase = "webmcp_export",
+                        path = %self.inner.path.display(),
+                        error = %error,
+                        "optional WebMCP event hub lock poisoned"
+                    );
+                }
             }
         }
 
@@ -278,6 +299,25 @@ impl HarnessEventEmitter {
             item: ThreadItem {
                 id: format!("{turn_id}-assistant-final-{}", Uuid::new_v4()),
                 details: ThreadItemDetails::AgentMessage(AgentMessageItem { text: text.to_string() }),
+            },
+        }))
+    }
+
+    /// Emit bounded, non-secret failure diagnosis as a normal reasoning item.
+    /// This uses the existing item contract so it remains available to session
+    /// replay and exporters without exposing provider-native chain-of-thought.
+    pub(crate) fn emit_diagnosis(&self, turn_id: &str, text: &str) -> Result<()> {
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+
+        self.emit(ThreadEvent::ItemCompleted(ItemCompletedEvent {
+            item: ThreadItem {
+                id: format!("{turn_id}-diagnosis-{}", Uuid::new_v4()),
+                details: ThreadItemDetails::Reasoning(ReasoningItem {
+                    text: text.to_string(),
+                    stage: Some("diagnosis".to_string()),
+                }),
             },
         }))
     }
@@ -593,6 +633,22 @@ mod tests {
     }
 
     #[test]
+    fn diagnosis_is_written_as_a_reasoning_item_with_a_diagnosis_stage() {
+        let tmp = TempDir::new().expect("temp dir");
+        let path = tmp.path().join("events.jsonl");
+        let emitter = HarnessEventEmitter::new(path.clone()).expect("emitter");
+
+        emitter
+            .emit_diagnosis("turn-1", "Diagnosis: exec\nObserved: exit 1")
+            .expect("emit diagnosis");
+
+        let content = fs::read_to_string(path).expect("read harness log");
+        assert!(content.contains("\"type\":\"reasoning\""));
+        assert!(content.contains("\"stage\":\"diagnosis\""));
+        assert!(content.contains("Observed: exit 1"));
+    }
+
+    #[test]
     fn open_responses_integration_writes_sse_events() {
         let tmp = TempDir::new().expect("temp dir");
         let harness_path = tmp.path().join("harness.jsonl");
@@ -691,6 +747,25 @@ mod tests {
         emitter.finish().await.expect("canonical drain");
 
         let event_path = tmp.path().join(".vtcode/sessions/canonical-session/events.jsonl");
+        let event_lines = fs::read_to_string(event_path).expect("read canonical events").lines().count();
+        assert_eq!(event_lines, 1);
+    }
+
+    #[tokio::test]
+    async fn webmcp_export_failure_does_not_disable_canonical_persistence() {
+        let tmp = TempDir::new().expect("temp dir");
+        let emitter = HarnessEventEmitter::new_async(tmp.path(), "webmcp-failure-session", None)
+            .await
+            .expect("canonical emitter");
+        let hub = WebmcpEventHub::new_with_max_event_bytes(EventHubConfig::default(), 1).expect("bounded hub");
+        emitter.attach_webmcp_event_hub(hub).expect("attach WebMCP hub");
+
+        emitter
+            .emit(turn_started_event())
+            .expect("optional WebMCP failure must be isolated");
+        emitter.finish().await.expect("canonical emitter should still finish");
+
+        let event_path = tmp.path().join(".vtcode/sessions/webmcp-failure-session/events.jsonl");
         let event_lines = fs::read_to_string(event_path).expect("read canonical events").lines().count();
         assert_eq!(event_lines, 1);
     }

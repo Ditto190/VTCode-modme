@@ -34,6 +34,7 @@ const COPY_FAILURE_NOTIFICATION_TEXT: &str = "Copy failed";
 const ACTION_REQUIRED_STATUS_TEXT: &str = "Action required";
 const APPROVAL_REQUIRED_STATUS_TEXT: &str = "Approval required";
 const INPUT_REQUIRED_STATUS_TEXT: &str = "Input required";
+const ACTIVE_PTY_STATUS_TEXT: &str = "Running PTY command...";
 
 impl Session {
     pub(crate) fn set_task_panel_lines(&mut self, lines: Vec<String>) {
@@ -355,6 +356,8 @@ impl Session {
     }
 
     pub(crate) fn status_left_text(&self) -> Option<&str> {
+        let active_pty_status = self.active_pty_status_text();
+
         // During stage states (Planning/Building), show the live activity status
         // (e.g. "Running grep...") when the agent is actively working so the
         // footer reflects what is happening. Fall back to the stage label
@@ -366,7 +369,20 @@ impl Session {
                     return Some(trimmed);
                 }
             }
+            if let Some(status) = active_pty_status {
+                return Some(status);
+            }
             return self.activity_state.status();
+        }
+
+        // Compact PTY rendering intentionally keeps the live output row hidden.
+        // Keep the global PTY observer visible in the footer in that case, while
+        // preserving a more specific loading/approval status when one exists.
+        if self.activity_state.status().is_none()
+            && active_pty_status.is_some()
+            && !self.input_status_left.as_deref().is_some_and(status_requires_shimmer)
+        {
+            return active_pty_status;
         }
 
         self.activity_state
@@ -375,6 +391,7 @@ impl Session {
             .map(str::trim)
             .filter(|value: &&str| !value.is_empty())
             .or_else(|| self.overlay_attention_status_text())
+            .or(active_pty_status)
     }
 
     pub(crate) fn status_right_text(&self) -> Option<&str> {
@@ -392,7 +409,13 @@ impl Session {
     /// execute even before the displayed text has been updated.
     fn animation_status_text(&self) -> &str {
         if self.activity_state.is_stage() {
-            self.input_status_left.as_deref().unwrap_or("")
+            if let Some(left) = self.input_status_left.as_deref()
+                && !left.trim().is_empty()
+                && status_requires_shimmer(left)
+            {
+                return left;
+            }
+            self.active_pty_status_text().unwrap_or("")
         } else {
             self.status_left_text().unwrap_or("")
         }
@@ -413,6 +436,10 @@ impl Session {
             .as_ref()
             .map(|counter| counter.load(Ordering::Relaxed))
             .unwrap_or(0)
+    }
+
+    fn active_pty_status_text(&self) -> Option<&'static str> {
+        (self.active_pty_session_count() > 0).then_some(ACTIVE_PTY_STATUS_TEXT)
     }
 
     pub(crate) fn has_status_spinner(&self) -> bool {

@@ -74,19 +74,13 @@ pub(crate) struct InputStatusState {
 
 const GIT_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct BottomStatusLayout {
     left: Vec<String>,
     right: Vec<String>,
 }
 
 impl BottomStatusLayout {
-    fn push_left(&mut self, value: Option<String>) {
-        if let Some(value) = value {
-            push_unique(&mut self.left, value);
-        }
-    }
-
     fn into_status(self) -> (Option<String>, Option<String>) {
         (join_status_components(self.left), join_status_components(self.right))
     }
@@ -385,11 +379,21 @@ pub(crate) async fn update_input_status_if_changed(
 }
 
 fn auto_status_layout(state: &InputStatusState) -> BottomStatusLayout {
-    let mut layout = BottomStatusLayout::default();
-    layout.push_left(state.git_left.clone());
-    layout.right =
+    let right_components =
         auto_status_components(state.thread_context.as_deref(), state.is_cancelling, state.spooled_files_count, state);
-    layout
+    let right = right_components
+        .into_iter()
+        .filter(|component| {
+            state
+                .git_summary
+                .as_ref()
+                .is_none_or(|summary| !component.trim().eq_ignore_ascii_case(summary.branch.trim()))
+        })
+        .collect();
+    BottomStatusLayout {
+        left: state.git_left.clone().into_iter().collect(),
+        right,
+    }
 }
 
 /// Build model status with all context indicators including spooled files

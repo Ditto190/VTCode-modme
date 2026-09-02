@@ -284,6 +284,9 @@ fn normalized_to_legacy_stream(
                 NormalizedStreamEvent::ReasoningDelta { delta } => {
                     yield LLMStreamEvent::Reasoning { delta };
                 }
+                NormalizedStreamEvent::ReasoningStage { stage } => {
+                    yield LLMStreamEvent::ReasoningStage { stage };
+                }
                 NormalizedStreamEvent::ToolCallStart { call_id, name } => {
                     let _ = progress_tx.send(StreamProgressEvent::ToolCallStarted { call_id, name }).await;
                 }

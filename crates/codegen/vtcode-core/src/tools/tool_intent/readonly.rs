@@ -407,6 +407,8 @@ mod tests {
             "cat .vtcode/context/tool_outputs/run-1.txt",
             "sed -n '1,20p' .vtcode/context/tool_outputs/run-1.txt",
             "rg error .vtcode/context/tool_outputs",
+            "rg -n error .vtcode/context/tool_outputs | head -20",
+            "tail -n 20 .vtcode/context/tool_outputs/run-1.txt",
         ] {
             assert!(is_spool_file_read_command("exec_command", &run_cmd(command)), "expected spool read: {command}");
         }
@@ -415,6 +417,8 @@ mod tests {
             "cat .vtcode/context/tool_outputs/run-1.txt > copied.txt",
             "sed -i 's/a/b/' .vtcode/context/tool_outputs/run-1.txt",
             "rm .vtcode/context/tool_outputs/run-1.txt",
+            "cat \"$VTCODE_SPOOL\"",
+            "cat .vtcode/context/tool_outputs/run-1.txt |",
         ] {
             assert!(!is_spool_file_read_command("exec_command", &run_cmd(command)), "unexpected spool read: {command}");
         }

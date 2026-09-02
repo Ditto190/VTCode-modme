@@ -13,10 +13,11 @@ The VT Code terminal UI includes an interactive mode that combines keyboard-firs
 | `Ctrl+C`                                    | Cancel the current generation or command. Press twice to terminate the session. | Works during prompts, tool execution, and streaming replies.                                                                              |
 | `Ctrl+D`                                    | Exit VT Code interactive mode.                                                  | Sends EOF to the shell integration.                                                                                                       |
 | `Ctrl+L`                                    | Clear the terminal screen while keeping the conversation history.               | Useful for refreshing when output is cluttered.                                                                                           |
-| `Ctrl+T`                                    | Toggle verbose tool output and diagnostics.                                     | Reveals detailed tool invocation logs without affecting the TODO panel.                                                                   |
+| `Ctrl+T`                                    | Open or close Transcript Review (default binding).                               | Works in inline and fullscreen modes; if unbound, it remains the readline transpose shortcut.                                             |
+| `Alt+O`                                     | Open Transcript Review (compatibility alias).                                    | Useful when the terminal does not deliver `Ctrl+T`; mouse capture is required for clickable hints.                                        |
+| `Alt+T`                                     | Toggle compact or expanded tool summaries.                                      | Rebindable; the default compact presentation keeps live command output bounded.                                                         |
 | `Alt+G`                                     | Toggle the TODO task panel.                                                     | Rebindable via `toggle_task_panel`; works even when `ui.show_task_panel` is off.                                                          |
-| `Ctrl+O`                                    | Copy last agent response as markdown to clipboard.                              | Available after the agent has produced at least one response.                                                                             |
-| `Alt+O`                                     | Open or close fullscreen transcript review.                                     | Available when VT Code is using alternate-screen rendering.                                                                               |
+| `Ctrl+O`                                    | Copy the latest assistant response, or the complete Transcript Review.          | In review, always copies the complete ANSI-free conversation; otherwise it uses the latest-response behavior.                             |
 | `Ctrl+A`                                    | Move cursor to start of input line.                                             | UNIX/readline-style editing.                                                                                                              |
 | `Ctrl+E`                                    | Move cursor to end of input line (or open external editor when input is empty). | Uses `tools.editor` config, then `VISUAL`/`EDITOR`. Configure it with `/config tools.editor`.                                             |
 | `Ctrl+Home`                                 | Jump to the oldest visible transcript content.                                  | Fullscreen rendering only.                                                                                                                |
@@ -67,7 +68,7 @@ The VT Code terminal UI includes an interactive mode that combines keyboard-firs
 
 ## Fullscreen Rendering
 
-When VT Code is running in alternate-screen mode, the transcript and composer use a fixed fullscreen layout similar to terminal applications such as `vim` or `less`. The input stays pinned at the bottom, mouse handling is internal to VT Code, and transcript review/search happens inside the app instead of your terminal scrollback.
+When VT Code is running in alternate-screen mode, the transcript and composer use a fixed fullscreen layout similar to terminal applications such as `vim` or `less`. The input stays pinned at the bottom, mouse handling is internal to VT Code, and the tool-output viewer/search happens inside the app instead of your terminal scrollback.
 
 ### Fullscreen Navigation
 
@@ -78,15 +79,35 @@ When VT Code is running in alternate-screen mode, the transcript and composer us
 | `Ctrl+End`      | Jump to the latest transcript content and resume auto-follow. |
 | Mouse wheel     | Scroll the live transcript when mouse capture is enabled.     |
 
-### Transcript Review Surface
+### Transcript Review
 
-Press `Alt+O` to open the fullscreen transcript review surface. It builds a plain-text view of the full conversation, including expanded collapsed tool payloads, so search and export operate on the complete transcript rather than only the visible viewport.
+Press the configured review binding (default `Ctrl+T`) to open or close
+Transcript Review. The review composes the ordered user messages, assistant responses,
+reasoning, summaries, warnings, errors, and complete command captures. The
+normal transcript remains compact and bounded while the review retains full
+PTY captures and distinct pipe stdout/stderr streams.
+
+Successful command rows are grouped only when they are contiguous in rendered
+order. The visible shortcut and `click to expand or collapse` suffix is styled
+and clickable when mouse capture is enabled; clicking it focuses the first
+command in that group. Other transcript clicks continue to support selection
+and links. Successful file writes and edits end the command group and show a
+separate glance row with the affected path, `(+N -M)` counts, and numbered diff
+lines; the complete result remains available in the review and agent history.
+
+Rich rendering is the default and reuses the transcript's colors, links, and
+width-aware wrapping. Press the configured render-mode binding (default `R`)
+to switch to ANSI-free raw rendering for
+copying or export. Copying with `Ctrl+O`, opening the editor with `v`, or
+handing the review to native scrollback with `[` always uses the complete
+ANSI-free conversation text.
 
 | Shortcut                   | Description                                                                              |
 | :------------------------- | :--------------------------------------------------------------------------------------- |
-| `/`                        | Start a case-insensitive transcript search.                                              |
+| `r`                        | Toggle rich and raw rendering.                                                           |
+| `/`                        | Start a case-insensitive conversation search.                                             |
 | `Enter`                    | Commit the current search and jump to the first match.                                   |
-| `Esc`                      | Cancel the active search, or close transcript review when search is idle.                |
+| `Esc`                      | Cancel the active search, or close the viewer when search is idle.                        |
 | `n` / `N`                  | Jump to the next or previous search match.                                               |
 | `j` / `k` or `Up` / `Down` | Scroll one line.                                                                         |
 | `Ctrl+U` / `Ctrl+D`        | Scroll half a page.                                                                      |
@@ -94,9 +115,9 @@ Press `Alt+O` to open the fullscreen transcript review surface. It builds a plai
 | `Ctrl+F` / `Space`         | Scroll a full page down.                                                                 |
 | `g` / `Home`               | Jump to the top.                                                                         |
 | `G` / `End`                | Jump to the bottom.                                                                      |
-| `[`                        | Hand the expanded transcript to the terminal's native scrollback until you return.       |
-| `v`                        | Write the expanded transcript to a temporary file and open it in your configured editor. |
-| `q` or `Alt+O`             | Close transcript review.                                                                 |
+| `[`                        | Hand the complete conversation to the terminal's native scrollback until you return.    |
+| `v`                        | Write the complete conversation to a temporary file and open it in your configured editor.|
+| `q`, `Esc`, or the configured review binding | Close Transcript Review.                                                   |
 
 ### Mouse Capture, Copy, and tmux
 
@@ -106,6 +127,13 @@ Press `Alt+O` to open the fullscreen transcript review surface. It builds a plai
 - Dragging a selection to the top or bottom edge of the transcript auto-scrolls it, extending the selection onto newly revealed lines.
 - `ui.fullscreen.scroll_speed` multiplies mouse-wheel scrolling without affecting `PgUp`/`PgDn`.
 - Inside tmux, enable mouse support with `set -g mouse on` if you want wheel scrolling and other mouse actions to reach VT Code.
+
+The compact presentation and review affordances are configurable with
+`ui.tool_display_mode`, `ui.transcript_review.show_hints`,
+`ui.transcript_review.show_shortcut_guide`, `ui.transcript_review.show_close_button`,
+and the existing `ui.keybindings.open_transcript_review` and
+`ui.keybindings.toggle_transcript_render_mode` entries. All review controls
+are enabled and compact display is the default.
 - Avoid fullscreen rendering in `tmux -CC` sessions. iTerm2's control-mode integration does not handle alternate-screen mouse capture reliably.
 
 ### Session Context Commands
@@ -153,7 +181,7 @@ VT Code supports an optional Vim-style prompt editor.
 - VT Code routes prompt suggestion generation through `agent.prompt_suggestions` and falls back to deterministic local suggestions when the provider, model, or endpoint cannot service the request.
 - LLM-backed prompt suggestions can consume tokens. When `agent.prompt_suggestions.show_cost_notice = true`, VT Code shows a one-time reminder in the session before the first LLM-backed inline suggestion.
 - Picking a suggestion inserts it into the composer. Empty drafts are replaced; non-empty drafts keep their content and append the suggestion after a blank line.
-- `/tasks` toggles the dedicated TODO panel. It is fed directly from `task_tracker` output and remains independent from the `Ctrl+T` log toggle. Successful updates use the same compact tree in the transcript and panel; the panel header carries the checklist title and `completed/total` progress while step metadata remains available in structured tracker data. `Alt+G` toggles the panel from anywhere, and `ui.show_task_panel` controls whether it auto-shows when a plan is approved.
+- `/tasks` toggles the dedicated TODO panel. It is fed directly from `task_tracker` output and remains independent from the tool-summary display mode. Successful updates use the same compact tree in the transcript and panel; the panel header carries the checklist title and `completed/total` progress while step metadata remains available in structured tracker data. `Alt+G` toggles the panel from anywhere, and `ui.show_task_panel` controls whether it auto-shows when a plan is approved.
 - `/jobs` opens the active/background jobs picker for PTY-backed command sessions.
 - In `/jobs`, `Enter` or `Ctrl+R` focuses the selected job output, `Ctrl+P` previews a snapshot modal, and `Ctrl+X` sends an interrupt to the selected job.
 - Pressing `Enter` on an empty draft opens `/jobs` when active jobs exist; otherwise VT Code keeps the normal empty-enter behavior.

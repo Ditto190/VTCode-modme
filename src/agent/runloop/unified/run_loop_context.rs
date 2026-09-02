@@ -92,6 +92,14 @@ pub(crate) struct ToolWallClockExhaustionNotice {
 
 pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 
+/// Maximum aggregate tool-result preview bytes copied into the provider-facing
+/// history for one turn. Complete output remains in the internal spool and
+/// current-session tool-output viewer; this only bounds the diagnostic surface
+/// seen by a model during a recovery-heavy turn.
+pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize = 32 * 1024;
+
+const TOOL_PREVIEW_METADATA_STRING_LIMIT: usize = 512;
+
 impl ToolBudgetWarning {
     pub(crate) fn system_message(self) -> String {
         format!(
@@ -300,8 +308,8 @@ pub(crate) struct HarnessTurnState {
     pub turn_id: TurnId,
     pub phase: TurnPhase,
     pub turn_started_at: Instant,
-    /// Time spent in explicit command waits is excluded from the ordinary
-    /// per-turn harness wall-clock budget.
+    /// Time spent waiting for explicit user input or an already-running
+    /// command is excluded from the ordinary per-turn harness wall-clock budget.
     wait_started_at: Option<Instant>,
     excluded_wait_duration: Duration,
     pub tool_calls: usize,
@@ -314,17 +322,21 @@ pub(crate) struct HarnessTurnState {
     spooled_results: u32,
     raw_spooled_bytes: u64,
     model_visible_output_bytes: u64,
+    model_visible_tool_preview_bytes: usize,
+    model_visible_tool_preview_budget_exhausted: bool,
     recovery_activations: u32,
     pub blocked_tool_calls: usize,
     pub consecutive_blocked_tool_calls: usize,
     /// Counts consecutive malformed/schema-invalid tool calls independently
     /// from policy denials. A valid admitted call resets this streak.
     pub consecutive_preflight_failures: usize,
-    /// Counts how many times the agent emitted an assistant *text* response
-    /// (no tool calls) in this turn.  Used to short-circuit the recovery
-    /// loop when the model has already produced a final answer but recovery
-    /// iteration keeps re-prompting it.  Reset every turn.
-    pub assistant_text_responses_in_turn: u32,
+    /// Counts consecutive assistant *text-only* responses in this turn.
+    /// Admitted tool execution resets the streak so productive progress is
+    /// not mistaken for a tool-free regeneration loop. Reset every turn.
+    pub consecutive_assistant_text_responses: u32,
+    /// Copilot/runtime tool progress that occurs inside a provider request and
+    /// therefore has no ordinary `MessageRole::Tool` entry in history.
+    out_of_band_tool_progress: bool,
     /// Whether a non-empty final assistant response was rendered for this turn.
     /// This is separate from conversation history because recovery code can
     /// append a message without sending it through the user-facing renderer.
@@ -467,11 +479,14 @@ impl HarnessTurnState {
             spooled_results: 0,
             raw_spooled_bytes: 0,
             model_visible_output_bytes: 0,
+            model_visible_tool_preview_bytes: 0,
+            model_visible_tool_preview_budget_exhausted: false,
             recovery_activations: 0,
             blocked_tool_calls: 0,
             consecutive_blocked_tool_calls: 0,
             consecutive_preflight_failures: 0,
-            assistant_text_responses_in_turn: 0,
+            consecutive_assistant_text_responses: 0,
+            out_of_band_tool_progress: false,
             final_response_rendered: false,
             final_response_event_emitted: false,
             streamed_response_event_emitted: false,
@@ -543,15 +558,15 @@ impl HarnessTurnState {
         elapsed.saturating_sub(self.excluded_wait_duration.saturating_add(active_wait))
     }
 
-    /// Pause ordinary turn wall-clock accounting around an explicit command
+    /// Pause ordinary turn wall-clock accounting around an explicit external
     /// wait. This does not alter tool ceilings or cancellation behavior.
-    pub(crate) fn begin_long_running_command_wait(&mut self) {
+    pub(crate) fn begin_budget_excluded_wait(&mut self) {
         if self.wait_started_at.is_none() {
             self.wait_started_at = Some(Instant::now());
         }
     }
 
-    pub(crate) fn end_long_running_command_wait(&mut self) {
+    pub(crate) fn end_budget_excluded_wait(&mut self) {
         if let Some(started) = self.wait_started_at.take() {
             self.excluded_wait_duration = self.excluded_wait_duration.saturating_add(started.elapsed());
         }
@@ -607,6 +622,32 @@ impl HarnessTurnState {
             .saturating_add(u64::try_from(model_visible_output_bytes).unwrap_or(u64::MAX));
     }
 
+    /// Bound the tool response before it enters provider-facing history.
+    ///
+    /// Tool output processing already applies a per-result preview limit, but
+    /// a turn can still accumulate many independent previews (or repeatedly
+    /// inspect a spool file). Once the aggregate budget is exhausted, retain
+    /// only bounded metadata so recovery cannot amplify one diagnostic into a
+    /// recursively growing prompt.
+    pub(crate) fn bound_model_visible_tool_preview(&mut self, tool_name: Option<&str>, content: String) -> String {
+        if content.is_empty() {
+            return content;
+        }
+
+        let remaining = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES.saturating_sub(self.model_visible_tool_preview_bytes);
+        if !self.model_visible_tool_preview_budget_exhausted && content.len() <= remaining {
+            self.model_visible_tool_preview_bytes = self.model_visible_tool_preview_bytes.saturating_add(content.len());
+            if self.model_visible_tool_preview_bytes >= MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES {
+                self.model_visible_tool_preview_budget_exhausted = true;
+            }
+            return content;
+        }
+
+        self.model_visible_tool_preview_bytes = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+        self.model_visible_tool_preview_budget_exhausted = true;
+        bounded_tool_preview_metadata(tool_name, &content)
+    }
+
     pub(crate) fn replace_model_visible_output_bytes(&mut self, previous_len: usize, new_len: usize) {
         let previous_len = u64::try_from(previous_len).unwrap_or(u64::MAX);
         self.model_visible_output_bytes = self.model_visible_output_bytes.saturating_sub(previous_len);
@@ -654,14 +695,30 @@ impl HarnessTurnState {
         self.record_tool_call_with_warning(TOOL_BUDGET_WARNING_THRESHOLD)
     }
 
-    /// Record that the agent emitted a text response (no tool calls) in this
-    /// turn.  The turn loop also counts existing assistant messages in
-    /// `working_history` for the anti-runaway guard; this method exists
-    /// for symmetry with the other `record_*` helpers and is incremented
-    /// alongside the in-message tracking.
+    /// Record that the agent emitted a text-only response in this turn.
+    /// This state is authoritative and survives history compaction, including
+    /// inline tool boundaries that are not represented in `working_history`.
     pub(crate) fn record_assistant_text_response(&mut self) -> u32 {
-        self.assistant_text_responses_in_turn = self.assistant_text_responses_in_turn.saturating_add(1);
-        self.assistant_text_responses_in_turn
+        self.consecutive_assistant_text_responses = self.consecutive_assistant_text_responses.saturating_add(1);
+        self.consecutive_assistant_text_responses
+    }
+
+    /// Break the text-only response streak after a tool call passes admission.
+    /// Blocked and malformed attempts are not progress and retain the streak;
+    /// their dedicated safeguards remain responsible for those failure loops.
+    pub(crate) fn reset_assistant_text_response_streak(&mut self) {
+        self.consecutive_assistant_text_responses = 0;
+    }
+
+    /// Record productive tool execution that is not represented by a normal
+    /// tool-result message, such as an inline Copilot runtime call.
+    pub(crate) fn record_out_of_band_tool_progress(&mut self) {
+        self.out_of_band_tool_progress = true;
+        self.reset_assistant_text_response_streak();
+    }
+
+    pub(crate) fn has_out_of_band_tool_progress(&self) -> bool {
+        self.out_of_band_tool_progress
     }
 
     pub(crate) fn record_tool_budget_exhaustion_notice(&mut self) -> Option<ToolBudgetExhaustionNotice> {
@@ -1151,6 +1208,87 @@ impl HarnessTurnState {
     }
 }
 
+fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> String {
+    let parsed = serde_json::from_str::<serde_json::Value>(content).ok();
+    let object = parsed.as_ref().and_then(serde_json::Value::as_object);
+
+    let spool_path = object
+        .and_then(|value| value.get("spool_path"))
+        .and_then(serde_json::Value::as_str)
+        .map(|path| bounded_preview_string(path, TOOL_PREVIEW_METADATA_STRING_LIMIT));
+    let byte_count = object
+        .and_then(|value| {
+            ["original_bytes", "spooled_bytes", "output_bytes", "bytes"]
+                .into_iter()
+                .find_map(|key| value.get(key).and_then(serde_json::Value::as_u64))
+        })
+        .unwrap_or_else(|| u64::try_from(content.len()).unwrap_or(u64::MAX));
+    let completion_state = object
+        .and_then(|value| {
+            if value.get("spool_pending").and_then(serde_json::Value::as_bool) == Some(true) {
+                Some("pending")
+            } else if value.get("spool_complete").and_then(serde_json::Value::as_bool) == Some(true)
+                || value.get("is_exited").and_then(serde_json::Value::as_bool) == Some(true)
+            {
+                Some("complete")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("unknown");
+
+    let diagnosis = object
+        .and_then(|value| value.get("diagnosis"))
+        .and_then(serde_json::Value::as_object)
+        .map(|diagnosis| {
+            let mut bounded = serde_json::Map::new();
+            for key in ["observed", "likely_cause", "next_action"] {
+                if let Some(value) = diagnosis.get(key).and_then(serde_json::Value::as_str) {
+                    bounded.insert(
+                        key.to_string(),
+                        serde_json::Value::String(bounded_diagnosis_preview(value, TOOL_PREVIEW_METADATA_STRING_LIMIT)),
+                    );
+                }
+            }
+            serde_json::Value::Object(bounded)
+        });
+
+    let note = if spool_path.is_some() {
+        "Aggregate tool preview budget exhausted; complete output remains in the internal spool and current-session tool-output viewer."
+    } else {
+        "Aggregate tool preview budget exhausted; use a targeted bounded read or retry the request for more detail."
+    };
+    let mut metadata = serde_json::json!({
+        "tool": tool_name.map(|name| bounded_preview_string(name, TOOL_PREVIEW_METADATA_STRING_LIMIT)),
+        "spool_path": spool_path,
+        "byte_count": byte_count,
+        "completion_state": completion_state,
+        "preview_budget_exhausted": true,
+        "note": note,
+    });
+    if let Some(diagnosis) = diagnosis {
+        metadata["diagnosis"] = diagnosis;
+    }
+    metadata.to_string()
+}
+
+fn bounded_preview_string(value: &str, limit: usize) -> String {
+    if value.len() <= limit {
+        return value.to_string();
+    }
+    let mut end = limit;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &value[..end])
+}
+
+fn bounded_diagnosis_preview(value: &str, limit: usize) -> String {
+    let ansi_free = vtcode_commons::ansi::strip_ansi(value);
+    let sanitized = vtcode_commons::sanitizer::sanitize_provider_diagnostic(ansi_free.as_bytes());
+    bounded_preview_string(sanitized.trim(), limit)
+}
+
 pub(crate) struct RunLoopContext<'a> {
     pub renderer: &'a mut AnsiRenderer,
     pub handle: &'a InlineHandle,
@@ -1299,10 +1437,51 @@ mod tests {
     use hashbrown::HashSet;
 
     use super::{
-        CrossTurnTracker, HarnessTurnState, RecoveryMode, TOOL_BUDGET_WARNING_THRESHOLD, ToolBudgetExhaustion,
-        ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion, ToolWallClockExhaustionNotice,
-        TurnExecutionPhase, TurnId, TurnPhase, TurnRunId,
+        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode,
+        TOOL_BUDGET_WARNING_THRESHOLD, ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning,
+        ToolWallClockExhaustion, ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId,
     };
+
+    #[test]
+    fn model_visible_tool_preview_budget_returns_bounded_metadata_after_exhaustion() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        let first = state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(20 * 1024));
+        assert_eq!(first.len(), 20 * 1024);
+
+        let second = state.bound_model_visible_tool_preview(
+            Some("run_pty_cmd"),
+            serde_json::json!({
+                "output": "b".repeat(20 * 1024),
+                "spool_path": ".vtcode/context/tool_outputs/run-1.txt",
+                "spooled_bytes": 20 * 1024,
+                "spool_complete": true,
+                "diagnosis": {
+                    "observed": "exit 1",
+                    "likely_cause": "dependency check failed",
+                    "next_action": "\u{1b}[31minspect the first compiler error\u{1b}[0m\npassword=secret-not-for-context"
+                },
+            })
+            .to_string(),
+        );
+
+        assert!(second.len() < 2 * 1024);
+        assert!(second.contains(".vtcode/context/tool_outputs/run-1.txt"));
+        assert!(second.contains("\"byte_count\":20480"));
+        assert!(second.contains("\"completion_state\":\"complete\""));
+        assert!(second.contains("preview_budget_exhausted"));
+        assert!(second.contains("\"diagnosis\":{"));
+        assert!(second.contains("inspect the first compiler error"));
+        assert!(!second.contains("secret-not-for-context"));
+        assert!(!second.contains('\u{1b}'));
+        let repeated_b = "b".repeat(128);
+        assert!(!second.contains(repeated_b.as_str()));
+        assert_eq!(state.model_visible_tool_preview_bytes, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES);
+        assert!(state.model_visible_tool_preview_budget_exhausted);
+
+        let later = state.bound_model_visible_tool_preview(Some("cat"), "later output".to_string());
+        assert!(later.contains("Aggregate tool preview budget exhausted"));
+        assert!(!later.contains("later output"));
+    }
 
     #[test]
     fn harness_state_tracks_phase_transitions() {
@@ -1451,6 +1630,19 @@ mod tests {
         assert_eq!(state.wall_clock_budget_exhaustion(), None);
         state.turn_started_at = Instant::now().checked_sub(Duration::from_secs(11)).unwrap();
         assert_eq!(state.wall_clock_budget_exhaustion(), Some(ToolWallClockExhaustion { max_secs: 10 }));
+    }
+
+    #[test]
+    fn harness_state_excludes_active_external_wait_from_wall_clock_budget() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 4, 10, 1);
+        let wait_started_at = Instant::now().checked_sub(Duration::from_secs(11)).unwrap();
+        state.turn_started_at = wait_started_at;
+        state.wait_started_at = Some(wait_started_at);
+
+        assert_eq!(state.wall_clock_budget_exhaustion(), None);
+
+        state.end_budget_excluded_wait();
+        assert_eq!(state.wall_clock_budget_exhaustion(), None);
     }
 
     #[test]

@@ -8,6 +8,7 @@ use anstyle::Color as AnsiColorEnum;
 /// - Message styling and prefixes
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use super::super::types::{InlineMessageKind, InlineSegment, InlineTextStyle};
 use super::{CollapsedPaste, Session, message::MessageLine};
@@ -92,7 +93,7 @@ impl Session {
                     line_changed = true;
                 }
                 if line_changed {
-                    segment.style = std::sync::Arc::new(updated_style);
+                    segment.style = Arc::new(updated_style);
                 }
             }
             if line_changed {
@@ -212,20 +213,14 @@ impl Session {
                 kind,
                 vec![InlineSegment {
                     text: preview,
-                    style: std::sync::Arc::new(InlineTextStyle::default()),
+                    style: Arc::new(InlineTextStyle::default()),
                 }],
             );
             self.collapsed_pastes.push(CollapsedPaste { line_index, full_text: text });
             return;
         }
 
-        self.push_line(
-            kind,
-            vec![InlineSegment {
-                text,
-                style: std::sync::Arc::new(InlineTextStyle::default()),
-            }],
-        );
+        self.push_line(kind, vec![InlineSegment { text, style: Arc::new(InlineTextStyle::default()) }]);
     }
 
     /// Append a segment to the transcript, handling newlines and control characters
@@ -332,7 +327,7 @@ impl Session {
 
         line.segments = vec![InlineSegment {
             text: collapsed.full_text,
-            style: std::sync::Arc::new(InlineTextStyle::default()),
+            style: Arc::new(InlineTextStyle::default()),
         }];
         line.link_ranges.clear();
         line.revision = revision;
@@ -495,7 +490,7 @@ impl Session {
                 if !appended {
                     line.segments.push(InlineSegment {
                         text: text.to_owned(),
-                        style: std::sync::Arc::new(style.clone()),
+                        style: Arc::new(style.clone()),
                     });
                     appended = true;
                     mark_revision = true;
@@ -531,7 +526,7 @@ impl Session {
             if let Some(line) = self.lines.last_mut() {
                 line.segments.push(InlineSegment {
                     text: text.to_owned(),
-                    style: std::sync::Arc::new(style.clone()),
+                    style: Arc::new(style.clone()),
                 });
                 line.revision = revision;
             }
@@ -548,7 +543,7 @@ impl Session {
             kind,
             segments: vec![InlineSegment {
                 text: text.to_owned(),
-                style: std::sync::Arc::new(style.clone()),
+                style: Arc::new(style.clone()),
             }],
             link_ranges: Vec::new(),
             revision,

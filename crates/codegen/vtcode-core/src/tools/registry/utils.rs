@@ -13,19 +13,9 @@ pub(super) fn normalize_tool_output(mut val: Value) -> Value {
         .is_some_and(|path| !path.is_empty());
     obj.entry("success").or_insert(json!(true));
     let should_remove_stdout = {
-        let is_command_like = is_command_like_output(obj);
-        let is_git_diff = obj
-            .get("content_type")
-            .and_then(|value| value.as_str())
-            .is_some_and(|value| value == "git_diff");
-
         let out_trim = obj.get("output").and_then(|v| v.as_str()).map(str::trim_end);
         let std_trim = obj.get("stdout").and_then(|v| v.as_str()).map(str::trim_end);
-
-        let out_has_content = out_trim.is_some_and(|s| !s.is_empty());
-        let same = out_trim.is_some() && out_trim == std_trim;
-
-        same || (out_has_content && (is_git_diff || is_command_like))
+        out_trim.is_some() && out_trim == std_trim
     };
 
     if should_remove_stdout {
@@ -82,22 +72,6 @@ pub(super) fn normalize_tool_output(mut val: Value) -> Value {
     }
     obj.remove("raw_output");
     val
-}
-
-fn is_command_like_output(obj: &serde_json::Map<String, Value>) -> bool {
-    obj.contains_key("command")
-        || obj.contains_key("working_directory")
-        || obj.contains_key("session_id")
-        || obj.contains_key("process_id")
-        || obj.contains_key("spool_path")
-        || obj.contains_key("is_exited")
-        || obj.contains_key("exit_code")
-        || obj.contains_key("rows")
-        || obj.contains_key("cols")
-        || obj
-            .get("content_type")
-            .and_then(Value::as_str)
-            .is_some_and(|value| value == "exec_inspect")
 }
 
 pub(super) fn lines_match(content_lines: &[&str], expected_lines: &[&str]) -> bool {
@@ -162,6 +136,20 @@ mod tests {
 
         assert!(normalized.get("stdout").is_none());
         assert_eq!(normalized["output"], "hello\n");
+    }
+
+    #[test]
+    fn preserves_distinct_stdout_for_command_like_output() {
+        let normalized = normalize_tool_output(json!({
+            "output": "stderr line\n",
+            "stdout": "stdout line\n",
+            "command": "printf stdout",
+            "exit_code": 0,
+            "is_exited": true
+        }));
+
+        assert_eq!(normalized["output"], "stderr line\n");
+        assert_eq!(normalized["stdout"], "stdout line");
     }
 
     #[test]

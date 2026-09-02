@@ -45,6 +45,25 @@ impl Session {
         })
     }
 
+    fn handle_tool_output_viewer_scroll(&mut self, column: u16, row: u16, down: bool) -> bool {
+        let fallback_height = self.core.transcript_rows.max(1);
+        let Some(viewer) = self.tool_output_viewer_state_mut() else {
+            return false;
+        };
+        if !viewer.viewer_contains(column, row) {
+            return false;
+        }
+
+        let viewport_height = viewer.content_height_or(fallback_height);
+        if down {
+            viewer.scroll_line_down(viewport_height);
+        } else {
+            viewer.scroll_line_up(viewport_height);
+        }
+        self.mark_dirty();
+        true
+    }
+
     fn panel_row_index(&self, layout: &list_panel::ListPanelLayout, column: u16, row: u16) -> Option<usize> {
         let area = self.core.bottom_panel_area()?;
         layout.row_index(area, column, row)
@@ -488,15 +507,28 @@ impl Session {
                 }
 
                 match mouse_event.kind {
-                    MouseEventKind::Moved
-                        if self.update_transcript_file_link_hover(mouse_event.column, mouse_event.row) =>
-                    {
-                        self.mark_dirty();
+                    MouseEventKind::Moved => {
+                        let viewer_visible = self.tool_output_viewer_state().is_some();
+                        let mode_hover_changed = self
+                            .tool_output_viewer_state_mut()
+                            .is_some_and(|viewer| viewer.update_mode_hover(mouse_event.column, mouse_event.row));
+                        let close_hover_changed = self
+                            .tool_output_viewer_state_mut()
+                            .is_some_and(|viewer| viewer.update_close_hover(mouse_event.column, mouse_event.row));
+                        let link_hover_changed = if viewer_visible {
+                            self.core.clear_transcript_file_link_hover()
+                        } else {
+                            self.update_transcript_file_link_hover(mouse_event.column, mouse_event.row)
+                        };
+                        if mode_hover_changed || close_hover_changed || link_hover_changed {
+                            self.mark_dirty();
+                        }
                     }
                     MouseEventKind::ScrollDown => {
                         self.core.clear_pending_link_click();
                         self.core.mouse_selection.clear_click_history();
-                        if !self.handle_active_overlay_scroll(mouse_event, true, events, callback)
+                        if !self.handle_tool_output_viewer_scroll(mouse_event.column, mouse_event.row, true)
+                            && !self.handle_active_overlay_scroll(mouse_event, true, events, callback)
                             && !self.handle_bottom_panel_scroll(true)
                         {
                             self.scroll_line_down();
@@ -506,7 +538,8 @@ impl Session {
                     MouseEventKind::ScrollUp => {
                         self.core.clear_pending_link_click();
                         self.core.mouse_selection.clear_click_history();
-                        if !self.handle_active_overlay_scroll(mouse_event, false, events, callback)
+                        if !self.handle_tool_output_viewer_scroll(mouse_event.column, mouse_event.row, false)
+                            && !self.handle_active_overlay_scroll(mouse_event, false, events, callback)
                             && !self.handle_bottom_panel_scroll(false)
                         {
                             self.scroll_line_up();
@@ -515,12 +548,53 @@ impl Session {
                     }
                     MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                         self.core.clear_pending_link_click();
+                        if self
+                            .tool_output_viewer_state()
+                            .is_some_and(|viewer| viewer.close_control_contains(mouse_event.column, mouse_event.row))
+                        {
+                            self.close_tool_output_viewer();
+                            self.mark_dirty();
+                            return;
+                        }
+                        if self
+                            .tool_output_viewer_state()
+                            .is_some_and(|viewer| viewer.mode_control_contains(mouse_event.column, mouse_event.row))
+                        {
+                            if let Some(viewer) = self.tool_output_viewer_state_mut() {
+                                viewer.toggle_render_mode();
+                            }
+                            self.mark_dirty();
+                            return;
+                        }
+
+                        if self.tool_output_viewer_state().is_some() {
+                            if self
+                                .tool_output_viewer_state()
+                                .is_some_and(|viewer| viewer.body_contains(mouse_event.column, mouse_event.row))
+                            {
+                                self.core.mouse_drag_target = MouseDragTarget::Transcript;
+                                self.core.cancel_drag_auto_scroll();
+                                self.core.mouse_selection.start_selection(mouse_event.column, mouse_event.row);
+                            }
+                            self.mark_dirty();
+                            return;
+                        }
+
                         if self.core.queue_link_click_action(self.transcript_file_link_click_action(
                             mouse_event.column,
                             mouse_event.row,
                             mouse_event.modifiers,
                         )) {
                             self.core.mouse_selection.clear_click_history();
+                            return;
+                        }
+
+                        if let Some(review_anchor) =
+                            self.compact_activity_review_anchor_at(mouse_event.column, mouse_event.row)
+                        {
+                            let width = self.core.transcript_width.max(1);
+                            let height = self.core.transcript_rows.max(1);
+                            self.open_tool_output_viewer(width, height, Some(review_anchor));
                             return;
                         }
 
@@ -641,6 +715,17 @@ impl Session {
                         }
                     }
                     MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                        if self.tool_output_viewer_state().is_some() {
+                            if self.core.mouse_drag_target == MouseDragTarget::Transcript {
+                                self.core.mouse_selection.finish_selection(mouse_event.column, mouse_event.row);
+                                self.core.cancel_drag_auto_scroll();
+                            }
+                            self.core.mouse_drag_target = MouseDragTarget::None;
+                            self.core.clear_pending_link_click();
+                            self.mark_dirty();
+                            return;
+                        }
+
                         let transcript_link_action =
                             self.core.pending_link_click_action(self.transcript_file_link_click_action(
                                 mouse_event.column,

@@ -1,6 +1,7 @@
 use super::recovery_guidance::{
     empty_response_notice, empty_response_recovery_mode, empty_response_recovery_reason,
-    recovery_empty_fallback_safety_message, recovery_empty_response_fallback_message,
+    planning_empty_response_synthesis_directive, recovery_empty_fallback_safety_message,
+    recovery_empty_response_fallback_message,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -138,6 +139,12 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             {
                 // Preserve any accompanying prose so an exhausted-retries
                 // fallback can salvage it instead of discarding the turn.
+                if params.ctx.is_planning_active() {
+                    return params.ctx.break_planning_recovery_with_handoff(
+                        "the synthesis response attempted a tool call while tools were disabled",
+                        (!assistant_text.trim().is_empty()).then_some(assistant_text.as_str()),
+                    );
+                }
                 params
                     .ctx
                     .harness_state
@@ -296,6 +303,12 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 )
                 .trim()
                 .to_string();
+                if params.ctx.is_planning_active() {
+                    return params.ctx.break_planning_recovery_with_handoff(
+                        "the synthesis response attempted tool-call markup",
+                        (!salvage.is_empty()).then_some(salvage.as_str()),
+                    );
+                }
                 params.ctx.harness_state.record_recovery_rejected_synthesis(salvage);
                 return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
                     reason: Some(RECOVERY_CONTRACT_VIOLATION_REASON.to_string()),
@@ -315,18 +328,36 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                     RecoveryMode::ToolEnabledRetry
                 };
 
-                // A permanent interview denial still requires one real plan
-                // draft before approval. If the first tool-free synthesis is
-                // empty, spend the single bounded retry while tools remain
-                // disabled instead of ending the turn silently.
-                if matches!(recovery_mode, RecoveryMode::ToolFreeSynthesis)
-                    && params.ctx.is_planning_active()
-                    && params.ctx.plan_session.plan_synthesis_retry_allowed()
-                {
+                // Planning gets one deterministic tool-free synthesis after
+                // the second empty response. Do not spend another retry here:
+                // an empty synthesis must become a resumable blocked handoff,
+                // not another request cycle.
+                if params.ctx.is_planning_active() && matches!(recovery_mode, RecoveryMode::ToolEnabledRetry) {
                     params.ctx.finish_recovery_pass();
-                    if params.ctx.retry_denied_interview_plan_synthesis() {
-                        return Ok(TurnHandlerOutcome::Continue);
-                    }
+                    params.ctx.switch_to_tool_free_recovery();
+                    let directive = planning_empty_response_synthesis_directive(
+                        params.ctx.working_history,
+                        params.ctx.tool_registry.workspace_root().as_path(),
+                    );
+                    params.ctx.push_system_message(directive);
+                    params
+                        .ctx
+                        .renderer
+                        .line(
+                            MessageStyle::Info,
+                            "[!] Two empty planning responses detected; scheduling one tool-free plan synthesis pass.",
+                        )
+                        .unwrap_or(());
+                    tracing::warn!(
+                        "Two empty planning responses received; scheduling bounded tool-free plan synthesis."
+                    );
+                    return Ok(TurnHandlerOutcome::Continue);
+                }
+
+                if params.ctx.is_planning_active() && matches!(recovery_mode, RecoveryMode::ToolFreeSynthesis) {
+                    return params
+                        .ctx
+                        .break_planning_recovery_with_handoff("the model returned an empty synthesis response", None);
                 }
                 let recovery_reason = if params.ctx.recovery_is_tool_free() {
                     "Recovery mode requested a final synthesis pass, but the model returned no answer."
@@ -662,16 +693,6 @@ mod tests {
     async fn recovery_empty_response_fallback_uses_spool_excerpt_when_available() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         let mut ctx = backing.turn_processing_context();
-        let spool_dir = ctx.tool_registry.workspace_root().join(".vtcode/context/tool_outputs");
-        std::fs::create_dir_all(&spool_dir).expect("spool dir");
-        std::fs::write(
-            spool_dir.join("read_1.txt"),
-            (1..=30)
-                .map(|idx| format!("fallback-line-{idx}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-        .expect("spool file");
 
         ctx.working_history
             .push(uni::Message::user("summarize the failed read".to_string()));
@@ -679,7 +700,8 @@ mod tests {
             "call_1".to_string(),
             serde_json::json!({
                 "path": "src/main.rs",
-                "spool_path": ".vtcode/context/tool_outputs/read_1.txt"
+                "spool_path": ".vtcode/context/tool_outputs/read_1.txt",
+                "preview": "fallback-line-1\nfallback-line-2"
             })
             .to_string(),
         ));
@@ -898,6 +920,77 @@ Please re-run with tools enabled."#
 
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
         assert!(backing.recovery_is_tool_free());
+    }
+
+    #[tokio::test]
+    async fn planning_two_empty_responses_schedule_one_tool_free_synthesis() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.activate_planning_for_test();
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+
+        let first = {
+            let mut ctx = backing.turn_processing_context();
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::Empty,
+                response_streamed: false,
+                step_count: 1,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+                max_tool_loops: 4,
+                tool_repeat_limit: 4,
+            })
+            .await
+            .expect("first empty response should arm recovery")
+        };
+        assert!(matches!(first, TurnHandlerOutcome::Continue));
+        assert!(!backing.recovery_is_tool_free());
+        {
+            let mut ctx = backing.turn_processing_context();
+            assert!(ctx.consume_recovery_pass());
+        }
+
+        let second = {
+            let mut ctx = backing.turn_processing_context();
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::Empty,
+                response_streamed: false,
+                step_count: 2,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+                max_tool_loops: 4,
+                tool_repeat_limit: 4,
+            })
+            .await
+            .expect("second empty response should schedule synthesis")
+        };
+        assert!(matches!(second, TurnHandlerOutcome::Continue));
+        assert!(backing.recovery_is_tool_free());
+        assert!(backing.last_history_message_contains("exactly one completed `<proposed_plan>` block"));
+        {
+            let mut ctx = backing.turn_processing_context();
+            assert!(ctx.consume_recovery_pass());
+        }
+
+        let third = {
+            let mut ctx = backing.turn_processing_context();
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::Empty,
+                response_streamed: false,
+                step_count: 3,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+                max_tool_loops: 4,
+                tool_repeat_limit: 4,
+            })
+            .await
+            .expect("failed synthesis should produce a blocked handoff")
+        };
+        assert!(matches!(third, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })));
+        assert!(backing.last_history_message_contains("Planning remains active"));
     }
 
     /// Regression test for TD-015: text containing malformed `<tool_call>` tags

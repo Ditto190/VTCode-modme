@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use serde_json::Value;
 use tokio::sync::Notify;
+use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::core::agent::features::FeatureSet;
@@ -50,6 +51,13 @@ fn structured_failure_from_message(tool_name: &str, message: impl Into<String>) 
 
 fn structured_failure(tool_name: &str, error: &anyhow::Error) -> ToolExecutionError {
     ToolExecutionError::from_anyhow(tool_name, error, 0, false, false, Some("unified_runloop"))
+}
+
+fn excludes_wait_from_turn_clock(tool_name: &str, args: &Value) -> bool {
+    tool_name == tools::REQUEST_USER_INPUT
+        || (tool_intent::canonical_command_session_tool_name(tool_name)
+            .is_some_and(|canonical| canonical == tools::UNIFIED_EXEC)
+            && tool_intent::command_session_action_is(args, "wait"))
 }
 
 #[cfg_attr(feature = "profiling", hotpath::measure)]
@@ -331,7 +339,11 @@ pub(crate) async fn run_tool_call_with_args(
         // Also reject if the interview was permanently denied this session
         // (prevents a hallucinated tool call from reaching the HITL path).
         && !ctx.plan_session.is_interview_denied();
-    if let Some(hitl_result) = execute_hitl_tool(
+    let excludes_hitl_wait = name == tools::REQUEST_USER_INPUT;
+    if excludes_hitl_wait {
+        ctx.harness_state.begin_budget_excluded_wait();
+    }
+    let hitl_result = execute_hitl_tool(
         name,
         ctx.handle,
         ctx.session,
@@ -340,8 +352,11 @@ pub(crate) async fn run_tool_call_with_args(
         ctrl_c_notify,
         request_user_input_enabled,
     )
-    .await
-    {
+    .await;
+    if excludes_hitl_wait {
+        ctx.harness_state.end_budget_excluded_wait();
+    }
+    if let Some(hitl_result) = hitl_result {
         let status = match hitl_result {
             Ok(value) => ToolExecutionStatus::Success {
                 output: value,
@@ -377,13 +392,12 @@ pub(crate) async fn run_tool_call_with_args(
         );
         return Ok(outcome);
     }
-    let is_command_session_tool = tool_intent::canonical_command_session_tool_name(name)
-        .is_some_and(|canonical| canonical == tools::UNIFIED_EXEC);
-    let excludes_wait_from_turn_clock =
-        is_command_session_tool && tool_intent::command_session_action_is(effective_args.as_ref(), "wait");
-    if excludes_wait_from_turn_clock {
-        ctx.harness_state.begin_long_running_command_wait();
+    let budget_excluded_wait = excludes_wait_from_turn_clock(name, effective_args.as_ref());
+    if budget_excluded_wait {
+        ctx.harness_state.begin_budget_excluded_wait();
     }
+    let show_live_pty_preview =
+        !ctx.renderer.supports_inline_ui() || ctx.renderer.tool_display_mode() != ToolDisplayMode::Compact;
     let execution = execute_with_cache_and_streaming(
         ctx.tool_registry,
         ctx.tool_result_cache,
@@ -399,10 +413,11 @@ pub(crate) async fn run_tool_call_with_args(
         max_tool_retries,
         exec_settlement_mode_for_tool_call(prevalidated, name, effective_args.as_ref()),
         safety_prevalidated,
+        show_live_pty_preview,
     )
     .await;
-    if excludes_wait_from_turn_clock {
-        ctx.harness_state.end_long_running_command_wait();
+    if budget_excluded_wait {
+        ctx.harness_state.end_budget_excluded_wait();
     }
     let execution_status = resolve_file_conflict_status(
         ctx.tool_registry,
@@ -420,6 +435,7 @@ pub(crate) async fn run_tool_call_with_args(
         vt_cfg,
         max_tool_retries,
         safety_prevalidated,
+        show_live_pty_preview,
     )
     .await?;
 
@@ -708,7 +724,10 @@ fn cache_invalidation_paths(workspace_root: &Path, changed_paths: &[String]) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_invalidation_paths, exec_settlement_mode_for_tool_call, resolve_harness_item_identity};
+    use super::{
+        cache_invalidation_paths, excludes_wait_from_turn_clock, exec_settlement_mode_for_tool_call,
+        resolve_harness_item_identity,
+    };
     use serde_json::json;
     use vtcode_commons::canonicalize;
     use vtcode_core::tools::registry::ExecSettlementMode;
@@ -765,6 +784,19 @@ mod tests {
             ),
             ExecSettlementMode::Manual
         );
+    }
+
+    #[test]
+    fn excludes_user_interview_and_command_wait_from_turn_clock() {
+        assert!(excludes_wait_from_turn_clock(tools::REQUEST_USER_INPUT, &json!({})));
+        assert!(excludes_wait_from_turn_clock(
+            tools::UNIFIED_EXEC,
+            &json!({"action": "wait", "session_id": "run-1"})
+        ));
+        assert!(!excludes_wait_from_turn_clock(
+            tools::UNIFIED_EXEC,
+            &json!({"action": "run", "command": "cargo check"})
+        ));
     }
 
     #[test]

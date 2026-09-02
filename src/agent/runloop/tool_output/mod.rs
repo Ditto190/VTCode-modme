@@ -107,6 +107,19 @@ fn tool_follow_up_hints(val: &Value) -> Vec<String> {
     hints
 }
 
+/// Return follow-up guidance in the same order used by the live renderer.
+///
+/// The transcript viewer stores complete command captures separately from the
+/// compact live row. Keep this metadata in that capture so exporting or
+/// reviewing the whole conversation does not lose recovery instructions that
+/// were rendered after the command body.
+pub(crate) fn tool_follow_up_hints_for_capture(val: &Value, rendered_output: Option<&str>) -> Vec<String> {
+    tool_follow_up_hints(val)
+        .into_iter()
+        .filter(|hint| !rendered_output.is_some_and(|output| output.contains(hint.as_str())))
+        .collect()
+}
+
 pub(super) fn render_tool_follow_up_hints(
     renderer: &mut AnsiRenderer,
     val: &Value,
@@ -158,6 +171,13 @@ pub(crate) async fn render_tool_output(
 
     match tool_name {
         Some(tools::WRITE_FILE) | Some(tools::CREATE_FILE) => {
+            let git_styles = GitStyles::new();
+            let ls_styles = LsStyles::from_env();
+            return render_write_file_preview(renderer, val, &git_styles, &ls_styles);
+        }
+        Some(tools::EDIT_FILE) | Some(tools::SEARCH_REPLACE) | Some(tools::DELETE_FILE)
+            if val.get("diff").is_some() || val.get("diff_preview").is_some() =>
+        {
             let git_styles = GitStyles::new();
             let ls_styles = LsStyles::from_env();
             return render_write_file_preview(renderer, val, &git_styles, &ls_styles);
@@ -559,6 +579,7 @@ pub(crate) fn collect_inline_output(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use vtcode_core::config::ToolDisplayMode;
     use vtcode_core::ui::InlineHandle;
     use vtcode_core::utils::ansi::AnsiRenderer;
 
@@ -747,6 +768,7 @@ mod tests {
     async fn render_tool_output_exec_command_renders_terminal_panel_with_output() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        renderer.set_tool_display_mode(ToolDisplayMode::Expanded);
         let payload = json!({
             "command": "cargo check",
             "output": "Compiling vtcode v0.135.9",
@@ -769,6 +791,24 @@ mod tests {
             !inline_output.contains("(no output)"),
             "exec_command output must not fall through to the no-output status renderer"
         );
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_exec_command_compact_hides_completed_stdout() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "command": "cargo check",
+            "stdout": "verbose completed output",
+            "stderr": ""
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::EXEC_COMMAND), &payload, None)
+            .await
+            .expect("exec_command payload should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(!inline_output.contains("verbose completed output"));
     }
 
     #[tokio::test]
@@ -1057,7 +1097,7 @@ mod tests {
             .expect("canonical write diff should render");
 
         let inline_output = collect_inline_output(&mut receiver);
-        assert!(inline_output.contains("Edited README.md (+1 -1)"));
+        assert!(inline_output.contains("• Edited README.md (+1 -1)"));
         assert!(inline_output.contains("-    1 before"));
         assert!(inline_output.contains("+    1 after"));
     }

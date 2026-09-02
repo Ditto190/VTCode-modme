@@ -7,6 +7,10 @@ use crate::tools::mcp::legacy_mcp_tool_name;
 use crate::tools::tool_intent;
 
 pub fn tool_action_label(tool_name: &str, args: &Value) -> Cow<'static, str> {
+    if tool_intent::is_command_run_tool_call(tool_name, args) {
+        return Cow::Borrowed("Run command");
+    }
+
     let actual_tool_name = normalize_tool_name(tool_name);
 
     match actual_tool_name {

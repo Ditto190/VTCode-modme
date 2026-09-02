@@ -159,6 +159,25 @@ pub(crate) fn extract_any_plan(text: &str) -> ProposedPlanExtraction {
     extract_proposed_plan(text)
 }
 
+/// Recovery synthesis accepts one canonical plan block only. Normal planning
+/// responses continue to support the legacy `<plan>` alias, but the bounded
+/// tool-free recovery contract must be unambiguous before it can be persisted
+/// or shown for approval.
+pub(crate) fn has_exactly_one_proposed_plan_block(text: &str) -> bool {
+    let text = strip_plan_persistence_policy_line(text);
+    let Some(open_index) = text.find(OPEN_TAG) else {
+        return false;
+    };
+    let Some(close_index) = text.find(CLOSE_TAG) else {
+        return false;
+    };
+    open_index < close_index
+        && text.matches(OPEN_TAG).count() == 1
+        && text.matches(CLOSE_TAG).count() == 1
+        && !text.contains(ALT_OPEN_TAG)
+        && !text.contains(ALT_CLOSE_TAG)
+}
+
 pub(crate) fn has_unclosed_plan_block(text: &str) -> bool {
     let mut parser = ProposedPlanStreamParser::new();
     parser.consume(text);
@@ -263,8 +282,8 @@ fn safe_char_boundary(text: &str, idx: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProposedPlanStreamParser, extract_any_plan, extract_proposed_plan, has_unclosed_plan_block,
-        strip_plan_persistence_policy_line,
+        ProposedPlanStreamParser, extract_any_plan, extract_proposed_plan, has_exactly_one_proposed_plan_block,
+        has_unclosed_plan_block, strip_plan_persistence_policy_line,
     };
 
     #[test]
@@ -371,5 +390,17 @@ mod tests {
         visible.push_str(&trailing.stripped_text);
         assert!(!visible.contains("Emit exactly one final"));
         assert_eq!(trailing.plan_text.as_deref(), Some("- Step 1"));
+    }
+
+    #[test]
+    fn recovery_plan_shape_requires_one_canonical_block() {
+        assert!(has_exactly_one_proposed_plan_block("<proposed_plan>\n- Step 1\n</proposed_plan>"));
+        assert!(!has_exactly_one_proposed_plan_block("<plan>\n- Step 1\n</plan>"));
+        assert!(!has_exactly_one_proposed_plan_block(
+            "<proposed_plan>\n- A\n</proposed_plan>\n<proposed_plan>\n- B\n</proposed_plan>"
+        ));
+        assert!(!has_exactly_one_proposed_plan_block("<proposed_plan>\n- Missing close"));
+        assert!(!has_exactly_one_proposed_plan_block("<proposed_plan>\n- A\n</proposed_plan>\n</proposed_plan>"));
+        assert!(!has_exactly_one_proposed_plan_block("</proposed_plan>\n<proposed_plan>\n- A\n"));
     }
 }

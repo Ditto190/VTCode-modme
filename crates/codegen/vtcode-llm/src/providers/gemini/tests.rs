@@ -959,6 +959,7 @@ fn thought_signature_roundtrip_in_request() {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
         ]
         .into(),

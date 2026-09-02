@@ -262,6 +262,7 @@ pub fn build_two_pass_pass1_history(prefix: &[Message], compaction_prompt: &str)
         phase: None,
         origin_tool: None,
         metadata: None,
+        clear_at: None,
     });
     history
 }
@@ -293,6 +294,7 @@ pub fn build_two_pass_pass2_history(
             phase: None,
             origin_tool: None,
             metadata: None,
+            clear_at: None,
         });
     }
 
@@ -306,6 +308,7 @@ pub fn build_two_pass_pass2_history(
         phase: None,
         origin_tool: None,
         metadata: None,
+        clear_at: None,
     });
     history.extend(tail.iter().cloned());
     history.push(Message {
@@ -321,6 +324,7 @@ pub fn build_two_pass_pass2_history(
         phase: None,
         origin_tool: None,
         metadata: None,
+        clear_at: None,
     });
     history
 }
@@ -395,6 +399,7 @@ mod tests {
             phase: None,
             origin_tool: None,
             metadata: None,
+            clear_at: None,
         };
         let conv = vec![
             Message {
@@ -407,6 +412,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             Message {
                 role: MessageRole::Assistant,
@@ -418,6 +424,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             assistant.clone(),
             Message {
@@ -430,6 +437,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             Message {
                 role: MessageRole::User,
@@ -441,6 +449,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
         ];
         let split = split_conversation_for_two_pass(&conv, 0.9);
@@ -492,6 +501,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             Message {
                 role: MessageRole::User,
@@ -503,6 +513,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             Message {
                 role: MessageRole::Assistant,
@@ -514,6 +525,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             Message {
                 role: MessageRole::User,
@@ -525,6 +537,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
             Message {
                 role: MessageRole::Assistant,
@@ -536,6 +549,7 @@ mod tests {
                 phase: None,
                 origin_tool: None,
                 metadata: None,
+                clear_at: None,
             },
         ];
         let split = split_conversation_for_two_pass(&conv, 0.5);

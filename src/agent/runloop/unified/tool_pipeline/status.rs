@@ -77,6 +77,20 @@ pub(crate) enum ToolExecutionStatus {
 }
 
 impl ToolExecutionStatus {
+    /// Returns `true` when the execution produced a failure-like result.
+    ///
+    /// A command that returns a non-zero exit code remains a `Success` variant
+    /// so its output and partial file changes can be preserved, but it must
+    /// still be counted and diagnosed as a failed execution by turn-level
+    /// accounting.
+    pub(crate) fn is_failure_like(&self) -> bool {
+        match self {
+            Self::Success { command_success, .. } => !command_success,
+            Self::Failure { .. } | Self::Timeout { .. } => true,
+            Self::Cancelled => false,
+        }
+    }
+
     pub(crate) fn display_status(&self) -> ToolDisplayStatus {
         match self {
             Self::Success { output, command_success, .. } => {
@@ -178,7 +192,13 @@ pub(crate) enum ToolBatchResult {
 impl From<&ToolExecutionStatus> for ToolBatchResult {
     fn from(status: &ToolExecutionStatus) -> Self {
         match status {
-            ToolExecutionStatus::Success { .. } => Self::Success,
+            ToolExecutionStatus::Success { command_success, .. } => {
+                if *command_success {
+                    Self::Success
+                } else {
+                    Self::Failure
+                }
+            }
             ToolExecutionStatus::Failure { .. } => Self::Failure,
             ToolExecutionStatus::Timeout { .. } => Self::Timeout,
             ToolExecutionStatus::Cancelled => Self::Cancelled,
@@ -404,5 +424,50 @@ mod tests {
             ToolDisplayStatus::from_command_output(&serde_json::json!({"warning": "no results"}), true),
             ToolDisplayStatus::Warning
         );
+    }
+
+    #[test]
+    fn non_zero_success_is_failure_like_but_retains_partial_output() {
+        let status = ToolExecutionStatus::Success {
+            output: serde_json::json!({"stdout": "compiler output", "exit_code": 1}),
+            stdout: Some("compiler output".to_string()),
+            modified_files: vec!["src/lib.rs".to_string()],
+            command_success: false,
+        };
+
+        assert!(status.is_failure_like());
+        assert_eq!(ToolBatchResult::from(&status), ToolBatchResult::Failure);
+        assert_eq!(status.display_status(), ToolDisplayStatus::Failure);
+    }
+
+    #[test]
+    fn zero_exit_success_remains_success_like() {
+        let status = ToolExecutionStatus::Success {
+            output: serde_json::json!({"stdout": "ok", "exit_code": 0}),
+            stdout: Some("ok".to_string()),
+            modified_files: Vec::new(),
+            command_success: true,
+        };
+
+        assert!(!status.is_failure_like());
+        assert_eq!(ToolBatchResult::from(&status), ToolBatchResult::Success);
+    }
+
+    #[test]
+    fn non_zero_command_counts_as_failed_in_batch_summary() {
+        let mut batch = ToolBatchOutcome::new();
+        let status = ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 1}),
+            stdout: None,
+            modified_files: Vec::new(),
+            command_success: false,
+        };
+
+        batch.record(&status);
+
+        let stats = batch.stats();
+        assert_eq!(stats.succeeded, 0);
+        assert_eq!(stats.failed, 1);
+        assert!(batch.summary_line().contains("1 failed"));
     }
 }

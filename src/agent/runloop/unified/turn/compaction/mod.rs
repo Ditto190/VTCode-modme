@@ -28,8 +28,7 @@ pub(crate) use vtcode_core::persistent_memory::{GroundedFactRecord, dedup_latest
 
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
-use vtcode_commons::preview::{condense_text_bytes, tail_preview_text};
+use std::path::Path;
 use vtcode_core::compaction::auto::{AutoCompactionInput, auto_compact_messages};
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::hooks::LifecycleHookEngine;
@@ -43,13 +42,10 @@ use vtcode_core::core::agent::request_envelope::SegmentBoundaryReason;
 
 const RECOVERY_PREVIEW_MAX_CHARS: usize = 220;
 const RECOVERY_PREVIEW_MAX_TOOL_OUTPUTS: usize = 3;
+const RECOVERY_PREVIEW_MAX_TOTAL_CHARS: usize = 4 * 1024;
 const RECOVERY_PREVIEW_USER_LABEL: &str = "Latest user request";
 const RECOVERY_PREVIEW_TOOL_LABEL: &str = "Latest tool output";
 const RECOVERY_PREVIEW_ASSISTANT_LABEL: &str = "Latest assistant text";
-const RECOVERY_PREVIEW_SPOOL_READ_HEAD_BYTES: usize = 2_000;
-const RECOVERY_PREVIEW_SPOOL_READ_TAIL_BYTES: usize = 1_500;
-const RECOVERY_PREVIEW_SPOOL_EXEC_TAIL_BYTES: usize = 4_000;
-const RECOVERY_PREVIEW_SPOOL_EXEC_MAX_LINES: usize = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CompactionEnvelopeMode {

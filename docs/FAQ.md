@@ -118,18 +118,36 @@ The `ExternalAppLauncher` trait allows suspending the TUI to launch editors, git
 
 ### Why suspend the TUI to launch external apps?
 
-VT Code suspends the event loop, drains pending terminal events, leaves alternate-screen rendering, launches the external app, and then restores the fullscreen session. The same pattern is used for editor launches and for fullscreen transcript review handoff to native scrollback.
+VT Code suspends the event loop, drains pending terminal events, leaves alternate-screen rendering, launches the external app, and then restores the fullscreen session. The same pattern is used for editor launches and for the tool-output viewer's handoff to native scrollback.
 
 This prevents terminal artifacts and ensures external apps get clean input/output.
 
-### How does fullscreen transcript review work?
+### How does fullscreen Transcript Review work?
 
-Press `Alt+O` while fullscreen rendering is active to open transcript review. VT Code builds a plain-text cache of the full transcript, including expanded collapsed tool payloads, then lets you:
+Press the configured Transcript Review shortcut (default `Ctrl+T`) to open or
+close Transcript Review. VT Code composes the ordered session conversation
+with complete command output, including PTY captures and distinguishable pipe
+stdout/stderr streams. The live view stays compact, while the review retains
+the full capture. Rich rendering is the default; press the configured render
+toggle (default `R`) for ANSI-free raw text. You can:
 
 - search with `/`, `n`, and `N`
 - page through the conversation with `Ctrl+U`, `Ctrl+D`, `Ctrl+B`, and `Ctrl+F`
-- export to native terminal scrollback with `[`
-- open the expanded transcript in your editor with `v`
+- export the complete conversation to native terminal scrollback with `[`
+- open the complete conversation in your editor with `v`
+- copy the complete ANSI-free conversation with `Ctrl+O`
+
+Successful command rows are grouped only while they are contiguous. Their
+styled shortcut and `click to expand or collapse` suffix is clickable with
+mouse capture; clicking a grouped row opens the review at its first command.
+Failures,
+warnings, stderr, diffs, and meaningful artifacts remain inline.
+
+The Transcript Review title includes a clickable `[close]` control, and its
+footer lists the active open/close, rich/raw, search, and scrolling shortcuts.
+These hints and controls can be disabled independently in `ui.transcript_review`.
+`Alt+O` remains available as a compatibility alias. If the review action is
+explicitly unbound, `Ctrl+T` falls back to readline transpose behavior.
 
 ### What should I configure for tmux?
 

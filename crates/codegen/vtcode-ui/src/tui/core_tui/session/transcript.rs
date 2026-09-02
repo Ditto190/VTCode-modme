@@ -270,6 +270,18 @@ impl Session {
 
         arc_lines
     }
+
+    /// Return the reflowed row range occupied by one logical message.
+    pub(crate) fn transcript_message_row_range(&mut self, width: u16, index: usize) -> Option<(usize, usize)> {
+        let cache = self.ensure_reflow_cache(width);
+        let start = cache.row_offsets.get(index).copied()?;
+        let end = cache
+            .row_offsets
+            .get(index.saturating_add(1))
+            .copied()
+            .unwrap_or(cache.total_rows);
+        Some((start, end.max(start.saturating_add(1))))
+    }
 }
 
 impl Default for TranscriptReflowCache {

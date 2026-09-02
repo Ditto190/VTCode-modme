@@ -22,6 +22,11 @@ fn inline_command_variant_name(command: &InlineCommand) -> &'static str {
         InlineCommand::AppendPastedMessage { .. } => "AppendPastedMessage",
         InlineCommand::Inline { .. } => "Inline",
         InlineCommand::ReplaceLast { .. } => "ReplaceLast",
+        InlineCommand::RecordToolOutput { .. } => "RecordToolOutput",
+        InlineCommand::AppendToolOutputLine { .. } => "AppendToolOutputLine",
+        InlineCommand::AppendCompactActivity(_) => "AppendCompactActivity",
+        InlineCommand::ReplaceCompactActivity(_) => "ReplaceCompactActivity",
+        InlineCommand::CollapsePtyBlock(_) => "CollapsePtyBlock",
         InlineCommand::SetPrompt { .. } => "SetPrompt",
         InlineCommand::SetPlaceholder { .. } => "SetPlaceholder",
         InlineCommand::SetMessageLabels { .. } => "SetMessageLabels",
@@ -62,6 +67,7 @@ fn inline_command_variant_name(command: &InlineCommand) -> &'static str {
         InlineCommand::SetImageInputEnabled(_) => "SetImageInputEnabled",
         InlineCommand::RestoreInputDraft(_) => "RestoreInputDraft",
         InlineCommand::UpdateFilePaletteSearch { .. } => "UpdateFilePaletteSearch",
+        InlineCommand::SetKeyBindings { .. } => "SetKeyBindings",
     }
 }
 

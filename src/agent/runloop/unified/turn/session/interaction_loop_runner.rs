@@ -92,7 +92,7 @@ pub(super) async fn run_interaction_loop_impl(
                     {
                         tracing::warn!("Failed to apply live-reloaded workspace config: {}", err);
                     }
-                    apply_live_theme_and_appearance(ctx.handle, cfg);
+                    apply_live_theme_and_appearance(ctx.handle, cfg, ctx.session_bootstrap);
                     ctx.renderer
                         .set_show_diagnostics_in_transcript(cfg.ui.show_diagnostics_in_transcript);
                     ctx.renderer.set_tool_display_mode(cfg.ui.tool_display_mode);

@@ -4,6 +4,8 @@
 )]
 use super::super::*;
 use super::helpers::*;
+use crate::tui::core_tui::widgets::{LayoutMode, SessionWidget};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use unicode_width::UnicodeWidthStr;
 
 #[test]
@@ -240,6 +242,40 @@ fn empty_enter_with_active_pty_opens_jobs() {
 }
 
 #[test]
+fn active_pty_observer_drives_compact_loading_status() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let active_pty_sessions = Arc::new(AtomicUsize::new(1));
+    session.active_pty_sessions = Some(Arc::clone(&active_pty_sessions));
+    session.handle_command(InlineCommand::SetInputStatus { left: Some("main*".to_string()), right: None });
+
+    assert_eq!(session.status_left_text(), Some("Running PTY command..."));
+    assert!(session.has_status_spinner());
+    assert!(session.is_running_activity());
+
+    active_pty_sessions.store(0, Ordering::Relaxed);
+
+    assert_eq!(session.status_left_text(), Some("main*"));
+    assert!(!session.has_status_spinner());
+    assert!(!session.is_running_activity());
+}
+
+#[test]
+fn active_pty_observer_overrides_idle_stage_status() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let active_pty_sessions = Arc::new(AtomicUsize::new(1));
+    session.active_pty_sessions = Some(Arc::clone(&active_pty_sessions));
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Building));
+
+    assert_eq!(session.status_left_text(), Some("Running PTY command..."));
+    assert!(session.has_status_spinner());
+
+    active_pty_sessions.store(0, Ordering::Relaxed);
+
+    assert_eq!(session.status_left_text(), Some("Building..."));
+    assert!(!session.has_status_spinner());
+}
+
+#[test]
 fn task_panel_visibility_is_independent_from_logs() {
     let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
     session.set_task_panel_visible(true);
@@ -262,6 +298,24 @@ fn stage_states_keep_input_enabled() {
         assert_eq!(session.status_left_text(), state.status());
         assert!(!session.is_running_activity(), "{state:?} with no tool should not spin");
     }
+}
+
+#[test]
+fn git_status_is_not_rendered_in_footer() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.handle_command(InlineCommand::SetInputStatus {
+        left: Some("git: main*".to_string()),
+        right: Some("10:30".to_string()),
+    });
+
+    let area = Rect::new(0, 0, VIEW_WIDTH, 1);
+    let mut buffer = Buffer::empty(area);
+    SessionWidget::new(&mut session)
+        .layout_mode(LayoutMode::Compact)
+        .render(area, &mut buffer);
+
+    let rendered = buffer.content().iter().map(|cell| cell.symbol()).collect::<String>();
+    assert!(!rendered.contains("main*"), "git status should not appear in footer: {rendered}");
 }
 
 #[test]

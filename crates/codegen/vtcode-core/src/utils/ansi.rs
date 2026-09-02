@@ -24,7 +24,8 @@ use unicode_width::UnicodeWidthStr;
 use url::Url;
 use vtcode_commons::color_policy::{self, ColorOutputPolicySource};
 use vtcode_commons::diff_paths::looks_like_diff_content;
-use vtcode_commons::ui_protocol::CompactToolSummaryCall;
+use vtcode_commons::tool_types::CompactStr;
+use vtcode_commons::ui_protocol::{CompactActivityMetadata, ToolOutputId};
 use vtcode_commons::{parse_editor_target, resolve_editor_path};
 
 static FILE_OPENER: OnceLock<Mutex<vtcode_config::FileOpener>> = OnceLock::new();
@@ -114,7 +115,9 @@ pub struct AnsiRenderer {
     screen_reader_mode: bool,
     show_diagnostics_in_transcript: bool,
     tool_display_mode: ToolDisplayMode,
-    compact_tool_summary_batch: Option<Vec<CompactToolSummaryCall>>,
+    compact_command_group: Option<CompactActivityMetadata>,
+    next_compact_group_id: u64,
+    pending_tool_output_anchor: Option<ToolOutputId>,
 }
 
 impl AnsiRenderer {
@@ -156,8 +159,10 @@ impl AnsiRenderer {
             reasoning_visible: true,
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
-            tool_display_mode: ToolDisplayMode::Expanded,
-            compact_tool_summary_batch: None,
+            tool_display_mode: ToolDisplayMode::Compact,
+            compact_command_group: None,
+            next_compact_group_id: 0,
+            pending_tool_output_anchor: None,
         }
     }
 
@@ -176,6 +181,15 @@ impl AnsiRenderer {
             sink.set_highlight_config(config.clone());
         }
         self.highlight_config = config;
+    }
+
+    /// Associate the next summary line with a captured tool output block.
+    ///
+    /// This edge is UI-only. It is carried directly on the summary command so
+    /// repeated commands remain associated with their own captures even when
+    /// completions are interleaved.
+    pub fn set_next_tool_output_anchor(&mut self, id: ToolOutputId) {
+        self.pending_tool_output_anchor = Some(id);
     }
 
     /// Check if the last line rendered was empty
@@ -226,6 +240,7 @@ impl AnsiRenderer {
     }
 
     pub fn set_tool_display_mode(&mut self, mode: ToolDisplayMode) {
+        self.flush_compact_command_group();
         self.tool_display_mode = match mode {
             ToolDisplayMode::Compact => ToolDisplayMode::Compact,
             ToolDisplayMode::Expanded | ToolDisplayMode::Unknown => ToolDisplayMode::Expanded,
@@ -237,6 +252,7 @@ impl AnsiRenderer {
     }
 
     pub fn toggle_tool_display_mode(&mut self) -> ToolDisplayMode {
+        self.flush_compact_command_group();
         let next = match self.tool_display_mode {
             ToolDisplayMode::Expanded | ToolDisplayMode::Unknown => ToolDisplayMode::Compact,
             ToolDisplayMode::Compact => ToolDisplayMode::Expanded,
@@ -245,24 +261,109 @@ impl AnsiRenderer {
         next
     }
 
-    pub fn begin_compact_tool_summary_batch(&mut self) {
-        if self.tool_display_mode == ToolDisplayMode::Compact {
-            self.compact_tool_summary_batch = Some(Vec::new());
+    /// Stop compact command grouping at a presentation boundary.
+    ///
+    /// The grouping state is intentionally kept in the renderer rather than
+    /// the persisted execution event stream. Callers use this before a turn
+    /// ends or before rendering a non-command result.
+    pub fn flush_compact_command_group(&mut self) {
+        self.compact_command_group = None;
+    }
+
+    fn next_compact_activity(
+        &mut self,
+        command: String,
+        hidden_line_count: usize,
+        suffix: Option<String>,
+        review_anchor: Option<ToolOutputId>,
+    ) -> (CompactActivityMetadata, bool) {
+        if let Some(group) = &mut self.compact_command_group {
+            group.command_count = group.command_count.saturating_add(1);
+            group.command = None;
+            group.hidden_line_count = group.hidden_line_count.saturating_add(hidden_line_count);
+            group.suffix = None;
+            if let Some(review_anchor) = review_anchor {
+                if group.review_anchor.is_none() {
+                    group.review_anchor = Some(review_anchor);
+                }
+                if !group.review_anchors.contains(&review_anchor) {
+                    group.review_anchors.push(review_anchor);
+                }
+            }
+            return (group.clone(), true);
         }
+
+        let group_id = self.next_compact_group_id;
+        self.next_compact_group_id = self.next_compact_group_id.wrapping_add(1);
+        let activity = CompactActivityMetadata {
+            group_id,
+            command_count: 1,
+            command: Some(command.into()),
+            hidden_line_count,
+            suffix: suffix.map(CompactStr::from),
+            review_anchor,
+            review_anchors: review_anchor.into_iter().collect(),
+        };
+        self.compact_command_group = Some(activity.clone());
+        (activity, false)
     }
 
-    pub fn compact_tool_summary_batch_active(&self) -> bool {
-        self.compact_tool_summary_batch.is_some()
-    }
-
-    pub fn queue_compact_tool_summary(&mut self, summary: CompactToolSummaryCall) {
-        if let Some(batch) = &mut self.compact_tool_summary_batch {
-            batch.push(summary);
+    /// Render one compact successful command activity row, coalescing it with
+    /// the immediately preceding successful command row when possible.
+    pub fn render_compact_command_activity(
+        &mut self,
+        command: impl Into<String>,
+        hidden_line_count: usize,
+        suffix: Option<String>,
+        review_anchor: Option<ToolOutputId>,
+    ) -> Result<()> {
+        let command = command.into();
+        if !self.supports_inline_ui() {
+            return self.line(MessageStyle::Info, &format!("• Ran {command}"));
         }
+
+        let (activity, replaces_previous) =
+            self.next_compact_activity(command, hidden_line_count, suffix, review_anchor);
+        let text = activity.display_text();
+        if let Some(sink) = &self.sink {
+            if replaces_previous {
+                sink.handle.replace_compact_activity(activity);
+                transcript::replace_last(1, std::slice::from_ref(&text));
+            } else {
+                sink.handle.append_compact_activity(activity);
+                transcript::append(&text);
+            }
+        }
+        self.last_line_was_empty = false;
+        Ok(())
     }
 
-    pub fn take_compact_tool_summary_batch(&mut self) -> Vec<CompactToolSummaryCall> {
-        self.compact_tool_summary_batch.take().unwrap_or_default()
+    /// Collapse the live PTY preview into a compact activity row after the
+    /// command completes. The complete capture is recorded separately.
+    pub fn collapse_pty_block_to_compact_activity(
+        &mut self,
+        command: impl Into<String>,
+        hidden_line_count: usize,
+        suffix: Option<String>,
+        review_anchor: Option<ToolOutputId>,
+    ) -> Result<()> {
+        if !self.supports_inline_ui() {
+            return Ok(());
+        }
+
+        let (activity, replaces_previous) =
+            self.next_compact_activity(command.into(), hidden_line_count, suffix, review_anchor);
+        let text = activity.display_text();
+        if let Some(sink) = &self.sink {
+            sink.handle.collapse_pty_block(activity);
+            if replaces_previous {
+                transcript::replace_last(1, std::slice::from_ref(&text));
+            } else {
+                transcript::append(&text);
+            }
+        }
+        self.last_line_was_empty = false;
+        Ok(())
     }
 
     /// Set an explicit terminal width used when deciding how to render markdown
@@ -353,6 +454,7 @@ impl AnsiRenderer {
     }
 
     pub fn clear_screen(&mut self) {
+        self.flush_compact_command_group();
         if let Some(sink) = &self.sink {
             sink.handle.clear_screen();
         }
@@ -365,6 +467,7 @@ impl AnsiRenderer {
 
     /// Flush the buffer with the given style
     pub fn flush(&mut self, style: MessageStyle) -> Result<()> {
+        self.flush_compact_command_group();
         if !self.should_render_style(style) {
             self.buffer.clear();
             return Ok(());
@@ -393,6 +496,7 @@ impl AnsiRenderer {
 
     /// Convenience for writing a single line
     pub fn line(&mut self, style: MessageStyle, text: &str) -> Result<()> {
+        self.flush_compact_command_group();
         if !self.should_render_style(style) {
             return Ok(());
         }
@@ -442,6 +546,7 @@ impl AnsiRenderer {
                 text,
                 Self::message_kind(style),
                 !suppress_transcript,
+                None,
             )?;
             return Ok(());
         }
@@ -472,11 +577,12 @@ impl AnsiRenderer {
     /// `write_multiline_with_transcript` so the TUI reflow renders it
     /// with the same 2-space block prefix and styling as the PTY output.
     pub fn pty_continuation_line(&mut self, text: &str) -> Result<()> {
+        self.flush_compact_command_group();
         let style = MessageStyle::ToolOutput;
         let indent = style.indent();
         let kind = Self::message_kind(style);
         if let Some(sink) = &mut self.sink {
-            sink.write_multiline_with_transcript(style.style(), indent, text, kind, true)?;
+            sink.write_multiline_with_transcript(style.style(), indent, text, kind, true, None)?;
             return Ok(());
         }
         self.buffer.clear();
@@ -492,6 +598,7 @@ impl AnsiRenderer {
     /// The URL is rendered on its own line so that terminal emulators can
     /// detect and activate it for click-to-open behaviour.
     pub fn hyperlink_line(&mut self, style: MessageStyle, url: &str) -> Result<()> {
+        self.flush_compact_command_group();
         if !self.should_render_style(style) {
             return Ok(());
         }
@@ -503,7 +610,14 @@ impl AnsiRenderer {
                 url,
                 vtcode_commons::ansi_codes::hyperlink_close(),
             );
-            sink.write_multiline_with_transcript(style.style(), indent, &linked, Self::message_kind(style), true)?;
+            sink.write_multiline_with_transcript(
+                style.style(),
+                indent,
+                &linked,
+                Self::message_kind(style),
+                true,
+                None,
+            )?;
             self.last_line_was_empty = false;
             return Ok(());
         }
@@ -529,6 +643,7 @@ impl AnsiRenderer {
 
     /// Append a large pasted user message as a placeholder in inline UI.
     pub fn append_paste_placeholder(&mut self, message: &str, line_count: usize) -> Result<()> {
+        self.flush_compact_command_group();
         if let Some(sink) = &self.sink {
             sink.handle
                 .append_pasted_message(InlineMessageKind::User, message.to_string(), line_count);
@@ -541,6 +656,7 @@ impl AnsiRenderer {
 
     /// Write styled text without a trailing newline
     pub fn inline_with_style(&mut self, style: MessageStyle, text: &str) -> Result<()> {
+        self.flush_compact_command_group();
         if !self.should_render_style(style) {
             return Ok(());
         }
@@ -565,6 +681,8 @@ impl AnsiRenderer {
 
     /// Write a line with a custom style while preserving the logical message kind.
     pub fn line_with_override_style(&mut self, fallback: MessageStyle, style: Style, text: &str) -> Result<()> {
+        self.flush_compact_command_group();
+        let tool_output_id = self.pending_tool_output_anchor.take();
         if !self.should_render_style(fallback) {
             return Ok(());
         }
@@ -576,7 +694,7 @@ impl AnsiRenderer {
         let kind = Self::message_kind(fallback);
         let indent = self.indent_for_style(fallback);
         if let Some(sink) = &mut self.sink {
-            sink.write_multiline_with_transcript(style, indent, text, kind, !suppress_transcript)?;
+            sink.write_multiline_with_transcript(style, indent, text, kind, !suppress_transcript, tool_output_id)?;
             self.last_line_was_empty = text.trim().is_empty();
             return Ok(());
         }
@@ -611,6 +729,7 @@ impl AnsiRenderer {
 
     /// Write a raw line without styling
     pub fn raw_line(&mut self, text: &str) -> Result<()> {
+        self.flush_compact_command_group();
         writeln!(self.writer, "{text}")?;
         self.writer.flush()?;
         transcript::append(text);
@@ -620,6 +739,7 @@ impl AnsiRenderer {
     /// Render markdown content with proper syntax highlighting and indentation normalization.
     /// Use this for tool output that contains markdown code blocks.
     pub fn render_markdown_output(&mut self, style: MessageStyle, text: &str) -> Result<()> {
+        self.flush_compact_command_group();
         self.render_markdown(style, text)
     }
 
@@ -1294,7 +1414,7 @@ impl InlineSink {
     }
 
     fn write_multiline(&mut self, style: Style, indent: &str, text: &str, kind: InlineMessageKind) -> Result<()> {
-        self.write_multiline_with_transcript(style, indent, text, kind, Self::should_record_transcript(kind))
+        self.write_multiline_with_transcript(style, indent, text, kind, Self::should_record_transcript(kind), None)
     }
 
     fn write_multiline_with_transcript(
@@ -1304,6 +1424,7 @@ impl InlineSink {
         text: &str,
         kind: InlineMessageKind,
         record_transcript: bool,
+        tool_output_id: Option<ToolOutputId>,
     ) -> Result<()> {
         let text_storage;
         let text = if kind == InlineMessageKind::Agent {
@@ -1315,11 +1436,18 @@ impl InlineSink {
         let record_transcript = record_transcript && Self::should_record_transcript(kind);
 
         if text.is_empty() {
-            self.handle.append_line(kind, Vec::new());
+            if let Some(id) = tool_output_id {
+                self.handle.append_tool_output_line(id, kind, Vec::new());
+            } else {
+                self.handle.append_line(kind, Vec::new());
+            }
             return Ok(());
         }
 
         if let Some(payload) = Self::detect_large_json_payload(kind, text) {
+            // Summary lines are ordinary short text, so an anchor cannot
+            // normally reach this path. Keep the large-payload placeholder
+            // protocol unchanged if a future caller does pass one through.
             self.emit_large_json_payload(payload, indent, kind, record_transcript)?;
             return Ok(());
         }
@@ -1378,6 +1506,7 @@ impl InlineSink {
             } else {
                 None
             };
+            let mut tool_output_id = tool_output_id;
             for (mut segments, mut plain) in converted_lines.into_iter().zip(plain_lines.into_iter()) {
                 if let Some(ref style_arc) = fallback_arc_opt
                     && !plain.is_empty()
@@ -1392,7 +1521,9 @@ impl InlineSink {
                     plain.insert_str(0, indent);
                 }
 
-                if segments.is_empty() {
+                if let Some(id) = tool_output_id.take() {
+                    self.handle.append_tool_output_line(id, kind, segments);
+                } else if segments.is_empty() {
                     self.handle.append_line(kind, Vec::new());
                 } else {
                     self.handle.append_line(kind, segments);
@@ -1844,7 +1975,9 @@ mod tests {
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
             tool_display_mode: ToolDisplayMode::default(),
-            compact_tool_summary_batch: None,
+            compact_command_group: None,
+            next_compact_group_id: 0,
+            pending_tool_output_anchor: None,
         };
 
         // This should not create an extra empty line after "line 2"

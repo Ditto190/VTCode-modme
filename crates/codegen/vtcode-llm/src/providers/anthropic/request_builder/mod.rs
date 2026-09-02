@@ -22,7 +22,7 @@ use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
     default_effort_for_model, effort_allowed_for_model, rejects_sampling, resolve_model_name,
-    supports_assistant_prefill, supports_effort, supports_task_budget,
+    supports_assistant_prefill, supports_effort, supports_mid_conversation_system_messages, supports_task_budget,
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
@@ -105,11 +105,13 @@ pub(crate) fn convert_to_anthropic_format(
             false
         };
 
+    let allow_mid_conversation_system = supports_mid_conversation_system_messages(resolved_model, ctx.model);
+
     let SystemPromptBuildResult {
         mut system_value,
         breakpoints_used,
         has_uncached_runtime_context,
-    } = build_system_prompt(request, &system_cache_control, breakpoints_remaining);
+    } = build_system_prompt(request, &system_cache_control, breakpoints_remaining, !allow_mid_conversation_system);
     breakpoints_remaining = breakpoints_remaining.saturating_sub(breakpoints_used);
 
     // When the advisor tool is active, append a system-prompt block guiding the

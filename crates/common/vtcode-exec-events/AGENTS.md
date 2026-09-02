@@ -1,5 +1,4 @@
 # vtcode-exec-events
-
 [Root AGENTS.md](../AGENTS.md) | Authoritative `ThreadEvent` contract. All runtime events flow through this crate.
 
 ## Key Types
@@ -24,6 +23,7 @@
 - `vtcode-core::exec::events` re-exports these types — consumers should use that path, not depend on this crate directly.
 - Plan approval state is represented by `PlanApprovalRequestedEvent` and
   `PlanApprovalResolvedEvent`; keep `PlanApprovalDecision` stable because it is
-  consumed by headless clients and Open Responses adapters.
+  consumed by headless clients and Open Responses adapters. Bounded failure
+  explanations use the existing `ReasoningItem` with stage `"diagnosis"`; do not add a parallel event variant.
 - `HarnessEventItem` uses `HarnessEventKind` enum — adding variants requires schema version bump.
 - Schema `0.11.0` adds `context.reset` for plan-to-build fresh-thread handoffs; keep legacy payloads readable and ATIF output stable.
