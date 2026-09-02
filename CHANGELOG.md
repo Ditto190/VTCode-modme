@@ -2,6 +2,21 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.153.0 - 2026-09-02
+
+### Highlights
+#### Bug Fixes
+
+- Restore executable bit and harden crate publish invocation (619e8f2a) (@vinhnx)
+- Prevent terminal leak after exit to CLI (9315e1a3) 
+- Remove full-screen clear that left blank gap after exit (eee38b3b) 
+#### Features
+
+- Improve coloring of grouped tool call commands and wording highlight (2cf79d89) 
+- Add Gemini 3.8 Flash (0ef681e7) 
+- Refine transcript gutter and wrapping layout (cbab27e5) 
+- Add OpenRouter google/gemini-3.8-flash (daee46b6) 
+### Other Changes
 ## 0.152.0 - 2026-09-02
 
 ### Highlights
