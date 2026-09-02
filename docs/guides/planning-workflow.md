@@ -169,7 +169,7 @@ so an approved plan cannot switch to `build` and then wait for another
 
 ### Validated Approval Handoff
 
-Approval is accepted only for a persisted plan that passes the artifact validator and has a persisted task tracker. The canonical sections are `Summary`, `Implementation Steps`, `Test Cases and Validation`, and `Assumptions and Defaults`; the documented short aliases `Steps`, `Validation`, and `Assumptions` are accepted case-insensitively. Every numbered implementation step must name a concrete file, symbol, behavior, or other repository target and include a non-empty `verify:`/`verification:` command or check. Placeholder tokens and unresolved `Next open decision` or `Open question` entries block approval. Invalid candidates are rejected before persistence, so an existing valid draft is preserved. VT Code gives the model one bounded repair request; if the repaired artifact is still invalid, planning remains active with the validation reasons visible.
+Approval is accepted only for a persisted plan that passes the artifact validator and has a persisted task tracker. The canonical sections are `Summary`, `Implementation Steps`, `Test Cases and Validation`, and `Assumptions and Defaults`; the documented short aliases `Steps`, `Validation`, and `Assumptions` are accepted case-insensitively. Plans may also include optional `Expected Outcomes` and `Dependencies and Prerequisites` sections; the validator tolerates additional sections and enforces only the canonical four. Every numbered implementation step must name a concrete file, symbol, behavior, or other repository target and include a non-empty `verify:`/`verification:` command or check. Placeholder tokens and unresolved `Next open decision` or `Open question` entries block approval. Invalid candidates are rejected before persistence, so an existing valid draft is preserved. VT Code gives the model one bounded repair request; if the repaired artifact is still invalid, planning remains active with the validation reasons visible.
 
 Creating the `task_tracker` checklist is part of the approval gate. If the tracker tool is unavailable, fails, or does not persist its tracker file, the planning workflow remains active and no write-capable execution turn is started. All approval routes share the same typed handoff, including direct, queued, automatic, and fresh-context execution.
 
@@ -245,6 +245,7 @@ Incorrect: [main.rs](file:///Users/you/repo/src/main.rs#L42)
 Repository facts checked:
 
 - [file:symbol or behaviour confirmed from the repo]
+- [observed command output -> the insight it establishes]
 
 Next open decision: [if any], otherwise: No remaining scope decisions.
 
@@ -258,8 +259,8 @@ Next open decision: [if any], otherwise: No remaining scope decisions.
 
 ## Implementation Steps
 
-1. [Action] -> files/symbols -> verify: [check]
-2. [Action] -> files/symbols -> verify: [check]
+1. [Action] -> files: [path/to/file.rs] -> verify: [check]
+2. [Action] -> files: [path/to/file.rs] -> verify: [check]
 
 ## Test Cases and Validation
 
@@ -267,14 +268,116 @@ Next open decision: [if any], otherwise: No remaining scope decisions.
 - tests: [detected toolchain command]
 - behaviour: [targeted check]
 
+## Expected Outcomes
+
+- [observable end state the implementation must produce]
+
+## Dependencies and Prerequisites
+
+- [required tooling, configuration, or prior work]
+
 ## Assumptions and Defaults
 
 - [assumption or default chosen]
 - [out-of-scope item intentionally not changed]
-  </proposed_plan>
+
+</proposed_plan>
 ```
 
+`Expected Outcomes` and `Dependencies and Prerequisites` are optional sections:
+add them when they are material to the request — what observable end state the
+work must produce, and which tooling, configuration, or prior work must exist
+before implementation — and omit them when nothing material exists. The
+validator tolerates additional sections; only `Summary`, `Implementation Steps`,
+`Test Cases and Validation`, and `Assumptions and Defaults` are required.
+
 `Next open decision` and `Open question` entries are explicit reopen markers for follow-up planning; use a resolved statement such as `No remaining scope decisions` when none remain.
+
+### Reasoning and Evidence
+
+A plan is only as strong as the evidence behind it, and planning output should
+show the reasoning chain, not just the conclusion:
+
+- Ground every claim in a `file:symbol` reference or an observed read-only
+  command output. Never speculate about code you have not opened.
+- Pair each observed fact with its insight. A failing test line is evidence;
+  the root cause, constraint, or bottleneck it establishes is the insight.
+  Record the insight — the raw output belongs in the transcript, not the plan.
+- Put load-bearing findings (a verified root cause, a hard constraint) in
+  `Repository facts checked` or, when they define the work itself, in
+  `Summary`.
+- Make each step's `verify:` check the stated insight, so approval hands the
+  implementation agent a falsifiable target instead of a description.
+
+### Common Scenarios
+
+The reasoning chain above applies whenever a request needs diagnosis before
+change. Three recurring cases:
+
+**Troubleshooting a command failure.** A build, test, or runtime command fails.
+Run it read-only, capture the decisive output lines, and isolate the offending
+code before proposing a fix:
+
+```markdown
+Repository facts checked:
+
+- `cargo test parser::tests::parse_case` fails: `assertion failed: left == right` at src/parser.rs:120
+- src/parser.rs:118 advances the cursor before the bounds check, so the final byte is read twice
+
+<proposed_plan>
+
+# Fix off-by-one in parser cursor advance
+
+## Summary
+
+`parse_case` reads the final byte twice and fails the round-trip test. The fix
+hoists the bounds check above the cursor advance.
+
+## Implementation Steps
+
+1. Hoist bounds check above cursor advance -> files: [src/parser.rs] -> verify: [cargo test parser::tests::parse_case]
+2. Add single-byte regression test -> files: [src/parser.rs] -> verify: [cargo test parser::tests::single_byte]
+
+## Test Cases and Validation
+
+- build/lint: `cargo check`; `cargo clippy --workspace --all-targets -- -D warnings`
+- tests: `cargo nextest run`
+- behaviour: the previously failing `parse_case` passes
+
+## Expected Outcomes
+
+- `parse_case` accepts single-byte input without double-reading; no other parser behaviour changes
+
+## Assumptions and Defaults
+
+- only the cursor advance changes; the grammar itself is out of scope
+
+</proposed_plan>
+```
+
+**Optimizing a workflow.** A slow build, test, or check loop. Measure first so
+the numbers drive the plan, then verify the win without breaking correctness:
+
+- Repository facts: `cargo build --timings` puts 41% of build time in one
+  crate; the check script rebuilds three crates the dev script does not.
+- Insight: the bottleneck is that crate's feature set, not link time.
+- Steps shape: trim the unused feature → re-time the build against the
+  recorded baseline → run the full test gate. Each `verify:` is either the
+  timing comparison or the correctness gate, so the optimization cannot ship
+  as an unmeasured claim.
+
+**Root-cause bug fix.** For a behavioural bug — for example, a fullscreen TUI
+transcript leaking into the CLI scrollback after exit — the diagnosis-heavy
+plan maps onto the template section by section:
+
+| Diagnosis plan part | Template home |
+| ------------------- | ------------- |
+| Root cause (verified in code) | `Repository facts checked` — file:line evidence for the shutdown race |
+| Fix, in layers | `Implementation Steps`, each with its own `verify:` |
+| Verification and docs work | `Test Cases and Validation` |
+| Scope notes | `Assumptions and Defaults` (intentionally unchanged surface) |
+| — | `Expected Outcomes`: "CLI scrollback is clean after a plain exit" |
+| — | `Dependencies and Prerequisites`: PTY harness available for the regression check |
 
 ### Research Scope
 
@@ -373,7 +476,8 @@ user to keep planning rather than offering `implement`.
 
 1. Be specific about files, functions, constraints, and desired behaviour.
 2. Ask the agent to state trade-offs before implementation begins.
-3. Keep the planning agent read-oriented and switch to `build`, `auto`, or `review` for the next phase.
+3. Ask the agent to record expected outcomes and any prerequisites when they affect implementation order or risk.
+4. Keep the planning agent read-oriented and switch to `build`, `auto`, or `review` for the next phase.
 
 ## See Also
 
