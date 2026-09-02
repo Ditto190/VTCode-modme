@@ -2,11 +2,11 @@
 
 use serde_json::Value;
 use vtcode_commons::ErrorCategory;
-use vtcode_core::config::constants::tools as tool_names;
 use vtcode_core::tools::registry::ToolExecutionError;
 
 use super::ToolFailureDiagnosis;
 use super::evidence::bounded_field;
+use crate::agent::runloop::unified::turn::tool_outcomes::is_grep_style_no_match;
 
 pub(crate) fn deterministic_preflight_diagnosis(
     tool_name: &str,
@@ -28,6 +28,7 @@ pub(crate) fn deterministic_preflight_diagnosis(
 }
 
 pub(crate) fn deterministic_output_diagnosis(tool_name: &str, args: &Value, output: &Value) -> ToolFailureDiagnosis {
+    let grep_no_match = is_grep_style_no_match(tool_name, args, output);
     let tool_name = bounded_field(tool_name);
     let exit_code = output.get("exit_code").and_then(Value::as_i64);
     let stderr = first_text_field(
@@ -49,7 +50,6 @@ pub(crate) fn deterministic_output_diagnosis(tool_name: &str, args: &Value, outp
         .or_else(|| output.get("command").and_then(Value::as_str))
         .map(bounded_field);
 
-    let grep_no_match = is_grep_style_no_match(&tool_name, args, output);
     let command_not_found = diagnostic_fields(output)
         .map(bounded_field)
         .map(|field| field.to_ascii_lowercase())
@@ -92,48 +92,6 @@ pub(crate) fn deterministic_output_diagnosis(tool_name: &str, args: &Value, outp
     };
 
     ToolFailureDiagnosis::new(observed, likely_cause, next_action)
-}
-
-fn is_grep_style_no_match(tool_name: &str, args: &Value, output: &Value) -> bool {
-    if !matches!(tool_name, tool_names::UNIFIED_EXEC | tool_names::EXEC_COMMAND)
-        || output.get("exit_code").and_then(Value::as_i64) != Some(1)
-    {
-        return false;
-    }
-
-    let command = args
-        .get("command")
-        .and_then(Value::as_str)
-        .or_else(|| args.get("cmd").and_then(Value::as_str))
-        .or_else(|| output.get("command").and_then(Value::as_str))
-        .map(bounded_field)
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    let grep_style = command.starts_with("grep ")
-        || command.starts_with("rg ")
-        || command.contains("/grep ")
-        || command.contains("/rg ");
-    // Treat structured diagnostics as evidence too. A grep-style exit code 1
-    // is only a no-match signal when every output-bearing field is empty;
-    // otherwise an error or warning must not be hidden as a benign miss.
-    let output_empty = [
-        "stdout",
-        "output",
-        "preview",
-        "content",
-        "stderr",
-        "stderr_preview",
-        "error",
-        "message",
-        "critical_note",
-        "warning",
-        "hint",
-    ]
-    .iter()
-    .all(|key| value_is_empty(output.get(*key)));
-
-    grep_style && output_empty
 }
 
 pub(crate) fn deterministic_error_diagnosis(error: &ToolExecutionError, failure_kind: &str) -> ToolFailureDiagnosis {
@@ -270,13 +228,4 @@ fn diagnostic_fields(value: &Value) -> impl Iterator<Item = &str> {
     .filter_map(|key| value.get(key).and_then(Value::as_str))
     .map(str::trim)
     .filter(|text| !text.is_empty())
-}
-
-fn value_is_empty(value: Option<&Value>) -> bool {
-    match value {
-        None | Some(Value::Null) => true,
-        Some(Value::String(text)) => text.trim().is_empty(),
-        Some(Value::Array(values)) => values.is_empty(),
-        Some(Value::Bool(_) | Value::Number(_) | Value::Object(_)) => false,
-    }
 }
