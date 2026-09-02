@@ -71,6 +71,7 @@ def is_test_path(path: Path) -> bool:
         rel.startswith("fuzz/")
         or rel.startswith("target/")
         or rel.startswith("tests/")
+        or rel.startswith("benches/")
         or "/tests/" in rel
         or "/benches/" in rel
         or "/examples/" in rel
