@@ -314,6 +314,8 @@ pub enum ModelId {
     OpenRouterGoogleGemini36Flash,
     /// Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels via OpenRouter
     OpenRouterGoogleGemini37Flash,
+    /// Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE/agents with 1M context via OpenRouter
+    OpenRouterGoogleGemini38Flash,
 
     /// Claude Sonnet 5 - Anthropic Claude Sonnet 5 listing
     OpenRouterAnthropicClaudeSonnet5,
