@@ -118,10 +118,9 @@ pub(super) fn preview_command(command: &str, max_len: usize) -> String {
         // so a late first space does not collapse the preview to almost nothing.
         if last_space >= budget / 2 {
             head.truncate(last_space);
-            head.truncate(head.trim_end().len());
         }
     }
-    format!("{head}…")
+    format!("{}…", head.trim_end())
 }
 
 pub(super) fn describe_list_files(args: &Value, workspace_root: Option<&Path>) -> Option<(String, HashSet<String>)> {
@@ -641,16 +640,19 @@ mod tests {
 
     #[test]
     fn preview_command_long_command_head_truncates_at_word_boundary() {
-        let command = "echo one two three four five six seven eight nine ten eleven twelve thirteen";
-        let preview = preview_command(command, 30);
-        assert!(preview.ends_with('…'), "long preview should end with ellipsis: {preview}");
-        let without_ellipsis = preview.trim_end_matches('…');
-        assert!(
-            without_ellipsis.ends_with(|c: char| c.is_whitespace())
-                || command.starts_with(without_ellipsis),
-            "ellipsis should follow a word boundary: {preview}"
-        );
-        assert!(preview.chars().count() <= 30);
+        // 30-char budget: the 29-char cut lands inside "epsilon", but the last
+        // space (index 27) is past half the budget, so it is honored.
+        let command = "echo alpha beta gamma delta epsilon zeta eta theta iota";
+        assert_eq!(preview_command(command, 30), "echo alpha beta gamma delta…");
+    }
+
+    #[test]
+    fn preview_command_keeps_half_budget_when_first_space_is_early() {
+        // Cut lands inside "epsilon" with the only space at index 4, well under
+        // half the 29-char budget: fall back to a hard cut instead of collapsing
+        // the preview to "echo…".
+        let command = "echo alpha-beta-gamma-delta-epsilon zeta";
+        assert_eq!(preview_command(command, 30), "echo alpha-beta-gamma-delta-e…");
     }
 
     #[test]
@@ -666,10 +668,7 @@ mod tests {
             "command": ["cat", "docs/guides/agent-loop-contract.md", "2>/dev/null", "|", "head", "-120", ";", "echo", "---"]
         });
         let display = display_command_text(&args).expect("command display text");
-        assert_eq!(
-            display,
-            "cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120 ; echo ---"
-        );
+        assert_eq!(display, "cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120 ; echo ---");
     }
 
     #[test]

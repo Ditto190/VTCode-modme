@@ -556,6 +556,10 @@ impl ToolOutputViewerState {
     }
 }
 
+/// Shared tail of the compact-activity hint, rendered after the review
+/// keybinding in both plain-text and segmented form.
+const COMPACT_ACTIVITY_HINT_TAIL: &str = "transcript · click to expand";
+
 pub(super) fn compact_activity_hint_text(session: &Session) -> Option<String> {
     if !session.core.transcript_review_hints_visible() {
         return None;
@@ -563,7 +567,7 @@ pub(super) fn compact_activity_hint_text(session: &Session) -> Option<String> {
     session
         .core
         .primary_binding_label(Action::OpenTranscriptReview)
-        .map(|binding| format!("{binding} transcript · click to expand"))
+        .map(|binding| format!("{binding} {COMPACT_ACTIVITY_HINT_TAIL}"))
 }
 
 pub(super) fn compact_activity_segments(
@@ -588,7 +592,7 @@ pub(super) fn compact_activity_segments(
         });
         let rest_style = session.core.styles.default_inline_style().dim();
         segments.push(crate::tui::core_tui::types::InlineSegment {
-            text: " transcript · click to expand".to_string(),
+            text: format!(" {COMPACT_ACTIVITY_HINT_TAIL}"),
             style: std::sync::Arc::new(rest_style),
         });
     }

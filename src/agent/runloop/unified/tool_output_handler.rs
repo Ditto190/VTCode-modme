@@ -21,6 +21,9 @@ use crate::agent::runloop::unified::run_loop_context::RunLoopContext;
 use crate::agent::runloop::unified::tool_pipeline::{
     ToolDisplayStatus, ToolExecutionStatus, ToolPipelineOutcome, renders_pty_command_header, streams_pty_output,
 };
+use crate::agent::runloop::unified::tool_summary_helpers::{
+    display_command_text, preview_command, relativize_command_paths,
+};
 use vtcode_commons::canonicalize;
 
 fn record_mcp_outcome_event(
@@ -225,11 +228,9 @@ fn extract_command_line(args: &serde_json::Value) -> Option<String> {
 fn compact_command_text(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> String {
     // Display join (no shell_words quoting) plus a first-line head-truncated
     // preview: the collapsed row must stay readable, not executable-looking.
-    crate::agent::runloop::unified::tool_summary_helpers::display_command_text(args)
-        .map(|command| {
-            crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths(&command, workspace_root)
-        })
-        .map(|command| crate::agent::runloop::unified::tool_summary_helpers::preview_command(&command, 120))
+    display_command_text(args)
+        .map(|command| relativize_command_paths(&command, workspace_root))
+        .map(|command| preview_command(&command, 120))
         .filter(|command| !command.is_empty())
         .unwrap_or_else(|| name.to_string())
 }
@@ -758,9 +759,7 @@ fn command_output_header(name: &str, args: &serde_json::Value, workspace_root: O
     let command = extract_command_line(args)
         .map(|command| vtcode_commons::formatting::collapse_whitespace(&command))
         .filter(|command| !command.is_empty())
-        .map(|command| {
-            crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths(&command, workspace_root)
-        });
+        .map(|command| relativize_command_paths(&command, workspace_root));
     command
         .map(|command| format!("• Ran {command}"))
         .unwrap_or_else(|| format!("• Ran {name}"))

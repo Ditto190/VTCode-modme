@@ -771,7 +771,10 @@ mod tests {
     fn build_tool_summary_collapses_use_prefix_with_word_order_drift() {
         assert_eq!(build_tool_summary("Search code", "Use Code search"), "Search code");
         assert_eq!(build_tool_summary("Read file", "Use read file"), "Read file");
-        assert_eq!(build_tool_summary("Search code", "Use Code search workspace"), "Search code Use Code search workspace");
+        assert_eq!(
+            build_tool_summary("Search code", "Use Code search workspace"),
+            "Search code Use Code search workspace"
+        );
     }
 
     #[test]
