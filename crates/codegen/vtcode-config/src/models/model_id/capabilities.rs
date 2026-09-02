@@ -287,6 +287,7 @@ impl ModelId {
         matches!(
             self,
             ModelId::Gemini37Flash
+                | ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini36Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
                 | ModelId::EvolinkGemini35Flash
@@ -363,6 +364,7 @@ impl ModelId {
         matches!(
             self,
             ModelId::Gemini37Flash
+                | ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
                 | ModelId::GPT56Luna
                 | ModelId::MergeGatewayOpenAIGpt56Luna
@@ -393,7 +395,8 @@ impl ModelId {
         }
         matches!(
             self,
-            ModelId::Gemini37Flash
+            ModelId::Gemini38Flash
+                | ModelId::Gemini37Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
                 | ModelId::GPT56Sol
                 | ModelId::MergeGatewayOpenAIGpt56Sol
@@ -496,6 +499,7 @@ impl ModelId {
             ModelId::ZaiGlm52 => "5.2",
             ModelId::Gemini36Flash => "3.6",
             ModelId::Gemini37Flash => "3.7",
+            ModelId::Gemini38Flash => "3.8",
             ModelId::MergeGatewayGoogleGemini37Flash => "3.7",
             ModelId::OpenCodeGoGlm53 => "5.3",
             ModelId::OpenCodeGoGlm52 => "5.2",

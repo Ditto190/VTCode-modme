@@ -28,6 +28,7 @@ pub mod zai;
 // Backwards compatibility - keep old constants working
 pub const GEMINI_3_7_FLASH: &str = google::GEMINI_3_7_FLASH;
 pub const GEMINI_3_6_FLASH: &str = google::GEMINI_3_6_FLASH;
+pub const GEMINI_3_8_FLASH: &str = google::GEMINI_3_8_FLASH;
 pub const GEMINI_3_FLASH_PREVIEW: &str = google::GEMINI_3_FLASH_PREVIEW;
 pub(crate) const GPT: &str = openai::GPT;
 pub const GPT_5: &str = openai::GPT_5;

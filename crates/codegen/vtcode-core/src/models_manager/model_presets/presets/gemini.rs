@@ -6,10 +6,12 @@ use crate::config::types::ReasoningEffortLevel;
 pub(crate) fn gemini_presets() -> Vec<ModelPreset> {
     vec![
         ModelPreset {
-            id: "gemini-3-flash-preview".to_string(),
-            model: "gemini-3-flash-preview".to_string(),
-            display_name: "Gemini 3 Flash Preview".to_string(),
-            description: "Most intelligent model built for speed with superior search and grounding".to_string(),
+            id: "gemini-3.8-flash".to_string(),
+            model: "gemini-3.8-flash".to_string(),
+            display_name: "Gemini 3.8 Flash".to_string(),
+            description:
+                "Most intelligent Flash for long-horizon SWE, agents, and enterprise workflows with 1M context"
+                    .to_string(),
             provider: Provider::Gemini,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
             supported_reasoning_efforts: vec![
@@ -26,7 +28,7 @@ pub(crate) fn gemini_presets() -> Vec<ModelPreset> {
                     description: "Deep reasoning".to_string(),
                 },
             ],
-            is_default: true,
+            is_default: false,
             upgrade: None,
             show_in_picker: true,
             supported_in_api: true,
@@ -35,8 +37,8 @@ pub(crate) fn gemini_presets() -> Vec<ModelPreset> {
         ModelPreset {
             id: "gemini-3.7-flash".to_string(),
             model: "gemini-3.7-flash".to_string(),
-            display_name: "Gemini 3.5 Flash Lite".to_string(),
-            description: "Cost-optimized lightweight model for efficient inference".to_string(),
+            display_name: "Gemini 3.7 Flash".to_string(),
+            description: "Flash model with 1M context and tunable thinking levels (low, medium, high)".to_string(),
             provider: Provider::Gemini,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
             supported_reasoning_efforts: vec![
@@ -87,10 +89,10 @@ pub(crate) fn gemini_presets() -> Vec<ModelPreset> {
             context_window: Some(1_048_576),
         },
         ModelPreset {
-            id: "gemini-3.7-flash".to_string(),
-            model: "gemini-3.7-flash".to_string(),
-            display_name: "Gemini 3.7 Flash".to_string(),
-            description: "Latest flash model with 1M context and tunable thinking levels".to_string(),
+            id: "gemini-3-flash-preview".to_string(),
+            model: "gemini-3-flash-preview".to_string(),
+            display_name: "Gemini 3 Flash Preview".to_string(),
+            description: "Most intelligent model built for speed with superior search and grounding".to_string(),
             provider: Provider::Gemini,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
             supported_reasoning_efforts: vec![
@@ -107,7 +109,7 @@ pub(crate) fn gemini_presets() -> Vec<ModelPreset> {
                     description: "Deep reasoning".to_string(),
                 },
             ],
-            is_default: false,
+            is_default: true,
             upgrade: None,
             show_in_picker: true,
             supported_in_api: true,

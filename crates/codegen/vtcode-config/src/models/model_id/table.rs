@@ -98,6 +98,13 @@ model_id_table! {
         display: "Gemini 3.7 Flash",
         description: "Flash model with 1M context and tunable thinking levels (low, medium, high)",
     },
+    Gemini38Flash {
+        provider: Gemini,
+        id: models::GEMINI_3_8_FLASH,
+        parse: [models::GEMINI_3_8_FLASH],
+        display: "Gemini 3.8 Flash",
+        description: "Most intelligent Flash for long-horizon SWE, autonomous agents, and complex enterprise workflows with 1M context and tunable thinking (low, medium, high)",
+    },
     // OpenAI models
     GPT56Sol {
         provider: OpenAI,

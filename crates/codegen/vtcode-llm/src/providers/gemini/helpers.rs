@@ -99,9 +99,10 @@ impl GeminiProvider {
     }
 
     /// Check if model supports extended thinking levels (minimal, medium)
-    /// Only Gemini 3 Flash supports these additional levels
+    /// Only Gemini 3 Flash Preview supports the `minimal` level; stable
+    /// Gemini 3.7/3.8 Flash support low/medium/high with medium as default.
     pub(crate) fn supports_extended_thinking(model: &str) -> bool {
-        model.contains("gemini-3-flash")
+        model.contains("gemini-3-flash-preview")
     }
 
     /// Determine whether a Gemini model uses the latest API behavior that
@@ -136,10 +137,14 @@ impl GeminiProvider {
 
     /// Get supported thinking levels for a model
     /// Reference: <https://ai.google.dev/gemini-api/docs/gemini-3>
+    /// Gemini 3.8 Flash: low, medium (default), high — `minimal` is not supported and will error.
     pub(crate) fn supported_thinking_levels(model: &str) -> Vec<&'static str> {
-        if model.contains("gemini-3-flash") {
-            // Gemini 3 Flash supports all levels
+        if model.contains("gemini-3-flash-preview") {
+            // Preview supports all levels including minimal
             vec!["minimal", "low", "medium", "high"]
+        } else if model.contains("gemini-3") && model.contains("flash") {
+            // Stable Flash models (3.6, 3.7, 3.8) support low/medium/high (medium default)
+            vec!["low", "medium", "high"]
         } else if model.contains("gemini-3") {
             // Gemini 3 Pro supports low and high
             vec!["low", "high"]
@@ -1092,13 +1097,15 @@ fn build_generation_config(provider: &GeminiProvider, request: &LLMRequest) -> G
     if let Some(effort) = request.reasoning_effort
         && provider.supports_reasoning_effort(&request.model)
     {
-        let is_gemini3_flash = request.model.contains("gemini-3-flash");
+        let is_gemini3_flash_preview = request.model.contains("gemini-3-flash-preview");
+        let is_gemini3_flash = request.model.contains("gemini-3") && request.model.contains("flash");
         let thinking_level = match effort {
             ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => Some("low"),
             ReasoningEffortLevel::Minimal => {
-                if is_gemini3_flash {
+                if is_gemini3_flash_preview {
                     Some("minimal")
                 } else {
+                    // Gemini 3.8/3.7 Flash does not support `minimal` — fall back to `low` to avoid API error
                     Some("low")
                 }
             }

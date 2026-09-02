@@ -25,6 +25,8 @@ pub enum ModelId {
     Gemini36Flash,
     /// Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels
     Gemini37Flash,
+    /// Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE, agents, and enterprise workflows (1M context, 64k output, low/medium/high thinking)
+    Gemini38Flash,
 
     // OpenAI models
     /// GPT-5.6 Sol - Frontier model for complex professional work in the GPT-5.6 family

@@ -19,6 +19,7 @@ impl ModelId {
             // Gemini models
             ModelId::Gemini36Flash,
             ModelId::Gemini37Flash,
+            ModelId::Gemini38Flash,
             // OpenAI models
             ModelId::GPT56Sol,
             ModelId::GPT56Terra,

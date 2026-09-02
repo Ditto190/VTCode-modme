@@ -41,10 +41,72 @@
           "thinking": true
         }
       },
+      "gemini-3.6-flash": {
+        "id": "gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "description": "Latest flash model with improved reasoning, efficiency, and factual consistency",
+        "version": "stable",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "output_tokens": 65536,
+        "capabilities": {
+          "caching": true,
+          "code_execution": true,
+          "batch_api": true,
+          "structured_output": true,
+          "search_grounding": true,
+          "url_context": true,
+          "thinking": true
+        }
+      },
       "gemini-3.7-flash": {
         "id": "gemini-3.7-flash",
         "name": "Gemini 3.7 Flash",
         "description": "Flash model with 1M context and tunable thinking levels (low, medium, high)",
+        "version": "stable",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "output_tokens": 65536,
+        "capabilities": {
+          "caching": true,
+          "code_execution": true,
+          "batch_api": true,
+          "structured_output": true,
+          "search_grounding": true,
+          "url_context": true,
+          "thinking": true
+        }
+      },
+      "gemini-3.8-flash": {
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "description": "Most intelligent Flash for long-horizon software engineering, autonomous agents, and complex enterprise workflows with 1M context and tunable thinking (low, medium, high)",
         "version": "stable",
         "reasoning": true,
         "tool_call": true,
