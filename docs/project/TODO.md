@@ -65,3 +65,13 @@ analysis possible across turns
 #: 7
 Finding: files array always empty (file_count: 0) even for file-reading turns
 Evidence: Session replay can't show touched files
+
+===
+
+improve coloring of grouped tool call commands and wording higlight
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.09.57.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.09.55.png'
+
+---
+
+improve and fix UI '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.00.54.png'
