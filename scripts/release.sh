@@ -1098,9 +1098,13 @@ main() {
 
 	if [[ "$skip_crates" == 'false' ]]; then
 		print_distribution "Publishing crates in dependency order..."
-		if ! ./scripts/publish_extracted_crates.sh --skip-tests --skip-tags --skip-follow-up; then
+		# Ensure publish script is executable (defensive against lost +x on fresh checkout or noexec FS)
+		if [[ ! -x "$SCRIPT_DIR/publish_extracted_crates.sh" ]]; then
+			chmod +x "$SCRIPT_DIR/publish_extracted_crates.sh" 2>/dev/null || true
+		fi
+		if ! bash "$SCRIPT_DIR/publish_extracted_crates.sh" --skip-tests --skip-tags --skip-follow-up; then
 			print_error "Crate publishing failed. Remaining release steps (GitHub Release, binaries, Homebrew) will continue."
-			print_info "You can resume crate publishing with: ./scripts/publish_extracted_crates.sh --start-from <crate> --skip-tests --skip-tags --skip-follow-up"
+			print_info "You can resume crate publishing with: bash ./scripts/publish_extracted_crates.sh --start-from <crate> --skip-tests --skip-tags --skip-follow-up"
 		fi
 	fi
 
