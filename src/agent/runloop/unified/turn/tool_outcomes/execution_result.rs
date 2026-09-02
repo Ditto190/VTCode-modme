@@ -9,6 +9,7 @@
 //! - Verify: `cargo check -p vtcode && cargo test -p vtcode --bin vtcode inline_events::tests`
 
 mod auto_permission_probe;
+mod failure_diagnosis;
 mod failure_path;
 
 use anyhow::Result;
@@ -25,6 +26,12 @@ use vtcode_core::tools::registry::labels::tool_action_label;
 use vtcode_core::utils::ansi::MessageStyle;
 
 use self::auto_permission_probe::push_tool_response_with_auto_permission_probe;
+pub(crate) use self::failure_diagnosis::{
+    ToolFailureDiagnosis, bounded_diagnostic_field, bounded_error_evidence, bounded_output_evidence,
+    deterministic_error_diagnosis, deterministic_output_diagnosis, deterministic_preflight_diagnosis,
+    escape_untrusted_evidence, render_and_emit, render_diagnosis,
+};
+use self::failure_diagnosis::{diagnose_error, diagnose_output};
 use self::failure_path::{
     finalize_failed_tool_response, log_structured_failure, notify_structured_failure, record_recovery_tool_error,
 };
@@ -128,7 +135,7 @@ pub(crate) async fn handle_tool_execution_result<'a>(
     tool_start_time: std::time::Instant,
 ) -> Result<Option<TurnHandlerOutcome>> {
     // 1. Record metrics and outcome
-    let is_success = matches!(pipeline_outcome.status, ToolExecutionStatus::Success { .. });
+    let is_success = matches!(&pipeline_outcome.status, ToolExecutionStatus::Success { command_success: true, .. });
     let is_argument_error = if let ToolExecutionStatus::Failure { error } = &pipeline_outcome.status {
         check_is_argument_error(&error.message)
     } else {
@@ -136,13 +143,14 @@ pub(crate) async fn handle_tool_execution_result<'a>(
     };
 
     record_tool_execution(t_ctx.ctx, tool_name, tool_start_time, is_success, is_argument_error);
-    if matches!(pipeline_outcome.status, ToolExecutionStatus::Failure { .. } | ToolExecutionStatus::Timeout { .. }) {
+    if pipeline_outcome.status.is_failure_like() {
         t_ctx.ctx.harness_state.record_failed_tool_call();
     }
 
     match &pipeline_outcome.status {
-        ToolExecutionStatus::Success { output, .. } => {
-            handle_success(t_ctx, tool_call_id, tool_name, args_val, pipeline_outcome, output).await?;
+        ToolExecutionStatus::Success { output, command_success, .. } => {
+            handle_success(t_ctx, tool_call_id, tool_name, args_val, pipeline_outcome, output, *command_success)
+                .await?;
         }
         ToolExecutionStatus::Failure { error } => {
             if let Some(outcome) = handle_failure(t_ctx, tool_call_id, tool_name, args_val, error).await? {
@@ -189,13 +197,16 @@ async fn handle_success<'a>(
     args_val: &serde_json::Value,
     pipeline_outcome: &ToolPipelineOutcome,
     output: &serde_json::Value,
+    command_success: bool,
 ) -> Result<()> {
-    if let Err(err) = notify_tool_success(tool_name, None).await {
-        tracing::debug!(
-            tool = %tool_name,
-            error = %err,
-            "Failed to emit tool success notification"
-        );
+    if command_success {
+        if let Err(err) = notify_tool_success(tool_name, None).await {
+            tracing::debug!(
+                tool = %tool_name,
+                error = %err,
+                "Failed to emit tool success notification"
+            );
+        }
     }
 
     // Update blocked-streak and record tool response in grouped context form.
@@ -204,14 +215,41 @@ async fn handle_success<'a>(
     // Compact rendering may collapse or return early, but it must never affect
     // the model or harness context.
     let content_for_model = prepare_tool_response_content(t_ctx.ctx, tool_name, args_val, output).await;
-    push_tool_response_with_auto_permission_probe(t_ctx, tool_call_id.clone(), tool_name, content_for_model).await?;
+    let diagnosis = if command_success {
+        None
+    } else {
+        Some(diagnose_output(t_ctx.ctx, tool_name, args_val, output).await)
+    };
+    let response_result = if let Some(diagnosis) = diagnosis.as_ref() {
+        failure_diagnosis::push_tool_response_with_diagnosis(
+            t_ctx,
+            tool_call_id.clone(),
+            tool_name,
+            content_for_model,
+            diagnosis,
+        )
+        .await
+    } else {
+        push_tool_response_with_auto_permission_probe(t_ctx, tool_call_id.clone(), tool_name, content_for_model).await
+    };
+    // The execution pipeline has already emitted the canonical ToolOutput
+    // event before this handler runs. Emit the diagnosis immediately after
+    // the model-facing response attempt so UI/rendering failures cannot
+    // suppress the durable diagnosis item or change its ordering.
+    if let Some(diagnosis) = diagnosis.as_ref() {
+        render_and_emit(t_ctx.ctx, tool_name, diagnosis);
+    }
+    response_result?;
     // Skip signature recording for loop-detected stubs: a loop-detected result is
     // a cached/short-circuited response, not a genuine successful execution.
     // Recording its signature would cause the turn-local guard
     // (`has_successful_readonly_signature`) to treat future identical calls as
     // duplicates and return the stale loop-detected stub instead of re-executing.
     let is_loop_detected_stub = output.get("loop_detected").and_then(|v| v.as_bool()).unwrap_or(false);
-    if !is_loop_detected_stub && !vtcode_core::tools::tool_intent::classify_tool_intent(tool_name, args_val).mutating {
+    if command_success
+        && !is_loop_detected_stub
+        && !vtcode_core::tools::tool_intent::classify_tool_intent(tool_name, args_val).mutating
+    {
         let signature = signature_key_for(tool_name, args_val);
         t_ctx.ctx.harness_state.record_successful_readonly_signature(signature);
     } else {
@@ -305,7 +343,9 @@ async fn handle_failure<'a>(
         record_recovery_tool_error(t_ctx.ctx, tool_name, error, RecoveryErrorType::ToolExecution).await;
     }
 
-    finalize_failed_tool_response(t_ctx, tool_call_id, tool_name, args_val, error, "execution").await;
+    let diagnosis = diagnose_error(t_ctx.ctx, tool_name, args_val, error, "execution").await;
+    finalize_failed_tool_response(t_ctx, tool_call_id, tool_name, args_val, error, "execution", &diagnosis).await;
+    render_and_emit(t_ctx.ctx, tool_name, &diagnosis);
 
     if blocked_or_denied_failure {
         t_ctx.ctx.harness_state.record_denied_tool_call();
@@ -353,7 +393,9 @@ async fn handle_timeout(
 
     record_recovery_tool_error(t_ctx.ctx, tool_name, error, RecoveryErrorType::Timeout).await;
 
-    finalize_failed_tool_response(t_ctx, tool_call_id, tool_name, args_val, error, "timeout").await;
+    let diagnosis = diagnose_error(t_ctx.ctx, tool_name, args_val, error, "timeout").await;
+    finalize_failed_tool_response(t_ctx, tool_call_id, tool_name, args_val, error, "timeout", &diagnosis).await;
+    render_and_emit(t_ctx.ctx, tool_name, &diagnosis);
 
     Ok(())
 }
@@ -437,8 +479,11 @@ pub(super) fn record_mcp_event_to_panel(
     let mut mcp_event = mcp_events::McpEvent::new("mcp".to_string(), tool_name.to_string(), data_preview);
 
     match status {
-        ToolExecutionStatus::Success { .. } => {
+        ToolExecutionStatus::Success { command_success, .. } if *command_success => {
             mcp_event.success(None);
+        }
+        ToolExecutionStatus::Success { .. } => {
+            mcp_event.failure(Some("Command returned a non-zero exit code".to_string()));
         }
         ToolExecutionStatus::Failure { error } => {
             mcp_event.failure(Some(error.user_message()));

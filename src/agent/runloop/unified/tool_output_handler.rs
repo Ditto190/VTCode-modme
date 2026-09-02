@@ -23,13 +23,22 @@ use crate::agent::runloop::unified::tool_pipeline::{
 };
 use vtcode_commons::canonicalize;
 
-fn record_mcp_success_event(mcp_panel_state: &mut McpPanelState, tool_name: &str, args_val: &serde_json::Value) {
+fn record_mcp_outcome_event(
+    mcp_panel_state: &mut McpPanelState,
+    tool_name: &str,
+    args_val: &serde_json::Value,
+    command_success: bool,
+) {
     let mut mcp_event = crate::agent::runloop::mcp_events::McpEvent::new(
         "mcp".to_string(),
         tool_name.to_string(),
         Some(args_val.to_string()),
     );
-    mcp_event.success(None);
+    if command_success {
+        mcp_event.success(None);
+    } else {
+        mcp_event.failure(Some("Command returned a non-zero exit code".to_string()));
+    }
     mcp_panel_state.add_event(mcp_event);
 }
 
@@ -1145,7 +1154,7 @@ async fn handle_success_common(
         ctx.renderer.flush_compact_command_group();
         let tool_name = tool_name.trim_start_matches('_');
         let tool_name = tool_name.split("__").last().unwrap_or(tool_name);
-        record_mcp_success_event(ctx.mcp_panel_state, tool_name, args_val);
+        record_mcp_outcome_event(ctx.mcp_panel_state, tool_name, args_val, payload.command_success);
     } else if is_task_tracker_tool(name) && ctx.renderer.supports_inline_ui() {
         ctx.renderer.flush_compact_command_group();
         let block_lines = task_tracker_block_lines(payload.output);
@@ -1359,7 +1368,7 @@ pub(crate) async fn handle_pipeline_output_from_turn_ctx(
     let (modified_files, last_stdout) =
         handle_pipeline_output(&mut run_ctx, name, args_val, outcome, vt_config).await?;
 
-    if let ToolExecutionStatus::Success { output, modified_files, .. } = &outcome.status {
+    if let ToolExecutionStatus::Success { output, modified_files, command_success: true, .. } = &outcome.status {
         let activity_paths =
             collect_instruction_activity_paths(ctx.config.workspace.as_path(), args_val, output, modified_files);
         if !activity_paths.is_empty() {

@@ -30,7 +30,40 @@ glanceable `• Edited path (+N -M)` (or created/deleted) row followed by the
 numbered diff preview; the complete tool result remains available to the
 agent and Transcript Review.
 
+Failure-like results (hard failures, timeouts, and non-zero command exits) also
+show a bounded `Info` diagnosis with `Observed`, `Likely cause`, and `Next
+action`. It is derived from the existing bounded preview, while complete raw
+output remains available in Transcript Review. Deterministic guidance is used
+for policy, permission, authentication, circuit-breaker, sandbox, resource,
+and preflight failures; provider-native reasoning settings do not expose raw
+diagnosis-provider reasoning.
+
+When the UI collapses or bounds a tool result, every provider/model receives
+this exact disclosure after the tool-result user message:
+
+```text
+Only you see that command's output — the user's terminal shows at most a few lines of it. If the user needs to read any of it, put it in your reply.
+```
+
+Anthropic wire routes whose selected provider/model capability supports it use
+the native `clear_at: "next_user_message"` field and the required
+`mid-conversation-system-clear-at-2026-08-21` beta. Anthropic-shaped routes
+without that capability promote the same text to their top-level system
+prompt. All remaining provider routes receive it through their native system,
+history, instructions, or transcript mapping, without the Anthropic-only
+`clear_at` field. VT Code keeps one typed marker in canonical session history
+so provider switching and replay preserve the disclosure. This tells the model
+when it must quote or summarize output for the user; it does not expose raw
+provider reasoning or replace the complete output retained by Transcript
+Review.
+
 In compact mode, PTY commands keep their complete capture and grouped completion row without emitting a transient live PTY block. Progress remains available through the active status/spinner, while warnings, failures, diffs, stderr, and meaningful artifacts stay inline. Expanded mode preserves the bounded live tail.
+
+Model-facing progress guidance complements these UI summaries: for non-trivial
+tool work, the model announces the next phase in one brief line, gives one or
+two concise sentences when the phase or next action changes, and ends with a
+standalone recap. It should summarize material findings instead of rerunning a
+command whose successful body is available through Transcript Review.
 
 The runtime mode can be changed for the current session with `Alt+T`. This action is rebindable through the existing keybinding configuration. Use `/config` to cycle `ui.tool_display_mode` and persist the choice to `vtcode.toml`.
 

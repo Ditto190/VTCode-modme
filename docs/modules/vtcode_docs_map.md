@@ -150,8 +150,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/runtime-guidance.md`
   - **Content**: Runtime Guidance and Project Instructions
-  - **Topics**: Continuity and long-running work
-  - **User Questions**: "What can you tell me about Runtime Guidance and Project Instructions?", "How does Continuity and long-running work work?"
+  - **Topics**: User-facing progress contract, Continuity and long-running work
+  - **User Questions**: "What can you tell me about Runtime Guidance and Project Instructions?", "How does User-facing progress contract work?", "How does Continuity and long-running work work?"
 
 - **File**: `docs/development/rust-performance-principles.md`
   - **Content**: Rust-Specific Performance Principles for VT Code
@@ -573,7 +573,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/providers/PROVIDER_GUIDES.md`
   - **Content**: Provider Guides
-  - **Topics**: Provider whitelisting, Custom providers, Google Gemini, OpenAI, Anthropic
+  - **Topics**: Provider whitelisting, Custom providers, Collapsed tool-result disclosure, Google Gemini, OpenAI
   - **User Questions**: "What can you tell me about Provider Guides?", "How does Provider whitelisting work?", "How does Custom providers work?"
 
 - **File**: `docs/providers/zai.md`

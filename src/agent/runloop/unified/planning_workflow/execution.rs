@@ -79,7 +79,7 @@ pub(crate) async fn handle_start_planning(
     )
     .await;
 
-    if let ToolExecutionStatus::Success { ref output, .. } = tool_result {
+    if let ToolExecutionStatus::Success { ref output, command_success: true, .. } = tool_result {
         let status = output.get("status").and_then(|s| s.as_str());
         if status == Some(PLAN_STATUS_PENDING_CONFIRMATION) {
             if headless_planning_entry_requires_confirmation(
@@ -202,7 +202,7 @@ async fn handle_enter_pending_confirmation(
     )
     .await;
 
-    if let ToolExecutionStatus::Success { ref output, .. } = tool_result {
+    if let ToolExecutionStatus::Success { ref output, command_success: true, .. } = tool_result {
         let status = output.get("status").and_then(|s| s.as_str());
         if status == Some(PLAN_STATUS_SUCCESS) {
             enter_planning_workflow_after_start(ctx).await;

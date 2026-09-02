@@ -61,6 +61,53 @@ completed as failed. A timeout applies to the provider stream acquisition and
 is reported as a failure; it does not silently convert an empty or partial
 stream into success. Steering follow-ups remain queued for the next turn.
 
+Failure-like tool results include hard failures, timeouts, and successful process
+responses with a non-zero exit status. Non-zero results retain their stdout,
+stderr, exit status, partial output, and spool evidence, but count as failures
+for metrics, batch summaries, and recovery diagnosis; they do not create a
+successful read-only signature. Low-signal grep/no-match behavior remains
+unchanged. The existing model-facing tool response may include a bounded
+`diagnosis` object:
+
+```json
+{"diagnosis":{"observed":"...","likely_cause":"...","next_action":"..."}}
+```
+
+Diagnosis uses only the already bounded tool preview and never reopens a spool.
+When routing permits, a tool-free lightweight model request returns the same
+three bounded fields as strict JSON. Provider failure, timeout, or malformed
+output falls back to deterministic evidence-only guidance. Policy,
+authentication, permission, circuit-breaker, sandbox, resource, and preflight
+failures always use deterministic guidance, so diagnosis cannot recommend
+bypassing safeguards. The UI renders an `Info` block and emits an existing
+`ReasoningItem` with stage `"diagnosis"` after the failed `ToolOutput`; this
+remains visible when native reasoning is hidden. Provider-native reasoning
+continues to follow its existing capability and display settings, and raw
+chain-of-thought is never exposed.
+
+When the product collapses or bounds a tool result, every provider/model
+receives the fixed disclosure after the tool-result user message: `Only you
+see that command's output — the user's terminal shows at most a few lines of
+it. If the user needs to read any of it, put it in your reply.` Anthropic wire
+routes whose selected provider/model capability supports it use
+`clear_at: "next_user_message"` and the required beta; unsupported Anthropic
+models and gateways promote the same text to their top-level system prompt.
+Other providers map it to their native system, history, instructions, or
+transcript representation without the Anthropic-only `clear_at` field. One
+typed marker remains in canonical history for provider switching and replay.
+
+### User-facing progress updates
+
+The model-facing runtime contract is intentionally separate from provider
+native reasoning. For non-trivial tool work, the model should state the next
+phase in one brief line before the first call, provide one or two concise
+sentences only when the phase or next action changes, and end with a standalone
+recap of findings, changes, verification, and next steps. It must not narrate
+every tool call or expose hidden chain-of-thought. When compact UI hides
+successful output, it should summarize material findings in those visible
+updates or the final reply instead of rerunning commands solely to display
+output; complete evidence remains available through Transcript Review.
+
 ## Terminal Thread Result
 
 VT Code now emits `thread.completed` at the end of a session or exec run.

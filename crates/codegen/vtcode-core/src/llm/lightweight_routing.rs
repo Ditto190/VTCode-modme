@@ -31,6 +31,8 @@ pub enum LightweightFeature {
     GitHistorySummary,
     /// Running as a subagent delegate.
     Subagent,
+    /// Diagnosing a failed or non-zero tool execution from bounded evidence.
+    ToolFailureDiagnosis,
 }
 
 /// A resolved provider-and-model pair that identifies a specific LLM endpoint.
@@ -307,7 +309,8 @@ fn feature_uses_shared_model(
         | LightweightFeature::PromptRefinement
         | LightweightFeature::AutoPermissionReview
         | LightweightFeature::AutoPermissionProbe
-        | LightweightFeature::Subagent => true,
+        | LightweightFeature::Subagent
+        | LightweightFeature::ToolFailureDiagnosis => true,
     }
 }
 

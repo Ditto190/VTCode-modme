@@ -252,6 +252,66 @@ async fn compact_display_keeps_provider_history_identical_to_expanded_display() 
 }
 
 #[tokio::test]
+async fn non_zero_read_result_is_diagnosed_without_successful_readonly_signature() {
+    let mut backing = TestContextBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    let args = json!({"path": "missing.rs"});
+    let output = json!({
+        "path": "missing.rs",
+        "stderr": "No such file or directory",
+        "exit_code": 1
+    });
+    let pipeline_outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+        output,
+        stdout: None,
+        modified_files: Vec::new(),
+        command_success: false,
+    });
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+
+    handle_tool_execution_result(
+        &mut outcome_ctx,
+        "missing-read".to_string(),
+        tool_names::READ_FILE,
+        &args,
+        &pipeline_outcome,
+        Instant::now(),
+    )
+    .await
+    .expect("non-zero result should be handled");
+
+    let tool_response = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .find(|message| message.role == uni::MessageRole::Tool)
+        .expect("tool response should be recorded");
+    let response: serde_json::Value =
+        serde_json::from_str(&tool_response.content.as_text()).expect("tool response should remain JSON");
+    assert_eq!(
+        response["diagnosis"]["observed"],
+        "'read_file' returned exit code 1. Stderr: No such file or directory"
+    );
+    assert_eq!(
+        outcome_ctx
+            .ctx
+            .harness_state
+            .snapshot_turn_diagnostics(Default::default(), 0)
+            .failed_tool_calls,
+        1
+    );
+    let signature =
+        crate::agent::runloop::unified::turn::tool_outcomes::helpers::signature_key_for(tool_names::READ_FILE, &args);
+    assert!(!outcome_ctx.ctx.harness_state.has_successful_readonly_signature(&signature));
+}
+
+#[tokio::test]
 async fn blocked_tool_call_guard_short_circuits_to_recovery_when_active() {
     let mut backing = TestContextBacking::new(4).await;
     let mut ctx = backing.turn_processing_context();

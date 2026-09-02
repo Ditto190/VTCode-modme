@@ -286,7 +286,7 @@ No other config changes are required for this hop. VT Code's request builder aut
 
 3. **Test `max` effort.** VT Code supports `low`, `medium`, `high`, `xhigh`, `max`. Test `max` for capability-critical work; raise `max_tokens` to at least 64k when using `xhigh` or `max`.
 
-4. **Mid-conversation system messages.** Opus 5 accepts `role: "system"` in the `messages` array. VT Code's message builder can now inject mid-conversation system messages without rebuilding the full history, preserving prompt cache hits.
+4. **Mid-conversation system messages.** Opus 5 accepts `role: "system"` in the `messages` array. VT Code's message builder can now inject mid-conversation system messages without rebuilding the full history, preserving prompt cache hits. When VT Code collapses or bounds tool output, it adds the fixed disclosure after the tool-result user message. Anthropic wire routes use `clear_at: "next_user_message"` and the `mid-conversation-system-clear-at-2026-08-21` beta only when the selected provider/model capability supports them; unsupported Anthropic models and non-Anthropic wires receive the same text through their ordinary system/history mapping. The typed marker remains in canonical history for replay and provider switching.
 
 5. **Task budgets (beta).** If you use `task_budget_tokens` in `[provider.anthropic]`, it works unchanged on Opus 5. The minimum is 20,000 tokens.
 

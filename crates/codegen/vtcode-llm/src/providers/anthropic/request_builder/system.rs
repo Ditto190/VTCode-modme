@@ -1,6 +1,5 @@
-use crate::provider::LLMRequest;
+use crate::provider::{LLMRequest, MessageRole};
 use crate::providers::anthropic_types::CacheControl;
-use crate::providers::common::collect_history_system_directives;
 use serde_json::{Value, json};
 
 pub(crate) struct SystemPromptBuildResult {
@@ -18,8 +17,19 @@ fn has_runtime_context_section(prompt: &str) -> bool {
     prompt.starts_with(RUNTIME_CONTEXT_NEWLINE) || prompt.contains(NEWLINE_RUNTIME_CONTEXT_NEWLINE)
 }
 
-fn append_history_system_directives(final_system_prompt: &mut String, request: &LLMRequest) {
-    let directives = collect_history_system_directives(request);
+fn append_history_system_directives(
+    final_system_prompt: &mut String,
+    request: &LLMRequest,
+    include_turn_scoped_system_directives: bool,
+) {
+    let directives: Vec<String> = request
+        .messages
+        .iter()
+        .filter(|message| message.role == MessageRole::System)
+        .filter(|message| include_turn_scoped_system_directives || message.clear_at.is_none())
+        .map(|message| message.content.as_text().trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
 
     if directives.is_empty() {
         return;
@@ -64,6 +74,7 @@ pub(crate) fn build_system_prompt(
     request: &LLMRequest,
     cache_control: &Option<CacheControl>,
     breakpoints_remaining: usize,
+    include_turn_scoped_system_directives: bool,
 ) -> SystemPromptBuildResult {
     let mut final_system_prompt = request
         .system_prompt
@@ -101,7 +112,7 @@ pub(crate) fn build_system_prompt(
         }
     }
 
-    append_history_system_directives(&mut final_system_prompt, request);
+    append_history_system_directives(&mut final_system_prompt, request, include_turn_scoped_system_directives);
 
     if final_system_prompt.is_empty() {
         return SystemPromptBuildResult {

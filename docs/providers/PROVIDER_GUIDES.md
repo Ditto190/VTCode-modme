@@ -153,6 +153,25 @@ Worked examples: [Atlas Cloud](./atlascloud.md) and [OmniRoute](./omniroute.md).
 See the [Configuration guide](../config/config.md#custom_providers) for the
 complete field reference and precedence rules.
 
+## Collapsed tool-result disclosure
+
+When compact transcript review or bounded tool-output mode hides most of a
+tool result, VT Code adds one exact disclosure to canonical conversation
+history for every provider and model:
+
+```text
+Only you see that command's output — the user's terminal shows at most a few lines of it. If the user needs to read any of it, put it in your reply.
+```
+
+Provider adapters translate that typed history marker into their supported
+system, history, instructions, or transcript representation. Anthropic wire
+routes whose selected provider/model capability supports it use
+`clear_at: "next_user_message"` with the required beta; unsupported Anthropic
+models and gateways use a top-level system directive. Routes without that
+capability never receive the Anthropic-only `clear_at` field. Complete tool
+output remains available in Transcript Review, so this disclosure does not
+replace the retained evidence or expose provider chain-of-thought.
+
 ## Google Gemini
 
 -   **Official docs:** [Gemini API models](https://ai.google.dev/gemini-api/docs/models) · [Gemini 3.7 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash)
@@ -206,6 +225,7 @@ complete field reference and precedence rules.
 -   **Provider key:** `anthropic` (env: `ANTHROPIC_API_KEY`)
 -   **Default model:** `claude-sonnet-5`
 -   **Curated models:** `claude-sonnet-5`, `claude-fable-5`, `claude-mythos-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, and `claude-haiku-4-5`
+-   Collapsed or bounded tool output is disclosed to every provider/model with the fixed turn-scoped notice. Anthropic wire routes use `clear_at: "next_user_message"` plus the required beta only when the selected provider/model capability allows it; unsupported Claude models and other routes use ordinary top-level system/history mapping.
 -   Key management and defaults mirror the Gemini/OpenAI flow in [Getting Started](../user-guide/getting-started.md#api-requirements).
 -   Supported model IDs live in [`crates/codegen/vtcode-config/src/constants/models/anthropic.rs`](../../crates/codegen/vtcode-config/src/constants/models/anthropic.rs).
 

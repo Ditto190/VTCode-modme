@@ -86,7 +86,11 @@ pub(crate) fn build_messages(
                         cache_control: None,
                     });
                 }
-                messages.push(AnthropicMessage { role: "assistant".to_string(), content: blocks });
+                messages.push(AnthropicMessage {
+                    role: "assistant".to_string(),
+                    content: blocks,
+                    clear_at: None,
+                });
             }
             MessageRole::Tool => {
                 if let Some(tool_call_id) = &msg.tool_call_id
@@ -107,6 +111,7 @@ pub(crate) fn build_messages(
                             is_error: None,
                             cache_control: None,
                         }))],
+                        clear_at: None,
                     });
                 } else if !msg.content.is_empty() {
                     messages.push(AnthropicMessage {
@@ -116,10 +121,11 @@ pub(crate) fn build_messages(
                             citations: None,
                             cache_control: None,
                         }],
+                        clear_at: None,
                     });
                 }
             }
-            _ => {
+            MessageRole::System | MessageRole::User => {
                 let blocks = content_blocks_from_message_content(&msg.content, None, allow_container_uploads);
                 if blocks.is_empty() {
                     continue;
@@ -128,6 +134,7 @@ pub(crate) fn build_messages(
                 messages.push(AnthropicMessage {
                     role: msg.role.as_anthropic_str().to_string(),
                     content: blocks,
+                    clear_at: msg.clear_at,
                 });
             }
         }
@@ -382,6 +389,7 @@ fn add_prefill_message(request: &LLMRequest, messages: &mut Vec<AnthropicMessage
             messages.push(AnthropicMessage {
                 role: "assistant".to_string(),
                 content: vec![AnthropicContentBlock::Text { text, citations: None, cache_control: None }],
+                clear_at: None,
             });
         }
     } else if request.character_reinforcement
@@ -394,6 +402,7 @@ fn add_prefill_message(request: &LLMRequest, messages: &mut Vec<AnthropicMessage
                 citations: None,
                 cache_control: None,
             }],
+            clear_at: None,
         });
     }
 }

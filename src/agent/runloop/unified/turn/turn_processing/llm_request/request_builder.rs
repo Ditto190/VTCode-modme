@@ -18,6 +18,7 @@ use std::sync::Arc;
 use vtcode_commons::reasoning::ReasoningEffortLevel;
 use vtcode_core::config::build_openai_prompt_cache_key;
 use vtcode_core::config::constants::llm_generation;
+use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::core::agent::harness_kernel::{
     HarnessRequestPlanInput, build_harness_request_plan, stable_system_prefix_hash,
 };
@@ -46,6 +47,67 @@ pub(super) fn interrupted_provider_error(provider_name: &str) -> anyhow::Error {
         message: vtcode_core::llm::error_display::format_llm_error(provider_name, "Interrupted by user"),
         metadata: None,
     })
+}
+
+pub(super) const COLLAPSED_TOOL_OUTPUT_NOTICE: &str = "Only you see that command's output — the user's terminal shows at most a few lines of it. If the user needs to read any of it, put it in your reply.";
+
+fn should_add_collapsed_tool_output_notice(
+    supports_inline_ui: bool,
+    tool_display_mode: ToolDisplayMode,
+    tool_output_mode: Option<ToolOutputMode>,
+    history: &[uni::Message],
+) -> bool {
+    // Recovery and auto-permission paths may append a system directive after
+    // the tool response. Those directives do not change which result the next
+    // request is continuing, so inspect the last non-system message instead of
+    // requiring the tool response to be the literal final history entry.
+    let Some((last_non_system_index, last_non_system_message)) = history
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, message)| message.role != uni::MessageRole::System)
+    else {
+        return false;
+    };
+    if last_non_system_message.role != uni::MessageRole::Tool {
+        return false;
+    }
+    if history.iter().skip(last_non_system_index.saturating_add(1)).any(|message| {
+        message.role == uni::MessageRole::System && message.content.as_text().as_ref() == COLLAPSED_TOOL_OUTPUT_NOTICE
+    }) {
+        return false;
+    }
+
+    // Command panels always render a bounded head/tail preview, including in
+    // expanded/full configuration. Normal tool responses carry the canonical
+    // origin name, so preserve the disclosure for those results as well.
+    let command_output_is_bounded = last_non_system_message
+        .origin_tool
+        .as_deref()
+        .is_some_and(vtcode_core::tools::tool_intent::is_command_tool);
+
+    // `None` uses the renderer's compact default, and unknown config values
+    // fail closed to the bounded display path.
+    let compact_output = !matches!(tool_output_mode, Some(ToolOutputMode::Full));
+    let compact_display = supports_inline_ui && matches!(tool_display_mode, ToolDisplayMode::Compact);
+    compact_output || compact_display || command_output_is_bounded
+}
+
+fn append_collapsed_tool_output_notice(ctx: &mut TurnProcessingContext<'_>) {
+    let output_mode = ctx.vt_cfg.map(|config| config.ui.tool_output_mode);
+    if should_add_collapsed_tool_output_notice(
+        ctx.renderer.supports_inline_ui(),
+        ctx.renderer.tool_display_mode(),
+        output_mode,
+        ctx.working_history,
+    ) {
+        // Keep one typed marker in canonical history. Provider/model routes
+        // that advertise native support serialize it with `clear_at`; all
+        // other routes receive the same text as an ordinary system/history
+        // directive after request-only sanitization.
+        ctx.working_history
+            .push(uni::Message::turn_scoped_system(COLLAPSED_TOOL_OUTPUT_NOTICE.to_owned()));
+    }
 }
 
 pub(super) async fn build_turn_request(
@@ -200,6 +262,7 @@ pub(super) async fn build_turn_request(
         },
     );
     let context_management = resolve_context_management(ctx, turn_snapshot, request_model);
+    append_collapsed_tool_output_notice(ctx);
     let continuation_messages = Arc::new(
         ctx.context_manager
             .normalize_history_for_request(ctx.working_history)
@@ -216,6 +279,21 @@ pub(super) async fn build_turn_request(
         Cow::Borrowed(_) => Arc::clone(&continuation_messages),
         Cow::Owned(messages) => Arc::new(messages),
     };
+
+    // The typed marker is persisted once in canonical history. Translate its
+    // provider-specific lifecycle field into an ordinary system directive for
+    // routes without native support so every provider/model still receives the
+    // disclosure without an unsupported `clear_at` field.
+    if !turn_snapshot.capabilities.turn_scoped_system_messages
+        && request_messages.iter().any(|message| message.clear_at.is_some())
+    {
+        let messages = Arc::make_mut(&mut request_messages);
+        for message in messages {
+            if message.clear_at.is_some() {
+                message.clear_at = None;
+            }
+        }
+    }
 
     let request_context_message = ctx.context_manager.request_editor_context_message();
     if request_context_message.is_some() || few_shot_context.is_some() {
@@ -313,6 +391,7 @@ mod tests {
     use vtcode_config::{SubagentMemoryScope, SubagentSource, SubagentSpec};
     use vtcode_core::config::loader::VTCodeConfig;
     use vtcode_core::config::types::ReasoningEffortLevel;
+    use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
     use vtcode_core::llm::provider::{self as uni, ToolDefinition};
     use vtcode_core::{EditorContextSnapshot, EditorFileContext};
 
@@ -1352,5 +1431,131 @@ mod tests {
         let second = "Static prefix\n## Skills\n- rust-skills\n[Runtime Context]\n- Time (UTC): 2026-03-23T00:00:00Z\n- retries: 4";
 
         assert_eq!(stable_system_prefix_hash(first), stable_system_prefix_hash(second));
+    }
+
+    #[test]
+    fn collapsed_output_notice_is_provider_neutral_for_collapsed_tool_turns() {
+        let history = vec![uni::Message::tool_response("toolu_1".to_string(), "output".to_string())];
+
+        assert!(super::should_add_collapsed_tool_output_notice(
+            true,
+            ToolDisplayMode::Compact,
+            Some(ToolOutputMode::Full),
+            &history,
+        ));
+        assert!(super::should_add_collapsed_tool_output_notice(
+            false,
+            ToolDisplayMode::Expanded,
+            Some(ToolOutputMode::Compact),
+            &history,
+        ));
+        assert!(!super::should_add_collapsed_tool_output_notice(
+            true,
+            ToolDisplayMode::Expanded,
+            Some(ToolOutputMode::Full),
+            &history,
+        ));
+        let command_history = vec![uni::Message::tool_response_with_origin(
+            "toolu_2".to_string(),
+            "output".to_string(),
+            "exec_command".to_string(),
+        )];
+        assert!(super::should_add_collapsed_tool_output_notice(
+            true,
+            ToolDisplayMode::Expanded,
+            Some(ToolOutputMode::Full),
+            &command_history,
+        ));
+        assert!(super::should_add_collapsed_tool_output_notice(
+            true,
+            ToolDisplayMode::Compact,
+            Some(ToolOutputMode::Compact),
+            &history,
+        ));
+
+        let history_with_system_directive = vec![
+            history[0].clone(),
+            uni::Message::system("auto-permission review warning".to_string()),
+        ];
+        assert!(super::should_add_collapsed_tool_output_notice(
+            true,
+            ToolDisplayMode::Expanded,
+            Some(ToolOutputMode::Compact),
+            &history_with_system_directive,
+        ));
+    }
+
+    #[tokio::test]
+    async fn anthropic_request_build_persists_one_collapsed_output_notice() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut config = VTCodeConfig::default();
+        config.agent.provider = "anthropic".to_string();
+        let config = Box::leak(Box::new(config));
+
+        let mut ctx = backing.turn_processing_context();
+        ctx.vt_cfg = Some(config);
+        ctx.working_history.push(uni::Message::assistant_with_tools(
+            String::new(),
+            vec![uni::ToolCall::function(
+                "toolu_1".to_string(),
+                "exec_command".to_string(),
+                "{}".to_string(),
+            )],
+        ));
+        ctx.working_history
+            .push(uni::Message::tool_response("toolu_1".to_string(), "exit 1".to_string()));
+
+        let mut snapshot = capture_turn_request_snapshot(&mut ctx, "claude-fable-5", false);
+        snapshot.provider_name = "anthropic".to_string();
+        snapshot.capabilities.turn_scoped_system_messages = true;
+
+        let first = build_turn_request(&mut ctx, 1, "claude-fable-5", &snapshot, Some(320), None, false)
+            .await
+            .expect("Anthropic request should build");
+        assert_eq!(
+            first
+                .continuation_messages
+                .iter()
+                .filter(|message| message.clear_at == Some(uni::MessageClearAt::NextUserMessage))
+                .count(),
+            1
+        );
+        assert!(first.request.messages.iter().any(|message| {
+            message.clear_at == Some(uni::MessageClearAt::NextUserMessage)
+                && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
+        }));
+
+        let second = build_turn_request(&mut ctx, 2, "claude-fable-5", &snapshot, Some(320), None, false)
+            .await
+            .expect("Repeated request should build");
+        assert_eq!(
+            second
+                .continuation_messages
+                .iter()
+                .filter(|message| message.clear_at == Some(uni::MessageClearAt::NextUserMessage))
+                .count(),
+            1
+        );
+
+        let mut non_anthropic_snapshot = snapshot.clone();
+        non_anthropic_snapshot.provider_name = "openai".to_string();
+        non_anthropic_snapshot.capabilities.turn_scoped_system_messages = false;
+        let switched = build_turn_request(&mut ctx, 3, "gpt-5", &non_anthropic_snapshot, Some(320), None, false)
+            .await
+            .expect("Provider-switched request should build");
+        assert!(switched.request.messages.iter().all(|message| message.clear_at.is_none()));
+        assert_eq!(
+            switched
+                .request
+                .messages
+                .iter()
+                .filter(|message| {
+                    message.role == uni::MessageRole::System
+                        && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
+                })
+                .count(),
+            1
+        );
+        assert!(switched.continuation_messages.iter().any(|message| message.clear_at.is_some()));
     }
 }

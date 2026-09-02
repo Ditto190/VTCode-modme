@@ -20,6 +20,7 @@ mod tests {
             context_caching: true,
             responses_compaction: false,
             context_edits: false,
+            turn_scoped_system_messages: false,
             vision: true,
             context_size: 2_000_000,
         };
@@ -45,6 +46,7 @@ mod tests {
             context_caching: false,
             responses_compaction: false,
             context_edits: false,
+            turn_scoped_system_messages: false,
             vision: false,
             context_size: 128_000,
         };

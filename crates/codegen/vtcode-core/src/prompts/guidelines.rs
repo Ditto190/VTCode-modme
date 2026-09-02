@@ -60,6 +60,9 @@ pub fn generate_tool_guidelines_for_profile(
     if has_exec {
         lines.push(shell_task_guidance(shell_profile).to_string());
     }
+    if has_exec || has_apply_patch || has_search || has_read_file || has_list_files {
+        lines.push("- Diagnose from evidence; never bypass safeguards.".to_string());
+    }
     if has_stdin {
         lines.push("- Use `write_stdin` only with the existing `session_id` of an active exec_command session; when a run response is still running it includes `next_wait_args` (a pre-filled `action:\"wait\"` call) — prefer it over polling with `next_continue_args` to avoid burning tokens on short polls; call `wait` again after an in-progress deadline, and treat an active `spool_complete: false` reference as readable partial output; an exited pending spool is withheld until a later wait.".to_string());
     }
@@ -220,6 +223,9 @@ fn generate_runtime_tool_guidelines_for_profile(
     }
     if has_exec {
         lines.push("- In Planning workflow, use `exec_command` only for read-only verification.".to_string());
+    }
+    if has_exec || has_search || has_read_file || has_list_files {
+        lines.push("- In Planning workflow, diagnose from evidence; never bypass safeguards.".to_string());
     }
     if has_search {
         lines.push("- `code_search`: omit unused filters; no empty values (`path: \"\"`).".to_string());

@@ -10,6 +10,8 @@ use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings};
 use super::capabilities::supports_manual_interleaved_beta;
 use super::prompt_cache::requires_extended_ttl_beta;
 
+pub(crate) const MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA: &str = "mid-conversation-system-clear-at-2026-08-21";
+
 /// Configuration for beta header generation
 pub struct BetaHeaderConfig<'a> {
     pub config: &'a AnthropicConfig,
@@ -21,6 +23,7 @@ pub struct BetaHeaderConfig<'a> {
     pub include_server_side_fallback: bool,
     pub include_fallback_credit: bool,
     pub include_mid_conversation_tool_changes: bool,
+    pub include_mid_conversation_system_clear_at: bool,
 }
 
 pub fn prompt_cache_beta_header_value(cache_enabled: bool, settings: &AnthropicPromptCacheSettings) -> Option<String> {
@@ -72,6 +75,10 @@ pub fn combined_beta_header_value(
 
     if config.include_mid_conversation_tool_changes {
         pieces.push("mid-conversation-tool-changes-2026-07-01".to_owned());
+    }
+
+    if config.include_mid_conversation_system_clear_at {
+        pieces.push(MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA.to_owned());
     }
 
     if let Some(betas) = config.request_betas {

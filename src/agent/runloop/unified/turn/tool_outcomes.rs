@@ -17,4 +17,8 @@ mod subagent_memory;
 
 pub(crate) use apply::apply_turn_outcome;
 pub(crate) use dispatch::handle_tool_calls;
+pub(crate) use execution_result::{
+    ToolFailureDiagnosis, bounded_diagnostic_field, bounded_error_evidence, bounded_output_evidence,
+    deterministic_error_diagnosis, deterministic_output_diagnosis, escape_untrusted_evidence, render_diagnosis,
+};
 pub(crate) use handlers::ToolOutcomeContext;

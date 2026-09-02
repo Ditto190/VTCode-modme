@@ -28,6 +28,9 @@ pub struct ProviderCapabilities {
     pub(crate) context_caching: bool,
     pub responses_compaction: bool,
     pub context_edits: bool,
+    /// Whether the selected provider/model can carry Anthropic's native
+    /// turn-scoped system-message lifecycle field on the wire.
+    pub turn_scoped_system_messages: bool,
     pub(crate) vision: bool,
     pub(crate) context_size: usize,
 }
@@ -46,6 +49,7 @@ impl ProviderCapabilities {
             context_caching: provider.supports_context_caching(model),
             responses_compaction: provider.supports_responses_compaction(model),
             context_edits: provider.supports_context_edits(model),
+            turn_scoped_system_messages: provider.supports_turn_scoped_system_messages(model),
             vision: provider.supports_vision(model),
             context_size: provider.effective_context_size(model),
         }
@@ -225,6 +229,19 @@ pub trait LLMProvider: Send + Sync {
     /// Whether the provider supports provider-native context editing such as
     /// tool-result clearing.
     fn supports_context_edits(&self, _model: &str) -> bool {
+        false
+    }
+
+    /// Whether the selected provider/model can carry Anthropic's native
+    /// turn-scoped system-message lifecycle field on the wire.
+    ///
+    /// This is intentionally narrower than [`supports_context_edits`]: a
+    /// provider can expose Anthropic-shaped requests without supporting the
+    /// `clear_at` field, and a provider name does not necessarily identify the
+    /// wire protocol for every model. The runtime keeps the typed marker in
+    /// canonical history either way, translating it to an ordinary system or
+    /// history directive when this capability is false.
+    fn supports_turn_scoped_system_messages(&self, _model: &str) -> bool {
         false
     }
 

@@ -246,6 +246,9 @@ pub(super) fn human_event_line(event: &ThreadEvent) -> Option<String> {
             _ => None,
         },
         ThreadEvent::ItemCompleted(completed) => match &completed.item.details {
+            ThreadItemDetails::Reasoning(details) if details.stage.as_deref() == Some("diagnosis") => {
+                Some(format!("{} {}", style("[DIAGNOSIS]").yellow().bold(), details.text))
+            }
             ThreadItemDetails::CommandExecution(details)
                 if matches!(details.status, CommandExecutionStatus::Failed) =>
             {

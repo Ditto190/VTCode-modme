@@ -1413,6 +1413,7 @@ impl LLMProvider for MergeGatewayProvider {
                 match event? {
                     NormalizedStreamEvent::TextDelta { delta } => yield LLMStreamEvent::Token { delta },
                     NormalizedStreamEvent::ReasoningDelta { delta } => yield LLMStreamEvent::Reasoning { delta },
+                    NormalizedStreamEvent::ReasoningStage { stage } => yield LLMStreamEvent::ReasoningStage { stage },
                     NormalizedStreamEvent::ToolCallStart { .. }
                     | NormalizedStreamEvent::ToolCallDelta { .. }
                     | NormalizedStreamEvent::Usage { .. } => {}

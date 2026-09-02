@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
+use crate::provider::MessageClearAt;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AnthropicFallback {
@@ -100,6 +102,9 @@ pub enum ThinkingDisplay {
 pub struct AnthropicMessage {
     pub(crate) role: String,
     pub(crate) content: Vec<AnthropicContentBlock>,
+    /// Anthropic's turn-scoped system-message lifecycle field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clear_at: Option<MessageClearAt>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

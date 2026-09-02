@@ -4,7 +4,7 @@ use vtcode_core::tools::registry::ToolExecutionError;
 
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 
-use super::auto_permission_probe::push_tool_response_with_auto_permission_probe;
+use super::failure_diagnosis::{ToolFailureDiagnosis, push_tool_response_with_diagnosis};
 
 pub(super) async fn notify_structured_failure(
     tool_name: &str,
@@ -66,6 +66,7 @@ pub(super) async fn finalize_failed_tool_response(
     args_val: &serde_json::Value,
     error: &ToolExecutionError,
     failure_kind: &'static str,
+    diagnosis: &ToolFailureDiagnosis,
 ) {
     push_tool_error_response(
         t_ctx,
@@ -75,6 +76,7 @@ pub(super) async fn finalize_failed_tool_response(
         error.message.as_str(),
         failure_kind,
         Some(error),
+        diagnosis,
     )
     .await;
 
@@ -89,6 +91,7 @@ async fn push_tool_error_response(
     error_msg: &str,
     failure_kind: &'static str,
     structured_error: Option<&ToolExecutionError>,
+    diagnosis: &ToolFailureDiagnosis,
 ) {
     let (fallback_tool, fallback_tool_args) = if let Some((tool, args)) =
         super::super::error_handling::fallback_from_error(tool_name, error_msg, Some(args_val))
@@ -108,8 +111,9 @@ async fn push_tool_error_response(
         ),
         None => super::build_error_content(error_msg.to_string(), fallback_tool, fallback_tool_args, failure_kind),
     };
-    let serialized = error_content.to_string();
-    if let Err(err) = push_tool_response_with_auto_permission_probe(t_ctx, tool_call_id, tool_name, serialized).await {
-        tracing::warn!(tool = %tool_name, error = %err, "failed to push probed tool error response");
+    if let Err(error) =
+        push_tool_response_with_diagnosis(t_ctx, tool_call_id, tool_name, error_content.to_string(), diagnosis).await
+    {
+        tracing::warn!(tool = %tool_name, error = %error, "failed to push diagnosed tool response");
     }
 }

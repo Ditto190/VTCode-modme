@@ -1237,20 +1237,39 @@ fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> Stri
         })
         .unwrap_or("unknown");
 
+    let diagnosis = object
+        .and_then(|value| value.get("diagnosis"))
+        .and_then(serde_json::Value::as_object)
+        .map(|diagnosis| {
+            let mut bounded = serde_json::Map::new();
+            for key in ["observed", "likely_cause", "next_action"] {
+                if let Some(value) = diagnosis.get(key).and_then(serde_json::Value::as_str) {
+                    bounded.insert(
+                        key.to_string(),
+                        serde_json::Value::String(bounded_diagnosis_preview(value, TOOL_PREVIEW_METADATA_STRING_LIMIT)),
+                    );
+                }
+            }
+            serde_json::Value::Object(bounded)
+        });
+
     let note = if spool_path.is_some() {
         "Aggregate tool preview budget exhausted; complete output remains in the internal spool and current-session tool-output viewer."
     } else {
         "Aggregate tool preview budget exhausted; use a targeted bounded read or retry the request for more detail."
     };
-    serde_json::json!({
+    let mut metadata = serde_json::json!({
         "tool": tool_name.map(|name| bounded_preview_string(name, TOOL_PREVIEW_METADATA_STRING_LIMIT)),
         "spool_path": spool_path,
         "byte_count": byte_count,
         "completion_state": completion_state,
         "preview_budget_exhausted": true,
         "note": note,
-    })
-    .to_string()
+    });
+    if let Some(diagnosis) = diagnosis {
+        metadata["diagnosis"] = diagnosis;
+    }
+    metadata.to_string()
 }
 
 fn bounded_preview_string(value: &str, limit: usize) -> String {
@@ -1262,6 +1281,12 @@ fn bounded_preview_string(value: &str, limit: usize) -> String {
         end -= 1;
     }
     format!("{}…", &value[..end])
+}
+
+fn bounded_diagnosis_preview(value: &str, limit: usize) -> String {
+    let ansi_free = vtcode_commons::ansi::strip_ansi(value);
+    let sanitized = vtcode_commons::sanitizer::sanitize_provider_diagnostic(ansi_free.as_bytes());
+    bounded_preview_string(sanitized.trim(), limit)
 }
 
 pub(crate) struct RunLoopContext<'a> {
@@ -1430,6 +1455,11 @@ mod tests {
                 "spool_path": ".vtcode/context/tool_outputs/run-1.txt",
                 "spooled_bytes": 20 * 1024,
                 "spool_complete": true,
+                "diagnosis": {
+                    "observed": "exit 1",
+                    "likely_cause": "dependency check failed",
+                    "next_action": "\u{1b}[31minspect the first compiler error\u{1b}[0m\npassword=secret-not-for-context"
+                },
             })
             .to_string(),
         );
@@ -1439,6 +1469,10 @@ mod tests {
         assert!(second.contains("\"byte_count\":20480"));
         assert!(second.contains("\"completion_state\":\"complete\""));
         assert!(second.contains("preview_budget_exhausted"));
+        assert!(second.contains("\"diagnosis\":{"));
+        assert!(second.contains("inspect the first compiler error"));
+        assert!(!second.contains("secret-not-for-context"));
+        assert!(!second.contains('\u{1b}'));
         let repeated_b = "b".repeat(128);
         assert!(!second.contains(repeated_b.as_str()));
         assert_eq!(state.model_visible_tool_preview_bytes, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES);

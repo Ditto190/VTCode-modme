@@ -332,10 +332,11 @@ fn output_has_empty_search_results(output: &serde_json::Value) -> bool {
         .and_then(serde_json::Value::as_array)
         .is_some_and(|results| results.is_empty())
         && !output_has_actionable_recovery_guidance(output)
+        && !output_has_error_signal(output)
 }
 
 fn output_has_actionable_recovery_guidance(output: &serde_json::Value) -> bool {
-    ["hint", "next_action", "critical_note"].iter().any(|key| {
+    ["hint", "next_action", "critical_note", "warning"].iter().any(|key| {
         output
             .get(*key)
             .and_then(serde_json::Value::as_str)
@@ -344,6 +345,17 @@ fn output_has_actionable_recovery_guidance(output: &serde_json::Value) -> bool {
         .get("fallback_tool")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|value| !value.trim().is_empty())
+        || output.get("hints").and_then(serde_json::Value::as_array).is_some_and(|hints| {
+            hints
+                .iter()
+                .any(|hint| hint.as_str().is_some_and(|value| !value.trim().is_empty()))
+        })
+}
+
+fn output_has_error_signal(output: &serde_json::Value) -> bool {
+    ["error", "error_type", "stderr", "stderr_preview", "message"]
+        .iter()
+        .any(|key| !output_field_is_empty(output.get(*key)))
 }
 
 fn output_reuses_recent_result(output: &serde_json::Value) -> bool {
@@ -369,13 +381,30 @@ fn output_is_grep_style_miss(output: &serde_json::Value, command_success: bool) 
 
     let exit_code = output.get("exit_code").and_then(serde_json::Value::as_i64);
     let command = output.get("command").and_then(serde_json::Value::as_str).unwrap_or_default();
-    let stdout_empty = output
-        .get("stdout")
-        .or_else(|| output.get("output"))
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|text| text.trim().is_empty());
+    let streams_empty = [
+        "stdout",
+        "output",
+        "stderr",
+        "stderr_preview",
+        "error",
+        "message",
+        "critical_note",
+        "warning",
+        "hint",
+    ]
+    .iter()
+    .all(|key| output_field_is_empty(output.get(*key)));
 
-    stdout_empty && matches!(exit_code, Some(1 | 2)) && looks_like_grep_style_command(command)
+    streams_empty && matches!(exit_code, Some(1 | 2)) && looks_like_grep_style_command(command)
+}
+
+fn output_field_is_empty(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::String(text)) => text.trim().is_empty(),
+        Some(serde_json::Value::Array(values)) => values.is_empty(),
+        Some(serde_json::Value::Bool(_) | serde_json::Value::Number(_) | serde_json::Value::Object(_)) => false,
+    }
 }
 
 fn error_is_missing_resource(error: &str) -> bool {
@@ -457,6 +486,9 @@ where
     if let Some(index) = overwrite_index {
         let previous_text_len = history[index].content.as_text().len();
         history[index].content = uni::MessageContent::Text(content);
+        if let Some(tool_name) = tool_name {
+            history[index].origin_tool = Some(tool_name.to_string());
+        }
         return ToolResponseHistoryUpdate::Replaced { previous_text_len };
     }
 
@@ -817,6 +849,16 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].origin_tool.as_deref(), Some("read_file"));
         assert_eq!(update, ToolResponseHistoryUpdate::Appended);
+    }
+
+    #[test]
+    fn push_tool_response_refreshes_origin_tool_when_replacing_same_call() {
+        let mut history = vec![uni::Message::tool_response("call_1".to_string(), "old".to_string())];
+
+        let update = push_tool_response(&mut history, "call_1".to_string(), Some("exec_command"), "new".to_string());
+
+        assert_eq!(update, ToolResponseHistoryUpdate::Replaced { previous_text_len: 3 });
+        assert_eq!(history[0].origin_tool.as_deref(), Some("exec_command"));
     }
 
     #[test]
@@ -1602,6 +1644,30 @@ mod tests {
     }
 
     #[test]
+    fn low_signal_tracker_does_not_hide_structured_search_errors_as_empty_results() {
+        let mut tracker = LoopTracker::new();
+        let failure_like = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "results": [],
+                "error": "permission denied while searching the workspace"
+            }),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        update_repetition_tracker(
+            &mut tracker,
+            &failure_like,
+            tools::CODE_SEARCH,
+            &json!({"query":"secret", "path":"src"}),
+        );
+
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
+    }
+
+    #[test]
     fn low_signal_tracker_counts_missing_read_failures() {
         let mut tracker = LoopTracker::new();
         let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
@@ -1691,6 +1757,27 @@ mod tests {
         assert_eq!(tracker.max_low_signal_count(), 2);
         assert_eq!(tracker.consecutive_low_signal_navigations, 2);
         assert_eq!(tracker.total_low_signal_navigations, 2);
+    }
+
+    #[test]
+    fn low_signal_tracker_does_not_hide_grep_errors_as_no_match() {
+        let mut tracker = LoopTracker::new();
+        let failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "command": "rg missing restricted",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "permission denied",
+            }),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+
+        update_repetition_tracker(&mut tracker, &failure, tools::EXEC_COMMAND, &json!({"cmd":"rg missing restricted"}));
+
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
     }
 
     // --- read_normalized_signature_key tests ---

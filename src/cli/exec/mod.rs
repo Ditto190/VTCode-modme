@@ -46,7 +46,7 @@ mod tests {
     use vtcode_core::core::agent::task::{TaskOutcome, TaskResults};
     use vtcode_core::exec::events::{
         AgentMessageItem, CommandExecutionItem, CommandExecutionStatus, ErrorItem, HarnessEventItem, HarnessEventKind,
-        ItemCompletedEvent, ItemStartedEvent, PlanDeltaEvent, ThreadErrorEvent, ThreadEvent, ThreadItem,
+        ItemCompletedEvent, ItemStartedEvent, PlanDeltaEvent, ReasoningItem, ThreadErrorEvent, ThreadEvent, ThreadItem,
         ThreadItemDetails, ThreadStartedEvent, TurnCompletedEvent, Usage,
     };
 
@@ -166,6 +166,23 @@ mod tests {
             .expect("error event should render");
         assert!(line.contains("[ERROR]"));
         assert!(line.contains("boom"));
+    }
+
+    #[test]
+    fn human_event_line_formats_diagnosis_reasoning() {
+        let line = human_event_line(&ThreadEvent::ItemCompleted(ItemCompletedEvent {
+            item: ThreadItem {
+                id: "diagnosis-1".to_string(),
+                details: ThreadItemDetails::Reasoning(ReasoningItem {
+                    text: "Diagnosis: exec\nObserved: exit 1".to_string(),
+                    stage: Some("diagnosis".to_string()),
+                }),
+            },
+        }))
+        .expect("diagnosis should render");
+
+        assert!(line.contains("[DIAGNOSIS]"));
+        assert!(line.contains("Observed: exit 1"));
     }
 
     #[test]

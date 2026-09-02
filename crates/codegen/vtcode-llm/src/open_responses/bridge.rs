@@ -274,6 +274,11 @@ impl ResponseBuilder {
                 self.append_reasoning_delta(&item_id, output_index, delta);
                 emitter.reasoning_delta(&self.response.id, &item_id, output_index, delta);
             }
+            NormalizedStreamEvent::ReasoningStage { .. } => {
+                // Open Responses has no portable stage field. The VT Code
+                // runtime lifecycle receives this event separately.
+                self.ensure_normalized_response_started(emitter);
+            }
             NormalizedStreamEvent::ToolCallStart { call_id, name } => {
                 self.ensure_normalized_response_started(emitter);
                 self.ensure_normalized_tool_call(call_id, name.as_deref(), emitter);

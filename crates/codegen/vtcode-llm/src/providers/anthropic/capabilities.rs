@@ -10,6 +10,8 @@
 use crate::providers::anthropic_types::ThinkingDisplay;
 use vtcode_config::constants::{models, reasoning};
 
+const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClaudeThinkingMode {
     ManualBudget,
@@ -232,8 +234,17 @@ pub(crate) fn supports_assistant_prefill(model: &str, default_model: &str) -> bo
 }
 
 pub(crate) fn supports_mid_conversation_system_messages(model: &str, default_model: &str) -> bool {
+    supports_turn_scoped_system_messages(model, default_model)
+}
+
+/// Whether the model accepts Anthropic's turn-scoped `clear_at` system-message
+/// field. The current beta is available to the model families that accept
+/// mid-conversation system messages, but not Sonnet 5.
+pub(crate) fn supports_turn_scoped_system_messages(model: &str, default_model: &str) -> bool {
     let requested = resolve_model_name(model, default_model);
-    matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
+    matches_model(requested, models::anthropic::CLAUDE_FABLE_5)
+        || matches_model(requested, models::anthropic::CLAUDE_MYTHOS_5)
+        || matches_model(requested, CLAUDE_OPUS_4_8)
         || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
 }
 

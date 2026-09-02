@@ -152,6 +152,9 @@ impl RuntimeModelAdapter for ProviderRuntimeModelAdapter<'_> {
                 NormalizedStreamEvent::ReasoningDelta { delta } => {
                     on_progress(RuntimeModelProgress::ReasoningDelta(delta));
                 }
+                NormalizedStreamEvent::ReasoningStage { stage } => {
+                    on_progress(RuntimeModelProgress::ReasoningStage(stage));
+                }
                 NormalizedStreamEvent::ToolCallStart { call_id, name } => {
                     on_progress(RuntimeModelProgress::ToolCallStarted { call_id, name });
                 }

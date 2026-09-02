@@ -101,7 +101,12 @@ pub(crate) fn handle_preflight_failure(
             object.insert("fallback_tool_args".to_string(), fallback_args);
         }
     }
+    let diagnosis = super::execution_result::deterministic_preflight_diagnosis(tool_name, error, circuit_tripped);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("diagnosis".to_string(), diagnosis.to_value());
+    }
     ctx.push_tool_response(tool_call_id, Some(tool_name), payload.to_string());
+    super::execution_result::render_and_emit(ctx, tool_name, &diagnosis);
 
     circuit_tripped.then(|| {
         // Arm a tool-free recovery pass instead of hard-blocking. The flush
@@ -149,7 +154,13 @@ pub(crate) fn drain_preflight_circuit_responses(
             "next_action": "Stop retrying this batch. Tools are disabled for the next pass — synthesize a plain-text response reporting the failure to the user.",
             "retryable": false,
         });
+        let diagnosis = super::execution_result::deterministic_preflight_diagnosis(tool_name, error, true);
+        let mut payload = payload;
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("diagnosis".to_string(), diagnosis.to_value());
+        }
         ctx.push_tool_response(tool_call.call_id(), Some(tool_name), payload.to_string());
+        super::execution_result::render_and_emit(ctx, tool_name, &diagnosis);
     }
 }
 

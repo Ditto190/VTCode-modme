@@ -30,6 +30,7 @@ use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_core::utils::style_helpers::ColorPalette;
 use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
+use super::request_builder::COLLAPSED_TOOL_OUTPUT_NOTICE;
 use crate::agent::runloop::mcp_events::McpPanelState;
 use crate::agent::runloop::tool_output::resolve_stdout_tail_limit;
 use crate::agent::runloop::unified::async_mcp_manager::approval_policy_from_human_in_the_loop;
@@ -55,6 +56,10 @@ use crate::agent::runloop::unified::tool_routing::{
 use crate::agent::runloop::unified::turn::tool_outcomes::error_handling::tool_denial_diagnostic;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
     LoopTracker, mutation_blocked_until_verification, update_repetition_tracker,
+};
+use crate::agent::runloop::unified::turn::tool_outcomes::{
+    ToolFailureDiagnosis, bounded_diagnostic_field, bounded_error_evidence, bounded_output_evidence,
+    deterministic_error_diagnosis, deterministic_output_diagnosis, escape_untrusted_evidence, render_diagnosis,
 };
 use crate::agent::runloop::unified::ui_interaction::PlaceholderSpinner;
 use crate::agent::runloop::unified::ui_interaction_stream::CopilotRuntimeRequestHandler;
@@ -385,15 +390,73 @@ impl<'a> CopilotRuntimeHost<'a> {
             (pipeline_outcome, last_stdout)
         };
 
+        if pipeline_outcome.status.is_failure_like() {
+            self.harness_state.record_failed_tool_call();
+        }
+
         match pipeline_outcome.status {
-            ToolExecutionStatus::Success { output, .. } => {
+            ToolExecutionStatus::Success { output, command_success, .. } if command_success => {
                 let text_result = last_stdout
                     .filter(|s: &String| !s.trim().is_empty())
                     .unwrap_or_else(|| serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string()));
-                Ok(CopilotToolCallResponse::Success(CopilotToolCallSuccess { text_result_for_llm: text_result }))
+                Ok(CopilotToolCallResponse::Success(CopilotToolCallSuccess {
+                    text_result_for_llm: copilot_tool_result_text(&canonical_tool_name, text_result),
+                }))
             }
-            ToolExecutionStatus::Failure { error } => Ok(tool_failed_response(&canonical_tool_name, &error.message)),
-            ToolExecutionStatus::Timeout { error } => Ok(tool_timed_out_response(&canonical_tool_name, &error.message)),
+            ToolExecutionStatus::Success { output, .. } => {
+                let diagnosis = deterministic_output_diagnosis(&canonical_tool_name, &effective_arguments, &output);
+                render_diagnosis(
+                    renderer,
+                    self.harness_emitter,
+                    &self.harness_state.turn_id.0,
+                    &canonical_tool_name,
+                    &diagnosis,
+                );
+                let evidence = bounded_output_evidence(&canonical_tool_name, &effective_arguments, &output);
+                Ok(copilot_failure_response_with_diagnosis(
+                    &canonical_tool_name,
+                    &evidence,
+                    &format!(
+                        "tool '{}' returned a non-zero exit code; {}",
+                        canonical_tool_name, diagnosis.likely_cause
+                    ),
+                    &diagnosis,
+                ))
+            }
+            ToolExecutionStatus::Failure { error } => {
+                let diagnosis = deterministic_error_diagnosis(&error, "execution");
+                render_diagnosis(
+                    renderer,
+                    self.harness_emitter,
+                    &self.harness_state.turn_id.0,
+                    &canonical_tool_name,
+                    &diagnosis,
+                );
+                let evidence = bounded_error_evidence(&canonical_tool_name, &effective_arguments, &error, "execution");
+                Ok(copilot_failure_response_with_diagnosis(
+                    &canonical_tool_name,
+                    &evidence,
+                    &format!("tool '{canonical_tool_name}' failed: {}", error.message),
+                    &diagnosis,
+                ))
+            }
+            ToolExecutionStatus::Timeout { error } => {
+                let diagnosis = deterministic_error_diagnosis(&error, "timeout");
+                render_diagnosis(
+                    renderer,
+                    self.harness_emitter,
+                    &self.harness_state.turn_id.0,
+                    &canonical_tool_name,
+                    &diagnosis,
+                );
+                let evidence = bounded_error_evidence(&canonical_tool_name, &effective_arguments, &error, "timeout");
+                Ok(copilot_failure_response_with_diagnosis(
+                    &canonical_tool_name,
+                    &evidence,
+                    &format!("tool '{canonical_tool_name}' timed out: {}", error.message),
+                    &diagnosis,
+                ))
+            }
             ToolExecutionStatus::Cancelled => Ok(tool_cancelled_response(&canonical_tool_name)),
         }
     }
@@ -1814,18 +1877,30 @@ fn tool_exceeded_budget_response(tool_name: &str, max_tool_calls: usize) -> Copi
     })
 }
 
-fn tool_failed_response(tool_name: &str, error: &str) -> CopilotToolCallResponse {
+fn copilot_failure_response_with_diagnosis(
+    tool_name: &str,
+    evidence: &str,
+    error: &str,
+    diagnosis: &ToolFailureDiagnosis,
+) -> CopilotToolCallResponse {
+    let escaped_evidence = escape_untrusted_evidence(evidence);
+    let failure_text =
+        copilot_tool_result_text(tool_name, format!("VT Code failed to execute the tool `{tool_name}`."));
     CopilotToolCallResponse::Failure(CopilotToolCallFailure {
-        text_result_for_llm: format!("VT Code failed to execute the tool `{tool_name}`."),
-        error: format!("tool '{tool_name}' failed: {error}"),
+        text_result_for_llm: format!(
+            "{failure_text}\n\n<untrusted_tool_evidence>\n{escaped_evidence}\n</untrusted_tool_evidence>\n\n{}",
+            diagnosis.render_text(tool_name),
+        ),
+        error: bounded_diagnostic_field(error),
     })
 }
 
-fn tool_timed_out_response(tool_name: &str, error: &str) -> CopilotToolCallResponse {
-    CopilotToolCallResponse::Failure(CopilotToolCallFailure {
-        text_result_for_llm: format!("VT Code timed out while executing the tool `{tool_name}`."),
-        error: format!("tool '{tool_name}' timed out: {error}"),
-    })
+fn copilot_tool_result_text(tool_name: &str, text: String) -> String {
+    if vtcode_core::tools::tool_intent::is_command_tool(tool_name) {
+        format!("{text}\n\n{COLLAPSED_TOOL_OUTPUT_NOTICE}")
+    } else {
+        text
+    }
 }
 
 fn tool_cancelled_response(tool_name: &str) -> CopilotToolCallResponse {

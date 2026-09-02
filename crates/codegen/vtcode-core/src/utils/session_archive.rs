@@ -1,6 +1,6 @@
 use crate::config::constants::defaults;
 use crate::config::{HistoryPersistence, VTCodeConfig};
-use crate::llm::provider::{AssistantPhase, Message, MessageContent, MessageRole, ToolCall};
+use crate::llm::provider::{AssistantPhase, Message, MessageClearAt, MessageContent, MessageRole, ToolCall};
 use crate::telemetry::perf::PerfSpan;
 use crate::utils::error_log_collector::ErrorLogEntry;
 use crate::utils::session_transcript_norm::{
@@ -379,6 +379,8 @@ pub struct SessionMessage {
         deserialize_with = "deserialize_boxed_metadata_opt"
     )]
     pub metadata: Option<Box<crate::core::message_metadata::MessageMetadata>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_at: Option<MessageClearAt>,
 }
 
 impl Eq for SessionMessage {}
@@ -463,6 +465,7 @@ impl SessionMessage {
             phase: None,
             origin_tool: None,
             metadata: None,
+            clear_at: None,
         }
     }
 
@@ -497,6 +500,7 @@ impl From<&Message> for SessionMessage {
             phase: message.phase,
             origin_tool: boxed_non_empty_string(message.origin_tool.clone()),
             metadata: message.metadata.clone().map(Box::new),
+            clear_at: message.clear_at,
         }
     }
 }
@@ -513,6 +517,7 @@ impl From<&SessionMessage> for Message {
             phase: message.phase,
             origin_tool: clone_non_empty_boxed_string(&message.origin_tool),
             metadata: message.metadata.as_deref().cloned(),
+            clear_at: message.clear_at,
         }
     }
 }

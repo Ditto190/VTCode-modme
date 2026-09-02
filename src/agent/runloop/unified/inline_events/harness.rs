@@ -17,7 +17,7 @@ use vtcode_core::core::agent::events::{
 use vtcode_core::exec::events::ThreadStartedEvent;
 use vtcode_core::exec::events::{
     AgentMessageItem, CompactionMode, CompactionTrigger, HarnessEventItem, HarnessEventKind, ItemCompletedEvent,
-    ThreadCompactBoundaryEvent, ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadItem,
+    ReasoningItem, ThreadCompactBoundaryEvent, ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadItem,
     ThreadItemDetails, ToolCallStatus, ToolOutcome, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent, Usage,
     VersionedThreadEvent,
 };
@@ -299,6 +299,25 @@ impl HarnessEventEmitter {
             item: ThreadItem {
                 id: format!("{turn_id}-assistant-final-{}", Uuid::new_v4()),
                 details: ThreadItemDetails::AgentMessage(AgentMessageItem { text: text.to_string() }),
+            },
+        }))
+    }
+
+    /// Emit bounded, non-secret failure diagnosis as a normal reasoning item.
+    /// This uses the existing item contract so it remains available to session
+    /// replay and exporters without exposing provider-native chain-of-thought.
+    pub(crate) fn emit_diagnosis(&self, turn_id: &str, text: &str) -> Result<()> {
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+
+        self.emit(ThreadEvent::ItemCompleted(ItemCompletedEvent {
+            item: ThreadItem {
+                id: format!("{turn_id}-diagnosis-{}", Uuid::new_v4()),
+                details: ThreadItemDetails::Reasoning(ReasoningItem {
+                    text: text.to_string(),
+                    stage: Some("diagnosis".to_string()),
+                }),
             },
         }))
     }
@@ -611,6 +630,22 @@ mod tests {
         assert!(content.contains("item.completed"));
         assert!(content.contains("agent_message"));
         assert!(content.contains("The turn was blocked; retry the request."));
+    }
+
+    #[test]
+    fn diagnosis_is_written_as_a_reasoning_item_with_a_diagnosis_stage() {
+        let tmp = TempDir::new().expect("temp dir");
+        let path = tmp.path().join("events.jsonl");
+        let emitter = HarnessEventEmitter::new(path.clone()).expect("emitter");
+
+        emitter
+            .emit_diagnosis("turn-1", "Diagnosis: exec\nObserved: exit 1")
+            .expect("emit diagnosis");
+
+        let content = fs::read_to_string(path).expect("read harness log");
+        assert!(content.contains("\"type\":\"reasoning\""));
+        assert!(content.contains("\"stage\":\"diagnosis\""));
+        assert!(content.contains("Observed: exit 1"));
     }
 
     #[test]
