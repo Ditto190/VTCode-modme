@@ -1,20 +1,31 @@
 // Claude 5.x series - Latest Anthropic models
 pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 pub const SUPPORTED_MODELS: &[&str] = &[
-    "claude-sonnet-5", // Latest balanced flagship with adaptive thinking on by default
-    "claude-fable-5",  // Most capable widely released model
-    "claude-mythos-5", // Fable 5-class model without safety classifiers (limited)
-    "claude-opus-5",   // Opus-tier premium flagship with adaptive thinking, 1M context
+    "claude-sonnet-5",   // Latest balanced flagship with adaptive thinking on by default
+    "claude-fable-5",    // Most capable widely released model
+    "claude-fable-5-1",  // Successor to Fable 5, 1M context, cache reads at 1/4 cost
+    "claude-mythos-5",   // Fable 5-class model without safety classifiers (limited)
+    "claude-mythos-5-1", // Fable 5.1-class without safety classifiers, Project Glasswing
+    "claude-opus-5",     // Opus-tier premium flagship with adaptive thinking, 1M context
 ];
 
 // Convenience constants for alias models
 pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
 pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
 pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
+pub const CLAUDE_FABLE_5_1: &str = "claude-fable-5-1";
 pub const CLAUDE_MYTHOS_5: &str = "claude-mythos-5";
+pub const CLAUDE_MYTHOS_5_1: &str = "claude-mythos-5-1";
 
 /// Models that accept the reasoning effort parameter or extended thinking
-pub const REASONING_MODELS: &[&str] = &[CLAUDE_SONNET_5, CLAUDE_FABLE_5, CLAUDE_MYTHOS_5, CLAUDE_OPUS_5];
+pub const REASONING_MODELS: &[&str] = &[
+    CLAUDE_SONNET_5,
+    CLAUDE_FABLE_5,
+    CLAUDE_FABLE_5_1,
+    CLAUDE_MYTHOS_5,
+    CLAUDE_MYTHOS_5_1,
+    CLAUDE_OPUS_5,
+];
 
 /// Minimum advisor model capability: the advisor must be at least Claude Sonnet 5.
 const ADVISOR_MIN_MODEL: &str = CLAUDE_SONNET_5;
@@ -40,7 +51,9 @@ fn advisor_tier(model: &str) -> Option<u8> {
         CLAUDE_SONNET_5 => Some(3),
         CLAUDE_OPUS_5 => Some(6),
         CLAUDE_FABLE_5 => Some(8),
+        CLAUDE_FABLE_5_1 => Some(8),
         CLAUDE_MYTHOS_5 => Some(9),
+        CLAUDE_MYTHOS_5_1 => Some(9),
         _ => None,
     }
 }
@@ -58,8 +71,14 @@ pub fn validate_advisor_pair(executor: &str, advisor: &str) -> Result<(), String
     if advisor_base == CLAUDE_FABLE_5 && executor_base != CLAUDE_FABLE_5 {
         return Err(format!("advisor model {advisor} may only advise {CLAUDE_FABLE_5}"));
     }
+    if advisor_base == CLAUDE_FABLE_5_1 && executor_base != CLAUDE_FABLE_5_1 {
+        return Err(format!("advisor model {advisor} may only advise {CLAUDE_FABLE_5_1}"));
+    }
     if advisor_base == CLAUDE_MYTHOS_5 && executor_base != CLAUDE_MYTHOS_5 {
         return Err(format!("advisor model {advisor} may only advise {CLAUDE_MYTHOS_5}"));
+    }
+    if advisor_base == CLAUDE_MYTHOS_5_1 && executor_base != CLAUDE_MYTHOS_5_1 {
+        return Err(format!("advisor model {advisor} may only advise {CLAUDE_MYTHOS_5_1}"));
     }
 
     let Some(executor_tier) = advisor_tier(executor_base) else {
@@ -91,7 +110,9 @@ pub fn default_advisor_model(executor: &str) -> &'static str {
         CLAUDE_SONNET_5 => CLAUDE_OPUS_5,
         CLAUDE_OPUS_5 => CLAUDE_OPUS_5,
         CLAUDE_FABLE_5 => CLAUDE_FABLE_5,
+        CLAUDE_FABLE_5_1 => CLAUDE_FABLE_5_1,
         CLAUDE_MYTHOS_5 => CLAUDE_MYTHOS_5,
+        CLAUDE_MYTHOS_5_1 => CLAUDE_MYTHOS_5_1,
         _ => CLAUDE_OPUS_5,
     }
 }

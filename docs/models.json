@@ -947,6 +947,60 @@
         "status": "limited",
         "version": "5"
       },
+      "claude-fable-5-1": {
+        "id": "claude-fable-5-1",
+        "name": "Claude Fable 5.1",
+        "description": "Successor to Claude Fable 5 for demanding reasoning and long-horizon agentic work, adaptive thinking always on, 1M context, 128K output, cache reads at 1/4 cost",
+        "reasoning": true,
+        "effort": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "output_tokens": 128000,
+        "status": "current",
+        "version": "5.1",
+        "cost": {
+          "input": 1e-05,
+          "output": 5e-05,
+          "cache_read": 2.5e-07,
+          "cache_write": 1.25e-05
+        }
+      },
+      "claude-mythos-5-1": {
+        "id": "claude-mythos-5-1",
+        "name": "Claude Mythos 5.1",
+        "description": "Shares Claude Fable 5.1's capabilities without safety classifiers. Project Glasswing only, adaptive thinking always on, 1M context",
+        "reasoning": true,
+        "effort": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "output_tokens": 128000,
+        "status": "limited",
+        "version": "5.1",
+        "cost": {
+          "input": 1e-05,
+          "output": 5e-05,
+          "cache_read": 2.5e-07,
+          "cache_write": 1.25e-05
+        }
+      },
       "claude-opus-5": {
         "id": "claude-opus-5",
         "name": "Claude Opus 4.8",

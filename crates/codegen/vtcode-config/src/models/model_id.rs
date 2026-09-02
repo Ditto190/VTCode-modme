@@ -44,8 +44,12 @@ pub enum ModelId {
     ClaudeSonnet5,
     /// Claude Fable 5 - Anthropic's most capable widely released model for demanding reasoning and long-horizon agentic work
     ClaudeFable5,
+    /// Claude Fable 5.1 - successor to Fable 5 for demanding reasoning and long-horizon agentic work, 1M context, adaptive thinking always on, cache reads at 1/4 cost
+    ClaudeFable51,
     /// Claude Mythos 5 - Fable 5-class model without safety classifiers, limited availability through Project Glasswing
     ClaudeMythos5,
+    /// Claude Mythos 5.1 - same as Fable 5.1, Project Glasswing only, adaptive thinking always on, 1M context
+    ClaudeMythos51,
     /// Claude Opus 5 - Anthropic's newest Opus-tier model with 1M context, thinking on by default
     ClaudeOpus5,
     /// GitHub Copilot auto model selection

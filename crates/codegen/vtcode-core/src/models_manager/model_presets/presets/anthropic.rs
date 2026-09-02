@@ -120,6 +120,82 @@ pub(crate) fn anthropic_presets() -> Vec<ModelPreset> {
             context_window: Some(1_000_000),
         },
         ModelPreset {
+            id: "claude-fable-5-1".to_string(),
+            model: "claude-fable-5-1".to_string(),
+            display_name: "Claude Fable 5.1".to_string(),
+            description:
+                "Successor to Claude Fable 5 for demanding reasoning and long-horizon agentic work, adaptive thinking always on, 1M context, 128K output, cache reads at 1/4 cost"
+                    .to_string(),
+            provider: Provider::Anthropic,
+            default_reasoning_effort: ReasoningEffortLevel::High,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast adaptive effort".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced adaptive effort".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Default adaptive effort".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::XHigh,
+                    description: "Extended capability for the most capability-sensitive workloads".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum adaptive effort for intelligence-demanding tasks"
+                        .to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
+        ModelPreset {
+            id: "claude-mythos-5-1".to_string(),
+            model: "claude-mythos-5-1".to_string(),
+            display_name: "Claude Mythos 5.1".to_string(),
+            description:
+                "Shares Claude Fable 5.1's capabilities without safety classifiers. Project Glasswing only, adaptive thinking always on, 1M context"
+                    .to_string(),
+            provider: Provider::Anthropic,
+            default_reasoning_effort: ReasoningEffortLevel::High,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast adaptive effort".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced adaptive effort".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Default adaptive effort".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::XHigh,
+                    description: "Extended capability for the most capability-sensitive workloads".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum adaptive effort for intelligence-demanding tasks"
+                        .to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
+        ModelPreset {
             id: "claude-opus-5".to_string(),
             model: "claude-opus-5".to_string(),
             display_name: "Claude Opus 5".to_string(),

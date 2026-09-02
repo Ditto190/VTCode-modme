@@ -155,9 +155,12 @@ impl ModelId {
             ModelId::GPT56Terra => Some(ModelId::GPT56Luna),
             ModelId::MergeGatewayOpenAIGpt56Sol => Some(ModelId::MergeGatewayOpenAIGpt56Terra),
             ModelId::MergeGatewayOpenAIGpt56Terra => Some(ModelId::MergeGatewayOpenAIGpt56Luna),
-            ModelId::ClaudeSonnet5 | ModelId::ClaudeFable5 | ModelId::ClaudeMythos5 | ModelId::ClaudeOpus5 => {
-                Some(ModelId::ClaudeSonnet5)
-            }
+            ModelId::ClaudeSonnet5
+            | ModelId::ClaudeFable5
+            | ModelId::ClaudeFable51
+            | ModelId::ClaudeMythos5
+            | ModelId::ClaudeMythos51
+            | ModelId::ClaudeOpus5 => Some(ModelId::ClaudeSonnet5),
             ModelId::CopilotGPT54 => Some(ModelId::CopilotGPT54Mini),
             ModelId::CopilotGPT52Codex | ModelId::CopilotGPT51CodexMax => Some(ModelId::CopilotGPT54Mini),
             ModelId::DeepSeekV4Pro => Some(ModelId::DeepSeekV4Flash),
@@ -313,7 +316,9 @@ impl ModelId {
                 | ModelId::CopilotClaudeSonnet46
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
+                | ModelId::ClaudeFable51
                 | ModelId::ClaudeMythos5
+                | ModelId::ClaudeMythos51
                 | ModelId::ClaudeOpus5
                 | ModelId::OpenCodeGoGlm53
                 | ModelId::OpenCodeGoGlm52
@@ -397,7 +402,9 @@ impl ModelId {
                 | ModelId::MergeGatewayOpenAIGpt56Luna
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
+                | ModelId::ClaudeFable51
                 | ModelId::ClaudeMythos5
+                | ModelId::ClaudeMythos51
                 | ModelId::ClaudeOpus5
                 | ModelId::OpenCodeGoGlm53
                 | ModelId::OpenCodeGoGlm52
@@ -474,7 +481,9 @@ impl ModelId {
             // Anthropic generations
             ModelId::ClaudeSonnet5 => "5",
             ModelId::ClaudeFable5 => "5",
+            ModelId::ClaudeFable51 => "5.1",
             ModelId::ClaudeMythos5 => "5",
+            ModelId::ClaudeMythos51 => "5.1",
             ModelId::ClaudeOpus5 => "5",
             // DeepSeek generations
             ModelId::DeepSeekV4Pro | ModelId::DeepSeekV4Flash | ModelId::DeepSeekV4FlashVisionExp => "4",

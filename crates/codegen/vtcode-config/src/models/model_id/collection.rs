@@ -28,7 +28,9 @@ impl ModelId {
             // Anthropic models
             ModelId::ClaudeSonnet5,
             ModelId::ClaudeFable5,
+            ModelId::ClaudeFable51,
             ModelId::ClaudeMythos5,
+            ModelId::ClaudeMythos51,
             ModelId::ClaudeOpus5,
             ModelId::CopilotAuto,
             ModelId::CopilotGPT52Codex,

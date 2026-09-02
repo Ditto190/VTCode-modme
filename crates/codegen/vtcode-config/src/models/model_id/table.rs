@@ -149,12 +149,26 @@ model_id_table! {
         display: "Claude Fable 5",
         description: "Anthropic's most capable widely released model, for the most demanding reasoning and long-horizon agentic work",
     },
+    ClaudeFable51 {
+        provider: Anthropic,
+        id: models::CLAUDE_FABLE_5_1,
+        parse: [models::CLAUDE_FABLE_5_1],
+        display: "Claude Fable 5.1",
+        description: "Successor to Claude Fable 5 for demanding reasoning and long-horizon agentic work, adaptive thinking always on, 1M context, 128K output, cache reads at 1/4 cost",
+    },
     ClaudeMythos5 {
         provider: Anthropic,
         id: models::CLAUDE_MYTHOS_5,
         parse: [models::CLAUDE_MYTHOS_5],
         display: "Claude Mythos 5",
         description: "Shares Claude Fable 5's capabilities without safety classifiers. Limited availability through Project Glasswing",
+    },
+    ClaudeMythos51 {
+        provider: Anthropic,
+        id: models::CLAUDE_MYTHOS_5_1,
+        parse: [models::CLAUDE_MYTHOS_5_1],
+        display: "Claude Mythos 5.1",
+        description: "Shares Claude Fable 5.1's capabilities without safety classifiers. Project Glasswing only",
     },
     ClaudeOpus5 {
         provider: Anthropic,
