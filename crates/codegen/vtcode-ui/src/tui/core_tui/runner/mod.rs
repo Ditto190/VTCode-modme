@@ -351,13 +351,14 @@ where
     // When another party already restored the terminal (host backstop or panic
     // hook), the main screen buffer is live: writes here (line clear, cursor
     // show, clear) would land there instead of on the alternate screen.
+    let is_alternate = surface.use_alternate();
     let finalize_result = if crate::tui::core_tui::panic_hook::is_restore_claimed() {
         Ok(())
     } else {
         // Clear current line to remove any echoed characters (like ^C)
         let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
 
-        finalize_terminal(&mut terminal)
+        finalize_terminal(&mut terminal, is_alternate)
     };
 
     // Restore terminal modes (handles all modes including raw mode)

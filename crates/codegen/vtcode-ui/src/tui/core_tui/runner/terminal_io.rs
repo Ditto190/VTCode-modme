@@ -57,7 +57,7 @@ pub(super) fn prepare_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Result
     Ok(())
 }
 
-pub(super) fn finalize_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
+pub(super) fn finalize_terminal<B: Backend>(terminal: &mut Terminal<B>, use_alternate_screen: bool) -> Result<()> {
     execute!(io::stderr(), SetCursorStyle::DefaultUserShape)
         .context("failed to restore cursor style after inline session")?;
     reset_mouse_pointer_shape();
@@ -65,12 +65,18 @@ pub(super) fn finalize_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Resul
         .show_cursor()
         .map_err(|e| anyhow::anyhow!("failed to show cursor after inline session: {e}"))?;
     // Terminal::clear() snapshots the cursor via CPR (ESC[6n) to restore it afterward, which
-    // blocks ~2s once the event stream is shut down at exit. Clear the backend viewport instead;
-    // restore_tui() restores the saved cursor position right after.
-    terminal
-        .backend_mut()
-        .clear_region(ClearType::All)
-        .map_err(|e| anyhow::anyhow!("failed to clear inline terminal after session: {e}"))?;
+    // blocks ~2s once the event stream is shut down at exit. Clear the backend viewport
+    // instead; restore_tui() restores the saved cursor position right after.
+    // For inline sessions clearing All wipes the viewport and leaves a
+    // full-screen white gap above the next prompt — the TUI already drew
+    // inline and the transcript should remain as scrollback, so only
+    // alternate-screen sessions need a clear.
+    if use_alternate_screen {
+        terminal
+            .backend_mut()
+            .clear_region(ClearType::All)
+            .map_err(|e| anyhow::anyhow!("failed to clear inline terminal after session: {e}"))?;
+    }
     terminal
         .flush()
         .map_err(|e| anyhow::anyhow!("failed to flush inline terminal after session: {e}"))?;
@@ -160,6 +166,8 @@ mod tests {
     #[test]
     fn finalize_terminal_does_not_query_cursor_position() {
         let mut terminal = Terminal::new(NoCprBackend(TestBackend::new(80, 24))).unwrap();
-        assert!(finalize_terminal(&mut terminal).is_ok());
+        assert!(finalize_terminal(&mut terminal, true).is_ok());
+        let mut terminal = Terminal::new(NoCprBackend(TestBackend::new(80, 24))).unwrap();
+        assert!(finalize_terminal(&mut terminal, false).is_ok());
     }
 }

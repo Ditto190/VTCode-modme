@@ -19,19 +19,19 @@ use super::state::{self, KEYBOARD_ENHANCEMENTS_PUSHED};
 /// when leaving the buffer, so no explicit clear is needed there.
 ///
 /// Writes through any `Write` so the exact sequence is unit-testable.
-fn emit_restore_sequence(writer: &mut impl Write, clear_full_screen: bool) -> io::Result<()> {
+fn emit_restore_sequence(writer: &mut impl Write, _clear_full_screen: bool) -> io::Result<()> {
     // Clear current line to remove any echoed ^C characters
     execute!(writer, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
 
     // Leave alternate screen FIRST (most critical for visual restoration)
     execute!(writer, LeaveAlternateScreen)?;
 
-    // Inline sessions drew directly on the main screen: erase every drawn
-    // frame (welcome content, status line) so the shell prompt returns to a
-    // clean screen (fixes leftover TUI residue on exit).
-    if clear_full_screen {
-        execute!(writer, Clear(ClearType::All))?;
-    }
+    // Do not emit Clear(All) for inline sessions — it wipes the viewport
+    // and leaves a full-screen blank gap above the next shell prompt.
+    // Inline residue (welcome/status) is already cleared by the TUI's
+    // own teardown (prepare_terminal/finalize_terminal) when the TUI
+    // exits normally; the host backstop only needs to leave the
+    // alternate screen and reset modes. See #729 follow-up.
 
     // Disable terminal modes
     execute!(writer, DisableBracketedPaste)?;
@@ -162,9 +162,11 @@ mod tests {
         emit_restore_sequence(&mut bytes, true).unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
-        // Inline sessions drew on the main screen: the restore must erase
-        // every leftover frame (fixes TUI residue left behind on exit).
-        assert!(text.contains("\x1b[2J"), "inline restore must emit ESC[2J, got: {text:?}");
+        // Inline sessions no longer wipe the viewport — that leaves a
+        // full-screen white gap above the next shell prompt. The TUI's
+        // own teardown already handles inline residue; the host backstop
+        // only needs to leave the alternate screen and reset modes.
+        assert!(!text.contains("\x1b[2J"), "inline restore must not emit ESC[2J, got: {text:?}");
         assert!(text.contains("\x1b[1G\x1b[2K"), "inline restore must keep line clear, got: {text:?}");
         assert!(text.contains("\x1b[?1049l"), "inline restore must leave alternate screen, got: {text:?}");
     }
