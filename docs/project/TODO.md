@@ -94,3 +94,9 @@ Blocked handoff:
 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260902t14281-3z_732254-54385-20260902T144229Z.md
 
 note: i want you to fix and improve vtcode harness based on the session run log. The harness should be able to handle blocked calls more gracefully, provide better feedback to the user, and ensure that the session can resume smoothly after a blockage. Additionally, improve the UI to clearly indicate when a turn is blocked and what actions the user can take to resolve it. not do it yourself
+
+---
+
+fix broken tool call rendering
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 22.40.46.png'
