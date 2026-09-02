@@ -423,7 +423,7 @@ fn render_summary_with_highlights(
         if cursor < start {
             rendered.push_str(&render_styled(&summary[cursor..start], muted_color, None));
         }
-        rendered.push_str(&render_styled(&summary[start..end], accent_color, None));
+        rendered.push_str(&render_styled(&summary[start..end], accent_color, Some("bold".to_string())));
         cursor = end;
     }
     if cursor < summary.len() {

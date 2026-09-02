@@ -570,21 +570,27 @@ pub(super) fn compact_activity_segments(
     session: &Session,
     metadata: &vtcode_commons::ui_protocol::CompactActivityMetadata,
 ) -> Vec<crate::tui::core_tui::types::InlineSegment> {
-    let base_style = session.core.styles.accent_inline_style().bold();
-    let mut segments = vec![crate::tui::core_tui::types::InlineSegment {
-        text: metadata.display_text(),
-        style: std::sync::Arc::new(base_style),
-    }];
+    let styles = crate::tui::ui::shell_syntax::ShellLineStyles::from_session(session);
+    let mut segments = crate::tui::ui::shell_syntax::line_to_compact_segments(metadata, &styles);
 
-    if let Some(hint) = compact_activity_hint_text(session) {
+    if session.core.transcript_review_hints_visible()
+        && let Some(binding) = session.core.primary_binding_label(Action::OpenTranscriptReview)
+    {
         let separator_style = session.core.styles.default_inline_style().dim();
-        let hint_style = session.core.styles.accent_inline_style().underline();
         segments.push(crate::tui::core_tui::types::InlineSegment {
             text: " · ".to_string(),
             style: std::sync::Arc::new(separator_style),
         });
-        segments
-            .push(crate::tui::core_tui::types::InlineSegment { text: hint, style: std::sync::Arc::new(hint_style) });
+        let binding_style = session.core.styles.accent_inline_style().underline().bold();
+        segments.push(crate::tui::core_tui::types::InlineSegment {
+            text: binding.to_string(),
+            style: std::sync::Arc::new(binding_style),
+        });
+        let rest_style = session.core.styles.default_inline_style().dim();
+        segments.push(crate::tui::core_tui::types::InlineSegment {
+            text: " to view transcript · click to expand or collapse".to_string(),
+            style: std::sync::Arc::new(rest_style),
+        });
     }
 
     segments
@@ -1395,7 +1401,12 @@ mod tests {
             review_anchor: Some(1),
             review_anchors: vec![1],
         };
-        assert_eq!(compact_activity_segments(&session, &metadata).len(), 1);
+        let segs = compact_activity_segments(&session, &metadata);
+        // Single-command now tokenized: •, Ran, command tokens + hidden count.
+        assert!(segs.len() > 1);
+        let text: String = segs.iter().map(|s| s.text.as_str()).collect();
+        assert!(text.contains("printf configured"));
+        assert!(!text.contains("Ctrl+T"));
     }
 
     #[test]
@@ -1416,14 +1427,19 @@ mod tests {
                 review_anchors: vec![48],
             },
         ));
-        assert_eq!(session.core.lines[0].segments.len(), 3);
+        // With shell syntax: •, Ran, command tokens, hidden count, plus 3 hint segments (separator, binding, rest).
+        assert!(session.core.lines[0].segments.len() > 3);
+        let hint_text: String = session.core.lines[0].segments.iter().map(|s| s.text.as_str()).collect();
+        assert!(hint_text.contains("Ctrl+T"));
 
         let mut appearance = session.core.appearance.clone();
         appearance.show_transcript_review_hints = false;
         session.handle_command(InlineCommand::SetAppearance { appearance });
 
-        assert_eq!(session.core.lines[0].segments.len(), 1);
-        assert!(!session.core.lines[0].segments[0].text.contains("click to expand"));
+        // Without hint, still tokenized command segments remain.
+        assert!(session.core.lines[0].segments.len() > 1);
+        let plain_text: String = session.core.lines[0].segments.iter().map(|s| s.text.as_str()).collect();
+        assert!(!plain_text.contains("click to expand"));
     }
 
     #[test]
