@@ -285,14 +285,32 @@ fn publish_final_assistant_response(ctx: &mut TurnLoopContext<'_>, text: &str) -
     Ok(ctx.harness_state.final_response_event_emitted())
 }
 
-fn blocked_turn_final_response(reason: &str) -> &'static str {
+pub(crate) fn format_blocked_turn_final_response(reason: &str) -> String {
     if reason.contains(PENDING_VERIFICATION_BLOCK_REASON) {
-        PENDING_VERIFICATION_FINAL_RESPONSE
+        PENDING_VERIFICATION_FINAL_RESPONSE.to_string()
     } else if reason.contains(POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON) {
-        CONTEXT_CAPACITY_FINAL_RESPONSE
+        CONTEXT_CAPACITY_FINAL_RESPONSE.to_string()
+    } else if reason.contains("tool-call limit")
+        || reason.contains("Recovery tool-call limit")
+        || reason.contains("Blocked tool-call limit")
+    {
+        format!(
+            "The turn is blocked because repeated tool calls were rejected: {reason}. The available history and outputs are retained. You can resume the request with specific guidance, or adjust permissions/tools to continue."
+        )
+    } else if reason.contains("Repeated shell command") {
+        "The turn is blocked because repeated identical shell commands were detected. The available history and outputs are retained. Please provide alternative instructions or adjust the command.".to_string()
+    } else if !reason.trim().is_empty() && reason != "blocked" {
+        format!(
+            "The turn is blocked before success could be confirmed: {reason}. The available history and outputs are retained; resume the request or provide updated instructions to continue."
+        )
     } else {
-        GENERIC_BLOCKED_FINAL_RESPONSE
+        GENERIC_BLOCKED_FINAL_RESPONSE.to_string()
     }
+}
+
+#[cfg(test)]
+pub(crate) fn blocked_turn_final_response(reason: &str) -> String {
+    format_blocked_turn_final_response(reason)
 }
 
 fn ensure_blocked_turn_response(
@@ -303,7 +321,7 @@ fn ensure_blocked_turn_response(
 ) -> Result<()> {
     let existing_final = latest_final_assistant_response(working_history, turn_history_start_len);
     let generated_fallback = existing_final.is_none();
-    let final_text = existing_final.unwrap_or_else(|| blocked_turn_final_response(reason).to_string());
+    let final_text = existing_final.unwrap_or_else(|| format_blocked_turn_final_response(reason));
     if generated_fallback {
         ctx.harness_state.mark_final_response_fallback();
         working_history
@@ -792,7 +810,9 @@ pub(crate) async fn run_turn_loop(
         match maybe_handle_tool_loop_limit(&mut ctx, step_count, &mut current_max_tool_loops).await? {
             ToolLoopLimitAction::Proceed => {}
             ToolLoopLimitAction::ContinueLoop => continue,
-            ToolLoopLimitAction::BreakLoop => break,
+            ToolLoopLimitAction::BreakLoop => {
+                break;
+            }
         }
 
         let active_model = resolve_effective_request_model(&ctx.config.model, ctx.active_primary_agent.active());

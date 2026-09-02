@@ -103,7 +103,7 @@ pub async fn handle_resume_session_command(
     if resume.is_fork() {
         print_fork_summary(&resume);
     } else {
-        print_resume_summary(&resume);
+        print_resume_summary(&resume, &config.workspace);
     }
 
     run_single_agent_loop(config, skip_confirmations, resume).await
@@ -296,7 +296,7 @@ fn format_listing(listing: &SessionListing) -> String {
     summary
 }
 
-fn print_resume_summary(resume: &ResumeSession) {
+fn print_resume_summary(resume: &ResumeSession, workspace: &std::path::Path) {
     let ended = resume.snapshot().ended_at.with_timezone(&Local).format("%Y-%m-%d %H:%M");
     println!(
         "{}",
@@ -309,6 +309,19 @@ fn print_resume_summary(resume: &ResumeSession) {
         .green()
     );
     println!("{}", style(format!("Archive: {}", resume.path().display())).green());
+
+    if let Some(info) = vtcode_core::core::agent::blocked_handoff::read_current_blocked_handoff(workspace) {
+        if info.session_id == resume.identifier()
+            || resume.identifier().contains(&info.session_id)
+            || info.session_id.contains(&resume.identifier())
+        {
+            println!("{}", style(format!("Note: Resuming from a blocked turn: {}", info.blocker_summary)).yellow());
+            println!(
+                "{}",
+                style("Session context retained. Type 'continue' to resume or provide specific instructions.").cyan()
+            );
+        }
+    }
 }
 
 fn print_fork_summary(resume: &ResumeSession) {

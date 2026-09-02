@@ -2,7 +2,7 @@ use super::post_tool_recovery::complete_turn_after_failed_tool_free_recovery;
 use super::post_tool_recovery::prepare_post_tool_tool_free_recovery;
 use super::post_tool_recovery::{ensure_post_tool_resume_directive, has_tool_response_since};
 use super::{
-    ASSISTANT_TEXT_RESPONSE_CAP_REASON, COMPLETED_TURN_FALLBACK_RESPONSE, HarnessUsage,
+    ASSISTANT_TEXT_RESPONSE_CAP_REASON, COMPLETED_TURN_FALLBACK_RESPONSE, GENERIC_BLOCKED_FINAL_RESPONSE, HarnessUsage,
     PENDING_VERIFICATION_BLOCK_REASON, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
     POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON, POST_TOOL_RECOVERY_REASON, POST_TOOL_RECOVERY_REASON_PLAN_MODE,
     POST_TOOL_RESUME_DIRECTIVE, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE, PostToolFailureRecovery,
@@ -624,10 +624,33 @@ fn blocked_turn_final_response_is_not_suppressed_by_prior_event_state() {
 
 #[test]
 fn blocked_turn_final_response_has_generic_fallback() {
-    let response = blocked_turn_final_response("some other blocked reason");
+    let response = blocked_turn_final_response("blocked");
 
-    assert!(response.contains("blocked"));
-    assert!(response.contains("resume"));
+    assert_eq!(response, GENERIC_BLOCKED_FINAL_RESPONSE);
+
+    let empty_response = blocked_turn_final_response("");
+    assert_eq!(empty_response, GENERIC_BLOCKED_FINAL_RESPONSE);
+}
+
+#[test]
+fn blocked_turn_final_response_formats_tool_call_limit() {
+    let response = blocked_turn_final_response("Blocked tool-call limit reached after 4 calls");
+    assert!(response.contains("repeated tool calls were rejected"));
+    assert!(response.contains("Blocked tool-call limit reached after 4 calls"));
+    assert!(response.contains("retained"));
+}
+
+#[test]
+fn blocked_turn_final_response_formats_repeated_shell() {
+    let response = blocked_turn_final_response("Repeated shell command detected");
+    assert!(response.contains("repeated identical shell commands were detected"));
+    assert!(response.contains("retained"));
+}
+
+#[test]
+fn blocked_turn_final_response_formats_specific_reason() {
+    let response = blocked_turn_final_response("specific error happened");
+    assert!(response.contains("The turn is blocked before success could be confirmed: specific error happened"));
 }
 
 #[tokio::test]
@@ -1475,6 +1498,32 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
         }
 
         async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            // Bounded tool-failure diagnosis issues auxiliary requests on the
+            // same provider client (main-model route when no lightweight model
+            // is configured). Serve them with a valid diagnosis JSON without
+            // consuming the scripted main-loop sequence below.
+            if request
+                .system_prompt
+                .as_deref()
+                .is_some_and(|prompt| prompt.contains("failure-diagnosis checkpoint"))
+            {
+                return Ok(uni::LLMResponse {
+                    content: Some(
+                        r#"{"observed":"the scripted tool call failed","likely_cause":"intentional test failure","next_action":"inspect the tool output and retry with corrected arguments"}"#
+                            .to_string(),
+                    ),
+                    model: request.model.clone(),
+                    tool_calls: None,
+                    usage: None,
+                    finish_reason: uni::FinishReason::Stop,
+                    reasoning: None,
+                    reasoning_details: None,
+                    organization_id: None,
+                    request_id: None,
+                    tool_references: Vec::new(),
+                    compaction: None,
+                });
+            }
             let request_number = self.requests.fetch_add(1, Ordering::SeqCst);
             let tool_call = |label: &str, tool_name: &str, args: serde_json::Value| {
                 self.steps.lock().expect("step trace lock").push(label.to_string());
@@ -1572,12 +1621,17 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
         .await
         .expect("anti-blind recovery should return a blocked outcome");
 
-    assert!(matches!(
+    assert!(
+        matches!(
+            outcome.result,
+            TurnLoopResult::Blocked {
+                reason: Some(ref reason)
+            } if reason == PENDING_VERIFICATION_BLOCK_REASON
+        ),
+        "expected PENDING_VERIFICATION_BLOCK_REASON, got: {:?}, steps: {:?}",
         outcome.result,
-        TurnLoopResult::Blocked {
-            reason: Some(ref reason)
-        } if reason == PENDING_VERIFICATION_BLOCK_REASON
-    ));
+        steps.lock().expect("step trace lock").as_slice()
+    );
     assert_eq!(requests.load(Ordering::SeqCst), 10, "two pending text responses are the terminal cap");
     assert_eq!(
         steps.lock().expect("step trace lock").as_slice(),

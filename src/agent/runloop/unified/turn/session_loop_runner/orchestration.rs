@@ -709,6 +709,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         .await
                     )
                 };
+                if input_status_state.is_blocked {
+                    input_status_state.is_blocked = false;
+                    handle.set_placeholder(default_placeholder.clone());
+                }
                 let (next_turn_input, completed_turn_prompt_message_index) = match interaction_outcome {
                     InteractionOutcome::Exit { reason } => {
                         session_end_reason = reason;
@@ -1364,11 +1368,20 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     );
                 }
                 match &outcome_result {
+                    RunLoopTurnLoopResult::Completed { .. } => {
+                        let _ =
+                            vtcode_core::core::agent::blocked_handoff::clear_current_blocked_handoff(&config.workspace);
+                        session_stats.mark_turn_stalled(false, None);
+                    }
                     RunLoopTurnLoopResult::Aborted => {
                         session_stats
                             .mark_turn_stalled(true, Some("Turn aborted due to an execution error.".to_string()));
                     }
                     RunLoopTurnLoopResult::Blocked { reason } => {
+                        handle.set_placeholder(Some(
+                            "Turn blocked · Type 'continue' to retry or describe changes...".to_string(),
+                        ));
+                        input_status_state.is_blocked = true;
                         session_stats.mark_turn_stalled(
                             true,
                             reason

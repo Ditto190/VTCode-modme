@@ -89,7 +89,7 @@ pub(crate) fn blocked_tool_call_messages(
     let (block_reason, error_msg, error_label) = match (fuse_trip, recovery_mode) {
         (BlockedToolCallFuseTrip::Total { cap }, true) => (
             format!(
-                "Recovery tool-call limit reached after {cap} blocked calls. Last blocked call: '{display_tool}'. Tools remain disabled while the recovery response is finalized."
+                "Recovery tool-call limit reached after {cap} blocked calls (last blocked call: '{display_tool}')."
             ),
             format!("The recovery tool-call limit of {cap} blocked calls was exceeded for this turn."),
             "blocked_total",

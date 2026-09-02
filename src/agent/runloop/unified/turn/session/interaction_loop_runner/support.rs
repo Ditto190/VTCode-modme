@@ -313,13 +313,17 @@ pub(super) fn fallback_args_preview(args: &Value) -> String {
 }
 
 pub(super) fn stalled_follow_up_recovery_prompt(stall_reason: &str, has_fallback_hint: bool) -> String {
+    let clean_stall_reason = stall_reason
+        .replace("Tools remain disabled while the recovery response is finalized.", "")
+        .replace("Tools remain disabled while the recovery response is finalized", "");
+    let clean_stall_reason = clean_stall_reason.trim();
     if has_fallback_hint {
         format!(
-            "Continue autonomously from the last stalled turn. Stall reason: {stall_reason}. Use the recovered fallback hint as the first adjusted strategy, then continue until you can provide a concrete conclusion and final review."
+            "Continue from the last stalled turn. Stall reason: {clean_stall_reason}. Tools are fully enabled for this turn. Use the recovered fallback hint as the first adjusted strategy, review previous outputs, adjust your approach to avoid the prior blocker, and continue toward the objective."
         )
     } else {
         format!(
-            "Continue autonomously from the last stalled turn. Stall reason: {stall_reason}. Keep working until you can provide a concrete conclusion and final review."
+            "Continue from the last stalled turn. Stall reason: {clean_stall_reason}. Tools are fully enabled for this turn. Review previous outputs, adjust your approach to avoid the prior blocker, and continue toward the objective."
         )
     }
 }
@@ -1855,5 +1859,14 @@ mod tests {
             .path
             .clone();
         assert!(second_active.ends_with("src/beta.rs"), "expected beta, got {second_active}");
+    }
+
+    #[test]
+    fn test_stalled_follow_up_recovery_prompt_sanitizes_disabled_tools_message() {
+        let reason = "Recovery tool-call limit reached after 4 blocked calls. Tools remain disabled while the recovery response is finalized.";
+        let prompt = stalled_follow_up_recovery_prompt(reason, false);
+        assert!(!prompt.contains("Tools remain disabled"));
+        assert!(prompt.contains("Tools are fully enabled for this turn."));
+        assert!(prompt.contains("Recovery tool-call limit reached after 4 blocked calls."));
     }
 }

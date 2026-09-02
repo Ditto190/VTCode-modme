@@ -29,6 +29,7 @@ pub(crate) struct InputStatusState {
     pub(crate) context_limit_tokens: Option<usize>,
     pub(crate) context_remaining_tokens: Option<usize>,
     pub(crate) is_cancelling: bool,
+    pub(crate) is_blocked: bool,
     pub(crate) clock: Option<String>,
     // Dynamic context discovery status
     pub(crate) spooled_files_count: Option<usize>,
@@ -416,6 +417,9 @@ fn auto_status_components(
     let mut parts: Vec<Option<String>> = Vec::new();
     if is_cancelling {
         parts.push(Some("CANCELLING...".to_string()));
+    }
+    if state.is_blocked {
+        parts.push(Some("[BLOCKED]".to_string()));
     }
 
     parts.push(
@@ -827,5 +831,16 @@ mod tests {
             Err(error) => panic!("changed branch was not sent: {error}"),
         }
         assert!(receiver.try_recv().is_err(), "only changed title fields should enqueue commands");
+    }
+
+    #[test]
+    fn blocked_status_indicator_appears_when_blocked() {
+        let mut state = InputStatusState::default();
+        let normal_components = super::auto_status_components(Some("main"), false, None, &state);
+        assert!(!normal_components.contains(&"[BLOCKED]".to_string()));
+
+        state.is_blocked = true;
+        let blocked_components = super::auto_status_components(Some("main"), false, None, &state);
+        assert!(blocked_components.contains(&"[BLOCKED]".to_string()));
     }
 }

@@ -107,6 +107,103 @@ pub fn write_blocked_handoff_with_resume(
     Ok(BlockedHandoffArtifacts { current_path, archive_path })
 }
 
+/// Parsed information from a blocked handoff file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedHandoffInfo {
+    pub session_id: String,
+    pub outcome_code: String,
+    pub blocker_summary: String,
+    pub created_at: Option<String>,
+    pub resume_command: Option<String>,
+}
+
+/// Reads `.vtcode/tasks/current_blocked.md` if it exists, parsing the front-matter
+/// and blocker summary.
+pub fn read_current_blocked_handoff(workspace: &Path) -> Option<BlockedHandoffInfo> {
+    let current_path = workspace.join(TASKS_DIR).join(CURRENT_BLOCKED_FILE);
+    let content = fs::read_to_string(&current_path).ok()?;
+    parse_blocked_handoff_content(&content)
+}
+
+fn parse_blocked_handoff_content(content: &str) -> Option<BlockedHandoffInfo> {
+    let mut lines = content.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    let mut session_id = None;
+    let mut outcome_code = None;
+    let mut created_at = None;
+    let mut resume_command = None;
+
+    let mut in_front_matter = true;
+    let mut body_lines = Vec::new();
+
+    for line in lines {
+        if in_front_matter {
+            let trimmed = line.trim();
+            if trimmed == "---" {
+                in_front_matter = false;
+                continue;
+            }
+            if let Some((key, val)) = trimmed.split_once(':') {
+                let key = key.trim();
+                let val = val.trim().trim_matches('"').trim_matches('\'').trim().to_string();
+                match key {
+                    "session_id" => session_id = Some(val),
+                    "outcome" => outcome_code = Some(val),
+                    "created_at" => created_at = Some(val),
+                    "resume_command" => resume_command = Some(val),
+                    _ => {}
+                }
+            }
+        } else {
+            body_lines.push(line);
+        }
+    }
+
+    let session_id = session_id?;
+    let outcome_code = outcome_code.unwrap_or_else(|| "blocked".to_string());
+
+    let mut blocker_summary = String::new();
+    let mut in_summary = false;
+    for line in body_lines {
+        let trimmed = line.trim();
+        if trimmed == "# Blocker Summary" {
+            in_summary = true;
+            continue;
+        }
+        if in_summary {
+            if trimmed.starts_with('#') {
+                break;
+            }
+            blocker_summary.push_str(line);
+            blocker_summary.push('\n');
+        }
+    }
+    let blocker_summary = blocker_summary.trim().to_string();
+
+    Some(BlockedHandoffInfo {
+        session_id,
+        outcome_code,
+        blocker_summary,
+        created_at,
+        resume_command,
+    })
+}
+
+/// Clears `.vtcode/tasks/current_blocked.md` if it exists.
+///
+/// Returns `Ok(true)` if the file was deleted, or `Ok(false)` if it did not exist.
+pub fn clear_current_blocked_handoff(workspace: &Path) -> Result<bool> {
+    let current_path = workspace.join(TASKS_DIR).join(CURRENT_BLOCKED_FILE);
+    match fs::remove_file(&current_path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("failed to remove {}", current_path.display())),
+    }
+}
+
 fn render_blocked_handoff(
     workspace: &Path,
     session_id: &str,
@@ -140,20 +237,26 @@ fn render_blocked_handoff(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let (resume_front_matter, resume_metadata) = match resume {
+    let (resume_front_matter, resume_metadata, resume_actionable) = match resume {
         BlockedHandoffResume::Available(identifier) => (
             format!("resume_command: \"vtcode --resume {}\"\n", identifier.as_str()),
             format!("- Resume command: `vtcode --resume {}`\n", identifier.as_str()),
+            format!("- From terminal: Run `vtcode --resume {}`\n", identifier.as_str()),
         ),
         BlockedHandoffResume::Unavailable(explanation) => {
-            (String::new(), format!("- Resume unavailable: {}\n", explanation.trim()))
+            (String::new(), format!("- Resume unavailable: {}\n", explanation.trim()), String::new())
         }
     };
 
+    let actionable_steps = format!(
+        "## Actionable Next Steps\n\n- In this session: Type `continue` to retry with retained history, or provide alternative instructions.\n{resume_actionable}- Inspect details: Check `.vtcode/tasks/current_blocked.md`."
+    );
+
     format!(
-        "---\nsession_id: {session_id}\noutcome: {outcome_code}\ncreated_at: {created_at}\nworkspace: {}\n{resume_front_matter}---\n\n# Blocker Summary\n\n{}\n\n# Current Tracker Snapshot\n\n{}\n\n# Relevant Paths\n\n{}\n\n# Resume Metadata\n\n- Session ID: `{session_id}`\n- Outcome: `{outcome_code}`\n{resume_metadata}",
+        "---\nsession_id: {session_id}\noutcome: {outcome_code}\ncreated_at: {created_at}\nworkspace: {}\n{resume_front_matter}---\n\n# Blocker Summary\n\n{}\n\n{}\n\n# Current Tracker Snapshot\n\n{}\n\n# Relevant Paths\n\n{}\n\n# Resume Metadata\n\n- Session ID: `{session_id}`\n- Outcome: `{outcome_code}`\n{resume_metadata}",
         workspace.display(),
         blocker_summary.trim(),
+        actionable_steps,
         tracker_snapshot,
         relevant_paths_section,
     )
@@ -348,5 +451,40 @@ mod tests {
         // No cost or notify section
         assert!(!content.contains("Estimated cost:"));
         assert!(!content.contains("Notify command:"));
+    }
+
+    #[test]
+    fn test_read_and_clear_current_blocked_handoff() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        // When file does not exist
+        assert_eq!(read_current_blocked_handoff(temp.path()), None);
+        assert!(!clear_current_blocked_handoff(temp.path()).unwrap());
+
+        // Write a blocked handoff
+        let verified_identifier = VerifiedSessionArchiveIdentifier("session-archive-id".to_owned());
+        let _artifacts = write_blocked_handoff_with_resume(
+            temp.path(),
+            "test-session-123",
+            "blocked",
+            "Tool call failed repeatedly with permission errors.",
+            &[],
+            BlockedHandoffResume::Available(&verified_identifier),
+        )
+        .expect("write handoff");
+
+        // Read it back
+        let info = read_current_blocked_handoff(temp.path()).expect("read info");
+        assert_eq!(info.session_id, "test-session-123");
+        assert_eq!(info.outcome_code, "blocked");
+        assert_eq!(info.blocker_summary, "Tool call failed repeatedly with permission errors.");
+        assert!(info.created_at.is_some());
+        assert_eq!(info.resume_command.as_deref(), Some("vtcode --resume session-archive-id"));
+
+        // Clear it
+        assert!(clear_current_blocked_handoff(temp.path()).unwrap());
+        // Should no longer exist
+        assert_eq!(read_current_blocked_handoff(temp.path()), None);
+        assert!(!clear_current_blocked_handoff(temp.path()).unwrap());
     }
 }

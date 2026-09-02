@@ -340,6 +340,9 @@ pub(super) async fn run_interaction_loop_impl(
         if let Some(next_placeholder) = ctx.follow_up_placeholder.take() {
             ctx.handle.set_placeholder(Some(next_placeholder.clone()));
             *ctx.default_placeholder = Some(next_placeholder);
+        } else if state.input_status_state.is_blocked {
+            state.input_status_state.is_blocked = false;
+            ctx.handle.set_placeholder(ctx.default_placeholder.clone());
         }
 
         if process_slash_commands {

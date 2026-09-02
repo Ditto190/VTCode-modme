@@ -39,7 +39,8 @@ pub mod types;
 
 // Re-export main types for convenience
 pub use blocked_handoff::{
-    AsyncApprovalArtifacts, BlockedHandoffArtifacts, BlockedHandoffResume, write_blocked_handoff,
+    AsyncApprovalArtifacts, BlockedHandoffArtifacts, BlockedHandoffInfo, BlockedHandoffResume,
+    clear_current_blocked_handoff, read_current_blocked_handoff, write_blocked_handoff,
     write_blocked_handoff_with_resume,
 };
 pub use bootstrap::{AgentComponentBuilder, AgentComponentSet};

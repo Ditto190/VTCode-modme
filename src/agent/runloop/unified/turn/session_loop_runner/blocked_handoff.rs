@@ -148,10 +148,25 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
         resume,
     ) {
         Ok(artifacts) => {
-            for path in [&artifacts.current_path, &artifacts.archive_path] {
-                let path_text = path.display().to_string();
-                let _ = renderer.line(MessageStyle::Info, &format!("Blocked handoff: {path_text}"));
-                if let Some(emitter) = harness_emitter {
+            let _ = renderer.line(MessageStyle::Warning, &format!("Turn blocked: {blocker_summary}"));
+            let _ = renderer.line(MessageStyle::Info, "What you can do:");
+            let _ = renderer.line(
+                MessageStyle::Info,
+                "  • In this session: Type 'continue' to resume, or describe alternative instructions",
+            );
+            match resume {
+                BlockedHandoffResume::Available(id) => {
+                    let _ = renderer
+                        .line(MessageStyle::Info, &format!("  • From terminal: Run `vtcode --resume {}`", id.as_str()));
+                }
+                BlockedHandoffResume::Unavailable(_) => {}
+            }
+            let _ = renderer
+                .line(MessageStyle::Info, &format!("  • Blocker details: {}", artifacts.current_path.display()));
+
+            if let Some(emitter) = harness_emitter {
+                for path in [&artifacts.current_path, &artifacts.archive_path] {
+                    let path_text = path.display().to_string();
                     let _ = emitter.emit(harness_event(
                         HarnessEventKind::BlockedHandoffWritten,
                         Some("Blocked handoff written".to_string()),
