@@ -10,8 +10,8 @@ use std::fmt::Write;
 use syntect::util::LinesWithEndings;
 use vtcode_commons::diff_paths::{
     format_start_only_hunk_header, is_diff_addition_line, is_diff_deletion_line, is_diff_header_line,
-    is_diff_new_file_marker_line, language_hint_from_path, looks_like_diff_content, parse_diff_git_path,
-    parse_diff_marker_path,
+    is_diff_new_file_marker_line, is_prose_language_hint, language_hint_from_path, looks_like_diff_content,
+    parse_diff_git_path, parse_diff_marker_path,
 };
 
 const DIFF_SUMMARY_PREFIX: &str = "• Diff ";
@@ -663,6 +663,12 @@ pub(crate) fn render_diff_content_segments(
     let text = content.trim_end_matches('\n');
     if text.is_empty() {
         return vec![MarkdownSegment::new(fallback_style, " ")];
+    }
+
+    // Prose diffs render as solid fallback: syntax colors on tinted diff
+    // backgrounds hurt contrast and obscure add/del semantics.
+    if is_prose_language_hint(language) {
+        return vec![MarkdownSegment::new(fallback_style, text)];
     }
 
     if let Some(segments) = highlight_line_for_diff(text, language)

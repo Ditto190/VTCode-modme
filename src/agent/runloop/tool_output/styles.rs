@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 
-use anstyle::{AnsiColor, Color, Effects, Style as AnsiStyle};
+use anstyle::{AnsiColor, Color, Style as AnsiStyle};
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line, is_diff_header_line};
 use vtcode_core::config::constants::tools;
 use vtcode_core::tools::tool_intent;
@@ -27,20 +27,20 @@ pub(crate) struct GitStyles {
 
 impl GitStyles {
     pub(crate) fn new() -> Self {
-        // Use standard ANSI colors without bold - no theme dependency
-        // Background colors adapt to terminal theme (dark/light)
-        let remove_effects = Effects::DIMMED;
+        // Bright fg on the tinted diff bg keeps WCAG-readable contrast on dark
+        // terminals; deletions must NOT be DIMMED (dim red on maroon is
+        // unreadable, see README prose diff). Bold lives on the gutter marker
+        // in `format_diff_line_with_gutter_and_syntax`, not on content.
         Self {
             add: Some(
                 AnsiStyle::new()
-                    .fg_color(Some(Color::Ansi(AnsiColor::Green)))
+                    .fg_color(Some(Color::Ansi(AnsiColor::BrightGreen)))
                     .bg_color(diff_line_bg_color(true)),
             ),
             remove: Some(
                 AnsiStyle::new()
-                    .fg_color(Some(Color::Ansi(AnsiColor::Red)))
-                    .bg_color(diff_line_bg_color(false))
-                    .effects(remove_effects),
+                    .fg_color(Some(Color::Ansi(AnsiColor::BrightRed)))
+                    .bg_color(diff_line_bg_color(false)),
             ),
             header: Some(AnsiStyle::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))).bg_color(None)),
         }
@@ -170,6 +170,7 @@ pub(crate) fn select_line_style(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anstyle::Effects;
 
     #[test]
     fn detects_git_diff_styling() {
@@ -184,12 +185,17 @@ mod tests {
     }
 
     #[test]
-    fn removed_diff_lines_are_dimmed_relative_to_additions() {
+    fn diff_content_styles_use_bright_fg_without_dimming() {
         let git = GitStyles::new();
-        let remove_effects = git.remove.expect("remove style should exist").get_effects();
-        let add_effects = git.add.expect("add style should exist").get_effects();
-        assert!(remove_effects.contains(Effects::DIMMED));
-        assert!(!add_effects.contains(Effects::DIMMED));
+        let remove = git.remove.expect("remove style should exist");
+        let add = git.add.expect("add style should exist");
+        // DIMMED red on the maroon tint is unreadable; both sides stay solid.
+        assert!(!remove.get_effects().contains(Effects::DIMMED));
+        assert!(!add.get_effects().contains(Effects::DIMMED));
+        assert_eq!(remove.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightRed)));
+        assert_eq!(add.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightGreen)));
+        assert!(remove.get_bg_color().is_some());
+        assert!(add.get_bg_color().is_some());
     }
 
     #[test]

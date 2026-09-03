@@ -44,7 +44,9 @@ use std::borrow::Cow;
 use anstyle::{AnsiColor, Effects, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use smallvec::SmallVec;
-use vtcode_commons::diff_paths::{language_hint_from_path, parse_diff_git_path, parse_diff_marker_path};
+use vtcode_commons::diff_paths::{
+    is_prose_language_hint, language_hint_from_path, parse_diff_git_path, parse_diff_marker_path,
+};
 use vtcode_commons::diff_preview::{
     DiffDisplayKind, DiffDisplayLine, diff_display_line_number_width, display_lines_from_unified_diff,
 };
@@ -158,6 +160,12 @@ fn render_preview_line(
 }
 
 fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option<anstyle::Color>) -> Option<String> {
+    // Prose (markdown/text) diffs stay solid diff colors: syntax tokens on a
+    // tinted add/del background fail contrast and fight diff semantics
+    // (e.g. `**bold**` / `` `code` `` fragments glowing on green/red).
+    if is_prose_language_hint(language_hint) {
+        return None;
+    }
     let leading_ws_len = content
         .char_indices()
         .find(|(_, ch)| !ch.is_whitespace())
@@ -172,15 +180,25 @@ fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option
 
     let mut out = String::with_capacity(content.len() + 16);
     if !leading_ws.is_empty() {
+        // Keep indentation covered by the diff tint so wrapped/tinted rows
+        // have no unpainted holes.
+        if let Some(bg_color) = bg {
+            out.push_str(&AnsiStyle::new().bg_color(Some(bg_color)).render().to_string());
+        }
         out.push_str(leading_ws);
+        if bg.is_some() {
+            out.push_str(&Reset.to_string());
+        }
     }
     for (style, text) in segments {
         if text.is_empty() {
             continue;
         }
+        // Force the diff tint: syntect theme backgrounds must never punch
+        // holes in the full-width add/del background.
         let mut token_style = style;
-        if token_style.get_bg_color().is_none() && bg.is_some() {
-            token_style = token_style.bg_color(bg);
+        if let Some(bg_color) = bg {
+            token_style = token_style.bg_color(Some(bg_color));
         }
         out.push_str(&token_style.render().to_string());
         out.push_str(&text);
@@ -240,12 +258,15 @@ fn format_diff_line_with_gutter_and_syntax(
     let reset = Reset;
     let raw_line = line.numbered_text(line_number_width);
     let mut out = String::with_capacity(raw_line.len() + 32);
+    // Gutter shape: `marker + number + │ + content`. The `│` keeps markdown
+    // bullets (`- foo`) distinct from the diff marker (`+`/`-`).
     // Use write! to render ANSI escape codes directly without intermediate String allocations
     let _ = write!(out, "{}", marker_style.render());
     out.push_str(marker_text);
     out.push(' ');
     let _ = write!(out, "{}", gutter_style.render());
-    let _ = write!(out, "{line_no:>line_number_width$} ");
+    let _ = write!(out, "{line_no:>line_number_width$} │ ");
+    let _ = write!(out, "{reset}");
     if let Some(highlighted) = highlight_diff_content(content, language_hint, bg) {
         out.push_str(&highlighted);
     } else if let Some(style) = base_style {
@@ -616,7 +637,7 @@ mod tests {
 
     use super::{
         HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, format_diff_line_with_gutter_and_syntax,
-        hidden_lines_notice, language_hint_from_path, render_preview_line, strip_ansi_codes,
+        hidden_lines_notice, highlight_diff_content, language_hint_from_path, render_preview_line, strip_ansi_codes,
     };
 
     #[test]
@@ -679,7 +700,7 @@ mod tests {
         );
         assert!(rendered.contains("\u{1b}["));
         let stripped = strip_ansi_codes(&rendered);
-        assert!(stripped.contains("+  1377 "));
+        assert!(stripped.contains("+  1377 │ "));
         assert!(stripped.contains("let x = 1;"));
     }
 
@@ -696,7 +717,7 @@ mod tests {
             5,
         );
         let stripped = strip_ansi_codes(&rendered);
-        assert!(stripped.contains("+  1384     line,"));
+        assert!(stripped.contains("+  1384 │     line,"));
     }
 
     #[test]
@@ -712,7 +733,31 @@ mod tests {
             5,
         );
         let stripped = strip_ansi_codes(&rendered);
-        assert_eq!(stripped, "+    42  ");
+        assert_eq!(stripped, "+    42 │   ");
+    }
+
+    #[test]
+    fn format_diff_line_keeps_markdown_bullet_distinct_from_marker() {
+        let rendered = format_diff_line_with_gutter_and_syntax(
+            &DiffDisplayLine {
+                kind: DiffDisplayKind::Addition,
+                line_number: Some(53),
+                text: "- **Agent-first by design**: prose".to_string(),
+            },
+            None,
+            Some("md"),
+            5,
+        );
+        let stripped = strip_ansi_codes(&rendered);
+        assert_eq!(stripped, "+   53 │ - **Agent-first by design**: prose");
+    }
+
+    #[test]
+    fn prose_diff_content_skips_syntax_highlighting() {
+        let bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
+        assert!(highlight_diff_content("- **bold** and `code`", Some("md"), bg).is_none());
+        assert!(highlight_diff_content("plain prose", Some("txt"), bg).is_none());
+        assert!(highlight_diff_content("plain prose", Some("markdown"), bg).is_none());
     }
 
     #[test]

@@ -404,6 +404,17 @@ fn test_diff_blank_line_renders_placeholder_space() {
 }
 
 #[test]
+fn test_diff_prose_content_skips_syntax_highlighting() {
+    let fallback = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightGreen)));
+    for hint in [Some("md"), Some("markdown"), Some("txt")] {
+        let segments = render_diff_content_segments("- **Agent-first**: prose `code`", hint, fallback);
+        assert_eq!(segments.len(), 1, "prose hint {hint:?} must stay solid");
+        assert_eq!(segments[0].text, "- **Agent-first**: prose `code`");
+        assert_eq!(segments[0].style, fallback);
+    }
+}
+
+#[test]
 fn test_markdown_unlabeled_minimal_hunk_detects_diff() {
     let markdown = "```\n@@\n pub fn demo() {\n  -    old();\n  +    new();\n }\n```\n";
     let lines = render_markdown_to_lines(markdown, Style::default(), &theme::active_styles(), None);

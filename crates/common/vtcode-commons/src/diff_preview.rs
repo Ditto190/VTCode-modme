@@ -34,17 +34,21 @@ pub struct DiffDisplayLine {
 }
 
 impl DiffDisplayLine {
+    /// Render with an unambiguous gutter: `marker + number + │ + content`.
+    ///
+    /// The `│` separator keeps markdown bullets (`- foo`) and list markers
+    /// visually distinct from the diff marker (`+`/`-`/` `).
     pub fn numbered_text(&self, line_number_width: usize) -> String {
         match self.kind {
             DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => self.text.clone(),
             DiffDisplayKind::Addition => {
-                format!("+{:>line_number_width$} {}", self.line_number.unwrap_or_default(), self.text)
+                format!("+{:>line_number_width$} │ {}", self.line_number.unwrap_or_default(), self.text)
             }
             DiffDisplayKind::Deletion => {
-                format!("-{:>line_number_width$} {}", self.line_number.unwrap_or_default(), self.text)
+                format!("-{:>line_number_width$} │ {}", self.line_number.unwrap_or_default(), self.text)
             }
             DiffDisplayKind::Context => {
-                format!(" {:>line_number_width$} {}", self.line_number.unwrap_or_default(), self.text)
+                format!(" {:>line_number_width$} │ {}", self.line_number.unwrap_or_default(), self.text)
             }
         }
     }
@@ -253,9 +257,19 @@ diff --git a/file.txt b/file.txt
         let lines = format_numbered_unified_diff(diff);
         assert_eq!(lines[0], "diff --git a/file.txt b/file.txt");
         assert!(lines.iter().any(|line| line == "@@ -10 +10 @@"));
-        assert!(lines.iter().any(|line| line.starts_with("-   10 old")));
-        assert!(lines.iter().any(|line| line.starts_with("+   10 new")));
-        assert!(lines.iter().any(|line| line.starts_with("    11 context")));
+        assert!(lines.iter().any(|line| line.starts_with("-   10 │ old")));
+        assert!(lines.iter().any(|line| line.starts_with("+   10 │ new")));
+        assert!(lines.iter().any(|line| line.starts_with("    11 │ context")));
+    }
+
+    #[test]
+    fn numbered_text_uses_pipe_separator_for_markdown_bullets() {
+        let line = DiffDisplayLine {
+            kind: DiffDisplayKind::Addition,
+            line_number: Some(53),
+            text: "- **Agent-first by design**: prose".to_string(),
+        };
+        assert_eq!(line.numbered_text(5), "+   53 │ - **Agent-first by design**: prose");
     }
 
     #[test]

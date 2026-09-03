@@ -33,6 +33,14 @@ pub fn language_hint_from_path(path: &str) -> Option<String> {
         .map(|ext| ext.to_ascii_lowercase())
 }
 
+/// Whether a language hint refers to prose (markdown/text) where code syntax
+/// highlighting hurts diff readability.
+///
+/// Dimension key: `hint_str` is the lowercase file extension (e.g. `md`).
+pub fn is_prose_language_hint(hint: Option<&str>) -> bool {
+    matches!(hint, Some("md" | "markdown" | "txt" | "text" | "rst" | "adoc" | "textile"))
+}
+
 /// Whether a line is a unified diff addition content line (`+...`, excluding `+++` marker).
 pub fn is_diff_addition_line(line: &str) -> bool {
     line.starts_with('+') && !line.starts_with("+++")
@@ -192,8 +200,9 @@ pub fn format_start_only_hunk_header(line: &str) -> Option<String> {
 mod tests {
     use super::{
         format_start_only_hunk_header, is_apply_patch_header_line, is_diff_addition_line, is_diff_deletion_line,
-        is_diff_header_line, is_diff_new_file_marker_line, is_diff_old_file_marker_line, language_hint_from_path,
-        looks_like_diff_content, parse_diff_git_path, parse_diff_marker_path, parse_hunk_starts,
+        is_diff_header_line, is_diff_new_file_marker_line, is_diff_old_file_marker_line, is_prose_language_hint,
+        language_hint_from_path, looks_like_diff_content, parse_diff_git_path, parse_diff_marker_path,
+        parse_hunk_starts,
     };
 
     #[test]
@@ -271,5 +280,15 @@ mod tests {
     fn avoids_false_positive_for_plus_minus_logs() {
         let log = "+ started service\n- previous pid cleaned\n";
         assert!(!looks_like_diff_content(log));
+    }
+
+    #[test]
+    fn detects_prose_language_hints() {
+        for hint in ["md", "markdown", "txt", "text", "rst", "adoc"] {
+            assert!(is_prose_language_hint(Some(hint)), "{hint} should be prose");
+        }
+        assert!(!is_prose_language_hint(Some("rs")));
+        assert!(!is_prose_language_hint(Some("toml")));
+        assert!(!is_prose_language_hint(None));
     }
 }

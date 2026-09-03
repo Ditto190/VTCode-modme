@@ -2583,8 +2583,8 @@ mod tests {
         );
         assert!(!visible_text.contains("Edit file"));
         assert!(visible_text.contains("• Edited src/lib.rs (+1 -1)"));
-        assert!(visible_text.contains("-    1 before"));
-        assert!(visible_text.contains("+    1 after"));
+        assert!(visible_text.contains("-    1 │ before"));
+        assert!(visible_text.contains("+    1 │ after"));
     }
 
     #[tokio::test]

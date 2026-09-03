@@ -9,7 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use vtcode_commons::diff_paths::language_hint_from_path;
+use vtcode_commons::diff_paths::{is_prose_language_hint, language_hint_from_path};
 use vtcode_commons::diff_preview::{DiffDisplayKind, count_diff_changes, display_lines_from_hunks};
 
 use super::Session;
@@ -111,16 +111,31 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
                     DiffLineType::Context => " ",
                 };
 
+                // Gutter shape `marker + number + │` keeps markdown bullets
+                // (`- foo`) distinct from the diff marker.
                 let mut spans = vec![
                     Span::styled(prefix.to_string(), sign_style),
                     Span::styled(line_num_str, gutter_style),
+                    Span::styled("│ ".to_string(), gutter_style),
                 ];
 
-                for segment in
-                    render_diff_content_segments(&display_line.text, language.as_deref(), anstyle::Style::new())
-                {
-                    let style = content_style.patch(ratatui_style_from_ansi(segment.style));
-                    spans.push(Span::styled(segment.text, style));
+                // Prose diffs (md/txt) skip syntax highlighting: solid diff fg
+                // on the tinted bg. Code diffs keep syntax fg but are forced
+                // onto the diff bg so syntect theme holes can't show through.
+                let prose = is_prose_language_hint(language.as_deref());
+                if prose {
+                    spans.push(Span::styled(display_line.text.clone(), content_style));
+                } else {
+                    let forced_bg = content_style.bg.or(line_bg.bg);
+                    for segment in
+                        render_diff_content_segments(&display_line.text, language.as_deref(), anstyle::Style::new())
+                    {
+                        let mut style = content_style.patch(ratatui_style_from_ansi(segment.style));
+                        if forced_bg.is_some() {
+                            style.bg = forced_bg;
+                        }
+                        spans.push(Span::styled(segment.text, style));
+                    }
                 }
 
                 lines.push(Line::from(spans).style(line_bg));

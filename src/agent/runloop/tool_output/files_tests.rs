@@ -49,9 +49,9 @@ index 0000000..1111111 100644
 ";
     let lines = format_diff_content_lines_with_numbers(diff);
     assert!(lines.iter().any(|line| line == "@@ -10 +10 @@"));
-    assert!(lines.iter().any(|line| line.starts_with("-   10 old")));
-    assert!(lines.iter().any(|line| line.starts_with("+   10 new")));
-    assert!(lines.iter().any(|line| line.starts_with("    11 context")));
+    assert!(lines.iter().any(|line| line.starts_with("-   10 │ old")));
+    assert!(lines.iter().any(|line| line.starts_with("+   10 │ new")));
+    assert!(lines.iter().any(|line| line.starts_with("    11 │ context")));
 }
 
 #[test]
@@ -144,11 +144,15 @@ index 0000000..1111111 100644
     assert!(
         lines
             .iter()
-            .any(|line| line.starts_with("-  537 suppress_when_focused = false"))
+            .any(|line| line.starts_with("-  537 │ suppress_when_focused = false"))
     );
-    assert!(lines.iter().any(|line| line.starts_with("+  537 suppress_when_focused = true")));
-    assert!(lines.iter().any(|line| line.starts_with("-  546 tool_success = true")));
-    assert!(lines.iter().any(|line| line.starts_with("+  546 tool_success = false")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("+  537 │ suppress_when_focused = true"))
+    );
+    assert!(lines.iter().any(|line| line.starts_with("-  546 │ tool_success = true")));
+    assert!(lines.iter().any(|line| line.starts_with("+  546 │ tool_success = false")));
 }
 
 #[test]
@@ -170,6 +174,6 @@ fn standard_diff_formatter_handles_diff_without_diff_git_header() {
     let lines = format_diff_content_lines_with_numbers(diff);
     assert_eq!(lines[0], "--- a/file2.txt");
     assert_eq!(lines[1], "+++ b/file2.txt");
-    assert!(lines.iter().any(|line| line.starts_with("-    2 before")));
-    assert!(lines.iter().any(|line| line.starts_with("+    2 after")));
+    assert!(lines.iter().any(|line| line.starts_with("-    2 │ before")));
+    assert!(lines.iter().any(|line| line.starts_with("+    2 │ after")));
 }
