@@ -2677,6 +2677,78 @@
           "generation": "3.8",
           "doc_comment": "Qwen3.8 27B - Qwen's open-weight dense vision-language model with flexible thinking via OpenRouter"
         }
+      },
+      "meta/muse-spark-1.3": {
+        "id": "meta/muse-spark-1.3",
+        "name": "Meta: Muse Spark 1.3",
+        "description": "Meta Muse Spark 1.3 reasoning model via OpenRouter.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "file",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "cost": {
+          "input": 1.25e-06,
+          "output": 4.25e-06,
+          "cache_read": 1.5e-07
+        },
+        "vtcode": {
+          "variant": "OpenRouterMetaMuseSpark13",
+          "constant": "META_MUSE_SPARK_1_3",
+          "vendor": "meta",
+          "display": "Muse Spark 1.3 (OpenRouter)",
+          "description": "Meta Muse Spark 1.3 reasoning model via OpenRouter",
+          "efficient": false,
+          "top_tier": true,
+          "generation": "Muse-Spark-1.3",
+          "doc_comment": "Muse Spark 1.3 - Meta Muse Spark 1.3 reasoning model via OpenRouter"
+        }
+      },
+      "meta/muse-spark-1.3-contributor": {
+        "id": "meta/muse-spark-1.3-contributor",
+        "name": "Meta: Muse Spark 1.3 Contributor",
+        "description": "Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "file",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "cost": {
+          "input": 1e-07,
+          "output": 2e-07,
+          "cache_read": 2e-09
+        },
+        "vtcode": {
+          "variant": "OpenRouterMetaMuseSpark13Contributor",
+          "constant": "META_MUSE_SPARK_1_3_CONTRIBUTOR",
+          "vendor": "meta",
+          "display": "Muse Spark 1.3 Contributor (OpenRouter)",
+          "description": "Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter",
+          "efficient": true,
+          "top_tier": false,
+          "generation": "Muse-Spark-1.3-Contributor",
+          "doc_comment": "Muse Spark 1.3 Contributor - Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter"
+        }
       }
     },
     "default_model": "xiaomi/mimo-v2.5-pro"

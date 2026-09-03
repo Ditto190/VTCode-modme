@@ -616,7 +616,8 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::MergeGatewayAnthropicClaudeOpus5
             | ModelId::MergeGatewayGoogleGemini36Flash
             | ModelId::MergeGatewayGoogleGemini37Flash
-            | ModelId::MergeGatewayGoogleGemini38Flash => continue,
+            | ModelId::MergeGatewayGoogleGemini38Flash
+            | ModelId::MergeGatewayMetaMuseSpark13 => continue,
             _ => ModelId::from_str(&model.as_str()),
         };
         assert_eq!(parsed.unwrap(), model);

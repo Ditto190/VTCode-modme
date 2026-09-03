@@ -321,6 +321,10 @@ pub enum ModelId {
     OpenRouterMetaMuseGlimmer30b,
     /// Meta Muse Spark 1.2 via OpenRouter
     OpenRouterMetaMuseSpark12,
+    /// Meta Muse Spark 1.3 via OpenRouter
+    OpenRouterMetaMuseSpark13,
+    /// Meta Muse Spark 1.3 Contributor via OpenRouter
+    OpenRouterMetaMuseSpark13Contributor,
 
     /// Gemini 3.6 Flash - Latest Gemini flash model with improved capabilities via OpenRouter
     OpenRouterGoogleGemini36Flash,

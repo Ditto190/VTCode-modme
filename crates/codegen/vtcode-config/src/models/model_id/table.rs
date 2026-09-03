@@ -1028,6 +1028,7 @@ mod tests {
                 | ModelId::MergeGatewayGoogleGemini36Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
+                | ModelId::MergeGatewayMetaMuseSpark13
         )
     }
 
