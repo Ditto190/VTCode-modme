@@ -2,6 +2,27 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.154.0 - 2026-09-03
+
+### Highlights
+#### Bug Fixes
+
+- Guard against truncated print_info -> nfo typo (90106841) 
+- Harden crate publish against crates.io 5xx and dirty-tree failures (9e22a20f) 
+- Clean up grouped tool call previews and wording (8d7ff085) 
+- Realign stale expectations after model catalog and path changes (4b5b3b62) 
+- Exclude root-level benches from structured logging scan (b28490bf) 
+#### Documentation
+
+- Drop completed blocked-calls harness plan (2a7eb14b) 
+- Add Why VT Code highlights section (d66bd680) 
+- Replace em-dashes with colons and refine wording (343c57d9) 
+#### Features
+
+- Graceful blocked calls, rich feedback and resumption UI (f4726a07) 
+- Add Muse Spark 1.3 and Merge Gateway routes (0c73d628) 
+- Add OpenRouter Muse Spark 1.3 routes (d46c8d99) 
+### Other Changes
 ## 0.153.0 - 2026-09-02
 
 ### Highlights
