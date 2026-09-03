@@ -139,6 +139,7 @@ are enabled and compact display is the default.
 ### Session Context Commands
 
 - `/continue` resumes the most recently archived session in a new conversation. Equivalent to `vtcode --continue` from the CLI.
+- When a turn is blocked (repeated tool denials hit the fuse), the TUI shows a `Blocked` header badge, `Blocked • continue to retry • /resume • details: .vtcode/tasks/current_blocked.md` footer hint, and a transcript banner. Type `continue` with new guidance, describe alternative instructions, or run `vtcode --resume <session>` from a terminal. One attempt before the fuse trips, the runtime warns with the remaining attempts and a per-tool remedy hint.
 - `/compact` compacts the current session history immediately when you want to shed context manually.
 - `/compact edit-prompt` and `/compact reset-prompt` manage the saved default prompt for manual compaction requests.
 - For providers with native Responses compaction, VT Code uses the provider-owned compacted state.

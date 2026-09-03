@@ -18,8 +18,8 @@ use vtcode_core::exec::events::ThreadStartedEvent;
 use vtcode_core::exec::events::{
     AgentMessageItem, CompactionMode, CompactionTrigger, HarnessEventItem, HarnessEventKind, ItemCompletedEvent,
     ReasoningItem, ThreadCompactBoundaryEvent, ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadItem,
-    ThreadItemDetails, ToolCallStatus, ToolOutcome, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent, Usage,
-    VersionedThreadEvent,
+    ThreadItemDetails, ToolCallStatus, ToolOutcome, TurnBlockedEvent, TurnCompletedEvent, TurnFailedEvent,
+    TurnStartedEvent, Usage, VersionedThreadEvent,
 };
 #[cfg(test)]
 use vtcode_webmcp::EventHubConfig;
@@ -498,6 +498,10 @@ pub(crate) fn turn_completed_event(usage: Usage) -> ThreadEvent {
 
 pub(crate) fn turn_failed_event(message: impl Into<String>, usage: Option<Usage>) -> ThreadEvent {
     ThreadEvent::TurnFailed(TurnFailedEvent { message: message.into(), usage })
+}
+
+pub(crate) fn turn_blocked_event(event: TurnBlockedEvent) -> ThreadEvent {
+    ThreadEvent::TurnBlocked(event)
 }
 
 pub(crate) fn thread_completed_event(

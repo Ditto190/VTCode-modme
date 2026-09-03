@@ -752,6 +752,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 if input_status_state.is_blocked {
                     input_status_state.is_blocked = false;
                     handle.set_placeholder(default_placeholder.clone());
+                    handle.set_activity_state(ActivityState::Idle);
                 }
                 let (next_turn_input, completed_turn_prompt_message_index) = match interaction_outcome {
                     InteractionOutcome::Exit { reason } => {
@@ -1420,6 +1421,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         checkpoint_outcome.blocked_handoff_resume(),
                         &mut renderer,
                         harness_emitter.as_ref(),
+                        Some(&handle),
                     );
                 }
                 match &outcome_result {

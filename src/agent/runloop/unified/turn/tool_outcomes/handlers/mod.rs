@@ -43,8 +43,8 @@ pub(crate) use guards::BlockedToolCallLimits;
 #[cfg(test)]
 pub(crate) use guards::blocked_tool_guard::BlockedToolCallFuseTrip;
 pub(crate) use guards::{
-    blocked_tool_call_fuse_trip, blocked_tool_call_limits, blocked_tool_call_messages,
-    max_consecutive_blocked_tool_calls_per_turn,
+    blocked_tool_call_fuse_trip, blocked_tool_call_limits, blocked_tool_call_limits_for_tool,
+    blocked_tool_call_messages_detailed, max_consecutive_blocked_tool_calls_per_turn,
 };
 use guards::{
     enforce_blocked_tool_call_guard, enforce_duplicate_task_tracker_create_guard, enforce_read_after_write_guard,

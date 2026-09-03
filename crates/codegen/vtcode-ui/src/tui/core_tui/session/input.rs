@@ -1191,6 +1191,10 @@ pub(crate) fn status_requires_shimmer(text: &str) -> bool {
         "input required",
         "waiting for approval",
         "waiting for input",
+        "blocked",
+        "[blocked]",
+        "recovery: tools disabled",
+        "tools disabled",
         "ctrl+c",
         "/stop to stop",
     ];

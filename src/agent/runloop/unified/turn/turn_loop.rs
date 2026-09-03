@@ -26,7 +26,7 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
 use crate::agent::runloop::unified::inline_events::harness::{
-    HarnessEventEmitter, turn_completed_event, turn_failed_event, turn_started_event,
+    HarnessEventEmitter, harness_event, turn_blocked_event, turn_completed_event, turn_failed_event, turn_started_event,
 };
 use crate::agent::runloop::unified::planning_workflow::maybe_handle_planning_exit_trigger;
 use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState;
@@ -1667,6 +1667,31 @@ async fn finalize_turn(
         };
         if let Err(e) = emitter.emit(event) {
             tracing::debug!(error = %e, "harness turn outcome event emission failed");
+        }
+        if let TurnLoopResult::Blocked { reason } = result {
+            let message = reason.clone().unwrap_or_else(|| "turn blocked".to_string());
+            let blocked_event = vtcode_core::exec::events::TurnBlockedEvent {
+                message: message.clone(),
+                last_tool: None,
+                blocked_streak: ctx.harness_state.consecutive_blocked_tool_calls,
+                blocked_total: ctx.harness_state.blocked_tool_calls,
+                consecutive_cap: 0,
+                total_cap: 0,
+                recovery_active: ctx.harness_state.is_recovery_active() || ctx.harness_state.recovery_pass_used(),
+                usage: has_turn_usage(turn_usage).then(|| turn_usage.clone()),
+            };
+            if let Err(e) = emitter.emit(turn_blocked_event(blocked_event)) {
+                tracing::debug!(error = %e, "harness turn.blocked event emission failed");
+            }
+            if let Err(e) = emitter.emit(harness_event(
+                vtcode_core::exec::events::HarnessEventKind::TurnBlocked,
+                Some(message),
+                None,
+                None,
+                None,
+            )) {
+                tracing::debug!(error = %e, "harness TurnBlocked event emission failed");
+            }
         }
     }
     emit_turn_outcome_notification(

@@ -120,6 +120,9 @@ impl Session {
             || left.contains("action required")
             || left.contains("approval")
             || left.contains("input required")
+            || left.contains("blocked")
+            || left.contains("tools disabled")
+            || left.contains("recovery")
         {
             TerminalTitleStatus::ActionRequired
         } else if left.contains("undo") || left.contains("rewind") || left.contains("revert") {

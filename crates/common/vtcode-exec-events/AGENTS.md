@@ -7,7 +7,7 @@
 
 ## ThreadEvent Variants
 
-`thread.started` | `thread.completed` | `thread.compact_boundary` | `context.reset` | `turn.started` | `turn.completed` | `turn.failed` | `item.started` | `item.updated` | `item.completed` | `plan.delta` | `plan.approval.requested` | `plan.approval.resolved` | `error`
+`thread.started` | `thread.completed` | `thread.compact_boundary` | `context.reset` | `turn.started` | `turn.completed` | `turn.failed` | `turn.blocked` | `item.started` | `item.updated` | `item.completed` | `plan.delta` | `plan.approval.requested` | `plan.approval.resolved` | `error`
 
 ## Rules
 
@@ -27,3 +27,4 @@
   explanations use the existing `ReasoningItem` with stage `"diagnosis"`; do not add a parallel event variant.
 - `HarnessEventItem` uses `HarnessEventKind` enum — adding variants requires schema version bump.
 - Schema `0.12.0` adds blocked-handoff resolution metadata; keep legacy payloads readable and ATIF output stable.
+- Schema `0.13.0` adds `turn.blocked` plus `TurnBlocked`/`BlockedRecoveryStarted`/`BlockedRecoveryFinished` harness kinds; `turn.blocked` is emitted alongside `turn.failed` with fuse counters for UI subscribers.

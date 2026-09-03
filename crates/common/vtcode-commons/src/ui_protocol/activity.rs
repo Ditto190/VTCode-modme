@@ -11,6 +11,13 @@ pub enum ActivityState {
     /// The agent is executing an approved plan.
     Building,
     StartingBuild,
+    /// A bounded tool-free recovery pass is running after blocked tool calls.
+    /// Tools are disabled for this pass; input stays enabled.
+    Recovery,
+    /// The turn is blocked and waiting for user guidance (`continue`, new
+    /// instructions, or `vtcode --resume`). Distinct from `Idle` so the TUI
+    /// can keep a persistent blocked hint visible.
+    Blocked,
 }
 
 impl ActivityState {
@@ -21,7 +28,7 @@ impl ActivityState {
 
     /// Long-lived display stages that keep input enabled between turns.
     pub const fn is_stage(self) -> bool {
-        matches!(self, Self::Planning | Self::Building)
+        matches!(self, Self::Planning | Self::Building | Self::Recovery)
     }
 
     pub const fn status(self) -> Option<&'static str> {
@@ -32,6 +39,8 @@ impl ActivityState {
             Self::RestoringApprovedPlan => Some("Restoring approved plan..."),
             Self::Building => Some("Building..."),
             Self::StartingBuild => Some("Starting build..."),
+            Self::Recovery => Some("Recovery: tools disabled..."),
+            Self::Blocked => Some("Blocked — Type 'continue' to retry..."),
         }
     }
 }

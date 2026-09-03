@@ -206,6 +206,15 @@ fn describe_event(event: &vtcode_core::exec::events::ThreadEvent) -> (&'static s
         vtcode_core::exec::events::ThreadEvent::TurnFailed(e) => {
             ("turn.failed", truncate(&e.message, MAX_FIELD_DISPLAY_LEN).to_string())
         }
+        vtcode_core::exec::events::ThreadEvent::TurnBlocked(e) => (
+            "turn.blocked",
+            format!(
+                "{} (streak {}, total {})",
+                truncate(&e.message, MAX_FIELD_DISPLAY_LEN),
+                e.blocked_streak,
+                e.blocked_total
+            ),
+        ),
         vtcode_core::exec::events::ThreadEvent::ItemStarted(e) => {
             ("item.started", format!("type={}", item_type_label(&e.item.details)))
         }

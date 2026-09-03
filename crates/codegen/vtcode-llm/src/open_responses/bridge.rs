@@ -137,6 +137,22 @@ impl ResponseBuilder {
                 emitter.response_failed(self.response.clone());
             }
 
+            ThreadEvent::TurnBlocked(evt) => {
+                self.emit_custom_event(
+                    emitter,
+                    "vtcode.turn_blocked",
+                    json!({
+                        "message": evt.message,
+                        "last_tool": evt.last_tool,
+                        "blocked_streak": evt.blocked_streak,
+                        "blocked_total": evt.blocked_total,
+                        "consecutive_cap": evt.consecutive_cap,
+                        "total_cap": evt.total_cap,
+                        "recovery_active": evt.recovery_active,
+                    }),
+                );
+            }
+
             ThreadEvent::ThreadCompleted(evt) => {
                 self.emit_custom_event(
                     emitter,

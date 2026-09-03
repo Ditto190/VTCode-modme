@@ -414,6 +414,26 @@ impl AtifTrajectoryBuilder {
                 step.metrics = e.usage.as_ref().map(StepMetrics::from_usage);
                 self.push_step(step);
             }
+            ThreadEvent::TurnBlocked(e) => {
+                if let Some(usage) = &e.usage {
+                    self.saw_per_turn_usage = true;
+                    self.total_input_tokens = self.total_input_tokens.saturating_add(usage.input_tokens);
+                    self.total_output_tokens = self.total_output_tokens.saturating_add(usage.output_tokens);
+                    self.total_cached_tokens = self.total_cached_tokens.saturating_add(usage.cached_input_tokens);
+                }
+                let mut step = Step::system(self.next_step_id, &e.message);
+                step.timestamp = Some(ts_str);
+                step.metrics = e.usage.as_ref().map(StepMetrics::from_usage);
+                step.extra = Some(serde_json::json!({
+                    "last_tool": e.last_tool,
+                    "blocked_streak": e.blocked_streak,
+                    "blocked_total": e.blocked_total,
+                    "consecutive_cap": e.consecutive_cap,
+                    "total_cap": e.total_cap,
+                    "recovery_active": e.recovery_active,
+                }));
+                self.push_step(step);
+            }
             ThreadEvent::ItemCompleted(e) => {
                 self.process_item_completed(&e.item.id, &e.item.details, &ts_str);
             }

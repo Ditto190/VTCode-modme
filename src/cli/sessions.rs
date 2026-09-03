@@ -310,7 +310,14 @@ fn print_resume_summary(resume: &ResumeSession, workspace: &std::path::Path) {
     );
     println!("{}", style(format!("Archive: {}", resume.path().display())).green());
 
-    if let Some(info) = vtcode_core::core::agent::blocked_handoff::read_current_blocked_handoff(workspace) {
+    if let Some(info) =
+        vtcode_core::core::agent::blocked_handoff::read_current_blocked_handoff(workspace).or_else(|| {
+            vtcode_core::core::agent::blocked_handoff::find_latest_archived_blocker_for_session(
+                workspace,
+                &resume.identifier(),
+            )
+        })
+    {
         if info.session_id == resume.identifier()
             || resume.identifier().contains(&info.session_id)
             || info.session_id.contains(&resume.identifier())
@@ -319,6 +326,10 @@ fn print_resume_summary(resume: &ResumeSession, workspace: &std::path::Path) {
             println!(
                 "{}",
                 style("Session context retained. Type 'continue' to resume or provide specific instructions.").cyan()
+            );
+            println!(
+                "{}",
+                style("Details: .vtcode/tasks/current_blocked.md (or latest in .vtcode/tasks/blockers/)").cyan()
             );
         }
     }

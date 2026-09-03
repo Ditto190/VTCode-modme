@@ -19,8 +19,8 @@ pub(crate) mod task_tracker_guard;
 #[cfg(test)]
 pub(crate) use blocked_tool_guard::BlockedToolCallLimits;
 pub(crate) use blocked_tool_guard::{
-    blocked_tool_call_fuse_trip, blocked_tool_call_limits, blocked_tool_call_messages, enforce_blocked_tool_call_guard,
-    max_consecutive_blocked_tool_calls_per_turn,
+    blocked_tool_call_fuse_trip, blocked_tool_call_limits, blocked_tool_call_limits_for_tool,
+    blocked_tool_call_messages_detailed, enforce_blocked_tool_call_guard, max_consecutive_blocked_tool_calls_per_turn,
 };
 pub(crate) use read_guard::{enforce_read_after_write_guard, enforce_repeated_read_only_call_guard};
 pub(crate) use shell_run_guard::enforce_repeated_shell_run_guard;

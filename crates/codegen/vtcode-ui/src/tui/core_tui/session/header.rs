@@ -468,6 +468,25 @@ impl Session {
             push_badge(&mut spans, format!(" {label} "), badge_style, &mut first_section);
         }
 
+        // Show blocked/recovery badge so a stalled turn is visible in the header,
+        // not only in the footer hint. Uses ActivityState plus the [BLOCKED]
+        // input-status flag set by the runloop on blocked turns.
+        let is_blocked_header = matches!(
+            self.activity_state,
+            vtcode_commons::ui_protocol::ActivityState::Blocked | vtcode_commons::ui_protocol::ActivityState::Recovery
+        ) || self
+            .input_status_right
+            .as_deref()
+            .is_some_and(|status| status.contains("[BLOCKED]"))
+            || self
+                .input_status_left
+                .as_deref()
+                .is_some_and(|status| status.to_ascii_lowercase().contains("blocked"));
+        if is_blocked_header {
+            let blocked_style = Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD);
+            push_badge(&mut spans, "Blocked".to_string(), blocked_style, &mut first_section);
+        }
+
         if spans.is_empty() {
             spans.push(Span::raw(String::new()));
         }

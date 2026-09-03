@@ -12,8 +12,8 @@ use crate::exec::events::{
     CommandExecutionItem, CommandExecutionStatus, CompactionMode, CompactionTrigger, EVENT_SCHEMA_VERSION, ErrorItem,
     FileChangeItem, FileUpdateChange, HarnessEventItem, HarnessEventKind, ItemCompletedEvent, ItemStartedEvent,
     PatchApplyStatus, PatchChangeKind, ThreadCompactBoundaryEvent, ThreadCompletedEvent, ThreadCompletionSubtype,
-    ThreadEvent, ThreadItem, ThreadItemDetails, ThreadStartedEvent, ToolOutcome, TurnCompletedEvent, TurnFailedEvent,
-    TurnStartedEvent, Usage, tool_outcome_from_status,
+    ThreadEvent, ThreadItem, ThreadItemDetails, ThreadStartedEvent, ToolOutcome, TurnBlockedEvent, TurnCompletedEvent,
+    TurnFailedEvent, TurnStartedEvent, Usage, tool_outcome_from_status,
 };
 use anyhow::{Context, Result, anyhow};
 use parking_lot::Mutex;
@@ -535,6 +535,10 @@ impl ExecEventRecorder {
     pub fn turn_failed(&mut self, message: &str, usage: Option<Usage>) {
         self.record(ThreadEvent::TurnFailed(TurnFailedEvent { message: message.to_string(), usage }));
         self.finish_turn();
+    }
+
+    pub fn turn_blocked(&mut self, event: TurnBlockedEvent) {
+        self.record(ThreadEvent::TurnBlocked(event));
     }
 
     pub fn thread_completed(

@@ -350,7 +350,7 @@ async fn handle_failure<'a>(
     if blocked_or_denied_failure {
         t_ctx.ctx.harness_state.record_denied_tool_call();
         let streak = t_ctx.ctx.record_blocked_tool_call();
-        let limits = super::handlers::blocked_tool_call_limits(t_ctx.ctx);
+        let limits = super::handlers::blocked_tool_call_limits_for_tool(t_ctx.ctx, tool_name);
         // The interview denial has already armed the bounded tool-free
         // synthesis fallback. Do not let the generic blocked-call fuse turn
         // that recoverable transition into a terminal `Blocked` outcome.
@@ -363,8 +363,15 @@ async fn handle_failure<'a>(
         {
             let display_tool = tool_action_label(tool_name, args_val);
             let recovery_active = t_ctx.ctx.is_recovery_active();
-            let (block_reason, _) =
-                super::handlers::blocked_tool_call_messages(fuse_trip, recovery_active, &display_tool);
+            let blocked_total = t_ctx.ctx.harness_state.blocked_tool_calls;
+            let (block_reason, _) = super::handlers::blocked_tool_call_messages_detailed(
+                fuse_trip,
+                recovery_active,
+                &display_tool,
+                streak,
+                blocked_total,
+                tool_name,
+            );
             emit_turn_metric_log(t_ctx.ctx, fuse_trip.metric(), tool_name, streak, fuse_trip.cap());
             if !recovery_active {
                 t_ctx.ctx.harness_state.arm_blocked_tool_recovery(block_reason);
@@ -505,7 +512,8 @@ mod tests;
 #[cfg(test)]
 mod blocked_fuse_tests {
     use super::super::handlers::{
-        BlockedToolCallFuseTrip, BlockedToolCallLimits, blocked_tool_call_fuse_trip, blocked_tool_call_messages,
+        BlockedToolCallFuseTrip, BlockedToolCallLimits, blocked_tool_call_fuse_trip,
+        blocked_tool_call_messages_detailed,
     };
 
     fn limits(consecutive_cap: usize, total_cap: usize) -> BlockedToolCallLimits {
@@ -544,8 +552,14 @@ mod blocked_fuse_tests {
 
     #[test]
     fn denied_execution_result_uses_shared_total_fuse_message() {
-        let (reason, _) =
-            blocked_tool_call_messages(BlockedToolCallFuseTrip::Total { cap: 28 }, false, "read_file 'src/main.rs'");
+        let (reason, _) = blocked_tool_call_messages_detailed(
+            BlockedToolCallFuseTrip::Total { cap: 28 },
+            false,
+            "read_file 'src/main.rs'",
+            1,
+            29,
+            "exec_command",
+        );
         assert!(reason.contains("28 total blocked calls"));
     }
 }

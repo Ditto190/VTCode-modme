@@ -173,6 +173,35 @@ pub(super) fn timeline_rows_from_thread_events(records: &[ThreadEventRecord]) ->
                     false,
                 )
             }
+            ThreadEvent::TurnBlocked(event) => {
+                let mut body = format!(
+                    "{}\n\nBlocked streak: {} total: {} caps: {}/{} recovery: {}",
+                    event.message,
+                    event.blocked_streak,
+                    event.blocked_total,
+                    event.consecutive_cap,
+                    event.total_cap,
+                    event.recovery_active
+                );
+                if let Some(usage) = &event.usage {
+                    let _ = write!(&mut body, "\n\nUsage: {}", format_usage_summary(usage));
+                }
+                timeline_row(
+                    record.sequence,
+                    TIMELINE_SOURCE_THREAD_EVENTS,
+                    "turn.blocked",
+                    None,
+                    "turn",
+                    Some("failed"),
+                    record.turn_id.as_deref(),
+                    record.submission_id.as_ref().map(|value| value.as_str()),
+                    "Turn blocked".to_string(),
+                    truncate_preview(&event.message, SUMMARY_PREVIEW_LIMIT),
+                    body,
+                    pretty_json_string(&record.event),
+                    false,
+                )
+            }
             ThreadEvent::ItemStarted(event) => {
                 timeline_row_from_item(record, "item.started", "in_progress", &event.item)
             }
@@ -897,6 +926,9 @@ fn harness_title(event: &HarnessEventKind) -> &'static str {
         HarnessEventKind::PlanningCompleted => "Planning completed",
         HarnessEventKind::ContinuationStarted => "Continuation started",
         HarnessEventKind::ContinuationSkipped => "Continuation skipped",
+        HarnessEventKind::TurnBlocked => "Turn blocked",
+        HarnessEventKind::BlockedRecoveryStarted => "Blocked recovery started",
+        HarnessEventKind::BlockedRecoveryFinished => "Blocked recovery finished",
         HarnessEventKind::BlockedHandoffWritten => "Blocked handoff written",
         HarnessEventKind::BlockedHandoffResolved => "Blocked handoff resolved",
         HarnessEventKind::EvaluationStarted => "Evaluation started",
@@ -922,8 +954,10 @@ fn harness_status_label(event: &HarnessEventKind) -> &'static str {
         | HarnessEventKind::EvaluationPassed
         | HarnessEventKind::VerificationPassed
         | HarnessEventKind::BlockedHandoffWritten
-        | HarnessEventKind::BlockedHandoffResolved => "completed",
+        | HarnessEventKind::BlockedHandoffResolved
+        | HarnessEventKind::BlockedRecoveryFinished => "completed",
         HarnessEventKind::EvaluationFailed | HarnessEventKind::VerificationFailed => "failed",
+        HarnessEventKind::TurnBlocked => "failed",
         HarnessEventKind::PlanningStarted
         | HarnessEventKind::ContinuationStarted
         | HarnessEventKind::ContinuationSkipped
@@ -931,6 +965,7 @@ fn harness_status_label(event: &HarnessEventKind) -> &'static str {
         | HarnessEventKind::RevisionStarted
         | HarnessEventKind::VerificationStarted
         | HarnessEventKind::EscalationTriggered
+        | HarnessEventKind::BlockedRecoveryStarted
         | HarnessEventKind::ToolRetryAttempted => "in_progress",
         HarnessEventKind::EscalationBypassed | HarnessEventKind::ErrorRecovered => "completed",
         HarnessEventKind::ToolLatencyRecorded => "completed",

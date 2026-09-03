@@ -291,6 +291,13 @@ pub(super) fn human_event_line(event: &ThreadEvent) -> Option<String> {
                     vtcode_core::exec::events::HarnessEventKind::EscalationBypassed => {
                         style("[ESCALATED]").green().bold()
                     }
+                    vtcode_core::exec::events::HarnessEventKind::TurnBlocked => style("[BLOCKED]").red().bold(),
+                    vtcode_core::exec::events::HarnessEventKind::BlockedRecoveryStarted => {
+                        style("[RECOVERY]").yellow().bold()
+                    }
+                    vtcode_core::exec::events::HarnessEventKind::BlockedRecoveryFinished => {
+                        style("[RECOVERY]").green().bold()
+                    }
                     vtcode_core::exec::events::HarnessEventKind::ErrorRecovered => style("[RECOVERED]").green().bold(),
                     vtcode_core::exec::events::HarnessEventKind::ToolRetryAttempted => style("[RETRY]").yellow().bold(),
                     vtcode_core::exec::events::HarnessEventKind::ToolLatencyRecorded => {
@@ -311,6 +318,13 @@ pub(super) fn human_event_line(event: &ThreadEvent) -> Option<String> {
             _ => None,
         },
         ThreadEvent::TurnFailed(failed) => Some(format!("{} {}", style("[ERROR]").red().bold(), failed.message)),
+        ThreadEvent::TurnBlocked(blocked) => Some(format!(
+            "{} {} (streak {}, total {}) — Type 'continue' with new guidance or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md",
+            style("[BLOCKED]").red().bold(),
+            blocked.message,
+            blocked.blocked_streak,
+            blocked.blocked_total
+        )),
         ThreadEvent::Error(error) => Some(format!("{} {}", style("[ERROR]").red().bold(), error.message)),
         _ => None,
     }

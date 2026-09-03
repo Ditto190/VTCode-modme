@@ -58,9 +58,23 @@ pub struct ToolsConfig {
 
     /// Maximum consecutive blocked tool calls allowed per turn before forcing a
     /// turn break. The total fuse is 2x this value in normal mode, 4x in Plan
-    /// Mode, and this value in recovery mode.
+    /// Mode, and this value in recovery mode, unless overridden by
+    /// `max_total_blocked_tool_calls_per_turn`.
     #[serde(default = "default_max_consecutive_blocked_tool_calls_per_turn")]
     pub max_consecutive_blocked_tool_calls_per_turn: usize,
+
+    /// Optional explicit cap for total blocked tool calls per turn. When unset,
+    /// the runtime derives it from the consecutive cap (2x normal, 4x plan,
+    /// 1x recovery) so existing configs keep their behavior.
+    #[serde(default)]
+    pub max_total_blocked_tool_calls_per_turn: Option<usize>,
+
+    /// Per-tool consecutive blocked-call cap overrides keyed by tool name.
+    /// Allows read-only tools (e.g. `code_search`) to tolerate more denies
+    /// than mutating tools (e.g. `exec_command`) before tripping the fuse.
+    #[serde(default)]
+    #[cfg_attr(feature = "schema", schemars(with = "std::collections::BTreeMap<String, usize>"))]
+    pub blocked_tool_thresholds: IndexMap<String, usize>,
 
     /// Optional per-second rate limit for tool calls to smooth bursty retries.
     /// When unset, the runtime defaults apply.
@@ -233,6 +247,8 @@ impl Default for ToolsConfig {
             max_tool_loops: default_max_tool_loops(),
             max_repeated_tool_calls: default_max_repeated_tool_calls(),
             max_consecutive_blocked_tool_calls_per_turn: default_max_consecutive_blocked_tool_calls_per_turn(),
+            max_total_blocked_tool_calls_per_turn: None,
+            blocked_tool_thresholds: IndexMap::new(),
             max_tool_rate_per_second: default_max_tool_rate_per_second(),
             max_sequential_spool_chunk_reads: default_max_sequential_spool_chunk_reads(),
             web_fetch: WebFetchConfig::default(),
@@ -757,5 +773,31 @@ session_max_requests = 5
         a.push("evil.example".to_string());
         let b = WebFetchConfig::default().allowed_domains;
         assert!(!b.iter().any(|d| d == "evil.example"));
+    }
+
+    #[test]
+    fn blocked_tool_caps_default_to_derived_total() {
+        let config = ToolsConfig::default();
+        assert!(config.max_total_blocked_tool_calls_per_turn.is_none());
+        assert!(config.blocked_tool_thresholds.is_empty());
+    }
+
+    #[test]
+    fn blocked_tool_caps_deserialize_from_toml() {
+        let config: ToolsConfig = toml::from_str(
+            r#"
+max_consecutive_blocked_tool_calls_per_turn = 3
+max_total_blocked_tool_calls_per_turn = 10
+
+[blocked_tool_thresholds]
+exec_command = 3
+code_search = 6
+"#,
+        )
+        .expect("blocked tool caps should parse");
+        assert_eq!(config.max_consecutive_blocked_tool_calls_per_turn, 3);
+        assert_eq!(config.max_total_blocked_tool_calls_per_turn, Some(10));
+        assert_eq!(config.blocked_tool_thresholds.get("exec_command"), Some(&3));
+        assert_eq!(config.blocked_tool_thresholds.get("code_search"), Some(&6));
     }
 }

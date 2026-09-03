@@ -23,8 +23,12 @@ The closest concept mapping is:
 | `compact_boundary` | `thread.compact_boundary` |
 | Fresh plan execution handoff | `context.reset` |
 
-`turn.started`, `turn.completed`, and `turn.failed` remain VT Code turn
-wrappers around the inner item lifecycle.
+`turn.started`, `turn.completed`, `turn.failed`, and `turn.blocked` remain VT Code turn
+wrappers around the inner item lifecycle. `turn.blocked` is emitted alongside
+`turn.failed` for blocked turns with streak/total/caps/last-tool counters so UI
+layers get a first-class signal instead of inferring it. Harness `TurnBlocked`,
+`BlockedRecoveryStarted`, and `BlockedRecoveryFinished` item events cover the
+recovery lifecycle.
 
 ### Tool-result ordering and bounded request repair
 
@@ -232,8 +236,13 @@ the harness never reports successful completion without confirmation.
 Every blocked turn publishes one non-empty deterministic assistant response
 through normal conversation history, the renderer, and
 `ThreadEvent::ItemCompleted` with `AgentMessage`, then emits the corresponding
-`turn.failed` event. The turn result remains `Blocked`; publishing the handoff
-does not convert it to success or emit `turn.completed`.
+`turn.failed` event plus a first-class `turn.blocked` event with fuse counters.
+The turn result remains `Blocked`; publishing the handoff does not convert it
+to success or emit `turn.completed`. The TUI surfaces the block via a `Blocked`
+header badge, `Blocked • continue to retry…` footer hint, transcript banner, and
+`ActionRequired` terminal title; `ActivityState::Blocked`/`Recovery` drive those
+states while input stays enabled. Blocked-turn spool outputs are pinned until
+the blocker resolves so `continue`/`--resume` can still read them.
 
 Blocked responses are reason-specific. A pending-verification response explains
 that inspection-only checks, link checks, and `git diff --check` do not clear the

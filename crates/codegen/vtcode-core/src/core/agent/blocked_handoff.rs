@@ -125,6 +125,42 @@ pub fn read_current_blocked_handoff(workspace: &Path) -> Option<BlockedHandoffIn
     parse_blocked_handoff_content(&content)
 }
 
+/// Fallback when the live pointer is missing but an archived blocker exists
+/// for the session (e.g. pointer cleared by a fork or stale workspace).
+/// Returns the most recently modified matching archive, if any.
+pub fn find_latest_archived_blocker_for_session(workspace: &Path, session_id: &str) -> Option<BlockedHandoffInfo> {
+    let (_, _, blockers_dir) = safe_handoff_directories(workspace).ok()?;
+    let entries = fs::read_dir(&blockers_dir).ok()?;
+    let needle = session_id.to_ascii_lowercase();
+    let mut best: Option<(std::time::SystemTime, BlockedHandoffInfo)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+        if !file_name.contains(&needle) && !needle.contains(file_name.as_str()) {
+            // Also match sanitized session prefix (blocker files lowercase the id).
+            if !file_name.contains("session-") {
+                continue;
+            }
+            // Fall through to content check: session_id is in front-matter.
+        }
+        ensure_not_symlink(&path).ok()?;
+        let content = fs::read_to_string(&path).ok()?;
+        let info = parse_blocked_handoff_content(&content)?;
+        if info.session_id != session_id
+            && !session_id.contains(&info.session_id)
+            && !info.session_id.contains(session_id)
+        {
+            continue;
+        }
+        let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+        let replace = best.as_ref().is_none_or(|(best_time, _)| modified > *best_time);
+        if replace {
+            best = Some((modified, info));
+        }
+    }
+    best.map(|(_, info)| info)
+}
+
 fn parse_blocked_handoff_content(content: &str) -> Option<BlockedHandoffInfo> {
     let mut lines = content.lines();
     if lines.next()?.trim() != "---" {

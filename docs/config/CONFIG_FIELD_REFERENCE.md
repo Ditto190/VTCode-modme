@@ -785,7 +785,10 @@ python3 scripts/generate_config_field_reference.py
 | `tools.editor.suspend_tui` | `boolean` | no | `true` | Suspend the TUI event loop while editor is running |
 | `tools.loop_thresholds` | `object` | no | `{}` | Tool-specific loop thresholds (Adaptive Loop Detection) Allows setting higher loop limits for read-only tools (e.g., ls, grep) and lower limits for mutating tools. |
 | `tools.loop_thresholds.*` | `integer` | no | `-` | - |
-| `tools.max_consecutive_blocked_tool_calls_per_turn` | `integer` | no | `8` | Maximum consecutive blocked tool calls allowed per turn before forcing a turn break. The total fuse is 2x this value in normal mode, 4x in Plan Mode, and this value in recovery mode. |
+| `tools.max_consecutive_blocked_tool_calls_per_turn` | `integer` | no | `8` | Maximum consecutive blocked tool calls allowed per turn before forcing a turn break. The total fuse is 2x this value in normal mode, 4x in Plan Mode, and this value in recovery mode, unless overridden by `max_total_blocked_tool_calls_per_turn`. |
+| `tools.max_total_blocked_tool_calls_per_turn` | `integer \| null` | no | `null` | Optional explicit cap for total blocked tool calls per turn. When unset, the runtime derives it from the consecutive cap (2x normal, 4x plan, 1x recovery). |
+| `tools.blocked_tool_thresholds` | `object` | no | `{}` | Per-tool consecutive blocked-call cap overrides keyed by tool name. Allows read-only tools to tolerate more denies than mutating tools. |
+| `tools.blocked_tool_thresholds.*` | `integer` | no | `-` | - |
 | `tools.max_repeated_tool_calls` | `integer` | no | `2` | Maximum number of times the same tool invocation can be retried with the identical arguments within a single turn. |
 | `tools.max_sequential_spool_chunk_reads` | `integer` | no | `6` | Maximum sequential spool-chunk `read_file` calls allowed per turn before nudging the agent to switch to targeted extraction/summarization. |
 | `tools.max_tool_loops` | `integer` | no | `40` | Maximum inner tool-call loops per user turn. Set to `0` to disable the limit. Prevents infinite tool-calling cycles in interactive chat. This limits how many back-and-forths the agent will perform executing tools and re-asking the model before returning a final answer. |

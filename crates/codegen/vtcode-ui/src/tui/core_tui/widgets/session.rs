@@ -334,8 +334,17 @@ impl<'a> SessionWidget<'a> {
             .unwrap_or("");
         let right_status = self.session.status_right_text().unwrap_or("");
 
+        let is_blocked = right_status.contains("[BLOCKED]")
+            || left_status.to_ascii_lowercase().contains("blocked")
+            || left_status.to_ascii_lowercase().contains("tools disabled");
+        let is_recovery = left_status.to_ascii_lowercase().contains("recovery")
+            || left_status.to_ascii_lowercase().contains("tools disabled");
         let hint = if let Some(hint) = self.footer_hint_override {
             hint
+        } else if is_blocked {
+            footer_hints::BLOCKED
+        } else if is_recovery {
+            footer_hints::RECOVERY
         } else if self.session.thinking_spinner.is_active
             || self.session.has_status_spinner()
             || self.session.is_running_activity()

@@ -282,6 +282,10 @@ pub struct ToolOutputSpooler {
     config: SpoolerConfig,
     /// Track spooled files for cleanup
     spooled_files: Arc<RwLock<Vec<PathBuf>>>,
+    /// Pinned spool files that must survive cleanup/eviction because a
+    /// blocked turn handoff references them. Bounded: pins are cleared when
+    /// the owning session resolves its blocker or on explicit release.
+    pinned_files: Arc<RwLock<std::collections::HashSet<PathBuf>>>,
     /// Counter for throttling periodic cleanup
     spool_count: std::sync::atomic::AtomicU64,
 }
@@ -302,6 +306,7 @@ impl ToolOutputSpooler {
             output_dir,
             config,
             spooled_files: Arc::new(RwLock::new(Vec::with_capacity(max_files))),
+            pinned_files: Arc::new(RwLock::new(std::collections::HashSet::new())),
             spool_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -447,8 +452,12 @@ impl ToolOutputSpooler {
             files.push(file_path.clone());
 
             if files.len() > self.config.max_files {
-                let old_file = files.remove(0);
-                let _ = fs::remove_file(&old_file).await;
+                let pinned = self.pinned_files.read().await;
+                if let Some(evict_idx) = files.iter().position(|candidate| !pinned.contains(candidate)) {
+                    let old_file = files.remove(evict_idx);
+                    drop(pinned);
+                    let _ = fs::remove_file(&old_file).await;
+                }
             }
         }
 
@@ -597,7 +606,37 @@ impl ToolOutputSpooler {
         Ok(response)
     }
 
+    /// Pin spool files referenced by a blocked-turn handoff so age/eviction
+    /// cleanup cannot delete them before the user resumes. Pins are bounded:
+    /// callers must release them when the blocker resolves.
+    pub async fn pin_spool_files(&self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        let mut pinned = self.pinned_files.write().await;
+        pinned.extend(paths.iter().cloned());
+    }
+
+    /// Release pins for spool files that are no longer needed (e.g. blocker
+    /// resolved). Missing entries are ignored.
+    pub async fn unpin_spool_files(&self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        let mut pinned = self.pinned_files.write().await;
+        for path in paths {
+            pinned.remove(path);
+        }
+    }
+
+    /// Extract workspace-relative spool paths from model-facing values so a
+    /// blocked-turn handoff can pin exactly the files the next turn needs.
+    pub fn spool_paths_from_value(value: &Value) -> Option<String> {
+        SpooledOutputReference::from_value(value).map(|reference| reference.spool_path.to_string())
+    }
+
     /// Clean up old spooled files and sync the in-memory tracking list.
+    /// Pinned blocked-turn outputs are never deleted here.
     pub async fn cleanup_old_files(&self) -> Result<usize> {
         if !fs::try_exists(&self.output_dir).await.unwrap_or(false) {
             return Ok(0);
@@ -609,9 +648,13 @@ impl ToolOutputSpooler {
         // Collect paths to remove (can't modify vec during filesystem iteration)
         let mut paths_to_remove = Vec::new();
 
+        let pinned = self.pinned_files.read().await;
         let mut entries = fs::read_dir(&self.output_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
+            if pinned.contains(&path) {
+                continue;
+            }
             if let Ok(metadata) = entry.metadata().await
                 && let Ok(modified) = metadata.modified()
                 && let Ok(age) = now.duration_since(modified)
@@ -620,6 +663,7 @@ impl ToolOutputSpooler {
                 paths_to_remove.push(path);
             }
         }
+        drop(pinned);
 
         // Remove files from disk
         for path in &paths_to_remove {
@@ -1153,6 +1197,34 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
 
+        let removed = spooler.cleanup_old_files().await.unwrap();
+        assert_eq!(removed, 1);
+        assert!(!full_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_skips_pinned_blocked_turn_outputs() {
+        let temp = tempdir().unwrap();
+        let config = SpoolerConfig {
+            threshold_bytes: 1,
+            max_age_secs: 0,
+            ..Default::default()
+        };
+        let spooler = ToolOutputSpooler::with_config(temp.path(), config);
+        let value = json!({"output": "blocked output"});
+
+        let result = spooler.spool_output("exec_command", &value, false).await.unwrap();
+        let full_path = temp.path().join(&result.file_path);
+        assert!(full_path.exists());
+
+        spooler.pin_spool_files(std::slice::from_ref(&full_path)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+        let removed = spooler.cleanup_old_files().await.unwrap();
+        assert_eq!(removed, 0);
+        assert!(full_path.exists());
+
+        spooler.unpin_spool_files(std::slice::from_ref(&full_path)).await;
         let removed = spooler.cleanup_old_files().await.unwrap();
         assert_eq!(removed, 1);
         assert!(!full_path.exists());

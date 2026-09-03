@@ -223,6 +223,9 @@ pub mod hints {
     pub(crate) const PROCESSING: &str = vtcode_commons::stop_hints::STOP_HINT_COMPACT;
     pub(crate) const MODAL: &str = "↑↓ navigate • Enter select • Esc close";
     pub(crate) const EDITING: &str = "Enter/Tab queue • Ctrl+Enter run/steer • /stop • ↑ history";
+    pub(crate) const BLOCKED: &str =
+        "Blocked • continue to retry • /resume • details: .vtcode/tasks/current_blocked.md";
+    pub(crate) const RECOVERY: &str = "Recovery: tools disabled • synthesizing text response…";
 }
 
 #[cfg(test)]

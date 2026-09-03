@@ -24,7 +24,7 @@ pub mod atif;
 pub mod trace;
 
 /// Semantic version of the serialized event schema exported by this crate.
-pub const EVENT_SCHEMA_VERSION: &str = "0.12.0";
+pub const EVENT_SCHEMA_VERSION: &str = "0.13.0";
 
 /// Wraps a [`ThreadEvent`] with schema metadata so downstream consumers can
 /// negotiate compatibility before processing an event stream.
@@ -387,6 +387,11 @@ pub enum ThreadEvent {
     /// Marks a turn as failed with additional context.
     #[serde(rename = "turn.failed")]
     TurnFailed(TurnFailedEvent),
+    /// Marks a turn as blocked before success could be confirmed. Emitted
+    /// alongside `turn.failed` so UI subscribers get a first-class signal
+    /// with the fuse counters and last tool instead of inferring it.
+    #[serde(rename = "turn.blocked")]
+    TurnBlocked(TurnBlockedEvent),
     /// Indicates that an item has started processing.
     #[serde(rename = "item.started")]
     ItemStarted(ItemStartedEvent),
@@ -645,6 +650,34 @@ pub struct TurnFailedEvent {
     /// Human-readable explanation describing why the turn failed.
     pub message: String,
     /// Optional token usage that was consumed before the failure occurred.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+pub struct TurnBlockedEvent {
+    /// Human-readable explanation describing why the turn was blocked.
+    pub message: String,
+    /// Display label of the last blocked tool call, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_tool: Option<String>,
+    /// Consecutive blocked tool calls observed this turn.
+    #[serde(default)]
+    pub blocked_streak: usize,
+    /// Total blocked tool calls observed this turn.
+    #[serde(default)]
+    pub blocked_total: usize,
+    /// Consecutive cap that was enforced.
+    #[serde(default)]
+    pub consecutive_cap: usize,
+    /// Total cap that was enforced.
+    #[serde(default)]
+    pub total_cap: usize,
+    /// Whether the fuse tripped while a tool-free recovery pass was active.
+    #[serde(default)]
+    pub recovery_active: bool,
+    /// Optional token usage that was consumed before the block occurred.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
 }
@@ -1091,6 +1124,13 @@ pub enum HarnessEventKind {
     PlanningCompleted,
     ContinuationStarted,
     ContinuationSkipped,
+    /// A turn was blocked before success could be confirmed. Carries the fuse
+    /// counters so UI layers can render without correlating multiple events.
+    TurnBlocked,
+    /// A bounded tool-free recovery pass was scheduled after blocked calls.
+    BlockedRecoveryStarted,
+    /// A bounded tool-free recovery pass finished.
+    BlockedRecoveryFinished,
     BlockedHandoffWritten,
     /// The owning session resolved its archived blocked handoff and removed
     /// the live recovery pointer.
@@ -1226,6 +1266,31 @@ mod tests {
         let restored: ThreadEvent = serde_json::from_str(&json)?;
 
         assert_eq!(restored, event);
+        Ok(())
+    }
+
+    #[test]
+    fn turn_blocked_event_round_trip() -> Result<(), Box<dyn Error>> {
+        let event = ThreadEvent::TurnBlocked(TurnBlockedEvent {
+            message: "Blocked tool-call limit reached after 3 consecutive blocked calls.".to_string(),
+            last_tool: Some("exec_command".to_string()),
+            blocked_streak: 4,
+            blocked_total: 4,
+            consecutive_cap: 3,
+            total_cap: 6,
+            recovery_active: false,
+            usage: None,
+        });
+
+        let json = serde_json::to_string(&event)?;
+        assert!(json.contains("turn.blocked"));
+        let restored: ThreadEvent = serde_json::from_str(&json)?;
+        assert_eq!(restored, event);
+
+        // Legacy payloads without new counters still parse via defaults.
+        let legacy = serde_json::json!({"type": "turn.blocked", "message": "blocked"});
+        let parsed: ThreadEvent = serde_json::from_value(legacy)?;
+        assert!(matches!(parsed, ThreadEvent::TurnBlocked(_)));
         Ok(())
     }
 

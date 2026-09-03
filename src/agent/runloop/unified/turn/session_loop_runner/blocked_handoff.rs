@@ -138,6 +138,7 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
     resume: BlockedHandoffResume<'_>,
     renderer: &mut AnsiRenderer,
     harness_emitter: Option<&HarnessEventEmitter>,
+    handle: Option<&vtcode_ui::tui::app::InlineHandle>,
 ) {
     match write_blocked_handoff_with_resume(
         workspace,
@@ -164,7 +165,27 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             let _ = renderer
                 .line(MessageStyle::Info, &format!("  • Blocker details: {}", artifacts.current_path.display()));
 
+            if let Some(handle) = handle {
+                use std::sync::Arc;
+                use vtcode_ui::tui::app::{InlineMessageKind, InlineSegment, InlineTextStyle};
+                let text_style = Arc::new(InlineTextStyle::default());
+                let line = |text: String| vec![InlineSegment { text, style: text_style.clone() }];
+                handle.append_line(InlineMessageKind::Warning, line(format!("Turn blocked: {blocker_summary}")));
+                handle.append_line(
+                    InlineMessageKind::Info,
+                    line("What you can do: Type 'continue' to resume, describe alternative instructions, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md".to_string()),
+                );
+                handle.set_activity_state(vtcode_commons::ui_protocol::ActivityState::Blocked);
+            }
+
             if let Some(emitter) = harness_emitter {
+                let _ = emitter.emit(harness_event(
+                    HarnessEventKind::TurnBlocked,
+                    Some(blocker_summary.to_string()),
+                    None,
+                    None,
+                    None,
+                ));
                 for path in [&artifacts.current_path, &artifacts.archive_path] {
                     let path_text = path.display().to_string();
                     let _ = emitter.emit(harness_event(
