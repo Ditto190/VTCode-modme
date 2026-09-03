@@ -820,7 +820,6 @@ async fn duplicate_task_tracker_create_is_blocked_not_breaking() {
     let first =
         enforce_duplicate_task_tracker_create_guard(&mut ctx, "task_tracker_first", tool_names::TASK_TRACKER, &args);
     assert!(first.is_none());
-
     let second =
         enforce_duplicate_task_tracker_create_guard(&mut ctx, "task_tracker_second", tool_names::TASK_TRACKER, &args);
     assert!(matches!(second, Some(ValidationResult::Blocked)));
@@ -991,6 +990,20 @@ async fn repeated_identical_readonly_call_in_same_turn_reuses_recent_result() {
     assert!(first.is_none());
     assert_eq!(outcome_ctx.ctx.harness_state.tool_calls, 1);
     assert_eq!(outcome_ctx.ctx.tool_registry.execution_history_len(), 1);
+    assert!(outcome_ctx.ctx.harness_state.has_successful_readonly_signature(
+        &crate::agent::runloop::unified::turn::tool_outcomes::helpers::signature_key_for(tool_names::READ_FILE, &args,),
+    ));
+    assert!(
+        outcome_ctx
+            .ctx
+            .tool_registry
+            .find_recent_successful_output(
+                tool_names::READ_FILE,
+                &args,
+                outcome_ctx.ctx.harness_state.max_tool_wall_clock
+            )
+            .is_some()
+    );
 
     let second = handle_single_tool_call(&mut outcome_ctx, "read_twice", tool_names::READ_FILE, args)
         .await
@@ -999,6 +1012,14 @@ async fn repeated_identical_readonly_call_in_same_turn_reuses_recent_result() {
     assert!(second.is_none());
     assert_eq!(outcome_ctx.ctx.harness_state.tool_calls, 1);
     assert_eq!(outcome_ctx.ctx.tool_registry.execution_history_len(), 1);
+    assert_eq!(
+        outcome_ctx
+            .ctx
+            .harness_state
+            .snapshot_turn_diagnostics(Default::default(), 0)
+            .reused_results,
+        1
+    );
     assert!(
         outcome_ctx
             .ctx
@@ -1405,6 +1426,18 @@ async fn pending_verification_blocks_patch_before_filesystem_mutation() {
         message.role == uni::MessageRole::Tool
             && message.content.as_text().contains("anti_blind_editing_verification_required")
     }));
+    let response = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .rev()
+        .find(|message| message.role == uni::MessageRole::Tool)
+        .expect("blocked tool response");
+    let content = response.content.as_text();
+    assert!(content.contains("earlier turn"));
+    assert!(content.contains("\"pending_mutations\":null"));
+    assert!(content.contains("\"pending_mutation_count_known\":false"));
+    assert!(!content.contains("0 effective file changes"));
 }
 
 #[tokio::test]

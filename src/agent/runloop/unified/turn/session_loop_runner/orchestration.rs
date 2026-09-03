@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use anyhow::Result;
-use hashbrown::HashSet;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep, timeout};
 use tokio_util::sync::CancellationToken;
@@ -45,6 +44,7 @@ use super::support::{
 use crate::agent::runloop::ResumeSession;
 use crate::agent::runloop::git::{compute_session_code_change_delta, normalize_workspace_path};
 use crate::agent::runloop::model_picker::ModelPickerState;
+use crate::agent::runloop::unified::inline_events::harness::harness_event;
 use crate::agent::runloop::unified::palettes::ActivePalette;
 use crate::agent::runloop::unified::planning_workflow_state::{
     render_planning_workflow_next_step_hint, transition_to_planning_workflow,
@@ -68,6 +68,45 @@ use crate::agent::runloop::unified::turn::turn_loop_helpers::{
 };
 use crate::agent::runloop::unified::workspace_links::LinkedDirectory;
 use crate::updater::{InlineUpdateOutcome, display_update_notice, run_inline_update_prompt};
+
+pub(super) fn resolve_thread_completion_status(
+    session_end_reason: &SessionEndReason,
+    budget_limit_reached: bool,
+    last_approved_plan_summary_status: Option<ExecutionSummaryStatus>,
+    last_turn_result: Option<&RunLoopTurnLoopResult>,
+    last_turn_response_was_fallback: bool,
+) -> (&'static str, ThreadCompletionSubtype) {
+    if matches!(session_end_reason, SessionEndReason::Completed) {
+        return match (last_approved_plan_summary_status, last_turn_result) {
+            (Some(ExecutionSummaryStatus::Blocked), _)
+            | (_, Some(RunLoopTurnLoopResult::Blocked { .. }))
+            | (_, Some(RunLoopTurnLoopResult::Aborted)) => ("blocked", ThreadCompletionSubtype::ErrorDuringExecution),
+            (Some(ExecutionSummaryStatus::Failed), _)
+            | (_, Some(RunLoopTurnLoopResult::Completed { .. }))
+            | (_, Some(RunLoopTurnLoopResult::Cancelled))
+                if last_turn_response_was_fallback =>
+            {
+                ("failed", ThreadCompletionSubtype::ErrorDuringExecution)
+            }
+            (_, Some(RunLoopTurnLoopResult::Cancelled)) => ("cancelled", ThreadCompletionSubtype::Cancelled),
+            (_, Some(RunLoopTurnLoopResult::Exit)) => ("exit", ThreadCompletionSubtype::Cancelled),
+            _ => session_end_reason.thread_completion_status(budget_limit_reached),
+        };
+    }
+
+    if matches!(session_end_reason, SessionEndReason::Exit)
+        && !last_turn_response_was_fallback
+        && !matches!(
+            last_approved_plan_summary_status,
+            Some(ExecutionSummaryStatus::Blocked | ExecutionSummaryStatus::Failed)
+        )
+        && matches!(last_turn_result, Some(RunLoopTurnLoopResult::Completed { .. }))
+    {
+        return ("exit", ThreadCompletionSubtype::Success);
+    }
+
+    session_end_reason.thread_completion_status(budget_limit_reached)
+}
 
 #[cfg_attr(feature = "profiling", hotpath::measure)]
 pub(crate) async fn run_single_agent_loop_unified_impl(
@@ -970,13 +1009,17 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 let turn_started_at = Instant::now();
                 let history_snapshot_bytes = estimate_history_bytes(working_history);
                 let mut turn_metadata_cache = None;
-                // Cross-turn tracking data extracted from harness_state before
-                // it goes out of scope at the end of the match block.
-                let mut cross_turn_read_sigs: Vec<String> = Vec::new();
-                let mut cross_turn_written: HashSet<String> = HashSet::new();
-                let mut cross_turn_shell_cmd: Option<String> = None;
                 let planning_active = tool_registry.is_planning_active();
-                let outcome = match {
+                // Cross-turn tracking data and aborted diagnostics are
+                // extracted before harness_state goes out of scope.
+                let (
+                    turn_result,
+                    cross_turn_read_sigs,
+                    cross_turn_written,
+                    cross_turn_shell_cmd,
+                    cross_turn_out_of_band_progress,
+                    aborted_turn_diagnostics,
+                ) = {
                     let mut auto_finish_planning_attempted = false;
                     let max_tool_calls_per_turn = if executing_approved_plan {
                         effective_max_tool_calls_for_approved_plan_execution(harness_config.max_tool_calls_per_turn)
@@ -1037,19 +1080,25 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     let result =
                         crate::agent::runloop::unified::turn::run_turn_loop(working_history, turn_loop_ctx).await;
 
-                    match result {
-                        Ok(inner) => {
-                            // Extract cross-turn tracking data before harness_state
-                            // goes out of scope.
-                            cross_turn_read_sigs =
-                                harness_state.seen_successful_readonly_signatures.iter().cloned().collect();
-                            cross_turn_written = harness_state.recently_written_files.clone();
-                            cross_turn_shell_cmd = harness_state.last_shell_command_signature.clone();
-                            Ok(inner)
-                        }
-                        Err(err) => Err(err),
-                    }
-                } {
+                    // Preserve authoritative turn state even when the turn
+                    // loop fails before it can construct a normal outcome.
+                    let aborted_turn_diagnostics = result
+                        .is_err()
+                        .then(|| harness_state.snapshot_turn_diagnostics(Default::default(), 0));
+                    (
+                        result,
+                        harness_state
+                            .seen_successful_readonly_signatures
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        harness_state.recently_written_files.clone(),
+                        harness_state.last_admitted_shell_command_signature.clone(),
+                        harness_state.has_out_of_band_tool_progress(),
+                        aborted_turn_diagnostics,
+                    )
+                };
+                let outcome = match turn_result {
                     Ok(outcome) => outcome,
                     Err(err) => {
                         crate::agent::runloop::unified::status_line::clear_input_status(
@@ -1063,7 +1112,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         TurnLoopOutcome {
                             result: RunLoopTurnLoopResult::Aborted,
                             turn_modified_files: std::collections::BTreeSet::new(),
-                            turn_diagnostics: Default::default(),
+                            turn_diagnostics: aborted_turn_diagnostics.unwrap_or_default(),
                             pending_primary_agent: None,
                             pending_plan_auto_accept: false,
                             pending_plan_execution_context:
@@ -1077,10 +1126,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
 
                 // Cross-turn loop detection: fingerprint this turn's actions and
                 // inject a warning if a loop or stuck pattern is detected.
-                if let Some(cross_turn_warning) = cross_turn_tracker.seal_turn(
+                if let Some(cross_turn_warning) = cross_turn_tracker.seal_turn_with_progress(
                     &cross_turn_read_sigs,
                     &cross_turn_written,
                     cross_turn_shell_cmd.as_deref(),
+                    cross_turn_out_of_band_progress,
                     planning_active,
                 ) {
                     tracing::warn!(warning = %cross_turn_warning, "Cross-turn loop detector triggered");
@@ -1105,6 +1155,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 last_turn_result = Some(outcome_result.clone());
                 last_turn_response_was_fallback = final_response_was_fallback;
                 let turn_elapsed = turn_started_at.elapsed();
+                let mut turn_diagnostics = outcome.turn_diagnostics.clone();
+                turn_diagnostics.elapsed_ms = turn_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
                 let show_turn_timer = vt_cfg.as_ref().map(|cfg| cfg.ui.show_turn_timer).unwrap_or(true);
                 let harness_snapshot = tool_registry.harness_context_snapshot();
                 if let Err(err) = crate::agent::runloop::unified::turn::apply_turn_outcome(
@@ -1324,6 +1376,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         token_usage: None,
                         max_context_tokens: None,
                         loaded_skills: Some(skill_names),
+                        turn_diagnostics: Some(turn_diagnostics),
                     };
                     checkpoint_outcome = persist_session_checkpoint(archive, checkpoint_args, blocked_turn).await;
                 }
@@ -1369,8 +1422,26 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 }
                 match &outcome_result {
                     RunLoopTurnLoopResult::Completed { .. } => {
-                        let _ =
-                            vtcode_core::core::agent::blocked_handoff::clear_current_blocked_handoff(&config.workspace);
+                        let handoff_resolved =
+                            vtcode_core::core::agent::blocked_handoff::clear_current_blocked_handoff_for_session(
+                                &config.workspace,
+                                &harness_snapshot.session_id,
+                            );
+                        match handoff_resolved {
+                            Ok(true) => {
+                                if let Some(emitter) = harness_emitter.as_ref() {
+                                    let _ = emitter.emit(harness_event(
+                                        vtcode_core::exec::events::HarnessEventKind::BlockedHandoffResolved,
+                                        Some("Blocked handoff resolved".to_owned()),
+                                        None,
+                                        None,
+                                        None,
+                                    ));
+                                }
+                            }
+                            Ok(false) => {}
+                            Err(err) => tracing::warn!(error = %err, "Failed to resolve current blocked handoff"),
+                        }
                         session_stats.mark_turn_stalled(false, None);
                     }
                     RunLoopTurnLoopResult::Aborted => {
@@ -1422,27 +1493,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         }
         if let Some(emitter) = harness_emitter.as_ref() {
             let harness_snapshot = tool_registry.harness_context_snapshot();
-            let (outcome_code, subtype) = if matches!(session_end_reason, SessionEndReason::Completed) {
-                match (last_approved_plan_summary_status, last_turn_result.as_ref()) {
-                    (Some(ExecutionSummaryStatus::Blocked), _)
-                    | (_, Some(RunLoopTurnLoopResult::Blocked { .. }))
-                    | (_, Some(RunLoopTurnLoopResult::Aborted)) => {
-                        ("blocked", ThreadCompletionSubtype::ErrorDuringExecution)
-                    }
-                    (Some(ExecutionSummaryStatus::Failed), _)
-                    | (_, Some(RunLoopTurnLoopResult::Completed { .. }))
-                    | (_, Some(RunLoopTurnLoopResult::Cancelled))
-                        if last_turn_response_was_fallback =>
-                    {
-                        ("failed", ThreadCompletionSubtype::ErrorDuringExecution)
-                    }
-                    (_, Some(RunLoopTurnLoopResult::Cancelled)) => ("cancelled", ThreadCompletionSubtype::Cancelled),
-                    (_, Some(RunLoopTurnLoopResult::Exit)) => ("exit", ThreadCompletionSubtype::Cancelled),
-                    _ => session_end_reason.thread_completion_status(session_stats.budget_limit().is_some()),
-                }
-            } else {
-                session_end_reason.thread_completion_status(session_stats.budget_limit().is_some())
-            };
+            let (outcome_code, subtype) = resolve_thread_completion_status(
+                &session_end_reason,
+                session_stats.budget_limit().is_some(),
+                last_approved_plan_summary_status,
+                last_turn_result.as_ref(),
+                last_turn_response_was_fallback,
+            );
             let result = subtype
                 .is_success()
                 .then(|| latest_assistant_result_text(&runtime.state.messages))

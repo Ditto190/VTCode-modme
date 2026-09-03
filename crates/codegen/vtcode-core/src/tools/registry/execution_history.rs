@@ -17,6 +17,57 @@ use crate::tools::tool_intent;
 
 use super::execution_kernel::PATH_ALIAS_KEYS;
 
+const READ_OFFSET_KEYS: &[&str] = &[
+    "offset",
+    "offset_lines",
+    "offset_bytes",
+    "byte_offset",
+    "line_offset",
+    "o",
+    "line_start",
+    "start_line",
+];
+const READ_LIMIT_KEYS: &[&str] = &[
+    "limit",
+    "limit_lines",
+    "max_bytes",
+    "page_size",
+    "page_size_bytes",
+    "byte_page_size",
+    "page_size_lines",
+    "line_page_size",
+    "max_lines",
+    "chunk_lines",
+    "line_end",
+    "end_line",
+    "length",
+];
+const READ_EXTENT_KEYS: &[&str] = &[
+    "offset",
+    "offset_lines",
+    "offset_bytes",
+    "byte_offset",
+    "line_offset",
+    "o",
+    "line_start",
+    "start_line",
+    "limit",
+    "limit_lines",
+    "max_bytes",
+    "page_size",
+    "page_size_bytes",
+    "byte_page_size",
+    "page_size_lines",
+    "line_page_size",
+    "max_lines",
+    "chunk_lines",
+    "line_end",
+    "end_line",
+    "length",
+    "page",
+    "per_page",
+];
+
 /// Result of loop detection analysis.
 #[derive(Debug, Clone)]
 pub struct LoopDetectionResult {
@@ -737,31 +788,56 @@ impl ToolExecutionHistory {
 
     /// Check whether the cached record's read shape covers the new query's shape.
     ///
-    /// Returns `true` when both calls target the same offset and the cached
-    /// limit is at least as large as the query limit, and both calls use the
-    /// same raw mode. This prevents false loop detection when the model
-    /// requests a larger limit, different offset, or exact raw content after a
-    /// summarized read (issue #680).
+    /// Non-range arguments must match exactly. Range aliases are normalized
+    /// only after their values are validated, and the cached range must cover
+    /// the query range. This prevents replaying a different slice, encoding,
+    /// pagination page, or read mode (issue #680).
     fn read_extent_matches(cached_args: &Value, query_args: &Value) -> bool {
-        let cached_raw = cached_args.get("raw").and_then(Value::as_bool).unwrap_or(false);
-        let query_raw = query_args.get("raw").and_then(Value::as_bool).unwrap_or(false);
-        if cached_raw != query_raw {
+        let Some(cached_shape) = Self::read_shape_without_extent(cached_args) else {
+            return false;
+        };
+        let Some(query_shape) = Self::read_shape_without_extent(query_args) else {
+            return false;
+        };
+        if cached_shape != query_shape {
             return false;
         }
 
-        let cached_offset = cached_args.get("offset").and_then(Value::as_u64).unwrap_or(0);
-        let query_offset = query_args.get("offset").and_then(Value::as_u64).unwrap_or(0);
-        if cached_offset != query_offset {
+        let Ok(cached_offset) = read_extent_value(cached_args, READ_OFFSET_KEYS) else {
+            return false;
+        };
+        let Ok(query_offset) = read_extent_value(query_args, READ_OFFSET_KEYS) else {
+            return false;
+        };
+        if !compatible_extent_values(cached_offset, query_offset, true) {
             return false;
         }
 
-        let cached_limit = cached_args.get("limit").and_then(Value::as_u64);
-        let query_limit = query_args.get("limit").and_then(Value::as_u64);
-        match (cached_limit, query_limit) {
-            (Some(c), Some(q)) => c >= q,
-            (None, None) => true,
-            _ => false,
+        let Ok(cached_limit) = read_extent_value(cached_args, READ_LIMIT_KEYS) else {
+            return false;
+        };
+        let Ok(query_limit) = read_extent_value(query_args, READ_LIMIT_KEYS) else {
+            return false;
+        };
+        if !compatible_extent_values(cached_limit, query_limit, false) {
+            return false;
         }
+
+        let Ok(cached_page) = read_page_extent(cached_args) else {
+            return false;
+        };
+        let Ok(query_page) = read_page_extent(query_args) else {
+            return false;
+        };
+        cached_page == query_page
+    }
+
+    fn read_shape_without_extent(args: &Value) -> Option<Value> {
+        let mut object = args.as_object()?.clone();
+        for key in PATH_ALIAS_KEYS.iter().chain(READ_EXTENT_KEYS.iter()) {
+            object.remove(*key);
+        }
+        Some(Value::Object(object))
     }
 
     /// Extract the read target from tool args for path-based matching.
@@ -959,6 +1035,52 @@ impl ToolExecutionHistory {
             tool_name: tool_name.to_string(),
         }
     }
+}
+
+fn read_extent_value(args: &Value, keys: &[&'static str]) -> Result<Option<(&'static str, u64)>, ()> {
+    let object = args.as_object().ok_or(())?;
+    let mut found = None;
+    for key in keys {
+        let Some(value) = object.get(*key) else {
+            continue;
+        };
+        let value = value
+            .as_u64()
+            .or_else(|| value.as_str().and_then(|value| value.trim().parse::<u64>().ok()))
+            .ok_or(())?;
+        if found.is_some() {
+            return Err(());
+        }
+        found = Some((*key, value));
+    }
+    Ok(found)
+}
+
+fn compatible_extent_values(
+    cached: Option<(&'static str, u64)>,
+    query: Option<(&'static str, u64)>,
+    default_zero_is_compatible: bool,
+) -> bool {
+    match (cached, query) {
+        (Some((cached_key, cached_value)), Some((query_key, query_value))) => {
+            cached_key == query_key
+                && if default_zero_is_compatible {
+                    cached_value == query_value
+                } else {
+                    cached_value >= query_value
+                }
+        }
+        (None, None) => true,
+        (Some((_, value)), None) if default_zero_is_compatible => value == 0,
+        (None, Some((_, value))) if default_zero_is_compatible => value == 0,
+        _ => false,
+    }
+}
+
+fn read_page_extent(args: &Value) -> Result<(Option<u64>, Option<u64>), ()> {
+    let page = read_extent_value(args, &["page"])?.map(|(_, value)| value);
+    let per_page = read_extent_value(args, &["per_page"])?.map(|(_, value)| value);
+    Ok((page, per_page))
 }
 
 impl Default for ToolExecutionHistory {
@@ -1985,5 +2107,102 @@ mod tests {
             Duration::from_secs(600),
         );
         assert_eq!(result, Some(json!({"output":"exact file content"})));
+    }
+
+    #[test]
+    fn find_recent_successful_by_read_target_validates_aliases_pagination_and_encoding() {
+        let history = ToolExecutionHistory::new(10);
+        let cached_args = json!({
+            "action": "read",
+            "path": "src/lib.rs",
+            "offset_lines": 1,
+            "page_size_lines": 100,
+            "page": 2,
+            "per_page": 50,
+            "encoding": "utf8"
+        });
+        let cached_result = json!({"content": "cached"});
+        history.add_record(ToolExecutionRecord::success(
+            tools::UNIFIED_FILE.to_string(),
+            tools::UNIFIED_FILE.to_string(),
+            false,
+            None,
+            cached_args,
+            cached_result.clone(),
+            make_snapshot(),
+            None,
+            None,
+            None,
+            None,
+            false,
+        ));
+
+        assert_eq!(
+            history.find_recent_successful_by_read_target(
+                tools::UNIFIED_FILE,
+                &json!({
+                    "action": "read",
+                    "path": "src/lib.rs",
+                    "offset_lines": 1,
+                    "page_size_lines": 50,
+                    "page": 2,
+                    "per_page": 50,
+                    "encoding": "utf8"
+                }),
+                Duration::from_secs(600),
+            ),
+            Some(cached_result)
+        );
+        assert!(
+            history
+                .find_recent_successful_by_read_target(
+                    tools::UNIFIED_FILE,
+                    &json!({
+                        "action": "read",
+                        "path": "src/lib.rs",
+                        "offset_lines": 1,
+                        "page_size_lines": 50,
+                        "page": 3,
+                        "per_page": 50,
+                        "encoding": "utf8"
+                    }),
+                    Duration::from_secs(600),
+                )
+                .is_none()
+        );
+        assert!(
+            history
+                .find_recent_successful_by_read_target(
+                    tools::UNIFIED_FILE,
+                    &json!({
+                        "action": "read",
+                        "path": "src/lib.rs",
+                        "offset_lines": 1,
+                        "page_size_lines": 50,
+                        "page": 2,
+                        "per_page": 50,
+                        "encoding": "base64"
+                    }),
+                    Duration::from_secs(600),
+                )
+                .is_none()
+        );
+        assert!(
+            history
+                .find_recent_successful_by_read_target(
+                    tools::UNIFIED_FILE,
+                    &json!({
+                        "action": "read",
+                        "path": "src/lib.rs",
+                        "offset_lines": "invalid",
+                        "page_size_lines": 50,
+                        "page": 2,
+                        "per_page": 50,
+                        "encoding": "utf8"
+                    }),
+                    Duration::from_secs(600),
+                )
+                .is_none()
+        );
     }
 }

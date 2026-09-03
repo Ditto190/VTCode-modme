@@ -868,6 +868,7 @@ fn persist_archive_progress(
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .err()
         .map(|err| archive_save_warning_message("after turn completion", &err))

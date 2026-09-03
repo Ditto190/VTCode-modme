@@ -632,9 +632,11 @@ impl<'a> CopilotRuntimeHost<'a> {
             // rewrite so a later retry with the same id cannot inherit stale
             // arguments.
             self.pending_hook_rewritten_args.remove(tool_call_id);
+            self.harness_state.record_tool_budget_rejection();
             return Ok(Some(tool_exceeded_budget_response(tool_name, exhaustion.max)));
         }
 
+        self.harness_state.record_admitted_tool_call();
         if let Some(warning) = self.harness_state.record_tool_call_with_default_warning() {
             warning.log_threshold_reached("Tool-call budget warning threshold reached in copilot ACP path");
         }
@@ -680,6 +682,11 @@ impl<'a> CopilotRuntimeHost<'a> {
         // authoritative turn state only after admission; denied calls never
         // reach this method and cannot erase the response streak.
         self.harness_state.record_out_of_band_tool_progress();
+        self.session_stats.record_tool(tool_name);
+    }
+
+    fn record_out_of_band_tool_use(&mut self, tool_name: &str) {
+        self.harness_state.record_out_of_band_tool_call();
         self.session_stats.record_tool(tool_name);
     }
 
@@ -832,7 +839,7 @@ impl<'a> CopilotRuntimeHost<'a> {
         {
             let bind_result = session.bind_observed_tool_call(&update);
             if bind_result.emit_started {
-                self.record_tool_use(&bind_result.association.tool_name);
+                self.record_out_of_band_tool_use(&bind_result.association.tool_name);
                 self.emit_tool_started_event(
                     &bind_result.association.tool_call_id,
                     &bind_result.association.tool_name,
@@ -847,6 +854,9 @@ impl<'a> CopilotRuntimeHost<'a> {
                 );
             }
             if let Some(status) = bind_result.finish_status {
+                if matches!(status, ToolCallStatus::Failed) {
+                    self.harness_state.record_failed_tool_call();
+                }
                 self.emit_tool_finished_event(
                     &bind_result.association.tool_call_id,
                     &bind_result.association.tool_name,
@@ -871,7 +881,7 @@ impl<'a> CopilotRuntimeHost<'a> {
 
         if tool_update.started {
             let tool_name = self.observed_tool_calls[&tool_call_id].tool_name.clone();
-            self.record_tool_use(&tool_name);
+            self.record_out_of_band_tool_use(&tool_name);
             self.emit_tool_started_event(&tool_call_id, &tool_name, update.arguments.as_ref().unwrap_or(&Value::Null));
         }
 
@@ -887,6 +897,9 @@ impl<'a> CopilotRuntimeHost<'a> {
                 CopilotObservedToolCallStatus::Failed => ToolCallStatus::Failed,
                 _ => ToolCallStatus::InProgress,
             };
+            if matches!(status, ToolCallStatus::Failed) {
+                self.harness_state.record_failed_tool_call();
+            }
             self.emit_tool_finished_event(
                 &tool_call_id,
                 &state.tool_name,
@@ -934,10 +947,22 @@ impl CopilotRuntimeRequestHandler for CopilotRuntimeHost<'_> {
                 request_event.respond(decision).map_err(map_runtime_error)?;
             }
             CopilotRuntimeRequest::ToolCall(request_event) => {
+                self.harness_state.record_requested_tool_calls(1);
+                let admitted_before = self.harness_state.admitted_tool_call_count();
                 let response = self
                     .handle_vtcode_tool_call(renderer, request_event.request.clone())
                     .await
-                    .map_err(map_runtime_error)?;
+                    .map_err(|error| {
+                        self.harness_state.record_failed_tool_call();
+                        map_runtime_error(error)
+                    })?;
+                let budget_rejected = self.harness_state.take_tool_budget_rejection();
+                if self.harness_state.admitted_tool_call_count() == admitted_before
+                    && matches!(&response, CopilotToolCallResponse::Failure(_))
+                    && !budget_rejected
+                {
+                    self.harness_state.record_denied_tool_call();
+                }
                 request_event.respond(response).map_err(map_runtime_error)?;
             }
             CopilotRuntimeRequest::TerminalCreate(request_event) => {

@@ -95,6 +95,14 @@ fn should_add_collapsed_tool_output_notice(
 
 fn append_collapsed_tool_output_notice(ctx: &mut TurnProcessingContext<'_>) {
     let output_mode = ctx.vt_cfg.map(|config| config.ui.tool_output_mode);
+    // Old checkpoints may contain one copy per tool round. Remove every stale
+    // copy before deciding whether the current tail still needs the marker, so
+    // resumed sessions are repaired even when a marker already follows the
+    // latest tool response.
+    ctx.working_history.retain(|message| {
+        !(message.role == uni::MessageRole::System
+            && message.content.as_text().as_ref() == COLLAPSED_TOOL_OUTPUT_NOTICE)
+    });
     if should_add_collapsed_tool_output_notice(
         ctx.renderer.supports_inline_ui(),
         ctx.renderer.tool_display_mode(),
@@ -1494,6 +1502,10 @@ mod tests {
 
         let mut ctx = backing.turn_processing_context();
         ctx.vt_cfg = Some(config);
+        ctx.working_history
+            .push(uni::Message::turn_scoped_system(super::COLLAPSED_TOOL_OUTPUT_NOTICE.to_owned()));
+        ctx.working_history
+            .push(uni::Message::turn_scoped_system(super::COLLAPSED_TOOL_OUTPUT_NOTICE.to_owned()));
         ctx.working_history.push(uni::Message::assistant_with_tools(
             String::new(),
             vec![uni::ToolCall::function(
@@ -1537,10 +1549,35 @@ mod tests {
             1
         );
 
+        ctx.working_history.push(uni::Message::assistant_with_tools(
+            String::new(),
+            vec![uni::ToolCall::function(
+                "toolu_2".to_string(),
+                "exec_command".to_string(),
+                "{}".to_string(),
+            )],
+        ));
+        ctx.working_history
+            .push(uni::Message::tool_response("toolu_2".to_string(), "exit 0".to_string()));
+        build_turn_request(&mut ctx, 3, "claude-fable-5", &snapshot, Some(320), None, false)
+            .await
+            .expect("Next tool request should build");
+        assert_eq!(
+            ctx.working_history
+                .iter()
+                .filter(|message| {
+                    message.role == uni::MessageRole::System
+                        && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
+                })
+                .count(),
+            1,
+            "the generic disclosure must not accumulate once per tool round"
+        );
+
         let mut non_anthropic_snapshot = snapshot.clone();
         non_anthropic_snapshot.provider_name = "openai".to_string();
         non_anthropic_snapshot.capabilities.turn_scoped_system_messages = false;
-        let switched = build_turn_request(&mut ctx, 3, "gpt-5", &non_anthropic_snapshot, Some(320), None, false)
+        let switched = build_turn_request(&mut ctx, 4, "gpt-5", &non_anthropic_snapshot, Some(320), None, false)
             .await
             .expect("Provider-switched request should build");
         assert!(switched.request.messages.iter().all(|message| message.clear_at.is_none()));

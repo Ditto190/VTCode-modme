@@ -1,9 +1,11 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::{Read as _, Write as _};
+use std::path::{Component, Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use chrono::Utc;
 use uuid::Uuid;
+use vtcode_commons::canonicalize;
 
 use crate::utils::session_archive::VerifiedSessionArchiveIdentifier;
 use crate::utils::session_debug::sanitize_debug_component;
@@ -11,10 +13,8 @@ use crate::utils::session_debug::sanitize_debug_component;
 const TASKS_DIR: &str = ".vtcode/tasks";
 const CURRENT_BLOCKED_FILE: &str = "current_blocked.md";
 const BLOCKERS_DIR: &str = "blockers";
-const CURRENT_TASK_FILE: &str = "current_task.md";
 
 struct BlockedHandoffPaths<'a> {
-    tracker: &'a Path,
     current: &'a Path,
     archive: &'a Path,
 }
@@ -41,8 +41,8 @@ pub enum BlockedHandoffResume<'a> {
 /// Write a blocked-handoff artifact when the agent hits an unrecoverable blocker.
 ///
 /// Creates both a `current_blocked.md` file and a timestamped archive under
-/// `.vtcode/tasks/blockers/`. The handoff includes the blocker summary, current
-/// tracker snapshot. Resume commands are added only by
+/// `.vtcode/tasks/blockers/`. The handoff includes the blocker summary and
+/// explicitly declines to attribute the workspace-global tracker to a session. Resume commands are added only by
 /// [`write_blocked_handoff_with_resume`] after a caller verifies an
 /// archive identifier.
 pub fn write_blocked_handoff(
@@ -74,35 +74,33 @@ pub fn write_blocked_handoff_with_resume(
     relevant_paths: &[PathBuf],
     resume: BlockedHandoffResume<'_>,
 ) -> Result<BlockedHandoffArtifacts> {
-    let tasks_dir = workspace.join(TASKS_DIR);
-    let blockers_dir = tasks_dir.join(BLOCKERS_DIR);
+    let (workspace, tasks_dir, blockers_dir) = safe_handoff_directories(workspace)?;
     fs::create_dir_all(&blockers_dir)
         .with_context(|| format!("failed to create blockers dir {}", blockers_dir.display()))?;
 
-    let tracker_path = tasks_dir.join(CURRENT_TASK_FILE);
     let current_path = tasks_dir.join(CURRENT_BLOCKED_FILE);
     let timestamp = Utc::now();
-    let archive_name =
-        format!("{}-{}.md", sanitize_debug_component(session_id, "session"), timestamp.format("%Y%m%dT%H%M%SZ"));
+    let archive_name = format!(
+        "{}-{}-{}.md",
+        sanitize_debug_component(session_id, "session"),
+        timestamp.format("%Y%m%dT%H%M%SZ"),
+        Uuid::new_v4()
+    );
     let archive_path = blockers_dir.join(archive_name);
 
     let markdown = render_blocked_handoff(
-        workspace,
+        &workspace,
         session_id,
         outcome_code,
         blocker_summary,
-        BlockedHandoffPaths {
-            tracker: &tracker_path,
-            current: &current_path,
-            archive: &archive_path,
-        },
+        BlockedHandoffPaths { current: &current_path, archive: &archive_path },
         relevant_paths,
         timestamp.to_rfc3339(),
         resume,
     );
 
-    fs::write(&current_path, &markdown).with_context(|| format!("failed to write {}", current_path.display()))?;
-    fs::write(&archive_path, markdown).with_context(|| format!("failed to write {}", archive_path.display()))?;
+    write_handoff_file(&archive_path, &markdown, false)?;
+    write_handoff_file(&current_path, &markdown, true)?;
 
     Ok(BlockedHandoffArtifacts { current_path, archive_path })
 }
@@ -120,7 +118,9 @@ pub struct BlockedHandoffInfo {
 /// Reads `.vtcode/tasks/current_blocked.md` if it exists, parsing the front-matter
 /// and blocker summary.
 pub fn read_current_blocked_handoff(workspace: &Path) -> Option<BlockedHandoffInfo> {
-    let current_path = workspace.join(TASKS_DIR).join(CURRENT_BLOCKED_FILE);
+    let (_, tasks_dir) = safe_handoff_tasks_dir(workspace).ok()?;
+    let current_path = tasks_dir.join(CURRENT_BLOCKED_FILE);
+    ensure_not_symlink(&current_path).ok()?;
     let content = fs::read_to_string(&current_path).ok()?;
     parse_blocked_handoff_content(&content)
 }
@@ -192,11 +192,107 @@ fn parse_blocked_handoff_content(content: &str) -> Option<BlockedHandoffInfo> {
     })
 }
 
+fn safe_handoff_tasks_dir(workspace: &Path) -> Result<(PathBuf, PathBuf)> {
+    let canonical_workspace =
+        canonicalize(workspace).with_context(|| format!("failed to canonicalize {}", workspace.display()))?;
+    let tasks_dir = canonical_workspace.join(TASKS_DIR);
+    ensure_no_symlinked_components(&canonical_workspace, &tasks_dir)?;
+    Ok((canonical_workspace, tasks_dir))
+}
+
+fn safe_handoff_directories(workspace: &Path) -> Result<(PathBuf, PathBuf, PathBuf)> {
+    let (canonical_workspace, tasks_dir) = safe_handoff_tasks_dir(workspace)?;
+    let blockers_dir = tasks_dir.join(BLOCKERS_DIR);
+    ensure_no_symlinked_components(&canonical_workspace, &blockers_dir)?;
+    Ok((canonical_workspace, tasks_dir, blockers_dir))
+}
+
+fn ensure_no_symlinked_components(workspace: &Path, path: &Path) -> Result<()> {
+    let relative = path
+        .strip_prefix(workspace)
+        .with_context(|| format!("handoff path escaped {}", workspace.display()))?;
+    let mut current = workspace.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            anyhow::bail!("handoff path contains an unsafe component: {}", path.display());
+        };
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                ensure!(
+                    !metadata.file_type().is_symlink(),
+                    "refusing symlinked handoff directory {}",
+                    current.display()
+                );
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => break,
+            Err(err) => {
+                return Err(err).with_context(|| format!("failed to inspect handoff directory {}", current.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_not_symlink(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            ensure!(!metadata.file_type().is_symlink(), "refusing symlinked handoff {}", path.display());
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect handoff {}", path.display())),
+    }
+}
+
+fn ensure_safe_handoff_target(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            ensure!(!metadata.file_type().is_symlink(), "refusing symlinked handoff {}", path.display());
+            ensure!(metadata.is_file(), "refusing non-file handoff target {}", path.display());
+            ensure!(single_link_file(&metadata), "refusing hard-linked handoff target {}", path.display());
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect handoff target {}", path.display())),
+    }
+}
+
+fn write_handoff_file(path: &Path, contents: &str, replace_existing: bool) -> Result<()> {
+    if replace_existing {
+        ensure_safe_handoff_target(path)?;
+    }
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
+    if replace_existing {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to open handoff {} for writing", path.display()))?;
+    file.write_all(contents.as_bytes())
+        .with_context(|| format!("failed to write handoff {}", path.display()))?;
+    file.sync_data()
+        .with_context(|| format!("failed to sync handoff {}", path.display()))?;
+    Ok(())
+}
+
 /// Clears `.vtcode/tasks/current_blocked.md` if it exists.
 ///
 /// Returns `Ok(true)` if the file was deleted, or `Ok(false)` if it did not exist.
 pub fn clear_current_blocked_handoff(workspace: &Path) -> Result<bool> {
-    let current_path = workspace.join(TASKS_DIR).join(CURRENT_BLOCKED_FILE);
+    let (_, tasks_dir) = safe_handoff_tasks_dir(workspace)?;
+    let current_path = tasks_dir.join(CURRENT_BLOCKED_FILE);
+    ensure_not_symlink(&current_path)?;
     match fs::remove_file(&current_path) {
         Ok(()) => Ok(true),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -204,26 +300,188 @@ pub fn clear_current_blocked_handoff(workspace: &Path) -> Result<bool> {
     }
 }
 
+/// Clears `.vtcode/tasks/current_blocked.md` only when it belongs to `session_id`.
+///
+/// Missing or malformed handoffs are left intact so one session cannot clear
+/// another session's recovery pointer.
+pub fn clear_current_blocked_handoff_for_session(workspace: &Path, session_id: &str) -> Result<bool> {
+    let (workspace, tasks_dir) = safe_handoff_tasks_dir(workspace)?;
+    let current_path = tasks_dir.join(CURRENT_BLOCKED_FILE);
+    ensure_not_symlink(&current_path)?;
+    let claim_path = current_path.with_file_name(format!(
+        ".{CURRENT_BLOCKED_FILE}.{}.{}.resolving",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    match fs::rename(&current_path, &claim_path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!("failed to claim blocked handoff {} as {}", current_path.display(), claim_path.display())
+            });
+        }
+    }
+
+    let result = (|| {
+        let content = fs::read_to_string(&claim_path)
+            .with_context(|| format!("failed to read claimed handoff {}", claim_path.display()))?;
+        let Some(info) = parse_blocked_handoff_content(&content) else {
+            return Ok(false);
+        };
+        if info.session_id != session_id {
+            return Ok(false);
+        }
+        mark_archived_handoff_resolved(&workspace, &content, session_id)?;
+        fs::remove_file(&claim_path)
+            .with_context(|| format!("failed to remove claimed handoff {}", claim_path.display()))?;
+        Ok(true)
+    })();
+
+    if !matches!(result, Ok(true)) {
+        restore_claim_without_overwrite(&claim_path, &current_path)?;
+    }
+    result
+}
+
+/// Restore an unconsumed claim without overwriting a handoff concurrently
+/// written by another session. A hard link provides create-if-absent behavior;
+/// the private claim can then be unlinked independently.
+fn restore_claim_without_overwrite(claim_path: &Path, current_path: &Path) -> Result<()> {
+    match fs::hard_link(claim_path, current_path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to restore blocked handoff claim {}", claim_path.display()));
+        }
+    };
+    fs::remove_file(claim_path)
+        .with_context(|| format!("failed to release blocked handoff claim {}", claim_path.display()))
+}
+
+fn front_matter_value<'a>(content: &'a str, expected_key: &str) -> Option<&'a str> {
+    let mut lines = content.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            return None;
+        }
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        if key.trim() == expected_key {
+            return Some(value.trim().trim_matches('"').trim_matches('\''));
+        }
+    }
+    None
+}
+
+fn mark_archived_handoff_resolved(workspace: &Path, current_content: &str, session_id: &str) -> Result<()> {
+    let archive_file =
+        front_matter_value(current_content, "archive_file").context("blocked handoff archive_file is missing")?;
+    let archive_component = Path::new(archive_file);
+    let mut components = archive_component.components();
+    ensure!(
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none(),
+        "blocked handoff archive_file must be a single path component"
+    );
+
+    let (canonical_workspace, _, blockers_dir) = safe_handoff_directories(workspace)?;
+    let archive_path = blockers_dir.join(archive_component);
+    let canonical_blockers =
+        canonicalize(&blockers_dir).with_context(|| format!("failed to canonicalize {}", blockers_dir.display()))?;
+    ensure!(
+        canonical_blockers.starts_with(&canonical_workspace),
+        "blocked handoff blockers directory escaped {}",
+        canonical_workspace.display()
+    );
+    let canonical_archive =
+        canonicalize(&archive_path).with_context(|| format!("failed to canonicalize {}", archive_path.display()))?;
+    ensure!(
+        canonical_archive.parent() == Some(canonical_blockers.as_path()),
+        "blocked handoff archive escaped {}",
+        canonical_blockers.display()
+    );
+
+    let mut archive = open_archive_for_resolution(&canonical_archive)?;
+    let metadata = archive
+        .metadata()
+        .with_context(|| format!("failed to stat {}", canonical_archive.display()))?;
+    ensure!(metadata.is_file(), "blocked handoff archive is not a regular file");
+    ensure!(single_link_file(&metadata), "blocked handoff archive has unexpected hard links");
+
+    let mut archive_content = String::new();
+    archive
+        .read_to_string(&mut archive_content)
+        .with_context(|| format!("failed to read {}", canonical_archive.display()))?;
+    ensure!(
+        parse_blocked_handoff_content(&archive_content).is_some_and(|info| info.session_id == session_id),
+        "blocked handoff archive session does not match {session_id}"
+    );
+    let resolution_marker = format!("resolved_by_session: {session_id}");
+    if archive_content.lines().any(|line| line.trim() == resolution_marker) {
+        return Ok(());
+    }
+
+    write!(archive, "\n# Resolution\n\n{resolution_marker}\nresolved_at: {}\n", Utc::now().to_rfc3339())
+        .with_context(|| format!("failed to append resolution to {}", canonical_archive.display()))?;
+    archive
+        .sync_data()
+        .with_context(|| format!("failed to sync {}", canonical_archive.display()))?;
+    Ok(())
+}
+
+fn open_archive_for_resolution(path: &Path) -> Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    options.open(path).with_context(|| format!("failed to open {}", path.display()))
+}
+
+#[cfg(unix)]
+fn single_link_file(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    metadata.nlink() == 1
+}
+
+#[cfg(windows)]
+fn single_link_file(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.number_of_links() == 1
+}
+
+#[cfg(not(any(unix, windows)))]
+const fn single_link_file(_metadata: &fs::Metadata) -> bool {
+    // Refuse resolution on platforms without a stable link-count API rather
+    // than appending to a file whose identity cannot be checked.
+    false
+}
+
 fn render_blocked_handoff(
     workspace: &Path,
     session_id: &str,
     outcome_code: &str,
     blocker_summary: &str,
-    paths: BlockedHandoffPaths<'_>,
+    handoff_paths: BlockedHandoffPaths<'_>,
     relevant_paths: &[PathBuf],
     created_at: String,
     resume: BlockedHandoffResume<'_>,
 ) -> String {
-    let tracker_snapshot = fs::read_to_string(paths.tracker)
-        .ok()
-        .filter(|content| !content.trim().is_empty())
-        .unwrap_or_else(|| "_No current tracker snapshot found._".to_string());
-
     let mut paths = vec![
         workspace.to_path_buf(),
-        paths.tracker.to_path_buf(),
-        paths.current.to_path_buf(),
-        paths.archive.to_path_buf(),
+        handoff_paths.current.to_path_buf(),
+        handoff_paths.archive.to_path_buf(),
     ];
     for path in relevant_paths {
         if !paths.iter().any(|existing| existing == path) {
@@ -249,15 +507,21 @@ fn render_blocked_handoff(
     };
 
     let actionable_steps = format!(
-        "## Actionable Next Steps\n\n- In this session: Type `continue` to retry with retained history, or provide alternative instructions.\n{resume_actionable}- Inspect details: Check `.vtcode/tasks/current_blocked.md`."
+        "## Actionable Next Steps\n\n- In this session: Type `continue` to retry with retained history, or provide alternative instructions.\n{resume_actionable}- Archived details: `{}`.\n- Live pointer: `{}` may be cleared after this session recovers successfully.",
+        handoff_paths.archive.display(),
+        handoff_paths.current.display()
     );
+    let archive_file = handoff_paths
+        .archive
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
 
     format!(
-        "---\nsession_id: {session_id}\noutcome: {outcome_code}\ncreated_at: {created_at}\nworkspace: {}\n{resume_front_matter}---\n\n# Blocker Summary\n\n{}\n\n{}\n\n# Current Tracker Snapshot\n\n{}\n\n# Relevant Paths\n\n{}\n\n# Resume Metadata\n\n- Session ID: `{session_id}`\n- Outcome: `{outcome_code}`\n{resume_metadata}",
+        "---\nsession_id: {session_id}\noutcome: {outcome_code}\ncreated_at: {created_at}\nworkspace: {}\narchive_file: {archive_file}\n{resume_front_matter}---\n\n# Blocker Summary\n\n{}\n\n{}\n\n# Session Tracker Snapshot\n\n_Tracker snapshot unavailable: `.vtcode/tasks/current_task.md` is workspace-global and is not safe to attribute to this session._\n\n# Relevant Paths\n\n{}\n\n# Resume Metadata\n\n- Session ID: `{session_id}`\n- Outcome: `{outcome_code}`\n{resume_metadata}",
         workspace.display(),
         blocker_summary.trim(),
         actionable_steps,
-        tracker_snapshot,
         relevant_paths_section,
     )
 }
@@ -285,17 +549,17 @@ pub fn write_async_approval_blocker(
     estimated_cost: Option<f64>,
     notify_command: Option<&str>,
 ) -> Result<AsyncApprovalArtifacts> {
-    let tasks_dir = workspace.join(TASKS_DIR);
-    let blockers_dir = tasks_dir.join(BLOCKERS_DIR);
+    let (_, _, blockers_dir) = safe_handoff_directories(workspace)?;
     fs::create_dir_all(&blockers_dir)
         .with_context(|| format!("failed to create blockers dir {}", blockers_dir.display()))?;
 
     let approval_token = Uuid::new_v4().to_string();
     let timestamp = Utc::now();
     let archive_name = format!(
-        "async-{}-{}.md",
+        "async-{}-{}-{}.md",
         sanitize_debug_component(session_id, "session"),
-        timestamp.format("%Y%m%dT%H%M%SZ")
+        timestamp.format("%Y%m%dT%H%M%SZ"),
+        Uuid::new_v4()
     );
     let current_path = blockers_dir.join(archive_name);
 
@@ -315,8 +579,7 @@ pub fn write_async_approval_blocker(
         args_json = serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string()),
     );
 
-    fs::write(&current_path, &markdown)
-        .with_context(|| format!("failed to write async blocker {}", current_path.display()))?;
+    write_handoff_file(&current_path, &markdown, false)?;
 
     Ok(AsyncApprovalArtifacts { current_path, approval_token })
 }
@@ -332,7 +595,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp dir");
         let tasks_dir = temp.path().join(".vtcode/tasks");
         fs::create_dir_all(&tasks_dir).expect("tasks dir");
-        fs::write(tasks_dir.join("current_task.md"), "# Current Task\n\n- [ ] investigate blocker\n").expect("tracker");
+        fs::write(tasks_dir.join("current_task.md"), "# Unrelated Workspace Task\n").expect("tracker");
 
         let artifacts = write_blocked_handoff(
             temp.path(),
@@ -350,11 +613,62 @@ mod tests {
         assert!(current.contains("session_id: session-123"));
         assert!(current.contains("# Blocker Summary"));
         assert!(current.contains("Execution stalled on a loop."));
-        assert!(current.contains("# Current Task"));
+        assert!(current.contains("# Session Tracker Snapshot"));
+        assert!(current.contains("workspace-global"));
+        assert!(!current.contains("Unrelated Workspace Task"));
+        assert!(current.contains(&artifacts.archive_path.display().to_string()));
         assert!(!current.contains("resume_command:"));
         assert!(!current.contains("vtcode --resume"));
         assert!(current.contains("Resume is unavailable"));
         assert!(current.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn blocked_handoff_archives_have_unique_paths() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        let first =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "first", &[]).expect("write first handoff");
+        let second =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "second", &[]).expect("write second handoff");
+
+        assert_ne!(first.archive_path, second.archive_path);
+        assert!(first.archive_path.exists());
+        assert!(second.archive_path.exists());
+        assert!(
+            fs::read_to_string(first.archive_path)
+                .expect("read first archive")
+                .contains("first")
+        );
+    }
+
+    #[test]
+    fn async_approval_blockers_have_unique_paths() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let first = write_async_approval_blocker(
+            temp.path(),
+            "session-a",
+            "approve the first request",
+            "exec_command",
+            &serde_json::json!({"command": "true"}),
+            None,
+            None,
+        )
+        .expect("write first approval blocker");
+        let second = write_async_approval_blocker(
+            temp.path(),
+            "session-a",
+            "approve the second request",
+            "exec_command",
+            &serde_json::json!({"command": "false"}),
+            None,
+            None,
+        )
+        .expect("write second approval blocker");
+
+        assert_ne!(first.current_path, second.current_path);
+        assert!(first.current_path.exists());
+        assert!(second.current_path.exists());
     }
 
     #[test]
@@ -486,5 +800,151 @@ mod tests {
         // Should no longer exist
         assert_eq!(read_current_blocked_handoff(temp.path()), None);
         assert!(!clear_current_blocked_handoff(temp.path()).unwrap());
+    }
+
+    #[test]
+    fn session_scoped_clear_preserves_another_sessions_handoff() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let artifacts =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "stalled", &[]).expect("write handoff");
+
+        assert!(!clear_current_blocked_handoff_for_session(temp.path(), "session-b").expect("scoped clear"));
+        assert_eq!(
+            read_current_blocked_handoff(temp.path()).map(|info| info.session_id),
+            Some("session-a".to_string())
+        );
+        assert!(clear_current_blocked_handoff_for_session(temp.path(), "session-a").expect("scoped clear"));
+        assert_eq!(read_current_blocked_handoff(temp.path()), None);
+        let archive = fs::read_to_string(artifacts.archive_path).expect("read resolved archive");
+        assert!(archive.contains("# Resolution"));
+        assert!(archive.contains("resolved_by_session: session-a"));
+    }
+
+    #[test]
+    fn session_scoped_clear_preserves_malformed_handoff() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let tasks_dir = temp.path().join(TASKS_DIR);
+        fs::create_dir_all(&tasks_dir).expect("tasks dir");
+        let current = tasks_dir.join(CURRENT_BLOCKED_FILE);
+        fs::write(&current, "not a handoff").expect("write malformed handoff");
+
+        assert!(!clear_current_blocked_handoff_for_session(temp.path(), "session-a").expect("scoped clear"));
+        assert!(current.exists());
+    }
+
+    #[test]
+    fn session_scoped_clear_rejects_archive_path_traversal() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let tasks_dir = temp.path().join(TASKS_DIR);
+        fs::create_dir_all(&tasks_dir).expect("tasks dir");
+        let current = tasks_dir.join(CURRENT_BLOCKED_FILE);
+        fs::write(
+            &current,
+            "---\nsession_id: session-a\noutcome: blocked\narchive_file: ../../outside.md\n---\n\n# Blocker Summary\n\nstalled\n",
+        )
+        .expect("write traversal handoff");
+
+        assert!(clear_current_blocked_handoff_for_session(temp.path(), "session-a").is_err());
+        assert!(current.exists());
+        assert!(!temp.path().join("outside.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_scoped_clear_rejects_hardlinked_archive() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let artifacts =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "stalled", &[]).expect("write handoff");
+        let external = temp.path().join("outside.md");
+        fs::copy(&artifacts.archive_path, &external).expect("copy archive");
+        fs::remove_file(&artifacts.archive_path).expect("remove original archive");
+        fs::hard_link(&external, &artifacts.archive_path).expect("create hard link");
+
+        assert!(clear_current_blocked_handoff_for_session(temp.path(), "session-a").is_err());
+        assert!(read_current_blocked_handoff(temp.path()).is_some());
+        assert!(
+            !fs::read_to_string(external)
+                .expect("read external file")
+                .contains("# Resolution")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_blocked_handoff_rejects_hardlinked_current_pointer() {
+        let temp = tempfile::tempdir().expect("workspace temp dir");
+        let tasks_dir = temp.path().join(TASKS_DIR);
+        fs::create_dir_all(&tasks_dir).expect("tasks dir");
+        let external = temp.path().join("external.md");
+        fs::write(&external, "must remain unchanged").expect("external file");
+        fs::hard_link(&external, tasks_dir.join(CURRENT_BLOCKED_FILE)).expect("hard link current pointer");
+
+        assert!(write_blocked_handoff(temp.path(), "session-a", "blocked", "stalled", &[]).is_err());
+        assert_eq!(fs::read_to_string(external).expect("read external file"), "must remain unchanged");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_scoped_clear_rejects_blockers_directory_outside_workspace() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let artifacts =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "stalled", &[]).expect("write handoff");
+        let blockers_dir = temp.path().join(TASKS_DIR).join(BLOCKERS_DIR);
+        let outside_temp = tempfile::tempdir().expect("outside temp dir");
+        let outside_dir = outside_temp.path().join("outside-blockers");
+        fs::create_dir(&outside_dir).expect("outside directory");
+        let outside_archive = outside_dir.join(artifacts.archive_path.file_name().expect("archive file name"));
+        fs::rename(&artifacts.archive_path, &outside_archive).expect("move archive outside");
+        fs::remove_dir(&blockers_dir).expect("remove blockers directory");
+        std::os::unix::fs::symlink(&outside_dir, &blockers_dir).expect("link blockers directory");
+
+        assert!(clear_current_blocked_handoff_for_session(temp.path(), "session-a").is_err());
+        assert!(read_current_blocked_handoff(temp.path()).is_some());
+        assert!(
+            !fs::read_to_string(outside_archive)
+                .expect("read outside archive")
+                .contains("# Resolution")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_paths_reject_symlinked_vtcode_parent() {
+        let temp = tempfile::tempdir().expect("workspace temp dir");
+        let outside = tempfile::tempdir().expect("outside temp dir");
+        let outside_tasks = outside.path().join(TASKS_DIR);
+        fs::create_dir_all(&outside_tasks).expect("outside tasks dir");
+        std::os::unix::fs::symlink(outside.path().join(".vtcode"), temp.path().join(".vtcode"))
+            .expect("symlink vtcode parent");
+
+        assert!(write_blocked_handoff(temp.path(), "session-a", "blocked", "stalled", &[]).is_err());
+        assert!(
+            write_async_approval_blocker(
+                temp.path(),
+                "session-a",
+                "approve this",
+                "exec_command",
+                &serde_json::json!({}),
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert!(clear_current_blocked_handoff(temp.path()).is_err());
+        assert!(!outside_tasks.join(CURRENT_BLOCKED_FILE).exists());
+    }
+
+    #[test]
+    fn restoring_claim_does_not_overwrite_concurrent_handoff() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let current = temp.path().join(CURRENT_BLOCKED_FILE);
+        let claim = temp.path().join(".current_blocked.md.claim");
+        fs::write(&claim, "session-a").expect("write claim");
+        fs::write(&current, "session-b").expect("write replacement");
+
+        restore_claim_without_overwrite(&claim, &current).expect("restore without overwrite");
+
+        assert_eq!(fs::read_to_string(&current).expect("read current"), "session-b");
+        assert!(!claim.exists());
     }
 }

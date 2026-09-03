@@ -388,6 +388,7 @@ pub(super) async fn checkpoint_session_archive_start(
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: Some(snapshot.loaded_skills),
+            turn_diagnostics: None,
         })
         .await?;
     Ok(())

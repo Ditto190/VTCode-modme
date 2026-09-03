@@ -152,6 +152,7 @@ async fn checkpoint_exec_archive(
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .await
         .context("Failed to checkpoint exec session archive")?;

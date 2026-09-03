@@ -93,6 +93,8 @@ pub struct SnapshotTurnDiagnostics {
     pub elapsed_ms: u64,
     pub requested_tool_calls: u32,
     pub admitted_tool_calls: u32,
+    #[serde(default)]
+    pub unadmitted_tool_calls: u32,
     pub failed_tool_calls: u32,
     pub denied_tool_calls: u32,
     pub preflight_failures: u32,
@@ -100,6 +102,10 @@ pub struct SnapshotTurnDiagnostics {
     pub spooled_results: u32,
     pub raw_spooled_bytes: u64,
     pub model_visible_output_bytes: u64,
+    #[serde(default)]
+    pub suppressed_tool_previews: u32,
+    #[serde(default)]
+    pub model_visible_tool_preview_budget_exhausted: bool,
     pub low_signal_tool_calls: u32,
     pub recovery_activations: u32,
 }
@@ -1046,6 +1052,7 @@ mod tests {
             elapsed_ms: 12_345,
             requested_tool_calls: 9,
             admitted_tool_calls: 7,
+            unadmitted_tool_calls: 2,
             failed_tool_calls: 2,
             denied_tool_calls: 1,
             preflight_failures: 1,
@@ -1053,6 +1060,8 @@ mod tests {
             spooled_results: 3,
             raw_spooled_bytes: 139_000,
             model_visible_output_bytes: 6_100,
+            suppressed_tool_previews: 5,
+            model_visible_tool_preview_budget_exhausted: true,
             low_signal_tool_calls: 4,
             recovery_activations: 1,
         };

@@ -271,6 +271,9 @@ pub(super) fn human_event_line(event: &ThreadEvent) -> Option<String> {
                     vtcode_core::exec::events::HarnessEventKind::BlockedHandoffWritten => {
                         style("[HANDOFF]").cyan().bold()
                     }
+                    vtcode_core::exec::events::HarnessEventKind::BlockedHandoffResolved => {
+                        style("[HANDOFF]").green().bold()
+                    }
                     vtcode_core::exec::events::HarnessEventKind::EvaluationStarted => style("[EVAL]").cyan().bold(),
                     vtcode_core::exec::events::HarnessEventKind::EvaluationPassed => style("[EVAL]").green().bold(),
                     vtcode_core::exec::events::HarnessEventKind::EvaluationFailed => {

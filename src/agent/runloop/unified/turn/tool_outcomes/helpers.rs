@@ -231,6 +231,7 @@ pub(crate) fn find_duplicate_in_history(
                 if batch_tool_name == target_tool_name
                     && read_normalized_signature_key(batch_tool_name, tc_args) == target_signature
                     && read_extent::extent_covers(tc_args, args)
+                    && tool_response_is_replayable(msg)
                 {
                     matching_responses.push((abs_idx, tc_args.clone(), msg));
                 }
@@ -247,6 +248,96 @@ pub(crate) fn find_duplicate_in_history(
         }
     }
     None
+}
+
+fn tool_response_is_replayable(message: &uni::Message) -> bool {
+    let content = message.content.as_text();
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.len() > 128 * 1024 {
+        return false;
+    }
+
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(serde_json::Value::Object(output)) => {
+            if output.contains_key("error") || output.contains_key("error_type") || output.contains_key("failure_kind")
+            {
+                return false;
+            }
+            if output.get("blocked").and_then(serde_json::Value::as_bool) == Some(true)
+                || output.get("verification_required").and_then(serde_json::Value::as_bool) == Some(true)
+            {
+                return false;
+            }
+            if matches!(output.get("success"), Some(serde_json::Value::Bool(false)) | Some(serde_json::Value::Null)) {
+                return false;
+            }
+            if output.get("success").is_some_and(|value| !value.is_boolean()) {
+                return false;
+            }
+            !output.get("status").and_then(serde_json::Value::as_str).is_some_and(|status| {
+                matches!(
+                    status.to_ascii_lowercase().as_str(),
+                    "failed"
+                        | "failure"
+                        | "error"
+                        | "denied"
+                        | "permission_denied"
+                        | "rejected"
+                        | "timeout"
+                        | "timed_out"
+                        | "cancelled"
+                        | "canceled"
+                        | "interrupted"
+                        | "aborted"
+                        | "blocked"
+                        | "skipped"
+                        | "not_started"
+                        | "not_executed"
+                        | "pending"
+                        | "in_progress"
+                        | "not_run"
+                )
+            })
+        }
+        Ok(serde_json::Value::String(value)) => text_response_is_replayable(&value),
+        Ok(serde_json::Value::Array(_) | serde_json::Value::Number(_) | serde_json::Value::Bool(_)) => true,
+        Ok(serde_json::Value::Null) => false,
+        Err(_) => text_response_is_replayable(trimmed),
+    }
+}
+
+fn text_response_is_replayable(content: &str) -> bool {
+    let trimmed = content.trim();
+    const FAILURE_PREFIXES: &[&str] = &[
+        "error:",
+        "execution denied",
+        "permission denied",
+        "timeout",
+        "timed out",
+        "cancelled",
+        "canceled",
+        "failed",
+        "failure",
+        "denied",
+        "rejected",
+        "blocked",
+        "aborted",
+        "interrupted",
+        "skipped",
+        "not started",
+        "not executed",
+        "not run",
+        "pending",
+        "in progress",
+    ];
+    !FAILURE_PREFIXES.iter().any(|prefix| {
+        trimmed
+            .get(..prefix.len())
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+    })
 }
 
 fn history_has_scoped_mutation_after(
@@ -1777,6 +1868,18 @@ mod tests {
     }
 
     #[test]
+    fn read_normalized_signature_key_preserves_encoding() {
+        let utf8 = json!({"action": "read", "path": "src/lib.rs", "encoding": "utf8"});
+        let base64 = json!({"action": "read", "path": "src/lib.rs", "encoding": "base64"});
+
+        assert_ne!(
+            read_normalized_signature_key("file_operation", &utf8),
+            read_normalized_signature_key("file_operation", &base64),
+            "different encodings produce different tool output and must not reuse one another"
+        );
+    }
+
+    #[test]
     fn read_normalized_signature_key_differentiates_different_paths() {
         let args_a = json!({"action": "read", "path": "src/lib.rs"});
         let args_b = json!({"action": "read", "path": "src/main.rs"});
@@ -2099,6 +2202,53 @@ mod tests {
             assert!(
                 !tool_response_is_success(&response(content)),
                 "mutation outcome must not count as successful: {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_history_reuse_rejects_failed_results() {
+        let args = json!({"query": "needle", "path": "src"});
+        let call = || {
+            uni::Message::assistant_with_tools(
+                "search".into(),
+                vec![uni::ToolCall::function(
+                    "search_call".into(),
+                    tools::CODE_SEARCH.into(),
+                    serde_json::to_string(&args).unwrap(),
+                )],
+            )
+        };
+
+        for failure in [
+            r#"{"success":false,"output":"partial"}"#,
+            r#"{"status":"timeout","output":"partial"}"#,
+            r#"{"error":"permission denied"}"#,
+            "Error: command failed",
+            "timed out while reading",
+            "failed to execute command",
+            "denied by policy",
+            "blocked until verification",
+            "not executed",
+        ] {
+            let history = vec![
+                call(),
+                uni::Message::tool_response("search_call".into(), failure.into()),
+            ];
+            assert!(
+                find_duplicate_in_history(&history, tools::CODE_SEARCH, &args, Path::new(".")).is_none(),
+                "failed result must not be replayed: {failure}"
+            );
+        }
+
+        for success in [r#"{"results":[]}"#, "[]", "plain successful output"] {
+            let history = vec![
+                call(),
+                uni::Message::tool_response("search_call".into(), success.into()),
+            ];
+            assert_eq!(
+                find_duplicate_in_history(&history, tools::CODE_SEARCH, &args, Path::new(".")).as_deref(),
+                Some(success)
             );
         }
     }

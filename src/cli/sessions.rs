@@ -443,6 +443,7 @@ mod tests {
                 token_usage: None,
                 max_context_tokens: Some(128),
                 loaded_skills: Vec::new(),
+                turn_diagnostics: None,
             })),
             error_logs: Vec::new(),
         };
@@ -473,6 +474,7 @@ mod tests {
                 token_usage: None,
                 max_context_tokens: Some(128),
                 loaded_skills: Vec::new(),
+                turn_diagnostics: None,
             })),
             error_logs: Vec::new(),
         };

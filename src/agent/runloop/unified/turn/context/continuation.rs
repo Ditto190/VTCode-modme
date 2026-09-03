@@ -157,10 +157,13 @@ pub(super) fn evaluate_interim_text_continuation(
 }
 
 pub(super) fn push_system_directive_once(history: &mut Vec<uni::Message>, directive: &str) {
+    let current_turn_start = history
+        .iter()
+        .rposition(|message| message.role == uni::MessageRole::User)
+        .unwrap_or(0);
     let already_present = history
         .iter()
-        .rev()
-        .take(3)
+        .skip(current_turn_start)
         .any(|message| message.role == uni::MessageRole::System && message.content.as_text().trim() == directive);
     if !already_present {
         history.push(uni::Message::system(directive.to_string()));
@@ -527,6 +530,44 @@ mod tests {
     use crate::agent::runloop::unified::run_loop_context::RecoveryMode;
     use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
     use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
+
+    #[test]
+    fn system_directive_is_not_duplicated_after_intervening_messages() {
+        let directive = "Synthesize a final response now.";
+        let mut history = vec![uni::Message::system(directive.to_string())];
+        for index in 0..4 {
+            history.push(uni::Message::assistant(format!("intervening message {index}")));
+        }
+
+        push_system_directive_once(&mut history, directive);
+
+        assert_eq!(
+            history
+                .iter()
+                .filter(|message| message.role == uni::MessageRole::System && message.content.as_text() == directive)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn system_directive_is_reissued_for_a_new_user_turn() {
+        let directive = "Synthesize a final response now.";
+        let mut history = vec![
+            uni::Message::system(directive.to_string()),
+            uni::Message::user("first request".to_string()),
+        ];
+
+        push_system_directive_once(&mut history, directive);
+
+        assert_eq!(
+            history
+                .iter()
+                .filter(|message| message.role == uni::MessageRole::System && message.content.as_text() == directive)
+                .count(),
+            2
+        );
+    }
 
     #[test]
     fn follow_up_prompt_detection_accepts_continue_variants() {

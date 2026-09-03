@@ -270,6 +270,16 @@ commands preserve the tail. The complete spool, byte counts, reference
 metadata, and failure or recovery diagnostics remain available without
 reopening the spool while the response is constructed.
 
+Across a turn, provider-visible tool previews are capped at 32 KiB. Once that
+aggregate budget is exhausted, VTCode retains bounded outcome and control
+metadata while omitting payload bodies. A successful verifier therefore stays
+authoritative without encouraging duplicate reads or checks. Blocker live
+pointers are cleared only by the session that created them; archived blocker
+files remain self-contained, append a durable resolution marker before pointer
+cleanup, and do not claim ownership of the workspace-global task tracker. An
+ordinary user exit after a completed non-fallback turn is reported as successful
+thread completion; an exit that terminates active work remains cancellation.
+
 Workspace-aware tool responses and execution summaries render paths inside the
 active workspace relative to that workspace (for example,
 `.vtcode/tasks/current_task.md`). Paths outside the workspace keep their

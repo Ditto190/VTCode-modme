@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::constants::tools as tool_names;
+use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::llm::provider::{ContentPart, MessageClearAt, ToolCall};
 use anyhow::anyhow;
 use chrono::{TimeZone, Timelike};
@@ -282,6 +283,13 @@ async fn session_progress_persists_budget_and_recent_messages() -> Result<()> {
         SessionMessage::new(MessageRole::User, "latest"),
     ];
     let recent = vec![SessionMessage::new(MessageRole::Assistant, "recent")];
+    let diagnostics = SnapshotTurnDiagnostics {
+        requested_tool_calls: 3,
+        denied_tool_calls: 1,
+        suppressed_tool_previews: 2,
+        model_visible_tool_preview_budget_exhausted: true,
+        ..Default::default()
+    };
 
     let path = archive.persist_progress(SessionProgressArgs {
         total_messages: full.len(),
@@ -292,6 +300,7 @@ async fn session_progress_persists_budget_and_recent_messages() -> Result<()> {
         token_usage: Some("10 tokens".to_string()),
         max_context_tokens: Some(128),
         loaded_skills: None,
+        turn_diagnostics: Some(diagnostics.clone()),
     })?;
 
     let stored =
@@ -305,6 +314,7 @@ async fn session_progress_persists_budget_and_recent_messages() -> Result<()> {
     assert_eq!(progress.token_usage, Some("10 tokens".to_string()));
     assert_eq!(progress.tool_summaries, vec!["tool_a".to_string()]);
     assert_eq!(progress.max_context_tokens, Some(128));
+    assert_eq!(progress.turn_diagnostics, Some(diagnostics));
     assert_eq!(snapshot.transcript, vec!["recent".to_string()]);
     Ok(())
 }
@@ -338,6 +348,7 @@ async fn session_progress_transcript_skips_tool_noise_and_duplicates() -> Result
         token_usage: Some("10 tokens".to_string()),
         max_context_tokens: Some(128),
         loaded_skills: None,
+        turn_diagnostics: None,
     })?;
 
     let stored =
@@ -457,6 +468,7 @@ async fn session_progress_normalizes_exec_tool_aliases_in_summaries() -> Result<
         token_usage: Some("10 tokens".to_string()),
         max_context_tokens: Some(128),
         loaded_skills: None,
+        turn_diagnostics: None,
     })?;
 
     let stored =
@@ -818,6 +830,7 @@ async fn throttled_async_progress_does_not_claim_durable_checkpoint() -> Result<
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .await?;
     assert!(first_status.is_persisted());
@@ -837,6 +850,7 @@ async fn throttled_async_progress_does_not_claim_durable_checkpoint() -> Result<
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .await?;
     assert!(matches!(second_status, SessionProgressPersistenceStatus::Throttled(_)));
@@ -869,6 +883,7 @@ async fn forced_async_progress_persists_latest_message_after_throttle() -> Resul
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .await?;
 
@@ -886,6 +901,7 @@ async fn forced_async_progress_persists_latest_message_after_throttle() -> Resul
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .await?;
 
@@ -943,6 +959,7 @@ async fn session_archive_skips_writes_when_history_persistence_is_disabled() -> 
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: None,
+            turn_diagnostics: None,
         })
         .await?;
     assert!(matches!(status, SessionProgressPersistenceStatus::Disabled(_)));
@@ -985,6 +1002,7 @@ fn snapshot_compaction_shrinks_large_single_message_payloads() -> Result<()> {
             token_usage: Some("token ".repeat(200)),
             max_context_tokens: Some(128_000),
             loaded_skills: vec!["skill ".repeat(50)],
+            turn_diagnostics: None,
         })),
         error_logs: vec![ErrorLogEntry {
             timestamp: Utc::now().to_rfc3339(),

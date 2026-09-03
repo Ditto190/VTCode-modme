@@ -1,7 +1,9 @@
+use super::support::ExecutionSummaryStatus;
 use super::{
     archive::NextRuntimeArchiveId,
     archive::next_runtime_archive_id_request,
     archive::workspace_archive_label,
+    orchestration::resolve_thread_completion_status,
     support::{
         TurnHistoryCheckpoint, build_tracked_file_freshness_note, build_unrelated_dirty_worktree_note,
         checkpoint_session_archive_start, format_workspace_relative_paths, latest_assistant_result_text,
@@ -10,6 +12,7 @@ use super::{
 };
 use crate::agent::agents::ResumeSession;
 use crate::agent::runloop::git::normalize_workspace_path;
+use crate::agent::runloop::unified::turn::context::TurnLoopResult;
 use chrono::Utc;
 use std::collections::BTreeSet;
 use std::fs;
@@ -383,6 +386,25 @@ fn thread_completion_status_matches_public_contract() {
     assert_eq!(
         SessionEndReason::Completed.thread_completion_status(true),
         ("budget_limit_reached", ThreadCompletionSubtype::ErrorMaxBudgetUsd,)
+    );
+}
+
+#[test]
+fn exit_after_completed_turn_reports_success_instead_of_cancellation() {
+    assert_eq!(
+        resolve_thread_completion_status(
+            &SessionEndReason::Exit,
+            false,
+            Some(ExecutionSummaryStatus::Completed),
+            Some(&TurnLoopResult::Completed { plan_approved_execution_pending: false }),
+            false,
+        ),
+        ("exit", ThreadCompletionSubtype::Success)
+    );
+
+    assert_eq!(
+        resolve_thread_completion_status(&SessionEndReason::Exit, false, None, Some(&TurnLoopResult::Exit), false,),
+        ("exit", ThreadCompletionSubtype::Cancelled)
     );
 }
 

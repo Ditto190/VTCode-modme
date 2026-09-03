@@ -77,6 +77,7 @@ pub(super) async fn checkpoint_subagent_archive_start(archive: &SessionArchive, 
             token_usage: None,
             max_context_tokens: None,
             loaded_skills: Some(Vec::new()),
+            turn_diagnostics: None,
         })
         .await?;
     Ok(())

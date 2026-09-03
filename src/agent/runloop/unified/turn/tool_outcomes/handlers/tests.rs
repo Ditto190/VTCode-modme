@@ -142,7 +142,7 @@ struct TestContextBacking {
 impl TestContextBacking {
     async fn new(max_tool_calls: usize) -> Self {
         let temp = tempfile::TempDir::new().expect("temp workspace");
-        let workspace = temp.path().to_path_buf();
+        let workspace = vtcode_commons::canonicalize(temp.path()).expect("canonical temp workspace");
         let sample_file = workspace.join("sample.txt");
         std::fs::write(&sample_file, "hello\n").expect("write sample file");
 

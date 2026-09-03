@@ -37,8 +37,8 @@ impl ToolRegistry {
     }
 
     /// Find the most recent successful output for a read-only tool call that
-    /// targets the same file path, ignoring pagination fields.  Returns `None`
-    /// for non-read-only tools or when no path can be extracted.
+    /// targets the same file path with a compatible read shape.  Returns
+    /// `None` for non-read-only tools or when no path can be extracted.
     pub fn find_recent_successful_by_read_target(
         &self,
         tool_name: &str,

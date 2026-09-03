@@ -337,6 +337,7 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
                 Some(canonical_tool_name),
                 maybe_inline_spooled(canonical_tool_name, &reused_value),
             );
+            ctx.harness_state.record_reused_result();
             return Some(ValidationResult::Handled);
         }
     }
@@ -368,6 +369,7 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
                     maybe_inline_spooled(canonical_tool_name, &reused_value),
                 );
                 ctx.harness_state.record_successful_readonly_signature(signature);
+                ctx.harness_state.record_reused_result();
                 return Some(ValidationResult::Handled);
             }
         }
@@ -388,6 +390,7 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
             maybe_inline_spooled(canonical_tool_name, &reused_value),
         );
         ctx.harness_state.record_successful_readonly_signature(signature);
+        ctx.harness_state.record_reused_result();
         return Some(ValidationResult::Handled);
     }
 
@@ -410,6 +413,7 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
         } else {
             ctx.push_tool_response(tool_call_id, Some(canonical_tool_name), raw_output);
         }
+        ctx.harness_state.record_reused_result();
         return Some(ValidationResult::Handled);
     }
 

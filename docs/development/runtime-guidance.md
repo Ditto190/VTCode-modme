@@ -66,6 +66,18 @@ an active readable partial snapshot from a fully drained output stream. Exited
 sessions with an unfinished spool retain the session and defer the reference
 until a later wait can safely observe the complete file.
 
+The provider-facing history also has a 32 KiB aggregate tool-preview budget per
+turn. After exhaustion, new payload bodies are replaced by bounded metadata,
+but scalar control signals such as success, exit code, completion status,
+verification requirements, and retryability remain visible. The metadata tells
+the agent not to repeat equivalent calls merely to recover hidden output, and
+checkpoint diagnostics record how many previews were suppressed.
+Diagnostics also report requested, admitted, and derived unadmitted tool-call
+counts so budget or policy rejections cannot disappear from turn accounting.
+Read-only results reused by same-turn caches, cross-turn target caches, or
+bounded history replay all increment the same reuse counter. Request assembly
+also collapses legacy duplicate output-disclosure notices to one current marker.
+
 Interactive follow-ups are durable steering intents. Each queued intent has a
 UUID, the session envelope stores at most 16 pending intents and a 64-ID applied
 window, and the intent is acknowledged only after its tagged user message is

@@ -898,6 +898,7 @@ fn harness_title(event: &HarnessEventKind) -> &'static str {
         HarnessEventKind::ContinuationStarted => "Continuation started",
         HarnessEventKind::ContinuationSkipped => "Continuation skipped",
         HarnessEventKind::BlockedHandoffWritten => "Blocked handoff written",
+        HarnessEventKind::BlockedHandoffResolved => "Blocked handoff resolved",
         HarnessEventKind::EvaluationStarted => "Evaluation started",
         HarnessEventKind::EvaluationPassed => "Evaluation passed",
         HarnessEventKind::EvaluationFailed => "Evaluation failed",
@@ -920,7 +921,8 @@ fn harness_status_label(event: &HarnessEventKind) -> &'static str {
         HarnessEventKind::PlanningCompleted
         | HarnessEventKind::EvaluationPassed
         | HarnessEventKind::VerificationPassed
-        | HarnessEventKind::BlockedHandoffWritten => "completed",
+        | HarnessEventKind::BlockedHandoffWritten
+        | HarnessEventKind::BlockedHandoffResolved => "completed",
         HarnessEventKind::EvaluationFailed | HarnessEventKind::VerificationFailed => "failed",
         HarnessEventKind::PlanningStarted
         | HarnessEventKind::ContinuationStarted

@@ -97,8 +97,14 @@ pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 /// current-session tool-output viewer; this only bounds the diagnostic surface
 /// seen by a model during a recovery-heavy turn.
 pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize = 32 * 1024;
+const MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES: usize = 16 * 1024;
+const TOOL_PREVIEW_METADATA_MAX_DEPTH: usize = 8;
 
 const TOOL_PREVIEW_METADATA_STRING_LIMIT: usize = 512;
+/// Do not materialize an arbitrarily large suppressed payload merely to
+/// recover optional metadata. Normal tool responses are compacted before this
+/// point; oversized or malformed payloads keep only the generic byte count.
+const TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES: usize = 128 * 1024;
 
 impl ToolBudgetWarning {
     pub(crate) fn system_message(self) -> String {
@@ -189,14 +195,14 @@ pub(crate) struct TurnExecutionSnapshot {
 /// signatures used in that turn.  If the same fingerprint appears 2+ times
 /// in the sliding window, a cross-turn loop is detected.
 ///
-/// Also tracks consecutive turns with zero mutating tool calls to detect
+/// Also tracks consecutive turns with no execution progress to detect
 /// "stuck" states where the agent only reads without making progress.
 pub(crate) struct CrossTurnTracker {
     /// Rolling window of per-turn action fingerprints.
     turn_fingerprints: VecDeque<u64>,
     /// Maximum window size for cross-turn loop detection.
     window_size: usize,
-    /// Consecutive turns with zero mutating tool calls.
+    /// Consecutive turns with no workspace mutation or command execution.
     zero_mutation_turns: usize,
 }
 
@@ -221,11 +227,28 @@ impl CrossTurnTracker {
     /// - `planning_active`: whether the planning workflow is currently active.
     ///
     /// Returns a warning string if a loop or stuck pattern is detected.
+    #[allow(
+        dead_code,
+        reason = "Compatibility wrapper retained for callers using the original tracker API."
+    )]
     pub(crate) fn seal_turn(
         &mut self,
         read_only_signatures: &[String],
         written_files: &HashSet<String>,
         shell_command: Option<&str>,
+        planning_active: bool,
+    ) -> Option<String> {
+        self.seal_turn_with_progress(read_only_signatures, written_files, shell_command, false, planning_active)
+    }
+
+    /// Seal a turn while accounting for productive provider-native tool work
+    /// that is not represented by a normal tool-result message.
+    pub(crate) fn seal_turn_with_progress(
+        &mut self,
+        read_only_signatures: &[String],
+        written_files: &HashSet<String>,
+        shell_command: Option<&str>,
+        out_of_band_tool_progress: bool,
         planning_active: bool,
     ) -> Option<String> {
         let mut signatures: Vec<String> = read_only_signatures.to_vec();
@@ -236,7 +259,7 @@ impl CrossTurnTracker {
             signatures.push(cmd.to_string());
         }
 
-        let had_mutation = !written_files.is_empty();
+        let had_execution_progress = !written_files.is_empty() || shell_command.is_some() || out_of_band_tool_progress;
 
         // Compute fingerprint from sorted signatures so order doesn't matter.
         let fingerprint = if signatures.is_empty() {
@@ -271,12 +294,10 @@ impl CrossTurnTracker {
         }
 
         // Track zero-mutation turns for stuck detection.
-        if !signatures.is_empty() {
-            if had_mutation {
-                self.zero_mutation_turns = 0;
-            } else if !planning_active {
-                self.zero_mutation_turns = self.zero_mutation_turns.saturating_add(1);
-            }
+        if had_execution_progress {
+            self.zero_mutation_turns = 0;
+        } else if !signatures.is_empty() && !planning_active {
+            self.zero_mutation_turns = self.zero_mutation_turns.saturating_add(1);
         }
 
         // Return loop warning first (higher priority), then stuck warning.
@@ -323,7 +344,9 @@ pub(crate) struct HarnessTurnState {
     raw_spooled_bytes: u64,
     model_visible_output_bytes: u64,
     model_visible_tool_preview_bytes: usize,
+    model_visible_tool_metadata_bytes: usize,
     model_visible_tool_preview_budget_exhausted: bool,
+    suppressed_tool_previews: u32,
     recovery_activations: u32,
     pub blocked_tool_calls: usize,
     pub consecutive_blocked_tool_calls: usize,
@@ -356,6 +379,10 @@ pub(crate) struct HarnessTurnState {
     pub consecutive_spool_chunk_reads: usize,
     pub consecutive_same_shell_command_runs: usize,
     pub last_shell_command_signature: Option<String>,
+    /// Last shell command that passed the full admission gate. The repetition
+    /// guard records `last_shell_command_signature` earlier, so it must not be
+    /// used as evidence of execution progress by the cross-turn tracker.
+    pub last_admitted_shell_command_signature: Option<String>,
     pub consecutive_same_file_read_family_calls: usize,
     last_file_read_family_signature: Option<String>,
     /// Per-file-path read count, independent of slice (offset/limit/raw).
@@ -375,6 +402,10 @@ pub(crate) struct HarnessTurnState {
     /// policy-violation message is sent once and subsequent rejected calls in
     /// the same batch get a compact stub instead of repeating it.
     pub wall_clock_exhausted_emitted: bool,
+    /// Set when the current tool call was rejected specifically because the
+    /// per-turn tool-call budget was exhausted. The Copilot adapter consumes
+    /// this marker so budget rejections are not counted as permission denials.
+    tool_budget_rejection_pending: bool,
     /// Set when the first wall-clock rejection fires; consumed after the tool
     /// batch by the handler to push a single "synthesize now" system directive
     /// *after* all tool responses (never interleaved between them).
@@ -480,7 +511,9 @@ impl HarnessTurnState {
             raw_spooled_bytes: 0,
             model_visible_output_bytes: 0,
             model_visible_tool_preview_bytes: 0,
+            model_visible_tool_metadata_bytes: 0,
             model_visible_tool_preview_budget_exhausted: false,
+            suppressed_tool_previews: 0,
             recovery_activations: 0,
             blocked_tool_calls: 0,
             consecutive_blocked_tool_calls: 0,
@@ -494,6 +527,7 @@ impl HarnessTurnState {
             consecutive_spool_chunk_reads: 0,
             consecutive_same_shell_command_runs: 0,
             last_shell_command_signature: None,
+            last_admitted_shell_command_signature: None,
             consecutive_same_file_read_family_calls: 0,
             last_file_read_family_signature: None,
             file_read_path_counts: HashMap::new(),
@@ -506,6 +540,7 @@ impl HarnessTurnState {
             tool_budget_warning_emitted: false,
             tool_budget_exhausted_emitted: false,
             wall_clock_exhausted_emitted: false,
+            tool_budget_rejection_pending: false,
             wall_clock_directive_pending: false,
             tool_budget_directive_pending: false,
             pending_auto_permission_probe_warning: None,
@@ -591,12 +626,24 @@ impl HarnessTurnState {
         self.admitted_tool_calls = self.admitted_tool_calls.saturating_add(1);
     }
 
+    pub(crate) fn admitted_tool_call_count(&self) -> u32 {
+        self.admitted_tool_calls
+    }
+
     pub(crate) fn record_failed_tool_call(&mut self) {
         self.failed_tool_calls = self.failed_tool_calls.saturating_add(1);
     }
 
     pub(crate) fn record_denied_tool_call(&mut self) {
         self.denied_tool_calls = self.denied_tool_calls.saturating_add(1);
+    }
+
+    pub(crate) fn record_tool_budget_rejection(&mut self) {
+        self.tool_budget_rejection_pending = true;
+    }
+
+    pub(crate) fn take_tool_budget_rejection(&mut self) -> bool {
+        std::mem::take(&mut self.tool_budget_rejection_pending)
     }
 
     pub(crate) fn record_tool_output_metrics(
@@ -614,6 +661,10 @@ impl HarnessTurnState {
         }
         self.raw_spooled_bytes = self.raw_spooled_bytes.saturating_add(raw_spooled_bytes);
         self.record_model_visible_output_append(model_visible_output_bytes);
+    }
+
+    pub(crate) fn record_reused_result(&mut self) {
+        self.reused_results = self.reused_results.saturating_add(1);
     }
 
     pub(crate) fn record_model_visible_output_append(&mut self, model_visible_output_bytes: usize) {
@@ -645,7 +696,22 @@ impl HarnessTurnState {
 
         self.model_visible_tool_preview_bytes = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
         self.model_visible_tool_preview_budget_exhausted = true;
-        bounded_tool_preview_metadata(tool_name, &content)
+        self.suppressed_tool_previews = self.suppressed_tool_previews.saturating_add(1);
+        let metadata_remaining =
+            MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES.saturating_sub(self.model_visible_tool_metadata_bytes);
+        if metadata_remaining == 0 {
+            self.model_visible_tool_metadata_bytes = MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES;
+            return generic_tool_preview_metadata(content.len());
+        }
+        let metadata = bounded_tool_preview_metadata(tool_name, &content);
+        if metadata.len() <= metadata_remaining {
+            self.model_visible_tool_metadata_bytes =
+                self.model_visible_tool_metadata_bytes.saturating_add(metadata.len());
+            metadata
+        } else {
+            self.model_visible_tool_metadata_bytes = MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES;
+            generic_tool_preview_metadata(content.len())
+        }
     }
 
     pub(crate) fn replace_model_visible_output_bytes(&mut self, previous_len: usize, new_len: usize) {
@@ -663,6 +729,7 @@ impl HarnessTurnState {
             usage,
             requested_tool_calls: self.requested_tool_calls,
             admitted_tool_calls: self.admitted_tool_calls,
+            unadmitted_tool_calls: self.requested_tool_calls.saturating_sub(self.admitted_tool_calls),
             failed_tool_calls: self.failed_tool_calls,
             denied_tool_calls: self.denied_tool_calls,
             preflight_failures: self.preflight_failures,
@@ -670,6 +737,8 @@ impl HarnessTurnState {
             spooled_results: self.spooled_results,
             raw_spooled_bytes: self.raw_spooled_bytes,
             model_visible_output_bytes: self.model_visible_output_bytes,
+            suppressed_tool_previews: self.suppressed_tool_previews,
+            model_visible_tool_preview_budget_exhausted: self.model_visible_tool_preview_budget_exhausted,
             low_signal_tool_calls,
             recovery_activations: self.recovery_activations,
             ..Default::default()
@@ -715,6 +784,12 @@ impl HarnessTurnState {
     pub(crate) fn record_out_of_band_tool_progress(&mut self) {
         self.out_of_band_tool_progress = true;
         self.reset_assistant_text_response_streak();
+    }
+
+    pub(crate) fn record_out_of_band_tool_call(&mut self) {
+        self.record_requested_tool_calls(1);
+        self.record_admitted_tool_call();
+        self.record_out_of_band_tool_progress();
     }
 
     pub(crate) fn has_out_of_band_tool_progress(&self) -> bool {
@@ -1116,6 +1191,10 @@ impl HarnessTurnState {
         self.consecutive_same_shell_command_runs = 0;
     }
 
+    pub(crate) fn record_admitted_shell_command(&mut self, signature: String) {
+        self.last_admitted_shell_command_signature = Some(signature);
+    }
+
     pub(crate) fn record_file_read_family_call(&mut self, signature: String) -> usize {
         if self.last_file_read_family_signature.as_deref() == Some(signature.as_str()) {
             self.consecutive_same_file_read_family_calls =
@@ -1209,13 +1288,15 @@ impl HarnessTurnState {
 }
 
 fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> String {
-    let parsed = serde_json::from_str::<serde_json::Value>(content).ok();
+    let parsed = (content.len() <= TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES)
+        .then(|| serde_json::from_str::<serde_json::Value>(content).ok())
+        .flatten();
     let object = parsed.as_ref().and_then(serde_json::Value::as_object);
 
     let spool_path = object
         .and_then(|value| value.get("spool_path"))
         .and_then(serde_json::Value::as_str)
-        .map(|path| bounded_preview_string(path, TOOL_PREVIEW_METADATA_STRING_LIMIT));
+        .map(|path| bounded_diagnosis_preview(path, TOOL_PREVIEW_METADATA_STRING_LIMIT));
     let byte_count = object
         .and_then(|value| {
             ["original_bytes", "spooled_bytes", "output_bytes", "bytes"]
@@ -1229,6 +1310,8 @@ fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> Stri
                 Some("pending")
             } else if value.get("spool_complete").and_then(serde_json::Value::as_bool) == Some(true)
                 || value.get("is_exited").and_then(serde_json::Value::as_bool) == Some(true)
+                || value.get("exit_code").and_then(serde_json::Value::as_i64).is_some()
+                || value.get("status").and_then(serde_json::Value::as_str) == Some("completed")
             {
                 Some("complete")
             } else {
@@ -1256,7 +1339,7 @@ fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> Stri
     let note = if spool_path.is_some() {
         "Aggregate tool preview budget exhausted; complete output remains in the internal spool and current-session tool-output viewer."
     } else {
-        "Aggregate tool preview budget exhausted; use a targeted bounded read or retry the request for more detail."
+        "Aggregate tool preview budget exhausted; outcome metadata is preserved below. Do not repeat or rephrase this call solely to recover hidden output."
     };
     let mut metadata = serde_json::json!({
         "tool": tool_name.map(|name| bounded_preview_string(name, TOOL_PREVIEW_METADATA_STRING_LIMIT)),
@@ -1269,7 +1352,129 @@ fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> Stri
     if let Some(diagnosis) = diagnosis {
         metadata["diagnosis"] = diagnosis;
     }
+    if let Some(object) = object {
+        if let Some(error) = object.get("error")
+            && let Some(bounded) = bounded_tool_failure_metadata(error)
+        {
+            metadata["error"] = bounded;
+        }
+        for key in [
+            "error_summary",
+            "original_error",
+            "message",
+            "stderr",
+            "stderr_preview",
+            "critical_note",
+            "error_class",
+            "category",
+            "retry_summary",
+            "recovery_suggestions",
+        ] {
+            let Some(value) = object.get(key) else {
+                continue;
+            };
+            if let Some(bounded) = bounded_tool_failure_metadata(value) {
+                metadata[key] = bounded;
+            }
+        }
+        for key in [
+            "success",
+            "exit_code",
+            "command_success",
+            "blocked",
+            "verification_required",
+            "failure_kind",
+            "status",
+            "outcome",
+            "output_truncated",
+            "has_more",
+            "next_action",
+            "retryable",
+            "is_exited",
+            "spool_complete",
+            "spool_pending",
+        ] {
+            let Some(value) = object.get(key) else {
+                continue;
+            };
+            let bounded = match value {
+                serde_json::Value::String(value) => {
+                    serde_json::Value::String(bounded_diagnosis_preview(value, TOOL_PREVIEW_METADATA_STRING_LIMIT))
+                }
+                serde_json::Value::Bool(_) | serde_json::Value::Number(_) | serde_json::Value::Null => value.clone(),
+                _ => continue,
+            };
+            metadata[key] = bounded;
+        }
+    }
     metadata.to_string()
+}
+
+fn generic_tool_preview_metadata(byte_count: usize) -> String {
+    serde_json::json!({
+        "byte_count": u64::try_from(byte_count).unwrap_or(u64::MAX),
+        "preview_budget_exhausted": true,
+        "suppressed": true,
+    })
+    .to_string()
+}
+
+fn bounded_tool_failure_metadata(value: &serde_json::Value) -> Option<serde_json::Value> {
+    bounded_tool_failure_metadata_at_depth(value, TOOL_PREVIEW_METADATA_MAX_DEPTH)
+}
+
+fn bounded_tool_failure_metadata_at_depth(value: &serde_json::Value, depth: usize) -> Option<serde_json::Value> {
+    if depth == 0 {
+        return None;
+    }
+
+    match value {
+        serde_json::Value::String(value) => {
+            Some(serde_json::Value::String(bounded_diagnosis_preview(value, TOOL_PREVIEW_METADATA_STRING_LIMIT)))
+        }
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) | serde_json::Value::Null => Some(value.clone()),
+        serde_json::Value::Array(values) => {
+            let bounded = values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .take(4)
+                .map(|value| {
+                    serde_json::Value::String(bounded_diagnosis_preview(value, TOOL_PREVIEW_METADATA_STRING_LIMIT))
+                })
+                .collect::<Vec<_>>();
+            (!bounded.is_empty()).then_some(serde_json::Value::Array(bounded))
+        }
+        serde_json::Value::Object(object) => {
+            let mut bounded = serde_json::Map::new();
+            for key in [
+                "tool_name",
+                "error_type",
+                "category",
+                "message",
+                "original_error",
+                "retryable",
+                "is_recoverable",
+                "partial_state_possible",
+                "rollback_performed",
+                "circuit_breaker_impact",
+                "retry_delay_ms",
+                "retry_after_ms",
+            ] {
+                let Some(value) = object.get(key) else {
+                    continue;
+                };
+                if let Some(value) = bounded_tool_failure_metadata_at_depth(value, depth - 1) {
+                    bounded.insert(key.to_string(), value);
+                }
+            }
+            if let Some(value) = object.get("recovery_suggestions")
+                && let Some(value) = bounded_tool_failure_metadata_at_depth(value, depth - 1)
+            {
+                bounded.insert("recovery_suggestions".to_string(), value);
+            }
+            (!bounded.is_empty()).then_some(serde_json::Value::Object(bounded))
+        }
+    }
 }
 
 fn bounded_preview_string(value: &str, limit: usize) -> String {
@@ -1437,8 +1642,9 @@ mod tests {
     use hashbrown::HashSet;
 
     use super::{
-        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode,
-        TOOL_BUDGET_WARNING_THRESHOLD, ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning,
+        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES,
+        MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode, TOOL_BUDGET_WARNING_THRESHOLD,
+        TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES, ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning,
         ToolWallClockExhaustion, ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId,
     };
 
@@ -1455,6 +1661,15 @@ mod tests {
                 "spool_path": ".vtcode/context/tool_outputs/run-1.txt",
                 "spooled_bytes": 20 * 1024,
                 "spool_complete": true,
+                "exit_code": 1,
+                "status": "completed",
+                "success": false,
+                "error": {
+                    "message": "permission denied: token=secret-not-for-context",
+                    "original_error": "permission denied: token=secret-not-for-context",
+                    "retryable": false,
+                },
+                "error_summary": "permission denied: token=secret-not-for-context",
                 "diagnosis": {
                     "observed": "exit 1",
                     "likely_cause": "dependency check failed",
@@ -1468,6 +1683,11 @@ mod tests {
         assert!(second.contains(".vtcode/context/tool_outputs/run-1.txt"));
         assert!(second.contains("\"byte_count\":20480"));
         assert!(second.contains("\"completion_state\":\"complete\""));
+        assert!(second.contains("\"exit_code\":1"));
+        assert!(second.contains("\"status\":\"completed\""));
+        assert!(second.contains("\"success\":false"));
+        assert!(second.contains("\"error_summary\":\"permission denied"));
+        assert!(second.contains("\"message\":\"permission denied"));
         assert!(second.contains("preview_budget_exhausted"));
         assert!(second.contains("\"diagnosis\":{"));
         assert!(second.contains("inspect the first compiler error"));
@@ -1477,10 +1697,56 @@ mod tests {
         assert!(!second.contains(repeated_b.as_str()));
         assert_eq!(state.model_visible_tool_preview_bytes, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES);
         assert!(state.model_visible_tool_preview_budget_exhausted);
+        assert_eq!(state.suppressed_tool_previews, 1);
 
-        let later = state.bound_model_visible_tool_preview(Some("cat"), "later output".to_string());
+        let later = state.bound_model_visible_tool_preview(
+            Some("exec_command"),
+            serde_json::json!({"exit_code": 0, "status": "completed", "success": true, "output": "later output"})
+                .to_string(),
+        );
         assert!(later.contains("Aggregate tool preview budget exhausted"));
         assert!(!later.contains("later output"));
+        assert!(later.contains("\"exit_code\":0"));
+        assert!(later.contains("\"status\":\"completed\""));
+        assert!(later.contains("\"success\":true"));
+        assert_eq!(state.suppressed_tool_previews, 2);
+
+        let mut aggregate_metadata_bytes = second.len() + later.len();
+        for _ in 0..100 {
+            aggregate_metadata_bytes += state
+                .bound_model_visible_tool_preview(
+                    Some("exec_command"),
+                    serde_json::json!({
+                        "status": "completed",
+                        "success": true,
+                        "diagnosis": {"next_action": "x".repeat(2048)},
+                        "output": "hidden"
+                    })
+                    .to_string(),
+                )
+                .len();
+        }
+        assert!(aggregate_metadata_bytes <= MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES + 100 * 64);
+        assert_eq!(state.model_visible_tool_metadata_bytes, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn oversized_suppressed_preview_skips_unbounded_json_parse() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        state.bound_model_visible_tool_preview(
+            Some("exec_command"),
+            "a".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES),
+        );
+
+        let content = format!(
+            "{{\"error_summary\":\"should-not-be-parsed\",\"output\":\"{}\"}}",
+            "b".repeat(TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES)
+        );
+        let metadata = state.bound_model_visible_tool_preview(Some("exec_command"), content);
+
+        assert!(metadata.contains("\"preview_budget_exhausted\":true"));
+        assert!(!metadata.contains("should-not-be-parsed"));
+        assert!(metadata.contains("\"byte_count\":"));
     }
 
     #[test]
@@ -1498,6 +1764,19 @@ mod tests {
         assert_eq!(state.phase, TurnPhase::ExecutingTools);
         state.set_phase(TurnPhase::Finalizing);
         assert_eq!(state.phase, TurnPhase::Finalizing);
+    }
+
+    #[test]
+    fn harness_state_accounts_for_out_of_band_tool_calls() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+
+        state.record_out_of_band_tool_call();
+
+        let diagnostics = state.snapshot_turn_diagnostics(Default::default(), 0);
+        assert_eq!(diagnostics.requested_tool_calls, 1);
+        assert_eq!(diagnostics.admitted_tool_calls, 1);
+        assert_eq!(diagnostics.unadmitted_tool_calls, 0);
+        assert!(state.has_out_of_band_tool_progress());
     }
 
     #[test]
@@ -1589,6 +1868,19 @@ mod tests {
         // Second rejected call in the same turn must not re-arm the directive.
         assert!(state.record_tool_budget_exhaustion_notice().is_some());
         assert!(!state.take_tool_budget_directive_pending());
+    }
+
+    #[test]
+    fn tool_budget_rejection_is_separate_from_permission_denial() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 1, 10, 1);
+
+        state.record_tool_budget_rejection();
+        assert!(state.take_tool_budget_rejection());
+        assert!(!state.take_tool_budget_rejection());
+        assert_eq!(state.snapshot_turn_diagnostics(Default::default(), 0).denied_tool_calls, 0);
+
+        state.record_denied_tool_call();
+        assert_eq!(state.snapshot_turn_diagnostics(Default::default(), 0).denied_tool_calls, 1);
     }
 
     #[test]
@@ -2009,12 +2301,14 @@ mod tests {
         state.raw_spooled_bytes = u64::MAX - 2;
         state.model_visible_output_bytes = u64::MAX - 2;
         state.record_tool_output_metrics(true, true, 10, usize::MAX);
+        state.record_reused_result();
         state.activate_recovery("adaptive planning synthesis");
         state.activate_recovery("duplicate activation");
 
         let diagnostics = state.snapshot_turn_diagnostics(Default::default(), u32::MAX);
         assert_eq!(diagnostics.requested_tool_calls, u32::MAX);
-        assert_eq!(diagnostics.reused_results, 1);
+        assert_eq!(diagnostics.unadmitted_tool_calls, u32::MAX);
+        assert_eq!(diagnostics.reused_results, 2);
         assert_eq!(diagnostics.spooled_results, 1);
         assert_eq!(diagnostics.raw_spooled_bytes, u64::MAX);
         assert_eq!(diagnostics.model_visible_output_bytes, u64::MAX);
@@ -2100,6 +2394,47 @@ mod tests {
         let sigs_e = vec!["apply_patch::read::src/e.rs".to_string()];
         assert!(tracker.seal_turn(&sigs_d, &empty_written, None, false).is_none());
         assert!(tracker.seal_turn(&sigs_e, &empty_written, None, false).is_none());
+    }
+
+    #[test]
+    fn cross_turn_tracker_command_execution_resets_stuck_counter() {
+        let mut tracker = CrossTurnTracker::new();
+        let written = HashSet::new();
+
+        assert!(tracker.seal_turn(&["read::a".to_string()], &written, None, false).is_none());
+        assert!(tracker.seal_turn(&["read::b".to_string()], &written, None, false).is_none());
+        assert!(tracker.seal_turn(&[], &written, Some("exec::cargo-check"), false).is_none());
+        assert_eq!(tracker.zero_mutation_turns(), 0);
+
+        assert!(tracker.seal_turn(&["read::c".to_string()], &written, None, false).is_none());
+        assert!(tracker.seal_turn(&["read::d".to_string()], &written, None, false).is_none());
+    }
+
+    #[test]
+    fn cross_turn_tracker_out_of_band_progress_resets_stuck_counter() {
+        let mut tracker = CrossTurnTracker::new();
+        let written = HashSet::new();
+
+        assert!(tracker.seal_turn(&["read::a".to_string()], &written, None, false).is_none());
+        assert!(tracker.seal_turn(&["read::b".to_string()], &written, None, false).is_none());
+        assert_eq!(tracker.zero_mutation_turns(), 2);
+
+        assert!(tracker.seal_turn_with_progress(&[], &written, None, true, false).is_none());
+        assert_eq!(tracker.zero_mutation_turns(), 0);
+
+        assert!(tracker.seal_turn(&["read::c".to_string()], &written, None, false).is_none());
+        assert_eq!(tracker.zero_mutation_turns(), 1);
+    }
+
+    #[test]
+    fn harness_state_separates_guarded_and_admitted_shell_signatures() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+
+        state.record_shell_command_run("exec_command::blocked".to_string());
+        assert_eq!(state.last_admitted_shell_command_signature, None);
+
+        state.record_admitted_shell_command("exec_command::admitted".to_string());
+        assert_eq!(state.last_admitted_shell_command_signature.as_deref(), Some("exec_command::admitted"));
     }
 
     #[test]

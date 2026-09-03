@@ -24,7 +24,7 @@ pub mod atif;
 pub mod trace;
 
 /// Semantic version of the serialized event schema exported by this crate.
-pub const EVENT_SCHEMA_VERSION: &str = "0.11.0";
+pub const EVENT_SCHEMA_VERSION: &str = "0.12.0";
 
 /// Wraps a [`ThreadEvent`] with schema metadata so downstream consumers can
 /// negotiate compatibility before processing an event stream.
@@ -1092,6 +1092,9 @@ pub enum HarnessEventKind {
     ContinuationStarted,
     ContinuationSkipped,
     BlockedHandoffWritten,
+    /// The owning session resolved its archived blocked handoff and removed
+    /// the live recovery pointer.
+    BlockedHandoffResolved,
     EvaluationStarted,
     EvaluationPassed,
     EvaluationFailed,
@@ -1544,6 +1547,32 @@ mod tests {
         let json = serde_json::to_string(&event)?;
         let restored: ThreadEvent = serde_json::from_str(&json)?;
 
+        assert_eq!(restored, event);
+        Ok(())
+    }
+
+    #[test]
+    fn blocked_handoff_resolved_uses_stable_wire_name() -> Result<(), Box<dyn Error>> {
+        let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
+            item: ThreadItem {
+                id: "harness_resolved".to_string(),
+                details: ThreadItemDetails::Harness(HarnessEventItem {
+                    event: HarnessEventKind::BlockedHandoffResolved,
+                    message: Some("resolved".to_string()),
+                    command: None,
+                    path: None,
+                    exit_code: None,
+                    attempt: None,
+                    error_category: None,
+                    duration_ms: None,
+                }),
+            },
+        });
+
+        let value = serde_json::to_value(&event)?;
+        assert_eq!(value["item"]["event"], "blocked_handoff_resolved");
+
+        let restored: ThreadEvent = serde_json::from_value(value)?;
         assert_eq!(restored, event);
         Ok(())
     }

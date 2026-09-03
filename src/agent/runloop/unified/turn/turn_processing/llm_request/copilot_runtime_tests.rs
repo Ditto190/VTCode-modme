@@ -354,6 +354,14 @@ async fn observed_tool_calls_emit_incremental_output_updates() {
         output: Some("Compiling vtcode-core\nFinished `dev` profile".to_string()),
         terminal_id: None,
     });
+    runtime_host.handle_observed_tool_call(CopilotObservedToolCall {
+        tool_call_id: "call_2".to_string(),
+        tool_name: "Read the missing file".to_string(),
+        status: CopilotObservedToolCallStatus::Failed,
+        arguments: Some(json!({"path": "missing.txt"})),
+        output: Some("file not found".to_string()),
+        terminal_id: None,
+    });
 
     let payload = std::fs::read_to_string(harness_path).expect("read harness log");
     let events: Vec<serde_json::Value> = payload
@@ -376,6 +384,8 @@ async fn observed_tool_calls_emit_incremental_output_updates() {
                 .as_str()
                 .is_some_and(|output| output.contains("Finished `dev` profile"))
     }));
+    drop(runtime_host);
+    assert_eq!(harness_state.snapshot_turn_diagnostics(Default::default(), 0).failed_tool_calls, 1);
 }
 
 #[tokio::test]

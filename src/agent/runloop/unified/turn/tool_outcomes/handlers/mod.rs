@@ -21,6 +21,7 @@ use crate::agent::runloop::unified::tool_routing::{
 use crate::agent::runloop::unified::turn::context::{
     PreparedAssistantToolCall, TurnHandlerOutcome, TurnLoopResult, TurnProcessingContext,
 };
+use looping::shell_run_signature;
 mod budget;
 mod fallbacks;
 mod guards;
@@ -547,6 +548,10 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
         return Ok(None);
     }
 
+    if let Some(signature) = shell_run_signature(&prepared.canonical_name, &prepared.effective_args) {
+        t_ctx.ctx.harness_state.record_admitted_shell_command(signature);
+    }
+
     // 3. Execute and Handle Result
     if let Some(outcome) = execute_and_handle_tool_call(
         t_ctx.ctx,
@@ -577,9 +582,18 @@ pub(crate) fn block_mutation_until_verification(
         return Ok(false);
     }
 
-    let pending_mutations = repeated_tool_attempts.consecutive_mutations;
-    let message = format!(
-        "Mutation blocked until verification: {pending_mutations} effective file changes are awaiting a successful build, test, lint, or compile command."
+    let pending_mutations =
+        (repeated_tool_attempts.consecutive_mutations > 0).then_some(repeated_tool_attempts.consecutive_mutations);
+    let message = pending_mutations.map_or_else(
+        || {
+            "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a successful build, test, lint, or compile command."
+                .to_string()
+        },
+        |count| {
+            format!(
+                "Mutation blocked until verification: {count} effective file changes are awaiting a successful build, test, lint, or compile command."
+            )
+        },
     );
     if !repeated_tool_attempts.verification_block_notice_emitted {
         ctx.renderer.line(MessageStyle::Warning, &message)?;
@@ -595,6 +609,7 @@ pub(crate) fn block_mutation_until_verification(
             "failure_kind": "anti_blind_editing_verification_required",
             "verification_required": true,
             "pending_mutations": pending_mutations,
+            "pending_mutation_count_known": pending_mutations.is_some(),
             "error": message,
             "next_action": "Run a successful verification command with exec_command before making another workspace mutation.",
             "retryable": true,

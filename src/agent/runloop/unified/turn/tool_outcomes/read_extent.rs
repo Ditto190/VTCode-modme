@@ -8,7 +8,7 @@
 //! across four sites (`helpers::READ_OFFSET_KEYS`,
 //! `response_content::BOUNDED_READ_KEYS`, and `looping`'s
 //! `READ_FILE_OFFSET_KEYS`/`READ_FILE_LIMIT_KEYS`). Those lists drifted — `o`,
-//! `end_line`, `page_size_lines`, `encoding`, and `page`/`per_page` each
+//! `end_line`, `page_size_lines`, and `page`/`per_page` each
 //! appeared in some copies but not others — and two of them carried
 //! "keep aligned with …" comments admitting the fragility. This module is the
 //! single source of truth; every consumer delegates here so the vocabulary can
@@ -53,22 +53,18 @@ pub(crate) const LIMIT_KEYS: &[&str] = &[
 /// Pagination keys that scope a read without mapping cleanly to offset/limit.
 pub(crate) const PAGE_KEYS: &[&str] = &["page", "per_page"];
 
-/// Keys that never change *what* is read (only how it is decoded) but were
-/// historically stripped during read-signature normalization.
-const NORMALIZE_ONLY_KEYS: &[&str] = &["encoding"];
-
 /// Every key that scopes a read to a sub-range (offset ∪ limit ∪ page).
 pub(crate) fn bounded_extent_keys() -> impl Iterator<Item = &'static str> {
     OFFSET_KEYS.iter().chain(LIMIT_KEYS).chain(PAGE_KEYS).copied()
 }
 
 /// Keys stripped when normalizing a read's arguments for cross-turn dedup:
-/// everything that scopes a read, plus decode-only keys like `encoding`.
+/// everything that scopes a read.
 ///
 /// Stripping these makes "the same file read with a different slice" hash to
 /// the same signature, so redundant re-reads are recognized.
 pub(crate) fn normalization_strip_keys() -> impl Iterator<Item = &'static str> {
-    bounded_extent_keys().chain(NORMALIZE_ONLY_KEYS.iter().copied())
+    bounded_extent_keys()
 }
 
 /// Returns `true` when `args` explicitly narrows the read to a sub-range via
@@ -102,16 +98,71 @@ fn raw_flag(args: &Value) -> bool {
     args.get("raw").and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn extent_values_are_valid(args: &Value) -> bool {
+    let Some(object) = args.as_object() else {
+        return false;
+    };
+    if object.get("raw").is_some_and(|value| !value.is_boolean()) {
+        return false;
+    }
+    let values_are_numeric =
+        bounded_extent_keys().all(|key| object.get(key).is_none_or(|value| as_u64_lenient(value).is_some()));
+    let has_at_most_one_alias = |keys: &[&str]| keys.iter().filter(|key| object.contains_key(**key)).count() <= 1;
+    values_are_numeric && has_at_most_one_alias(OFFSET_KEYS) && has_at_most_one_alias(LIMIT_KEYS)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PaginationExtent {
+    page: Option<u64>,
+    per_page: Option<u64>,
+}
+
+fn pagination_extent(args: &Value) -> Result<Option<PaginationExtent>, ()> {
+    let Some(object) = args.as_object() else {
+        return Ok(None);
+    };
+    if !object.contains_key("page") && !object.contains_key("per_page") {
+        return Ok(None);
+    }
+
+    let page = match object.get("page") {
+        Some(value) => Some(as_u64_lenient(value).ok_or(())?),
+        None => None,
+    };
+    let per_page = match object.get("per_page") {
+        Some(value) => Some(as_u64_lenient(value).ok_or(())?),
+        None => None,
+    };
+
+    Ok(Some(PaginationExtent { page, per_page }))
+}
+
+fn pagination_matches(cached: &Value, query: &Value) -> bool {
+    match (pagination_extent(cached), pagination_extent(query)) {
+        (Ok(None), Ok(None)) => true,
+        (Ok(Some(cached)), Ok(Some(query))) => cached == query,
+        _ => false,
+    }
+}
+
 /// Returns `true` when a `cached` read's extent covers a `query`'s extent —
-/// same raw mode, same offset, and a cached limit at least as large as the
-/// query's (an unbounded cached limit covers any query).
+/// same raw mode, pagination, and offset, and a cached limit at least as large
+/// as the query's (an unbounded cached limit covers any query).
 ///
 /// Understands the full offset/limit alias vocabulary (not just literal
 /// `offset`/`limit`), so reads scoped by `start_line`/`end_line` are compared
 /// on their true ranges rather than silently treated as identical (which would
 /// return the wrong slice's cached content).
 pub(crate) fn extent_covers(cached: &Value, query: &Value) -> bool {
+    if !extent_values_are_valid(cached) || !extent_values_are_valid(query) {
+        return false;
+    }
     if raw_flag(cached) != raw_flag(query) {
+        return false;
+    }
+    // Page-based reads select disjoint results. Their exact pagination shape
+    // must match; invalid pagination is never safe to reuse.
+    if !pagination_matches(cached, query) {
         return false;
     }
     if extent_offset(cached) != extent_offset(query) {
@@ -148,13 +199,13 @@ mod tests {
     }
 
     #[test]
-    fn normalization_strip_keys_includes_encoding_and_all_extent_keys() {
+    fn normalization_strip_keys_includes_all_extent_keys() {
         let keys: Vec<&str> = normalization_strip_keys().collect();
-        assert!(keys.contains(&"encoding"));
         assert!(keys.contains(&"offset"));
         assert!(keys.contains(&"limit"));
         assert!(keys.contains(&"page"));
         assert!(keys.contains(&"start_line"));
+        assert!(!keys.contains(&"encoding"));
     }
 
     #[test]
@@ -192,6 +243,36 @@ mod tests {
     fn extent_covers_rejects_raw_mode_mismatch() {
         let cached = json!({"offset": 0, "limit": 500});
         let query = json!({"offset": 0, "limit": 100, "raw": true});
+        assert!(!extent_covers(&cached, &query));
+    }
+
+    #[test]
+    fn extent_covers_requires_matching_pagination() {
+        let cached = json!({"page": 1, "per_page": 50});
+        assert!(extent_covers(&cached, &json!({"page": 1, "per_page": 50})));
+        assert!(!extent_covers(&cached, &json!({"page": 2, "per_page": 50})));
+        assert!(!extent_covers(&cached, &json!({"page": 1, "per_page": 100})));
+        assert!(!extent_covers(&cached, &json!({"offset": 0, "limit": 50})));
+    }
+
+    #[test]
+    fn extent_covers_rejects_invalid_pagination() {
+        assert!(!extent_covers(&json!({"page": "unknown"}), &json!({"page": "unknown"})));
+        assert!(!extent_covers(&json!({"page": 1}), &json!({"page": null})));
+    }
+
+    #[test]
+    fn extent_covers_rejects_invalid_extent_values() {
+        assert!(!extent_covers(&json!({"offset": "unknown"}), &json!({"offset": 0})));
+        assert!(!extent_covers(&json!({"limit": "unknown"}), &json!({"limit": 10})));
+        assert!(!extent_covers(&json!({"raw": "yes"}), &json!({"raw": false})));
+    }
+
+    #[test]
+    fn extent_covers_rejects_conflicting_extent_aliases() {
+        let cached = json!({"offset": 0, "offset_lines": 20, "limit": 100});
+        let query = json!({"offset": 0, "offset_lines": 40, "limit": 100});
+
         assert!(!extent_covers(&cached, &query));
     }
 

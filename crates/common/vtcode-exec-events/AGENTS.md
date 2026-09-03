@@ -26,4 +26,4 @@
   consumed by headless clients and Open Responses adapters. Bounded failure
   explanations use the existing `ReasoningItem` with stage `"diagnosis"`; do not add a parallel event variant.
 - `HarnessEventItem` uses `HarnessEventKind` enum — adding variants requires schema version bump.
-- Schema `0.11.0` adds `context.reset` for plan-to-build fresh-thread handoffs; keep legacy payloads readable and ATIF output stable.
+- Schema `0.12.0` adds blocked-handoff resolution metadata; keep legacy payloads readable and ATIF output stable.

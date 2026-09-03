@@ -1,5 +1,6 @@
 use crate::config::constants::defaults;
 use crate::config::{HistoryPersistence, VTCodeConfig};
+use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::llm::provider::{AssistantPhase, Message, MessageClearAt, MessageContent, MessageRole, ToolCall};
 use crate::telemetry::perf::PerfSpan;
 use crate::utils::error_log_collector::ErrorLogEntry;
@@ -554,6 +555,10 @@ pub struct SessionProgress {
     /// Names of skills loaded at checkpoint time
     #[serde(default)]
     pub loaded_skills: Vec<String>,
+    /// Diagnostics for the most recently checkpointed turn, including turns
+    /// that ended blocked, cancelled, or aborted before a turn snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_diagnostics: Option<SnapshotTurnDiagnostics>,
 }
 
 #[derive(Debug, Clone)]
@@ -588,6 +593,8 @@ pub struct SessionProgressArgs {
     pub token_usage: Option<String>,
     pub max_context_tokens: Option<usize>,
     pub loaded_skills: Option<Vec<String>>,
+    /// Optional diagnostics for the turn represented by this checkpoint.
+    pub turn_diagnostics: Option<SnapshotTurnDiagnostics>,
 }
 
 /// Outcome of an asynchronous session-progress checkpoint.
@@ -989,6 +996,7 @@ impl SessionArchive {
             token_usage,
             max_context_tokens,
             loaded_skills,
+            turn_diagnostics,
         } = args;
 
         let transcript = progress_transcript_from_recent_messages(&recent_messages);
@@ -1007,6 +1015,7 @@ impl SessionArchive {
                 token_usage,
                 max_context_tokens,
                 loaded_skills: loaded_skills.unwrap_or_default(),
+                turn_diagnostics,
             }),
         )
     }
