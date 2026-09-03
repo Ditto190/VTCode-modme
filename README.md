@@ -16,12 +16,9 @@
 
 - [Overview](#overview)
 - [Why VT Code](#why-vt-code)
-- [Features](#features)
-- [WebMCP browser bridge](#webmcp-browser-bridge)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
-- [Providers and models](#providers-and-models)
-- [Local inference](#local-inference-experimental)
+- [Providers](#providers)
 - [Development](#development)
 - [Contributing](#contributing)
 - [Support](#support)
@@ -38,461 +35,121 @@
 </p>
 
 VT Code is an open-source Rust terminal coding agent for interactive and
-long-running autonomous workflows. It combines a responsive TUI, safe terminal
-tools, multi-provider LLM support, open protocols, and extensible Skills in one
-tool, so you can move from a question to a reviewed change without leaving your
-terminal.
+long-running autonomous work. A responsive TUI, safe tools, multi-provider LLM
+support, open protocols, and extensible Skills take you from question to
+reviewed change without leaving the terminal.
 
-> **Project status:** Active development.
-> Local inference and some automation workflows are experimental, and
-> interfaces and configuration may change between releases.
+> **Status:** Active development. Local inference and some automation flows are
+> experimental and may change between releases.
+>
+> **Behind the build:** [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in):
+> harness design, evals, security, and lessons from a year of building.
 
 ## Why VT Code
 
-- **Harness, not a wrapper**: the model reasons; the harness enforces
-  progress with tools, sandbox, evals, and state.
-- **Agent-first by design**: the repository is the system of record —
-  `AGENTS.md` is the map, `docs/` is the territory, and design decisions
-  live in versioned docs, not in someone's head or a chat thread.
-- **Safety-first**: sandboxed shell, command policies, per-workspace
-  approvals; the sandbox/exec boundary is a primary adversarial surface
-  with regression coverage for command injection, path/symlink escape,
-  and environment leakage.
-- **Built for long runs**: durable session memory, spooled tool output,
-  auto-compaction; "done" only when verification passes.
+- **Harness, not a wrapper**: the model reasons; the harness enforces progress
+  with tools, sandbox, evals, and state.
+- **Safety-first**: sandboxed shell, command policies, per-workspace approvals,
+  and fail-closed handling of injection, path/symlink escape, and env leakage.
+- **Built for long runs**: durable session memory, spooled output,
+  auto-compaction, and verification before "done".
 - **Protocol-native**: MCP, Skills, Agent Plugins, ACP (Zed), A2A, and ATIF
   export with no core forks.
-- **Parallel loop engineering**: worktree isolation, propose/verify
-  sub-agents, cost guardrails.
-- **Engineering discipline as a feature**: a single authoritative
-  `ThreadEvent` runtime contract, strict crate layering
-  (`types → config → core → tools → agent → TUI`), CI-enforced invariants,
-  and WCAG AA contrast tests for every built-in theme.
-- **Runs anywhere**: 30 providers plus local Ollama, LM Studio, and
-  llama.cpp.
-
-## Features
-
-### Runtime and coding
-
-- **Agent runtime**: interactive TUI, slash commands, streaming, `ask`/`exec` CLI, session resume, review workflows, and the authenticated WebMCP browser bridge
-- **Coding tools**: safe file operations, [ripgrep](https://github.com/BurntSushi/ripgrep) search, [ast-grep](https://ast-grep.github.io/) symbol maps, fuzzy discovery, code intelligence, project indexing, and terminal execution
-
-### Extensibility and providers
-
-- **Extensibility**: [Agent Skills](https://agentskills.io), [MCP](https://modelcontextprotocol.io/) client/server, [Agent Plugins](https://agent-plugins.org), lifecycle hooks, subagents, custom providers, and [ACP](https://agentclientprotocol.com)
-- **Model providers**: 30 built-in providers, custom OpenAI-compatible endpoints, and **local inference via Ollama, LM Studio, and llama.cpp** (managed with `/local`)
-
-### Safety and protocols
-
-- **Safety**: restricted shell sandbox, tool guardrails, subprocess isolation, audit logging, per-workspace approval before lifecycle hooks defined in workspace configuration (`vtcode.toml`, `.vtcode`, or agent-spec files) can run shell commands, and terminal-owned WebMCP pairing/write boundaries
-- **Provider governance**: `providers_whitelist` restricts which LLM providers VT Code can access, preventing accidental data leakage to unapproved endpoints
-- **Protocols**: Open Responses, Agent2Agent (A2A), ATIF, and Anthropic Messages API
-
-### Automation and planning
-
-- **Loop engineering**: worktree isolation for parallel agents, propose/verify sub-agent separation, durable loop state, and cost guardrails
-- **Planning workflow**: iterate on a build plan with `/plan` and the `plan` primary agent, then hand off to `build`/`auto` through a structured review gate
-
-VT Code is designed for both interactive development and unattended work. It
-keeps tool execution and provider access explicit, while allowing the same
-session to move from exploration to implementation and review.
-
-## WebMCP browser bridge
-
-The WebMCP browser bridge is a first-class, opt-in VT Code integration. The
-maintained browser app is published at two origins:
-
-| Deployment | URL | Browser origin | Use it for |
-| --- | --- | --- | --- |
-| ChatGPT Site | <https://vtcode.vinhnx.chatgpt.site/> | `https://vtcode.vinhnx.chatgpt.site` | Hosted WebMCP demonstration |
-| GitHub Pages | <https://vinhnx.github.io/VTCode/> | `https://vinhnx.github.io` | Static fallback and WebMCP reference client |
-
-The app derives the exact pairing origin from the page currently open, so pair
-the active VT Code session with `/webmcp pair https://vtcode.vinhnx.chatgpt.site`
-for the ChatGPT Site or `/webmcp pair https://vinhnx.github.io` for GitHub
-Pages. See the [WebMCP user guide](./docs/user-guide/webmcp.md),
-[development guide](./docs/development/webmcp.md), [deployment reference](./docs/reference/webmcp.md),
-[WebMCP app guide](./apps/webmcp/GUIDE.md), [WebMCP app README](./apps/webmcp/README.md),
-and [WebMCP crate documentation](./crates/codegen/vtcode-webmcp/README.md) for
-setup, integration, and implementation details.
+- **Parallel by design**: worktree isolation, propose/verify sub-agents,
+  `/plan` workflow, and cost guardrails.
+- **Runs anywhere**: 30 providers plus local Ollama, LM Studio, and llama.cpp.
 
 ## Quick start
 
-### 1. Install
-
-The native installer is recommended for macOS and Linux. It installs VT Code
-and the `ripgrep` and `ast-grep` search tools used by its coding workflow.
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
-```
+# or: brew install vinhnx/tap/vtcode | cargo install vtcode
 
-Other installation methods are documented in the
-[Installation Guide](./docs/installation/README.md).
-
-```bash
-# Homebrew
-brew install vinhnx/tap/vtcode
-
-# Cargo
-cargo install vtcode
-```
-
-### 2. Initialize a workspace
-
-Run this from the project you want VT Code to work on:
-
-```bash
 cd path/to/your/project
-vtcode init
-```
-
-This scaffolds project configuration and agent guidance. Review the generated
-files before committing them.
-
-### 3. Configure a provider
-
-Set the API key for the provider you want to use (or configure an OAuth-based
-provider with `vtcode login`). For example:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-See the [provider guides](./docs/providers/PROVIDER_GUIDES.md) for supported
-providers, local inference options, and authentication details. Never commit
-API keys or place them directly in `vtcode.toml`.
-
-### 4. Launch VT Code
-
-```bash
-vtcode
-```
-
-VT Code opens an interactive terminal UI in the current workspace. Use `ask`,
-`exec`, or `review` when you want a one-shot workflow.
-
-### Common commands
-
-```bash
+vtcode init                    # scaffolds config + AGENTS.md; review before committing
+export OPENAI_API_KEY="sk-..." # or `vtcode login` for OAuth providers
 vtcode                         # interactive TUI
-vtcode init                    # scaffold project config + AGENTS.md
-vtcode ask "explain Rc vs Arc" # one-shot question
-vtcode exec "refactor main.rs" # headless task with full tool access
-vtcode review                  # review uncommitted changes
-vtcode update                  # self-update
-vtcode webmcp serve --origin http://localhost:5173 --allowed-root /path/to/project
 ```
 
-To connect a browser editor to the current interactive session, start `vtcode`
-in the target workspace and run `/webmcp pair http://localhost:5173` in the
-TUI. For workspace-only browser access, use the `vtcode webmcp serve` command
-shown above. Both paths are disabled until explicitly started and keep browser
-writes behind the existing VT Code terminal or full-auto policy.
+```bash
+vtcode ask "explain Rc vs Arc" # one-shot question
+vtcode exec "refactor main.rs" # headless task
+vtcode review                  # review uncommitted changes
+```
+
+See [Installation](./docs/installation/README.md) and
+[Getting Started](./docs/user-guide/getting-started.md). Never commit API keys
+or put them in `vtcode.toml`.
+
+### WebMCP browser bridge (opt-in)
+
+Pair a running session from the TUI (`/webmcp pair <origin>`) or serve a
+bounded workspace (`vtcode webmcp serve --origin <origin> --allowed-root <dir>`).
+Hosted app: <https://vtcode.vinhnx.chatgpt.site/> · fallback:
+<https://vinhnx.github.io/VTCode/>. Details: [user guide](./docs/user-guide/webmcp.md),
+[deployment reference](./docs/reference/webmcp.md).
 
 ## Documentation
 
-Use the documentation by task: start with installation, then choose a user
-guide, integration guide, or reference.
+- **Start**: [Installation](./docs/installation/README.md) ·
+  [Getting started](./docs/user-guide/getting-started.md) ·
+  [Wiki](https://github.com/vinhnx/VTCode/wiki) ·
+  [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
+- **Use**: [TUI](./docs/user-guide/interactive-mode.md) ·
+  [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) ·
+  [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) ·
+  [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md)
+- **Extend**: [Skills](./docs/skills/SKILLS_GUIDE.md) ·
+  [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) ·
+  [Editors](./docs/guides/zed-acp.md)
+- **Operate**: [Safety](./docs/security/SECURITY_MODEL.md) ·
+  [Protocols](./docs/protocols/OPEN_RESPONSES.md) ·
+  [Loop engineering](./docs/project/PLAN-loop-engineering.md) ·
+  [Architecture](./docs/ARCHITECTURE.md)
 
-### Start here
+## Providers
 
-- [**Installation**](./docs/installation/README.md): installation methods, provider setup, and troubleshooting
-- [**Getting started**](./docs/user-guide/getting-started.md): first workspace, provider, and session
-- [**Wiki**](https://github.com/vinhnx/VTCode/wiki): community wiki on configuration, providers, local models, skills, MCP, automation, security, and FAQ
-
-### User guides
-
-- [**Interactive TUI**](./docs/user-guide/interactive-mode.md): primary agents, slash commands (`/model`, `/review`, `/mcp`, `/skills`, `/theme`, `/compact`)
-- [**CLI commands**](./docs/user-guide/commands.md): command reference for interactive, headless, review, and automation workflows
-- [**WebMCP browser bridge**](./docs/user-guide/webmcp.md): connect a supported browser editor to an active VT Code session or a bounded standalone workspace bridge
-- [**WebMCP deployment reference**](./docs/reference/webmcp.md): public origins, pairing commands, origin-trial configuration, and deployment checks
-- [**Full automation**](./docs/guides/full-automation.md): `--full-auto` CLI, plan-build-evaluate harness, subagents, and scheduled tasks
-- [**Providers**](./docs/providers/PROVIDER_GUIDES.md): setup guides for all built-in providers
-- [**Configuration**](./docs/config/CONFIG_FIELD_REFERENCE.md): `vtcode.toml`, tool config, and lifecycle hooks
-
-### Integrations
-
-- [**Agent Skills**](./docs/skills/SKILLS_GUIDE.md): creating, loading, and sharing skills
-- [**Agent Plugins**](./docs/guides/agent-plugins.md): portable skill + MCP packages via `vtcode plugins`
-- [**MCP Integration**](./docs/guides/mcp-integration.md): client and server modes
-- [**Editor guides**](./docs/guides/zed-acp.md): Zed ACP, VS Code, and Claude Code
-
-### Operations and architecture
-
-- [**Safety**](./docs/security/SECURITY_MODEL.md): shell sandbox, security hardening, and threat model
-- [**Protocols**](./docs/protocols/OPEN_RESPONSES.md): Open Responses, ATIF, A2A, and Anthropic Messages API
-- [**Loop engineering**](./docs/project/PLAN-loop-engineering.md): worktree isolation, propose/verify, loop state, and cost guardrails
-- [**Planning workflow**](./docs/guides/planning-workflow.md): `/plan`, review gate, and plan handoff to build/auto agents
-
-### Reference
-
-- [**Architecture**](./docs/ARCHITECTURE.md): workspace boundaries and runtime design
-- [**Configuration field reference**](./docs/config/CONFIG_FIELD_REFERENCE.md): complete `vtcode.toml` reference
-- [**Command security model**](./docs/development/COMMAND_SECURITY_MODEL.md): execution policy and sandbox boundaries
-- [**Development setup**](./docs/development/DEVELOPMENT_SETUP.md): prerequisites and local workflow
-- [**Testing**](./docs/development/testing.md): test profiles and verification commands
-
-## Providers and models
-
-VT Code supports 30 built-in providers, local inference backends, and
-custom OpenAI-compatible endpoints.
-
-### Provider directory
-
-The list below is grouped by how a request reaches a model. The
-[provider guide](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
-for credentials, supported capabilities, and model defaults.
-
-- **Cloud LLMs**: [Anthropic](./docs/providers/PROVIDER_GUIDES.md#anthropic-claude) · [OpenAI](./docs/providers/PROVIDER_GUIDES.md#openai-gpt) · [Gemini](./docs/providers/PROVIDER_GUIDES.md#google-gemini) · [Meta AI (Muse)](./docs/providers/PROVIDER_GUIDES.md#meta-ai) · [Z.AI](./docs/providers/PROVIDER_GUIDES.md#zai-zai) · [Moonshot (Kimi)](./docs/providers/PROVIDER_GUIDES.md#moonshot-kimi) · [StepFun](./docs/providers/PROVIDER_GUIDES.md#stepfun) · [MiniMax](./docs/providers/PROVIDER_GUIDES.md#minimax) · [Mistral](./docs/providers/PROVIDER_GUIDES.md#mistral) · [Qwen](./docs/providers/PROVIDER_GUIDES.md#qwen)
-- **Foundations**: [NVIDIA NIM](./docs/providers/PROVIDER_GUIDES.md#nvidia-nim) · [Xiaomi MiMo](./docs/providers/PROVIDER_GUIDES.md#xiaomi-mimo)
-- **Gateways**: [OpenRouter](./docs/providers/PROVIDER_GUIDES.md#openrouter-marketplace) · [Merge Gateway](./docs/providers/PROVIDER_GUIDES.md#merge-gateway) · [Evolink](./docs/providers/PROVIDER_GUIDES.md#evolink-multi-model-gateway) · [HuggingFace](./docs/providers/PROVIDER_GUIDES.md#huggingface) · [Atlas Cloud](./docs/providers/PROVIDER_GUIDES.md#atlas-cloud) · [OmniRoute](./docs/providers/PROVIDER_GUIDES.md#omniroute)
-- **Local inference**: [Ollama](./docs/providers/PROVIDER_GUIDES.md#ollama-local--cloud-models) · [LM Studio](./docs/providers/PROVIDER_GUIDES.md#lm-studio-local-server) · [llama.cpp](./docs/providers/PROVIDER_GUIDES.md#llamacpp-local-server)
-- **Other**: [GitHub Copilot](./docs/providers/PROVIDER_GUIDES.md#github-copilot) · [Anthropic API Compat](./docs/providers/PROVIDER_GUIDES.md#anthropic-api-compatibility-server) · [Poolside](./docs/providers/PROVIDER_GUIDES.md#poolside)
-
-Additional built-in providers include [DeepSeek](./docs/providers/PROVIDER_GUIDES.md#deepseek),
-[xAI](./docs/providers/PROVIDER_GUIDES.md#xai-grok), [OpenCode Zen](./docs/providers/PROVIDER_GUIDES.md#opencode-zen),
-and [OpenCode Go](./docs/providers/PROVIDER_GUIDES.md#opencode-go).
-
-See the [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) for credentials,
-model defaults, API capabilities, and setup details. Merge Gateway is a
-built-in OpenAI-compatible gateway with curated routes and pass-through
-support for valid explicit `provider/model` IDs.
-
-### Configure a provider
-
-List available providers and configure one from the CLI:
+30 built-in providers, custom OpenAI-compatible endpoints, and local backends.
+[Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
+for credentials and model defaults.
 
 ```bash
 vtcode models list
 vtcode models config
 ```
 
-For a quick start, set the environment variable documented by your provider.
-OAuth-based providers can use their dedicated `vtcode login` command.
-
-### Custom providers
-
-Use `[[custom_providers]]` to add a private gateway, an aggregator such as
-Atlas Cloud or OmniRoute, or an internal inference cluster:
-
-#### Basic configuration
-
-```toml
-[[custom_providers]]
-name = "mycorp"
-display_name = "MyCorp"
-base_url = "https://llm.corp.example/v1"
-api_key_env = "MYCORP_API_KEY"
-model = "gpt-5-mini"
-models = ["gpt-5-mini", "gpt-5.6-sol"]
-context_window = 256000   # optional; defaults to 128000 tokens
-```
-
-Set the corresponding environment variable before launching VT Code:
-
-```bash
-export MYCORP_API_KEY="..."
-```
-
-#### Capability settings
-
-- `context_window`: capability size in tokens. It controls UI context sizing,
-  compaction thresholds, and preflight token checks.
-- `models`: optional model IDs to expose in the model picker. `model` remains
-  the default selection.
-- `api_format`: optional value of `auto`, `openai-chat`, `openai-responses`, or
-  `anthropic-messages`. Omit it to preserve autodetection, or set it explicitly
-  to prevent fallback to another format.
-- Capability defaults include `supports_tools`, `supports_reasoning`,
-  `supports_reasoning_effort`, `supports_vision`, `supports_structured_output`,
-  `supports_parallel_tool_calls`, `supports_context_caching`,
-  `supports_responses_compaction`, and `supports_context_edits`.
-
-The separate `context.max_context_tokens` setting can impose a lower session
-budget. See the [configuration reference](./docs/config/CONFIG_FIELD_REFERENCE.md)
-and [custom provider configuration](./docs/config/config.md#custom_providers).
-
-#### Model profiles
-
-Use a profile for model-specific overrides:
-
-```toml
-[custom_providers.profiles."gpt-5.6-sol"]
-api_format = "openai-responses"
-context_window = 131072
-supports_tools = true
-supports_vision = false
-supports_structured_output = true
-```
-
-Profiles apply only to an existing model identifier. They do not add models to
-the picker. Use `model` or `models` on the provider entry to control model
-availability.
-
-#### Validate the configuration
-
-```bash
-vtcode models list
-vtcode models config
-vtcode ask "Summarize this repository"
-```
-
-See the [worked provider examples](./docs/providers/PROVIDER_GUIDES.md#custom-providers)
-for Atlas Cloud and OmniRoute.
-
-### Provider governance
-
-Use `providers_whitelist` in `vtcode.toml` to restrict access to approved
-providers. This helps prevent accidental data leakage in corporate or
-air-gapped environments.
-
-```toml
-# vtcode.toml
-providers_whitelist = ["opencode-zen", "opencode-go", "gemini"]
-```
-
-Leave it empty, the default, to allow all built-in and custom providers. See
-the [configuration reference](./docs/config/CONFIG_FIELD_REFERENCE.md) and
-[Getting Started](./docs/user-guide/getting-started.md) for setup instructions.
-
-## Local inference (experimental)
-
-Run models entirely on your machine for privacy, offline use, or zero token
-cost. VT Code supports three local backends, all managed from the TUI:
-
-### Supported backends
-
-- **Ollama** (`ollama serve`), best-supported local backend; auto-loads pulled models.
-- **LM Studio** (`lms server start`), OpenAI-compatible; select the loaded model in the picker.
-- **llama.cpp** (`llama-server -m model.gguf`), most automated; auto-starts via `LLAMACPP_MODEL_PATH`.
-
-### TUI commands
-
-```text
-/local                 # interactive local server manager
-/local start ollama   # start a specific backend
-/local troubleshoot   # diagnose connection / model issues
-```
-
-Before each generation VT Code verifies the server is up and the model is
-loaded, and on failure prints the exact recovery command (e.g.
-`ollama pull gpt-oss:20b`) instead of a cryptic error. Local inference is
-**experimental** and depends on your hardware. See
-[Local Models guide](./docs/guides/local-models.md) for trade-offs, hardware
-sizing, and a reliable-setup checklist. For the full `/local` reference, see
-[Local Inference Servers](./docs/providers/local-servers.md).
+Restrict providers per workspace with `providers_whitelist` in `vtcode.toml`.
+Local inference (experimental) via Ollama, LM Studio, and llama.cpp, managed
+with `/local` in the TUI — see [Local Models](./docs/guides/local-models.md).
 
 ## Development
-
-### Build from source
 
 ```bash
 git clone https://github.com/vinhnx/vtcode.git
 cd vtcode
 ./scripts/run-debug.sh
+./scripts/check-dev.sh   # fast gate: clippy, fmt, check
+cargo nextest run        # tests (never `cargo test`)
 ```
 
-### Workspace layout
-
-Rust stable, edition 2024, MSRV 1.93.0. The workspace contains 21 crates; the
-root binary and core/UI crates are included in the default build:
-
-| Layer   | Crates                                                                                                                                                                                                                       |
-| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Binary  | `vtcode`                                                                                                                                                                                                                     |
-| Common  | `vtcode-commons`, `vtcode-exec-events`, `vtcode-macros`, `vtcode-utility-tool-specs`                                                                                                                                         |
-| Codegen | `vtcode-core`, `vtcode-ui`, `vtcode-config`, `vtcode-llm`, `vtcode-skills`, `vtcode-safety`, `vtcode-a2a`, `vtcode-mcp`, `vtcode-auth`, `vtcode-acp`, `vtcode-indexer`, `vtcode-bash-runner`, `vtcode-memory`, `vtcode-eval` |
-
-### Library use
-
-For crate-based integrations, see
-[`vtcode-battery-pack`](https://github.com/vinhnx/vtcode-battery-pack).
-
-### Quality checks
-
-```bash
-./scripts/check-dev.sh   # fast quality gate: clippy, fmt, and check
-cargo nextest run        # parallel test runner
-```
-
-CI runs locked dependency resolution and treats warnings as errors. For a
-faster local iteration loop, use `./scripts/check-dev.sh`; use nextest rather
-than `cargo test` for the project's test suite.
+Rust stable, edition 2024. ~30 crates layered as
+`types → config → core → tools → agent → TUI`, with `ThreadEvent` as the
+authoritative runtime contract. See [Development setup](./docs/development/DEVELOPMENT_SETUP.md)
+and [Testing](./docs/development/testing.md).
 
 ## Contributing
 
-VT Code is built by an open-source community. Whether you're fixing bugs,
-improving docs, proposing features, reporting security issues, or shipping
-patches, all contributions are welcome.
-
-### Ways to contribute
-
-- **Security advisories**: Responsible disclosure makes everyone safer. See the [Security Policy](https://github.com/vinhnx/VTCode/security/policy) for reporting guidelines.
-- **Bug fixes and patches**: Small or large, every fix matters.
-- **Documentation**: Guides, examples, and improvements help the whole ecosystem.
-- **Features and ideas**: Open an issue or start a discussion.
-- **Code reviews and testing**: Help keep the project healthy.
-
-### Getting started
-
-- Browse [good first issues](https://github.com/vinhnx/vtcode/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
-- Read [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for humans
-- Check [AGENTS.md](./AGENTS.md) for AI agents
-
-### Contributors
-
-Thank you to everyone who has contributed to VT Code. Your work makes this
-project better for all of us.
-
-<p align="center">
-  <a href="https://github.com/kernitus"><img src="https://avatars.githubusercontent.com/u/2789734?s=60" width="40" height="40" alt="@kernitus" title="@kernitus 👑 Main Contributor (52 commits)" style="border-radius: 50%; border: 2px solid #FFD700;" /></a>&nbsp;
-  <a href="https://github.com/7jrxt42BxFZo4iAnN4CX"><img src="https://avatars.githubusercontent.com/u/72938937?s=60" width="40" height="40" alt="@7jrxt42BxFZo4iAnN4CX" title="@7jrxt42BxFZo4iAnN4CX 🚀 Core contributor (40 commits) - subagents, hooks, config & TUI fixes (#737, #738, #740-#742+)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/oiwn"><img src="https://avatars.githubusercontent.com/u/398035?s=60" width="40" height="40" alt="@oiwn" title="@oiwn 🚀 Core contributor (6 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/Sachin-Bhat"><img src="https://avatars.githubusercontent.com/u/25080916?s=60" width="40" height="40" alt="@Sachin-Bhat" title="@Sachin-Bhat 🚀 Core contributor (3 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/chenrui333"><img src="https://avatars.githubusercontent.com/u/1580956?s=60" width="40" height="40" alt="@chenrui333" title="@chenrui333 🚀 Core contributor (3 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/gzsombor"><img src="https://avatars.githubusercontent.com/u/66230?s=60" width="40" height="40" alt="@gzsombor" title="@gzsombor 🚀 Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/leonj1"><img src="https://avatars.githubusercontent.com/u/5171829?s=60" width="40" height="40" alt="@leonj1" title="@leonj1 🚀 Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/netbrah"><img src="https://avatars.githubusercontent.com/u/162479981?s=60" width="40" height="40" alt="@netbrah" title="@netbrah 🚀 Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/xcrong"><img src="https://avatars.githubusercontent.com/u/46434477?s=60" width="40" height="40" alt="@xcrong" title="@xcrong 🚀 Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/lucaszhu-hue"><img src="https://avatars.githubusercontent.com/u/278269343?s=60" width="40" height="40" alt="@lucaszhu-hue" title="@lucaszhu-hue 🚀 Core contributor (2 commits) - Atlas Cloud (#648, #662)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/raphamorim"><img src="https://avatars.githubusercontent.com/u/3630346?s=60" width="40" height="40" alt="@raphamorim" title="@raphamorim 💡 PR #708, rio-vt migration (1 commit)" style="border-radius: 50%; border: 2px solid #4A90D9;" /></a>&nbsp;
-  <a href="https://github.com/nnfrog"><img src="https://avatars.githubusercontent.com/u/142202920?s=60" width="40" height="40" alt="@nnfrog" title="@nnfrog 🛡️ GHSA-r249-hpfx-x2w7 (security advisory)" style="border-radius: 50%; border: 2px solid #FF6B6B;" /></a>&nbsp;
-  <a href="https://github.com/glmgbj233"><img src="https://avatars.githubusercontent.com/u/115564047?s=60" width="40" height="40" alt="@glmgbj233" title="@glmgbj233 🛡️ GHSA-wqgw-crr5-cr2p (security advisory)" style="border-radius: 50%; border: 2px solid #FF6B6B;" /></a>&nbsp;
-  <a href="https://github.com/EvoLinkAI"><img src="https://avatars.githubusercontent.com/u/253253881?s=60" width="40" height="40" alt="@EvoLinkAI" title="@EvoLinkAI ✨ Contributor (1 commit) - Evolink provider (#664)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/diegosouzapw"><img src="https://avatars.githubusercontent.com/u/8016841?s=60" width="40" height="40" alt="@diegosouzapw" title="@diegosouzapw ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/ForrestThump"><img src="https://avatars.githubusercontent.com/u/44280834?s=60" width="40" height="40" alt="@ForrestThump" title="@ForrestThump ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/morler"><img src="https://avatars.githubusercontent.com/u/478444?s=60" width="40" height="40" alt="@morler" title="@morler ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/poelzi"><img src="https://avatars.githubusercontent.com/u/66107?s=60" width="40" height="40" alt="@poelzi" title="@poelzi ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/RobertBorg"><img src="https://avatars.githubusercontent.com/u/1288566?s=60" width="40" height="40" alt="@RobertBorg" title="@RobertBorg ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/Sanjays2402"><img src="https://avatars.githubusercontent.com/u/51058514?s=60" width="40" height="40" alt="@Sanjays2402" title="@Sanjays2402 ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/TuanLe-bk18"><img src="https://avatars.githubusercontent.com/u/222461688?s=60" width="40" height="40" alt="@TuanLe-bk18" title="@TuanLe-bk18 ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
-  <a href="https://github.com/uiYzzi"><img src="https://avatars.githubusercontent.com/u/40852301?s=60" width="40" height="40" alt="@uiYzzi" title="@uiYzzi ✨ Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>
-</p>
+Small, focused PRs merge fastest. See [CONTRIBUTING.md](./docs/CONTRIBUTING.md)
+for humans and [AGENTS.md](./AGENTS.md) for agents; start with
+[good first issues](https://github.com/vinhnx/vtcode/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22).
+Thank you to [all contributors](https://github.com/vinhnx/VTCode/graphs/contributors).
 
 ## Support
 
-### Sponsorship
-
-VT Code is a labor of love built in my spare time. If it has helped you ship
-something or learn something, a [sponsorship](https://github.com/sponsors/vinhnx)
-would mean the world.
-
-<p align="center">
-  <a href="https://github.com/dnhn"><img src="https://avatars.githubusercontent.com/u/2561973" width="80" height="80" alt="@dnhn" style="border-radius: 50%" /></a>
-  <a href="https://github.com/codemod"><img src="https://avatars.githubusercontent.com/u/78830094" width="80" height="80" alt="@codemod" style="border-radius: 50%" /></a>
-  <a href="https://github.com/coderabbitai"><img src="https://avatars.githubusercontent.com/u/132028505" width="80" height="80" alt="@coderabbitai" style="border-radius: 50%" /></a>
-  <a href="https://github.com/KhaiRyth"><img src="https://avatars.githubusercontent.com/u/273723951" width="80" height="80" alt="@KhaiRyth" style="border-radius: 50%" /></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/sponsors/vinhnx"><img src="https://img.shields.io/badge/%E2%9D%A4%20Sponsor-30363D?style=for-the-badge&logo=github-sponsors&logoColor=#EA4AAA" alt="GitHub Sponsors" height="33" /></a>&nbsp;&nbsp;&nbsp;
-  <a href="https://buymeacoffee.com/vinhnx"><img src="./resources/screenshots/qr_donate.png" alt="Buy Me a Coffee" width="100" style="border-radius: 12px" /></a>
-</p>
+VT Code is built in spare time. If it helped you,
+[sponsor](https://github.com/sponsors/vinhnx) the work.
 
 ## License
 
-First-party code is licensed under **MIT OR Apache-2.0**; choose whichever works best for you. See [LICENSE](LICENSE) for the full Apache-2.0 text; MIT terms are also granted under the same copyright.
-
-Third-party and inspired-by code remains under its original licenses. See [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) for attributions.
+First-party code is **MIT OR Apache-2.0**. See [LICENSE](LICENSE).
+Third-party code keeps its original licenses — see [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
