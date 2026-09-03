@@ -7,13 +7,55 @@ use tempfile::TempDir;
 use vtcode_core::tools::editing::Patch;
 
 #[test]
-fn parser_rejects_absolute_and_lexically_traversing_patch_paths() {
-    for patch_text in [
-        "*** Begin Patch\n*** Add File: /tmp/escaped.txt\n+escaped\n*** End Patch\n",
-        "*** Begin Patch\n*** Add File: ../escaped.txt\n+escaped\n*** End Patch\n",
-    ] {
-        assert!(Patch::parse(patch_text).is_err(), "parser accepted {patch_text:?}");
-    }
+fn parser_rejects_lexically_traversing_patch_paths() {
+    // A parent-directory traversal is rejected at parse time: it can never
+    // produce a safe target however it is later joined against the workspace.
+    let patch_text = "*** Begin Patch\n*** Add File: ../escaped.txt\n+escaped\n*** End Patch\n";
+    assert!(Patch::parse(patch_text).is_err(), "parser accepted {patch_text:?}");
+}
+
+#[test]
+fn parser_accepts_absolute_patch_paths() {
+    // Absolute paths parse successfully; containment is enforced at apply time
+    // against the workspace root rather than rejected here.
+    let patch_text = "*** Begin Patch\n*** Add File: /tmp/escaped.txt\n+escaped\n*** End Patch\n";
+    assert!(Patch::parse(patch_text).is_ok(), "absolute path should parse, got: {patch_text:?}");
+}
+
+#[tokio::test]
+async fn absolute_path_outside_workspace_is_rejected_at_apply() {
+    let workspace = TempDir::new().expect("workspace should be created");
+    let patch = Patch::parse("*** Begin Patch\n*** Add File: /tmp/escaped.txt\n+escaped\n*** End Patch\n")
+        .expect("absolute path should parse");
+
+    let error = patch
+        .apply(workspace.path())
+        .await
+        .expect_err("absolute path outside workspace must be rejected at apply");
+
+    assert!(
+        error.to_string().contains("containment") || error.to_string().contains("escapes workspace"),
+        "unexpected error message: {error}"
+    );
+}
+
+#[tokio::test]
+async fn absolute_path_inside_workspace_applies() {
+    let workspace = TempDir::new().expect("workspace should be created");
+    let target = workspace.path().join("README.md");
+    let patch_text = format!("*** Begin Patch\n*** Add File: {}\n+hello\n*** End Patch\n", target.display());
+    let patch = Patch::parse(&patch_text).expect("absolute in-workspace path should parse");
+
+    let result = patch
+        .apply(workspace.path())
+        .await
+        .expect("absolute in-workspace path should apply");
+    assert!(!result.is_empty());
+
+    let content = tokio::fs::read_to_string(&target)
+        .await
+        .expect("created file should be readable");
+    assert_eq!(content, "hello\n");
 }
 
 #[tokio::test]

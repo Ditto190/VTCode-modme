@@ -19,25 +19,22 @@ pub(crate) fn validate_patch_path(operation: &'static str, raw_path: &str) -> Re
         });
     }
 
+    // Absolute paths are accepted at parse time: models commonly echo a
+    // workspace-relative target as an absolute path (for example
+    // `/home/user/project/README.md`), and rejecting it here forces an
+    // unnecessary round-trip. Authoritative containment is enforced at apply
+    // time by `applicator::ensure_target_within_workspace`, which resolves
+    // symlinks and fails closed on anything outside the workspace. Lexical
+    // `..` traversal is still rejected here because it can never produce a
+    // safe target however it is later joined.
     let candidate = Path::new(raw_path);
-    if candidate.is_absolute() {
-        return Err(PatchError::InvalidPath {
-            operation,
-            path: raw_path.to_string(),
-            reason: "path must be relative".to_string(),
-        });
-    }
-
     for component in candidate.components() {
-        match component {
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(PatchError::InvalidPath {
-                    operation,
-                    path: raw_path.to_string(),
-                    reason: "path escapes workspace".to_string(),
-                });
-            }
-            _ => {}
+        if component == Component::ParentDir {
+            return Err(PatchError::InvalidPath {
+                operation,
+                path: raw_path.to_string(),
+                reason: "path escapes workspace".to_string(),
+            });
         }
     }
 

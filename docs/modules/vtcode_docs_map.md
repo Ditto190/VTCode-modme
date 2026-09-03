@@ -769,6 +769,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Binary Size Summary, Release-fast Binary Analysis (32 MiB), Debug Binary Analysis (84 MiB), Recommendations
   - **User Questions**: "What can you tell me about Bloaty Analysis Report for vtcode?", "How does Overview work?", "How does Binary Size Summary work?"
 
+- **File**: `docs/blog/building-vt-code-a-year-in.md`
+  - **Content**: Building VT Code, a year in
+  - **Topics**: The model shelf, September 2026, Benchmarks, with honest framing, The roadmap shipped, The harness matters more than the model, Context engineering got real numbers
+  - **User Questions**: "What can you tell me about Building VT Code, a year in?", "How does The model shelf, September 2026 work?", "How does Benchmarks, with honest framing work?"
+
 - **File**: `docs/audits/code-review-2026-08-07.md`
   - **Content**: Code Review + Fixes — 2026-08-07
   - **Topics**: Completed fixes, Decomposition: `core/loop_detector.rs` → `core/loop_detector/mod.rs` + `normalization.rs`, Intentionally not changed, Verification summary, Status
