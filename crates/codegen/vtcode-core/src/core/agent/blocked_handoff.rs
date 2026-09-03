@@ -260,16 +260,16 @@ fn ensure_safe_handoff_target(path: &Path) -> Result<()> {
 
 fn write_handoff_file(path: &Path, contents: &str, replace_existing: bool) -> Result<()> {
     if replace_existing {
-        ensure_safe_handoff_target(path)?;
+        return write_replaced_handoff_file(path, contents);
     }
 
+    write_new_handoff_file(path, contents)
+}
+
+fn write_new_handoff_file(path: &Path, contents: &str) -> Result<()> {
     let mut options = fs::OpenOptions::new();
     options.write(true);
-    if replace_existing {
-        options.create(true).truncate(true);
-    } else {
-        options.create_new(true);
-    }
+    options.create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -283,6 +283,36 @@ fn write_handoff_file(path: &Path, contents: &str, replace_existing: bool) -> Re
         .with_context(|| format!("failed to write handoff {}", path.display()))?;
     file.sync_data()
         .with_context(|| format!("failed to sync handoff {}", path.display()))?;
+    Ok(())
+}
+
+fn write_replaced_handoff_file(path: &Path, contents: &str) -> Result<()> {
+    ensure_safe_handoff_target(path)?;
+    let parent = path.parent().context("handoff target has no parent directory")?;
+    let target_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("handoff");
+    let temporary_path = parent.join(format!(".{target_name}.{}.tmp", Uuid::new_v4()));
+
+    if let Err(error) = write_new_handoff_file(&temporary_path, contents) {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(error);
+    }
+
+    #[cfg(unix)]
+    let replacement = fs::rename(&temporary_path, path);
+    #[cfg(not(unix))]
+    let replacement = match fs::rename(&temporary_path, path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            ensure_safe_handoff_target(path)?;
+            fs::remove_file(path).and_then(|()| fs::rename(&temporary_path, path))
+        }
+        Err(error) => Err(error),
+    };
+
+    if let Err(error) = replacement {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(error).with_context(|| format!("failed to replace handoff {}", path.display()));
+    }
     Ok(())
 }
 
@@ -639,6 +669,27 @@ mod tests {
             fs::read_to_string(first.archive_path)
                 .expect("read first archive")
                 .contains("first")
+        );
+    }
+
+    #[test]
+    fn replacing_current_handoff_does_not_leave_temporary_files() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let tasks_dir = temp.path().join(TASKS_DIR);
+        fs::create_dir_all(&tasks_dir).expect("tasks dir");
+        let current = tasks_dir.join(CURRENT_BLOCKED_FILE);
+        fs::write(&current, "old handoff").expect("write old handoff");
+
+        write_handoff_file(&current, "new handoff", true).expect("replace handoff");
+
+        assert_eq!(fs::read_to_string(&current).expect("read replacement"), "new handoff");
+        assert_eq!(
+            fs::read_dir(tasks_dir)
+                .expect("read tasks dir")
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(".current_blocked.md."))
+                .count(),
+            0
         );
     }
 

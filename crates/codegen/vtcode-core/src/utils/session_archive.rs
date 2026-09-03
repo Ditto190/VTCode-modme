@@ -976,13 +976,17 @@ impl SessionArchive {
         total_messages: usize,
         distinct_tools: Vec<String>,
         messages: Vec<SessionMessage>,
+        turn_diagnostics: Option<SnapshotTurnDiagnostics>,
     ) -> SessionSnapshot {
         self.build_snapshot(
             total_messages,
             normalize_distinct_tools_for_summary(&distinct_tools),
             clean_transcript_lines(&transcript),
             messages,
-            None,
+            turn_diagnostics.map(|turn_diagnostics| SessionProgress {
+                turn_diagnostics: Some(turn_diagnostics),
+                ..SessionProgress::default()
+            }),
         )
     }
 
@@ -1048,7 +1052,21 @@ impl SessionArchive {
         distinct_tools: Vec<String>,
         messages: Vec<SessionMessage>,
     ) -> Result<PathBuf> {
-        let snapshot = self.build_final_snapshot(transcript, total_messages, distinct_tools, messages);
+        self.finalize_with_diagnostics(transcript, total_messages, distinct_tools, messages, None)
+    }
+
+    /// Finalize the archive while retaining lightweight diagnostics for the
+    /// last turn. The final snapshot still omits the heavy progress history.
+    pub fn finalize_with_diagnostics(
+        &self,
+        transcript: Vec<String>,
+        total_messages: usize,
+        distinct_tools: Vec<String>,
+        messages: Vec<SessionMessage>,
+        turn_diagnostics: Option<SnapshotTurnDiagnostics>,
+    ) -> Result<PathBuf> {
+        let snapshot =
+            self.build_final_snapshot(transcript, total_messages, distinct_tools, messages, turn_diagnostics);
 
         let path = self.write_snapshot(snapshot)?;
         if let Some(parent) = path.parent() {

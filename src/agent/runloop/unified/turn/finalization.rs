@@ -5,6 +5,7 @@
 use anyhow::Result;
 use std::io;
 use std::path::PathBuf;
+use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
 use vtcode_core::hooks::{LifecycleHookEngine, SessionEndReason};
 use vtcode_core::llm::provider as uni;
 use vtcode_core::notifications::{set_global_notification_hook_engine, set_global_terminal_focused};
@@ -40,6 +41,7 @@ pub(super) async fn finalize_session(
     session_end_reason: SessionEndReason,
     session_archive: &mut Option<SessionArchive>,
     session_stats: &SessionStats,
+    last_turn_diagnostics: Option<SnapshotTurnDiagnostics>,
     conversation_history: &[uni::Message],
     linked_directories: Vec<LinkedDirectory>,
     async_mcp_manager: Option<&AsyncMcpManager>,
@@ -54,7 +56,13 @@ pub(super) async fn finalize_session(
         let total_messages = conversation_history.len();
         let session_messages: Vec<SessionMessage> = conversation_history.iter().map(SessionMessage::from).collect();
 
-        match archive.finalize(transcript_lines, total_messages, distinct_tools, session_messages) {
+        match archive.finalize_with_diagnostics(
+            transcript_lines,
+            total_messages,
+            distinct_tools,
+            session_messages,
+            last_turn_diagnostics,
+        ) {
             Ok(path) => {
                 archive_path = Some(path.clone());
                 if let Some(hooks) = lifecycle_hooks {

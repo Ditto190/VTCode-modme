@@ -534,6 +534,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let mut last_approved_plan_summary_status: Option<ExecutionSummaryStatus> = None;
         let mut last_turn_result: Option<RunLoopTurnLoopResult> = None;
         let mut last_turn_response_was_fallback = false;
+        let mut last_turn_diagnostics = None;
 
         if !startup_update_requested_restart {
             loop {
@@ -1157,6 +1158,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 let turn_elapsed = turn_started_at.elapsed();
                 let mut turn_diagnostics = outcome.turn_diagnostics.clone();
                 turn_diagnostics.elapsed_ms = turn_elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+                last_turn_diagnostics = Some(turn_diagnostics.clone());
                 let show_turn_timer = vt_cfg.as_ref().map(|cfg| cfg.ui.show_turn_timer).unwrap_or(true);
                 let harness_snapshot = tool_registry.harness_context_snapshot();
                 if let Err(err) = crate::agent::runloop::unified::turn::apply_turn_outcome(
@@ -1578,6 +1580,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             session_end_reason,
             &mut session_archive,
             &session_stats,
+            last_turn_diagnostics,
             &runtime.state.messages,
             linked_directories,
             async_mcp_manager.as_deref(),
