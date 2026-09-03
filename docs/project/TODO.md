@@ -102,3 +102,7 @@ fix broken tool call rendering
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 22.40.46.png'
 
 ===
+
+check and fix when vtcode hit max tool call limit and then after user grant for more tool call, it seems that the current `Build` agent is accidentally stuck in a blocked state and cannot continue to process the next tool call. The harness should be able to detect this situation and automatically resume the agent's operation after the user grants permission for more tool calls. Additionally, provide clear feedback to the user about the current state of the agent and any actions they need to take. It was switched to to `Duck`, a discovery and read-only agent, which is not the intended behavior. The harness should ensure that the correct agent is resumed after the user grants permission for more tool calls. Also check the logs and ensure vtcode harness is persistent, and can recover gracefully from such scenarios. Also check for duplicated, wasted tool calls and context that is not being utilized effectively. The harness should optimize tool call usage and ensure that the session can continue smoothly without unnecessary interruptions or wasted resources.
+
+logs: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260903T023423Z_385180-10964 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260903T023025Z_046359-10964
