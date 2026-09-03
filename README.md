@@ -14,9 +14,10 @@
 
 ## Contents
 
-- [New: VT Code WebMCP application](#new-vt-code-webmcp-application)
 - [Overview](#overview)
 - [Why VT Code](#why-vt-code)
+- [Features](#features)
+- [WebMCP browser bridge](#webmcp-browser-bridge)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 - [Providers and models](#providers-and-models)
@@ -50,35 +51,27 @@ terminal.
 
 - **Harness, not a wrapper**: the model reasons; the harness enforces
   progress with tools, sandbox, evals, and state.
+- **Agent-first by design**: the repository is the system of record —
+  `AGENTS.md` is the map, `docs/` is the territory, and design decisions
+  live in versioned docs, not in someone's head or a chat thread.
 - **Safety-first**: sandboxed shell, command policies, per-workspace
-  approvals, adversarial regression tests.
+  approvals; the sandbox/exec boundary is a primary adversarial surface
+  with regression coverage for command injection, path/symlink escape,
+  and environment leakage.
 - **Built for long runs**: durable session memory, spooled tool output,
   auto-compaction; "done" only when verification passes.
 - **Protocol-native**: MCP, Skills, Agent Plugins, ACP (Zed), A2A, and ATIF
   export with no core forks.
 - **Parallel loop engineering**: worktree isolation, propose/verify
   sub-agents, cost guardrails.
+- **Engineering discipline as a feature**: a single authoritative
+  `ThreadEvent` runtime contract, strict crate layering
+  (`types → config → core → tools → agent → TUI`), CI-enforced invariants,
+  and WCAG AA contrast tests for every built-in theme.
 - **Runs anywhere**: 30 providers plus local Ollama, LM Studio, and
   llama.cpp.
 
-## New: VT Code WebMCP application
-
-The WebMCP browser bridge is a first-class, opt-in VT Code integration. The
-maintained browser app is published at two origins:
-
-| Deployment | URL | Browser origin | Use it for |
-| --- | --- | --- | --- |
-| ChatGPT Site | <https://vtcode.vinhnx.chatgpt.site/> | `https://vtcode.vinhnx.chatgpt.site` | Hosted WebMCP demonstration |
-| GitHub Pages | <https://vinhnx.github.io/VTCode/> | `https://vinhnx.github.io` | Static fallback and WebMCP reference client |
-
-The app derives the exact pairing origin from the page currently open, so pair
-the active VT Code session with `/webmcp pair https://vtcode.vinhnx.chatgpt.site`
-for the ChatGPT Site or `/webmcp pair https://vinhnx.github.io` for GitHub
-Pages. See the [WebMCP user guide](./docs/user-guide/webmcp.md),
-[development guide](./docs/development/webmcp.md), [deployment reference](./docs/reference/webmcp.md),
-[WebMCP app guide](./apps/webmcp/GUIDE.md), [WebMCP app README](./apps/webmcp/README.md),
-and [WebMCP crate documentation](./crates/codegen/vtcode-webmcp/README.md) for
-setup, integration, and implementation details.
+## Features
 
 ### Runtime and coding
 
@@ -104,6 +97,25 @@ setup, integration, and implementation details.
 VT Code is designed for both interactive development and unattended work. It
 keeps tool execution and provider access explicit, while allowing the same
 session to move from exploration to implementation and review.
+
+## WebMCP browser bridge
+
+The WebMCP browser bridge is a first-class, opt-in VT Code integration. The
+maintained browser app is published at two origins:
+
+| Deployment | URL | Browser origin | Use it for |
+| --- | --- | --- | --- |
+| ChatGPT Site | <https://vtcode.vinhnx.chatgpt.site/> | `https://vtcode.vinhnx.chatgpt.site` | Hosted WebMCP demonstration |
+| GitHub Pages | <https://vinhnx.github.io/VTCode/> | `https://vinhnx.github.io` | Static fallback and WebMCP reference client |
+
+The app derives the exact pairing origin from the page currently open, so pair
+the active VT Code session with `/webmcp pair https://vtcode.vinhnx.chatgpt.site`
+for the ChatGPT Site or `/webmcp pair https://vinhnx.github.io` for GitHub
+Pages. See the [WebMCP user guide](./docs/user-guide/webmcp.md),
+[development guide](./docs/development/webmcp.md), [deployment reference](./docs/reference/webmcp.md),
+[WebMCP app guide](./apps/webmcp/GUIDE.md), [WebMCP app README](./apps/webmcp/README.md),
+and [WebMCP crate documentation](./crates/codegen/vtcode-webmcp/README.md) for
+setup, integration, and implementation details.
 
 ## Quick start
 
@@ -229,17 +241,15 @@ custom OpenAI-compatible endpoints.
 
 ### Provider directory
 
-The list below is grouped by how a request reaches a model. The provider guide
-is the source of truth for credentials, supported capabilities, and model
-defaults.
+The list below is grouped by how a request reaches a model. The
+[provider guide](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
+for credentials, supported capabilities, and model defaults.
 
-| Category            | Providers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Cloud LLMs**      | [Anthropic](./docs/providers/PROVIDER_GUIDES.md#anthropic-claude) · [OpenAI](./docs/providers/PROVIDER_GUIDES.md#openai-gpt) · [Gemini](./docs/providers/PROVIDER_GUIDES.md#google-gemini) · [Meta AI (Muse)](./docs/providers/PROVIDER_GUIDES.md#meta-ai) · [Z.AI](./docs/providers/PROVIDER_GUIDES.md#zai-zai) · [Moonshot (Kimi)](./docs/providers/PROVIDER_GUIDES.md#moonshot-kimi) · [StepFun](./docs/providers/PROVIDER_GUIDES.md#stepfun) · [MiniMax](./docs/providers/PROVIDER_GUIDES.md#minimax) · [Mistral](./docs/providers/PROVIDER_GUIDES.md#mistral) · [Qwen](./docs/providers/PROVIDER_GUIDES.md#qwen) |
-| **Foundations**     | [NVIDIA NIM](./docs/providers/PROVIDER_GUIDES.md#nvidia-nim) · [Xiaomi MiMo](./docs/providers/PROVIDER_GUIDES.md#xiaomi-mimo)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| **Gateways**        | [OpenRouter](./docs/providers/PROVIDER_GUIDES.md#openrouter-marketplace) · [Merge Gateway](./docs/providers/PROVIDER_GUIDES.md#merge-gateway) · [Evolink](./docs/providers/PROVIDER_GUIDES.md#evolink-multi-model-gateway) · [HuggingFace](./docs/providers/PROVIDER_GUIDES.md#huggingface) · [Atlas Cloud](./docs/providers/PROVIDER_GUIDES.md#atlas-cloud) · [OmniRoute](./docs/providers/PROVIDER_GUIDES.md#omniroute)                                                                                                                                                                                             |
-| **Local inference** | [Ollama](./docs/providers/PROVIDER_GUIDES.md#ollama-local--cloud-models) · [LM Studio](./docs/providers/PROVIDER_GUIDES.md#lm-studio-local-server) · [llama.cpp](./docs/providers/PROVIDER_GUIDES.md#llamacpp-local-server)                                                                                                                                                                                                                                                                                                                                                                                           |
-| **Other**           | [GitHub Copilot](./docs/providers/PROVIDER_GUIDES.md#github-copilot) · [Anthropic API Compat](./docs/providers/PROVIDER_GUIDES.md#anthropic-api-compatibility-server) · [Poolside](./docs/providers/PROVIDER_GUIDES.md#poolside)                                                                                                                                                                                                                                                                                                                                                                                      |
+- **Cloud LLMs**: [Anthropic](./docs/providers/PROVIDER_GUIDES.md#anthropic-claude) · [OpenAI](./docs/providers/PROVIDER_GUIDES.md#openai-gpt) · [Gemini](./docs/providers/PROVIDER_GUIDES.md#google-gemini) · [Meta AI (Muse)](./docs/providers/PROVIDER_GUIDES.md#meta-ai) · [Z.AI](./docs/providers/PROVIDER_GUIDES.md#zai-zai) · [Moonshot (Kimi)](./docs/providers/PROVIDER_GUIDES.md#moonshot-kimi) · [StepFun](./docs/providers/PROVIDER_GUIDES.md#stepfun) · [MiniMax](./docs/providers/PROVIDER_GUIDES.md#minimax) · [Mistral](./docs/providers/PROVIDER_GUIDES.md#mistral) · [Qwen](./docs/providers/PROVIDER_GUIDES.md#qwen)
+- **Foundations**: [NVIDIA NIM](./docs/providers/PROVIDER_GUIDES.md#nvidia-nim) · [Xiaomi MiMo](./docs/providers/PROVIDER_GUIDES.md#xiaomi-mimo)
+- **Gateways**: [OpenRouter](./docs/providers/PROVIDER_GUIDES.md#openrouter-marketplace) · [Merge Gateway](./docs/providers/PROVIDER_GUIDES.md#merge-gateway) · [Evolink](./docs/providers/PROVIDER_GUIDES.md#evolink-multi-model-gateway) · [HuggingFace](./docs/providers/PROVIDER_GUIDES.md#huggingface) · [Atlas Cloud](./docs/providers/PROVIDER_GUIDES.md#atlas-cloud) · [OmniRoute](./docs/providers/PROVIDER_GUIDES.md#omniroute)
+- **Local inference**: [Ollama](./docs/providers/PROVIDER_GUIDES.md#ollama-local--cloud-models) · [LM Studio](./docs/providers/PROVIDER_GUIDES.md#lm-studio-local-server) · [llama.cpp](./docs/providers/PROVIDER_GUIDES.md#llamacpp-local-server)
+- **Other**: [GitHub Copilot](./docs/providers/PROVIDER_GUIDES.md#github-copilot) · [Anthropic API Compat](./docs/providers/PROVIDER_GUIDES.md#anthropic-api-compatibility-server) · [Poolside](./docs/providers/PROVIDER_GUIDES.md#poolside)
 
 Additional built-in providers include [DeepSeek](./docs/providers/PROVIDER_GUIDES.md#deepseek),
 [xAI](./docs/providers/PROVIDER_GUIDES.md#xai-grok), [OpenCode Zen](./docs/providers/PROVIDER_GUIDES.md#opencode-zen),
@@ -301,8 +311,8 @@ export MYCORP_API_KEY="..."
   `supports_responses_compaction`, and `supports_context_edits`.
 
 The separate `context.max_context_tokens` setting can impose a lower session
-budget. See the [configuration reference](./docs/config/CONFIG_FIELD_REFERENCE.md),
-the [custom provider configuration](./docs/config/config.md#custom_providers).
+budget. See the [configuration reference](./docs/config/CONFIG_FIELD_REFERENCE.md)
+and [custom provider configuration](./docs/config/config.md#custom_providers).
 
 #### Model profiles
 
