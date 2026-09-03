@@ -78,10 +78,14 @@ pub enum ModelId {
     // Official Meta AI models
     /// Meta Muse Spark 1.1 - Official Meta AI Standard-tier reasoning model
     MetaMuseSpark11,
-    /// Meta Muse Spark 1.2 - Official Meta AI flagship Standard-tier reasoning model
+    /// Meta Muse Spark 1.2 - Official Meta AI Standard-tier reasoning model
     MetaMuseSpark12,
     /// Meta Muse Spark 1.2 Contributor tier - opt-in variant with Meta's discounted data-contribution terms
     MetaMuseSpark12Contributor,
+    /// Meta Muse Spark 1.3 - Official Meta AI flagship Standard-tier reasoning model, tuned for agentic workflows
+    MetaMuseSpark13,
+    /// Meta Muse Spark 1.3 Contributor tier - opt-in variant with Meta's discounted data-contribution terms
+    MetaMuseSpark13Contributor,
 
     // NVIDIA NIM models
     /// NVIDIA Nemotron 3 Ultra - NVIDIA's flagship agentic reasoning model via NIM
@@ -122,6 +126,8 @@ pub enum ModelId {
     MergeGatewayThinkingMachinesInkling,
     /// Meta Muse Spark 1.1 through Merge Gateway
     MergeGatewayMetaMuseSpark11,
+    /// Meta Muse Spark 1.3 through Merge Gateway
+    MergeGatewayMetaMuseSpark13,
     /// Z.AI GLM-5.3 Flash through Merge Gateway
     MergeGatewayZaiGlm53Flash,
     /// OpenAI GPT-5.6 Luna through Merge Gateway
@@ -130,6 +136,12 @@ pub enum ModelId {
     MergeGatewayOpenAIGpt56Sol,
     /// OpenAI GPT-5.6 Terra through Merge Gateway
     MergeGatewayOpenAIGpt56Terra,
+    /// Google Gemini 3.8 Flash through Merge Gateway
+    MergeGatewayGoogleGemini38Flash,
+    /// Anthropic Claude Fable 5.1 through Merge Gateway
+    MergeGatewayAnthropicClaudeFable51,
+    /// DeepSeek V4 Flash 0731 Fast through Merge Gateway
+    MergeGatewayDeepseekV4Flash0731Fast,
 
     // Mistral AI models
     /// Mistral Large 3 - State-of-the-art open-weight general-purpose multimodal model

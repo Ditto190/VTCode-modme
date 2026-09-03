@@ -111,14 +111,18 @@ fn test_model_providers() {
     assert_eq!(ModelId::MergeGatewayAnthropicClaudeOpus5.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayGoogleGemini36Flash.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayGoogleGemini37Flash.provider(), Provider::MergeGateway);
+    assert_eq!(ModelId::MergeGatewayGoogleGemini38Flash.provider(), Provider::MergeGateway);
+    assert_eq!(ModelId::MergeGatewayAnthropicClaudeFable51.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayDeepseekV4Pro0813.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayDeepseekV4Flash0731.provider(), Provider::MergeGateway);
+    assert_eq!(ModelId::MergeGatewayDeepseekV4Flash0731Fast.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayXaiGrok46.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayQwen38Max.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayMinimaxH3.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayMoonshotKimiK3.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayThinkingMachinesInkling.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayMetaMuseSpark11.provider(), Provider::MergeGateway);
+    assert_eq!(ModelId::MergeGatewayMetaMuseSpark13.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayOpenAIGpt56Luna.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayOpenAIGpt56Sol.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayOpenAIGpt56Terra.provider(), Provider::MergeGateway);
@@ -139,7 +143,7 @@ fn test_provider_defaults() {
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::OpenAI), ModelId::GPT56Sol);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Anthropic), ModelId::ClaudeOpus5);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::DeepSeek), ModelId::DeepSeekV4Pro);
-    assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Meta), ModelId::MetaMuseSpark12);
+    assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Meta), ModelId::MetaMuseSpark13);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::NVIDIA), ModelId::NvidiaNemotron3Ultra550bA55b);
     assert_eq!(
         ModelId::default_orchestrator_for_provider(Provider::OpenRouter),
@@ -176,8 +180,9 @@ fn test_model_variants() {
     assert!(ModelId::ClaudeOpus5.is_pro_variant());
     assert!(ModelId::ClaudeSonnet5.is_pro_variant());
     assert!(ModelId::DeepSeekV4Pro.is_pro_variant());
+    assert!(ModelId::MetaMuseSpark13.is_pro_variant());
+    assert!(ModelId::MetaMuseSpark13Contributor.is_pro_variant());
     assert!(ModelId::MetaMuseSpark12.is_pro_variant());
-    assert!(ModelId::ZaiGlm52.is_pro_variant());
     assert!(ModelId::XaiGrok46.is_pro_variant());
     assert!(!ModelId::Gemini37Flash.is_pro_variant());
 
@@ -197,6 +202,8 @@ fn test_model_variants() {
     assert!(ModelId::ClaudeOpus5.is_top_tier());
     assert!(ModelId::ClaudeSonnet5.is_top_tier());
     assert!(ModelId::DeepSeekV4Pro.is_top_tier());
+    assert!(ModelId::MetaMuseSpark13.is_top_tier());
+    assert!(ModelId::MetaMuseSpark13Contributor.is_top_tier());
     assert!(ModelId::MetaMuseSpark12.is_top_tier());
     assert!(ModelId::ZaiGlm52.is_top_tier());
     assert!(ModelId::Gemini37Flash.is_top_tier());
@@ -215,6 +222,11 @@ fn test_preferred_lightweight_variant() {
     assert_eq!(ModelId::Gemini37Flash.preferred_lightweight_variant(), None);
     assert_eq!(ModelId::ZaiGlm52.preferred_lightweight_variant(), None);
     assert_eq!(ModelId::MetaMuseSpark12.preferred_lightweight_variant(), Some(ModelId::MetaMuseSpark11));
+    assert_eq!(ModelId::MetaMuseSpark13.preferred_lightweight_variant(), Some(ModelId::MetaMuseSpark12));
+    assert_eq!(
+        ModelId::MetaMuseSpark13Contributor.preferred_lightweight_variant(),
+        Some(ModelId::MetaMuseSpark12Contributor)
+    );
     assert_eq!(ModelId::GPT56Luna.preferred_lightweight_variant(), None);
     assert_eq!(ModelId::XaiGrok46.preferred_lightweight_variant(), Some(ModelId::XaiGrokBuild01));
 }
@@ -240,6 +252,8 @@ fn test_model_generation() {
     assert_eq!(ModelId::MetaMuseSpark11.generation(), "Muse-Spark-1.1");
     assert_eq!(ModelId::MetaMuseSpark12.generation(), "Muse-Spark-1.2");
     assert_eq!(ModelId::MetaMuseSpark12Contributor.generation(), "Muse-Spark-1.2");
+    assert_eq!(ModelId::MetaMuseSpark13.generation(), "Muse-Spark-1.3");
+    assert_eq!(ModelId::MetaMuseSpark13Contributor.generation(), "Muse-Spark-1.3");
 
     // Z.AI generations
     assert_eq!(ModelId::ZaiGlm52.generation(), "5.2");
@@ -277,6 +291,8 @@ fn test_models_for_provider() {
     assert_eq!(
         meta_models,
         &[
+            ModelId::MetaMuseSpark13,
+            ModelId::MetaMuseSpark13Contributor,
             ModelId::MetaMuseSpark12,
             ModelId::MetaMuseSpark12Contributor,
             ModelId::MetaMuseSpark11
@@ -289,12 +305,16 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaZaiGlm52));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 17);
+    assert_eq!(merge_gateway_models.len(), 21);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt55));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini37Flash));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini38Flash));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeFable51));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekV4Flash0731Fast));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekV4Pro0813));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt56Terra));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayMetaMuseSpark13));
 
     let openrouter_models = ModelId::models_for_provider(Provider::OpenRouter);
     assert!(openrouter_models.contains(&ModelId::OpenRouterOpenAIGpt5));
@@ -595,7 +615,8 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             ModelId::MergeGatewayOpenAIGpt55
             | ModelId::MergeGatewayAnthropicClaudeOpus5
             | ModelId::MergeGatewayGoogleGemini36Flash
-            | ModelId::MergeGatewayGoogleGemini37Flash => continue,
+            | ModelId::MergeGatewayGoogleGemini37Flash
+            | ModelId::MergeGatewayGoogleGemini38Flash => continue,
             _ => ModelId::from_str(&model.as_str()),
         };
         assert_eq!(parsed.unwrap(), model);

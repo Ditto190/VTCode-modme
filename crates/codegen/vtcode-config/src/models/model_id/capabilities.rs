@@ -167,20 +167,26 @@ impl ModelId {
             ModelId::DeepSeekV4FlashVisionExp => Some(ModelId::DeepSeekV4Flash),
             ModelId::MergeGatewayDeepseekV4Pro0813 => Some(ModelId::MergeGatewayDeepseekV4Flash0731),
             ModelId::MetaMuseSpark12 => Some(ModelId::MetaMuseSpark11),
+            ModelId::MetaMuseSpark13 => Some(ModelId::MetaMuseSpark12),
+            ModelId::MetaMuseSpark13Contributor => Some(ModelId::MetaMuseSpark12Contributor),
             ModelId::NvidiaNemotron3Ultra550bA55b => Some(ModelId::NvidiaNemotron3Super120bA12b),
             ModelId::NvidiaNemotron3Super120bA12b => Some(ModelId::NvidiaNemotron3Nano30bA3b),
             ModelId::MergeGatewayDefaultRouting
             | ModelId::MergeGatewayOpenAIGpt55
             | ModelId::MergeGatewayAnthropicClaudeOpus5
+            | ModelId::MergeGatewayAnthropicClaudeFable51
             | ModelId::MergeGatewayGoogleGemini36Flash
             | ModelId::MergeGatewayGoogleGemini37Flash
+            | ModelId::MergeGatewayGoogleGemini38Flash
             | ModelId::MergeGatewayDeepseekV4Flash0731
+            | ModelId::MergeGatewayDeepseekV4Flash0731Fast
             | ModelId::MergeGatewayXaiGrok46
             | ModelId::MergeGatewayQwen38Max
             | ModelId::MergeGatewayMinimaxH3
             | ModelId::MergeGatewayMoonshotKimiK3
             | ModelId::MergeGatewayThinkingMachinesInkling
             | ModelId::MergeGatewayMetaMuseSpark11
+            | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt56Luna => None,
             ModelId::OpenCodeGoDeepseekV4Pro => Some(ModelId::OpenCodeGoDeepseekV4Flash),
             ModelId::OpenCodeGoMimoV25Pro => Some(ModelId::OpenCodeGoMimoV25),
@@ -253,15 +259,19 @@ impl ModelId {
             ModelId::MergeGatewayDefaultRouting
             | ModelId::MergeGatewayOpenAIGpt55
             | ModelId::MergeGatewayAnthropicClaudeOpus5
+            | ModelId::MergeGatewayAnthropicClaudeFable51
             | ModelId::MergeGatewayGoogleGemini36Flash
             | ModelId::MergeGatewayGoogleGemini37Flash
+            | ModelId::MergeGatewayGoogleGemini38Flash
             | ModelId::MergeGatewayDeepseekV4Flash0731
+            | ModelId::MergeGatewayDeepseekV4Flash0731Fast
             | ModelId::MergeGatewayXaiGrok46
             | ModelId::MergeGatewayQwen38Max
             | ModelId::MergeGatewayMinimaxH3
             | ModelId::MergeGatewayMoonshotKimiK3
             | ModelId::MergeGatewayThinkingMachinesInkling
             | ModelId::MergeGatewayMetaMuseSpark11
+            | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt56Luna
             | ModelId::MergeGatewayOpenAIGpt56Sol
             | ModelId::MergeGatewayOpenAIGpt56Terra => None,
@@ -290,6 +300,7 @@ impl ModelId {
                 | ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini36Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
+                | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::EvolinkGemini35Flash
                 | ModelId::EvolinkDeepseekV4Flash
                 | ModelId::OpenRouterStepfunStep35FlashFree
@@ -297,6 +308,7 @@ impl ModelId {
                 | ModelId::StepFun37Flash
                 | ModelId::HuggingFaceDeepseekV4FlashNovita
                 | ModelId::MergeGatewayDeepseekV4Flash0731
+                | ModelId::MergeGatewayDeepseekV4Flash0731Fast
                 | ModelId::DeepSeekV4Flash
                 | ModelId::DeepSeekV4FlashVisionExp
                 | ModelId::ZaiGlm53Flash
@@ -318,6 +330,7 @@ impl ModelId {
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
+                | ModelId::MergeGatewayAnthropicClaudeFable51
                 | ModelId::ClaudeMythos5
                 | ModelId::ClaudeMythos51
                 | ModelId::ClaudeOpus5
@@ -330,7 +343,10 @@ impl ModelId {
                 | ModelId::OpenCodeGoDeepseekV4Pro
                 | ModelId::DeepSeekV4Pro
                 | ModelId::MergeGatewayDeepseekV4Pro0813
+                | ModelId::MetaMuseSpark13
+                | ModelId::MetaMuseSpark13Contributor
                 | ModelId::MetaMuseSpark12
+                | ModelId::MergeGatewayMetaMuseSpark13
                 | ModelId::EvolinkDeepseekV4Pro
                 | ModelId::ZaiGlm53
                 | ModelId::ZaiGlm52
@@ -366,12 +382,14 @@ impl ModelId {
             ModelId::Gemini37Flash
                 | ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
+                | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::GPT56Luna
                 | ModelId::MergeGatewayOpenAIGpt56Luna
                 | ModelId::CopilotGPT54Mini
                 | ModelId::DeepSeekV4Flash
                 | ModelId::DeepSeekV4FlashVisionExp
                 | ModelId::MergeGatewayDeepseekV4Flash0731
+                | ModelId::MergeGatewayDeepseekV4Flash0731Fast
                 | ModelId::MetaMuseSpark11
                 | ModelId::MergeGatewayMinimaxH3
                 | ModelId::HuggingFaceStep35Flash
@@ -398,6 +416,7 @@ impl ModelId {
             ModelId::Gemini38Flash
                 | ModelId::Gemini37Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
+                | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::GPT56Sol
                 | ModelId::MergeGatewayOpenAIGpt56Sol
                 | ModelId::GPT56Terra
@@ -406,6 +425,7 @@ impl ModelId {
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
+                | ModelId::MergeGatewayAnthropicClaudeFable51
                 | ModelId::ClaudeMythos5
                 | ModelId::ClaudeMythos51
                 | ModelId::ClaudeOpus5
@@ -419,7 +439,10 @@ impl ModelId {
                 | ModelId::OpenCodeGoDeepseekV4Pro
                 | ModelId::DeepSeekV4Pro
                 | ModelId::MergeGatewayDeepseekV4Pro0813
+                | ModelId::MetaMuseSpark13
+                | ModelId::MetaMuseSpark13Contributor
                 | ModelId::MetaMuseSpark12
+                | ModelId::MergeGatewayMetaMuseSpark13
                 | ModelId::ZaiGlm53
                 | ModelId::ZaiGlm53Flash
                 | ModelId::ZaiGlm52
@@ -494,6 +517,7 @@ impl ModelId {
             ModelId::MergeGatewayDeepseekV4Flash0731 => "4-flash-0731",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
             ModelId::MetaMuseSpark12 | ModelId::MetaMuseSpark12Contributor => "Muse-Spark-1.2",
+            ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
             // Z.AI generations
             ModelId::ZaiGlm53 | ModelId::ZaiGlm53Flash | ModelId::MergeGatewayZaiGlm53Flash => "5.3",
             ModelId::ZaiGlm52 => "5.2",
@@ -501,6 +525,7 @@ impl ModelId {
             ModelId::Gemini37Flash => "3.7",
             ModelId::Gemini38Flash => "3.8",
             ModelId::MergeGatewayGoogleGemini37Flash => "3.7",
+            ModelId::MergeGatewayGoogleGemini38Flash => "3.8",
             ModelId::OpenCodeGoGlm53 => "5.3",
             ModelId::OpenCodeGoGlm52 => "5.2",
             ModelId::OpenCodeGoGpt56Luna => "5.6-luna",
@@ -562,10 +587,13 @@ impl ModelId {
             ModelId::MergeGatewayOpenAIGpt55 => "5.5",
             ModelId::MergeGatewayAnthropicClaudeOpus5 => "5",
             ModelId::MergeGatewayGoogleGemini36Flash => "3.6",
+            ModelId::MergeGatewayAnthropicClaudeFable51 => "5.1",
+            ModelId::MergeGatewayDeepseekV4Flash0731Fast => "4-flash-0731-fast",
             ModelId::MergeGatewayQwen38Max => "3.8-max",
             ModelId::MergeGatewayMinimaxH3 => "H3",
             ModelId::MergeGatewayThinkingMachinesInkling => "Inkling",
             ModelId::MergeGatewayMetaMuseSpark11 => "Muse-Spark-1.1",
+            ModelId::MergeGatewayMetaMuseSpark13 => "Muse-Spark-1.3",
             ModelId::MergeGatewayOpenAIGpt56Luna
             | ModelId::MergeGatewayOpenAIGpt56Sol
             | ModelId::MergeGatewayOpenAIGpt56Terra => "5.6",

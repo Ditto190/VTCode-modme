@@ -22,10 +22,22 @@ fn reasoning_efforts() -> Vec<ReasoningEffortPreset> {
 pub(crate) fn meta_presets() -> Vec<ModelPreset> {
     [
         (
+            models::meta::MUSE_SPARK_1_3,
+            "Muse Spark 1.3 (Meta AI)",
+            "Official Meta AI Standard-tier flagship tuned for agentic workflows with always-on reasoning and a 1M-token context window",
+            true,
+        ),
+        (
+            models::meta::MUSE_SPARK_1_3_CONTRIBUTOR,
+            "Muse Spark 1.3 Contributor (Meta AI)",
+            "Opt-in Meta AI Contributor-tier Muse Spark 1.3 variant; review Meta's data-contribution terms before use",
+            false,
+        ),
+        (
             models::meta::MUSE_SPARK_1_2,
             "Muse Spark 1.2 (Meta AI)",
             "Official Meta AI Standard-tier flagship with always-on reasoning and a 1M-token context window",
-            true,
+            false,
         ),
         (
             models::meta::MUSE_SPARK_1_1,

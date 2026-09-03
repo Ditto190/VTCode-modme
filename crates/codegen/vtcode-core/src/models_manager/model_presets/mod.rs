@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn merge_gateway_presets_expose_curated_routes_and_default() {
         let presets = presets::merge_gateway_presets();
-        assert_eq!(presets.len(), 17);
+        assert_eq!(presets.len(), 21);
         let default = presets
             .iter()
             .find(|preset| preset.is_default)
@@ -393,10 +393,11 @@ mod tests {
     #[test]
     fn meta_presets_keep_standard_default_and_contributor_opt_in() {
         let presets = presets::meta_presets();
-        assert_eq!(presets.len(), 3);
+        assert_eq!(presets.len(), 5);
 
         let default = presets.iter().find(|preset| preset.is_default).expect("Meta default preset");
-        assert_eq!(default.model, "muse-spark-1.2");
+        assert_eq!(default.model, "muse-spark-1.3");
+        assert!(presets.iter().any(|preset| preset.model == "muse-spark-1.3-contributor"));
         assert!(presets.iter().any(|preset| preset.model == "muse-spark-1.2-contributor"));
         assert!(
             presets

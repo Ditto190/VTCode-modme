@@ -271,6 +271,20 @@ model_id_table! {
         display: "Muse Spark 1.2 Contributor (Meta AI)",
         description: "Official Meta AI Muse Spark 1.2 Contributor-tier variant with always-on reasoning and long context",
     },
+    MetaMuseSpark13 {
+        provider: Meta,
+        id: models::meta::MUSE_SPARK_1_3,
+        parse: [models::meta::MUSE_SPARK_1_3],
+        display: "Muse Spark 1.3 (Meta AI)",
+        description: "Official Meta AI Muse Spark 1.3 Standard-tier flagship tuned for agentic workflows with always-on reasoning and long context",
+    },
+    MetaMuseSpark13Contributor {
+        provider: Meta,
+        id: models::meta::MUSE_SPARK_1_3_CONTRIBUTOR,
+        parse: [models::meta::MUSE_SPARK_1_3_CONTRIBUTOR],
+        display: "Muse Spark 1.3 Contributor (Meta AI)",
+        description: "Official Meta AI Muse Spark 1.3 Contributor-tier variant with always-on reasoning and long context",
+    },
     // NVIDIA NIM models
     NvidiaNemotron3Ultra550bA55b {
         provider: NVIDIA,
@@ -399,6 +413,13 @@ model_id_table! {
         display: "Muse Spark 1.1 (Merge Gateway)",
         description: "Meta Muse Spark 1.1 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
+    MergeGatewayMetaMuseSpark13 {
+        provider: MergeGateway,
+        id: models::merge_gateway::META_MUSE_SPARK_1_3,
+        parse: [models::merge_gateway::META_MUSE_SPARK_1_3],
+        display: "Muse Spark 1.3 (Merge Gateway)",
+        description: "Meta Muse Spark 1.3 accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
     MergeGatewayZaiGlm53Flash {
         provider: MergeGateway,
         id: models::merge_gateway::ZAI_GLM_5_3_FLASH,
@@ -426,6 +447,27 @@ model_id_table! {
         parse: [models::merge_gateway::OPENAI_GPT_5_6_TERRA],
         display: "GPT-5.6 Terra (Merge Gateway)",
         description: "OpenAI GPT-5.6 Terra accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayGoogleGemini38Flash {
+        provider: MergeGateway,
+        id: models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH,
+        parse: [models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH],
+        display: "Gemini 3.8 Flash (Merge Gateway)",
+        description: "Google Gemini 3.8 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayAnthropicClaudeFable51 {
+        provider: MergeGateway,
+        id: models::merge_gateway::ANTHROPIC_CLAUDE_FABLE_5_1,
+        parse: [models::merge_gateway::ANTHROPIC_CLAUDE_FABLE_5_1],
+        display: "Claude Fable 5.1 (Merge Gateway)",
+        description: "Anthropic Claude Fable 5.1 accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayDeepseekV4Flash0731Fast {
+        provider: MergeGateway,
+        id: models::merge_gateway::DEEPSEEK_V4_FLASH_0731_FAST,
+        parse: [models::merge_gateway::DEEPSEEK_V4_FLASH_0731_FAST],
+        display: "DeepSeek V4 Flash 0731 Fast (Merge Gateway)",
+        description: "DeepSeek V4 Flash 0731 Fast served through Merge Gateway's OpenAI-compatible endpoint",
     },
     // Mistral models
     MistralLarge3 {
@@ -985,6 +1027,7 @@ mod tests {
                 | ModelId::MergeGatewayAnthropicClaudeOpus5
                 | ModelId::MergeGatewayGoogleGemini36Flash
                 | ModelId::MergeGatewayGoogleGemini37Flash
+                | ModelId::MergeGatewayGoogleGemini38Flash
         )
     }
 

@@ -13,10 +13,14 @@ pub const MINIMAX_H3: &str = "minimax/minimax-h3";
 pub const MOONSHOT_KIMI_K3: &str = "moonshot/kimi-k3";
 pub const THINKINGMACHINES_INKLING: &str = "thinkingmachines/inkling";
 pub const META_MUSE_SPARK_1_1: &str = "meta/muse-spark-1.1";
+pub const META_MUSE_SPARK_1_3: &str = "meta/muse-spark-1.3";
 pub const ZAI_GLM_5_3_FLASH: &str = "zai/glm-5.3-flash";
 pub const OPENAI_GPT_5_6_LUNA: &str = "openai/gpt-5.6-luna";
 pub const OPENAI_GPT_5_6_SOL: &str = "openai/gpt-5.6-sol";
 pub const OPENAI_GPT_5_6_TERRA: &str = "openai/gpt-5.6-terra";
+pub const GOOGLE_GEMINI_3_8_FLASH: &str = "google/gemini-3.8-flash";
+pub const ANTHROPIC_CLAUDE_FABLE_5_1: &str = "anthropic/claude-fable-5-1";
+pub const DEEPSEEK_V4_FLASH_0731_FAST: &str = "deepseek/deepseek-v4-flash-0731-fast";
 
 pub const DEFAULT_MODEL: &str = DEFAULT_ROUTING;
 
@@ -26,16 +30,20 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     DEFAULT_ROUTING,
     OPENAI_GPT_5_5,
     ANTHROPIC_CLAUDE_OPUS_5,
+    ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
+    GOOGLE_GEMINI_3_8_FLASH,
     DEEPSEEK_V4_PRO_0813,
     DEEPSEEK_V4_FLASH_0731,
+    DEEPSEEK_V4_FLASH_0731_FAST,
     XAI_GROK_4_6,
     QWEN_3_8_MAX,
     MINIMAX_H3,
     MOONSHOT_KIMI_K3,
     THINKINGMACHINES_INKLING,
     META_MUSE_SPARK_1_1,
+    META_MUSE_SPARK_1_3,
     ZAI_GLM_5_3_FLASH,
     OPENAI_GPT_5_6_LUNA,
     OPENAI_GPT_5_6_SOL,
@@ -49,6 +57,7 @@ pub const REASONING_EFFORT_ROUTES: &[&str] = &[
     XAI_GROK_4_6,
     MOONSHOT_KIMI_K3,
     META_MUSE_SPARK_1_1,
+    META_MUSE_SPARK_1_3,
     ZAI_GLM_5_3_FLASH,
     OPENAI_GPT_5_6_LUNA,
     OPENAI_GPT_5_6_SOL,
@@ -58,10 +67,13 @@ pub const REASONING_EFFORT_ROUTES: &[&str] = &[
 /// Routes that advertise Gateway-controlled `thinking.budget_tokens` controls.
 pub const THINKING_BUDGET_ROUTES: &[&str] = &[
     ANTHROPIC_CLAUDE_OPUS_5,
+    ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
+    GOOGLE_GEMINI_3_8_FLASH,
     DEEPSEEK_V4_PRO_0813,
     DEEPSEEK_V4_FLASH_0731,
+    DEEPSEEK_V4_FLASH_0731_FAST,
     QWEN_3_8_MAX,
     MINIMAX_H3,
     THINKINGMACHINES_INKLING,
@@ -73,16 +85,20 @@ pub const THINKING_BUDGET_ROUTES: &[&str] = &[
 pub const REASONING_MODELS: &[&str] = &[
     OPENAI_GPT_5_5,
     ANTHROPIC_CLAUDE_OPUS_5,
+    ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
+    GOOGLE_GEMINI_3_8_FLASH,
     DEEPSEEK_V4_PRO_0813,
     DEEPSEEK_V4_FLASH_0731,
+    DEEPSEEK_V4_FLASH_0731_FAST,
     XAI_GROK_4_6,
     QWEN_3_8_MAX,
     MINIMAX_H3,
     MOONSHOT_KIMI_K3,
     THINKINGMACHINES_INKLING,
     META_MUSE_SPARK_1_1,
+    META_MUSE_SPARK_1_3,
     ZAI_GLM_5_3_FLASH,
     OPENAI_GPT_5_6_LUNA,
     OPENAI_GPT_5_6_SOL,

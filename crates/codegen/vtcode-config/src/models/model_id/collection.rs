@@ -44,6 +44,8 @@ impl ModelId {
             ModelId::DeepSeekV4Flash,
             ModelId::DeepSeekV4FlashVisionExp,
             // Official Meta AI models (kept before marketplace entries)
+            ModelId::MetaMuseSpark13,
+            ModelId::MetaMuseSpark13Contributor,
             ModelId::MetaMuseSpark12,
             ModelId::MetaMuseSpark12Contributor,
             ModelId::MetaMuseSpark11,
@@ -67,10 +69,14 @@ impl ModelId {
             ModelId::MergeGatewayMoonshotKimiK3,
             ModelId::MergeGatewayThinkingMachinesInkling,
             ModelId::MergeGatewayMetaMuseSpark11,
+            ModelId::MergeGatewayMetaMuseSpark13,
             ModelId::MergeGatewayZaiGlm53Flash,
             ModelId::MergeGatewayOpenAIGpt56Luna,
             ModelId::MergeGatewayOpenAIGpt56Sol,
             ModelId::MergeGatewayOpenAIGpt56Terra,
+            ModelId::MergeGatewayGoogleGemini38Flash,
+            ModelId::MergeGatewayAnthropicClaudeFable51,
+            ModelId::MergeGatewayDeepseekV4Flash0731Fast,
             // Mistral models
             ModelId::MistralLarge3,
             // Z.AI models
