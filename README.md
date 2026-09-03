@@ -16,6 +16,7 @@
 
 - [New: VT Code WebMCP application](#new-vt-code-webmcp-application)
 - [Overview](#overview)
+- [Why VT Code](#why-vt-code)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 - [Providers and models](#providers-and-models)
@@ -44,6 +45,21 @@ terminal.
 > **Project status:** Active development.
 > Local inference and some automation workflows are experimental, and
 > interfaces and configuration may change between releases.
+
+## Why VT Code
+
+- **Harness, not a wrapper** — the model reasons; the harness enforces
+  progress with tools, sandbox, evals, and state.
+- **Safety-first** — sandboxed shell, command policies, per-workspace
+  approvals, adversarial regression tests.
+- **Built for long runs** — durable session memory, spooled tool output,
+  auto-compaction; "done" only when verification passes.
+- **Protocol-native** — MCP, Skills, Agent Plugins, ACP (Zed), A2A, ATIF
+  export — no core forks required.
+- **Parallel loop engineering** — worktree isolation, propose/verify
+  sub-agents, cost guardrails.
+- **Runs anywhere** — 30 providers plus local Ollama, LM Studio, and
+  llama.cpp.
 
 ## New: VT Code WebMCP application
 
