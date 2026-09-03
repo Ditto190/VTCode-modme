@@ -6,32 +6,36 @@ use ratatui::crossterm::{
     cursor::{MoveToColumn, RestorePosition, SetCursorStyle, Show},
     event::{DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, PopKeyboardEnhancementFlags},
     execute,
-    terminal::{Clear, ClearType, LeaveAlternateScreen, disable_raw_mode},
+    terminal::{Clear, ClearType, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled},
 };
 
 use super::state::{self, KEYBOARD_ENHANCEMENTS_PUSHED};
 
 /// Emit the terminal-restoration escape sequence.
 ///
-/// `clear_full_screen` must be true when the TUI drew inline (no
-/// alternate screen buffer), so leftover frames are erased from the main
-/// screen. Alternate-screen sessions restore the main screen automatically
-/// when leaving the buffer, so no explicit clear is needed there.
+/// When `clear_alternate` is true we are currently on the alternate screen
+/// buffer and should purge that buffer's contents before leaving it so no
+/// transcript frames are accidentally revealed in the main scrollback.
+/// When false we are inline on the main screen and must not emit a full
+/// Clear(All) which would wipe the scrollback and leave a blank gap above
+/// the next prompt.
 ///
 /// Writes through any `Write` so the exact sequence is unit-testable.
-fn emit_restore_sequence(writer: &mut impl Write, _clear_full_screen: bool) -> io::Result<()> {
+fn emit_restore_sequence(writer: &mut impl Write, clear_alternate: bool) -> io::Result<()> {
     // Clear current line to remove any echoed ^C characters
     execute!(writer, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
 
-    // Leave alternate screen FIRST (most critical for visual restoration)
-    execute!(writer, LeaveAlternateScreen)?;
+    // If we're on the alternate screen, clear its contents BEFORE leaving
+    // so the act of leaving the buffer does not reveal the last TUI frame
+    // as scrollback in the main terminal.
+    if clear_alternate {
+        if let Err(error) = execute!(writer, Clear(ClearType::All)) {
+            tracing::debug!(%error, "failed to clear alternate terminal buffer before restore");
+        }
+    }
 
-    // Do not emit Clear(All) for inline sessions — it wipes the viewport
-    // and leaves a full-screen blank gap above the next shell prompt.
-    // Inline residue (welcome/status) is already cleared by the TUI's
-    // own teardown (prepare_terminal/finalize_terminal) when the TUI
-    // exits normally; the host backstop only needs to leave the
-    // alternate screen and reset modes. See #729 follow-up.
+    // Leave alternate screen (best-effort regardless of current state)
+    execute!(writer, LeaveAlternateScreen)?;
 
     // Disable terminal modes
     execute!(writer, DisableBracketedPaste)?;
@@ -50,11 +54,11 @@ fn open_tty_writer() -> Option<std::fs::File> {
     OpenOptions::new().write(true).open("/dev/tty").ok()
 }
 
-fn emit_restore_to_all_targets(clear_full_screen: bool) -> Option<io::Error> {
+fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     let mut first_error: Option<io::Error> = None;
 
     let mut stderr = io::stderr();
-    if let Err(error) = emit_restore_sequence(&mut stderr, clear_full_screen) {
+    if let Err(error) = emit_restore_sequence(&mut stderr, clear_alternate) {
         first_error.get_or_insert(error);
     }
     if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
@@ -64,7 +68,7 @@ fn emit_restore_to_all_targets(clear_full_screen: bool) -> Option<io::Error> {
     crate::tui::core_tui::runner::terminal_io::reset_mouse_pointer_shape();
 
     if let Some(mut tty) = open_tty_writer() {
-        let _ = emit_restore_sequence(&mut tty, clear_full_screen);
+        let _ = emit_restore_sequence(&mut tty, clear_alternate);
         let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show, RestorePosition);
         let _ = tty.flush();
         let _ = write!(tty, "\x1b]22;default\x07");
@@ -80,17 +84,19 @@ fn emit_restore_to_all_targets(clear_full_screen: bool) -> Option<io::Error> {
 /// It is idempotent: subsequent calls are no-ops.
 ///
 /// - Drains pending events before and after restoration
-/// - Leaves alternate screen
-/// - Clears the entire screen when the TUI ran inline (no alternate buffer)
+/// - Clears the alternate viewport before leaving the alternate screen
+/// - Leaves the alternate screen
+/// - Preserves inline transcript scrollback instead of clearing the main viewport
 /// - Disables bracketed paste, focus change, mouse capture
 /// - Pops keyboard enhancement flags if pushed
 /// - Resets cursor style and shows cursor
-/// - Disables raw mode last
+/// - Restores raw mode to its state before the TUI started
 pub fn restore_tui() -> io::Result<()> {
     if !state::try_claim_restore() {
         return Ok(());
     }
 
+    let _terminal_lock = state::lock_terminal_operations();
     state::mark_tui_deinitialized();
 
     let terminal_modified = state::is_terminal_modified();
@@ -115,26 +121,54 @@ pub fn restore_tui() -> io::Result<()> {
 
     crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
-    let clear_full_screen = !alternate_active;
-    if let Some(error) = emit_restore_to_all_targets(clear_full_screen) {
+    // If the TUI ran on the alternate screen, clear that buffer before
+    // leaving so the transcript is not revealed as scrollback in the
+    // primary screen. Inline sessions must not be cleared here.
+    let clear_alternate = alternate_active;
+    if let Some(error) = emit_restore_to_all_targets(clear_alternate) {
         first_error.get_or_insert(error);
     }
 
     // Drain terminal responses from restore sequences while raw mode still active
     crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
-    // Disable raw mode LAST — must run even if emit failed
-    if let Err(error) = disable_raw_mode() {
-        first_error.get_or_insert(error);
+    // Restore raw-mode to the state it had before the TUI started.
+    // If we can query the terminal's current raw-mode we only toggle when
+    // needed; otherwise fall back to disabling raw mode to preserve a
+    // conservative and usable state.
+    let previous_raw = state::is_raw_mode_was_enabled();
+    match is_raw_mode_enabled() {
+        Ok(current_enabled) => {
+            if previous_raw && !current_enabled {
+                if let Err(error) = enable_raw_mode() {
+                    first_error.get_or_insert(error);
+                }
+            } else if !previous_raw && current_enabled {
+                if let Err(error) = disable_raw_mode() {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        Err(_) => {
+            // Couldn't query — fall back to best-effort disable when the
+            // TUI had enabled raw mode (previous_raw == false) to avoid
+            // leaving the tty in a no-echo/no-stdin state.
+            if !previous_raw {
+                if let Err(error) = disable_raw_mode() {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
     }
 
-    // Best-effort stty sane equivalent for /dev/tty when disable_raw_mode
+    // Best-effort stty sane equivalent for /dev/tty when raw-mode toggles
     // succeeded but tty still has echo off due to cargo wrapping stderr.
     if let Some(mut tty) = open_tty_writer() {
         let _ = tty.flush();
     }
     // Ensure stderr is flushed after raw mode restore
     let _ = io::stderr().flush();
+    state::mark_raw_mode_was_enabled(false);
 
     match first_error {
         Some(error) => Err(error),
@@ -157,30 +191,35 @@ mod tests {
     }
 
     #[test]
-    fn restore_sequence_clears_full_screen_for_inline_sessions() {
+    fn restore_sequence_does_not_clear_inline_screen() {
         let mut bytes: Vec<u8> = Vec::new();
-        emit_restore_sequence(&mut bytes, true).unwrap();
-        let text = String::from_utf8(bytes).unwrap();
-
-        // Inline sessions no longer wipe the viewport — that leaves a
-        // full-screen white gap above the next shell prompt. The TUI's
-        // own teardown already handles inline residue; the host backstop
-        // only needs to leave the alternate screen and reset modes.
-        assert!(!text.contains("\x1b[2J"), "inline restore must not emit ESC[2J, got: {text:?}");
-        assert!(text.contains("\x1b[1G\x1b[2K"), "inline restore must keep line clear, got: {text:?}");
-        assert!(text.contains("\x1b[?1049l"), "inline restore must leave alternate screen, got: {text:?}");
-    }
-
-    #[test]
-    fn restore_sequence_skips_full_screen_clear_for_alternate_screen_sessions() {
-        let mut bytes: Vec<u8> = Vec::new();
+        // Inline session: do not clear the full-screen buffer here
         emit_restore_sequence(&mut bytes, false).unwrap();
         let text = String::from_utf8(bytes).unwrap();
 
-        // Alternate-screen sessions restore the main screen when leaving the
-        // buffer; clearing it explicitly would wipe pre-session shell content.
-        assert!(!text.contains("\x1b[2J"), "alternate restore must not emit ESC[2J, got: {text:?}");
-        assert!(text.contains("\x1b[?1049l"), "alternate restore must leave alternate screen, got: {text:?}");
+        assert!(!text.contains("\x1b[2J"), "inline restore must not emit ESC[2J, got: {text:?}");
+        assert!(text.contains("\x1b[1G\x1b[2K"), "inline restore must keep line clear, got: {text:?}");
+        assert!(
+            text.contains("\x1b[?1049l"),
+            "inline restore must leave alternate screen (best-effort), got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn restore_sequence_clears_alternate_buffer_before_leaving() {
+        let mut bytes: Vec<u8> = Vec::new();
+        // Alternate session: clear the alternate buffer to avoid leaking
+        // TUI frames into the main scrollback when leaving it.
+        emit_restore_sequence(&mut bytes, true).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+
+        assert!(
+            text.contains("\x1b[2J"),
+            "alternate-restore must emit ESC[2J to purge alternate buffer, got: {text:?}"
+        );
+        let clear_index = text.find("\x1b[2J").expect("alternate screen clear is present");
+        let leave_index = text.find("\x1b[?1049l").expect("alternate screen leave is present");
+        assert!(clear_index < leave_index, "alternate buffer must be cleared before leaving: {text:?}");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::sync::Once;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 pub(crate) static TUI_INITIALIZED: AtomicBool = AtomicBool::new(false);
 /// Whether any component has put the terminal into a non-default state
@@ -17,6 +18,7 @@ pub(crate) static KEYBOARD_ENHANCEMENTS_PUSHED: AtomicBool = AtomicBool::new(fal
 /// screen already restores it.
 pub(crate) static ALTERNATE_SCREEN_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) static RESTORE_DONE: AtomicBool = AtomicBool::new(false);
+static TERMINAL_OPERATION_LOCK: Mutex<()> = Mutex::new(());
 static DEBUG_MODE: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 pub(crate) static COLOR_EYRE_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 static SHOW_DIAGNOSTICS: AtomicBool = AtomicBool::new(false);
@@ -89,6 +91,7 @@ pub(crate) fn app_metadata() -> AppMetadata {
 pub(crate) fn mark_tui_initialized() {
     TUI_INITIALIZED.store(true, Ordering::SeqCst);
     RESTORE_DONE.store(false, Ordering::SeqCst);
+    RAW_MODE_WAS_ENABLED.store(false, Ordering::SeqCst);
     // Fresh session: alternate-screen state is set by the runner when it enters one.
     ALTERNATE_SCREEN_ACTIVE.store(false, Ordering::SeqCst);
 }
@@ -123,6 +126,31 @@ pub(crate) fn mark_alternate_screen_active(active: bool) {
 
 pub(crate) fn is_alternate_screen_active() -> bool {
     ALTERNATE_SCREEN_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Track whether raw mode was enabled before the TUI took control.
+/// This allows the canonical restore path to return the terminal to the
+/// exact prior raw-mode state instead of unconditionally disabling it.
+static RAW_MODE_WAS_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn mark_raw_mode_was_enabled(enabled: bool) {
+    RAW_MODE_WAS_ENABLED.store(enabled, Ordering::SeqCst);
+}
+
+pub(crate) fn is_raw_mode_was_enabled() -> bool {
+    RAW_MODE_WAS_ENABLED.load(Ordering::SeqCst)
+}
+
+/// Serialize terminal writes with restoration so a forced host cleanup cannot
+/// switch buffers while a render is still painting a frame.
+pub(crate) fn lock_terminal_operations() -> MutexGuard<'static, ()> {
+    match TERMINAL_OPERATION_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("terminal operation lock was poisoned; continuing cleanup");
+            poisoned.into_inner()
+        }
+    }
 }
 
 pub(crate) fn try_claim_restore() -> bool {

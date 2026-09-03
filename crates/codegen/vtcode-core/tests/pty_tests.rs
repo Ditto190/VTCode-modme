@@ -21,6 +21,83 @@ fn shell_command(script: &str) -> Vec<String> {
     }
 }
 
+// Deadline-bounded polling helpers to keep PTY tests deterministic under load.
+// Fixed single sleeps flake on slow CI; polling until a condition holds with a
+// generous deadline removes timing sensitivity without changing assertions.
+const POLL_INTERVAL_MS: u64 = 50;
+const SESSION_READY_TIMEOUT_MS: u64 = 2_000;
+const OUTPUT_TIMEOUT_MS: u64 = 2_000;
+const BG_PID_TIMEOUT_MS: u64 = 5_000;
+const KILL_TIMEOUT_MS: u64 = 2_000;
+
+async fn sleep_ms(ms: u64) {
+    tokio::time::sleep(Duration::from_millis(ms)).await;
+}
+
+fn session_screen_contains(manager: &PtyManager, session_id: &str, needle: &str) -> bool {
+    manager
+        .snapshot_session(session_id)
+        .map(|snapshot| {
+            snapshot
+                .screen_contents
+                .as_deref()
+                .map(|contents| contents.contains(needle))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+async fn wait_for_session_screen(manager: &PtyManager, session_id: &str, needle: &str, timeout_ms: u64) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    while tokio::time::Instant::now() < deadline {
+        if session_screen_contains(manager, session_id, needle) {
+            return true;
+        }
+        sleep_ms(POLL_INTERVAL_MS).await;
+    }
+    session_screen_contains(manager, session_id, needle)
+}
+
+async fn wait_for_session_output(
+    manager: &PtyManager,
+    session_id: &str,
+    needle: &str,
+    timeout_ms: u64,
+    drain: bool,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some(output)) = manager.read_session_output(session_id, drain)
+            && output.contains(needle)
+        {
+            return Some(output);
+        }
+        sleep_ms(POLL_INTERVAL_MS).await;
+    }
+    manager.read_session_output(session_id, drain).ok().flatten()
+}
+
+fn parse_bg_pid(output: &str) -> Option<i32> {
+    output
+        .lines()
+        .find(|line| line.contains("bg_pid:"))
+        .and_then(|line| line.split(':').next_back())
+        .and_then(|pid_str| pid_str.trim().parse::<i32>().ok())
+}
+
+async fn wait_for_bg_pid(manager: &PtyManager, session_id: &str, timeout_ms: u64) -> Option<i32> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some(output)) = manager.read_session_output(session_id, false)
+            && let Some(pid) = parse_bg_pid(&output)
+        {
+            return Some(pid);
+        }
+        sleep_ms(POLL_INTERVAL_MS).await;
+    }
+    None
+}
+
 #[tokio::test]
 async fn run_pty_command_captures_output() -> Result<()> {
     let temp_dir = tempdir()?;
@@ -77,7 +154,10 @@ async fn create_list_and_close_session_preserves_screen_contents() -> Result<()>
         size,
     )?);
 
-    std::thread::sleep(Duration::from_millis(150));
+    assert!(
+        wait_for_session_screen(&manager, &session_id, "ready", SESSION_READY_TIMEOUT_MS).await,
+        "session screen should contain 'ready'"
+    );
 
     let sessions = manager.list_sessions();
     assert_eq!(sessions.len(), 1);
@@ -134,22 +214,23 @@ async fn session_input_roundtrip_and_resize() -> Result<()> {
         size,
     )?);
 
-    std::thread::sleep(Duration::from_millis(150));
+    sleep_ms(150).await;
 
     let _bytes_written = manager.send_input_to_session(&session_id, b"hello", true)?;
-    std::thread::sleep(Duration::from_millis(150));
 
-    let drained = manager.read_session_output(&session_id, true)?;
-    let drained_text = drained.as_deref().expect("expected drained output");
+    let drained_text = wait_for_session_output(&manager, &session_id, "got:hello", OUTPUT_TIMEOUT_MS, true)
+        .await
+        .expect("expected drained output containing got:hello");
     assert!(drained_text.contains("got:hello"));
 
     assert!(manager.read_session_output(&session_id, false)?.is_none());
 
     let _bytes_written = manager.send_input_to_session(&session_id, b"world", true)?;
-    std::thread::sleep(Duration::from_millis(150));
 
-    let peek = manager.read_session_output(&session_id, false)?;
-    let peek_text = peek.as_deref().expect("expected pending output").to_string();
+    let peek_text = wait_for_session_output(&manager, &session_id, "got:world", OUTPUT_TIMEOUT_MS, false)
+        .await
+        .expect("expected pending output containing got:world")
+        .to_string();
     assert!(peek_text.contains("got:world"));
 
     let drained_again = manager.read_session_output(&session_id, true)?;
@@ -280,20 +361,9 @@ async fn pty_terminate_kills_background_children_in_same_process_group() -> Resu
     )?);
 
     // Wait for the background process to be spawned and its PID to be printed
-    let mut bg_pid: Option<i32> = None;
-    for _ in 0..20 {
-        if let Ok(Some(output)) = manager.read_session_output(&session_id, false)
-            && let Some(line) = output.lines().find(|l| l.contains("bg_pid:"))
-            && let Some(pid_str) = line.split(':').next_back()
-            && let Ok(pid) = pid_str.trim().parse::<i32>()
-        {
-            bg_pid = Some(pid);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    let bg_pid = bg_pid.expect("Failed to capture background PID");
+    let bg_pid = wait_for_bg_pid(&manager, &session_id, BG_PID_TIMEOUT_MS)
+        .await
+        .expect("Failed to capture background PID");
     let pid = Pid::from_raw(bg_pid);
 
     // Verify background process is running
@@ -303,13 +373,14 @@ async fn pty_terminate_kills_background_children_in_same_process_group() -> Resu
     drop(manager.close_session(&session_id)?);
 
     // Verify background process is killed (may need a short wait for signal to propagate)
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(KILL_TIMEOUT_MS);
     let mut killed = false;
-    for _ in 0..10 {
+    while tokio::time::Instant::now() < deadline {
         if kill(pid, None).is_err() {
             killed = true;
             break;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        sleep_ms(POLL_INTERVAL_MS).await;
     }
 
     assert!(killed, "Background process should have been killed");
@@ -359,7 +430,7 @@ async fn run_pty_command_timeout_kills_background_children() -> Result<()> {
 
     // Give a small amount of time for the background process to write the file if it hasn't yet
     // though the timeout is 500ms, which should be enough for 'echo $! > file'
-    std::thread::sleep(Duration::from_millis(100));
+    sleep_ms(100).await;
 
     // Read the background PID
     let bg_pid_str = fs::read_to_string(&pid_file).expect("Failed to read PID file");
@@ -367,13 +438,14 @@ async fn run_pty_command_timeout_kills_background_children() -> Result<()> {
     let pid = Pid::from_raw(bg_pid);
 
     // Verify background process is killed
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(KILL_TIMEOUT_MS);
     let mut killed = false;
-    for _ in 0..10 {
+    while tokio::time::Instant::now() < deadline {
         if kill(pid, None).is_err() {
             killed = true;
             break;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        sleep_ms(POLL_INTERVAL_MS).await;
     }
 
     assert!(killed, "Background process should have been killed by run_command timeout");

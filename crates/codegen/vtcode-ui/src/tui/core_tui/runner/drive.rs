@@ -226,6 +226,11 @@ fn render_if_dirty<B: Backend, S: TuiSessionDriver>(
         return Ok(());
     }
 
+    let _terminal_lock = crate::tui::core_tui::panic_hook::lock_terminal_operations();
+    if crate::tui::core_tui::panic_hook::is_restore_claimed() {
+        return Ok(());
+    }
+
     let desired_steady = session.use_steady_cursor();
     if desired_steady != *cursor_steady {
         let style = if desired_steady {

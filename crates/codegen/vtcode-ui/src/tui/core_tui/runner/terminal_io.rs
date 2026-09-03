@@ -4,8 +4,12 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use ratatui::{
     Terminal,
-    backend::{Backend, ClearType},
-    crossterm::{cursor::SetCursorStyle, execute},
+    backend::{Backend, ClearType as BackendClearType},
+    crossterm::{
+        cursor::{MoveToColumn, SetCursorStyle},
+        execute,
+        terminal::{Clear, ClearType as CrosstermClearType},
+    },
 };
 
 /// Mouse pointer shape states, mirroring standard text editor cursors.
@@ -46,18 +50,31 @@ pub(crate) fn reset_mouse_pointer_shape() {
 }
 
 pub(super) fn prepare_terminal<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
+    let _terminal_lock = crate::tui::core_tui::panic_hook::lock_terminal_operations();
+    if crate::tui::core_tui::panic_hook::is_restore_claimed() {
+        return Ok(());
+    }
+
     terminal
         .hide_cursor()
         .map_err(|e| anyhow::anyhow!("failed to hide inline cursor: {e}"))?;
     crate::tui::ui::tui::panic_hook::mark_terminal_modified();
     terminal
-        .clear()
+        .backend_mut()
+        .clear_region(BackendClearType::All)
         .map_err(|e| anyhow::anyhow!("failed to clear inline terminal: {e}"))?;
     crate::tui::ui::tui::panic_hook::mark_terminal_modified();
     Ok(())
 }
 
 pub(super) fn finalize_terminal<B: Backend>(terminal: &mut Terminal<B>, use_alternate_screen: bool) -> Result<()> {
+    let _terminal_lock = crate::tui::core_tui::panic_hook::lock_terminal_operations();
+    if crate::tui::core_tui::panic_hook::is_restore_claimed() {
+        return Ok(());
+    }
+
+    execute!(io::stderr(), MoveToColumn(0), Clear(CrosstermClearType::CurrentLine))
+        .context("failed to clear the terminal line after session")?;
     execute!(io::stderr(), SetCursorStyle::DefaultUserShape)
         .context("failed to restore cursor style after inline session")?;
     reset_mouse_pointer_shape();
@@ -74,7 +91,7 @@ pub(super) fn finalize_terminal<B: Backend>(terminal: &mut Terminal<B>, use_alte
     if use_alternate_screen {
         terminal
             .backend_mut()
-            .clear_region(ClearType::All)
+            .clear_region(BackendClearType::All)
             .map_err(|e| anyhow::anyhow!("failed to clear inline terminal after session: {e}"))?;
     }
     terminal
@@ -146,7 +163,7 @@ mod tests {
             self.0.clear().map_err(|never| match never {})
         }
 
-        fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+        fn clear_region(&mut self, clear_type: BackendClearType) -> Result<(), Self::Error> {
             self.0.clear_region(clear_type).map_err(|never| match never {})
         }
 

@@ -2,11 +2,6 @@ use std::io;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use ratatui::crossterm::{
-    cursor::MoveToColumn,
-    execute,
-    terminal::{Clear, ClearType},
-};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
@@ -198,9 +193,6 @@ impl TerminalModeRestoreGuard {
 
     fn restore_silently(&mut self) {
         if self.state.is_some() {
-            if !crate::tui::core_tui::panic_hook::is_restore_claimed() {
-                let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
-            }
             if let Err(error) = self.restore() {
                 tracing::warn!(%error, "failed to restore terminal modes");
             }
@@ -355,9 +347,6 @@ where
     let finalize_result = if crate::tui::core_tui::panic_hook::is_restore_claimed() {
         Ok(())
     } else {
-        // Clear current line to remove any echoed characters (like ^C)
-        let _ = execute!(io::stderr(), MoveToColumn(0), Clear(ClearType::CurrentLine));
-
         finalize_terminal(&mut terminal, is_alternate)
     };
 

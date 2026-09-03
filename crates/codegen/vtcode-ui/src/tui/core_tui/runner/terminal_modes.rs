@@ -8,26 +8,23 @@ use ratatui::crossterm::{
         EnableMouseCapture,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled},
 };
 
 use crate::tui::options::FullscreenInteractionSettings;
 
-/// Represents the state of terminal modes before TUI initialization.
-///
-/// This struct tracks which terminal features were enabled before we
-/// modified them, allowing proper restoration on exit.
+/// Tracks terminal features changed while the TUI owns the terminal.
 #[derive(Debug, Clone)]
 pub(super) struct TerminalModeState {
-    /// Whether bracketed paste was enabled (we enable it)
+    /// Whether VT Code enabled bracketed paste.
     bracketed_paste_enabled: bool,
-    /// Whether raw mode was enabled (we enable it)
+    /// Whether VT Code enabled raw mode.
     raw_mode_enabled: bool,
-    /// Whether mouse capture was enabled (we enable it)
+    /// Whether VT Code enabled mouse capture.
     mouse_capture_enabled: bool,
-    /// Whether focus change events were enabled (we enable them)
+    /// Whether VT Code enabled focus change events.
     focus_change_enabled: bool,
-    /// Whether keyboard enhancement flags were pushed (we push them)
+    /// Whether VT Code pushed keyboard enhancement flags.
     keyboard_enhancements_pushed: bool,
     /// Whether the cursor position was saved before entering fullscreen
     cursor_position_saved: bool,
@@ -105,6 +102,37 @@ pub(super) fn enable_terminal_modes(
 ) -> Result<TerminalModeState> {
     let mut state = TerminalModeState::new();
 
+    // Capture existing raw-mode state before changing any terminal mode so the
+    // canonical restore path can return the terminal to its original state.
+    match is_raw_mode_enabled() {
+        Ok(prev_enabled) => {
+            crate::tui::ui::tui::panic_hook::state::mark_raw_mode_was_enabled(prev_enabled);
+            if !prev_enabled {
+                match enable_raw_mode() {
+                    Ok(_) => {
+                        state.raw_mode_enabled = true;
+                        crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+                    }
+                    Err(error) => {
+                        return Err(anyhow::anyhow!("failed to enable raw mode: {error}"));
+                    }
+                }
+            }
+        }
+        Err(error) => {
+            tracing::debug!(%error, "failed to query raw mode; attempting to enable raw mode");
+            match enable_raw_mode() {
+                Ok(_) => {
+                    state.raw_mode_enabled = true;
+                    crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+                }
+                Err(error) => {
+                    return Err(anyhow::anyhow!("failed to enable raw mode: {error}"));
+                }
+            }
+        }
+    }
+
     // Enable bracketed paste
     match execute!(stderr, EnableBracketedPaste) {
         Ok(_) => {
@@ -113,17 +141,6 @@ pub(super) fn enable_terminal_modes(
         }
         Err(error) => {
             tracing::warn!(%error, "failed to enable bracketed paste");
-        }
-    }
-
-    // Enable raw mode
-    match enable_raw_mode() {
-        Ok(_) => {
-            state.raw_mode_enabled = true;
-            crate::tui::ui::tui::panic_hook::mark_terminal_modified();
-        }
-        Err(error) => {
-            return Err(anyhow::anyhow!("failed to enable raw mode: {error}"));
         }
     }
 

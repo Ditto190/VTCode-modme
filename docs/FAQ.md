@@ -112,7 +112,7 @@ The fullscreen TUI uses the shared runner in `crates/codegen/vtcode-ui/src/tui/c
 
 1. **Enter:** Save cursor position, enable terminal modes (raw mode, bracketed paste, focus events, keyboard enhancements, optional mouse capture), then enter alternate screen.
 2. **Running:** Process events, update state, and render only the current viewport.
-3. **Exit:** Stop the event loop, finalize the terminal, leave alternate screen, restore terminal modes in reverse order, and restore the saved cursor position.
+3. **Exit:** Stop the event loop, clear the alternate viewport, finalize the terminal, leave alternate screen, restore terminal modes in reverse order, and restore the saved cursor position. A shared teardown gate prevents a forced host cleanup from racing a final frame onto the main screen.
 
 The `ExternalAppLauncher` trait allows suspending the TUI to launch editors, git clients, etc.
 
