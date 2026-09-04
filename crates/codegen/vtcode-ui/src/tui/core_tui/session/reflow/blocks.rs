@@ -12,7 +12,7 @@ use super::super::styling::tool_inline_style_for;
 use super::super::{Session, TranscriptLine, render, text_utils};
 use super::helpers::{
     has_summary_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text, parse_tool_call_prefix,
-    split_tool_spans,
+    push_spacing_blanks, push_spacing_transcript_lines, split_tool_spans,
 };
 use crate::tui::config::constants::ui;
 
@@ -273,12 +273,11 @@ impl Session {
 
         let mut lines = Vec::new();
 
-        // Add visual separator at start of tool block
+        // Visual separator at the start of a tool block. Single ownership: the
+        // previous block suppresses its trailing gap before tool blocks (see
+        // `next_is_tool_block`), so this top gap is the only one.
         if is_start && self.should_add_tool_block_top_spacing(index) {
-            let spacing = self.tool_block_spacing();
-            for _ in 0..spacing {
-                lines.push(Line::default());
-            }
+            push_spacing_blanks(&mut lines, self.tool_block_spacing());
         }
 
         let content = render::render_tool_segments(self, line);
@@ -353,12 +352,10 @@ impl Session {
             }
         }
 
-        // Add optional spacing after tool block for clean separation
+        // Spacing after a tool block for clean separation (single ownership:
+        // the next tool-block start suppresses its own top gap inside chains).
         if is_end {
-            let spacing = self.tool_block_spacing();
-            for _ in 0..spacing {
-                lines.push(Line::default());
-            }
+            push_spacing_blanks(&mut lines, self.tool_block_spacing());
         }
 
         if lines.is_empty() {
@@ -531,15 +528,18 @@ impl Session {
         }
 
         if is_end {
-            lines.extend(std::iter::repeat_n(Line::default(), self.tool_block_spacing()));
+            push_spacing_blanks(&mut lines, self.tool_block_spacing());
         }
 
         let mut transcript_lines =
             build_pty_transcript_lines(lines, &line.link_ranges, body_prefix, continuation_prefix.as_str());
+        // Single ownership, as for tool blocks above: the previous block
+        // suppresses its trailing gap before PTY blocks, so this top gap is
+        // the only one.
         if is_start && self.should_add_tool_block_top_spacing(index) {
             let spacing = self.tool_block_spacing();
             let mut spaced = Vec::with_capacity(transcript_lines.len() + spacing);
-            spaced.extend(std::iter::repeat_n(TranscriptLine::default(), spacing));
+            push_spacing_transcript_lines(&mut spaced, spacing);
             spaced.append(&mut transcript_lines);
             transcript_lines = spaced;
         }

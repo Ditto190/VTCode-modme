@@ -54,6 +54,32 @@ fn test_markdown_blockquote_prefix() {
 }
 
 #[test]
+fn test_markdown_blockquote_end_emits_separator_before_paragraph() {
+    let markdown = "> Quote line\n\nNext paragraph\n";
+    let lines = render_markdown(markdown);
+    let text_lines = lines_to_text(&lines);
+    let quote = text_lines.iter().position(|line| line.contains("Quote line")).expect("quote");
+    let para = text_lines
+        .iter()
+        .position(|line| line.contains("Next paragraph"))
+        .expect("paragraph");
+    assert_eq!(para, quote + 2, "expected exactly one blank separator row, got {text_lines:?}");
+    assert!(text_lines[quote + 1].trim().is_empty(), "separator should be blank, got {text_lines:?}");
+}
+
+#[test]
+fn test_markdown_table_first_response_has_no_leading_blank() {
+    let markdown = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |\n";
+    let lines = render_markdown(markdown);
+    let text_lines = lines_to_text(&lines);
+    assert!(!text_lines.is_empty(), "table should render lines");
+    assert!(
+        !text_lines.first().is_some_and(|line| line.trim().is_empty()),
+        "table-first response must not start with a blank row, got {text_lines:?}"
+    );
+}
+
+#[test]
 fn test_markdown_inline_code_strips_backticks() {
     let markdown = "Use `code` here.";
     let lines = render_markdown(markdown);

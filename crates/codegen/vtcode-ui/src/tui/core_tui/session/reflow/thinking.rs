@@ -13,6 +13,7 @@ use super::super::Session;
 use super::super::message::TranscriptLine;
 use super::super::render;
 use super::super::text_utils;
+use super::helpers::{next_is_tool_block, push_spacing_transcript_lines, trim_trailing_blank_transcript_lines};
 use super::transcript_line_with_detected_links;
 
 fn trim_leading_whitespace(line: &mut Line<'static>) {
@@ -146,15 +147,19 @@ impl Session {
         // separated from the agent response that follows it by one blank line.
         // Expanded reasoning flows directly into that response (no gap), and
         // runs followed by a non-agent line keep `message_block_spacing`.
+        // A tool block owns its own top gap (min 1 guaranteed), so a run
+        // directly before one emits nothing here.
         let run_end = start + run_len;
-        let next_kind = self.lines.get(run_end).map(|line| line.kind);
+        let next = self.lines.get(run_end);
+        let next_kind = next.map(|line| line.kind);
+        // The body may end with blank rows; trim them so the separator below
+        // contributes exactly its own gap instead of stacking.
+        trim_trailing_blank_transcript_lines(&mut result);
         if collapsed && next_kind == Some(InlineMessageKind::Agent) {
-            result.push(TranscriptLine::default());
-        } else if next_kind != Some(InlineMessageKind::Agent) {
+            push_spacing_transcript_lines(&mut result, 1);
+        } else if next_kind != Some(InlineMessageKind::Agent) && !next_is_tool_block(next) {
             let spacing = self.appearance.message_block_spacing.min(2) as usize;
-            for _ in 0..spacing {
-                result.push(TranscriptLine::default());
-            }
+            push_spacing_transcript_lines(&mut result, spacing);
         }
 
         result

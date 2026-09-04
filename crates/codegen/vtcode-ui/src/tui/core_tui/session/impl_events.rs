@@ -452,8 +452,7 @@ impl Session {
         }
 
         let viewport_rows = self.transcript_rows.max(1) as usize;
-        let padding = usize::from(ui::INLINE_TRANSCRIPT_BOTTOM_PADDING);
-        let effective_padding = padding.min(viewport_rows.saturating_sub(1));
+        let effective_padding = ui::effective_transcript_bottom_padding(viewport_rows);
         let total_rows = self.total_transcript_rows(self.transcript_width) + effective_padding;
         let (top_offset, _clamped_total_rows) = self.prepare_transcript_scroll(total_rows, viewport_rows);
         let view_top = top_offset.min(self.scroll_manager.max_offset());

@@ -4,7 +4,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::tui::config::constants::ui;
 
-use super::super::message::MessageLine;
+use super::super::message::{MessageLine, TranscriptLine};
 use crate::tui::core_tui::types::InlineMessageKind;
 
 /// Rule fill pattern for Fieldset-style info/warning/error blocks.
@@ -72,6 +72,68 @@ pub(super) fn is_bullet_summary_text(text: &str) -> bool {
 pub(super) fn is_tree_detail_text(text: &str) -> bool {
     let stripped = super::super::text_utils::strip_ansi_codes(text);
     stripped.starts_with("  └ ") || stripped.starts_with("  ├ ") || stripped.starts_with("  │ ")
+}
+
+/// Returns `true` when the next message starts a tool-block boundary that owns
+/// its own top spacing (Tool/Pty header or Info tool-summary line).
+///
+/// Trailing spacing from the previous block must be suppressed in this case so
+/// the boundary contributes exactly one gap (the tool top, which is clamped to
+/// a minimum of 1). Centralizes the check previously duplicated in
+/// `reflow_message_lines` and `reflow_tool_lines`.
+pub(super) fn next_is_tool_block(next: Option<&MessageLine>) -> bool {
+    match next {
+        Some(line) if line.kind == InlineMessageKind::Tool || line.kind == InlineMessageKind::Pty => true,
+        Some(line) if line.kind == InlineMessageKind::Info => is_tool_summary_line(line),
+        _ => false,
+    }
+}
+
+/// Returns `true` when a reflowed ratatui line is visually blank (no segments
+/// or only whitespace, e.g. `""` or `"  "`). Whitespace-only rows defeat a
+/// naive `segments.is_empty()` check and must collapse like empty rows.
+pub(super) fn line_is_blank(line: &Line<'_>) -> bool {
+    line.spans.iter().all(|span| span.content.trim().is_empty())
+}
+
+/// Returns `true` when a transcript line is visually blank. Mirrors
+/// [`line_is_blank`] for the [`TranscriptLine`] wrapper.
+pub(super) fn transcript_line_is_blank(line: &TranscriptLine) -> bool {
+    line_is_blank(&line.line)
+}
+
+/// Push `count` blank lines, discounting one when `lines` already ends with a
+/// blank row.
+///
+/// Content may already end with a blank row (e.g. agent text ending in `\n\n`
+/// or markdown paragraph gaps). Without the discount the content blank and the
+/// requested inter-block gap stack (2 rows for the default spacing of 1).
+/// With it the boundary contributes exactly `count` rows, preserving the
+/// `message_block_spacing` 0–2 range while keeping the cozy rhythm.
+pub(super) fn push_spacing_blanks(lines: &mut Vec<Line<'static>>, count: usize) {
+    let mut remaining = count;
+    if lines.last().is_some_and(line_is_blank) {
+        remaining = remaining.saturating_sub(1);
+    }
+    lines.extend(std::iter::repeat_with(Line::default).take(remaining));
+}
+
+/// [`push_spacing_blanks`] for reflowed transcript lines.
+pub(super) fn push_spacing_transcript_lines(lines: &mut Vec<TranscriptLine>, count: usize) {
+    let mut remaining = count;
+    if lines.last().is_some_and(transcript_line_is_blank) {
+        remaining = remaining.saturating_sub(1);
+    }
+    lines.extend(std::iter::repeat_with(TranscriptLine::default).take(remaining));
+}
+
+/// Remove trailing blank transcript rows so the caller can append exactly one
+/// inter-block separator. Prevents content trailing blanks (e.g. markdown
+/// paragraph gaps, `\n\n` endings) from stacking with message gaps.
+pub(super) fn trim_trailing_blank_transcript_lines(lines: &mut Vec<TranscriptLine>) {
+    while lines.last().is_some_and(transcript_line_is_blank) {
+        lines.pop();
+    }
 }
 
 pub(super) fn agent_code_continuation_prefix(message: &MessageLine) -> Option<String> {
@@ -169,4 +231,82 @@ pub(super) fn split_tool_spans(spans: Vec<Span<'static>>) -> Vec<Vec<Span<'stati
     }
 
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::core_tui::types::{InlineSegment, InlineTextStyle};
+    use std::sync::Arc;
+
+    fn message_line(kind: InlineMessageKind, text: &str) -> MessageLine {
+        MessageLine {
+            kind,
+            segments: vec![InlineSegment {
+                text: text.to_string(),
+                style: Arc::new(InlineTextStyle::default()),
+            }],
+            link_ranges: Vec::new(),
+            revision: 0,
+        }
+    }
+
+    fn text_line(text: &str) -> TranscriptLine {
+        TranscriptLine {
+            line: Line::from(text.to_string()),
+            explicit_links: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn line_is_blank_covers_empty_and_whitespace_rows() {
+        assert!(line_is_blank(&Line::default()));
+        assert!(line_is_blank(&Line::from("   ".to_string())));
+        assert!(!line_is_blank(&Line::from("answer".to_string())));
+    }
+
+    #[test]
+    fn push_spacing_discounts_an_existing_trailing_blank() {
+        let mut lines = vec![text_line("answer"), TranscriptLine::default()];
+        push_spacing_transcript_lines(&mut lines, 1);
+        assert_eq!(lines.len(), 2, "existing blank + requested 1 must not stack");
+
+        let mut lines = vec![text_line("answer"), TranscriptLine::default()];
+        push_spacing_transcript_lines(&mut lines, 2);
+        assert_eq!(lines.len(), 3, "existing blank discounts exactly one row");
+    }
+
+    #[test]
+    fn push_spacing_blanks_covers_plain_lines() {
+        let mut lines = vec![Line::from("tool output".to_string())];
+        push_spacing_blanks(&mut lines, 1);
+        assert_eq!(lines.len(), 2);
+
+        push_spacing_blanks(&mut lines, 1);
+        assert_eq!(lines.len(), 2, "existing blank + requested 1 must not stack");
+
+        push_spacing_blanks(&mut lines, 0);
+        assert_eq!(lines.len(), 2, "zero requested rows must not add rows");
+    }
+
+    #[test]
+    fn trim_trailing_blank_transcript_lines_keeps_head_content() {
+        let mut lines = vec![
+            text_line("answer"),
+            TranscriptLine::default(),
+            TranscriptLine::default(),
+        ];
+        trim_trailing_blank_transcript_lines(&mut lines);
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn next_is_tool_block_covers_tool_pty_and_summaries() {
+        assert!(next_is_tool_block(Some(&message_line(InlineMessageKind::Tool, "• Ran x"))));
+        assert!(next_is_tool_block(Some(&message_line(InlineMessageKind::Pty, "output"))));
+        assert!(next_is_tool_block(Some(&message_line(InlineMessageKind::Info, "• Ran x"))));
+        assert!(!next_is_tool_block(Some(&message_line(InlineMessageKind::Agent, "answer"))));
+        assert!(!next_is_tool_block(Some(&message_line(InlineMessageKind::Info, "plain status"))));
+        assert!(!next_is_tool_block(None));
+    }
 }

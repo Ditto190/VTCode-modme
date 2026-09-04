@@ -31,7 +31,13 @@ pub const INLINE_NAVIGATION_MIN_WIDTH: u16 = 24;
 pub const INLINE_CONTENT_MIN_WIDTH: u16 = 48;
 pub const INLINE_STACKED_NAVIGATION_PERCENT: u16 = INLINE_NAVIGATION_PERCENT;
 pub const INLINE_SCROLLBAR_EDGE_PADDING: u16 = 1;
-pub const INLINE_TRANSCRIPT_BOTTOM_PADDING: u16 = 4;
+/// Transcript bottom padding rows.
+///
+/// Compatibility duplicate: no in-repo readers. The live TUI value is
+/// `vtcode_ui::tui::config::constants::ui::INLINE_TRANSCRIPT_BOTTOM_PADDING`
+/// (with `effective_transcript_bottom_padding`); keep the two in sync and do
+/// not add new readers of this constant.
+pub const INLINE_TRANSCRIPT_BOTTOM_PADDING: u16 = 2;
 pub const INLINE_PREVIEW_MAX_CHARS: usize = 56;
 pub const INLINE_PREVIEW_ELLIPSIS: &str = "…";
 pub const INLINE_PASTE_COLLAPSE_LINE_THRESHOLD: usize = 10;

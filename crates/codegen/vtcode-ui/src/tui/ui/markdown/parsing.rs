@@ -242,6 +242,7 @@ pub(crate) fn handle_end_tag(tag: TagEnd, ctx: &mut MarkdownContext<'_>) {
         TagEnd::BlockQuote(_) => {
             ctx.flush_line();
             *ctx.blockquote_depth = ctx.blockquote_depth.saturating_sub(1);
+            push_blank_line(ctx.lines);
         }
         TagEnd::List(_) => {
             ctx.flush_line();
@@ -570,14 +571,17 @@ pub(crate) fn flush_current_line(
 }
 
 pub(crate) fn push_blank_line(lines: &mut Vec<MarkdownLine>) {
-    if lines.last().map(|line| line.segments.is_empty()).unwrap_or(false) {
+    if lines.is_empty() {
+        return;
+    }
+    if lines.last().is_some_and(|line| line.is_empty()) {
         return;
     }
     lines.push(MarkdownLine::default());
 }
 
 pub(crate) fn trim_trailing_blank_lines(lines: &mut Vec<MarkdownLine>) {
-    while lines.last().map(|line| line.segments.is_empty()).unwrap_or(false) {
+    while lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
     }
 }

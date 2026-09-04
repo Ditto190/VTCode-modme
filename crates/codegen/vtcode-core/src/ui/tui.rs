@@ -261,6 +261,11 @@ mod headless {
         pub min_content_width: u16,
         pub min_navigation_width: u16,
         pub navigation_width_percent: u8,
+        /// Bottom padding rows under the transcript.
+        ///
+        /// Retained for config compatibility only; the live transcript reads
+        /// `vtcode_ui::tui::config::constants::ui::INLINE_TRANSCRIPT_BOTTOM_PADDING`,
+        /// so a non-zero value set here has no render effect.
         pub transcript_bottom_padding: u16,
         pub dim_completed_todos: bool,
         pub message_block_spacing: u8,

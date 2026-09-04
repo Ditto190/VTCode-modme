@@ -31,7 +31,15 @@ pub const INLINE_NAVIGATION_MIN_WIDTH: u16 = 24;
 pub const INLINE_CONTENT_MIN_WIDTH: u16 = 48;
 pub const INLINE_STACKED_NAVIGATION_PERCENT: u16 = INLINE_NAVIGATION_PERCENT;
 pub const INLINE_SCROLLBAR_EDGE_PADDING: u16 = 1;
-pub const INLINE_TRANSCRIPT_BOTTOM_PADDING: u16 = 4;
+pub const INLINE_TRANSCRIPT_BOTTOM_PADDING: u16 = 2;
+
+/// Effective transcript bottom padding rows for a viewport, clamped so at
+/// least one content row stays visible. Single source of truth for the four
+/// transcript scroll-metric sites (widget, state, two click handlers).
+#[inline]
+pub fn effective_transcript_bottom_padding(viewport_rows: usize) -> usize {
+    usize::from(INLINE_TRANSCRIPT_BOTTOM_PADDING).min(viewport_rows.saturating_sub(1))
+}
 pub const INLINE_PREVIEW_MAX_CHARS: usize = 56;
 pub const INLINE_PREVIEW_ELLIPSIS: &str = crate::design::constants::INLINE_PREVIEW_ELLIPSIS;
 pub const INLINE_PASTE_COLLAPSE_LINE_THRESHOLD: usize = 10;
@@ -280,3 +288,16 @@ pub const SAFE_ANSI_COLORS: [u8; 10] = [
 /// - 12 (brblue): Low contrast in Basic Dark
 /// - 15 (brwhite): Low contrast on light backgrounds
 pub const PROBLEMATIC_ANSI_COLORS: [u8; 6] = [0, 7, 8, 11, 12, 15];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_transcript_bottom_padding_clamps_to_viewport() {
+        assert_eq!(effective_transcript_bottom_padding(0), 0);
+        assert_eq!(effective_transcript_bottom_padding(1), 0);
+        assert_eq!(effective_transcript_bottom_padding(2), 1);
+        assert_eq!(effective_transcript_bottom_padding(100), usize::from(INLINE_TRANSCRIPT_BOTTOM_PADDING));
+    }
+}

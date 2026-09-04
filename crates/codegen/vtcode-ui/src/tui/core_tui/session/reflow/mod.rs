@@ -28,7 +28,9 @@ mod thinking;
 
 pub(super) use helpers::parse_tool_call_prefix;
 use helpers::{
-    agent_code_continuation_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text, rule_fill,
+    agent_code_continuation_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text,
+    next_is_tool_block, push_spacing_blanks, push_spacing_transcript_lines, rule_fill,
+    trim_trailing_blank_transcript_lines,
 };
 
 pub(super) fn is_info_box_line(message: &MessageLine) -> bool {
@@ -121,9 +123,10 @@ impl Session {
 
         let is_tool_summary = message.kind == InlineMessageKind::Info && is_tool_summary_line(message);
         if is_tool_summary && self.should_add_tool_block_top_spacing(index) {
-            for _ in 0..self.tool_block_spacing() {
-                wrapped.push(TranscriptLine::default());
-            }
+            // Single ownership: the previous block suppresses its trailing gap
+            // before tool blocks (see `next_is_tool_block`), so this top gap
+            // (min 1) is the only one.
+            push_spacing_transcript_lines(&mut wrapped, self.tool_block_spacing());
         }
 
         // Check if this is the start of a new conversation turn
@@ -138,13 +141,11 @@ impl Session {
 
         let spacing = self.appearance.message_block_spacing.min(2) as usize;
 
-        // Add a subtle separator before User messages (single divider, not double)
+        // Divider before User messages. No blank rows are emitted here: the
+        // previous block owns the trailing gap (possibly 0 when spacing is 0),
+        // so emitting top spacing as well would double every turn
+        // (Agent bottom + User top + divider). The divider alone separates.
         if message.kind == InlineMessageKind::User && is_new_turn && max_width > 0 {
-            if prev_kind.is_some() {
-                for _ in 0..spacing {
-                    wrapped.push(TranscriptLine::default());
-                }
-            }
             let divider = self.message_divider_line(max_width, message.kind);
             wrapped.push(transcript_line_with_detected_links(divider, self.workspace_root.as_deref()));
         }
@@ -168,51 +169,54 @@ impl Session {
             wrapped.push(TranscriptLine::default());
         }
 
+        // Content may end with blank rows (e.g. agent text ending in `\n\n`
+        // or markdown paragraph gaps). Trim them so the separator below
+        // contributes exactly one gap instead of stacking.
+        trim_trailing_blank_transcript_lines(&mut wrapped);
+        if wrapped.is_empty() {
+            wrapped.push(TranscriptLine::default());
+            return wrapped;
+        }
+
         // Add spacing after messages for visual grouping (respects message_block_spacing config)
         let next_line = self.lines.get(index + 1);
         let next_kind = next_line.map(|l| l.kind);
         match message.kind {
             InlineMessageKind::Error | InlineMessageKind::Info | InlineMessageKind::Warning => {
-                let skip_spacing = is_tool_summary_line(message)
-                    && match next_line {
-                        Some(next) if next.kind == InlineMessageKind::Info => is_tool_summary_line(next),
-                        Some(next) if next.kind == InlineMessageKind::Tool || next.kind == InlineMessageKind::Pty => {
-                            true
-                        }
-                        _ => false,
-                    };
-                if !skip_spacing {
+                // A tool block owns its own top gap (clamped to min 1), so a
+                // preceding summary must not emit trailing spacing as well.
+                // (`next_is_tool_block` covers Tool/Pty and Info summaries,
+                // i.e. every case the old inline match handled.)
+                if !next_is_tool_block(next_line) {
                     let spacing = if is_tool_summary {
                         self.tool_block_spacing()
                     } else {
                         spacing
                     };
-                    for _ in 0..spacing {
-                        wrapped.push(TranscriptLine::default());
-                    }
+                    push_spacing_transcript_lines(&mut wrapped, spacing);
                 }
             }
-            // No spacing if followed by Agent (reasoning -> content flow)
-            InlineMessageKind::Policy if next_kind != Some(InlineMessageKind::Agent) => {
-                for _ in 0..spacing {
-                    wrapped.push(TranscriptLine::default());
-                }
+            // No spacing if followed by Agent (reasoning -> content flow).
+            // A tool block owns its own top gap, so suppress here as well.
+            InlineMessageKind::Policy
+                if next_kind != Some(InlineMessageKind::Agent) && !next_is_tool_block(next_line) =>
+            {
+                push_spacing_transcript_lines(&mut wrapped, spacing);
             }
-            InlineMessageKind::User => {
+            // A tool block owns its own top gap (min 1 guaranteed), so a User
+            // message directly before one must not emit trailing spacing.
+            InlineMessageKind::User if !next_is_tool_block(next_line) => {
                 // Blank lines after user message for clean separation
-                for _ in 0..spacing {
-                    wrapped.push(TranscriptLine::default());
-                }
+                push_spacing_transcript_lines(&mut wrapped, spacing);
             }
+            InlineMessageKind::User => {}
             // Check if next message is a different type (end of agent turn).
             // Always separate an agent response from the following turn with at
             // least one blank line (even when message_block_spacing is 0), so
             // the response reads as a distinct block.
             InlineMessageKind::Agent if next_kind.is_some() && next_kind != Some(InlineMessageKind::Agent) => {
                 let gap = spacing.max(1);
-                for _ in 0..gap {
-                    wrapped.push(TranscriptLine::default());
-                }
+                push_spacing_transcript_lines(&mut wrapped, gap);
             }
             _ => {}
         }
@@ -364,9 +368,11 @@ impl Session {
         lines.extend(wrapped);
         lines.push(Line::styled(bottom, border_style));
 
-        let spacing = self.appearance.message_block_spacing.min(2) as usize;
-        for _ in 0..spacing {
-            lines.push(Line::default());
+        // A tool block owns its own top gap (min 1 guaranteed), so a fieldset
+        // directly before one must not emit trailing spacing as well.
+        if !next_is_tool_block(self.lines.get(cursor)) {
+            let spacing = self.appearance.message_block_spacing.min(2) as usize;
+            push_spacing_blanks(&mut lines, spacing);
         }
 
         if lines.is_empty() {
