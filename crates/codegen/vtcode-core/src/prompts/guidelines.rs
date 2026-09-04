@@ -75,7 +75,7 @@ pub fn generate_tool_guidelines_for_profile(
     }
     if has_apply_patch || has_exec {
         lines.push("- If calls repeat, re-plan instead of retrying.".to_string());
-        lines.push("- When a tool result says `preview_budget_exhausted`, trust its preserved outcome metadata; do not repeat or rephrase the call merely to recover hidden output. If verification remains pending, run one standalone verifier, then synthesize.".to_string());
+        lines.push("- When a tool result says `preview_budget_exhausted`, trust its preserved outcome metadata; do not repeat or rephrase the call merely to recover hidden output. If verification is pending, run one verifier (standalone or `&&` chain, no pipes), then synthesize.".to_string());
     }
     if has_search || has_exec {
         lines.push("- Run independent tools in parallel when their inputs do not depend on each other.".to_string());

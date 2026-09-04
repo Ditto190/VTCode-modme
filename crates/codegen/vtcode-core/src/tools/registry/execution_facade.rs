@@ -992,7 +992,17 @@ impl ToolRegistry {
         // successful result immediately instead of paying for another round-trip and
         // another spool file. This is gated by a short TTL and the read-only classification
         // so mutating calls never take this path.
-        if readonly_classification && !skip_loop_detection {
+        //
+        // Verification commands (`cargo check`, `cargo nextest run`, `cargo fmt
+        // --check`, and pure `&&` chains thereof) are read-only by intent but
+        // must always re-execute: reusing a stale success would clear the
+        // anti-blind-editing gate without verifying the current worktree, and
+        // reusing a stale failure would keep the gate pending after a fix.
+        let is_verification_command = matches!(
+            crate::tools::tool_intent::classify_shell_activity(&tool_name, args),
+            crate::tools::tool_intent::ShellActivity::Verification
+        );
+        if readonly_classification && !is_verification_command && !skip_loop_detection {
             let fast_reuse_max_age = Duration::from_secs(60);
             let fast_reused = self
                 .execution_history

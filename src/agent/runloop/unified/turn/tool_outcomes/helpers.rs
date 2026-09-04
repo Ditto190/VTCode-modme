@@ -823,14 +823,20 @@ pub(crate) fn mutation_blocked_until_verification(
 ///
 /// Count completed attempts for repetition detection, but only successful
 /// mutations contribute to anti-blind-editing verification pressure.
+///
+/// Returns `true` when this outcome freshly granted (or refreshed) the
+/// failed-verifier fix-up window. Callers must reset the assistant text-response
+/// streak so the model gets one diagnostic explanation before the
+/// pending-verification text cap re-applies; otherwise a failed build blocks
+/// the turn before the agent can describe the failure and use its fix-up edits.
 pub(crate) fn update_repetition_tracker(
     loop_tracker: &mut LoopTracker,
     outcome: &ToolPipelineOutcome,
     name: &str,
     args: &serde_json::Value,
-) {
+) -> bool {
     if matches!(&outcome.status, ToolExecutionStatus::Cancelled) {
-        return;
+        return false;
     }
 
     let canonical_name = canonical_tool_name(name);
@@ -866,6 +872,8 @@ pub(crate) fn update_repetition_tracker(
                     // opens the fix-up window. Tool-level Failure/Timeout (never
                     // executed, e.g. argument errors) must not grant edits.
                     loop_tracker.record_failed_verification();
+                    loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                    return true;
                 }
                 loop_tracker.reset_navigation_window(low_signal_family.is_none());
             }
@@ -883,6 +891,8 @@ pub(crate) fn update_repetition_tracker(
                         matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. });
                     if ran_and_failed {
                         loop_tracker.record_failed_verification();
+                        loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                        return true;
                     }
                     loop_tracker.reset_navigation_window(low_signal_family.is_none());
                 } else {
@@ -913,6 +923,7 @@ pub(crate) fn update_repetition_tracker(
             loop_tracker.record_navigation_signal(is_low_signal_navigation);
         }
     }
+    false
 }
 
 fn mutation_was_applied(outcome: &ToolPipelineOutcome) -> bool {
@@ -1332,6 +1343,120 @@ mod tests {
                 "smuggled mutation must stay blocked: {command}"
             );
         }
+    }
+
+    #[test]
+    fn pure_and_chained_verifiers_are_admitted_and_clear_gate() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        for command in [
+            "cargo fmt --all -- --check && cargo check --locked",
+            "cargo check --locked && cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked && cargo clippy --locked -p vtcode-ui -- -D warnings",
+        ] {
+            assert!(
+                !mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "pure && verifier chain must be admitted: {command}"
+            );
+        }
+
+        let chained_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &chained_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check && cargo check --locked"}),
+        ));
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.consecutive_mutations, 0);
+    }
+
+    #[test]
+    fn non_and_chained_verifiers_do_not_clear_gate() {
+        for command in [
+            "cargo check --locked; cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked || cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked | head -40",
+        ] {
+            let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+            tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+            let chained_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+                output: serde_json::json!({"exit_code": 0}),
+                stdout: None,
+                modified_files: vec![],
+                command_success: true,
+            });
+            update_repetition_tracker(&mut tracker, &chained_success, tools::EXEC_COMMAND, &json!({"cmd": command}));
+            assert!(tracker.verification_is_pending(), "`;`/`||`/`|` chains must not clear the gate: {command}");
+        }
+    }
+
+    #[test]
+    fn fmt_check_clears_gate_but_plain_fmt_does_not() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        assert!(!mutation_blocked_until_verification(
+            &tracker,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check"})
+        ));
+
+        let fmt_check_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        update_repetition_tracker(
+            &mut tracker,
+            &fmt_check_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check"}),
+        );
+        assert!(!tracker.verification_is_pending());
+
+        // Plain `cargo fmt` rewrites files: it stays a mutation and never
+        // clears the gate.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        assert!(mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": "cargo fmt"})));
+    }
+
+    #[test]
+    fn failed_verifier_reports_fix_window_for_text_streak_reset() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let failed_check = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 1}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &failed_check,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked"}),
+        ));
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+
+        let successful_check = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &successful_check,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked"}),
+        ));
     }
 
     #[test]

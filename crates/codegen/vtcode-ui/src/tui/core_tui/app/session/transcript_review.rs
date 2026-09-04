@@ -593,10 +593,18 @@ pub(super) fn compact_activity_segments(
             text: binding.to_string(),
             style: std::sync::Arc::new(binding_style),
         });
+        // Keep the explanatory words dimmed but underline the click affordance
+        // itself so it reads as clickable. Hit regions are derived from
+        // underlined spans, so both the binding and this action open review.
         let rest_style = session.core.styles.default_inline_style().dim();
         segments.push(crate::tui::core_tui::types::InlineSegment {
-            text: format!(" {COMPACT_ACTIVITY_HINT_TAIL}"),
+            text: " transcript · ".to_string(),
             style: std::sync::Arc::new(rest_style),
+        });
+        let action_style = session.core.styles.accent_inline_style().underline();
+        segments.push(crate::tui::core_tui::types::InlineSegment {
+            text: "click to expand".to_string(),
+            style: std::sync::Arc::new(action_style),
         });
     }
 
@@ -1367,6 +1375,29 @@ mod tests {
         let session = test_session();
         let hint = compact_activity_hint_text(&session).expect("default review binding should have a hint");
         assert_eq!(hint, "Ctrl+T transcript · click to expand");
+    }
+
+    #[test]
+    fn compact_activity_hint_underlines_click_affordance() {
+        let session = test_session();
+        let metadata = vtcode_commons::ui_protocol::CompactActivityMetadata {
+            group_id: 7,
+            command_count: 2,
+            command: None,
+            hidden_line_count: 0,
+            suffix: None,
+            review_anchor: Some(7),
+            review_anchors: vec![7],
+        };
+        let segments = compact_activity_segments(&session, &metadata);
+        let text: String = segments.iter().map(|segment| segment.text.as_str()).collect();
+        assert!(text.contains("2 commands"));
+        assert!(text.contains("click to expand"));
+        let action = segments
+            .iter()
+            .find(|segment| segment.text == "click to expand")
+            .expect("click affordance");
+        assert!(action.style.effects.contains(anstyle::Effects::UNDERLINE));
     }
 
     #[test]

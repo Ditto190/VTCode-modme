@@ -112,8 +112,9 @@ pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
     "Turn blocked after repeated unverified assistant responses; verification is still pending.";
 const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending. \
-    Inspection-only checks do not clear the verification gate; run a standalone `cargo check --locked` \
-    or the relevant `cargo nextest run` command (no `| head` pipes) to exit 0, then resume the request. \
+    Inspection-only checks do not clear the verification gate; run `cargo check --locked`, \
+    `cargo fmt --all -- --check`, or the relevant `cargo nextest run` command (standalone or as a pure `&&` chain, \
+    no `| head` pipes and no `;`/`||`/`|` joins) to exit 0, then resume the request. \
     A failed verifier grants ";
 const PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX: &str = " fix-up edits before re-verify is required.";
 

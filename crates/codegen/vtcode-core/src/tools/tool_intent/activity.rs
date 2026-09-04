@@ -36,6 +36,11 @@ fn is_verification_invocation(words: &[String]) -> bool {
 
     match program.as_str() {
         "cargo" => {
+            if second.as_deref() == Some("fmt") {
+                // `cargo fmt` without `--check` reformats the worktree (mutation).
+                // With `--check` it is a read-only lint verification.
+                return words.iter().any(|word| word == "--check");
+            }
             matches!(second.as_deref(), Some("check" | "build" | "clippy" | "test"))
                 || (second.as_deref() == Some("nextest") && third.as_deref() == Some("run"))
         }
@@ -137,7 +142,16 @@ fn classify_provable_shell_sequence(command: &str) -> Option<ShellActivity> {
     // final status reflects every verification stage. Do not let a successful
     // downstream command clear the anti-blind checkpoint after an earlier
     // verifier failed.
+    //
+    // Exception: a pure `&&` chain of verification (or readonly) segments
+    // short-circuits on first failure, so its exit status does represent every
+    // stage. `cargo fmt --check && cargo check --locked && cargo nextest run`
+    // must clear the gate; `;`, `||`, `|`, and background `&` still mask
+    // failures and stay `Mutation`.
     if saw_verification && has_multiple_segments {
+        if shell_uses_only_and_chaining(command) {
+            return Some(ShellActivity::Verification);
+        }
         return Some(ShellActivity::Mutation);
     }
 
@@ -152,12 +166,68 @@ fn has_shell_sequence(command: &str) -> bool {
     static_shell_command_words(command).is_none_or(|segments| segments.len() > 1)
 }
 
+/// Quote-aware check that a shell command chains segments only with `&&`.
+///
+/// Returns `false` when an unquoted `;`, newline, `||`, single `&`
+/// (background), or `|` (pipeline) is present, since those operators let a
+/// downstream success mask an earlier verifier failure. `&&` short-circuits,
+/// so a pure `&&` chain of verifiers has a faithful aggregate exit status and
+/// may clear the anti-blind-editing gate.
+fn shell_uses_only_and_chaining(command: &str) -> bool {
+    let chars: Vec<char> = command.chars().collect();
+    let mut index = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    while index < chars.len() {
+        let character = chars[index];
+        if character == '\'' && !in_double_quote {
+            in_single_quote = !in_single_quote;
+            index += 1;
+            continue;
+        }
+        if character == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            index += 1;
+            continue;
+        }
+        if in_single_quote || in_double_quote {
+            index += 1;
+            continue;
+        }
+        match character {
+            ';' | '\n' | '|' => return false,
+            '&' => {
+                let next_is_and = chars.get(index + 1) == Some(&'&');
+                if !next_is_and {
+                    return false;
+                }
+                // A `||`-style `|` was already rejected above; `&&` consumes
+                // both characters. `|||`, `&&&`, and similar malformed
+                // sequences fail closed.
+                let third = chars.get(index + 2);
+                if third == Some(&'&') || third == Some(&'|') {
+                    return false;
+                }
+                index += 2;
+                continue;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+
+    true
+}
+
 /// Classify a shell call without weakening the authoritative mutation guard.
 ///
 /// Standalone output plumbing such as `2>&1` or `> build.log` does not turn a
 /// primary verification command into a mutation for progress accounting.
-/// Multi-stage pipelines and chains remain mutations because their final
-/// status does not reliably represent every verification stage.
+/// Pipelines and `;`/`||` chains remain mutations because their final
+/// status does not reliably represent every verification stage. Pure `&&`
+/// chains of verification-or-readonly segments are `Verification` since `&&`
+/// short-circuits on first failure.
 #[must_use]
 pub fn classify_shell_activity(tool_name: &str, args: &Value) -> ShellActivity {
     let command = crate::tools::command_args::raw_command_text(args);
@@ -365,6 +435,66 @@ mod tests {
             assert_eq!(
                 classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),
                 ShellActivity::Inspection,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn cargo_fmt_check_is_verification_but_plain_fmt_is_not() {
+        for command in [
+            "cargo fmt --check",
+            "cargo fmt --all -- --check",
+            "cargo fmt -- --check",
+        ] {
+            assert_eq!(
+                classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),
+                ShellActivity::Verification,
+                "{command}"
+            );
+            assert!(
+                shell_command_is_admitted_verification_attempt(&exec_command(command)),
+                "expected admission: {command}"
+            );
+        }
+        // Plain `cargo fmt` rewrites the worktree: it must stay a mutation and
+        // must not ride through the verification gate.
+        assert_eq!(classify_shell_activity(tools::EXEC_COMMAND, &exec_command("cargo fmt")), ShellActivity::Mutation);
+        assert!(!shell_command_is_admitted_verification_attempt(&exec_command("cargo fmt")));
+    }
+
+    #[test]
+    fn pure_and_chained_verifiers_are_verification() {
+        for command in [
+            "cargo fmt --all -- --check && cargo check --locked",
+            "cargo check --locked && cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked && cargo clippy --locked -p vtcode-ui -- -D warnings",
+            "git diff --check && cargo check --locked",
+        ] {
+            assert_eq!(
+                classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),
+                ShellActivity::Verification,
+                "{command}"
+            );
+            assert!(
+                shell_command_is_admitted_verification_attempt(&exec_command(command)),
+                "expected admission: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_and_chained_verifiers_remain_mutations() {
+        for command in [
+            "cargo check --locked; cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked || cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked | head -40",
+            "cargo check --locked && cargo nextest run --locked -p vtcode-ui | head -40",
+            "cargo check --locked &",
+        ] {
+            assert_eq!(
+                classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),
+                ShellActivity::Mutation,
                 "{command}"
             );
         }

@@ -634,7 +634,7 @@ pub(crate) fn block_mutation_until_verification(
             "pending_mutation_count_known": pending_mutations.is_some(),
             "fix_edits_remaining": repeated_tool_attempts.fix_edits_remaining,
             "error": message,
-            "next_action": format!("Run a standalone verification command with exec_command (e.g. `cargo check --locked`, no `| head` pipes) to exit 0 before making another workspace mutation. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits, then requires re-verify."),
+            "next_action": format!("Run one verification command with exec_command to exit 0 before another workspace mutation: `cargo check --locked`, `cargo fmt --all -- --check`, or `cargo nextest run --locked -p <crate>`. A pure `&&` chain of verifiers also clears the gate. Do not pipe verifiers through `| head` and do not join with `;`/`||`/`|`; use `max_output_tokens` instead of pipes. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation, then requires re-verify."),
             "retryable": true,
         })
         .to_string(),

@@ -383,7 +383,19 @@ impl<'a> CopilotRuntimeHost<'a> {
             }
 
             if let Some(loop_tracker) = self.loop_tracker.as_deref_mut() {
-                update_repetition_tracker(loop_tracker, &pipeline_outcome, &canonical_tool_name, &effective_arguments);
+                if update_repetition_tracker(
+                    loop_tracker,
+                    &pipeline_outcome,
+                    &canonical_tool_name,
+                    &effective_arguments,
+                ) {
+                    // A failed verifier grants fix-up edits; reset the text
+                    // streak so the diagnostic summary does not immediately
+                    // trip the pending-verification text cap. Reset through
+                    // the run-loop context, which owns the `&mut`
+                    // `harness_state` borrow for this block.
+                    run_loop_ctx.harness_state.reset_assistant_text_response_streak();
+                }
                 run_loop_ctx
                     .session_stats
                     .set_verification_snapshot(loop_tracker.verification_snapshot());

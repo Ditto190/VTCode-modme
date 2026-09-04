@@ -228,7 +228,12 @@ async fn execute_parallel_group<'a, 'b>(
         record_circuit_transition(t_ctx.ctx, &name, circuit_before).await;
 
         let outcome = crate::agent::runloop::unified::tool_pipeline::ToolPipelineOutcome::from_status(status);
-        update_repetition_tracker(t_ctx.repeated_tool_attempts, &outcome, &name, &args);
+        if update_repetition_tracker(t_ctx.repeated_tool_attempts, &outcome, &name, &args) {
+            // A failed verifier grants fix-up edits; give the model one
+            // diagnostic explanation before the pending-verification text cap
+            // re-applies instead of blocking the turn on the failure summary.
+            t_ctx.ctx.harness_state.reset_assistant_text_response_streak();
+        }
         t_ctx
             .ctx
             .session_stats
@@ -533,7 +538,11 @@ async fn execute_and_handle_tool_call_inner<'a>(
     }
     record_circuit_transition(ctx, tool_name, circuit_before).await;
 
-    update_repetition_tracker(repeated_tool_attempts, &pipeline_outcome, tool_name, &args_val);
+    if update_repetition_tracker(repeated_tool_attempts, &pipeline_outcome, tool_name, &args_val) {
+        // A failed verifier grants fix-up edits; reset the text streak so the
+        // model can diagnose the failure before the text cap re-applies.
+        ctx.harness_state.reset_assistant_text_response_streak();
+    }
     ctx.session_stats
         .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
 
