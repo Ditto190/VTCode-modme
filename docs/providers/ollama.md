@@ -31,7 +31,7 @@ Ollama can serve models locally on your machine or proxy larger releases through
 
 ### Environment Variables
 
-- `OLLAMA_BASE_URL` (optional): Custom Ollama endpoint (defaults to `http://localhost:11434`). Set to `https://ollama.com` to send requests directly to Ollama Cloud.
+- `OLLAMA_BASE_URL` (optional): Custom Ollama endpoint (defaults to `http://localhost:11434`). Set to `https://ollama.com` to send requests directly to Ollama Cloud, or to `http://localhost:17434` to use [llmman](https://github.com/llmmanorg/llmman), a local model runner that serves the same Ollama API (see [Using llmman](local-servers.md#using-llmman)).
 - `OLLAMA_API_KEY` (optional): Required when connecting to Ollama Cloud. Not needed for purely local workloads.
 
 ### VT Code Configuration

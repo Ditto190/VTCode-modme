@@ -26,6 +26,10 @@ VT Code manages local LLM inference servers through the `/local` command. Contro
 | **LM Studio** | `http://localhost:1234/v1` | `lms` | https://lmstudio.ai/download |
 | **llama.cpp** | `http://localhost:8080/v1` | `llama-server` | https://llama.app |
 
+[llmman](https://github.com/llmmanorg/llmman) serves the Ollama API on port
+`17434` and works through the `ollama` provider; see
+[Using llmman](#using-llmman) below.
+
 ---
 
 ## Running Ollama
@@ -111,6 +115,36 @@ cat ~/.ollama/logs/server.log
 /local configure ollama    Show environment config
 /local troubleshoot ollama Diagnose connection issues
 ```
+
+### Using llmman
+
+[llmman](https://github.com/llmmanorg/llmman) is a local model runner that
+serves the Ollama API (alongside OpenAI- and Anthropic-compatible ones) on port
+`17434`. Models are pulled as OCI artifacts or straight from Hugging Face
+(`hf.co/org/model`) and served by upstream `llama.cpp`, `vllm`, or `mlx-lm`.
+Because the API is the same, VT Code's `ollama` provider works unchanged; only
+the base URL differs.
+
+```bash
+# Install and start
+curl -fsSL https://raw.githubusercontent.com/llmmanorg/llmman/main/install.sh | sh
+llmman serve
+
+# Pull a model
+llmman pull gemma4
+llmman pull hf.co/unsloth/Qwen3.5-0.8B-GGUF
+
+# Point VT Code's ollama provider at llmman
+export OLLAMA_BASE_URL=http://localhost:17434
+vtcode --provider ollama --model gemma4
+```
+
+Override the listen address on the llmman side with `LLMMAN_HOST`
+(`[host][:port]`), then set `OLLAMA_BASE_URL` to match.
+
+llmman does not serve `/api/embed`; embeddings are only available via its
+OpenAI-compatible `/v1/embeddings` route. `/local start ollama` manages the
+`ollama` binary, not `llmman`, so start `llmman serve` yourself.
 
 ---
 
