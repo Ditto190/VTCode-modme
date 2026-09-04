@@ -9,7 +9,7 @@ use vtcode_core::tools::registry::labels::tool_action_label;
 use vtcode_core::utils::ansi::MessageStyle;
 
 use super::error_handling::tool_denial_diagnostic;
-use super::helpers::{check_is_argument_error, mutation_blocked_until_verification};
+use super::helpers::{FAILED_VERIFICATION_FIX_ALLOWANCE, check_is_argument_error, mutation_blocked_until_verification};
 use crate::agent::runloop::unified::async_mcp_manager::approval_policy_from_human_in_the_loop;
 use crate::agent::runloop::unified::tool_call_safety::invocation_id_from_call_id;
 use crate::agent::runloop::unified::tool_pipeline::validation::{
@@ -584,14 +584,23 @@ pub(crate) fn block_mutation_until_verification(
 
     let pending_mutations =
         (repeated_tool_attempts.consecutive_mutations > 0).then_some(repeated_tool_attempts.consecutive_mutations);
+    let fix_hint = if repeated_tool_attempts.fix_edits_remaining > 0 {
+        format!(
+            " {} fix-up edit(s) remain from the last failed verifier; use them to repair, then re-run a standalone verifier.",
+            repeated_tool_attempts.fix_edits_remaining
+        )
+    } else {
+        String::new()
+    };
     let message = pending_mutations.map_or_else(
         || {
-            "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a successful build, test, lint, or compile command."
-                .to_string()
+            format!(
+                "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a successful build, test, lint, or compile command.{fix_hint}"
+            )
         },
         |count| {
             format!(
-                "Mutation blocked until verification: {count} effective file changes are awaiting a successful build, test, lint, or compile command."
+                "Mutation blocked until verification: {count} effective file changes are awaiting a successful build, test, lint, or compile command.{fix_hint}"
             )
         },
     );
@@ -610,8 +619,9 @@ pub(crate) fn block_mutation_until_verification(
             "verification_required": true,
             "pending_mutations": pending_mutations,
             "pending_mutation_count_known": pending_mutations.is_some(),
+            "fix_edits_remaining": repeated_tool_attempts.fix_edits_remaining,
             "error": message,
-            "next_action": "Run a successful verification command with exec_command before making another workspace mutation.",
+            "next_action": format!("Run a standalone verification command with exec_command (e.g. `cargo check --locked`, no `| head` pipes) to exit 0 before making another workspace mutation. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits, then requires re-verify."),
             "retryable": true,
         })
         .to_string(),

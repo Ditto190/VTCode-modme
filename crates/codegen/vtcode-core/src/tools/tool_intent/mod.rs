@@ -11,7 +11,7 @@ pub use actions::{
     action_qualified_policy_name, command_session_action, command_session_action_in, command_session_action_is,
     file_operation_action, file_operation_action_in, file_operation_action_is, mcp_action, mcp_action_is,
 };
-pub use activity::{ShellActivity, classify_shell_activity};
+pub use activity::{ShellActivity, classify_shell_activity, shell_command_is_admitted_verification_attempt};
 pub use classify::{
     builtin_tool_behavior, canonical_command_session_tool_name, classify_tool_intent, is_command_run_tool,
     is_command_run_tool_call, is_command_tool, is_edited_file_conflict_guarded_call, is_parallel_safe_call,

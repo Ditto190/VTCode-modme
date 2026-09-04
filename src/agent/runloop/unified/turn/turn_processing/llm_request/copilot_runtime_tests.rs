@@ -846,7 +846,7 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
         "a denied inline mutation is not a productive response-streak boundary"
     );
 
-    assert!(runtime_host.session_stats.verification_pending());
+    assert!(runtime_host.session_stats.verification_snapshot().0);
     let response = runtime_host
         .handle_vtcode_tool_call(
             &mut renderer,
@@ -872,13 +872,13 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
             .as_deref()
             .is_some_and(|tracker| !tracker.verification_is_pending())
     );
-    assert!(!runtime_host.session_stats.verification_pending());
+    assert!(!runtime_host.session_stats.verification_snapshot().0);
     assert_eq!(
         runtime_host.harness_state.consecutive_assistant_text_responses, 0,
         "successful inline verification must remain visible in authoritative turn state"
     );
 
-    let resumed_tracker = LoopTracker::with_verification_pending(runtime_host.session_stats.verification_pending());
+    let resumed_tracker = LoopTracker::with_verification_snapshot(runtime_host.session_stats.verification_snapshot());
     assert!(!mutation_blocked_until_verification(
         &resumed_tracker,
         vtcode_core::config::constants::tools::APPLY_PATCH,

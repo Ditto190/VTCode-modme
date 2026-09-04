@@ -45,7 +45,7 @@ impl ListNavigator {
     }
 
     pub(crate) fn set_scroll_offset(&mut self, offset: usize) {
-        self.scroll_offset = offset;
+        self.scroll_offset = offset.min(self.max_scroll_offset());
     }
 
     pub(crate) fn set_selected(&mut self, selected: Option<usize>) {
@@ -143,5 +143,77 @@ impl ListNavigator {
         } else if selected >= self.scroll_offset + self.visible_rows {
             self.scroll_offset = selected + 1 - self.visible_rows;
         }
+
+        self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset());
+    }
+
+    fn max_scroll_offset(&self) -> usize {
+        if self.visible_rows == 0 {
+            return 0;
+        }
+        self.item_count.saturating_sub(self.visible_rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ListNavigator;
+
+    #[test]
+    fn downward_navigation_wraps_without_invalid_scroll() {
+        let mut navigator = ListNavigator::new();
+        navigator.set_item_count(10);
+        navigator.set_visible_rows(3);
+        navigator.select_first();
+
+        for _ in 0..20 {
+            navigator.move_down();
+        }
+
+        assert_eq!(navigator.selected(), Some(0));
+        assert_eq!(navigator.scroll_offset(), 0);
+
+        navigator.select_last();
+        assert_eq!(navigator.selected(), Some(9));
+        assert_eq!(navigator.scroll_offset(), 7);
+    }
+
+    #[test]
+    fn page_navigation_and_resize_keep_selection_visible() {
+        let mut navigator = ListNavigator::new();
+        navigator.set_item_count(12);
+        navigator.set_visible_rows(4);
+        navigator.select_first();
+
+        navigator.page_down(4);
+        assert_eq!(navigator.selected(), Some(4));
+        assert_eq!(navigator.scroll_offset(), 1);
+
+        navigator.select_last();
+        navigator.set_visible_rows(8);
+        assert_eq!(navigator.selected(), Some(11));
+        assert_eq!(navigator.scroll_offset(), 4);
+
+        navigator.set_visible_rows(0);
+        assert_eq!(navigator.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn empty_and_short_lists_have_zero_scroll() {
+        let mut navigator = ListNavigator::new();
+        navigator.set_item_count(0);
+        navigator.set_visible_rows(4);
+        assert_eq!(navigator.selected(), None);
+        assert_eq!(navigator.scroll_offset(), 0);
+
+        navigator.set_item_count(2);
+        navigator.select_last();
+        assert_eq!(navigator.scroll_offset(), 0);
+
+        // A zero-row viewport never carries a stale offset, even via direct sets.
+        navigator.set_item_count(10);
+        navigator.set_visible_rows(0);
+        navigator.set_scroll_offset(9);
+        assert_eq!(navigator.scroll_offset(), 0);
     }
 }

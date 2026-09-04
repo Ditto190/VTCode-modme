@@ -1056,7 +1056,7 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
 
     let mut history = vec![uni::Message::user("continue the implementation".to_string())];
     let turn_context = backing.turn_loop_context();
-    turn_context.session_stats.set_verification_pending(true);
+    turn_context.session_stats.set_verification_snapshot((true, 0));
     let outcome = run_turn_loop(&mut history, turn_context)
         .await
         .expect("a resumed unverified turn should produce a blocked handoff");
@@ -1348,7 +1348,7 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
 
     let mut history = vec![uni::Message::user("finish the pending change".to_string())];
     let turn_context = backing.turn_loop_context();
-    turn_context.session_stats.set_verification_pending(true);
+    turn_context.session_stats.set_verification_snapshot((true, 0));
     let outcome = run_turn_loop(&mut history, turn_context)
         .await
         .expect("blocked mutation should retain the text-response streak");

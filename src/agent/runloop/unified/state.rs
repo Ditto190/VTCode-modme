@@ -81,6 +81,10 @@ pub(crate) struct SessionStats {
     /// This survives a blocked turn so a later `continue` cannot claim
     /// completion from inspection-only work.
     verification_pending: bool,
+    /// Bounded fix-up edits remaining while `verification_pending` is true.
+    /// Granted by a failed verifier so a broken build can be repaired across
+    /// `continue` turns; consumed by successful fix-up mutations.
+    verification_fix_remaining: u8,
     /// Responses-style continuation state keyed by normalized provider/model pairs.
     previous_response_chains: HashMap<(String, String), ResponsesContinuationState>,
     prompt_cache_profile: Option<PromptCacheProfile>,
@@ -483,12 +487,16 @@ impl SessionStats {
         }
     }
 
-    pub(crate) fn verification_pending(&self) -> bool {
-        self.verification_pending
+    /// Bundle counterpart to `LoopTracker::verification_snapshot`. Turn setup
+    /// and persistence must move both halves together; threading the tuple
+    /// through one call keeps a pending gate from losing its fix window.
+    pub(crate) fn verification_snapshot(&self) -> (bool, u8) {
+        (self.verification_pending, self.verification_fix_remaining)
     }
 
-    pub(crate) fn set_verification_pending(&mut self, pending: bool) {
-        self.verification_pending = pending;
+    pub(crate) fn set_verification_snapshot(&mut self, snapshot: (bool, u8)) {
+        self.verification_pending = snapshot.0;
+        self.verification_fix_remaining = if snapshot.0 { snapshot.1 } else { 0 };
     }
 
     #[cfg(test)]
@@ -1130,13 +1138,13 @@ mod tests {
     #[test]
     fn verification_pending_survives_stall_recovery_until_explicitly_cleared() {
         let mut stats = SessionStats::default();
-        stats.set_verification_pending(true);
+        stats.set_verification_snapshot((true, 0));
         stats.mark_turn_stalled(true, Some("verification pending".to_string()));
         stats.mark_turn_stalled(false, None);
 
-        assert!(stats.verification_pending());
-        stats.set_verification_pending(false);
-        assert!(!stats.verification_pending());
+        assert!(stats.verification_snapshot().0);
+        stats.set_verification_snapshot((false, 0));
+        assert!(!stats.verification_snapshot().0);
     }
 
     #[test]

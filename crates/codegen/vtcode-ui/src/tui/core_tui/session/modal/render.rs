@@ -199,7 +199,8 @@ impl SharedListWidgetModel for ModalListPanelModel<'_> {
     }
 
     fn set_scroll_offset(&mut self, offset: usize) {
-        *self.list.list_state.offset_mut() = offset;
+        let max_offset = self.list.max_scroll_offset();
+        *self.list.list_state.offset_mut() = offset.min(max_offset);
     }
 
     fn set_viewport_rows(&mut self, rows: u16) {

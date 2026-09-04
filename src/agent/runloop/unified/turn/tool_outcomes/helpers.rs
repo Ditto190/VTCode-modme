@@ -4,7 +4,9 @@ use std::time::Instant;
 use rustc_hash::{FxHashMap, FxHashSet};
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::names::canonical_tool_name;
-use vtcode_core::tools::tool_intent::{ShellActivity, classify_shell_activity};
+use vtcode_core::tools::tool_intent::{
+    ShellActivity, classify_shell_activity, shell_command_is_admitted_verification_attempt,
+};
 
 use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
 use crate::agent::runloop::unified::turn::tool_outcomes::read_extent;
@@ -15,6 +17,13 @@ use crate::agent::runloop::unified::turn::tool_outcomes::{is_grep_style_no_match
 pub(crate) const BLIND_EDITING_THRESHOLD: usize = 4;
 pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: Pause to run verification/tests.";
 pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "CRITICAL: Multiple edits were made without verification. Stop editing and run `exec_command` to compile or test before proceeding.";
+/// Fix-up window granted after a failed verification attempt. A failed
+/// `cargo check` / `cargo nextest run` must not deadlock the turn: the agent
+/// needs a bounded number of edits to address the reported failure before
+/// re-verifying. Each failed verifier refreshes this window, so blind editing
+/// (many edits with no verifier attempt) stays blocked while fix-verify loops
+/// can make progress.
+pub(crate) const FAILED_VERIFICATION_FIX_ALLOWANCE: u8 = 2;
 
 /// Threshold: number of consecutive read/search operations before the Navigation
 /// Loop warning fires.
@@ -34,6 +43,11 @@ pub(crate) struct LoopTracker {
     pub consecutive_mutations: usize,
     /// True after the mutation threshold until a verification command completes.
     pub verification_pending: bool,
+    /// Bounded fix-up edits allowed while verification stays pending.
+    /// Set to [`FAILED_VERIFICATION_FIX_ALLOWANCE`] after a failed verifier so
+    /// a broken build can be repaired; consumed by successful fix-up mutations.
+    /// Persisted in `SessionStats` so `continue` turns keep the same window.
+    pub fix_edits_remaining: u8,
     /// Prevent repeated warning output while verification remains pending.
     pub verification_warning_emitted: bool,
     /// Prevent repeated inline block notices for a single verification checkpoint.
@@ -63,6 +77,7 @@ impl LoopTracker {
             low_signal_attempts: FxHashMap::with_capacity_and_hasher(8, Default::default()),
             consecutive_mutations: 0,
             verification_pending: false,
+            fix_edits_remaining: 0,
             verification_warning_emitted: false,
             verification_block_notice_emitted: false,
             consecutive_navigations: 0,
@@ -75,12 +90,15 @@ impl LoopTracker {
         }
     }
 
-    /// Start a turn with the verification checkpoint carried from an earlier
-    /// turn in the same session. A resumed turn must not accept a text-only
-    /// completion until a successful verification command clears the state.
-    pub(crate) fn with_verification_pending(verification_pending: bool) -> Self {
+    /// Tuple counterpart to `SessionStats::verification_snapshot`, so turn
+    /// setup and persistence share one call shape instead of threading two
+    /// loosely-coupled halves across five call sites. A zero-pending snapshot
+    /// never carries fix-ups; the clamp keeps a stale caller from building an
+    /// inconsistent gate.
+    pub(crate) fn with_verification_snapshot(snapshot: (bool, u8)) -> Self {
         let mut tracker = Self::new();
-        tracker.verification_pending = verification_pending;
+        tracker.verification_pending = snapshot.0;
+        tracker.fix_edits_remaining = if snapshot.0 { snapshot.1 } else { 0 };
         tracker
     }
 
@@ -130,6 +148,18 @@ impl LoopTracker {
         self.total_low_signal_navigations = 0;
     }
 
+    /// Clear the per-turn navigation window after a non-navigation tool.
+    /// Callers pass `low_signal_family.is_none()` so diverse productive reads
+    /// keep their repetition history while low-signal churn resets.
+    fn reset_navigation_window(&mut self, clear_low_signal_attempts: bool) {
+        self.consecutive_navigations = 0;
+        self.nav_signatures.clear();
+        self.reset_low_signal_navigation_counters();
+        if clear_low_signal_attempts {
+            self.reset_low_signal_attempts();
+        }
+    }
+
     fn record_navigation_signal(&mut self, is_low_signal: bool) {
         if is_low_signal {
             self.low_signal_tool_calls = self.low_signal_tool_calls.saturating_add(1);
@@ -157,11 +187,34 @@ impl LoopTracker {
         self.verification_pending || self.consecutive_mutations >= BLIND_EDITING_THRESHOLD
     }
 
+    /// Snapshot the session-persisted gate state for `SessionStats`.
+    /// Persist both halves together so resumed turns reconstruct the same
+    /// gate instead of drifting (a pending gate with a lost fix window
+    /// deadlocks a broken build).
+    pub(crate) fn verification_snapshot(&self) -> (bool, u8) {
+        (self.verification_is_pending(), self.fix_edits_remaining)
+    }
+
     pub(crate) fn mark_verification_pending(&mut self) {
         self.verification_pending = true;
     }
 
+    /// Grant a bounded fix-up window after a failed verifier. The gate stays
+    /// pending (completion still requires a successful standalone verifier),
+    /// but the next [`FAILED_VERIFICATION_FIX_ALLOWANCE`] successful mutations
+    /// are admitted so a broken build can be repaired instead of deadlocking.
+    pub(crate) fn record_failed_verification(&mut self) {
+        self.verification_pending = true;
+        self.fix_edits_remaining = FAILED_VERIFICATION_FIX_ALLOWANCE;
+    }
+
     fn record_successful_mutation(&mut self) {
+        // Consume the fix-up window first: repair edits must not grow the
+        // blind-editing counter while the gate already requires re-verify.
+        if self.verification_pending && self.fix_edits_remaining > 0 {
+            self.fix_edits_remaining = self.fix_edits_remaining.saturating_sub(1);
+            return;
+        }
         self.consecutive_mutations = self.consecutive_mutations.saturating_add(1);
         if self.consecutive_mutations >= BLIND_EDITING_THRESHOLD {
             self.verification_pending = true;
@@ -171,6 +224,7 @@ impl LoopTracker {
     fn mark_verification_complete(&mut self) {
         self.consecutive_mutations = 0;
         self.verification_pending = false;
+        self.fix_edits_remaining = 0;
         self.verification_warning_emitted = false;
         self.verification_block_notice_emitted = false;
     }
@@ -727,6 +781,10 @@ fn is_execution_tool(name: &str) -> bool {
 ///
 /// Reads, inspections, verification commands, task tracking, and dedicated
 /// plan-artifact writes remain available while the checkpoint is pending.
+/// A failed verifier grants a bounded fix-up window ([`FAILED_VERIFICATION_FIX_ALLOWANCE`])
+/// so a broken build can be repaired, and piped verifier attempts
+/// (e.g. `cargo check 2>&1 | head`) are admitted to run even though only a
+/// standalone success clears the gate.
 pub(crate) fn mutation_blocked_until_verification(
     loop_tracker: &LoopTracker,
     name: &str,
@@ -738,10 +796,27 @@ pub(crate) fn mutation_blocked_until_verification(
 
     let canonical_name = canonical_tool_name(name);
     if is_execution_tool(canonical_name) {
-        return matches!(classify_shell_activity(canonical_name, args), ShellActivity::Mutation);
+        // Truncation-only verifier attempts (`cargo check 2>&1 | head`) must
+        // run so the model can see the failure; they never clear the gate
+        // (see update_repetition_tracker). The admission predicate requires
+        // every shell segment to be verification-or-readonly, so a smuggled
+        // mutation such as `cargo check && rm -rf target` stays blocked.
+        if shell_command_is_admitted_verification_attempt(args)
+            && matches!(classify_shell_activity(canonical_name, args), ShellActivity::Mutation)
+        {
+            return false;
+        }
+        if !matches!(classify_shell_activity(canonical_name, args), ShellActivity::Mutation) {
+            return false;
+        }
+        // Fix-up window: allow bounded repair edits after a failed verifier.
+        return loop_tracker.fix_edits_remaining == 0;
     }
 
-    vtcode_core::tools::tool_intent::classify_tool_intent(canonical_name, args).mutating
+    if !vtcode_core::tools::tool_intent::classify_tool_intent(canonical_name, args).mutating {
+        return false;
+    }
+    loop_tracker.fix_edits_remaining == 0
 }
 
 /// Updates the tool repetition tracker based on the execution outcome.
@@ -786,44 +861,51 @@ pub(crate) fn update_repetition_tracker(
             ShellActivity::Verification => {
                 if matches!(&outcome.status, ToolExecutionStatus::Success { command_success: true, .. }) {
                     loop_tracker.mark_verification_complete();
+                } else if matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. }) {
+                    // Only a verifier that actually ran and reported non-zero
+                    // opens the fix-up window. Tool-level Failure/Timeout (never
+                    // executed, e.g. argument errors) must not grant edits.
+                    loop_tracker.record_failed_verification();
                 }
-                loop_tracker.consecutive_navigations = 0;
-                loop_tracker.nav_signatures.clear();
-                loop_tracker.reset_low_signal_navigation_counters();
-                if low_signal_family.is_none() {
-                    loop_tracker.reset_low_signal_attempts();
-                }
+                loop_tracker.reset_navigation_window(low_signal_family.is_none());
             }
             ShellActivity::Mutation => {
-                if mutation_was_applied(outcome) {
-                    loop_tracker.record_successful_mutation();
-                }
-                loop_tracker.consecutive_navigations = 0;
-                loop_tracker.nav_signatures.clear();
-                loop_tracker.reset_low_signal_navigation_counters();
-                if low_signal_family.is_none() {
-                    loop_tracker.reset_low_signal_attempts();
+                // Truncation-only verifier attempts (e.g. `cargo check 2>&1 | head`)
+                // are admitted to run but never clear the gate: the pipeline
+                // exit status is the truncator's, not the verifier's. Don't
+                // count them as blind edits; a failed piped attempt still
+                // opens the fix window so the agent can repair and re-run a
+                // standalone verifier. Chained mutations smuggled behind a
+                // verifier prefix are rejected by the admission predicate and
+                // take the blind-edit path below.
+                if shell_command_is_admitted_verification_attempt(args) {
+                    let ran_and_failed =
+                        matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. });
+                    if ran_and_failed {
+                        loop_tracker.record_failed_verification();
+                    }
+                    loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                } else {
+                    if mutation_was_applied(outcome) {
+                        loop_tracker.record_successful_mutation();
+                    }
+                    loop_tracker.reset_navigation_window(low_signal_family.is_none());
                 }
             }
         }
     } else if is_plan_artifact_write(canonical_name, args) {
         // Plan artifact writes in dedicated plan storage are allowed in Planning workflow and
         // should not trigger anti-blind-editing verification pressure.
-        loop_tracker.consecutive_navigations = 0;
-        loop_tracker.nav_signatures.clear();
-        loop_tracker.reset_low_signal_navigation_counters();
+        // Low-signal repetition history is preserved: plan writes are not
+        // navigation, so they neither advance nor clear that window.
+        loop_tracker.reset_navigation_window(false);
     } else {
         let intent = vtcode_core::tools::tool_intent::classify_tool_intent(canonical_name, args);
         if intent.mutating {
             if mutation_was_applied(outcome) {
                 loop_tracker.record_successful_mutation();
             }
-            loop_tracker.consecutive_navigations = 0;
-            loop_tracker.nav_signatures.clear();
-            loop_tracker.reset_low_signal_navigation_counters();
-            if low_signal_family.is_none() {
-                loop_tracker.reset_low_signal_attempts();
-            }
+            loop_tracker.reset_navigation_window(low_signal_family.is_none());
         } else {
             // Read-only / navigation tool
             loop_tracker.consecutive_navigations += 1;
@@ -1173,6 +1255,113 @@ mod tests {
 
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+        // A failed verifier keeps the gate but opens a bounded fix-up window
+        // so the broken build can be repaired instead of deadlocking.
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(!mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+    }
+
+    #[test]
+    fn failed_verification_fix_window_is_consumed_by_repair_edits() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let failed_check = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 1}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+        update_repetition_tracker(&mut tracker, &failed_check, tools::EXEC_COMMAND, &json!({"cmd":"cargo check"}));
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+
+        let edit = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for _ in 0..FAILED_VERIFICATION_FIX_ALLOWANCE {
+            assert!(!mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+            update_repetition_tracker(&mut tracker, &edit, tools::EDIT_FILE, &json!({"path": "src/lib.rs"}));
+            assert!(tracker.verification_is_pending());
+        }
+        // Window exhausted: further mutations block again until a standalone
+        // verifier succeeds.
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+    }
+
+    #[test]
+    fn piped_verifier_is_admitted_but_does_not_clear_gate() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        // Piped verifiers must run (not block) so the model sees output, but
+        // the pipeline status is the truncator's — only standalone success clears.
+        assert!(!mutation_blocked_until_verification(
+            &tracker,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked 2>&1 | head -c 4000"})
+        ));
+        let piped_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        update_repetition_tracker(
+            &mut tracker,
+            &piped_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked 2>&1 | head -c 4000"}),
+        );
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+    }
+
+    #[test]
+    fn smuggled_mutation_behind_verifier_prefix_stays_blocked() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        for command in [
+            "cargo check && rm -rf target",
+            "cargo check; rm foo.txt",
+            "cargo check --locked && cargo test && rm foo.txt",
+        ] {
+            assert!(
+                mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "smuggled mutation must stay blocked: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_level_verification_failure_grants_no_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let tool_failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::EXEC_COMMAND.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "check could not start".to_string(),
+            ),
+        });
+        update_repetition_tracker(
+            &mut tracker,
+            &tool_failure,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked"}),
+        );
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+    }
+
+    #[test]
+    fn verification_snapshot_bundle_round_trips_without_drift() {
+        let tracker = LoopTracker::with_verification_snapshot((true, FAILED_VERIFICATION_FIX_ALLOWANCE));
+        assert_eq!(tracker.verification_snapshot(), (true, FAILED_VERIFICATION_FIX_ALLOWANCE));
+        let cleared = LoopTracker::with_verification_snapshot((false, FAILED_VERIFICATION_FIX_ALLOWANCE));
+        assert_eq!(cleared.verification_snapshot(), (false, 0));
     }
 
     #[test]
@@ -1253,7 +1442,7 @@ mod tests {
 
     #[test]
     fn carried_verification_checkpoint_clears_after_successful_check() {
-        let mut tracker = LoopTracker::with_verification_pending(true);
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
         let successful_check = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: serde_json::json!({"exit_code": 0}),
             stdout: None,
@@ -1269,6 +1458,13 @@ mod tests {
         );
 
         assert!(!tracker.verification_is_pending());
+    }
+
+    #[test]
+    fn verification_snapshot_round_trips_through_session_state() {
+        let tracker = LoopTracker::with_verification_snapshot((true, FAILED_VERIFICATION_FIX_ALLOWANCE));
+        assert_eq!(tracker.verification_snapshot(), (true, FAILED_VERIFICATION_FIX_ALLOWANCE));
+        assert_eq!(LoopTracker::new().verification_snapshot(), (false, 0));
     }
 
     #[test]

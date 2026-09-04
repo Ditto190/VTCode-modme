@@ -232,7 +232,13 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             Ok(balancer_outcome)
         }
         TurnProcessingResult::TextResponse { text, reasoning, reasoning_details, proposed_plan } => {
-            if params.repeated_tool_attempts.verification_is_pending() {
+            // Planning synthesis makes no workspace mutation, so a verification
+            // checkpoint carried from an earlier build turn must not block the
+            // `<proposed_plan>`. Without this, plan mode deadlocks: research
+            // completes, but the plan draft counts towards the unverified-text
+            // cap and the turn blocks every time.
+            let is_planning_synthesis = proposed_plan.is_some() || params.ctx.is_planning_active();
+            if params.repeated_tool_attempts.verification_is_pending() && !is_planning_synthesis {
                 return Ok(
                     match params
                         .ctx

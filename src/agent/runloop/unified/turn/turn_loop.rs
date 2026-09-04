@@ -71,7 +71,9 @@ use vtcode_core::core::agent::error_recovery::ErrorType;
 use vtcode_core::primary_agent::ActivePrimaryAgentState;
 
 use crate::agent::runloop::mcp_events;
-use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{ANTI_BLIND_EDITING_DIRECTIVE, LoopTracker};
+use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
+    ANTI_BLIND_EDITING_DIRECTIVE, FAILED_VERIFICATION_FIX_ALLOWANCE, LoopTracker,
+};
 use crate::agent::runloop::unified::turn::turn_helpers::{display_error, error_message_for_user};
 
 /// Max completion tokens for the tool-free recovery synthesis pass.
@@ -109,9 +111,17 @@ pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
     "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.";
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
     "Turn blocked after repeated unverified assistant responses; verification is still pending.";
-const PENDING_VERIFICATION_FINAL_RESPONSE: &str = "The turn is blocked because verification is still pending. \
-    Inspection-only checks do not clear the verification gate; run `cargo check --locked` \
-    or the relevant `cargo nextest run` command, then resume the request.";
+const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending. \
+    Inspection-only checks do not clear the verification gate; run a standalone `cargo check --locked` \
+    or the relevant `cargo nextest run` command (no `| head` pipes) to exit 0, then resume the request. \
+    A failed verifier grants ";
+const PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX: &str = " fix-up edits before re-verify is required.";
+
+fn pending_verification_final_response() -> String {
+    format!(
+        "{PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX}{FAILED_VERIFICATION_FIX_ALLOWANCE}{PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX}"
+    )
+}
 const CONTEXT_CAPACITY_FINAL_RESPONSE: &str = "The turn is blocked because context capacity or compaction failed. \
     The retained tool outputs and progress are preserved; resume the request or switch \
     models and try again.";
@@ -287,7 +297,7 @@ fn publish_final_assistant_response(ctx: &mut TurnLoopContext<'_>, text: &str) -
 
 pub(crate) fn format_blocked_turn_final_response(reason: &str) -> String {
     if reason.contains(PENDING_VERIFICATION_BLOCK_REASON) {
-        PENDING_VERIFICATION_FINAL_RESPONSE.to_string()
+        pending_verification_final_response()
     } else if reason.contains(POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON) {
         CONTEXT_CAPACITY_FINAL_RESPONSE.to_string()
     } else if reason.contains("tool-call limit")
@@ -699,7 +709,7 @@ pub(crate) async fn run_turn_loop(
     let mut plan_condense_attempts: u8 = 0;
     let mut turn_usage = HarnessUsage::default();
     // Optimization: Interned signatures with exponential backoff for loop detection
-    let mut repeated_tool_attempts = LoopTracker::with_verification_pending(ctx.session_stats.verification_pending());
+    let mut repeated_tool_attempts = LoopTracker::with_verification_snapshot(ctx.session_stats.verification_snapshot());
     if repeated_tool_attempts.verification_is_pending() {
         repeated_tool_attempts.verification_warning_emitted = true;
         let has_recent_verification_directive = working_history.iter().rev().take(8).any(|message| {
@@ -1622,7 +1632,7 @@ pub(crate) async fn run_turn_loop(
     let plan_approved_execution_pending =
         matches!(&result, TurnLoopResult::Completed { plan_approved_execution_pending: true });
     ctx.session_stats
-        .set_verification_pending(repeated_tool_attempts.verification_is_pending());
+        .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
     let turn_diagnostics = ctx
         .harness_state
         .snapshot_turn_diagnostics(turn_usage.clone(), repeated_tool_attempts.low_signal_tool_calls);

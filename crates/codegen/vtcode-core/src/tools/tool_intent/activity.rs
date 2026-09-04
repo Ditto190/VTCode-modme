@@ -55,6 +55,46 @@ fn contains_verification_invocation(command: &str) -> bool {
         .is_some_and(|commands| commands.iter().any(|words| is_verification_invocation(words)))
 }
 
+/// Return whether a shell tool call is an admitted truncation-only verification
+/// attempt while the anti-blind-editing gate is pending.
+///
+/// Piped verifiers (e.g. `cargo check 2>&1 | head -c 4000`) must be allowed to
+/// run so the model can see the failure; otherwise the generic "cap output
+/// with `| head`" guidance deadlocks on `Mutation blocked until verification`.
+/// Only a standalone successful verifier clears the gate; this helper only
+/// decides admission, never clearance.
+///
+/// Fail-closed smuggling guard: every parsed shell segment must be a
+/// verification invocation or an allow-listed readonly command. A chained
+/// mutation such as `cargo check && rm -rf target` therefore stays blocked
+/// instead of riding through on the verifier prefix. Unparseable (dynamic)
+/// shell syntax also stays blocked.
+pub fn shell_command_is_admitted_verification_attempt(args: &Value) -> bool {
+    let Some(command) = crate::tools::command_args::raw_command_text(args) else {
+        return false;
+    };
+    if crate::tools::command_args::contains_dynamic_shell_syntax(&command) {
+        return false;
+    }
+    let segments =
+        static_shell_command_words(&command).or_else(|| static_shell_command_words_with_output_plumbing(&command));
+    let Some(segments) = segments else {
+        return false;
+    };
+    if segments.is_empty() {
+        return false;
+    }
+    let mut saw_verification = false;
+    for words in &segments {
+        if is_verification_invocation(words) {
+            saw_verification = true;
+        } else if !command_words_are_readonly(words) {
+            return false;
+        }
+    }
+    saw_verification
+}
+
 fn has_logical_sequencing(words: &[String]) -> bool {
     words.iter().any(|word| matches!(word.as_str(), "&&" | "||" | ";"))
 }
@@ -165,6 +205,35 @@ mod tests {
 
     fn exec_command(command: &str) -> Value {
         json!({"cmd": command})
+    }
+
+    #[test]
+    fn admitted_verification_attempt_allows_truncation_but_blocks_smuggled_mutations() {
+        for command in [
+            "cargo check --locked 2>&1 | head -c 4000",
+            "cargo check --locked",
+            "cargo nextest run 2>&1 | head -c 4000",
+        ] {
+            assert!(
+                shell_command_is_admitted_verification_attempt(&exec_command(command)),
+                "expected admission: {command}"
+            );
+        }
+        for command in [
+            "cargo check && rm -rf target",
+            "cargo check; rm foo.txt",
+            "cargo check || rm foo.txt",
+            "cargo check && cargo test && rm foo.txt",
+            "sed -i '' 's/old/new/' README.md",
+            "echo $(date)",
+            "cargo check > build.log && rm foo.txt",
+        ] {
+            assert!(
+                !shell_command_is_admitted_verification_attempt(&exec_command(command)),
+                "expected block: {command}"
+            );
+        }
+        assert!(!shell_command_is_admitted_verification_attempt(&json!({})));
     }
 
     #[test]

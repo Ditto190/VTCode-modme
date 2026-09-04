@@ -637,6 +637,9 @@ impl ModalListState {
         let Some(mut index) = self.list_state.selected() else {
             if let Some(last) = self.last_selectable_index() {
                 self.list_state.select(Some(last));
+                if let Some(rows) = self.viewport_rows {
+                    self.ensure_visible(rows);
+                }
             }
             return;
         };
@@ -654,6 +657,9 @@ impl ModalListState {
                 && item.selection.is_some()
             {
                 self.list_state.select(Some(index));
+                if let Some(rows) = self.viewport_rows {
+                    self.ensure_visible(rows);
+                }
                 return;
             }
         }
@@ -662,6 +668,9 @@ impl ModalListState {
             self.list_state.select(Some(first));
         } else {
             self.list_state.select(None);
+        }
+        if let Some(rows) = self.viewport_rows {
+            self.ensure_visible(rows);
         }
     }
 
@@ -681,6 +690,9 @@ impl ModalListState {
             let item_index = self.visible_indices[index];
             if self.items[item_index].selection.is_some() {
                 self.list_state.select(Some(index));
+                if let Some(rows) = self.viewport_rows {
+                    self.ensure_visible(rows);
+                }
                 break;
             }
         }
@@ -764,6 +776,24 @@ impl ModalListState {
 
     pub(crate) fn set_viewport_rows(&mut self, rows: u16) {
         self.viewport_rows = Some(rows);
+        if rows == 0 {
+            *self.list_state.offset_mut() = 0;
+            return;
+        }
+        let max_offset = self.max_scroll_offset();
+        if self.list_state.offset() > max_offset {
+            *self.list_state.offset_mut() = max_offset;
+        }
+    }
+
+    pub(crate) fn max_scroll_offset(&self) -> usize {
+        let Some(rows) = self.viewport_rows else {
+            return self.visible_indices.len().saturating_sub(1);
+        };
+        if rows == 0 {
+            return 0;
+        }
+        self.visible_indices.len().saturating_sub(rows as usize)
     }
 
     pub(super) fn ensure_visible(&mut self, viewport: u16) {
@@ -774,12 +804,15 @@ impl ModalListState {
             return;
         }
         let visible = viewport as usize;
-        let offset = self.list_state.offset();
-        if selected < offset {
-            *self.list_state.offset_mut() = selected;
+        let max_offset = self.visible_indices.len().saturating_sub(visible.max(1));
+        let offset = self.list_state.offset().min(max_offset);
+        *self.list_state.offset_mut() = if selected < offset {
+            selected
         } else if selected >= offset + visible {
-            *self.list_state.offset_mut() = selected + 1 - visible;
-        }
+            (selected + 1 - visible).min(max_offset)
+        } else {
+            offset
+        };
     }
 
     pub(crate) fn apply_search(&mut self, query: &str) {
