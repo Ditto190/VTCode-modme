@@ -69,7 +69,11 @@ pub(crate) async fn run_preflight_check() {
 
     // Keep the on-disk cache in sync so the session init code can also
     // read the result when it loads the cache later.
-    if let Err(err) = cache::record_successful_check(Some(&latest.version), latest_is_newer) {
+    if let Err(err) = cache::record_successful_check_with_notes(
+        Some(&latest.version),
+        latest_is_newer,
+        Some(latest.release_notes.as_str()),
+    ) {
         debug!("Preflight update check: failed to update cache: {err}");
     }
 

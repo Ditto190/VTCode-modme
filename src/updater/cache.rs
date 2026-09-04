@@ -19,6 +19,7 @@ pub(super) struct UpdateCacheSnapshot {
     pub(super) latest_was_newer: bool,
     pub(super) last_seen_version: Option<Version>,
     pub(super) dismissed_version: Option<Version>,
+    pub(super) release_notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +33,8 @@ struct UpdateCachePayload {
     last_seen_version: Option<String>,
     #[serde(default)]
     dismissed_version: Option<String>,
+    #[serde(default)]
+    release_notes: Option<String>,
 }
 
 pub(super) fn read_snapshot() -> Result<UpdateCacheSnapshot> {
@@ -105,6 +108,7 @@ fn read_snapshot_file(path: &Path) -> Result<Option<(UpdateCacheSnapshot, bool)>
                 latest_was_newer: false,
                 last_seen_version: None,
                 dismissed_version: None,
+                release_notes: None,
             },
             false,
         )));
@@ -118,6 +122,7 @@ fn read_snapshot_file(path: &Path) -> Result<Option<(UpdateCacheSnapshot, bool)>
                 latest_was_newer: false,
                 last_seen_version: None,
                 dismissed_version: None,
+                release_notes: None,
             },
             false,
         )));
@@ -137,18 +142,31 @@ fn read_snapshot_file(path: &Path) -> Result<Option<(UpdateCacheSnapshot, bool)>
                 .dismissed_version
                 .as_deref()
                 .and_then(|value| Version::parse(value).ok()),
+            release_notes: payload.release_notes,
         },
         true,
     )))
 }
 
-pub(super) fn record_successful_check(latest_version: Option<&Version>, latest_was_newer: bool) -> Result<()> {
+pub(super) fn record_successful_check_with_notes(
+    latest_version: Option<&Version>,
+    latest_was_newer: bool,
+    release_notes: Option<&str>,
+) -> Result<()> {
     update_snapshot(|snapshot| {
         snapshot.last_checked = Some(SystemTime::now());
         snapshot.latest_version = latest_version.cloned();
         snapshot.latest_was_newer = latest_was_newer;
+        if let Some(release_notes) = release_notes {
+            snapshot.release_notes = Some(release_notes.to_owned());
+        }
         Ok(())
     })
+}
+
+#[cfg(test)]
+pub(super) fn record_successful_check(latest_version: Option<&Version>, latest_was_newer: bool) -> Result<()> {
+    record_successful_check_with_notes(latest_version, latest_was_newer, None)
 }
 
 pub(super) fn record_failed_check() -> Result<()> {
@@ -170,6 +188,17 @@ pub(super) fn record_dismissed_version(version: &Version) -> Result<()> {
         snapshot.dismissed_version = Some(version.clone());
         Ok(())
     })
+}
+
+/// Return the release metadata cached by the background update check when it
+/// describes the running version. This deliberately never performs network
+/// I/O; session setup must not wait for GitHub.
+pub(super) fn current_release_info(current: &Version) -> Option<(Version, String)> {
+    let snapshot = read_snapshot().ok()?;
+    if snapshot.latest_version.as_ref() != Some(current) {
+        return None;
+    }
+    Some((current.clone(), snapshot.release_notes?))
 }
 
 pub(super) fn clear_dismissed_version() -> Result<()> {
@@ -201,6 +230,7 @@ fn snapshot_write_payload(cache_file: &Path, snapshot: &UpdateCacheSnapshot) -> 
         latest_was_newer: snapshot.latest_was_newer,
         last_seen_version: snapshot.last_seen_version.as_ref().map(ToString::to_string),
         dismissed_version: snapshot.dismissed_version.as_ref().map(ToString::to_string),
+        release_notes: snapshot.release_notes.clone(),
     };
     let serialized = serde_json::to_vec(&payload).context("Failed to serialize update cache payload")?;
     if let Some(parent) = cache_file.parent() {
@@ -282,6 +312,7 @@ mod tests {
             latest_was_newer: true,
             last_seen_version: None,
             dismissed_version: None,
+            release_notes: None,
         };
         std::fs::write(path, serde_json::to_string(&payload).expect("serialize update cache payload"))
             .expect("write update cache payload");

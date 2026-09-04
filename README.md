@@ -1,24 +1,15 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./resources/logo/vt_code_dark.svg" />
-  <source media="(prefers-color-scheme: light)" srcset="./resources/logo/vt_code_light.svg" />
   <img src="./resources/logo/vt_code_adaptive.svg" alt="VT Code" width="300" />
 </picture>
 
 **Secure, open, universal terminal coding agent in Rust.**
 
-<!-- status -->
-[![CI](https://github.com/vinhnx/vtcode/actions/workflows/ci.yml/badge.svg)](https://github.com/vinhnx/vtcode/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/vinhnx/vtcode?style=flat-square)](https://github.com/vinhnx/vtcode/releases)
-[![License](https://img.shields.io/github/license/vinhnx/vtcode?style=flat-square)](./LICENSE)
-<!-- ecosystem -->
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-BFB38F?style=flat-square)](https://agentskills.io/)
 [![Agent Client Protocol](https://img.shields.io/badge/Agent_Client_Protocol-383B73?style=flat-square&logo=zedindustries&logoColor=white)](./docs/guides/zed-acp.md)
 [![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-A63333?style=flat-square&logo=modelcontextprotocol&logoColor=white)](./docs/guides/mcp-integration.md)
 [![Agent Plugins](https://img.shields.io/badge/Agent_Plugins-5865F2?style=flat-square)](./docs/guides/agent-plugins.md)
-<!-- tooling -->
-[![Built with Ratatui](https://img.shields.io/badge/Built_With-Ratatui-000?style=flat-square&logo=ratatui&logoColor=white&labelColor=000)](https://ratatui.rs/highlights/v030/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vinhnx/VTCode)
 
 </div>
@@ -33,11 +24,19 @@
 - [Overview](#overview)
 - [Why VT Code](#why-vt-code)
 - [Quick start](#quick-start)
+  - [1. Install](#1-install)
+  - [2. Configure](#2-configure)
+  - [3. Run](#3-run)
+  - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
 - [Documentation](#documentation)
 - [Providers](#providers)
 - [Development](#development)
 - [Contributing](#contributing)
+  - [Ways to contribute](#ways-to-contribute)
+  - [Getting started](#getting-started)
+  - [Contributors](#contributors)
 - [Support](#support)
+  - [Sponsorship](#sponsorship)
 - [License](#license)
 
 </details>
@@ -73,22 +72,22 @@ the terminal.
 > **Video companions:** [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
 > [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o).
 
-| Podcast companion | Video companion |
-| --- | --- |
+| Podcast companion                                                                                                                                                            | Video companion                                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <a href="https://www.youtube.com/watch?v=XLoswcd5rH0"><img src="https://img.youtube.com/vi/XLoswcd5rH0/maxresdefault.jpg" alt="VT Code podcast companion" width="400" /></a> | <a href="https://www.youtube.com/watch?v=PvL_kPjgU6o"><img src="https://img.youtube.com/vi/PvL_kPjgU6o/maxresdefault.jpg" alt="VT Code video companion" width="400" /></a> |
-| [Watch the podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) | [Watch the video](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
+| [Watch the podcast](https://www.youtube.com/watch?v=XLoswcd5rH0)                                                                                                             | [Watch the video](https://www.youtube.com/watch?v=PvL_kPjgU6o)                                                                                                             |
 
 ## Why VT Code
 
-| Pillar | What it means |
-| --- | --- |
-| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evaluations to enforce progress. |
+| Pillar                     | What it means                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evaluations to enforce progress.                                  |
 | **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses for injection, path/symlink escape, and environment leakage. |
-| **Long-run reliability** | Durable session memory, task tracking, spooled output, checkpoints, automatic compaction, resumable handoffs, and verification before "done". |
-| **Observable by design** | A canonical `ThreadEvent` runtime contract supports replay, archives, checkpoints, memory views, and trajectory export. |
-| **Protocol-native** | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without core forks. |
-| **Controlled autonomy** | Planning, human approval, isolated worktrees, propose/verify sub-agents, full automation, and cost guardrails scale autonomy safely. |
-| **Runs anywhere** | 30 providers plus local Ollama, LM Studio, and llama.cpp. |
+| **Long-run reliability**   | Durable session memory, task tracking, spooled output, checkpoints, automatic compaction, resumable handoffs, and verification before "done". |
+| **Observable by design**   | A canonical `ThreadEvent` runtime contract supports replay, archives, checkpoints, memory views, and trajectory export.                       |
+| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without core forks.                            |
+| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, full automation, and cost guardrails scale autonomy safely.          |
+| **Runs anywhere**          | 30 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                     |
 
 ## Quick start
 
@@ -136,21 +135,21 @@ See [Installation](./docs/installation/README.md) and
 vtcode webmcp serve --origin <origin> --allowed-root <dir>
 ```
 
-| Host | Link |
-| --- | --- |
-| Hosted app | <https://vtcode.vinhnx.chatgpt.site/> |
-| Fallback | <https://vinhnx.github.io/VTCode/> |
-| User guide | [WebMCP user guide](./docs/user-guide/webmcp.md) |
+| Host       | Link                                                      |
+| ---------- | --------------------------------------------------------- |
+| Hosted app | <https://vtcode.vinhnx.chatgpt.site/>                     |
+| Fallback   | <https://vinhnx.github.io/VTCode/>                        |
+| User guide | [WebMCP user guide](./docs/user-guide/webmcp.md)          |
 | Deployment | [WebMCP deployment reference](./docs/reference/webmcp.md) |
 
 ## Documentation
 
-| Area | Guides |
-| --- | --- |
-| Start | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) · [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in) · [Podcast companion](https://www.youtube.com/watch?v=XLoswcd5rH0) · [Video companion](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
-| Use | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
-| Extend | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors](./docs/guides/zed-acp.md) |
-| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
+| Area    | Guides                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) · [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in) · [Podcast companion](https://www.youtube.com/watch?v=XLoswcd5rH0) · [Video companion](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
+| Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md)                                                                                                          |
+| Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors](./docs/guides/zed-acp.md)                                                                                                                                                                                                                               |
+| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                                                                                                                              |
 
 ## Providers
 

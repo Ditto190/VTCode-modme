@@ -457,38 +457,10 @@ fn load_startup_update_check() -> crate::updater::StartupUpdateCheck {
 }
 
 async fn load_release_highlights_for_startup() -> Option<(semver::Version, Vec<String>)> {
-    use crate::updater::parse_release_highlights;
-
     if !crate::updater::should_show_release_notes_for_current_version() {
         return None;
     }
-
-    let current_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).ok()?;
-    let updater = Updater::new(env!("CARGO_PKG_VERSION")).ok()?;
-
-    let info = match updater.fetch_current_release_info().await {
-        Ok(info) => info,
-        Err(_) => {
-            // Record seen on fetch failure to avoid retrying every startup
-            crate::updater::record_current_version_seen();
-            return None;
-        }
-    };
-
-    // Only show if the fetched version matches current (we just updated to it).
-    // Record as seen either way to avoid repeated API calls on every startup.
-    if info.version != current_version {
-        crate::updater::record_current_version_seen();
-        return None;
-    }
-
-    let parsed = parse_release_highlights(&info.version, &info.release_notes);
-    if parsed.items.is_empty() {
-        crate::updater::record_current_version_seen();
-        return None;
-    }
-
-    Some((info.version, parsed.items))
+    crate::updater::cached_current_release_highlights()
 }
 
 fn create_async_mcp_manager(

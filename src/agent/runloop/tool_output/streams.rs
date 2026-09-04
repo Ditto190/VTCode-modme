@@ -215,6 +215,8 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     out: &'a mut String,
 ) -> &'a str {
     use std::fmt::Write as _;
+
+    out.clear();
     let (marker, mut content) = match line.kind {
         DiffDisplayKind::Addition => ('+', line.text.as_str()),
         DiffDisplayKind::Deletion => ('-', line.text.as_str()),
@@ -273,7 +275,6 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     };
     let reset = Reset;
     let raw_line = line.numbered_text(line_number_width);
-    out.clear();
     out.reserve(raw_line.len() + 32);
     // Gutter shape: `marker + number + │ + content`. The `│` keeps markdown
     // bullets (`- foo`) distinct from the diff marker (`+`/`-`).
@@ -346,6 +347,16 @@ async fn render_run_command_preview(
     Ok(())
 }
 
+fn update_diff_language_hint(line: &DiffDisplayLine, current_language_hint: &mut Option<String>) {
+    if !matches!(line.kind, DiffDisplayKind::Metadata) {
+        return;
+    }
+
+    if let Some(path) = parse_diff_git_path(&line.text).or_else(|| parse_diff_marker_path(&line.text)) {
+        *current_language_hint = language_hint_from_path(&path);
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "Intentional compatibility, platform, or test-only suppression."
@@ -383,20 +394,12 @@ pub(crate) fn render_diff_content_block(
 
     let line_number_width = diff_display_line_number_width(lines_slice);
     let color_enabled = renderer.capabilities().supports_color();
-    let first_diff_line = lines_slice.iter().find(|l| l.is_diff());
-    let current_language_hint: Option<String> = first_diff_line.and_then(|first| {
-        parse_diff_git_path(&first.text)
-            .or_else(|| parse_diff_marker_path(&first.text))
-            .and_then(|path| language_hint_from_path(&path))
-    });
-    let prose = current_language_hint
-        .as_deref()
-        .map(|hint| is_prose_language_hint(Some(hint)))
-        .unwrap_or_default();
+    let mut current_language_hint: Option<String> = None;
     let mut formatted_buffer = String::with_capacity(256);
     let mut display_buffer = String::with_capacity(256);
 
     for line in lines_slice {
+        update_diff_language_hint(line, &mut current_language_hint);
         display_buffer.clear();
         let raw_line = line.numbered_text(line_number_width);
         if raw_line.is_empty() {
@@ -425,6 +428,10 @@ pub(crate) fn render_diff_content_block(
         }
 
         let line_style = select_line_style(tool_name, &display_buffer, git_styles, ls_styles);
+        let prose = current_language_hint
+            .as_deref()
+            .map(|hint| is_prose_language_hint(Some(hint)))
+            .unwrap_or_default();
         let rendered_owned = if color_enabled && !was_truncated && !prose {
             Some(format_diff_line_with_gutter_and_syntax(
                 line,
@@ -656,13 +663,14 @@ mod tests {
     use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
     use anstyle::AnsiColor;
-    use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine};
+    use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine, display_lines_from_unified_diff};
 
     use crate::agent::runloop::tool_output::collect_inline_output;
 
     use super::{
         HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, format_diff_line_with_gutter_and_syntax,
         hidden_lines_notice, highlight_diff_content, language_hint_from_path, render_preview_line, strip_ansi_codes,
+        update_diff_language_hint,
     };
 
     #[test]
@@ -768,6 +776,35 @@ mod tests {
     }
 
     #[test]
+    fn format_diff_line_clears_reused_buffer_for_metadata() {
+        let mut buf = String::new();
+        let _ = format_diff_line_with_gutter_and_syntax(
+            &DiffDisplayLine {
+                kind: DiffDisplayKind::Addition,
+                line_number: Some(1),
+                text: "let x = 1;".to_string(),
+            },
+            None,
+            None,
+            5,
+            &mut buf,
+        );
+        let rendered = format_diff_line_with_gutter_and_syntax(
+            &DiffDisplayLine {
+                kind: DiffDisplayKind::Metadata,
+                line_number: None,
+                text: "diff --git a/src/lib.rs b/src/lib.rs".to_string(),
+            },
+            None,
+            None,
+            5,
+            &mut buf,
+        );
+
+        assert_eq!(strip_ansi_codes(rendered), "diff --git a/src/lib.rs b/src/lib.rs");
+    }
+
+    #[test]
     fn format_diff_line_keeps_markdown_bullet_distinct_from_marker() {
         let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
@@ -822,5 +859,19 @@ mod tests {
     fn language_hint_from_path_extracts_extension() {
         assert_eq!(language_hint_from_path("vtcode-tui/src/ui/markdown.rs").as_deref(), Some("rs"));
         assert_eq!(language_hint_from_path("Makefile"), None);
+    }
+
+    #[test]
+    fn diff_metadata_sets_language_hint_for_body_lines() {
+        let diff = "diff --git a/src/lib.rs b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let lines = display_lines_from_unified_diff(diff);
+        let mut current_language_hint = None;
+
+        for line in &lines {
+            update_diff_language_hint(line, &mut current_language_hint);
+            if line.is_diff() {
+                assert_eq!(current_language_hint.as_deref(), Some("rs"));
+            }
+        }
     }
 }

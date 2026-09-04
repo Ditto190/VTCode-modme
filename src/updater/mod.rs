@@ -21,7 +21,6 @@ pub(crate) use interactive::{
 };
 pub(crate) use preflight::{get_preflight_notice, run_preflight_check};
 pub(crate) use progress::UpdateProgress;
-pub(crate) use release_notes::parse_highlights as parse_release_highlights;
 pub(crate) use types::{
     InstallOutcome, StartupUpdateCheck, StartupUpdateNotice, UpdateExecutionStrategy, UpdateGuidance, UpdateInfo,
     VersionInfo,
@@ -140,7 +139,11 @@ impl Updater {
         };
 
         let latest_is_newer = latest.version > self.current_version;
-        cache::record_successful_check(Some(&latest.version), latest_is_newer)?;
+        cache::record_successful_check_with_notes(
+            Some(&latest.version),
+            latest_is_newer,
+            Some(latest.release_notes.as_str()),
+        )?;
 
         Ok(latest_is_newer.then(|| self.notice_for_version(latest.version)))
     }
@@ -273,11 +276,6 @@ impl Updater {
             guidance: self.update_guidance(),
         }
     }
-
-    /// Fetch the latest release info from GitHub for the current release channel.
-    pub(crate) async fn fetch_current_release_info(&self) -> Result<UpdateInfo> {
-        github::fetch_latest_release_info(self.config.download_timeout_secs).await
-    }
 }
 
 /// Check whether release notes should be shown for the current version.
@@ -296,6 +294,13 @@ pub(crate) fn should_show_release_notes_for_current_version() -> bool {
             false
         }
     }
+}
+
+pub(crate) fn cached_current_release_highlights() -> Option<(Version, Vec<String>)> {
+    let current = Version::parse(env!("CARGO_PKG_VERSION")).ok()?;
+    let (_, release_notes) = cache::current_release_info(&current)?;
+    let parsed = release_notes::parse_highlights(&current, &release_notes);
+    (!parsed.items.is_empty()).then_some((current, parsed.items))
 }
 
 /// Record that the current version's release notes have been shown.

@@ -758,6 +758,7 @@ impl AnsiRenderer {
                 | MessageStyle::Response
                 | MessageStyle::Reasoning
                 | MessageStyle::ReasoningEmphasis
+                | MessageStyle::User
         );
 
         // Strip ANSI codes from agent response to prevent interference with markdown rendering
