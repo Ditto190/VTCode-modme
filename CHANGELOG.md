@@ -2,6 +2,33 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.155.0 - 2026-09-04
+
+### Highlights
+#### Bug Fixes
+
+- Accept in-workspace absolute paths (415b9047) 
+- Harden recovery state and replay handling (0856cc1e) 
+- Retain final diagnostics and harden handoff writes (0942e281) 
+- Use pipe gutter and solid prose colors for readable diffs (82086129) 
+#### Documentation
+
+- Promote features section and compact provider directory (ee7cb026) 
+- Revamp into short concise overview with blog link (c0a315bf) 
+- Restore contributing and support sections, concise wording (9bdbe6c9) 
+#### Features
+
+- Graceful blocked-turn recovery with turn.blocked event and TUI indicators (5121237b) 
+- Add GPT-6 Astra model with guide-conformant wiring (9820863d) 
+### Other Changes
+#### Other
+
+- Delete webmcp-youtube-upload-package.md (92e1c300) (@vinhnx)
+- Delete devpost-submission.md (50bd938d) (@vinhnx)
+- Update TODO (ba6f9b8a) 
+#### Tests
+
+- Replace fixed sleeps with deadline-bounded polling helpers (5068d899) 
 ## 0.154.0 - 2026-09-03
 
 ### Highlights
