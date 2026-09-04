@@ -2,6 +2,31 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.156.1 - 2026-09-04
+
+### Highlights
+#### Bug Fixes
+
+- Single-ownership transcript spacing and markdown rhythm (d9dfbed6) 
+- Unblock verification gate after failed verifiers with bounded fix-up window (0ac78576) 
+- Track omitted line counts to keep line numbers accurate (faa2bb02) 
+- Style leading whitespace in code blocks and fix phantom line numbers (bcca153a) 
+#### Documentation
+
+- Revamp with modern GFM syntax and video companions (33229ad7) (@vinhnx)
+- Group header badges and drop emoji and em-dashes (6584d240) (@vinhnx)
+- Add WebMCP greeting and separator (7e0e38db) (@vinhnx)
+- Clarify vtcode differentiators (b0e44335) 
+- Simplify badges and expand table of contents (1a60e9e4) 
+#### Features
+
+- Add /transcript command with bounded snapshot eviction (e784ad71) 
+### Other Changes
+#### Other
+
+- Update TODO (53ebe036) 
+- Update TODO (82232175) 
+- Update TODO (e7d2fae1) 
 ## 0.156.0 - 2026-09-04
 
 ### Highlights
