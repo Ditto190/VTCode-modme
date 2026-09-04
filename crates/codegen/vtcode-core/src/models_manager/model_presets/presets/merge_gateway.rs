@@ -178,6 +178,13 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             1_100_000,
             false,
         ),
+        (
+            models::merge_gateway::OPENAI_GPT_6_ASTRA,
+            "GPT-6 Astra (Merge Gateway)",
+            "OpenAI GPT-6 Astra through Merge Gateway",
+            1_050_000,
+            false,
+        ),
     ]
     .into_iter()
     .map(|(model, display_name, description, context_window, is_default)| {

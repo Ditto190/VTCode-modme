@@ -397,5 +397,36 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             supported_in_api: true,
             context_window: Some(262_144),
         },
+        ModelPreset {
+            id: "openrouter/openai/gpt-6-astra".to_string(),
+            model: "openai/gpt-6-astra".to_string(),
+            display_name: "GPT-6 Astra (OpenRouter)".to_string(),
+            description: "OpenAI's flagship model for demanding end-to-end work via OpenRouter".to_string(),
+            provider: Provider::OpenRouter,
+            default_reasoning_effort: ReasoningEffortLevel::High,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep (default)".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::XHigh,
+                    description: "Maximum depth".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_050_000),
+        },
     ]
 }

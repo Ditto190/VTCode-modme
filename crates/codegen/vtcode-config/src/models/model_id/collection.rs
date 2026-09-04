@@ -78,6 +78,7 @@ impl ModelId {
             ModelId::MergeGatewayGoogleGemini38Flash,
             ModelId::MergeGatewayAnthropicClaudeFable51,
             ModelId::MergeGatewayDeepseekV4Flash0731Fast,
+            ModelId::MergeGatewayOpenAIGpt6Astra,
             // Mistral models
             ModelId::MistralLarge3,
             // Z.AI models

@@ -189,6 +189,7 @@ impl ModelId {
             | ModelId::MergeGatewayMetaMuseSpark11
             | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt56Luna => None,
+            ModelId::MergeGatewayOpenAIGpt6Astra => None,
             ModelId::OpenCodeGoDeepseekV4Pro => Some(ModelId::OpenCodeGoDeepseekV4Flash),
             ModelId::OpenCodeGoMimoV25Pro => Some(ModelId::OpenCodeGoMimoV25),
             ModelId::OpenCodeGoQwen37Max => Some(ModelId::OpenCodeGoQwen37Plus),
@@ -275,7 +276,8 @@ impl ModelId {
             | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt56Luna
             | ModelId::MergeGatewayOpenAIGpt56Sol
-            | ModelId::MergeGatewayOpenAIGpt56Terra => None,
+            | ModelId::MergeGatewayOpenAIGpt56Terra
+            | ModelId::MergeGatewayOpenAIGpt6Astra => None,
             ModelId::EvolinkDeepseekV4Pro => Some(ModelId::EvolinkDeepseekV4Flash),
             ModelId::HuggingFaceDeepseekV4ProTogether => Some(ModelId::HuggingFaceDeepseekV4FlashNovita),
             ModelId::HuggingFaceDeepseekV4ProNovita => Some(ModelId::HuggingFaceDeepseekV4FlashNovita),
@@ -422,9 +424,9 @@ impl ModelId {
                 | ModelId::GPT6Astra
                 | ModelId::GPT56Sol
                 | ModelId::MergeGatewayOpenAIGpt56Sol
-                | ModelId::GPT56Terra
                 | ModelId::MergeGatewayOpenAIGpt56Terra
                 | ModelId::MergeGatewayOpenAIGpt56Luna
+                | ModelId::MergeGatewayOpenAIGpt6Astra
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
@@ -601,6 +603,7 @@ impl ModelId {
             ModelId::MergeGatewayOpenAIGpt56Luna
             | ModelId::MergeGatewayOpenAIGpt56Sol
             | ModelId::MergeGatewayOpenAIGpt56Terra => "5.6",
+            ModelId::MergeGatewayOpenAIGpt6Astra => "6",
             _ => "unknown",
         }
     }

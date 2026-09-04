@@ -144,6 +144,8 @@ pub enum ModelId {
     MergeGatewayAnthropicClaudeFable51,
     /// DeepSeek V4 Flash 0731 Fast through Merge Gateway
     MergeGatewayDeepseekV4Flash0731Fast,
+    /// OpenAI GPT-6 Astra through Merge Gateway
+    MergeGatewayOpenAIGpt6Astra,
 
     // Mistral AI models
     /// Mistral Large 3 - State-of-the-art open-weight general-purpose multimodal model
@@ -318,6 +320,8 @@ pub enum ModelId {
     OpenRouterOpenAIGpt5,
     /// OpenAI GPT-5 Chat - Chat optimised GPT-5 endpoint without tool use
     OpenRouterOpenAIGpt5Chat,
+    /// OpenAI GPT-6 Astra - OpenAI's flagship model for demanding end-to-end work via OpenRouter
+    OpenRouterOpenAIGpt6Astra,
 
     /// Meta Muse Glimmer 30B via OpenRouter
     OpenRouterMetaMuseGlimmer30b,

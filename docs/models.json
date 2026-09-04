@@ -2778,6 +2778,40 @@
           "generation": "Muse-Spark-1.3-Contributor",
           "doc_comment": "Muse Spark 1.3 Contributor - Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter"
         }
+      },
+      "openai/gpt-6-astra": {
+        "id": "openai/gpt-6-astra",
+        "name": "OpenAI: GPT-6 Astra",
+        "description": "OpenAI's flagship model for demanding end-to-end work. Suited for advanced analysis, software engineering, deep research, scientific work, and document creation, with particular strengths in long-horizon agentic tasks that involve computer and browser use.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1050000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 1e-05,
+          "output": 5e-05,
+          "cache_read": 1e-06
+        },
+        "vtcode": {
+          "variant": "OpenRouterOpenAIGpt6Astra",
+          "constant": "OPENAI_GPT_6_ASTRA",
+          "vendor": "openai",
+          "display": "GPT-6 Astra (OpenRouter)",
+          "description": "OpenAI's flagship model for demanding end-to-end work via OpenRouter",
+          "efficient": false,
+          "top_tier": true,
+          "generation": "6",
+          "doc_comment": "GPT-6 Astra - OpenAI's flagship model for demanding end-to-end work via OpenRouter"
+        }
       }
     },
     "default_model": "xiaomi/mimo-v2.5-pro"

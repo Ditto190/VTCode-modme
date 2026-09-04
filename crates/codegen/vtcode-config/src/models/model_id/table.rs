@@ -455,6 +455,13 @@ model_id_table! {
         display: "GPT-5.6 Terra (Merge Gateway)",
         description: "OpenAI GPT-5.6 Terra accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
+    MergeGatewayOpenAIGpt6Astra {
+        provider: MergeGateway,
+        id: models::merge_gateway::OPENAI_GPT_6_ASTRA,
+        parse: [models::merge_gateway::OPENAI_GPT_6_ASTRA],
+        display: "GPT-6 Astra (Merge Gateway)",
+        description: "OpenAI GPT-6 Astra accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
     MergeGatewayGoogleGemini38Flash {
         provider: MergeGateway,
         id: models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH,
@@ -1036,6 +1043,7 @@ mod tests {
                 | ModelId::MergeGatewayGoogleGemini37Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::MergeGatewayMetaMuseSpark13
+                | ModelId::MergeGatewayOpenAIGpt6Astra
         )
     }
 
