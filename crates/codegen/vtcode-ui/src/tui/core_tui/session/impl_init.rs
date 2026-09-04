@@ -109,6 +109,8 @@ impl Session {
             needs_redraw: true,
             needs_full_clear: false,
             transcript_clear_required: true,
+            evicted_message_count: 0,
+            pending_new_messages: 0,
             should_exit: false,
             last_interrupt_press: None,
             scroll_cursor_steady_until: None,

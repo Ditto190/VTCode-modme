@@ -322,7 +322,7 @@ fn empty_input_status_shows_subagent_shortcuts() {
 
 #[test]
 fn empty_input_status_hides_subagent_shortcuts_without_agents() {
-    let session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
 
     let rendered = session
         .render_input_status_line(VIEW_WIDTH)

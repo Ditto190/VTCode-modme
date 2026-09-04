@@ -774,7 +774,7 @@ impl Session {
         inline_prompt_suggestion_suffix(self.input_manager.content(), suggestion)
     }
 
-    pub(crate) fn render_input_status_line(&self, width: u16) -> Option<Line<'static>> {
+    pub(crate) fn render_input_status_line(&mut self, width: u16) -> Option<Line<'static>> {
         if width == 0 {
             return None;
         }
@@ -804,12 +804,7 @@ impl Session {
             (existing, None) => existing,
         };
 
-        // Build scroll indicator if enabled
-        let scroll_indicator = if ui::SCROLL_INDICATOR_ENABLED {
-            Some(self.build_scroll_indicator())
-        } else {
-            None
-        };
+        let scroll_indicator = self.build_scroll_indicator();
 
         if left.is_none() && right.is_none() && scroll_indicator.is_none() && !self.thinking_spinner.is_active {
             return None;
@@ -954,10 +949,31 @@ impl Session {
         Some("↓ or Alt+S local agents · Ctrl+B background".to_string())
     }
 
-    /// Build scroll indicator string with percentage
-    fn build_scroll_indicator(&self) -> String {
-        let percent = self.scroll_manager.progress_percent();
-        format!("{} {:>3}%", ui::SCROLL_INDICATOR_FORMAT, percent)
+    /// Builds the footer scroll indicator.
+    ///
+    /// Uses the inverted scroll model documented on `ScrollManager`:
+    /// offset 0 is the bottom (live) edge and increasing offsets move toward
+    /// older content at the top of the transcript.
+    ///
+    /// - At the bottom: no indicator at all.
+    /// - While scrolled: `↑ {visible_top}/{total}` shows the top row position.
+    /// - When new lines arrived while scrolled: `↓ {N} new` highlights the
+    ///   pending content until the user returns to the bottom.
+    fn build_scroll_indicator(&mut self) -> Option<String> {
+        if !self.user_scrolled {
+            return None;
+        }
+
+        let pending = self.pending_new_messages;
+        let total = self.transcript_rows.max(1) as usize;
+        let top = self.scroll_manager.offset().saturating_add(1).min(total);
+
+        let label = if pending > 0 {
+            format!("↓ {} new", pending)
+        } else {
+            format!("↑ {}/{}", top, total)
+        };
+        Some(label)
     }
 
     fn create_git_status_spans(&self, text: &str, default_style: Style) -> Vec<Span<'static>> {
@@ -1018,7 +1034,7 @@ impl Session {
     }
 
     /// Build input status line for external widgets
-    pub(crate) fn build_input_status_widget_data(&self, width: u16) -> Option<Vec<Span<'static>>> {
+    pub(crate) fn build_input_status_widget_data(&mut self, width: u16) -> Option<Vec<Span<'static>>> {
         self.render_input_status_line(width).map(|line| line.spans)
     }
 }

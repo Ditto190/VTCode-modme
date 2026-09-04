@@ -176,6 +176,24 @@ fn handle_clear_command(args: &str, renderer: &mut AnsiRenderer) -> Result<Slash
     }
 }
 
+fn handle_transcript_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
+    let args = args.trim();
+    let (action, rest) = match args.split_once(char::is_whitespace) {
+        Some((action, rest)) => (action, rest.trim()),
+        None => (args, ""),
+    };
+
+    match action {
+        "stats" | "" => Ok(SlashCommandOutcome::ShowTranscriptStats),
+        "clear" => Ok(SlashCommandOutcome::ClearScreen),
+        "export" => Ok(SlashCommandOutcome::ExportTranscript { path: (!rest.is_empty()).then(|| rest.to_string()) }),
+        _ => {
+            renderer.line(MessageStyle::Error, "Usage: /transcript [stats|clear|export [path]]")?;
+            Ok(SlashCommandOutcome::Handled)
+        }
+    }
+}
+
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn handle_compact_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
     match parse_compact_command(args) {
@@ -577,6 +595,7 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "statusline" => handle_statusline_command(args),
         "title" => handle_title_command(args, renderer),
         "clear" => handle_clear_command(args, renderer),
+        "transcript" => handle_transcript_command(args, renderer),
         "compact" | "context" => handle_compact_command(args, renderer),
         "copy" => handle_copy_command(args, renderer),
         "suggest" => handle_suggest_command(args, renderer),

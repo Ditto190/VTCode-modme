@@ -61,10 +61,14 @@ pub const INLINE_TOOL_DETAIL_CONTINUATION: &str = "    ";
 /// Base gutter for PTY body blocks.
 pub const INLINE_PTY_BODY_GUTTER: &str = "";
 
+/// Maximum number of message lines kept in the TUI transcript before
+/// eviction begins. Older lines are dropped in chunks to amortize cost.
+pub const TUI_TRANSCRIPT_MAX_MSGS: usize = 5000;
+/// Number of oldest message lines removed per eviction pass.
+pub const TUI_TRANSCRIPT_EVICT_CHUNK: usize = 1000;
+
 /// Scroll percentage format in status bar
 pub const SCROLL_INDICATOR_FORMAT: &str = "↕";
-/// Show scroll percentage in status bar
-pub const SCROLL_INDICATOR_ENABLED: bool = false;
 
 pub const INLINE_BLOCK_TOP_LEFT: &str = "╭";
 pub const INLINE_BLOCK_TOP_RIGHT: &str = "╮";

@@ -787,6 +787,7 @@ impl Session {
     /// This is more efficient than calling scroll_line_up/down multiple times
     pub(crate) fn apply_coalesced_scroll(&mut self, line_delta: i32, page_delta: i32) {
         self.mark_scrolling();
+        self.ensure_scroll_metrics();
         let previous_offset = self.scroll_manager.offset();
 
         // Apply page scroll first (larger movements)

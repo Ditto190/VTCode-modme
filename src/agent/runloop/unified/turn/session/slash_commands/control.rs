@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::PathBuf;
 use vtcode_core::core::decision_tracker::DecisionTracker;
 use vtcode_core::hooks::SessionEndReason;
 use vtcode_core::llm::provider::MessageRole;
@@ -124,6 +125,8 @@ pub(crate) async fn handle_clear_conversation(ctx: SlashCommandContext<'_>) -> R
         *ledger = DecisionTracker::new();
     }
     transcript::clear();
+    ctx.handle.clear_screen();
+    ctx.handle.clear_input();
     ctx.renderer.clear_screen();
     ctx.renderer.line(MessageStyle::Info, "Cleared conversation history.")?;
     ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
@@ -134,6 +137,42 @@ pub(crate) async fn handle_clear_screen(ctx: SlashCommandContext<'_>) -> Result<
     ctx.renderer.clear_screen();
     ctx.renderer
         .line(MessageStyle::Info, "Cleared screen. Conversation context is preserved.")?;
+    ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
+    Ok(SlashCommandControl::Continue)
+}
+
+pub(crate) async fn handle_show_transcript_stats(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    let disk_event_count = transcript::len();
+
+    ctx.renderer.line(
+        MessageStyle::Info,
+        &format!("Transcript: {disk_event_count} disk events (TUI-only memory is bounded and evicts oldest lines)."),
+    )?;
+    ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
+    Ok(SlashCommandControl::Continue)
+}
+
+pub(crate) async fn handle_export_transcript(
+    ctx: SlashCommandContext<'_>,
+    path: Option<String>,
+) -> Result<SlashCommandControl> {
+    let target = match path {
+        Some(value) if !value.trim().is_empty() => PathBuf::from(value.trim()),
+        _ => PathBuf::from("transcript-export.txt"),
+    };
+    if let Some(parent) = target.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    let text = transcript::snapshot().join("\n");
+    tokio::fs::write(&target, text)
+        .await
+        .with_context(|| format!("Failed to export transcript to {}", target.display()))?;
+    ctx.renderer
+        .line(MessageStyle::Info, &format!("Transcript exported to {}.", target.display()))?;
     ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
     Ok(SlashCommandControl::Continue)
 }

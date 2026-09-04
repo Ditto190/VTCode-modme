@@ -106,6 +106,10 @@ pub(crate) enum CompactConversationCommand {
 pub(crate) enum SlashCommandOutcome {
     Handled,
     ThemeChanged(String),
+    ShowTranscriptStats,
+    ExportTranscript {
+        path: Option<String>,
+    },
     InitializeWorkspace {
         force: bool,
     },

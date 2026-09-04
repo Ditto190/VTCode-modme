@@ -141,16 +141,13 @@ impl Session {
 
     /// Push a new message line to the transcript
     pub(crate) fn push_line(&mut self, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
-        let previous_max_offset = self.current_max_scroll_offset();
         let revision = self.next_revision();
         let index = self.lines.len();
         self.lines
             .push(MessageLine { kind, segments, link_ranges: Vec::new(), revision });
         self.mark_line_dirty(index);
-        if !self.is_streaming_final_answer {
-            self.invalidate_scroll_metrics();
-        }
-        self.adjust_scroll_after_change(previous_max_offset);
+        self.invalidate_scroll_metrics();
+        self.evict_old_messages_if_needed();
 
         // Mark thinking spinner as active after user message (no placeholder line - just state)
         if kind == InlineMessageKind::User {
@@ -192,6 +189,33 @@ impl Session {
             .map(|line| line.kind)
     }
 
+    /// Evicts the oldest message lines once the transcript exceeds its
+    /// configured cap, keeping the on-screen view bounded while leaving the
+    /// on-disk event log untouched.
+    fn evict_old_messages_if_needed(&mut self) {
+        let excess = self.lines.len().saturating_sub(ui::TUI_TRANSCRIPT_MAX_MSGS);
+        if excess == 0 {
+            return;
+        }
+
+        let remove_count = excess.max(ui::TUI_TRANSCRIPT_EVICT_CHUNK);
+        let previous_max_offset = self.current_max_scroll_offset();
+        let first_removed = self.lines.len().saturating_sub(remove_count);
+
+        self.collapsed_pastes.retain(|paste| paste.line_index < first_removed);
+        for paste in &mut self.collapsed_pastes {
+            paste.line_index -= remove_count;
+        }
+        self.thinking_runs.clear();
+
+        self.lines.drain(..remove_count);
+        self.evicted_message_count += remove_count;
+
+        self.invalidate_transcript_cache();
+        self.invalidate_scroll_metrics();
+        self.adjust_scroll_after_change(previous_max_offset);
+    }
+
     /// Append a large pasted message as a collapsible placeholder.
     pub(crate) fn append_pasted_message(&mut self, kind: InlineMessageKind, text: String, line_count: usize) {
         if is_large_json_payload(kind, &text, line_count) {
@@ -221,6 +245,22 @@ impl Session {
         }
 
         self.push_line(kind, vec![InlineSegment { text, style: Arc::new(InlineTextStyle::default()) }]);
+    }
+
+    /// Exports a bounded snapshot of the visible transcript.
+    pub(crate) fn transcript_export_text(&self) -> String {
+        self.lines
+            .iter()
+            .map(|line| {
+                let text: String = line.segments.iter().map(|segment| segment.text.as_str()).collect();
+                if line.kind == InlineMessageKind::User {
+                    format!("> {}", text)
+                } else {
+                    text
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Append a segment to the transcript, handling newlines and control characters
@@ -509,9 +549,7 @@ impl Session {
 
         if appended {
             self.mark_line_dirty(self.lines.len() - 1);
-            if !self.is_streaming_final_answer {
-                self.invalidate_scroll_metrics();
-            }
+            self.invalidate_scroll_metrics();
             return;
         }
 
@@ -531,9 +569,7 @@ impl Session {
                 line.revision = revision;
             }
             self.mark_line_dirty(index);
-            if !self.is_streaming_final_answer {
-                self.invalidate_scroll_metrics();
-            }
+            self.invalidate_scroll_metrics();
             return;
         }
 

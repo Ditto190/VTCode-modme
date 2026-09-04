@@ -470,6 +470,7 @@ const IMMEDIATE_SUBMIT_COMMANDS: &[&str] = &[
     "/continue",
     "/fork",
     "/history",
+    "/transcript",
     "/exit",
 ];
 
