@@ -191,3 +191,25 @@ Grant more tool calls must resume the **same Build turn**, not leave the harness
 - Restore the pre-grant write-capable agent **and** lock Tab during grant/blocked/active turn.
 - Idle Tab after a finished turn stays user-controlled.
 - Out of scope: raising default loop/session caps; rewriting Duck’s spec.
+
+---
+
+check again, it seems the <webmcp_authoritative_diff>
+
+```diff
+--- a/docs/project/TODO.md
++++ b/docs/project/TODO.md
+@@ -2,7 +2,7 @@
+---
+-Hello, World!!!
++Hello, World!!! again from webmcp app
+---
+```
+
+</webmcp_authoritative_diff>
+
+diff still not rendered properly, it is showing as plain text
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-04 at 16.56.38.png'
+
+log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/checkpoints/turn_1061.json
