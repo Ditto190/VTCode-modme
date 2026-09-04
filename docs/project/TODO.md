@@ -122,3 +122,13 @@ Fix diff output doesn't render cleanly and correctly
 check /config listing some time can not scroll to last items, it get stuck even though the list is longer than the screen. The harness should ensure that the scrolling behavior in the /config listing is smooth and allows users to reach the last items without getting stuck. Additionally, provide visual indicators or feedback to inform users when they have reached the end of the list or if there are more items to scroll through.
 
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-03 at 16.58.38.png'
+
+===
+
+fix propose plan mode markdown is not rendering correctly, it should be able to render the markdown content properly and display it in a readable format. The harness should ensure that any markdown content is parsed and rendered accurately, preserving formatting, headings, lists, and other elements. Additionally, provide clear feedback to the user if there are any issues with rendering the markdown content.
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-04 at 10.54.05.png'
+
+---
+
+check plan mode: vtcode on user approval confirmation dialog -> accept and implement -> the agent use auto mode -> then later the agent switch to propose plan mode, but not implement it?
