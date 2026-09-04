@@ -167,9 +167,12 @@ fn highlight_code_block(
         let line_count = source_line_count(code_to_display);
         let number_width = line_number_width(line_count);
         let gutter_style = line_number_style(theme_styles, base_style);
+        let code_style = code_block_style(theme_styles, base_style);
         let mut line_number = 1usize;
-        for (index, segments) in highlighted.into_iter().enumerate() {
-            let src = source_lines.get(index).copied().unwrap_or("");
+        for (index, src) in source_lines.iter().enumerate() {
+            let Some(segments) = highlighted.get(index) else {
+                break;
+            };
             let is_omitted = parse_omitted_line_count(src).is_some();
             let (gutter_text, omitted) = if use_line_numbers {
                 let (text, om) = format_gutter_text(line_number, number_width, src);
@@ -181,8 +184,15 @@ fn highlight_code_block(
             if is_omitted {
                 line.push_segment(gutter_style, src);
             } else {
+                let mut in_leading_whitespace = true;
                 for (style, text) in segments {
-                    line.push_segment(style, &text);
+                    let is_leading_whitespace = in_leading_whitespace && text.trim().is_empty();
+                    if is_leading_whitespace {
+                        line.push_segment(code_style, text);
+                    } else {
+                        in_leading_whitespace = false;
+                        line.push_segment(*style, text);
+                    }
                 }
             }
             line_number = line_number.saturating_add(omitted);
@@ -445,15 +455,7 @@ fn line_number_width(line_count: usize) -> usize {
 }
 
 fn source_line_count(code: &str) -> usize {
-    let mut count = 0usize;
-    for raw_line in LinesWithEndings::from(code) {
-        let trimmed = raw_line.trim_end_matches('\n');
-        count = count.saturating_add(parse_omitted_line_count(trimmed).unwrap_or(1));
-    }
-    if code.ends_with('\n') {
-        count = count.saturating_add(1);
-    }
-    count
+    code.lines().map(|line| parse_omitted_line_count(line).unwrap_or(1)).sum()
 }
 
 /// Parse the number of omitted lines from a condensed line like

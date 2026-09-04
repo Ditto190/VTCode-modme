@@ -27,6 +27,16 @@ fn render_markdown_with_table_width(markdown: &str, table_max_width: usize) -> V
     )
 }
 
+fn render_markdown_highlighted(markdown: &str) -> Vec<MarkdownLine> {
+    render_markdown_to_lines_with_options(
+        markdown,
+        Style::default(),
+        &theme::active_styles(),
+        Some(&SyntaxHighlightingConfig::default()),
+        RenderMarkdownOptions::default(),
+    )
+}
+
 #[test]
 fn test_markdown_heading_renders_prefixes() {
     let markdown = "# Heading\n\n## Subheading\n";
@@ -320,6 +330,59 @@ fn test_markdown_code_block_with_language_renders_line_numbers() {
 }
 
 #[test]
+fn test_markdown_code_block_trailing_newline_has_no_phantom_line_number() {
+    let markdown = "```rust\nfn first() {}\nfn second() {}\n```\n";
+    let lines = render_markdown_highlighted(markdown);
+
+    let code_lines = lines
+        .iter()
+        .filter(|line| {
+            let text = line.segments.iter().map(|segment| segment.text.as_str()).collect::<String>();
+            text.contains("fn first() {}") || text.contains("fn second() {}")
+        })
+        .count();
+    assert_eq!(code_lines, 2);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.segments.iter().any(|segment| segment.text == "  2  ")),
+        "second source line should have a gutter"
+    );
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.segments.iter().all(|segment| segment.text != "  3  ")),
+        "trailing newline should not create a phantom gutter"
+    );
+}
+
+#[test]
+fn test_markdown_code_block_leading_whitespace_uses_code_style() {
+    let markdown = "```rust\nlet value = 1;\n    return value;\n```\n";
+    let lines = render_markdown_highlighted(markdown);
+
+    let code_line = lines
+        .iter()
+        .find(|line| {
+            line.segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>()
+                .contains("return value")
+        })
+        .expect("code line exists");
+    let gutter_style = code_line.segments.first().expect("gutter segment exists").style;
+    let first_code_segment = code_line
+        .segments
+        .iter()
+        .find(|segment| segment.text == "    ")
+        .expect("leading whitespace segment exists");
+
+    assert_ne!(first_code_segment.style, gutter_style);
+}
+
+#[test]
 fn test_markdown_code_block_omitted_line_gutter_uses_source_line_numbers() {
     let markdown = "```rust\n\
 line 1\n\
@@ -358,7 +421,7 @@ fn test_markdown_code_block_without_language_skips_line_numbers() {
 #[test]
 fn test_markdown_diff_code_block_strips_backgrounds() {
     let markdown = "```diff\n@@ -1 +1 @@\n- old\n+ new\n context\n```\n";
-    let lines = render_markdown_to_lines(markdown, Style::default(), &theme::active_styles(), None);
+    let lines = render_markdown(markdown);
 
     let added_line = lines
         .iter()
@@ -427,6 +490,64 @@ fn test_diff_blank_line_renders_placeholder_space() {
 
     assert_eq!(segments.len(), 1);
     assert_eq!(segments[0].text, " ");
+}
+
+#[test]
+fn test_markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
+    let markdown = "```diff\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-const value = 1;\n+const value = 2;\n```\n";
+    let lines = render_markdown(markdown);
+    let palette = DiffColorPalette::default();
+
+    let added_line = lines
+        .iter()
+        .find(|line| {
+            line.segments
+                .iter()
+                .map(|seg| seg.text.as_str())
+                .collect::<String>()
+                .contains("+const value = 2;")
+        })
+        .expect("added line exists");
+    assert!(
+        added_line
+            .segments
+            .iter()
+            .any(|seg| seg.style.get_fg_color() == palette.added_style().get_fg_color())
+    );
+
+    let removed_line = lines
+        .iter()
+        .find(|line| {
+            line.segments
+                .iter()
+                .map(|seg| seg.text.as_str())
+                .collect::<String>()
+                .contains("-const value = 1;")
+        })
+        .expect("removed line exists");
+    assert!(
+        removed_line
+            .segments
+            .iter()
+            .any(|seg| seg.style.get_fg_color() == palette.removed_style().get_fg_color())
+    );
+
+    let header_line = lines
+        .iter()
+        .find(|line| {
+            line.segments
+                .iter()
+                .map(|seg| seg.text.as_str())
+                .collect::<String>()
+                .contains("@@ -1 +1 @@")
+        })
+        .expect("hunk header exists");
+    assert!(
+        header_line
+            .segments
+            .iter()
+            .any(|seg| seg.style.get_fg_color() == palette.header_style().get_fg_color())
+    );
 }
 
 #[test]

@@ -216,7 +216,11 @@ impl<'a> InlineEventLoop<'a> {
     async fn process_buffered_event(&mut self, event: InlineEvent) -> Result<InlineLoopAction> {
         if let InlineEvent::Submit(ref input) | InlineEvent::WebmcpSubmit(ref input) = event {
             if !input.is_empty() {
-                self.emit_interjected(InterjectionSource::Direct, Self::count_images(input));
+                let source = match event {
+                    InlineEvent::Submit(_) => InterjectionSource::Direct,
+                    _ => InterjectionSource::Queue,
+                };
+                self.emit_interjected(source, Self::count_images(input));
             }
         }
 
