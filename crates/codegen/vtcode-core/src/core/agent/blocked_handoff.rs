@@ -286,7 +286,15 @@ fn ensure_safe_handoff_target(path: &Path) -> Result<()> {
         Ok(metadata) => {
             ensure!(!metadata.file_type().is_symlink(), "refusing symlinked handoff {}", path.display());
             ensure!(metadata.is_file(), "refusing non-file handoff target {}", path.display());
-            ensure!(single_link_file(&metadata), "refusing hard-linked handoff target {}", path.display());
+            #[cfg(windows)]
+            let is_single_linked = {
+                let file = fs::File::open(path)
+                    .with_context(|| format!("failed to open handoff target {} for inspection", path.display()))?;
+                single_link_file(&file)
+            };
+            #[cfg(not(windows))]
+            let is_single_linked = single_link_file(&metadata);
+            ensure!(is_single_linked, "refusing hard-linked handoff target {}", path.display());
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -478,7 +486,11 @@ fn mark_archived_handoff_resolved(workspace: &Path, current_content: &str, sessi
         .metadata()
         .with_context(|| format!("failed to stat {}", canonical_archive.display()))?;
     ensure!(metadata.is_file(), "blocked handoff archive is not a regular file");
-    ensure!(single_link_file(&metadata), "blocked handoff archive has unexpected hard links");
+    #[cfg(windows)]
+    let is_single_linked = single_link_file(&archive);
+    #[cfg(not(windows))]
+    let is_single_linked = single_link_file(&metadata);
+    ensure!(is_single_linked, "blocked handoff archive has unexpected hard links");
 
     let mut archive_content = String::new();
     archive
@@ -521,10 +533,19 @@ fn single_link_file(metadata: &fs::Metadata) -> bool {
 }
 
 #[cfg(windows)]
-fn single_link_file(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
+#[expect(
+    unsafe_code,
+    reason = "Windows has no stable standard-library hard-link count API; query the owning file handle through Win32"
+)]
+fn single_link_file(file: &fs::File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
 
-    metadata.number_of_links() == 1
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `file` owns a valid handle for the duration of the call and
+    // `information` points to writable storage of the expected Win32 type.
+    let query_succeeded = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) != 0 };
+    query_succeeded && information.nNumberOfLinks == 1
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -936,7 +957,7 @@ mod tests {
         assert!(!temp.path().join("outside.md").exists());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn session_scoped_clear_rejects_hardlinked_archive() {
         let temp = tempfile::tempdir().expect("temp dir");
@@ -956,7 +977,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn write_blocked_handoff_rejects_hardlinked_current_pointer() {
         let temp = tempfile::tempdir().expect("workspace temp dir");
