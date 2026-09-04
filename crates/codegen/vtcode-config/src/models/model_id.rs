@@ -29,6 +29,8 @@ pub enum ModelId {
     Gemini38Flash,
 
     // OpenAI models
+    /// GPT-6 Astra - Most capable model for hardest end-to-end work with complex reasoning, coding, computer use, and research
+    GPT6Astra,
     /// GPT-5.6 Sol - Frontier model for complex professional work in the GPT-5.6 family
     GPT56Sol,
     /// GPT-5.6 Terra - GPT-5.6 model that balances intelligence and cost

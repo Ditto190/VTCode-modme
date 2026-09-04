@@ -564,7 +564,12 @@ impl OpenAIProvider {
     }
 
     fn supports_temperature_parameter(model: &str) -> bool {
-        if model == models::openai::GPT_5 || model == models::openai::GPT_5_MINI || model == models::openai::GPT_5_NANO
+        // GPT-6 Astra does not support temperature/top_p/top_logprobs.
+        // https://developers.openai.com/api/docs/guides/latest-model#update-api-and-model-parameters
+        if model == models::openai::GPT_6_ASTRA
+            || model == models::openai::GPT_5
+            || model == models::openai::GPT_5_MINI
+            || model == models::openai::GPT_5_NANO
         {
             return false;
         }

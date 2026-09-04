@@ -7,7 +7,8 @@ use crate::providers::common::append_normalized_reasoning_detail_items;
 use crate::providers::openai::types::OpenAIResponsesPayload;
 use crate::providers::shared::{
     collect_tool_references_from_tool_search_output, function_output_value_from_message_content,
-    parse_cached_prompt_tokens_from_usage, tool_result_content_from_message_content,
+    parse_cache_write_tokens_from_usage, parse_cached_prompt_tokens_from_usage,
+    tool_result_content_from_message_content,
 };
 use hashbrown::HashMap;
 use serde_json::{Value, json};
@@ -404,6 +405,7 @@ pub(crate) fn parse_responses_payload(
 
     let usage = response_json.get("usage").map(|usage_value| {
         let cached_prompt_tokens = parse_cached_prompt_tokens_from_usage(usage_value, include_cached_prompt_metrics);
+        let cache_creation_tokens = parse_cache_write_tokens_from_usage(usage_value, include_cached_prompt_metrics);
 
         Usage {
             prompt_tokens: usage_value
@@ -424,7 +426,7 @@ pub(crate) fn parse_responses_payload(
                 .and_then(|v| u32::try_from(v).ok())
                 .unwrap_or(0),
             cached_prompt_tokens,
-            cache_creation_tokens: None,
+            cache_creation_tokens,
             cache_read_tokens: None,
             iterations: None,
         }
@@ -616,7 +618,7 @@ pub(crate) fn build_standard_responses_payload(
 mod tests {
     use super::{build_standard_responses_payload, parse_responses_payload};
     use crate::provider::{LLMRequest, Message, ToolCall};
-    use crate::providers::shared::parse_cached_prompt_tokens_from_usage;
+    use crate::providers::shared::{parse_cache_write_tokens_from_usage, parse_cached_prompt_tokens_from_usage};
     use serde_json::{Value, json};
 
     fn assert_multimodal_tool_result(payload: super::OpenAIResponsesPayload) {
@@ -1290,5 +1292,47 @@ mod tests {
             parse_cached_prompt_tokens_from_usage(&json!({"input_tokens_details": {"cached_tokens": 31}}), false),
             None
         );
+    }
+
+    #[test]
+    fn parse_responses_payload_reports_cache_write_tokens() {
+        let response = json!({
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": "hello"}
+                    ]
+                }
+            ],
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 5,
+                "total_tokens": 105,
+                "input_tokens_details": {
+                    "cached_tokens": 42,
+                    "cache_write_tokens": 58
+                }
+            }
+        });
+
+        let parsed = parse_responses_payload(response, "gpt-6-astra".to_string(), true).expect("payload should parse");
+        let usage = parsed.usage.expect("usage should exist");
+
+        assert_eq!(usage.cached_prompt_tokens, Some(42));
+        assert_eq!(usage.cache_creation_tokens, Some(58));
+    }
+
+    #[test]
+    fn parse_cache_write_tokens_supports_chat_fallback_shape_and_metrics_gate() {
+        assert_eq!(
+            parse_cache_write_tokens_from_usage(&json!({"prompt_tokens_details": {"cache_write_tokens": 17}}), true),
+            Some(17)
+        );
+        assert_eq!(
+            parse_cache_write_tokens_from_usage(&json!({"input_tokens_details": {"cache_write_tokens": 31}}), false),
+            None
+        );
+        assert_eq!(parse_cache_write_tokens_from_usage(&json!({"input_tokens_details": {}}), true), None);
     }
 }

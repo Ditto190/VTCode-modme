@@ -1,6 +1,7 @@
 use rig::providers::gemini::completion::gemini_api_types::ThinkingConfig;
 use rig::providers::openai;
 use serde_json::{Value, json};
+use vtcode_config::constants::models::openai as openai_models;
 use vtcode_config::models::Provider;
 use vtcode_config::types::ReasoningEffortLevel;
 
@@ -26,8 +27,18 @@ impl RigProviderCapabilities {
             Provider::OpenAI => {
                 let mut reasoning = openai::responses_api::Reasoning::new();
                 let mapped = match effort {
-                    ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => return None,
+                    ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => {
+                        // GPT-6 Astra does not support the `none` effort; start with `low`.
+                        // https://developers.openai.com/api/docs/guides/latest-model#update-api-and-model-parameters
+                        if openai_models::is_gpt6_astra_model(&self.model) {
+                            return Some(json!({ "effort": "low" }));
+                        }
+                        return None;
+                    }
                     ReasoningEffortLevel::Minimal => {
+                        if openai_models::is_gpt6_astra_model(&self.model) {
+                            return Some(json!({ "effort": "low" }));
+                        }
                         let effort = if is_gpt5_codex_model(&self.model) {
                             "low"
                         } else {
@@ -208,6 +219,23 @@ mod tests {
 
         assert_eq!(max_payload["thinking"]["type"], "enabled");
         assert_eq!(max_payload["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn rig_capabilities_coerce_unsupported_efforts_to_low_for_gpt6_astra() {
+        for effort in [ReasoningEffortLevel::None, ReasoningEffortLevel::Minimal] {
+            let payload = RigProviderCapabilities::new(Provider::OpenAI, "gpt-6-astra")
+                .reasoning_parameters(effort)
+                .expect("astra coerces unsupported effort to low");
+
+            assert_eq!(payload["effort"], "low");
+        }
+
+        let medium = RigProviderCapabilities::new(Provider::OpenAI, "gpt-6-astra")
+            .reasoning_parameters(ReasoningEffortLevel::Medium)
+            .expect("astra keeps supported effort");
+
+        assert_eq!(medium["effort"], "medium");
     }
 
     #[test]

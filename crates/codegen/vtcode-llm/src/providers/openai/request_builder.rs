@@ -6,7 +6,10 @@ use crate::error_display;
 use crate::provider;
 use crate::providers::common::serialize_message_content_openai_for_model;
 use crate::rig_adapter::RigProviderCapabilities;
-use crate::system_prompt::{default_system_prompt, openai_gpt55_contract_addendum, openai_gpt56_contract_addendum};
+use crate::system_prompt::{
+    default_system_prompt, openai_gpt6_contract_addendum, openai_gpt55_contract_addendum,
+    openai_gpt56_contract_addendum,
+};
 use hashbrown::HashSet;
 use rig::providers::openai::responses_api::{
     AdditionalParameters as RigResponsesAdditionalParameters, Include as RigResponsesInclude,
@@ -24,6 +27,7 @@ use super::types::{MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload};
 const NONE_REASONING_EFFORT_MODELS: &[&str] = &[openai_models::GPT, openai_models::GPT_5_6, openai_models::GPT_5_6_SOL];
 const MEDIUM_REASONING_EFFORT_MODELS: &[&str] = &[openai_models::GPT_5, openai_models::GPT_5_6_SOL];
 const HIGH_REASONING_EFFORT_MODELS: &[&str] = &[
+    openai_models::GPT_6_ASTRA,
     openai_models::GPT_5_6_SOL,
     openai_models::GPT_5_6_TERRA,
     openai_models::GPT_5_6_LUNA,
@@ -31,6 +35,7 @@ const HIGH_REASONING_EFFORT_MODELS: &[&str] = &[
 ];
 const TEXT_VERBOSITY_MODELS: &[&str] = &[
     openai_models::GPT,
+    openai_models::GPT_6_ASTRA,
     openai_models::GPT_5_6,
     openai_models::GPT_5_6_SOL,
     openai_models::GPT_5_6_SOL,
@@ -50,6 +55,7 @@ const LOW_VERBOSITY_MODELS: &[&str] = &[
 ];
 const PHASE_REPLAY_MODELS: &[&str] = &[
     openai_models::GPT,
+    openai_models::GPT_6_ASTRA,
     openai_models::GPT_5_6_SOL,
     openai_models::GPT_5_6_SOL,
     openai_models::GPT_5_CODEX,
@@ -62,6 +68,7 @@ const GATED_SAMPLING_MODELS: &[&str] = &[
     openai_models::GPT_5_6_SOL,
 ];
 const SAMPLING_DISABLED_MODELS: &[&str] = &[
+    openai_models::GPT_6_ASTRA,
     openai_models::GPT_5,
     openai_models::GPT_5_6_SOL,
     openai_models::GPT_5_MINI,
@@ -133,7 +140,7 @@ fn is_gpt56_model(model: &str) -> bool {
 }
 
 fn is_openai_gpt_responses_model(model: &str) -> bool {
-    model == openai_models::GPT || model.starts_with(openai_models::GPT_5)
+    model == openai_models::GPT || model.starts_with(openai_models::GPT_5) || openai_models::is_gpt6_astra_model(model)
 }
 
 fn supports_assistant_phase_replay(model: &str) -> bool {
@@ -143,7 +150,7 @@ fn supports_assistant_phase_replay(model: &str) -> bool {
 fn default_replay_instructions(model: &str) -> Option<String> {
     if is_gpt5_codex_model(model) {
         Some(format!("You are Codex, based on GPT-5. {}", default_system_prompt()))
-    } else if is_gpt55_model(model) || is_gpt56_model(model) {
+    } else if is_gpt55_model(model) || is_gpt56_model(model) || openai_models::is_gpt6_astra_model(model) {
         Some(default_system_prompt())
     } else {
         None
@@ -151,7 +158,9 @@ fn default_replay_instructions(model: &str) -> Option<String> {
 }
 
 fn augment_openai_instructions(model: &str, instructions: String) -> String {
-    let addendum = if is_gpt56_model(model) {
+    let addendum = if openai_models::is_gpt6_astra_model(model) {
+        Some(openai_gpt6_contract_addendum())
+    } else if is_gpt56_model(model) {
         Some(openai_gpt56_contract_addendum())
     } else if is_gpt55_model(model) {
         Some(openai_gpt55_contract_addendum())
@@ -563,7 +572,17 @@ fn build_responses_request_from_history(
         typed_parameters.prompt_cache_key = Some(prompt_cache_key.to_string());
     }
 
-    if ctx.include_prompt_cache_retention
+    // GPT-6 Astra follows the GPT-5.6-and-later cache scheme: lifetime is
+    // controlled by `prompt_cache_options.ttl`, not `prompt_cache_retention`.
+    // https://developers.openai.com/api/docs/guides/prompt-caching#summary-of-model-differences
+    let is_gpt6_astra = openai_models::is_gpt6_astra_model(&request.model);
+    if is_gpt6_astra
+        && ctx.include_prompt_cache_retention
+        && ctx.is_responses_api_model
+        && trimmed_non_empty(ctx.prompt_cache_retention).is_some()
+    {
+        openai_request["prompt_cache_options"] = json!({ "ttl": "30m" });
+    } else if ctx.include_prompt_cache_retention
         && ctx.is_responses_api_model
         && let Some(retention) = trimmed_non_empty(ctx.prompt_cache_retention)
     {
@@ -580,6 +599,10 @@ fn build_responses_request_from_history(
     }
     if ctx.include_encrypted_reasoning {
         push_unique_include(&mut include_values, "reasoning.encrypted_content");
+    }
+    if is_gpt6_astra {
+        // GPT-6 Astra does not support logprobs output.
+        include_values.retain(|field| field != "message.output_text.logprobs");
     }
     if !include_values.is_empty() {
         openai_request["include"] =
@@ -754,7 +777,10 @@ fn build_responses_request_from_history(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChatRequestContext, ResponsesRequestContext, build_chat_request, build_responses_request};
+    use super::{
+        ChatRequestContext, ResponsesRequestContext, augment_openai_instructions, build_chat_request,
+        build_responses_request,
+    };
     use crate::provider;
     use serde_json::{Value, json};
     use vtcode_config::constants::models;
@@ -916,5 +942,70 @@ mod tests {
 
             assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(requested_stream));
         }
+    }
+
+    fn gpt6_astra_request() -> provider::LLMRequest {
+        let mut request = request();
+        request.model = models::openai::GPT_6_ASTRA.to_string();
+        request
+    }
+
+    #[test]
+    fn gpt6_astra_defaults_to_high_reasoning_effort() {
+        let payload = build_responses_request(&gpt6_astra_request(), &base_context(None))
+            .expect("astra responses request should build");
+
+        assert_eq!(payload.pointer("/reasoning/effort").and_then(Value::as_str), Some("high"));
+    }
+
+    #[test]
+    fn gpt6_astra_omits_sampling_parameters() {
+        let mut request = gpt6_astra_request();
+        request.temperature = Some(0.7);
+        request.top_p = Some(0.9);
+        request.presence_penalty = Some(0.1);
+        request.frequency_penalty = Some(-0.5);
+
+        let payload =
+            build_responses_request(&request, &base_context(None)).expect("astra responses request should build");
+
+        assert!(payload.get("sampling_parameters").is_none());
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn gpt6_astra_uses_prompt_cache_options_ttl() {
+        let mut ctx = base_context(None);
+        ctx.include_prompt_cache_retention = true;
+        ctx.prompt_cache_retention = Some("24h");
+
+        let payload =
+            build_responses_request(&gpt6_astra_request(), &ctx).expect("astra responses request should build");
+
+        assert_eq!(payload.pointer("/prompt_cache_options/ttl").and_then(Value::as_str), Some("30m"));
+        assert!(payload.get("prompt_cache_retention").is_none());
+    }
+
+    #[test]
+    fn gpt6_astra_strips_logprobs_from_include() {
+        let mut request = gpt6_astra_request();
+        request.responses_include = Some(vec![
+            "message.output_text.logprobs".to_owned(),
+            "reasoning.encrypted_content".to_owned(),
+        ]);
+
+        let payload =
+            build_responses_request(&request, &base_context(None)).expect("astra responses request should build");
+
+        assert_eq!(payload.get("include").and_then(Value::as_array), Some(&vec![json!("reasoning.encrypted_content")]));
+    }
+
+    #[test]
+    fn gpt6_astra_receives_dedicated_addendum() {
+        let instructions = augment_openai_instructions(models::openai::GPT_6_ASTRA, "Be helpful.".to_string());
+
+        assert!(instructions.contains("GPT-6 Astra"));
+        assert!(!instructions.contains("GPT-5.6 model"));
     }
 }

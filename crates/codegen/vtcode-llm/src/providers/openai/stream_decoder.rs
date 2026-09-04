@@ -11,6 +11,7 @@
 use crate::error_display;
 use crate::provider;
 use crate::providers::shared::StreamTelemetry;
+use crate::providers::shared::parse_cache_write_tokens_from_usage;
 use crate::providers::shared::parse_cached_prompt_tokens_from_usage;
 use crate::providers::shared::{
     ResponsesStreamEventPolicy, StreamAssemblyError, extract_data_payload, response_stream_event_policy,
@@ -55,6 +56,7 @@ fn merge_final_response_metadata(
 ) {
     if let Some(usage_value) = final_response.get("usage") {
         let cached_prompt_tokens = parse_cached_prompt_tokens_from_usage(usage_value, include_cached_prompt_metrics);
+        let cache_creation_tokens = parse_cache_write_tokens_from_usage(usage_value, include_cached_prompt_metrics);
 
         response.usage = Some(provider::Usage {
             prompt_tokens: usage_value
@@ -75,7 +77,7 @@ fn merge_final_response_metadata(
                 .and_then(|value| u32::try_from(value).ok())
                 .unwrap_or(0),
             cached_prompt_tokens,
-            cache_creation_tokens: None,
+            cache_creation_tokens,
             cache_read_tokens: None,
             iterations: None,
         });

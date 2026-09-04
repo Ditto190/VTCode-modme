@@ -287,6 +287,35 @@
         },
         "context": 1050000
       },
+      "gpt-6-astra": {
+        "id": "gpt-6-astra",
+        "name": "GPT-6 Astra",
+        "description": "Most capable model for hardest end-to-end work with complex reasoning, coding, computer use, research, and document creation.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1050000,
+        "output_tokens": 128000,
+        "capabilities": {
+          "caching": true,
+          "structured_output": true,
+          "thinking": true
+        },
+        "cost": {
+          "input": 1e-05,
+          "output": 5e-05,
+          "cache_read": 1e-06,
+          "cache_write": 1.25e-05
+        }
+      },
       "gpt": {
         "id": "gpt",
         "name": "GPT",

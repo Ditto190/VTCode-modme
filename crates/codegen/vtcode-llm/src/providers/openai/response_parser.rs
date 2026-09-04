@@ -3,6 +3,7 @@
 use crate::error_display;
 use crate::provider;
 use crate::providers::extract_reasoning_trace;
+use crate::providers::shared::parse_cache_write_tokens_from_usage;
 use crate::providers::shared::parse_openai_tool_calls;
 use serde_json::Value;
 
@@ -89,6 +90,7 @@ pub(crate) fn parse_chat_response(
             } else {
                 None
             };
+            let cache_creation_tokens = parse_cache_write_tokens_from_usage(usage_value, include_cached_prompt_tokens);
 
             provider::Usage {
                 prompt_tokens: usage_value
@@ -107,7 +109,7 @@ pub(crate) fn parse_chat_response(
                     .and_then(|v| u32::try_from(v).ok())
                     .unwrap_or(0),
                 cached_prompt_tokens,
-                cache_creation_tokens: None,
+                cache_creation_tokens,
                 cache_read_tokens: None,
                 iterations: None,
             }

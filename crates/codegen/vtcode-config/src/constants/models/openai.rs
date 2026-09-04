@@ -1,6 +1,7 @@
 pub const DEFAULT_MODEL: &str = "gpt-5.6-sol";
 pub const SUPPORTED_MODELS: &[&str] = &[
     GPT,
+    GPT_6_ASTRA,
     "gpt-5.6",       // GPT-5.6 alias (routes to gpt-5.6-sol)
     "gpt-5.6-sol",   // GPT-5.6 Sol flagship model
     "gpt-5.6-terra", // GPT-5.6 Terra balanced model
@@ -25,6 +26,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
 /// Models that require the OpenAI Responses API
 pub const RESPONSES_API_MODELS: &[&str] = &[
     GPT,
+    GPT_6_ASTRA,
     GPT_5_6,
     GPT_5_6_SOL,
     GPT_5_6_TERRA,
@@ -49,6 +51,7 @@ pub const RESPONSES_API_MODELS: &[&str] = &[
 /// Models that support the OpenAI reasoning parameter payload
 pub const REASONING_MODELS: &[&str] = &[
     GPT,
+    GPT_6_ASTRA,
     GPT_5_6,
     GPT_5_6_SOL,
     GPT_5_6_TERRA,
@@ -79,6 +82,7 @@ pub const HARMONY_MODELS: &[&str] = &[GPT_OSS_20B, GPT_OSS_120B];
 
 // Convenience constants for commonly used models
 pub const GPT: &str = "gpt";
+pub const GPT_6_ASTRA: &str = "gpt-6-astra";
 pub const GPT_5_6_SOL: &str = "gpt-5.6-sol";
 pub const GPT_5_6_TERRA: &str = "gpt-5.6-terra";
 pub const GPT_5_6_LUNA: &str = "gpt-5.6-luna";
@@ -135,6 +139,16 @@ pub const DEPRECATED_MODEL_REPLACEMENTS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// Returns true for GPT-6 Astra model IDs.
+///
+/// Centralizes the Astra check shared by request shaping (`vtcode-llm`
+/// request builder) and reasoning-parameter mapping (`rig_adapter`) so the
+/// two paths cannot diverge.
+#[must_use]
+pub fn is_gpt6_astra_model(model: &str) -> bool {
+    model == GPT_6_ASTRA
+}
+
 /// Returns the recommended replacement for a deprecated OpenAI model, if known.
 ///
 /// Returns `Some((replacement_id, reason))` when the model is a known
@@ -150,6 +164,14 @@ pub fn deprecated_model_replacement(model: &str) -> Option<(&'static str, &'stat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpt6_astra_detector_matches_only_the_astra_id() {
+        assert!(is_gpt6_astra_model(GPT_6_ASTRA));
+        assert!(!is_gpt6_astra_model(GPT_5_6_SOL));
+        assert!(!is_gpt6_astra_model(GPT));
+        assert!(!is_gpt6_astra_model("gpt-6"));
+    }
 
     #[test]
     fn deprecated_gpt5_maps_to_gpt56_sol() {

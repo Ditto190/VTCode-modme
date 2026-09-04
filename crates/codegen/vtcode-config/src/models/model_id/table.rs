@@ -106,6 +106,13 @@ model_id_table! {
         description: "Most intelligent Flash for long-horizon SWE, autonomous agents, and complex enterprise workflows with 1M context and tunable thinking (low, medium, high)",
     },
     // OpenAI models
+    GPT6Astra {
+        provider: OpenAI,
+        id: models::openai::GPT_6_ASTRA,
+        parse: [models::openai::GPT_6_ASTRA],
+        display: "GPT-6 Astra",
+        description: "Most capable model for hardest end-to-end work with complex reasoning, coding, computer use, research, and document creation",
+    },
     GPT56Sol {
         provider: OpenAI,
         id: models::openai::GPT_5_6_SOL,

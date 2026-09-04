@@ -46,6 +46,42 @@ pub(crate) fn parse_cached_prompt_tokens_from_usage(
     cached_prompt_tokens
 }
 
+/// Parse OpenAI `cache_write_tokens` from a Responses/Chat usage payload.
+///
+/// GPT-5.6 and later bill cache writes at 1.25x the input rate; downstream
+/// cost math consumes this via `Usage::cache_creation_tokens`.
+/// Mirrors [`parse_cached_prompt_tokens_from_usage`], including the metrics
+/// gate: no value is reported when cached-prompt metrics are disabled.
+pub(crate) fn parse_cache_write_tokens_from_usage(
+    usage_value: &Value,
+    include_cached_prompt_metrics: bool,
+) -> Option<u32> {
+    if !include_cached_prompt_metrics {
+        return None;
+    }
+
+    let cache_write_tokens = usage_value
+        .get("input_tokens_details")
+        .and_then(|details| details.get("cache_write_tokens"))
+        .or_else(|| {
+            usage_value
+                .get("prompt_tokens_details")
+                .and_then(|details| details.get("cache_write_tokens"))
+        })
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok());
+
+    if let Some(cache_write_tokens) = cache_write_tokens {
+        tracing::debug!(
+            target = "vtcode::llm::responses::prompt_cache",
+            cache_write_tokens,
+            "Responses cache-write token usage"
+        );
+    }
+
+    cache_write_tokens
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StreamAssemblyError {
     #[error("missing field `{0}` in stream payload")]
