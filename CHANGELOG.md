@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.156.0 - 2026-09-04
+
+### Highlights
+#### Bug Fixes
+
+- Use stable Windows hard-link inspection (6593183c) 
+### Other Changes
 ## 0.155.0 - 2026-09-04
 
 ### Highlights
