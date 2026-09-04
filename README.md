@@ -53,9 +53,14 @@
 </div>
 
 VT Code is an open-source Rust terminal coding agent for interactive and
-long-running autonomous work. A responsive TUI, safe tools, multi-provider LLM
-support, open protocols, and extensible Skills take you from question to
-reviewed change without leaving the terminal.
+long-running autonomous work. It is a **harness, not just an LLM wrapper**:
+the model provides reasoning, while the runtime provides the tools, context,
+sandbox, state, evaluation, and verification needed to turn that reasoning into
+safe, reviewable progress.
+
+A responsive TUI, multi-provider LLM support, durable sessions, open protocols,
+and extensible Skills take you from question to reviewed change without leaving
+the terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows are
@@ -77,11 +82,12 @@ reviewed change without leaving the terminal.
 
 | Pillar | What it means |
 | --- | --- |
-| **Harness, not a wrapper** | The model reasons; the harness enforces progress with tools, sandbox, evals, and state. |
-| **Safety-first** | Sandboxed shell, command policies, per-workspace approvals, and fail-closed handling of injection, path/symlink escape, and env leakage. |
-| **Built for long runs** | Durable session memory, spooled output, auto-compaction, and verification before "done". |
-| **Protocol-native** | MCP, Skills, Agent Plugins, ACP (Zed), A2A, and ATIF export with no core forks. |
-| **Parallel by design** | Worktree isolation, propose/verify sub-agents, `/plan` workflow, and cost guardrails. |
+| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evaluations to enforce progress. |
+| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses for injection, path/symlink escape, and environment leakage. |
+| **Long-run reliability** | Durable session memory, task tracking, spooled output, checkpoints, automatic compaction, resumable handoffs, and verification before "done". |
+| **Observable by design** | A canonical `ThreadEvent` runtime contract supports replay, archives, checkpoints, memory views, and trajectory export. |
+| **Protocol-native** | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without core forks. |
+| **Controlled autonomy** | Planning, human approval, isolated worktrees, propose/verify sub-agents, full automation, and cost guardrails scale autonomy safely. |
 | **Runs anywhere** | 30 providers plus local Ollama, LM Studio, and llama.cpp. |
 
 ## Quick start
