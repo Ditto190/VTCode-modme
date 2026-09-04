@@ -7,6 +7,11 @@ use std::sync::Arc;
 
 use super::{Session, message::TranscriptLine};
 
+pub(super) struct TranscriptScrollAnchor {
+    message_index: usize,
+    row_in_message: usize,
+}
+
 #[derive(Default, Clone)]
 pub struct CachedMessage {
     pub revision: u64,
@@ -168,6 +173,40 @@ impl TranscriptReflowCache {
 }
 
 impl Session {
+    pub(super) fn transcript_scroll_anchor(&mut self) -> Option<TranscriptScrollAnchor> {
+        if self.transcript_width == 0 || self.scroll_manager.offset() == 0 {
+            return None;
+        }
+        self.ensure_scroll_metrics();
+        let top_row = self.scroll_manager.max_offset().saturating_sub(self.scroll_manager.offset());
+        let cache = self.ensure_reflow_cache(self.transcript_width);
+        let message_index = cache
+            .messages
+            .iter()
+            .enumerate()
+            .rposition(|(index, message)| !message.lines.is_empty() && cache.row_offsets[index] <= top_row)?;
+        Some(TranscriptScrollAnchor {
+            message_index,
+            row_in_message: top_row.saturating_sub(cache.row_offsets[message_index]),
+        })
+    }
+
+    pub(super) fn restore_transcript_scroll_anchor(&mut self, anchor: Option<TranscriptScrollAnchor>) {
+        let Some(anchor) = anchor else {
+            return;
+        };
+        self.ensure_scroll_metrics();
+        let cache = self.ensure_reflow_cache(self.transcript_width);
+        let Some(message) = cache.messages.get(anchor.message_index) else {
+            return;
+        };
+        let top_row = cache.row_offsets[anchor.message_index]
+            .saturating_add(anchor.row_in_message.min(message.lines.len().saturating_sub(1)));
+        self.scroll_manager
+            .set_offset(self.scroll_manager.max_offset().saturating_sub(top_row));
+        self.invalidate_transcript_viewport();
+    }
+
     /// Ensures the reflow cache is up to date for the given width
     pub(super) fn ensure_reflow_cache(&mut self, width: u16) -> &mut TranscriptReflowCache {
         let mut cache = self
@@ -307,6 +346,90 @@ mod tests {
             text: text.to_string(),
             style: Arc::new(InlineTextStyle::default()),
         }
+    }
+
+    fn history_session() -> Session {
+        let mut session = Session::new(InlineTheme::default(), None, 20);
+        session.apply_transcript_width(80);
+        session.apply_transcript_rows(6);
+        for index in 0..30 {
+            session.handle_command(crate::tui::core_tui::types::InlineCommand::AppendLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![segment(&format!("message {index}: {}", "word ".repeat(20)))],
+            });
+        }
+        session.ensure_scroll_metrics();
+        let top_row = session.ensure_reflow_cache(80).row_offsets[10];
+        session.scroll_manager.set_offset(session.scroll_manager.max_offset() - top_row);
+        session
+    }
+
+    fn assert_cached_matches_fresh(session: &mut Session, width: u16) {
+        let cached = session.collect_transcript_window_cached(width, 0, usize::MAX);
+        let fresh = session.reflow_transcript_lines(width);
+        assert_eq!(cached.len(), fresh.len());
+        for (cached_line, fresh_line) in cached.iter().zip(&fresh) {
+            assert_eq!(&cached_line.line, fresh_line);
+        }
+    }
+
+    #[test]
+    fn history_anchor_survives_streaming_resize_and_overlay_height() {
+        let mut session = history_session();
+        let anchor = session.transcript_scroll_anchor().unwrap();
+        assert_eq!(anchor.message_index, 10);
+        for width in [32, 100, 48] {
+            session.apply_transcript_width(width);
+            session.apply_transcript_rows(3);
+            session.handle_command(crate::tui::core_tui::types::InlineCommand::AppendLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![segment("streaming output")],
+            });
+            session.apply_transcript_rows(6);
+            let restored = session.transcript_scroll_anchor().unwrap();
+            assert_eq!(restored.message_index, anchor.message_index);
+            assert_eq!(restored.row_in_message, anchor.row_in_message);
+            assert_cached_matches_fresh(&mut session, width);
+        }
+    }
+
+    #[test]
+    fn view_row_recalculation_preserves_history_anchor() {
+        let mut session = history_session();
+        let anchor = session.transcript_scroll_anchor().unwrap();
+
+        session.apply_view_rows(10);
+
+        let restored = session.transcript_scroll_anchor().unwrap();
+        assert_eq!(restored.message_index, anchor.message_index);
+        assert_eq!(restored.row_in_message, anchor.row_in_message);
+    }
+
+    #[test]
+    fn bottom_follow_survives_reflow() {
+        let mut session = history_session();
+        session.scroll_manager.set_offset(0);
+        for width in [32, 100] {
+            session.apply_transcript_width(width);
+            session.apply_transcript_rows(3);
+            assert_eq!(session.scroll_manager.offset(), 0);
+        }
+    }
+
+    #[test]
+    fn theme_change_refreshes_cached_transcript_styles() {
+        let mut session = history_session();
+        let before = session.collect_transcript_window_cached(80, 0, usize::MAX);
+        session.handle_command(crate::tui::core_tui::types::InlineCommand::SetTheme {
+            theme: InlineTheme {
+                foreground: Some(anstyle::Color::Rgb(anstyle::RgbColor(12, 34, 56))),
+                ..InlineTheme::default()
+            },
+        });
+        let after = session.collect_transcript_window_cached(80, 0, usize::MAX);
+        assert!(!Arc::ptr_eq(&before, &after));
+        assert!(before.iter().zip(after.iter()).any(|(before, after)| before.line != after.line));
+        assert_cached_matches_fresh(&mut session, 80);
     }
 
     #[test]

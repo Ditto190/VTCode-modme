@@ -192,7 +192,11 @@ impl Widget for &mut SessionWidget<'_> {
             }
 
             if transcript_area.width > 0 && transcript_area.height > 0 {
-                self.session.apply_view_rows(transcript_area.height);
+                // The explicit layout path already supplies the measured
+                // transcript rectangle. Updating `view_rows` here would
+                // temporarily recalculate `transcript_rows` from that
+                // rectangle as if it were the full viewport, which can make
+                // scroll-anchor restoration observe the wrong geometry.
                 let has_logs = self.session.show_logs && self.session.has_logs() && mode.show_logs_panel();
                 if has_logs {
                     let [transcript, logs] = transcript_area

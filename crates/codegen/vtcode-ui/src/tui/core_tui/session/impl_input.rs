@@ -51,8 +51,10 @@ impl Session {
 
         match command {
             InlineCommand::AppendLine { kind, segments } => {
+                let previous_max_offset = self.current_max_scroll_offset();
                 self.clear_thinking_spinner_if_active(kind);
                 self.push_line(kind, segments);
+                self.adjust_scroll_after_change(previous_max_offset);
                 self.request_transcript_clear();
             }
             InlineCommand::AppendPastedMessage { kind, text, line_count } => {

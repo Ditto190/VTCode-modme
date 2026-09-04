@@ -7,22 +7,29 @@ use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::ui::tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 
 pub(super) fn handle_paste(session: &mut Session, content: &str) {
+    if let Some(modal) = session.modal_state_mut() {
+        if let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut()) {
+            search.insert(content);
+            list.apply_search(&search.query);
+            session.mark_dirty();
+            return;
+        }
+        if modal.secure_prompt.is_none() || modal.list.is_some() {
+            return;
+        }
+    } else if let Some(wizard) = session.wizard_overlay_mut() {
+        if let Some(search) = wizard.search.as_mut() {
+            search.insert(content);
+            if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
+                step.list.apply_search(&search.query);
+            }
+            session.mark_dirty();
+        }
+        return;
+    }
+
     if session.input_enabled {
         session.insert_paste_text(content);
-        session.mark_dirty();
-    } else if let Some(modal) = session.modal_state_mut()
-        && let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut())
-    {
-        search.insert(content);
-        list.apply_search(&search.query);
-        session.mark_dirty();
-    } else if let Some(wizard) = session.wizard_overlay_mut()
-        && let Some(search) = wizard.search.as_mut()
-    {
-        search.insert(content);
-        if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
-            step.list.apply_search(&search.query);
-        }
         session.mark_dirty();
     }
 }
@@ -337,7 +344,7 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
             }
             None
         }
-        KeyCode::Char('j') if has_control => {
+        KeyCode::Char('j') if has_control && session.input_enabled => {
             // Ctrl+J is a line feed character, insert newline for multiline input
             session.insert_char('\n');
             session.mark_dirty();

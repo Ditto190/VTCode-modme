@@ -290,6 +290,7 @@ pub struct Session {
     last_overlay_list_selection: Option<InlineListSelection>,
     last_overlay_list_was_last: bool,
     line_revision_counter: u64,
+    pub(crate) transcript_presentation_revision: u64,
     /// Track the first line that needs reflow/update to avoid O(N) scans
     first_dirty_line: Option<usize>,
     in_tool_code_fence: bool,

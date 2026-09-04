@@ -828,6 +828,7 @@ impl Session {
 
     /// Invalidate the transcript cache
     pub(crate) fn invalidate_transcript_cache(&mut self) {
+        self.transcript_presentation_revision = self.transcript_presentation_revision.wrapping_add(1);
         let had_cache = if let Some(cache) = self.transcript_cache.as_mut() {
             cache.invalidate_content();
             true

@@ -54,10 +54,6 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
     {
         viewer.insert_search_text(content);
         session.mark_dirty();
-    } else if session.core.input_enabled() {
-        session.insert_paste_text(content);
-        session.update_input_triggers();
-        session.mark_dirty();
     } else if session.history_picker_visible() {
         let history = input_history_entries(session);
         session.history_picker_state.search_query.push_str(content);
@@ -76,6 +72,14 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
         if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
             step.list.apply_search(&search.query);
         }
+        session.mark_dirty();
+    } else if session.core.input_enabled()
+        && !session.visible_transient_surface().is_some_and(|surface| {
+            matches!(surface.focus_policy(), TransientFocusPolicy::Modal | TransientFocusPolicy::CapturedInput)
+        })
+    {
+        session.insert_paste_text(content);
+        session.update_input_triggers();
         session.mark_dirty();
     }
     None
@@ -1768,6 +1772,141 @@ mod tests {
         session.core.apply_transcript_rows(8);
         session.core.apply_transcript_width(60);
         session
+    }
+
+    #[test]
+    fn paste_routes_to_list_search_after_composer_is_reenabled() {
+        use crate::tui::core_tui::app::types::ListOverlayRequest;
+        use crate::tui::core_tui::types::{InlineListItem, InlineListSearchConfig, InlineListSelection};
+
+        for searchable in [false, true] {
+            let mut session = build_session();
+            session.core.input_manager.set_content("draft".to_string());
+            session.show_transient(TransientRequest::List(ListOverlayRequest {
+                title: "Choose".to_string(),
+                lines: Vec::new(),
+                footer_hint: None,
+                items: ["alpha", "beta"]
+                    .into_iter()
+                    .map(|title| InlineListItem {
+                        title: title.to_string(),
+                        subtitle: None,
+                        badge: None,
+                        indent: 0,
+                        selection: Some(InlineListSelection::SlashCommand(title.to_string())),
+                        search_value: Some(title.to_string()),
+                    })
+                    .collect(),
+                selected: None,
+                search: searchable.then(|| InlineListSearchConfig { label: "Filter".to_string(), placeholder: None }),
+                hotkeys: Vec::new(),
+            }));
+            session.core.set_input_enabled(true);
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+
+            session.handle_event(CrosstermEvent::Paste("beta".to_string()), &sender, None);
+
+            assert_eq!(session.core.input_manager.content(), "draft");
+            assert!(receiver.try_recv().is_err());
+            let modal = session.modal_state_mut().expect("overlay remains active");
+            if searchable {
+                assert_eq!(modal.search.as_ref().expect("search").query, "beta");
+                assert_eq!(modal.list.as_ref().expect("list").visible_indices, vec![1]);
+            }
+        }
+    }
+
+    #[test]
+    fn paste_routes_to_history_search_after_composer_is_reenabled() {
+        let mut session = build_session();
+        session.core.input_manager.set_content("draft".to_string());
+        session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(session.history_picker_visible());
+        session.core.set_input_enabled(true);
+        let draft = session.core.input_manager.content().to_string();
+        let query = session.history_picker_state.search_query.clone();
+
+        assert!(handle_paste(&mut session, "beta").is_none());
+
+        assert_eq!(session.core.input_manager.content(), draft);
+        assert_eq!(session.history_picker_state.search_query, format!("{query}beta"));
+    }
+
+    #[test]
+    fn paste_respects_visible_surface_focus_policy() {
+        for surface in [
+            TransientSurface::DiffPreview,
+            TransientSurface::ToolOutputViewer,
+            TransientSurface::LocalAgents,
+            TransientSurface::SlashPalette,
+            TransientSurface::AgentPalette,
+            TransientSurface::FilePalette,
+            TransientSurface::TaskPanel,
+        ] {
+            let mut session = build_session();
+            session.core.input_manager.set_content("draft".to_string());
+            session.show_transient_surface(surface);
+            session.core.set_input_enabled(true);
+
+            assert!(handle_paste(&mut session, "beta").is_none());
+
+            let expected = match surface.focus_policy() {
+                TransientFocusPolicy::Modal | TransientFocusPolicy::CapturedInput => "draft",
+                TransientFocusPolicy::SharedInput | TransientFocusPolicy::Passive => "draftbeta",
+            };
+            assert_eq!(session.core.input_manager.content(), expected, "{surface:?}");
+        }
+    }
+
+    #[test]
+    fn paste_does_not_reach_suspended_history_search() {
+        let mut session = build_session();
+        session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(session.history_picker_visible());
+        let query = session.history_picker_state.search_query.clone();
+        session.show_transient(TransientRequest::Modal(ModalOverlayRequest {
+            title: "Notice".to_string(),
+            lines: Vec::new(),
+            secure_prompt: None,
+        }));
+        session.core.set_input_enabled(true);
+        let draft = session.core.input_manager.content().to_string();
+
+        assert!(handle_paste(&mut session, "beta").is_none());
+
+        assert_eq!(session.history_picker_state.search_query, query);
+        assert_eq!(session.core.input_manager.content(), draft);
+        assert!(session.has_active_overlay());
+    }
+
+    #[test]
+    fn paste_routes_to_viewer_only_while_search_is_active() {
+        let mut session = build_session();
+        session.core.input_manager.set_content("draft".to_string());
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: vec!["beta output".to_string()],
+            ..Default::default()
+        });
+        session.tool_output_revision = 1;
+        session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert!(session.tool_output_viewer_state().is_some());
+        session.core.set_input_enabled(true);
+
+        assert!(handle_paste(&mut session, "ignored").is_none());
+        assert_eq!(session.core.input_manager.content(), "draft");
+
+        session.tool_output_viewer_state_mut().expect("viewer").start_search();
+        assert!(handle_paste(&mut session, "beta").is_none());
+        session.tool_output_viewer_state_mut().expect("viewer").commit_search(8);
+
+        assert_eq!(session.core.input_manager.content(), "draft");
+        assert!(
+            session
+                .tool_output_viewer_state()
+                .expect("viewer")
+                .status_label()
+                .contains("search 'beta'")
+        );
     }
 
     #[test]

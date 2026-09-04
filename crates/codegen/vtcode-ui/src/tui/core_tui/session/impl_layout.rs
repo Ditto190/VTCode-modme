@@ -24,15 +24,19 @@ impl Session {
     pub(crate) fn apply_transcript_rows(&mut self, rows: u16) {
         let resolved = rows.max(1);
         if self.transcript_rows != resolved {
+            let anchor = self.transcript_scroll_anchor();
             self.transcript_rows = resolved;
             self.invalidate_scroll_metrics();
+            self.restore_transcript_scroll_anchor(anchor);
         }
     }
 
     pub(crate) fn apply_transcript_width(&mut self, width: u16) {
         if self.transcript_width != width {
+            let anchor = self.transcript_scroll_anchor();
             self.transcript_width = width;
             self.invalidate_scroll_metrics();
+            self.restore_transcript_scroll_anchor(anchor);
             // The hidden-header line is built against `transcript_width`: the
             // right-aligned mode/model summary only renders when width > 0.
             // On the first frame `transcript_width` is still 0, so the line is
@@ -53,10 +57,6 @@ impl Session {
         let header_rows = self.header_rows.max(ui::INLINE_HEADER_HEIGHT);
         let reserved = (header_rows + self.input_height).saturating_add(2);
         let available = self.view_rows.saturating_sub(reserved).max(1);
-
-        if self.transcript_rows != available {
-            self.transcript_rows = available;
-            self.invalidate_scroll_metrics();
-        }
+        self.apply_transcript_rows(available);
     }
 }

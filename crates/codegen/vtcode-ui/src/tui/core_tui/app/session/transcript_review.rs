@@ -91,6 +91,7 @@ struct CachedToolOutputBlock {
 struct ReviewRevision {
     transcript: u64,
     tool_output: u64,
+    presentation: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -134,6 +135,7 @@ impl ToolOutputViewerState {
         let revision = ReviewRevision {
             transcript: session.core.current_transcript_revision(),
             tool_output: session.tool_output_revision,
+            presentation: session.core.transcript_presentation_revision,
         };
         if self.width == width && self.height == height && self.source_revision == revision {
             self.focus_pending_target(height);
@@ -141,9 +143,10 @@ impl ToolOutputViewerState {
             return;
         }
 
-        let was_at_bottom = self.is_at_bottom(height);
+        let was_at_bottom = self.is_at_bottom(self.height);
         let width_changed = self.width != width;
-        self.refresh_messages(session, width, width_changed);
+        let presentation_changed = self.source_revision.presentation != revision.presentation;
+        self.refresh_messages(session, width, width_changed || presentation_changed);
         self.width = width;
         self.height = height;
         self.source_revision = revision;
@@ -1006,6 +1009,36 @@ mod tests {
 
     fn test_session() -> AppSession {
         AppSession::new(InlineTheme::default(), None, 24)
+    }
+
+    #[test]
+    fn theme_change_rebuilds_unchanged_capture_styles() {
+        let mut session = test_session();
+        add_block(&mut session, &["captured output"]);
+        let mut viewer = ToolOutputViewerState::open(&session, 40, 10);
+        let before = viewer.messages[0].rich_lines.clone();
+        session.handle_command(InlineCommand::SetTheme {
+            theme: InlineTheme {
+                foreground: Some(anstyle::Color::Rgb(anstyle::RgbColor(12, 34, 56))),
+                ..Default::default()
+            },
+        });
+        viewer.refresh(&session, 40, 10);
+        let fresh = ToolOutputViewerState::open(&session, 40, 10);
+        assert_ne!(before, viewer.messages[0].rich_lines);
+        assert_eq!(viewer.messages[0].rich_lines, fresh.messages[0].rich_lines);
+    }
+
+    #[test]
+    fn shrinking_viewer_keeps_bottom_follow() {
+        let mut session = test_session();
+        for _ in 0..20 {
+            add_block(&mut session, &["output"]);
+        }
+        let mut viewer = ToolOutputViewerState::open(&session, 40, 10);
+        assert!(viewer.is_at_bottom(10));
+        viewer.refresh(&session, 40, 5);
+        assert!(viewer.is_at_bottom(5));
     }
 
     fn text_segment(text: impl Into<String>) -> InlineSegment {

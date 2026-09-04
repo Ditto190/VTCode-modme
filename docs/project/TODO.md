@@ -105,12 +105,6 @@ fix broken tool call rendering
 
 ===
 
-check /config listing some time can not scroll to last items, it get stuck even though the list is longer than the screen. The harness should ensure that the scrolling behavior in the /config listing is smooth and allows users to reach the last items without getting stuck. Additionally, provide visual indicators or feedback to inform users when they have reached the end of the list or if there are more items to scroll through.
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-03 at 16.58.38.png'
-
-===
-
 fix propose plan mode markdown is not rendering correctly, it should be able to render the markdown content properly and display it in a readable format. The harness should ensure that any markdown content is parsed and rendered accurately, preserving formatting, headings, lists, and other elements. Additionally, provide clear feedback to the user if there are any issues with rendering the markdown content.
 
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-04 at 10.54.05.png'
@@ -123,71 +117,4 @@ log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/sess
 
 ===
 
-check and fix vtcode agent keep getting turn blocked. repeatedly. deep dive and fix.
-
-CRITICAL.
-
-====================================================== Warning ======================================================
-Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a successful build, test
-, lint, or compile command.
-=====================================================================================================================
-
-• The turn is blocked because verification is still pending. Inspection-only checks do not clear the verification
-gate; run cargo check --locked or the relevant cargo nextest run command, then resume the request.
-------------------------------------------------------- Info --------------------------------------------------------
-Turn blocked after repeated unverified assistant responses; verification is still pending.
-
-a non-zero exit status; the bounded output does not establish a more specific
-cause.
-Next action: Inspect the reported error and retry with corrected arguments or a narrower scope.
-
-• Ran cargo check --locked
-
-log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260904T034530Z_179873-58689
-
----
-
-small details: on "/" splash command pallate suggestion, pressing "enter" should just accept the suggestion and populate into the chat input box, instead of executing the command immediately. This allows users to review and edit the suggestion before sending it, improving usability and reducing accidental command execution. Check how "tab" key is used for suggestion selection and ensure that the behavior is consistent with user expectations. Additionally, provide visual feedback to indicate that the suggestion has been accepted into the input box, and allow users to easily modify or cancel the input before sending it.
-
----
-
-## Plan: Resume After Tool-Call Limit Grant
-
-Grant more tool calls must resume the **same Build turn**, not leave the harness blocked or leak into Duck. Session logs show a blocked turn with no final answer, then a new session that burned overlapping README searches and continued as Duck.
-
-**Steps**
-
-1. Treat overlay Cancel/Esc as deny; keep waiting on leaked Tab/CyclePrimaryAgent; re-show on Deferred instead of mapping those to deny in `limit_prompts.rs`.
-2. After a grant, retry the pending tool call with the increased budget and emit a harness grant event — do not mark `SessionLimitNotIncreased` / Blocked.
-3. After a loop-limit grant, keep tools enabled and continue the same agent; do not arm tool-free recovery.
-4. Snapshot the write-capable agent at prompt time; restore Build if Duck/Plan leaked in during the grant.
-5. Lock Tab/mode switches for overlays, Building, Recovery, and Blocked — not only transient handoff states.
-6. Persist `primary_agent` on every switch and restore it on resume; do not drop to Duck via `/new` after a live blocked handoff.
-7. Clear Blocked UI after grant; do not convert a grant-in-flight turn into `COMPLETED_TURN_NO_RESPONSE_REASON`.
-8. Persist the granted session fuse across `set_limits` / `start_turn`.
-9. Cap same-file `code_search` reuse (README churn in session 2) and tell the model to use existing outputs after a grant.
-10. Show explicit user copy: current agent, grant vs deny, and what to do next.
-
-**Relevant files**
-
-- `limit_prompts.rs` — grant vs deny
-- `overlay_prompt.rs` — overlay wait
-- `turn_loop_helpers.rs` — loop-limit resume
-- `orchestration.rs` — blocked UI, agent persist, new session
-- `mode_switch_guard.rs` — Tab lock
-- `read_guard.rs` — same-path search cap
-
-**Verification**
-
-1. Overlay noise is not a deny; genuine Deny still synthesizes.
-2. Grant retries the pending call as Build.
-3. Tab is locked while Building/Blocked/overlay-active.
-4. Archive restore keeps Build; session fuse survives the next turn.
-5. Repeat `code_search` on one file reuses or stops after a small cap.
-6. `cargo nextest run` on limit-prompt, blocked-handoff, primary-agent, read-guard, and UI Tab-lock tests.
-
-**Decisions**
-
-- Restore the pre-grant write-capable agent **and** lock Tab during grant/blocked/active turn.
-- Idle Tab after a finished turn stays user-controlled.
-- Out of scope: raising default loop/session caps; rewriting Duck’s spec.
+check and add xhigh, max effort to supported models/providers. use websearch research for the supported models/providers to determine if they support xhigh and max effort parameters. If they do, update the harness to include these parameters in the model configuration. Additionally, provide clear documentation on how to use these parameters and any limitations or considerations when using them with different models/providers. also revise the notes for each effort in the /model picker.

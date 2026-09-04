@@ -7,6 +7,74 @@ use super::helpers::*;
 use crate::tui::core_tui::session::input_manager::InputHistoryEntry;
 
 #[test]
+fn disabled_input_ignores_control_j_but_preserves_interrupt() {
+    let mut session = session_with_input("draft", 5);
+    session.handle_command(InlineCommand::SetInputEnabled(false));
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+
+    session.handle_event(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL)), &sender, None);
+
+    assert_eq!(session.input_manager.content(), "draft");
+    assert_eq!(session.cursor(), 5);
+    assert!(receiver.try_recv().is_err());
+
+    session.handle_event(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), &sender, None);
+    assert!(matches!(receiver.try_recv(), Ok(InlineEvent::Interrupt)));
+}
+
+#[test]
+fn enabled_input_control_j_still_inserts_newline() {
+    let mut session = session_with_input("draft", 5);
+
+    assert!(
+        session
+            .process_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL))
+            .is_none()
+    );
+    assert_eq!(session.input_manager.content(), "draft\n");
+}
+
+#[test]
+fn overlay_owns_paste_after_input_is_reenabled() {
+    for searchable in [false, true] {
+        let mut session = session_with_input("draft", 5);
+        session.handle_command(InlineCommand::ShowOverlay {
+            request: Box::new(OverlayRequest::List(ListOverlayRequest {
+                title: "Choose".to_string(),
+                lines: Vec::new(),
+                footer_hint: None,
+                items: ["alpha", "beta"]
+                    .into_iter()
+                    .map(|title| InlineListItem {
+                        title: title.to_string(),
+                        subtitle: None,
+                        badge: None,
+                        indent: 0,
+                        selection: Some(InlineListSelection::SlashCommand(title.to_string())),
+                        search_value: Some(title.to_string()),
+                    })
+                    .collect(),
+                selected: None,
+                search: searchable.then(|| InlineListSearchConfig { label: "Filter".to_string(), placeholder: None }),
+                hotkeys: Vec::new(),
+            })),
+        });
+        session.handle_command(InlineCommand::SetInputEnabled(true));
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+
+        session.handle_event(CrosstermEvent::Paste("beta".to_string()), &sender, None);
+
+        assert_eq!(session.input_manager.content(), "draft");
+        assert!(receiver.try_recv().is_err());
+        let modal = session.modal_state().expect("overlay remains active");
+        if searchable {
+            assert_eq!(modal.search.as_ref().expect("search").query, "beta");
+            assert_eq!(modal.list.as_ref().expect("list").visible_indices, vec![1]);
+        }
+    }
+}
+
+#[test]
 fn move_left_word_from_end_moves_to_word_start() {
     let text = "hello world";
     let mut session = session_with_input(text, text.len());

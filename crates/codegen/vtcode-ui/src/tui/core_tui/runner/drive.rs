@@ -380,7 +380,6 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
                                 ScrollAccumulator::new(runtime_options.fullscreen.scroll_speed);
                             let input_started_at = Instant::now();
                             let mut processed_terminal_events = 1;
-                            let mut saw_tick = false;
 
                             // Try to accumulate the first event as scroll (only if safe)
                             let first_coalesced = can_coalesce_scroll
@@ -398,13 +397,20 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
                             }
 
                             // Process all other pending events, coalescing scroll events when safe
-                            while processed_terminal_events < MAX_TERMINAL_EVENTS_PER_TURN {
+                            while processed_terminal_events < MAX_TERMINAL_EVENTS_PER_TURN
+                                && !session.should_exit()
+                            {
                                 let Ok(next_event) = inputs.try_recv() else {
                                     break;
                                 };
                                 processed_terminal_events += 1;
                                 match next_event {
                                     TerminalEvent::Crossterm(evt) => {
+                                        if should_count_as_user_activity(&evt)
+                                            && let Some(counter) = runtime_options.input_activity_counter.as_ref()
+                                        {
+                                            counter.fetch_add(1, Ordering::Relaxed);
+                                        }
                                         handle_focus_change_event(
                                             &evt,
                                             runtime_options.focus_callback.as_ref(),
@@ -433,7 +439,11 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
                                         }
                                     }
                                     TerminalEvent::Tick => {
-                                        saw_tick = true;
+                                        scroll_accum.apply(session);
+                                        scroll_accum = ScrollAccumulator::new(
+                                            runtime_options.fullscreen.scroll_speed,
+                                        );
+                                        session.handle_tick();
                                     }
                                 }
                             }
@@ -441,9 +451,6 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
                             // Apply any remaining accumulated scroll events
                             if scroll_accum.has_scroll() {
                                 scroll_accum.apply(session);
-                            }
-                            if saw_tick {
-                                session.handle_tick();
                             }
 
                             render_if_dirty(
@@ -458,6 +465,14 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
                     }
                     Some(TerminalEvent::Tick) => {
                         session.handle_tick();
+                        render_if_dirty(
+                            terminal,
+                            session,
+                            &event_channels,
+                            &mut cursor_steady,
+                            &mut mouse_pointer,
+                            None,
+                        )?;
                     }
                     None => {
                         if commands.is_closed() {
@@ -494,4 +509,34 @@ pub(super) async fn drive_terminal<B: Backend, S: TuiSessionDriver>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::core_tui::session::Session;
+    use crate::tui::core_tui::types::InlineTheme;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn paused_redraw_preserves_dirty_state() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut session = Session::new(InlineTheme::default(), None, 24);
+        let (_listener, channels) = EventListener::new();
+        channels.pause();
+        session.mark_dirty();
+        render_if_dirty(&mut terminal, &mut session, &channels, &mut false, &mut MousePointerShape::Default, None)
+            .unwrap();
+        assert!(session.take_redraw());
+    }
+
+    #[test]
+    fn activity_counts_input_but_not_focus_or_resize() {
+        let page_up = Event::Key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        assert!(should_count_as_user_activity(&page_up));
+        assert!(should_count_as_user_activity(&Event::Paste("text".to_owned())));
+        assert!(!should_count_as_user_activity(&Event::FocusGained));
+        assert!(!should_count_as_user_activity(&Event::Resize(80, 24)));
+    }
 }
