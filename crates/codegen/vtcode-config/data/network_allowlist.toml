@@ -224,6 +224,13 @@ protocol = "http"
 notes    = "Ollama REST API"
 
 [[ai_providers.local]]
+name     = "llmman"
+host     = "localhost"
+port     = 17434
+protocol = "http"
+notes    = "Ollama-compatible REST API served by llmman (https://github.com/llmmanorg/llmman)"
+
+[[ai_providers.local]]
 name     = "LlamaCpp"
 host     = "localhost"
 port     = 8080
