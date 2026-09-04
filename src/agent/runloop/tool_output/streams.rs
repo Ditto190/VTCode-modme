@@ -207,24 +207,40 @@ fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option
     if out.is_empty() { None } else { Some(out) }
 }
 
-fn format_diff_line_with_gutter_and_syntax(
+fn format_diff_line_with_gutter_and_syntax<'a>(
     line: &DiffDisplayLine,
     base_style: Option<AnsiStyle>,
     language_hint: Option<&str>,
     line_number_width: usize,
-) -> String {
+    out: &'a mut String,
+) -> &'a str {
     use std::fmt::Write as _;
     let (marker, mut content) = match line.kind {
         DiffDisplayKind::Addition => ('+', line.text.as_str()),
         DiffDisplayKind::Deletion => ('-', line.text.as_str()),
         DiffDisplayKind::Context => (' ', line.text.as_str()),
         DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => {
-            return line.numbered_text(line_number_width);
+            out.push_str(&line.numbered_text(line_number_width));
+            return out;
         }
     };
     if content.is_empty() {
         content = " ";
     }
+
+    // Add/delete content is truncated to a single line at MAX_LINE_LENGTH so
+    // these rows never wrap or get padded into continuation rows.
+    let content_owned;
+    let content: &str = if !matches!(marker, ' ') {
+        if display_width(content) > MAX_LINE_LENGTH {
+            content_owned = truncate_with_ellipsis(content, MAX_LINE_LENGTH, "...");
+            &content_owned
+        } else {
+            content
+        }
+    } else {
+        content
+    };
 
     let marker_text = match marker {
         '+' => "+",
@@ -257,7 +273,8 @@ fn format_diff_line_with_gutter_and_syntax(
     };
     let reset = Reset;
     let raw_line = line.numbered_text(line_number_width);
-    let mut out = String::with_capacity(raw_line.len() + 32);
+    out.clear();
+    out.reserve(raw_line.len() + 32);
     // Gutter shape: `marker + number + │ + content`. The `│` keeps markdown
     // bullets (`- foo`) distinct from the diff marker (`+`/`-`).
     // Use write! to render ANSI escape codes directly without intermediate String allocations
@@ -364,19 +381,27 @@ pub(crate) fn render_diff_content_block(
         }
     }
 
-    let mut display_buffer = String::with_capacity(256);
-    let mut current_language_hint: Option<String> = None;
     let line_number_width = diff_display_line_number_width(lines_slice);
     let color_enabled = renderer.capabilities().supports_color();
+    let first_diff_line = lines_slice.iter().find(|l| l.is_diff());
+    let current_language_hint: Option<String> = first_diff_line.and_then(|first| {
+        parse_diff_git_path(&first.text)
+            .or_else(|| parse_diff_marker_path(&first.text))
+            .and_then(|path| language_hint_from_path(&path))
+    });
+    let prose = current_language_hint
+        .as_deref()
+        .map(|hint| is_prose_language_hint(Some(hint)))
+        .unwrap_or_default();
+    let mut formatted_buffer = String::with_capacity(256);
+    let mut display_buffer = String::with_capacity(256);
+
     for line in lines_slice {
+        display_buffer.clear();
         let raw_line = line.numbered_text(line_number_width);
         if raw_line.is_empty() {
             continue;
         }
-        if let Some(path) = parse_diff_git_path(&line.text).or_else(|| parse_diff_marker_path(&line.text)) {
-            current_language_hint = language_hint_from_path(&path);
-        }
-        display_buffer.clear();
         let was_truncated = display_width(&raw_line) > MAX_LINE_LENGTH;
         if was_truncated {
             display_buffer.push_str(&truncate_with_ellipsis(&raw_line, MAX_LINE_LENGTH, "..."));
@@ -400,22 +425,22 @@ pub(crate) fn render_diff_content_block(
         }
 
         let line_style = select_line_style(tool_name, &display_buffer, git_styles, ls_styles);
-        // Only allocate a new String when we actually need to render with syntax highlighting.
-        // Avoid the unconditional clone when color is disabled or line was truncated.
-        let rendered = if color_enabled && !was_truncated {
+        let rendered_owned = if color_enabled && !was_truncated && !prose {
             Some(format_diff_line_with_gutter_and_syntax(
                 line,
                 line_style,
                 current_language_hint.as_deref(),
                 line_number_width,
+                &mut formatted_buffer,
             ))
         } else {
             None
         };
+
         render_preview_line(
             renderer,
             &display_buffer,
-            rendered.as_deref().filter(|r| *r != display_buffer.as_str()),
+            rendered_owned.filter(|r| *r != display_buffer.as_str()),
             None,
             false,
             fallback_style,
@@ -688,6 +713,7 @@ mod tests {
     #[test]
     fn format_diff_line_styles_gutter_for_additions() {
         let style = anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::Green)));
+        let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
             &DiffDisplayLine {
                 kind: DiffDisplayKind::Addition,
@@ -697,15 +723,17 @@ mod tests {
             Some(style),
             None,
             5,
+            &mut buf,
         );
         assert!(rendered.contains("\u{1b}["));
-        let stripped = strip_ansi_codes(&rendered);
+        let stripped = strip_ansi_codes(rendered);
         assert!(stripped.contains("+  1377 │ "));
         assert!(stripped.contains("let x = 1;"));
     }
 
     #[test]
     fn format_diff_line_preserves_code_indentation() {
+        let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
             &DiffDisplayLine {
                 kind: DiffDisplayKind::Addition,
@@ -715,13 +743,15 @@ mod tests {
             None,
             None,
             5,
+            &mut buf,
         );
-        let stripped = strip_ansi_codes(&rendered);
+        let stripped = strip_ansi_codes(rendered);
         assert!(stripped.contains("+  1384 │     line,"));
     }
 
     #[test]
     fn format_diff_line_keeps_blank_line_spacing() {
+        let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
             &DiffDisplayLine {
                 kind: DiffDisplayKind::Addition,
@@ -731,13 +761,15 @@ mod tests {
             None,
             None,
             5,
+            &mut buf,
         );
-        let stripped = strip_ansi_codes(&rendered);
-        assert_eq!(stripped, "+    42 │   ");
+        let stripped = strip_ansi_codes(rendered);
+        assert_eq!(stripped, "+    42 │  ");
     }
 
     #[test]
     fn format_diff_line_keeps_markdown_bullet_distinct_from_marker() {
+        let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
             &DiffDisplayLine {
                 kind: DiffDisplayKind::Addition,
@@ -747,9 +779,35 @@ mod tests {
             None,
             Some("md"),
             5,
+            &mut buf,
         );
-        let stripped = strip_ansi_codes(&rendered);
-        assert_eq!(stripped, "+   53 │ - **Agent-first by design**: prose");
+        let stripped = strip_ansi_codes(rendered);
+        assert_eq!(stripped, "+    53 │ - **Agent-first by design**: prose");
+    }
+
+    #[test]
+    fn format_diff_line_truncates_long_addition() {
+        let mut buf = String::new();
+        let long_text = "y".repeat(MAX_LINE_LENGTH * 2);
+        // Gutter overhead: marker(1) + space(1) + 5 number columns + " │ " (3) = 10.
+        let gutter_width = 10;
+        let rendered = format_diff_line_with_gutter_and_syntax(
+            &DiffDisplayLine {
+                kind: DiffDisplayKind::Addition,
+                line_number: Some(9),
+                text: long_text,
+            },
+            None,
+            None,
+            5,
+            &mut buf,
+        );
+        let stripped = strip_ansi_codes(rendered);
+        assert!(
+            vtcode_commons::preview::display_width(&stripped) <= MAX_LINE_LENGTH + gutter_width,
+            "rendered diff line must not exceed MAX_LINE_LENGTH + gutter width"
+        );
+        assert!(stripped.contains("..."));
     }
 
     #[test]

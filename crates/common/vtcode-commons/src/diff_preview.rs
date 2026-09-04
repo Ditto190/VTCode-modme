@@ -33,7 +33,20 @@ pub struct DiffDisplayLine {
     pub text: String,
 }
 
+impl DiffDisplayKind {
+    /// Whether this kind carries diff body content (context, addition, or
+    /// deletion) rather than metadata or a hunk header.
+    pub fn is_diff(self) -> bool {
+        matches!(self, Self::Context | Self::Addition | Self::Deletion)
+    }
+}
+
 impl DiffDisplayLine {
+    /// Whether this line carries diff content, without re-parsing its text.
+    pub fn is_diff(&self) -> bool {
+        self.kind.is_diff()
+    }
+
     /// Render with an unambiguous gutter: `marker + number + │ + content`.
     ///
     /// The `│` separator keeps markdown bullets (`- foo`) and list markers
@@ -158,6 +171,17 @@ pub fn display_lines_from_unified_diff(diff_content: &str) -> Vec<DiffDisplayLin
             continue;
         }
 
+        if let Some(omitted) = parse_omitted_line_count(line) {
+            old_line_no = old_line_no.saturating_add(omitted);
+            new_line_no = new_line_no.saturating_add(omitted);
+            lines.push(DiffDisplayLine {
+                kind: DiffDisplayKind::Metadata,
+                line_number: None,
+                text: line.to_string(),
+            });
+            continue;
+        }
+
         lines.push(DiffDisplayLine {
             kind: DiffDisplayKind::Metadata,
             line_number: None,
@@ -171,16 +195,39 @@ pub fn display_lines_from_unified_diff(diff_content: &str) -> Vec<DiffDisplayLin
 pub fn diff_display_line_number_width(lines: &[DiffDisplayLine]) -> usize {
     let max_digits = lines
         .iter()
-        .filter_map(|line| line.line_number.map(|line_no| line_no.to_string().len()))
+        .filter_map(|line| line.line_number)
+        .map(digit_count)
         .max()
         .unwrap_or(4);
     max_digits.clamp(5, 6)
+}
+
+fn digit_count(mut value: u32) -> usize {
+    let mut digits = 1;
+    while value >= 10 {
+        value /= 10;
+        digits += 1;
+    }
+    digits
 }
 
 pub fn format_numbered_unified_diff(diff_content: &str) -> Vec<String> {
     let display_lines = display_lines_from_unified_diff(diff_content);
     let width = diff_display_line_number_width(&display_lines);
     display_lines.into_iter().map(|line| line.numbered_text(width)).collect()
+}
+
+/// Parse the number of omitted lines from a condensation marker such as
+/// `"... 12 lines omitted ..."`.
+fn parse_omitted_line_count(line: &str) -> Option<u32> {
+    let trimmed = line.trim();
+    let after = trimmed.strip_prefix("...")?;
+    let after = after.trim_start();
+    let digits_end = after.find(|ch: char| !ch.is_ascii_digit())?;
+    if digits_end == 0 {
+        return None;
+    }
+    after[..digits_end].parse().ok()
 }
 
 fn display_line_from_diff_line(line: &crate::diff::DiffLine) -> DiffDisplayLine {
@@ -335,5 +382,75 @@ diff --git a/file.txt b/file.txt
     fn preserves_plain_text_when_not_diff() {
         let lines = format_numbered_unified_diff("plain text output");
         assert_eq!(lines, vec!["plain text output".to_string()]);
+    }
+
+    #[test]
+    fn is_diff_discriminates_content_lines() {
+        let diff = "\
+diff --git a/file.txt b/file.txt
+@@ -1 +1 @@
+-old
++new
+ context
+";
+        let lines = display_lines_from_unified_diff(diff);
+        assert_eq!(lines[0].kind, DiffDisplayKind::Metadata);
+        assert!(!lines[0].is_diff());
+        assert_eq!(lines[1].kind, DiffDisplayKind::HunkHeader);
+        assert!(!lines[1].is_diff());
+        assert!(lines[2].is_diff());
+        assert!(lines[3].is_diff());
+        assert!(lines[4].is_diff());
+    }
+
+    #[test]
+    fn omitted_marker_advances_both_counters() {
+        let diff = "\
+@@ -1,5 +1,5 @@
+-one
+... 3 lines omitted ...
+ old tail
+";
+
+        let lines = display_lines_from_unified_diff(diff);
+        assert_eq!(lines[1].kind, DiffDisplayKind::Deletion);
+        assert_eq!(lines[1].line_number, Some(1));
+        assert_eq!(lines[2].kind, DiffDisplayKind::Metadata);
+        assert_eq!(lines[2].line_number, None);
+        assert_eq!(lines[3].kind, DiffDisplayKind::Context);
+        assert_eq!(lines[3].line_number, Some(4));
+    }
+
+    #[test]
+    fn diff_display_line_number_width_clamps_to_bounds() {
+        let small = vec![DiffDisplayLine {
+            kind: DiffDisplayKind::Context,
+            line_number: Some(1),
+            text: "text".to_string(),
+        }];
+        assert_eq!(diff_display_line_number_width(&small), 5);
+
+        let large = vec![DiffDisplayLine {
+            kind: DiffDisplayKind::Context,
+            line_number: Some(100_000),
+            text: "text".to_string(),
+        }];
+        assert_eq!(diff_display_line_number_width(&large), 6);
+    }
+
+    #[test]
+    fn metadata_lines_stay_metadata_after_hunk() {
+        let diff = "\
+@@ -1 +1 @@
+-old
+\\ No newline at end of file
++new
+";
+
+        let lines = display_lines_from_unified_diff(diff);
+        assert_eq!(lines[2].kind, DiffDisplayKind::Metadata);
+        assert_eq!(lines[2].line_number, None);
+        assert_eq!(lines[3].kind, DiffDisplayKind::Addition);
+        assert_eq!(lines[3].line_number, Some(1));
     }
 }
