@@ -108,9 +108,25 @@ fn render_confirmation_prompt(handle: &InlineHandle, plan: &PlanContent) {
     // in the scrollable transcript so users can review every section before
     // choosing an execution mode. The overlay's `lines` field is intentionally
     // bounded by `render_plan_summary` and must not be used for this content.
+    // The harness normalizes plan markdown here so headings, lists, and other
+    // formatting render accurately instead of leaking raw `<proposed_plan>`
+    // wrappers or collapsing into a wall of text.
     if !plan.raw_content.trim().is_empty() {
+        let (display_markdown, warnings) =
+            crate::agent::runloop::unified::plan_blocks::prepare_plan_markdown_for_display(&plan.raw_content);
         append_message(handle, InlineMessageKind::Info, "Implementation plan (full):");
-        append_message(handle, InlineMessageKind::Agent, plan.raw_content.clone());
+        if display_markdown.trim().is_empty() {
+            append_message(
+                handle,
+                InlineMessageKind::Warning,
+                "Plan content could not be rendered (empty after cleanup). See the plan file for details.",
+            );
+        } else {
+            append_message(handle, InlineMessageKind::Agent, display_markdown);
+        }
+        for warning in warnings {
+            append_message(handle, InlineMessageKind::Warning, warning);
+        }
     }
 
     if let Some(path) = plan.file_path.as_deref()

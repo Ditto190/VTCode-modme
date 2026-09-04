@@ -94,7 +94,11 @@ pub(crate) fn check_read_family_cap(
     if streak < cap {
         return ReadFamilyCapDecision::BelowCap;
     }
-    let target = read_family_target(&family_key);
+    let target = if canonical_tool_name == tool_names::CODE_SEARCH {
+        normalised_code_search_path(effective_args).unwrap_or_else(|| "workspace".to_string())
+    } else {
+        read_family_target(&family_key)
+    };
     let block_reason = format!(
         "Repeated read-only exploration of '{target}' hit the per-turn family cap ({cap}). Scheduling a final recovery pass without more tools."
     );
@@ -112,6 +116,8 @@ fn repeated_file_read_family_key(canonical_tool_name: &str, args: &Value) -> Opt
 
     match canonical_tool_name {
         tool_names::READ_FILE | tool_names::UNIFIED_FILE => low_signal_family_key(canonical_tool_name, args),
+        tool_names::CODE_SEARCH => vtcode_core::tools::normalised_code_search_loop_identity(args)
+            .map(|identity| format!("code_search::{identity}")),
         tool_names::UNIFIED_EXEC | tool_names::EXEC_COMMAND | "command_session" => {
             if let Some(exec_read) = parse_simple_exec_read_target(args) {
                 return Some(format!("unified_exec::read::{}{}", exec_read.path, exec_read.slice_suffix));
@@ -197,7 +203,23 @@ fn repeated_read_path(canonical_tool_name: &str, effective_args: &Value) -> Opti
         return extract_read_path(effective_args);
     }
 
+    if canonical_tool_name == tool_names::CODE_SEARCH {
+        // A search without an explicit path is scoped to the workspace root;
+        // count that scope too so query churn cannot evade the path cap.
+        return normalised_code_search_path(effective_args);
+    }
+
     None
+}
+
+fn normalised_code_search_path(effective_args: &Value) -> Option<String> {
+    let path = effective_args
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".");
+    Some(vtcode_core::tools::normalised_code_search_path(path))
 }
 
 /// Build the error content for a repeated file read family guard trip.
@@ -487,6 +509,56 @@ mod tests {
         let args = serde_json::json!({});
         let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);
         assert_eq!(key, None);
+    }
+
+    #[test]
+    fn repeated_file_read_family_key_tracks_code_search_identity() {
+        let args = serde_json::json!({"query": "HarnessTurnState", "path": "README.md"});
+        let key = repeated_file_read_family_key(tool_names::CODE_SEARCH, &args)
+            .expect("valid code_search should have a loop identity");
+        assert!(key.starts_with("code_search::"));
+        assert!(key.contains("HarnessTurnState"));
+    }
+
+    #[test]
+    fn repeated_read_path_tracks_code_search_scope_and_workspace_default() {
+        assert_eq!(
+            repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn", "path": "README.md"})),
+            Some("README.md".to_string())
+        );
+        assert_eq!(
+            repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn"})),
+            Some(".".to_string())
+        );
+        assert_eq!(
+            repeated_read_path(
+                tool_names::CODE_SEARCH,
+                &serde_json::json!({"query": "fn", "path": "./docs/../README.md"})
+            ),
+            Some("README.md".to_string())
+        );
+        assert_eq!(
+            repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn", "path": "../README.md"})),
+            Some("../README.md".to_string())
+        );
+    }
+
+    #[test]
+    fn code_search_family_cap_reports_path_not_serialized_identity() {
+        let args = serde_json::json!({"query": "a very long query", "path": "./docs/../README.md"});
+        let decision = check_read_family_cap(
+            tool_names::CODE_SEARCH,
+            &args,
+            MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+        );
+
+        let ReadFamilyCapDecision::Tripped { target, block_reason, .. } = decision else {
+            panic!("expected code_search family cap to trip");
+        };
+        assert_eq!(target, "README.md");
+        assert!(block_reason.contains("'README.md'"));
+        assert!(!block_reason.contains("a very long query"));
     }
 
     #[test]

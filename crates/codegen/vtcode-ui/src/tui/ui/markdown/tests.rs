@@ -130,6 +130,58 @@ fn test_markdown_unordered_list_bullets() {
 }
 
 #[test]
+fn test_propose_plan_wrappers_are_stripped_and_bullets_normalized() {
+    let markdown = "<proposed_plan>\n## Summary\nFix scrolling.\n\n• Down reaches the final item.\n</proposed_plan>";
+    let lines = render_markdown(markdown);
+    let output: String = lines
+        .iter()
+        .map(|line| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(!output.contains("<proposed_plan>"), "plan wrappers must not leak: {output}");
+    assert!(!output.contains("</proposed_plan>"), "plan wrappers must not leak: {output}");
+    assert!(output.contains("Fix scrolling."), "headings/body must survive: {output}");
+    assert!(output.contains("•"), "bullets must render as lists: {output}");
+}
+
+#[test]
+fn test_legacy_plan_wrapper_is_stripped() {
+    let markdown = "<plan>\n- Step 1\n</plan>";
+    let lines = render_markdown(markdown);
+    let output: String = lines
+        .iter()
+        .map(|line| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!output.contains("<plan>"), "legacy plan tags must not leak: {output}");
+    assert!(output.contains("Step 1"), "plan body must survive: {output}");
+}
+
+#[test]
+fn test_code_block_content_is_not_rewritten_by_plan_cleanup() {
+    let markdown = "```text\n• literal <plan>\n```";
+    let lines = render_markdown(markdown);
+    let output: String = lines
+        .iter()
+        .map(|line| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(output.contains("• literal <plan>"), "code block content must remain lossless: {output}");
+}
+
+#[test]
+fn test_inline_code_content_is_not_rewritten_by_plan_cleanup() {
+    let markdown = "Use é `<plan>` or `<proposed_plan>` as wrapper names.";
+    let lines = render_markdown(markdown);
+    let output = lines_to_text(&lines).join("\n");
+
+    assert!(output.contains("<plan>"), "inline plan tag must remain lossless: {output}");
+    assert!(output.contains("<proposed_plan>"), "inline plan tag must remain lossless: {output}");
+}
+
+#[test]
 fn test_markdown_table_box_drawing() {
     let markdown = r#"
 | Header 1 | Header 2 |

@@ -158,6 +158,14 @@ impl ActivePrimaryAgentState {
         &self.active
     }
 
+    /// Restore a previously captured active-agent snapshot. Runloop prompt
+    /// boundaries use this to keep a write-capable Build handoff intact when
+    /// unrelated queued UI input attempts to switch modes mid-turn.
+    pub fn restore_snapshot(&mut self, snapshot: ActivePrimaryAgent) -> &ActivePrimaryAgent {
+        self.active = snapshot;
+        &self.active
+    }
+
     pub fn select_from_discovery(
         &mut self,
         discovered: &DiscoveredSubagents,
@@ -471,6 +479,20 @@ mod tests {
 
         assert_eq!(error, PrimaryAgentResolutionError::UnknownAgent { requested: "missing".to_string() });
         assert_eq!(state.active(), &original);
+    }
+
+    #[test]
+    fn restore_snapshot_returns_to_write_capable_build_agent() {
+        let mut state = ActivePrimaryAgentState::default();
+        let build_snapshot = state.active().clone();
+        state
+            .select_from_specs(&[test_spec("duck")], "duck")
+            .expect("select leaked agent");
+        assert_eq!(state.active().identity.name, "duck");
+
+        state.restore_snapshot(build_snapshot);
+
+        assert_eq!(state.active().identity.name, "build");
     }
 
     #[test]

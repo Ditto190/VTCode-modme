@@ -299,6 +299,15 @@ pub(super) fn flush_budget_synthesis_directives(ctx: &mut TurnProcessingContext<
     }
 }
 
+/// Push model-facing guidance after a user grants more session tool calls.
+/// This is deliberately flushed after the tool batch, alongside the existing
+/// budget directives, so provider message ordering remains valid.
+pub(super) fn flush_session_limit_grant_directive(ctx: &mut TurnProcessingContext<'_>) {
+    if ctx.harness_state.take_session_limit_grant_directive_pending() {
+        ctx.push_system_message(crate::agent::runloop::unified::run_loop_context::SESSION_LIMIT_GRANT_DIRECTIVE);
+    }
+}
+
 pub(super) fn apply_reused_read_only_loop_metadata(obj: &mut serde_json::Map<String, serde_json::Value>) {
     // Keep output/content/stdout/stderr intact — stripping them was causing
     // false loop detection to leave the model with no data (issue #680). The
@@ -399,6 +408,9 @@ async fn run_safety_validation_loop(
         canonical_tool_name,
         effective_args,
         invocation_id,
+        Some(ctx.harness_state),
+        ctx.harness_emitter,
+        Some(ctx.active_primary_agent.active().name()),
     )
     .await
     {
@@ -509,6 +521,7 @@ pub(crate) async fn handle_single_tool_call<'a, 'b, 'tool>(
 ) -> Result<Option<TurnHandlerOutcome>> {
     let outcome = handle_tool_call_inner(t_ctx, tool_call_id, tool_name, &args_val).await?;
     flush_budget_synthesis_directives(t_ctx.ctx);
+    flush_session_limit_grant_directive(t_ctx.ctx);
     flush_blocked_tool_recovery(t_ctx.ctx);
     Ok(outcome)
 }

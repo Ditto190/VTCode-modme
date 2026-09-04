@@ -27,4 +27,4 @@
   explanations use the existing `ReasoningItem` with stage `"diagnosis"`; do not add a parallel event variant.
 - `HarnessEventItem` uses `HarnessEventKind` enum — adding variants requires schema version bump.
 - Schema `0.12.0` adds blocked-handoff resolution metadata; keep legacy payloads readable and ATIF output stable.
-- Schema `0.13.0` adds `turn.blocked` plus `TurnBlocked`/`BlockedRecoveryStarted`/`BlockedRecoveryFinished` harness kinds; `turn.blocked` is emitted alongside `turn.failed` with fuse counters for UI subscribers.
+- Schema `0.14.0` adds `SessionToolLimitIncreased` and `ToolLoopLimitIncreased` harness kinds for same-turn limit grants; schema `0.13.0` added `turn.blocked` plus `TurnBlocked`/`BlockedRecoveryStarted`/`BlockedRecoveryFinished`, emitted alongside `turn.failed` with fuse counters for UI subscribers.

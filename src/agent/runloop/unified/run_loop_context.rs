@@ -97,6 +97,10 @@ pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 /// current-session tool-output viewer; this only bounds the diagnostic surface
 /// seen by a model during a recovery-heavy turn.
 pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize = 32 * 1024;
+/// Model-facing guidance emitted after a user increases the per-turn tool
+/// budget. Keep this shared by the normal and out-of-band provider paths so a
+/// grant has the same continuation semantics regardless of transport.
+pub(crate) const SESSION_LIMIT_GRANT_DIRECTIVE: &str = "Session tool-call limit increased by the user. Continue this same turn with the current agent, retry the pending call, and reuse existing tool outputs instead of repeating exploration.";
 const MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES: usize = 16 * 1024;
 const TOOL_PREVIEW_METADATA_MAX_DEPTH: usize = 8;
 
@@ -416,6 +420,11 @@ pub(crate) struct HarnessTurnState {
     /// exhaustion hard-broke the turn as `Blocked` with no synthesis pass, so
     /// plan mode never produced a plan (checkpoint turn_647 follow-up).
     pub tool_budget_directive_pending: bool,
+    /// Set when a user grants additional session tool-call headroom. The
+    /// corresponding model-facing directive is flushed after the current tool
+    /// batch so it never splits an assistant tool-call/result sequence.
+    session_limit_grant_directive_pending: bool,
+    session_limit_granted: bool,
     /// Model-facing prompt-injection warning queued while a tool batch is
     /// executing. It is flushed after every batch result so it cannot split
     /// an assistant tool-call/result sequence on the provider wire.
@@ -543,6 +552,8 @@ impl HarnessTurnState {
             tool_budget_rejection_pending: false,
             wall_clock_directive_pending: false,
             tool_budget_directive_pending: false,
+            session_limit_grant_directive_pending: false,
+            session_limit_granted: false,
             pending_auto_permission_probe_warning: None,
             recovery_reason: None,
             recovery_phase: RecoveryPhase::Inactive,
@@ -811,6 +822,22 @@ impl HarnessTurnState {
     /// fired). Mirrors `take_wall_clock_directive_pending`.
     pub(crate) fn take_tool_budget_directive_pending(&mut self) -> bool {
         std::mem::take(&mut self.tool_budget_directive_pending)
+    }
+
+    /// Record a user-approved session limit increase for the current turn.
+    pub(crate) fn record_session_limit_grant(&mut self) {
+        self.session_limit_granted = true;
+        self.session_limit_grant_directive_pending = true;
+    }
+
+    pub(crate) fn has_session_limit_grant(&self) -> bool {
+        self.session_limit_granted
+    }
+
+    /// Consume the pending model-facing session-limit guidance after the tool
+    /// batch has appended all of its responses.
+    pub(crate) fn take_session_limit_grant_directive_pending(&mut self) -> bool {
+        std::mem::take(&mut self.session_limit_grant_directive_pending)
     }
 
     /// Record a wall-clock-budget rejection for the current tool call.
@@ -2271,6 +2298,21 @@ mod tests {
 
         state.reset_file_read_path_counts();
         assert_eq!(state.record_file_read_path_call("src/lib.rs".to_string()), 1);
+    }
+
+    #[test]
+    fn session_limit_grant_is_recorded_once_and_exposed_for_cleanup() {
+        let mut state =
+            HarnessTurnState::new(TurnRunId("run-limit".to_string()), TurnId("turn-limit".to_string()), 20, 600, 3);
+
+        assert!(!state.has_session_limit_grant());
+        assert!(!state.take_session_limit_grant_directive_pending());
+
+        state.record_session_limit_grant();
+
+        assert!(state.has_session_limit_grant());
+        assert!(state.take_session_limit_grant_directive_pending());
+        assert!(!state.take_session_limit_grant_directive_pending());
     }
 
     #[test]

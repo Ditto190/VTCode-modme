@@ -1,12 +1,15 @@
 use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    Notify,
+    mpsc::{UnboundedReceiver, UnboundedSender},
+};
 use unicode_width::UnicodeWidthStr;
 use vtcode_commons::ui_protocol::{CompactActivityMetadata, ToolOutputId};
 
@@ -23,6 +26,35 @@ use crate::tui::core_tui::types::{
 };
 
 const MAX_DEFERRED_EVENTS: usize = 32;
+
+/// Shared state and wake-up signal for deferred bridge input.
+///
+/// The UI can close a captured-input surface without emitting an inline event
+/// (for example, Esc on the local-agents drawer). A boolean alone cannot wake
+/// an already waiting [`InlineSession::next_event`], so the state carries a
+/// notification alongside the atomic flag.
+#[derive(Default)]
+pub(crate) struct TransientActivitySignal {
+    active: AtomicBool,
+    changed: Notify,
+}
+
+impl TransientActivitySignal {
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_active(&self, active: bool) {
+        let previous = self.active.swap(active, Ordering::AcqRel);
+        if previous != active {
+            self.changed.notify_one();
+        }
+    }
+
+    async fn wait_for_change(&self) {
+        self.changed.notified().await;
+    }
+}
 
 /// A user prompt from a previous session archive, used to populate the history picker.
 #[derive(Debug, Clone)]
@@ -255,6 +287,12 @@ pub struct InlineHandle {
     pub(crate) sender: UnboundedSender<InlineCommand>,
     message_layout: Arc<InlineLayoutState>,
     deferred_events: Arc<Mutex<VecDeque<InlineEvent>>>,
+    transient_activity: Arc<TransientActivitySignal>,
+    /// Whether the app session owns the authoritative transient stack. A
+    /// standalone handle has no stack to resync after a close, so it updates
+    /// the signal eagerly; the UI-owned handle waits for AppSession to expose
+    /// the next visible surface before releasing input ownership.
+    ui_owned_transient_activity: bool,
     next_tool_output_id: Arc<AtomicU64>,
 }
 
@@ -264,10 +302,27 @@ impl InlineHandle {
     }
 
     pub(crate) fn new(sender: UnboundedSender<InlineCommand>) -> Self {
+        Self::new_with_transient_signal_and_ownership(sender, Arc::new(TransientActivitySignal::default()), false)
+    }
+
+    pub(crate) fn new_with_transient_signal(
+        sender: UnboundedSender<InlineCommand>,
+        transient_activity: Arc<TransientActivitySignal>,
+    ) -> Self {
+        Self::new_with_transient_signal_and_ownership(sender, transient_activity, true)
+    }
+
+    fn new_with_transient_signal_and_ownership(
+        sender: UnboundedSender<InlineCommand>,
+        transient_activity: Arc<TransientActivitySignal>,
+        ui_owned_transient_activity: bool,
+    ) -> Self {
         Self {
             sender,
             message_layout: Arc::new(InlineLayoutState::default()),
             deferred_events: Arc::new(Mutex::new(VecDeque::new())),
+            transient_activity,
+            ui_owned_transient_activity,
             next_tool_output_id: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -291,6 +346,14 @@ impl InlineHandle {
 
     pub fn has_deferred_event(&self) -> bool {
         self.deferred_events.lock().is_ok_and(|events| !events.is_empty())
+    }
+
+    fn transient_active(&self) -> bool {
+        self.transient_activity.is_active()
+    }
+
+    async fn wait_for_transient_activity_change(&self) {
+        self.transient_activity.wait_for_change().await;
     }
 
     fn send_command(&self, command: InlineCommand) {
@@ -506,6 +569,18 @@ impl InlineHandle {
     }
 
     pub fn show_transient(&self, request: TransientRequest) {
+        if let Some(active) = transient_input_state(&request) {
+            // Eagerly acquire ownership so bridge input cannot overtake the
+            // queued UI command. A UI-owned close is released by AppSession,
+            // which can account for any lower captured surface on its stack.
+            if self.sender.is_closed() && self.ui_owned_transient_activity {
+                // A production UI that has already torn down cannot process
+                // this request, so do not strand deferred input as active.
+                self.transient_activity.set_active(false);
+            } else if active || !self.ui_owned_transient_activity {
+                self.transient_activity.set_active(active);
+            }
+        }
         self.send_command(InlineCommand::ShowTransient { request: Box::new(request) });
     }
 
@@ -591,6 +666,12 @@ impl InlineHandle {
     }
 
     pub fn close_transient(&self) {
+        // AppSession synchronizes the shared signal from its nested transient
+        // stack. Clearing eagerly here would briefly release deferred bridge
+        // input while a lower captured-input surface remains visible.
+        if !self.ui_owned_transient_activity || self.sender.is_closed() {
+            self.transient_activity.set_active(false);
+        }
         self.send_command(InlineCommand::CloseTransient);
     }
 
@@ -611,6 +692,25 @@ impl InlineHandle {
     }
 }
 
+/// Return the deferred-input state for requests that own or release input.
+/// Passive updates and palette preloads leave the current state unchanged.
+fn transient_input_state(request: &TransientRequest) -> Option<bool> {
+    match request {
+        TransientRequest::Modal(_)
+        | TransientRequest::List(_)
+        | TransientRequest::Wizard(_)
+        | TransientRequest::Diff(_)
+        | TransientRequest::HistoryPicker
+        | TransientRequest::SlashPalette => Some(true),
+        TransientRequest::FilePalette(request) => request.visible,
+        TransientRequest::AgentPalette(request) => request.visible,
+        TransientRequest::LocalAgents(request) => request.visible,
+        // The task panel is a passive surface; it keeps the input enabled and
+        // therefore must not hold bridge events while it is visible.
+        TransientRequest::TaskPanel(_) => None,
+    }
+}
+
 pub struct InlineSession {
     pub handle: InlineHandle,
     pub events: UnboundedReceiver<InlineEvent>,
@@ -622,10 +722,27 @@ pub struct InlineSession {
 
 impl InlineSession {
     pub async fn next_event(&mut self) -> Option<InlineEvent> {
-        if let Some(event) = self.handle.take_deferred_event() {
-            return Some(event);
+        loop {
+            if !self.handle.transient_active()
+                && let Some(event) = self.handle.take_deferred_event()
+            {
+                return Some(event);
+            }
+
+            tokio::select! {
+                event = self.events.recv() => match event {
+                    Some(event) => return Some(event),
+                    None if self.handle.transient_active() && self.handle.has_deferred_event() => {
+                        // A closed UI channel must not strand bridge input
+                        // behind a captured-input surface. Wait for the
+                        // surface to release ownership, then drain it.
+                        self.handle.wait_for_transient_activity_change().await;
+                    }
+                    None => return self.handle.take_deferred_event(),
+                },
+                _ = self.handle.wait_for_transient_activity_change() => {}
+            }
         }
-        self.events.recv().await
     }
 
     /// Wait for the TUI task to finish its own terminal teardown.
@@ -683,5 +800,139 @@ impl crate::tui::core_tui::runner::TuiCommand for InlineCommand {
 
     fn is_start_event_stream(&self) -> bool {
         matches!(self, InlineCommand::StartEventStream)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session() -> (InlineHandle, InlineSession, UnboundedSender<InlineEvent>) {
+        let (command_sender, _command_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (event_sender, event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(command_sender);
+        let session = InlineSession {
+            handle: handle.clone(),
+            events: event_receiver,
+            worker: None,
+        };
+        (handle, session, event_sender)
+    }
+
+    #[tokio::test]
+    async fn deferred_event_waits_until_transient_closes() {
+        let (handle, mut session, event_sender) = test_session();
+
+        handle
+            .defer_event(InlineEvent::WebmcpSubmit("deferred".into()))
+            .expect("defer bridge event");
+        handle.show_list_modal("test".into(), Vec::new(), Vec::new(), None, None);
+        event_sender.send(InlineEvent::Cancel).expect("send modal result");
+
+        let modal_event = session.next_event().await;
+        assert!(matches!(modal_event, Some(InlineEvent::Cancel)));
+
+        handle.close_transient();
+        let deferred_event = session.next_event().await;
+        assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
+    }
+
+    #[tokio::test]
+    async fn transient_close_wakes_waiting_deferred_event_consumer() {
+        let (handle, session, _event_sender) = test_session();
+
+        handle
+            .defer_event(InlineEvent::WebmcpSubmit("deferred".into()))
+            .expect("defer bridge event");
+        handle.show_local_agents();
+
+        let waiter = tokio::spawn(async move {
+            let mut session = session;
+            session.next_event().await
+        });
+        tokio::task::yield_now().await;
+
+        // A captured-input surface can close without sending a user event.
+        handle.transient_activity.set_active(false);
+
+        let deferred_event = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("deferred consumer should wake after transient close")
+            .expect("deferred consumer task should finish");
+        assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
+    }
+
+    #[tokio::test]
+    async fn closed_event_stream_waits_for_transient_close_before_deferred_event() {
+        let (handle, session, event_sender) = test_session();
+
+        handle
+            .defer_event(InlineEvent::WebmcpSubmit("deferred".into()))
+            .expect("defer bridge event");
+        handle.show_local_agents();
+        drop(event_sender);
+
+        let mut waiter = tokio::spawn(async move {
+            let mut session = session;
+            session.next_event().await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut waiter)
+                .await
+                .is_err(),
+            "closed UI channel must not bypass an active captured-input surface"
+        );
+
+        handle.transient_activity.set_active(false);
+        let deferred_event = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("deferred consumer should wake after transient close")
+            .expect("deferred consumer task should finish");
+        assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
+    }
+
+    #[tokio::test]
+    async fn palette_preload_does_not_hold_deferred_input() {
+        let (handle, mut session, _event_sender) = test_session();
+
+        handle
+            .defer_event(InlineEvent::WebmcpSubmit("deferred".into()))
+            .expect("defer bridge event");
+        handle.configure_agent_palette(Vec::new());
+
+        let deferred_event = session.next_event().await;
+        assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
+    }
+
+    #[tokio::test]
+    async fn passive_task_panel_updates_do_not_hold_deferred_input() {
+        let (handle, mut session, _event_sender) = test_session();
+
+        handle
+            .defer_event(InlineEvent::WebmcpSubmit("deferred".into()))
+            .expect("defer bridge event");
+        handle.show_task_panel();
+        handle.update_task_panel(Vec::new());
+
+        let deferred_event = session.next_event().await;
+        assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
+    }
+
+    #[tokio::test]
+    async fn captured_local_agents_drawer_releases_deferred_input_when_hidden() {
+        let (handle, mut session, event_sender) = test_session();
+
+        handle
+            .defer_event(InlineEvent::WebmcpSubmit("deferred".into()))
+            .expect("defer bridge event");
+        handle.show_local_agents();
+        event_sender.send(InlineEvent::Cancel).expect("send drawer event");
+
+        let drawer_event = session.next_event().await;
+        assert!(matches!(drawer_event, Some(InlineEvent::Cancel)));
+
+        handle.hide_local_agents();
+        let deferred_event = session.next_event().await;
+        assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
     }
 }

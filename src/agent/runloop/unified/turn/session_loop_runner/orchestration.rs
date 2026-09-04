@@ -69,6 +69,15 @@ use crate::agent::runloop::unified::turn::turn_loop_helpers::{
 use crate::agent::runloop::unified::workspace_links::LinkedDirectory;
 use crate::updater::{InlineUpdateOutcome, display_update_notice, run_inline_update_prompt};
 
+fn persist_primary_agent(
+    session_archive: &mut Option<session_archive::SessionArchive>,
+    active_primary_agent: &vtcode_core::primary_agent::ActivePrimaryAgentState,
+) {
+    if let Some(archive) = session_archive.as_mut() {
+        archive.set_primary_agent(active_primary_agent.active().name());
+    }
+}
+
 pub(super) fn resolve_thread_completion_status(
     session_end_reason: &SessionEndReason,
     budget_limit_reached: bool,
@@ -135,6 +144,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
     let mut vt_cfg = initial_vt_cfg.or_else(|| config_watcher.load_config());
     let mut idle_config = extract_idle_config(vt_cfg.as_ref());
     let mut pending_session_start_trigger = None;
+    let mut next_session_primary_agent: Option<String> = None;
 
     loop {
         let session_started_at = Instant::now();
@@ -245,6 +255,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             tracing::warn!("Failed to checkpoint session archive at startup: {}", err);
         }
         let session_setup_phase = vtcode_commons::startup_trace::phase_started();
+        let session_primary_agent_override = next_session_primary_agent.take();
         let mut session_state = initialize_session(
             &config,
             vt_cfg.as_ref(),
@@ -252,13 +263,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             primary_agent_explicitly_configured,
             resume_ref,
             thread_handle.thread_id().as_str(),
+            session_primary_agent_override.as_deref(),
         )
         .await?;
         // Persist the active primary agent ("mode") so a future resume restores
         // it instead of falling back to the config default.
-        if let Some(archive) = session_archive.as_mut() {
-            archive.set_primary_agent(session_state.active_primary_agent.active().name());
-        }
+        persist_primary_agent(&mut session_archive, &session_state.active_primary_agent);
         let harness_config = vt_cfg.as_ref().map(|cfg| cfg.agent.harness.clone()).unwrap_or_default();
         let turn_run_id = TurnRunId(thread_handle.thread_id().to_string());
         let harness_emitter =
@@ -356,6 +366,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             mut active_primary_agent,
             ..
         } = session_state;
+        // `initialize_session_ui` may move the archive through setup. Persist
+        // again after extracting the live state so every subsequent switch is
+        // anchored to the same archive metadata instance.
+        persist_primary_agent(&mut session_archive, &active_primary_agent);
         let decision_ledger = metadata.decision_ledger;
         let traj = metadata.trajectory;
         let telemetry = metadata.telemetry;
@@ -749,6 +763,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         .await
                     )
                 };
+                // User-driven mode switches are applied inside the interaction
+                // loop. Capture them before any turn outcome can block or
+                // hand off so an archive resume never falls back to Duck/Plan.
+                persist_primary_agent(&mut session_archive, &active_primary_agent);
                 if input_status_state.is_blocked {
                     input_status_state.is_blocked = false;
                     handle.set_placeholder(default_placeholder.clone());
@@ -1020,6 +1038,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     cross_turn_written,
                     cross_turn_shell_cmd,
                     cross_turn_out_of_band_progress,
+                    session_limit_granted,
                     aborted_turn_diagnostics,
                 ) = {
                     let mut auto_finish_planning_attempted = false;
@@ -1079,8 +1098,18 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         runtime_steering,
                     );
 
+                    let primary_agent_snapshot = active_primary_agent.active().clone();
                     let result =
                         crate::agent::runloop::unified::turn::run_turn_loop(working_history, turn_loop_ctx).await;
+
+                    // Prompt overlays can receive queued mode events while the
+                    // turn owns the input surface. Restore the write-capable
+                    // agent selected at prompt time before handling the turn
+                    // outcome; legitimate handoffs are applied below from the
+                    // explicit outcome, not through leaked UI input.
+                    if active_primary_agent.active() != &primary_agent_snapshot {
+                        active_primary_agent.restore_snapshot(primary_agent_snapshot);
+                    }
 
                     // Preserve authoritative turn state even when the turn
                     // loop fails before it can construct a normal outcome.
@@ -1097,6 +1126,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         harness_state.recently_written_files.clone(),
                         harness_state.last_admitted_shell_command_signature.clone(),
                         harness_state.has_out_of_band_tool_progress(),
+                        harness_state.has_session_limit_grant(),
                         aborted_turn_diagnostics,
                     )
                 };
@@ -1124,6 +1154,14 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         }
                     }
                 };
+                if session_limit_granted && !matches!(&outcome.result, RunLoopTurnLoopResult::Blocked { .. }) {
+                    // A successful grant resumes the pending Build turn. Do
+                    // not leave the previous blocked placeholder/state visible
+                    // or let a grant-in-flight turn be finalized as no response.
+                    input_status_state.is_blocked = false;
+                    handle.set_placeholder(default_placeholder.clone());
+                    handle.set_activity_state(ActivityState::Idle);
+                }
                 remove_transient_system_notes(working_history, &transient_system_notes);
 
                 // Cross-turn loop detection: fingerprint this turn's actions and
@@ -1256,6 +1294,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         agent = %execution_agent,
                         "Switched primary agent after plan approval"
                     );
+                    persist_primary_agent(&mut session_archive, &active_primary_agent);
                 }
                 if plan_approved_execution_pending && !has_primary_agent_switch {
                     session_skip_confirmations = plan_auto_accept;
@@ -1313,6 +1352,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         .messages_mut()
                         .push(vtcode_core::llm::provider::Message::system(execution_directive));
                     handle.set_activity_state(ActivityState::Building);
+                    persist_primary_agent(&mut session_archive, &active_primary_agent);
                 }
                 if executing_approved_plan {
                     let summary = approved_plan_execution_summary(
@@ -1354,6 +1394,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 tool_result_cache.write().await.check_pressure_and_evict();
                 let blocked_turn = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { .. });
                 let mut checkpoint_outcome = SessionCheckpointOutcome::without_archive(blocked_turn);
+                persist_primary_agent(&mut session_archive, &active_primary_agent);
                 if let Some(archive) = session_archive.as_ref() {
                     let messages: Vec<SessionMessage> =
                         runtime.state.messages.iter().map(SessionMessage::from).collect();
@@ -1482,6 +1523,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             }
         }
         if let Some(archive) = session_archive.as_mut() {
+            archive.set_primary_agent(active_primary_agent.active().name());
             let skill_names: Vec<String> = loaded_skills.read().await.keys().cloned().collect();
             archive.set_loaded_skills(skill_names);
             archive.set_continuation_metadata(session_stats.budget_limit().map(|(max_budget_usd, actual_cost_usd)| {
@@ -1575,6 +1617,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         // and clears its screen. The owned copy remains available for the
         // plain stdout postamble after terminal restoration.
         let final_response = latest_assistant_result_text(&runtime.state.messages);
+        if matches!(session_end_reason, SessionEndReason::NewSession) {
+            next_session_primary_agent = Some(active_primary_agent.active().name().to_owned());
+        }
         let finalization_output = match finalize_session(
             &mut renderer,
             lifecycle_hooks.as_ref(),

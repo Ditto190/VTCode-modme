@@ -274,6 +274,19 @@ fn shift_tab_cycles_previous_primary_agent() {
 }
 
 #[test]
+fn tab_does_not_cycle_primary_agent_in_building_recovery_or_blocked_states() {
+    for state in [ActivityState::Building, ActivityState::Recovery, ActivityState::Blocked] {
+        let mut session = app_session_with_input("", 0);
+        load_primary_agent_palette(&mut session);
+        session.handle_command(app_types::InlineCommand::SetActivityState(state));
+
+        let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert!(event.is_none(), "mode switching must stay locked in {state:?}");
+    }
+}
+
+#[test]
 fn header_suggestions_include_subagent_shortcuts() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.local_agents = vec![sample_local_agent_entry(app_types::LocalAgentKind::Delegated)];

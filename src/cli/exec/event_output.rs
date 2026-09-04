@@ -305,6 +305,12 @@ pub(super) fn human_event_line(event: &ThreadEvent) -> Option<String> {
                     }
                     vtcode_core::exec::events::HarnessEventKind::SnapshotCreated => style("[SNAPSHOT]").cyan().bold(),
                     vtcode_core::exec::events::HarnessEventKind::SnapshotRestored => style("[REWIND]").yellow().bold(),
+                    vtcode_core::exec::events::HarnessEventKind::SessionToolLimitIncreased => {
+                        style("[LIMIT]").green().bold()
+                    }
+                    vtcode_core::exec::events::HarnessEventKind::ToolLoopLimitIncreased => {
+                        style("[LOOP LIMIT]").green().bold()
+                    }
                 };
                 let detail = match (item.message.as_deref(), item.path.as_deref()) {
                     (Some(message), Some(path)) => format!("{message}: {path}"),

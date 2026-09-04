@@ -244,6 +244,7 @@ pub(crate) fn session_with_slash_palette_commands() -> AppSession {
             app_types::SlashCommandItem::new("checkup", "Run diagnostics"),
             app_types::SlashCommandItem::new("command", "Run a terminal command"),
             app_types::SlashCommandItem::new("files", "Browse files"),
+            app_types::SlashCommandItem::new("stop", "Stop current task"),
         ],
         "Agent TUI".to_string(),
     )

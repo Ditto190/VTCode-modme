@@ -674,7 +674,23 @@ impl<'a> TurnProcessingContext<'a> {
 
             use vtcode_core::utils::ansi::MessageStyle;
             self.renderer.line(MessageStyle::Info, "Plan ready for approval:")?;
-            self.renderer.line(MessageStyle::Response, &plan_text)?;
+            // The harness normalizes plan markdown before rendering so headings,
+            // lists, and formatting are preserved and raw `<proposed_plan>`
+            // wrappers never leak into the transcript. Any repair is surfaced
+            // explicitly so rendering issues are visible instead of silent.
+            let (display_markdown, display_warnings) =
+                crate::agent::runloop::unified::plan_blocks::prepare_plan_markdown_for_display(&plan_text);
+            if display_markdown.trim().is_empty() {
+                self.renderer.line(
+                    MessageStyle::Warning,
+                    "Plan content was empty after cleanup; see the persisted plan file for details.",
+                )?;
+            } else {
+                self.renderer.line(MessageStyle::Response, &display_markdown)?;
+            }
+            for warning in display_warnings {
+                self.renderer.line(MessageStyle::Warning, &warning)?;
+            }
             if approval_route == crate::agent::runloop::unified::planning_workflow::PlanApprovalRoute::Headless {
                 self.renderer.line(
                     MessageStyle::Info,

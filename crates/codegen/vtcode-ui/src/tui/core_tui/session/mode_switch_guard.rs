@@ -21,6 +21,11 @@ pub(crate) trait ModeSwitchGuardSession {
     /// Whether a turn is currently processing and mode switches must be locked.
     fn is_running_activity(&self) -> bool;
 
+    /// Whether the authoritative activity state owns the mode boundary even
+    /// when no spinner is currently running (for example Building, Recovery,
+    /// or Blocked).
+    fn is_mode_switch_locked(&self) -> bool;
+
     /// Whether the given key may cycle the primary agent (ignoring activity).
     fn can_cycle_primary_agent(&self, key: &KeyEvent) -> bool;
 
@@ -35,7 +40,7 @@ pub(crate) trait ModeSwitchGuardSession {
 /// responsible for constructing the cycle event, since the concrete `InlineEvent`
 /// type differs between the app session and the inline session.
 pub(crate) fn try_cycle_primary_agent<S: ModeSwitchGuardSession>(session: &mut S, key: &KeyEvent) -> bool {
-    if session.is_running_activity() {
+    if session.is_running_activity() || session.is_mode_switch_locked() {
         session.notify_mode_switch_busy();
         return false;
     }

@@ -516,6 +516,9 @@ async fn check_tool_safety(
         name,
         args_val,
         invocation_id,
+        Some(ctx.harness_state),
+        ctx.harness_emitter,
+        ctx.agent_name.as_deref(),
     )
     .await
     {

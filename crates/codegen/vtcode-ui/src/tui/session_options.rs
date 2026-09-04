@@ -8,7 +8,7 @@ use hashbrown::HashMap;
 use crate::tui::core_tui::app::session::AppSession;
 use crate::tui::core_tui::app::types::{
     FocusChangeCallback, InlineEventCallback, InlineHandle, InlineSession, InlineTheme, PreviewCallback,
-    SlashCommandItem,
+    SlashCommandItem, TransientActivitySignal,
 };
 use crate::tui::core_tui::log;
 use crate::tui::core_tui::runner::{TuiOptions, run_tui};
@@ -94,6 +94,8 @@ pub fn spawn_session_with_options(theme: InlineTheme, options: SessionOptions) -
     let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
     let show_logs = log::is_tui_log_capture_enabled();
+    let transient_active = Arc::new(TransientActivitySignal::default());
+    let transient_active_for_session = transient_active.clone();
 
     let worker = tokio::spawn(async move {
         if let Err(error) = run_tui(
@@ -115,7 +117,7 @@ pub fn spawn_session_with_options(theme: InlineTheme, options: SessionOptions) -
             },
             move |rows| {
                 let bindings = BindingStore::new(options.key_bindings.clone());
-                AppSession::new_with_logs_and_bindings(
+                let mut session = AppSession::new_with_logs_and_bindings(
                     theme,
                     options.placeholder,
                     rows,
@@ -124,7 +126,9 @@ pub fn spawn_session_with_options(theme: InlineTheme, options: SessionOptions) -
                     options.slash_commands,
                     options.app_name,
                     bindings,
-                )
+                );
+                session.set_transient_activity_signal(transient_active_for_session.clone());
+                session
             },
         )
         .await
@@ -145,7 +149,7 @@ pub fn spawn_session_with_options(theme: InlineTheme, options: SessionOptions) -
     });
 
     Ok(InlineSession {
-        handle: InlineHandle::new(command_tx),
+        handle: InlineHandle::new_with_transient_signal(command_tx, transient_active),
         events: event_rx,
         worker: Some(worker),
     })

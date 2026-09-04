@@ -40,7 +40,9 @@ use crate::agent::runloop::unified::inline_events::harness::{
 };
 use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState;
 use crate::agent::runloop::unified::progress::{ProgressReporter, ProgressUpdateGuard, spawn_elapsed_time_updater};
-use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, RunLoopContext};
+use crate::agent::runloop::unified::run_loop_context::{
+    HarnessTurnState, RunLoopContext, SESSION_LIMIT_GRANT_DIRECTIVE,
+};
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::state::SessionStats;
 use crate::agent::runloop::unified::tool_call_safety::{ToolCallSafetyValidator, invocation_id_from_call_id};
@@ -94,6 +96,7 @@ pub(super) struct CopilotRuntimeHost<'a> {
     exposed_tool_names: BTreeSet<String>,
     harness_emitter: Option<&'a HarnessEventEmitter>,
     harness_item_prefix: String,
+    agent_name: Option<String>,
     observed_tool_calls: HashMap<String, ObservedToolCallState>,
     local_terminal_sessions: HashMap<String, LocalTerminalSession>,
     compatibility_notice_shown: bool,
@@ -132,6 +135,7 @@ impl<'a> CopilotRuntimeHost<'a> {
         skip_confirmations: bool,
         harness_emitter: Option<&'a HarnessEventEmitter>,
         harness_item_prefix: String,
+        agent_name: Option<String>,
     ) -> Self {
         let allowlist = vt_cfg
             .map(|cfg| cfg.auth.copilot.vtcode_tool_allowlist.clone())
@@ -182,6 +186,7 @@ impl<'a> CopilotRuntimeHost<'a> {
             exposed_tool_names,
             harness_emitter,
             harness_item_prefix,
+            agent_name,
             observed_tool_calls: HashMap::new(),
             local_terminal_sessions: HashMap::new(),
             compatibility_notice_shown: false,
@@ -516,6 +521,9 @@ impl<'a> CopilotRuntimeHost<'a> {
             tool_name,
             safety_args,
             invocation_id,
+            Some(self.harness_state),
+            self.harness_emitter,
+            self.agent_name.as_deref(),
         )
         .await
         {
@@ -572,6 +580,9 @@ impl<'a> CopilotRuntimeHost<'a> {
                             tool_name,
                             &updated,
                             invocation_id,
+                            Some(self.harness_state),
+                            self.harness_emitter,
+                            self.agent_name.as_deref(),
                         )
                         .await
                         {
@@ -956,6 +967,10 @@ impl CopilotRuntimeRequestHandler for CopilotRuntimeHost<'_> {
                         self.harness_state.record_failed_tool_call();
                         map_runtime_error(error)
                     })?;
+                let response = append_session_limit_grant_guidance(
+                    response,
+                    self.harness_state.take_session_limit_grant_directive_pending(),
+                );
                 let budget_rejected = self.harness_state.take_tool_budget_rejection();
                 if self.harness_state.admitted_tool_call_count() == admitted_before
                     && matches!(&response, CopilotToolCallResponse::Failure(_))
@@ -1930,6 +1945,34 @@ fn copilot_tool_result_text(tool_name: &str, text: String) -> String {
 
 fn tool_cancelled_response(tool_name: &str) -> CopilotToolCallResponse {
     denied_tool_response(tool_name, "execution cancelled")
+}
+
+/// Copilot tool calls are answered directly through ACP rather than the normal
+/// turn-processing context, so they cannot receive the shared system-message
+/// flush. Append the same one-shot grant guidance to the tool result instead.
+fn append_session_limit_grant_guidance(
+    response: CopilotToolCallResponse,
+    grant_pending: bool,
+) -> CopilotToolCallResponse {
+    if !grant_pending {
+        return response;
+    }
+
+    let append_guidance = |text: &mut String| {
+        text.push_str("\n\n");
+        text.push_str(SESSION_LIMIT_GRANT_DIRECTIVE);
+    };
+
+    match response {
+        CopilotToolCallResponse::Success(mut success) => {
+            append_guidance(&mut success.text_result_for_llm);
+            CopilotToolCallResponse::Success(success)
+        }
+        CopilotToolCallResponse::Failure(mut failure) => {
+            append_guidance(&mut failure.text_result_for_llm);
+            CopilotToolCallResponse::Failure(failure)
+        }
+    }
 }
 
 fn summarize_permission_request(request: &CopilotPermissionRequest) -> Option<PermissionPromptSummary> {

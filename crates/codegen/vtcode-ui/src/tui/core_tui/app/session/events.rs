@@ -779,8 +779,7 @@ pub(super) fn process_key_with_clipboard_image_reader(
         KeyCode::BackTab => {
             session.clear_inline_prompt_suggestion();
             session.mark_dirty();
-            if session.is_running_activity() {
-                push_mode_switch_busy_notice(session);
+            if !mode_switch_guard::try_cycle_primary_agent(session, &key) {
                 return None;
             }
             Some(InlineEvent::CyclePrimaryAgentPrevious)
@@ -1490,9 +1489,13 @@ fn handle_tool_output_viewer_key(
 }
 
 fn can_cycle_primary_agent(session: &Session, key: &KeyEvent) -> bool {
-    key.modifiers == KeyModifiers::NONE
-        && session.visible_transient_surface().is_none()
-        && !session.has_active_overlay()
+    let valid_modifiers = match key.code {
+        // Crossterm reports Shift+Tab as BackTab with the SHIFT bit set.
+        // Keep accepting the explicit bit while rejecting unrelated combos.
+        KeyCode::BackTab => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
+        _ => key.modifiers == KeyModifiers::NONE,
+    };
+    valid_modifiers && session.visible_transient_surface().is_none() && !session.has_active_overlay()
 }
 
 /// Notice shown when the user requests a mode switch (primary-agent cycle or
@@ -1513,6 +1516,10 @@ fn push_mode_switch_busy_notice(session: &mut Session) {
 impl mode_switch_guard::ModeSwitchGuardSession for Session {
     fn is_running_activity(&self) -> bool {
         TuiSessionDriver::is_running_activity(self)
+    }
+
+    fn is_mode_switch_locked(&self) -> bool {
+        self.core.activity_state.locks_mode_switch()
     }
 
     fn can_cycle_primary_agent(&self, key: &KeyEvent) -> bool {
@@ -1553,13 +1560,20 @@ fn handle_running_slash_command_block(session: &mut Session) -> bool {
 }
 
 fn handle_running_slash_command_block_for_input(session: &mut Session, input: &str) -> bool {
-    if !session.is_running_activity() {
-        return false;
-    }
-
     let Some(command_name) = extract_slash_command_name(input) else {
         return false;
     };
+
+    // Building, recovery, and blocked states keep the composer available for
+    // follow-up input, but they still own the primary-agent/planning boundary.
+    // Those states may not report a spinner, so check the authoritative lock
+    // before allowing an explicit mode command through.
+    let is_mode_switch = matches!(command_name, "mode" | "plan");
+    let command_is_locked =
+        session.is_running_activity() || (session.core.activity_state.locks_mode_switch() && is_mode_switch);
+    if !command_is_locked {
+        return false;
+    }
 
     // Read-only local commands are safe to defer: falling through lets the normal
     // queueing path run them right after the current turn instead of dropping them.
@@ -1569,7 +1583,7 @@ fn handle_running_slash_command_block_for_input(session: &mut Session, input: &s
 
     // Mode switches (agent selection, planning workflow) are locked while a turn
     // is processing; surface the dedicated notice for those commands.
-    let message = if matches!(command_name, "mode" | "plan") {
+    let message = if is_mode_switch {
         mode_switch_guard::MODE_SWITCH_BUSY_NOTICE.to_string()
     } else {
         format!(
@@ -1736,11 +1750,13 @@ fn handle_diff_preview_key(session: &mut Session, key: &KeyEvent) -> Option<Inli
 mod tests {
     use super::*;
     use crate::tui::core_tui::app::types::{
-        CompactActivityMetadata, InlineCommand, ModalOverlayRequest, TransientRequest,
+        CompactActivityMetadata, InlineCommand, LocalAgentsTransientRequest, ModalOverlayRequest,
+        TransientActivitySignal, TransientRequest,
     };
     use crate::tui::core_tui::session::action::BindingStore;
     use crate::tui::core_tui::types::{
-        InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, SecurePromptConfig,
+        InlineCommand as CoreInlineCommand, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme,
+        SecurePromptConfig,
     };
     use hashbrown::HashMap;
     use ratatui::Terminal;
@@ -1752,6 +1768,68 @@ mod tests {
         session.core.apply_transcript_rows(8);
         session.core.apply_transcript_width(60);
         session
+    }
+
+    #[test]
+    fn transient_activity_signal_tracks_ui_owned_surface_lifecycle() {
+        let signal = Arc::new(TransientActivitySignal::default());
+        let mut session = build_session();
+        session.set_transient_activity_signal(signal.clone());
+
+        session.show_transient(TransientRequest::LocalAgents(LocalAgentsTransientRequest { visible: Some(true) }));
+        assert!(signal.is_active());
+
+        assert!(session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)).is_none());
+        assert!(!signal.is_active());
+
+        assert!(
+            session
+                .process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+                .is_none()
+        );
+        assert!(signal.is_active());
+        assert!(session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)).is_none());
+        assert!(!signal.is_active());
+    }
+
+    #[test]
+    fn transient_activity_signal_keeps_lower_captured_surface_after_nested_close() {
+        let signal = Arc::new(TransientActivitySignal::default());
+        let mut session = build_session();
+        session.set_transient_activity_signal(signal.clone());
+
+        session.show_transient(TransientRequest::LocalAgents(LocalAgentsTransientRequest { visible: Some(true) }));
+        session.show_transient(TransientRequest::Modal(ModalOverlayRequest {
+            title: "nested".to_string(),
+            lines: Vec::new(),
+            secure_prompt: None,
+        }));
+        assert!(signal.is_active());
+
+        session.close_transient();
+        assert!(signal.is_active(), "the lower captured surface still owns input");
+
+        session.close_transient();
+        assert!(!signal.is_active());
+    }
+
+    #[test]
+    fn locked_activity_blocks_explicit_mode_switch_commands() {
+        for state in [
+            vtcode_commons::ui_protocol::ActivityState::Building,
+            vtcode_commons::ui_protocol::ActivityState::Recovery,
+            vtcode_commons::ui_protocol::ActivityState::Blocked,
+        ] {
+            for input in ["/mode", "/mode build", "/plan", "/plan on"] {
+                let mut session = build_session();
+                session.core.handle_command(CoreInlineCommand::SetActivityState(state));
+
+                assert!(
+                    handle_running_slash_command_block_for_input(&mut session, input),
+                    "{input} must stay locked in {state:?}"
+                );
+            }
+        }
     }
 
     fn text_segment(text: impl Into<String>) -> InlineSegment {

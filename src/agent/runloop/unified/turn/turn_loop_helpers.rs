@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::json;
 
+use crate::agent::runloop::unified::inline_events::harness::harness_event;
 use crate::agent::runloop::unified::planning_workflow::detect_enter_planning_intent;
 use crate::agent::runloop::unified::run_loop_context::HarnessTurnState;
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
@@ -540,15 +541,16 @@ pub(super) async fn maybe_handle_tool_loop_limit(
         return Ok(ToolLoopLimitAction::BreakLoop);
     }
 
-    match crate::agent::runloop::unified::tool_routing::prompt_tool_loop_limit_increase(
+    let prompt_result = crate::agent::runloop::unified::tool_routing::prompt_tool_loop_limit_increase(
         ctx.handle,
         ctx.session,
         ctx.ctrl_c_state,
         ctx.ctrl_c_notify,
         *current_max_tool_loops,
+        Some(ctx.active_primary_agent.active().name()),
     )
-    .await
-    {
+    .await;
+    match prompt_result {
         Ok(Some(requested_increment)) => {
             let increment =
                 clamp_tool_loop_increment(requested_increment, *current_max_tool_loops, hard_cap, planning_active);
@@ -566,6 +568,22 @@ pub(super) async fn maybe_handle_tool_loop_limit(
             }
             let previous_max_tool_loops = *current_max_tool_loops;
             *current_max_tool_loops = (*current_max_tool_loops).saturating_add(increment);
+            if let Some(emitter) = ctx.harness_emitter
+                && let Err(error) = emitter.emit(harness_event(
+                    vtcode_core::exec::events::HarnessEventKind::ToolLoopLimitIncreased,
+                    Some(format!(
+                        "Current agent {} granted +{} tool loops (limit {}); continuing this turn and reusing existing tool outputs.",
+                        ctx.active_primary_agent.active().name(),
+                        increment,
+                        *current_max_tool_loops,
+                    )),
+                    None,
+                    None,
+                    None,
+                ))
+            {
+                tracing::debug!(error = %error, "Failed to emit tool-loop grant event");
+            }
             tracing::info!(
                 "Updated tool loop limit: turn={} (was {}), session tool-call limit remains unchanged",
                 *current_max_tool_loops,

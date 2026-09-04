@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{prelude::*, widgets::Clear};
 
 use crate::tui::config::constants::ui;
@@ -318,52 +318,11 @@ pub(super) fn apply_selected_slash_suggestion(session: &mut Session) -> bool {
 }
 
 fn autocomplete_slash_suggestion(session: &mut Session) -> bool {
-    let input_content = session.core.input_manager.content();
-    let cursor_pos = session.core.input_manager.cursor();
-
-    let Some(range) = command_range(input_content, cursor_pos) else {
-        return false;
-    };
-
-    let prefix_text = command_prefix(input_content, cursor_pos).unwrap_or_default();
-    if prefix_text.is_empty() {
-        return false;
-    }
-
-    let suggestions = session.slash_palette.suggestions();
-    if suggestions.is_empty() {
-        return false;
-    }
-
-    // suggestions() is already ranked by slash_palette fuzzy scoring.
-    let Some(best_command) = suggestions.first().map(|suggestion| match suggestion {
-        slash_palette::SlashPaletteSuggestion::Static(command) => command.name.as_str(),
-    }) else {
-        return false;
-    };
-
-    // Handle static command
-    let suffix = &input_content[range.end..];
-    let mut new_input = format!("/{best_command}");
-
-    let cursor_position = if suffix.is_empty() {
-        new_input.push(' ');
-        new_input.len()
-    } else {
-        if !suffix.chars().next().is_some_and(char::is_whitespace) {
-            new_input.push(' ');
-        }
-        let position = new_input.len();
-        new_input.push_str(suffix);
-        position
-    };
-
-    session.core.input_manager.set_content(new_input);
-    session.core.input_manager.set_cursor(cursor_position);
-
-    clear_slash_suggestions(session);
-    session.mark_dirty();
-    true
+    // Tab accepts the currently highlighted suggestion, matching Enter.
+    // Both populate the composer (with a trailing space) and dismiss the
+    // palette so the user can review, edit, or cancel before submitting
+    // with a second Enter press.
+    apply_selected_slash_suggestion(session)
 }
 
 pub(super) fn try_handle_slash_navigation(
@@ -413,15 +372,18 @@ pub(super) fn try_handle_slash_navigation(
         KeyCode::Tab => autocomplete_slash_suggestion(session),
         KeyCode::BackTab => move_slash_selection_up(session),
         KeyCode::Enter => {
-            let applied = apply_selected_slash_suggestion(session);
-            if !applied {
+            // Only plain Enter accepts the highlighted suggestion into the
+            // composer. Modified Enter (Shift/Ctrl/Alt/Cmd) falls through to
+            // the normal handler for newline, steering, or queue behavior.
+            if has_control || has_alt || has_command || key.modifiers.contains(KeyModifiers::SHIFT) {
                 return false;
             }
 
-            // Always let Enter fall through to the normal handler so the
-            // command is submitted in one press, regardless of whether it
-            // is in the "immediate submit" list.
-            false
+            // Accept into the input box without submitting: dismiss the
+            // palette and leave `/command ` editable so users can review,
+            // modify (type args, Backspace), or cancel (Esc) before pressing
+            // Enter a second time to execute.
+            apply_selected_slash_suggestion(session)
         }
         KeyCode::Esc => {
             clear_slash_suggestions(session);
@@ -438,8 +400,14 @@ pub(super) fn try_handle_slash_navigation(
     handled
 }
 
-/// Slash commands that submit immediately when chosen from the palette, without
+/// Slash commands that submit directly on the confirming (second) Enter, without
 /// requiring a follow-up confirmation or argument prompt.
+///
+/// The palette itself never submits: first Enter/Tab only accepts the
+/// highlighted suggestion into the composer (`/command `) and dismisses the
+/// palette for review/edit/cancel. This set decides the second-Enter path —
+/// immediate commands submit even while busy, others go through the
+/// queue/block handling.
 ///
 /// Kept as a single source of truth so the matcher cannot drift from the set
 /// of commands that behave this way.

@@ -459,6 +459,16 @@ the assistant call and its results. Request assembly may create a repaired,
 request-only view when older history contains split, orphaned, duplicate, or
 missing results; the durable session history is not rewritten by this repair.
 
+If the session tool-call limit is reached during an active turn, VT Code shows
+the current primary agent and asks whether to grant more calls. A grant retries
+the pending call in the same turn, emits `session_tool_limit_increased`, and
+preserves the granted session fuse across runtime limit refreshes and the next
+turn. A denial remains an explicit denial. The analogous tool-loop prompt emits
+`tool_loop_limit_increased` and keeps tools enabled for the current agent; it
+does not enter tool-free recovery. Transient bridge submissions, including
+mode-switch input, are deferred or ignored while the prompt owns input and are
+not interpreted as a denial.
+
 ## Plan File Persistence
 
 The runtime-owned draft is the single source of truth and lives on disk under

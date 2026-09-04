@@ -720,7 +720,10 @@ pub(crate) async fn run_turn_loop(
         }
     }
 
-    // Reset safety validator for a new turn
+    // Reset per-turn counters while preserving only the explicit session
+    // headroom granted by the user. The validator reapplies that fuse inside
+    // `set_limits`, while ordinary runtime config changes (including a lower
+    // configured limit) remain authoritative when no grant exists.
     {
         let (max_per_turn, max_per_session) = resolve_safety_tool_call_limits(
             ctx.harness_state.max_tool_calls,

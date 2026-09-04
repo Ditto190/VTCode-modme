@@ -24,7 +24,7 @@ pub mod atif;
 pub mod trace;
 
 /// Semantic version of the serialized event schema exported by this crate.
-pub const EVENT_SCHEMA_VERSION: &str = "0.13.0";
+pub const EVENT_SCHEMA_VERSION: &str = "0.14.0";
 
 /// Wraps a [`ThreadEvent`] with schema metadata so downstream consumers can
 /// negotiate compatibility before processing an event stream.
@@ -1154,6 +1154,11 @@ pub enum HarnessEventKind {
     SnapshotCreated,
     /// A checkpoint snapshot was restored (rewind operation).
     SnapshotRestored,
+    /// The user granted additional session tool-call capacity and the
+    /// pending call will be retried in the same turn.
+    SessionToolLimitIncreased,
+    /// The user granted additional tool-loop capacity for the current turn.
+    ToolLoopLimitIncreased,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

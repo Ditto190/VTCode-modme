@@ -6,7 +6,7 @@ use super::super::*;
 use super::helpers::*;
 
 #[test]
-fn busy_slash_palette_stop_interrupts_immediately() {
+fn busy_slash_palette_stop_accepts_then_interrupts_on_second_enter() {
     let mut session = session_with_slash_palette_commands();
     session.handle_command(app_types::InlineCommand::SetInputStatus {
         left: Some("Running command: cargo test".to_string()),
@@ -24,12 +24,22 @@ fn busy_slash_palette_stop_interrupts_immediately() {
         assert!(event.is_none());
     }
 
+    // First Enter accepts into the composer for review instead of executing.
+    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(accept.is_none(), "first Enter should accept, not submit");
+    assert_eq!(session.core.input_manager.content(), "/stop ");
+    assert!(
+        session.slash_palette.suggestions().is_empty(),
+        "palette should dismiss after accept for visual feedback"
+    );
+
+    // Second Enter executes the reviewed command.
     let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(event, Some(app_types::InlineEvent::Interrupt)));
 }
 
 #[test]
-fn slash_palette_enter_submits_immediate_command() {
+fn slash_palette_enter_accepts_immediate_command_for_review() {
     let mut session = session_with_slash_palette_commands();
 
     for key in [
@@ -42,12 +52,22 @@ fn slash_palette_enter_submits_immediate_command() {
         assert!(event.is_none());
     }
 
+    // First Enter populates the input box without submitting.
+    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(accept.is_none(), "first Enter should accept, not submit");
+    assert_eq!(session.core.input_manager.content(), "/new ");
+    assert!(
+        session.slash_palette.suggestions().is_empty(),
+        "palette should dismiss after accept for visual feedback"
+    );
+
+    // User can review/edit, then second Enter submits.
     let submit = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(submit, Some(app_types::InlineEvent::Submit(value)) if value.trim() == "/new"));
 }
 
 #[test]
-fn slash_palette_enter_submits_review_immediately() {
+fn slash_palette_enter_accepts_review_for_review() {
     let mut session = session_with_slash_palette_commands();
 
     for key in [
@@ -60,8 +80,59 @@ fn slash_palette_enter_submits_review_immediately() {
         assert!(event.is_none());
     }
 
+    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(accept.is_none(), "first Enter should accept, not submit");
+    assert_eq!(session.core.input_manager.content(), "/review ");
+    assert!(session.slash_palette.suggestions().is_empty());
+
     let submit = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(submit, Some(app_types::InlineEvent::Submit(value)) if value.trim() == "/review"));
+}
+
+#[test]
+fn slash_palette_tab_accepts_selected_suggestion_like_enter() {
+    let mut session = session_with_slash_palette_commands();
+
+    for key in [
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE),
+    ] {
+        let event = session.process_key(key);
+        assert!(event.is_none());
+    }
+
+    let accept = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(accept.is_none(), "Tab should accept, not submit");
+    assert_eq!(session.core.input_manager.content(), "/new ");
+    assert!(session.slash_palette.suggestions().is_empty());
+}
+
+#[test]
+fn slash_palette_accepted_input_remains_editable_and_cancellable() {
+    let mut session = session_with_slash_palette_commands();
+
+    for key in [
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE),
+    ] {
+        let _ = session.process_key(key);
+    }
+    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(accept.is_none());
+    assert_eq!(session.core.input_manager.content(), "/new ");
+
+    // User can modify the accepted input before sending.
+    let _ = session.process_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+    assert_eq!(session.core.input_manager.content(), "/new x");
+
+    // User can cancel the accepted input with Esc.
+    let cancel = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(cancel.is_none());
+    assert_eq!(session.core.input_manager.content(), "");
 }
 
 #[test]
