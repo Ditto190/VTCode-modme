@@ -64,13 +64,6 @@ Evidence: Session replay can't show touched files
 
 ===
 
-## VT520 dumb-chat mode — plan only (2026-09-05)
-
-- Plan: [PLAN-vt520-dumb-chat.md](PLAN-vt520-dumb-chat.md)
-- Scope: emulator-only testing, chat + tools with numbered approvals.
-- Status: plan drafted, not implemented. No code changes.
-- Workaround today: `TERM=dumb NO_COLOR=1 vtcode exec "..." --no-color`.
-
 ====
 
 You are improving VT Code itself (/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode, Cargo workspace ~30 crates, Rust 1.88, edition 2024).
@@ -89,6 +82,8 @@ Task: find top 5 self-improvements across agent-loop, tools, prompts, safety tha
 
 In vtcode + gpt-6-astra (1.05M ctx / 922k max in / 128k out / $10 in / $50 out / reasoning.effort: low,medium,high,xhigh,max):
 Astra is built for exactly this: long multi-step coding, computer-use, multi-agent delegation, with fewer tokens/task than GPT-5.6 Sol. Gotchas for VT Code: >272k in = 2x in + 1.5x out, no temperature/top_p, use Responses API, and it over-asks + over-tests + over-obeys AGENTS.md/SKILL.md by default. 0. Wire it up (once)
+
+---
 
 # vtcode.toml
 
