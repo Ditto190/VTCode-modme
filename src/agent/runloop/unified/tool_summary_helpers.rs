@@ -175,10 +175,19 @@ pub(super) fn describe_grep_file(args: &Value, workspace_root: Option<&Path>) ->
 }
 
 pub(super) fn describe_code_search(args: &Value) -> Option<(String, HashSet<String>)> {
-    let query = lookup_string(args, "query")?;
-    let mut used = HashSet::new();
-    used.insert("query".to_string());
-    Some((format!("Search code for {}", truncate_middle(&query, 40)), used))
+    // The schema requires `query`, but accept common aliases defensively so a
+    // valid search never degrades to a generic "Search code" header with the
+    // query hidden. Record the actual matched key so detail collection and
+    // headline highlights stay in sync (a hardcoded "query" would leak e.g.
+    // `Pattern: …` as a duplicate detail line).
+    for key in ["query", "pattern", "q", "text"] {
+        if let Some(query) = lookup_string(args, key) {
+            let mut used = HashSet::new();
+            used.insert(key.to_string());
+            return Some((format!("Search code for {}", truncate_middle(&query, 40)), used));
+        }
+    }
+    None
 }
 
 pub(super) fn describe_path_action(
@@ -696,5 +705,18 @@ mod tests {
         assert_eq!(summary, "Search code for agent loop implementation");
         assert!(used.contains("query"));
         assert!(!used.contains("max_results"));
+    }
+
+    #[test]
+    fn describe_code_search_accepts_query_aliases() {
+        // A valid search must never degrade to a generic header when the
+        // query arrives under an alias key. The used set must record the
+        // actual key so the value is not duplicated as a detail line.
+        for key in ["pattern", "q", "text"] {
+            let args = json!({ key: "core agent loop", "file_types": ["rs"] });
+            let (summary, used) = describe_code_search(&args).expect("alias query should describe");
+            assert_eq!(summary, "Search code for core agent loop");
+            assert!(used.contains(key), "used should record the matched key, got {used:?}");
+        }
     }
 }

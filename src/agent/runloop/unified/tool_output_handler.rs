@@ -9,7 +9,6 @@ use vtcode_commons::paths::ensure_path_within_workspace_resolved;
 use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
-use vtcode_core::tools::command_args;
 use vtcode_core::tools::tool_intent;
 use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_core::utils::ansi::MessageStyle;
@@ -220,19 +219,28 @@ fn apply_task_tracker_block(
     harness_state.remember_task_tracker_block(lines);
 }
 
-/// Extract the command string from tool call arguments.
+/// Extract the command string from tool call arguments for display.
+///
+/// Uses display-safe joining (bare `|`, `>`, `;`; quotes only whitespace) so
+/// `• Ran` headers read as shell, not as quoted tokens like `'|'`/`'2>'`.
 fn extract_command_line(args: &serde_json::Value) -> Option<String> {
-    command_args::command_text(args).ok().flatten()
+    display_command_text(args)
+}
+
+/// Shared display → relativize → single-line preview pipeline for `• Ran …`
+/// headers. Keeps the collapsed row and the viewer header consistent instead
+/// of echoing a multi-line script.
+fn compact_command_preview(args: &serde_json::Value, workspace_root: Option<&Path>) -> Option<String> {
+    display_command_text(args)
+        .map(|command| relativize_command_paths(&command, workspace_root))
+        .map(|command| preview_command(&command, 120))
+        .filter(|command| !command.is_empty())
 }
 
 fn compact_command_text(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> String {
     // Display join (no shell_words quoting) plus a first-line head-truncated
     // preview: the collapsed row must stay readable, not executable-looking.
-    display_command_text(args)
-        .map(|command| relativize_command_paths(&command, workspace_root))
-        .map(|command| preview_command(&command, 120))
-        .filter(|command| !command.is_empty())
-        .unwrap_or_else(|| name.to_string())
+    compact_command_preview(args, workspace_root).unwrap_or_else(|| name.to_string())
 }
 
 fn compact_hidden_line_count(output: &serde_json::Value, complete_capture: Option<&str>) -> usize {
@@ -756,11 +764,10 @@ fn normalized_lines_contain_subsequence(container: &[String], candidate: &[Strin
 }
 
 fn command_output_header(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-    let command = extract_command_line(args)
-        .map(|command| vtcode_commons::formatting::collapse_whitespace(&command))
-        .filter(|command| !command.is_empty())
-        .map(|command| relativize_command_paths(&command, workspace_root));
-    command
+    // `display_command_text` is already display-safe (bare `|`, `>`, `;`).
+    // Keep the viewer header to a single readable preview line, consistent
+    // with the compact `• Ran` row, instead of echoing a multi-line script.
+    compact_command_preview(args, workspace_root)
         .map(|command| format!("• Ran {command}"))
         .unwrap_or_else(|| format!("• Ran {name}"))
 }
@@ -1574,6 +1581,36 @@ mod tests {
             ),
             "• Ran git status --short"
         );
+    }
+
+    #[test]
+    fn command_extraction_leaves_shell_operators_bare() {
+        // Screenshot 2026-09-02: `• Ran cat … '2>' '/dev/null' '|' …` quoted
+        // every operator. Display joining must keep `|`, `>`, `;` bare and
+        // quote only words containing whitespace.
+        let args = serde_json::json!({
+            "command": [
+                "cat", "docs/guides/agent-loop-contract.md",
+                "2>/dev/null", "|", "head", "-120",
+                ";", "echo", "---"
+            ]
+        });
+        assert_eq!(
+            extract_command_line(&args),
+            Some("cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120 ; echo ---".to_string())
+        );
+        assert_eq!(
+            command_output_header(tools::EXEC_COMMAND, &args, None),
+            "• Ran cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120 ; echo ---"
+        );
+        // String commands preserve raw shell text (no re-quoting).
+        let string_args = serde_json::json!({
+            "command": "cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120; echo ---"
+        });
+        let header = command_output_header(tools::EXEC_COMMAND, &string_args, None);
+        assert_eq!(header, "• Ran cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120; echo ---");
+        assert!(!header.contains("'|'"), "pipe must not be quoted: {header}");
+        assert!(!header.contains("'2>'"), "redirection must not be quoted: {header}");
     }
 
     #[test]

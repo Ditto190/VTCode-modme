@@ -1132,7 +1132,7 @@ fn empty_agent_segments_dont_trigger_streaming_state() {
 #[test]
 fn tool_summary_details_are_tightly_grouped() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
-    session.push_line(InlineMessageKind::Info, vec![make_segment("• Search code Use Code search")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("• Search code for core agent loop")]);
     session.push_line(InlineMessageKind::Info, vec![make_segment("  └ File types: rs")]);
     session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Max results: 25")]);
     session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Path: crates/codegen/vtcode-core")]);
@@ -1146,7 +1146,7 @@ fn tool_summary_details_are_tightly_grouped() {
         .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
         .collect();
     assert!(texts[0].trim().is_empty()); // top
-    assert_eq!(texts[1], "• Search code Use Code search");
+    assert_eq!(texts[1], "• Search code for core agent loop");
     assert_eq!(texts[2], "  └ File types: rs");
     assert_eq!(texts[3], "  └ Max results: 25");
     assert_eq!(texts[4], "  └ Path: crates/codegen/vtcode-core");
