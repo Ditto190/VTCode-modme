@@ -1012,7 +1012,7 @@ shell_zsh_fork = false
 [context]
 # Session prompt safety budget used by automatic compaction
 # The effective default trigger is 90% of min(this budget, provider capacity)
-max_context_tokens = 160000
+max_context_tokens = 0
 
 # Percentage to trim context to when it gets too large
 trim_to_percent = 60

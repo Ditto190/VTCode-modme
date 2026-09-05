@@ -182,6 +182,17 @@ pub trait LLMProvider: Send + Sync {
         false
     }
 
+    /// Exact levels accepted by this route; providers may override catalog metadata.
+    fn supported_reasoning_efforts(&self, model: &str) -> &'static [&'static str] {
+        if !self.supports_reasoning_effort(model) {
+            return &[];
+        }
+        vtcode_config::models::model_catalog_entry(self.name(), model)
+            .map(|entry| entry.reasoning_efforts)
+            .filter(|levels| !levels.is_empty())
+            .unwrap_or(&["low", "medium", "high"])
+    }
+
     /// Provider/model-specific sampling parameter overrides.
     ///
     /// Custom-provider profiles may pin exact sampling values per model; every

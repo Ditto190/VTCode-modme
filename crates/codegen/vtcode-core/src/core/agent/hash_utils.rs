@@ -11,6 +11,121 @@ use serde_json::Value;
 
 use crate::llm::provider::ToolDefinition;
 
+/// Resolved wire capabilities that define a cache-stable request segment.
+/// Runtime counters and environment observations deliberately do not belong here.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PromptCapabilityIdentity {
+    provider: compact_str::CompactString,
+    model: compact_str::CompactString,
+    context_window: usize,
+    reasoning_tag: compact_str::CompactString,
+    reasoning_effort: bool,
+    parallel_tools: bool,
+    tools: bool,
+    caching: bool,
+    catalog_epoch: u64,
+}
+
+impl PromptCapabilityIdentity {
+    /// Prefer discovery/catalog capacity when the caller already resolved a model.
+    #[must_use]
+    pub fn with_resolved_model(mut self, resolved: &crate::llm::model_resolver::ResolvedModel) -> Self {
+        self.context_window = resolved.context_window().unwrap_or(self.context_window);
+        self
+    }
+    #[must_use]
+    pub fn resolve(
+        provider: &dyn crate::llm::provider::LLMProvider,
+        model: &str,
+        reasoning: Option<crate::config::types::ReasoningEffortLevel>,
+        catalog_epoch: u64,
+    ) -> Self {
+        Self {
+            provider: provider.name().into(),
+            model: model.into(),
+            context_window: provider.effective_context_size(model),
+            reasoning_tag: reasoning.map_or_else(|| "unset".into(), |effort| effort.to_string().into()),
+            reasoning_effort: provider.supports_reasoning_effort(model),
+            parallel_tools: provider.supports_parallel_tool_config(model),
+            tools: provider.supports_tools(model),
+            caching: provider.supports_context_caching(model),
+            catalog_epoch,
+        }
+    }
+
+    #[must_use]
+    pub fn prefix_hash(&self, prompt_hash: u64) -> u64 {
+        hash_value(&(prompt_hash, self))
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn capability_identity_resolves_three_provider_families_without_transport() {
+        use crate::config::constants::models;
+        use crate::config::types::ReasoningEffortLevel;
+        use crate::llm::provider::LLMProvider;
+        use crate::llm::providers::{AnthropicProvider, GeminiProvider, OpenAIProvider};
+
+        let providers: [(Box<dyn LLMProvider>, &str); 3] = [
+            (Box::new(OpenAIProvider::new("offline-fixture".into())), models::openai::DEFAULT_MODEL),
+            (Box::new(AnthropicProvider::new("offline-fixture".into())), models::anthropic::DEFAULT_MODEL),
+            (Box::new(GeminiProvider::new("offline-fixture".into())), models::google::DEFAULT_MODEL),
+        ];
+        for (provider, model) in providers {
+            let identity =
+                PromptCapabilityIdentity::resolve(provider.as_ref(), model, Some(ReasoningEffortLevel::High), 1);
+            assert_eq!(identity.context_window, provider.effective_context_size(model));
+            assert_eq!(identity.parallel_tools, provider.supports_parallel_tool_config(model));
+            assert_eq!(identity.reasoning_effort, provider.supports_reasoning_effort(model));
+            let repeat =
+                PromptCapabilityIdentity::resolve(provider.as_ref(), model, Some(ReasoningEffortLevel::High), 1);
+            assert_eq!(identity.prefix_hash(7), repeat.prefix_hash(7));
+            let refreshed =
+                PromptCapabilityIdentity::resolve(provider.as_ref(), model, Some(ReasoningEffortLevel::High), 2);
+            assert_ne!(identity.prefix_hash(7), refreshed.prefix_hash(7));
+        }
+    }
+
+    #[test]
+    fn capability_prefix_tracks_changes_for_three_provider_families() {
+        for (provider, model, context_window) in [
+            ("openai", "openai-fixture", 1_000_000),
+            ("anthropic", "claude-fixture", 200_000),
+            ("gemini", "gemini-fixture", 32_000),
+        ] {
+            let identity = PromptCapabilityIdentity {
+                provider: provider.into(),
+                model: model.into(),
+                context_window,
+                reasoning_tag: "high".into(),
+                reasoning_effort: true,
+                parallel_tools: true,
+                tools: true,
+                caching: true,
+                catalog_epoch: 1,
+            };
+            let baseline = identity.prefix_hash(7);
+            assert_eq!(baseline, identity.clone().prefix_hash(7));
+            let mut changed = identity.clone();
+            changed.catalog_epoch += 1;
+            assert_ne!(baseline, changed.prefix_hash(7));
+            changed = identity.clone();
+            changed.reasoning_tag = "low".into();
+            assert_ne!(baseline, changed.prefix_hash(7));
+            changed = identity.clone();
+            changed.context_window /= 2;
+            assert_ne!(baseline, changed.prefix_hash(7));
+            changed = identity;
+            changed.parallel_tools = false;
+            assert_ne!(baseline, changed.prefix_hash(7));
+        }
+    }
+}
+
 /// Hash a value using the default hasher.
 pub fn hash_value<T: Hash>(value: &T) -> u64 {
     let mut hasher = DefaultHasher::new();

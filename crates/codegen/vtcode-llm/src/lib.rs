@@ -32,11 +32,13 @@ pub mod provider;
 pub mod provider_base;
 pub mod provider_config_types;
 pub mod providers;
+pub mod reasoning_effort;
 pub mod rig_adapter;
 pub mod single_response;
 pub(crate) mod system_prompt;
 pub mod tool_bridge;
 pub mod types;
+pub mod usage_cost;
 pub mod utils;
 
 // Re-export main types for backward compatibility

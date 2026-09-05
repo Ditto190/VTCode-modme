@@ -586,6 +586,9 @@ fn cache_key(
     project_root.hash(&mut hasher);
 
     if let Some(cfg) = vtcode_config {
+        cfg.agent.provider.hash(&mut hasher);
+        cfg.agent.default_model.hash(&mut hasher);
+        cfg.agent.reasoning_effort.to_string().hash(&mut hasher);
         cfg.agent.include_working_directory.hash(&mut hasher);
         cfg.agent.include_temporal_context.hash(&mut hasher);
         cfg.prompt_cache.cache_friendly_prompt_shaping.hash(&mut hasher);
@@ -1988,6 +1991,20 @@ Use a skill only when the user names it or the task clearly matches. Load detail
         assert!(!text.contains("## Environment"));
         assert!(!text.contains("## Active Tools"));
         assert!(!report.over_budget, "text should fit budget once every droppable section is gone");
+    }
+
+    #[test]
+    fn test_cache_key_changes_with_model_capability_configuration() {
+        let root = PathBuf::from("/workspace");
+        let mut config = VTCodeConfig::default();
+        let initial = cache_key(&root, Some(&config), Some(1));
+        config.agent.default_model = "different-model".into();
+        let model_changed = cache_key(&root, Some(&config), Some(1));
+        assert_ne!(initial, model_changed);
+        config.agent.reasoning_effort = crate::config::types::ReasoningEffortLevel::Max;
+        let reasoning_changed = cache_key(&root, Some(&config), Some(1));
+        assert_ne!(model_changed, reasoning_changed);
+        assert_ne!(reasoning_changed, cache_key(&root, Some(&config), Some(2)));
     }
 
     #[test]

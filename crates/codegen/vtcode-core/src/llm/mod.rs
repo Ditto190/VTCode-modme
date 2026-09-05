@@ -200,6 +200,7 @@ pub mod providers;
 pub mod request_gap;
 /// Adapter for the Rig agent framework.
 pub mod rig_adapter;
+pub use vtcode_llm::reasoning_effort;
 /// RL optimization loop: adaptive action selection (bandit / actor-critic).
 pub mod rl;
 mod single_response;

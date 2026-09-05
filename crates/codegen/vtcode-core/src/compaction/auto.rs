@@ -13,7 +13,7 @@ use anyhow::Result;
 
 use crate::compaction::memory_envelope::{
     MemoryEnvelopePersistence, MemoryEnvelopePlacement, SessionMemoryEnvelopeUpdate,
-    dedup_repeated_file_reads_for_local_compaction, effective_compaction_threshold,
+    dedup_repeated_file_reads_for_local_compaction, effective_compaction_threshold_with_reserve,
     persist_memory_envelope_async_with_update, strip_existing_memory_envelope,
 };
 use crate::compaction::two_pass::fingerprint_prefix;
@@ -46,6 +46,8 @@ pub struct AutoCompactionInput<'a> {
     pub vt_cfg: Option<&'a VTCodeConfig>,
     /// Current estimated token usage of the live history (before compaction).
     pub current_token_usage: usize,
+    /// Output limit of the next request, excluding prompt/history overhead.
+    pub reserved_output_tokens: usize,
     /// Files touched so far this session (enrich the memory envelope).
     pub touched_files: &'a [String],
     /// Engine configuration (thresholds, retention, summary prompt overrides).
@@ -86,6 +88,7 @@ pub async fn auto_compact_messages(
         workspace_root,
         vt_cfg,
         current_token_usage,
+        reserved_output_tokens,
         touched_files,
         engine_cfg,
         manual_options,
@@ -100,7 +103,8 @@ pub async fn auto_compact_messages(
         return Ok(None);
     }
 
-    let Some(threshold) = effective_compaction_threshold(vt_cfg, provider, model) else {
+    let Some(threshold) = effective_compaction_threshold_with_reserve(vt_cfg, provider, model, reserved_output_tokens)
+    else {
         return Ok(None);
     };
     if current_token_usage < threshold && !force_compaction {
@@ -355,6 +359,7 @@ mod tests {
                 session_id: "s1",
                 workspace_root: Path::new("."),
                 vt_cfg: Some(&vt_cfg),
+                reserved_output_tokens: 0,
                 current_token_usage: 900,
                 touched_files: &[],
                 engine_cfg: CompactionConfig::default(),
@@ -388,6 +393,7 @@ mod tests {
                 session_id: "s1",
                 workspace_root: Path::new("."),
                 vt_cfg: Some(&vt_cfg),
+                reserved_output_tokens: 0,
                 current_token_usage: 900,
                 touched_files: &[],
                 engine_cfg: CompactionConfig {
@@ -435,6 +441,7 @@ mod tests {
                 session_id: "session-1",
                 workspace_root: workspace.path(),
                 vt_cfg: Some(&vt_cfg),
+                reserved_output_tokens: 0,
                 current_token_usage: 4_000,
                 touched_files: &[],
                 engine_cfg: CompactionConfig {

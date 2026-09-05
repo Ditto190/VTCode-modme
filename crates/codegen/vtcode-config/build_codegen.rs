@@ -401,6 +401,9 @@ pub fn generate_model_capabilities(entries: &[CapabilityEntry]) -> String {
             pub description: &'static str,
             pub context_window: usize,
             pub max_output_tokens: Option<usize>,
+            pub reasoning_efforts: &'static [&'static str],
+            pub is_pro: bool,
+            pub lightweight_model: Option<&'static str>,
             pub reasoning: bool,
             pub tool_call: bool,
             pub vision: bool,
@@ -444,6 +447,12 @@ fn capability_entry_expr(entry: &CapabilityEntry) -> TokenStream {
     let context_window = entry.context_window;
     let max_output_tokens = optional_usize_tokens(entry.max_output_tokens);
     let reasoning = entry.reasoning;
+    let reasoning_efforts = &entry.reasoning_efforts;
+    let is_pro = entry.is_pro;
+    let lightweight_model = match &entry.lightweight_model {
+        Some(model) => quote! { Some(#model) },
+        None => quote! { None },
+    };
     let tool_call = entry.tool_call;
     let vision = entry.vision;
     let modalities: TokenStream = entry.input_modalities.iter().map(|m| quote! { #m, }).collect();
@@ -460,6 +469,9 @@ fn capability_entry_expr(entry: &CapabilityEntry) -> TokenStream {
             context_window: #context_window,
             max_output_tokens: #max_output_tokens,
             reasoning: #reasoning,
+            reasoning_efforts: &[#(#reasoning_efforts),*],
+            is_pro: #is_pro,
+            lightweight_model: #lightweight_model,
             tool_call: #tool_call,
             vision: #vision,
             input_modalities: &[
