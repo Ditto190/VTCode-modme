@@ -397,6 +397,8 @@ fn extract_plan_body_for_display(text: &str) -> Option<String> {
 /// - `•` bullets become `-` (the marker pulldown-cmark recognizes)
 /// - bare `Summary:` / `Test Cases and Validation:` / `Assumptions…` labels
 ///   become `##` headings so they read as sections instead of a wall of text
+/// - long `1. Action -> files: […] -> verify: […]` steps are split so the
+///   metadata renders as nested bullets instead of one unwrapped wall of text
 /// - missing blank lines around headings/lists are repaired so the parser
 ///   emits distinct blocks instead of one collapsed paragraph.
 fn normalize_plan_display_markdown(body: &str) -> String {
@@ -475,6 +477,36 @@ fn normalize_plan_display_markdown(body: &str) -> String {
             }
         }
 
+        // Split long `1. Action -> files: […] -> verify: […]` steps so the
+        // metadata renders as nested bullets. A single-line step with two
+        // `->` clauses wraps without a hanging indent and reads as a wall of
+        // text (Sep-04 screenshot); nested `- files:` / `- verify:` lines keep
+        // the ordered-list structure while staying scannable. Fenced code is
+        // already excluded above. Splits happen only at ` -> files:` /
+        // ` -> verify:` outside inline-code spans so `` `a -> files: b` ``
+        // and prose arrows (`A -> B`) stay intact.
+        if is_ordered_list_item(current.trim())
+            && let Some(parts) = split_ordered_step_metadata(current.trim())
+        {
+            let marker_width = ordered_marker_width(current.trim());
+            let nested_prefix = format!("{indent}{:width$}- ", "", width = marker_width);
+            lines.push(DisplayLine {
+                text: format!("{indent}{}", parts[0].trim_end()),
+                structural: true,
+            });
+            for part in &parts[1..] {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                lines.push(DisplayLine {
+                    text: format!("{nested_prefix}{part}"),
+                    structural: true,
+                });
+            }
+            continue;
+        }
+
         lines.push(DisplayLine { text: current, structural: true });
     }
 
@@ -535,6 +567,53 @@ fn is_ordered_list_item(trimmed: &str) -> bool {
     }
     let rest: String = trimmed.chars().skip_while(|c| c.is_ascii_digit()).collect();
     rest.starts_with(". ") || rest.starts_with(") ")
+}
+
+/// Width of the ordered marker (`1. ` -> 3, `10. ` -> 4) so nested bullets
+/// align under the item content instead of a fixed 3-space guess.
+fn ordered_marker_width(trimmed: &str) -> usize {
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits + 2
+}
+
+/// Split `1. Action -> files: […] -> verify: […]` at metadata boundaries
+/// outside inline-code spans. Returns head + metadata parts; `None` when no
+/// ` -> files:` / ` -> verify:` marker exists outside backticks.
+fn split_ordered_step_metadata(trimmed: &str) -> Option<Vec<String>> {
+    let mut splits = Vec::new();
+    let mut inline_ticks: Option<usize> = None;
+    let mut cursor = 0;
+    while cursor < trimmed.len() {
+        let remainder = &trimmed[cursor..];
+        if remainder.starts_with('`') {
+            let run = remainder.bytes().take_while(|byte| *byte == b'`').count();
+            if inline_ticks.is_some_and(|ticks| ticks == run) {
+                inline_ticks = None;
+            } else if inline_ticks.is_none() {
+                inline_ticks = Some(run);
+            }
+            cursor += run;
+            continue;
+        }
+        if inline_ticks.is_none() && (remainder.starts_with(" -> files:") || remainder.starts_with(" -> verify:")) {
+            splits.push(cursor);
+            cursor += " -> ".len();
+            continue;
+        }
+        let character = remainder.chars().next().expect("cursor is on a character boundary");
+        cursor += character.len_utf8();
+    }
+    if splits.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::with_capacity(splits.len() + 1);
+    let mut start = 0;
+    for split in splits {
+        parts.push(trimmed[start..split].to_string());
+        start = split + " -> ".len();
+    }
+    parts.push(trimmed[start..].to_string());
+    Some(parts)
 }
 
 fn find_next_open_tag(text: &str) -> Option<(usize, PlanTag)> {
@@ -756,6 +835,24 @@ mod tests {
         assert!(display.contains("## Assumptions and Defaults"));
         assert!(display.contains("- Down reaches the final item."));
         assert!(display.contains("1. Locate modal"));
+        // Long steps are split so metadata renders as nested bullets instead
+        // of one unwrapped wall of text (Sep-04 screenshot).
+        assert!(display.contains("- files: [src/modal.rs]"));
+        assert!(display.contains("- verify: [cargo check]"));
+        assert!(warnings.is_empty(), "well-formed plan should not warn: {warnings:?}");
+    }
+
+    #[test]
+    fn display_preparation_splits_screenshot_style_long_steps() {
+        let raw = "<proposed_plan>\nSummary: The approved /config scrolling fix could not be implemented.\n\n1. Locate the actual /config list-modal implementation -> files: [src/a.rs, crates/b.rs] -> verify: [rg -n \"x\" src]\n\nTest Cases and Validation:\n\n• Down reaches the final item.\n\nAssumptions and Defaults:\n\n• Paths are stale.\n</proposed_plan>";
+        let (display, warnings) = prepare_plan_markdown_for_display(raw);
+        assert!(!display.contains("<proposed_plan>"));
+        assert!(display.contains("## Summary"));
+        assert!(display.contains("1. Locate the actual /config list-modal implementation"));
+        assert!(display.contains("- files: [src/a.rs, crates/b.rs]"));
+        assert!(display.contains("- verify:"));
+        assert!(display.contains("## Test Cases and Validation"));
+        assert!(display.contains("- Down reaches the final item."));
         assert!(warnings.is_empty(), "well-formed plan should not warn: {warnings:?}");
     }
 

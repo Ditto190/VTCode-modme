@@ -21,7 +21,7 @@ use crate::agent::runloop::unified::tool_pipeline::{
     ToolDisplayStatus, ToolExecutionStatus, ToolPipelineOutcome, renders_pty_command_header, streams_pty_output,
 };
 use crate::agent::runloop::unified::tool_summary_helpers::{
-    display_command_text, preview_command, relativize_command_paths,
+    COMPACT_PREVIEW_LEN, display_command_text, preview_command, relativize_command_paths,
 };
 use vtcode_commons::canonicalize;
 
@@ -233,7 +233,7 @@ fn extract_command_line(args: &serde_json::Value) -> Option<String> {
 fn compact_command_preview(args: &serde_json::Value, workspace_root: Option<&Path>) -> Option<String> {
     display_command_text(args)
         .map(|command| relativize_command_paths(&command, workspace_root))
-        .map(|command| preview_command(&command, 120))
+        .map(|command| preview_command(&command, COMPACT_PREVIEW_LEN))
         .filter(|command| !command.is_empty())
 }
 
@@ -1611,6 +1611,23 @@ mod tests {
         assert_eq!(header, "• Ran cat docs/guides/agent-loop-contract.md 2>/dev/null | head -120; echo ---");
         assert!(!header.contains("'|'"), "pipe must not be quoted: {header}");
         assert!(!header.contains("'2>'"), "redirection must not be quoted: {header}");
+    }
+
+    #[test]
+    fn command_header_for_multiline_python_stays_readable() {
+        // Screenshot 2026-09-02: `• Ran python3 -c "` with `tur…ool_calls`
+        // continuations and `\'\'` quoting noise. The viewer header must stay
+        // single-line with real script content and no nested-quote artifacts.
+        let args = serde_json::json!({
+            "command": "python3 -c \"\nimport json\nwith open('.vtcode/checkpoints/turn_1032.json') as f: d = json.load(f)\""
+        });
+        let header = command_output_header(tools::EXEC_COMMAND, &args, None);
+        assert!(header.starts_with("• Ran python3 -c "), "got: {header}");
+        assert!(header.contains("import json"), "got: {header}");
+        assert!(!header.contains('\n'), "newlines leaked: {header:?}");
+        assert!(!header.contains("tur…ool"), "mid-string ellipsis leaked: {header}");
+        assert!(!header.contains("\\'"), "escaped quotes leaked: {header}");
+        assert_ne!(header, "• Ran python3 -c \"");
     }
 
     #[test]

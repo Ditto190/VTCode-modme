@@ -89,20 +89,6 @@ note: i want you to fix and improve vtcode harness based on the session run log.
 
 ---
 
-fix broken tool call rendering
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 22.40.46.png'
-
-===
-
-===
-
-fix propose plan mode markdown is not rendering correctly, it should be able to render the markdown content properly and display it in a readable format. The harness should ensure that any markdown content is parsed and rendered accurately, preserving formatting, headings, lists, and other elements. Additionally, provide clear feedback to the user if there are any issues with rendering the markdown content.
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-04 at 10.54.05.png'
-
----
-
 check plan mode: vtcode on user approval confirmation dialog -> accept and implement -> the agent use auto mode -> then later the agent switch to propose plan mode, but not implement it? User has to nudge `start implement` manually. The harness should ensure that when the agent switches to propose plan mode, it automatically implements the proposed plan without requiring additional user intervention. Additionally, provide clear feedback to the user about the current mode and any actions they need to take to ensure the plan is implemented correctly.
 
 log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260904T034530Z_179873-58689
