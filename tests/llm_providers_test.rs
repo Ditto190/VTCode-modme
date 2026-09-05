@@ -37,6 +37,62 @@ fn test_provider_factory_creation() {
     assert!(providers.contains(&"minimax".to_string()));
     assert!(providers.contains(&"huggingface".to_string()));
     assert!(providers.contains(&"openresponses".to_string()));
+    assert!(providers.contains(&"vercel".to_string()));
+}
+
+#[test]
+fn test_vercel_provider_creation() {
+    let factory = LLMFactory::new();
+    let provider = factory
+        .create_provider(
+            "vercel",
+            vtcode_core::llm::factory::ProviderConfig {
+                api_key: Some("test-key".to_string()),
+                openai_chatgpt_auth: None,
+                copilot_auth: None,
+                base_url: None,
+                model: Some(models::vercel::ANTHROPIC_CLAUDE_SONNET_5.to_string()),
+                prompt_cache: None,
+                timeouts: None,
+                openai: None,
+                anthropic: None,
+                model_behavior: None,
+                workspace_root: None,
+            },
+            &[],
+        )
+        .expect("Vercel provider should be registered in the factory");
+    assert_eq!(provider.name(), "vercel");
+    assert_eq!(provider.backend_kind(), vtcode_commons::llm::BackendKind::Vercel);
+
+    let supported = provider.supported_models();
+    assert!(supported.contains(&models::vercel::DEFAULT_MODEL.to_string()));
+    // Gateway accepts unlisted vendor/model ids; validation must not reject them.
+    let request = LLMRequest {
+        messages: vec![Message::user("hi".to_string())].into(),
+        model: "some-vendor/unlisted-model".to_string(),
+        ..Default::default()
+    };
+    assert!(provider.validate_request(&request).is_ok());
+}
+
+#[test]
+fn test_vercel_model_id_resolution() {
+    use std::str::FromStr;
+    // Non-colliding gateway ids parse straight to the Vercel variant.
+    let model_id = vtcode_core::config::models::ModelId::from_str(models::vercel::ANTHROPIC_CLAUDE_HAIKU_4_5)
+        .expect("gateway id should parse to a ModelId");
+    assert_eq!(model_id.provider(), Provider::Vercel);
+    assert_eq!(model_id.as_str(), models::vercel::ANTHROPIC_CLAUDE_HAIKU_4_5);
+    // Ids shared with OpenRouter/Merge Gateway keep the existing bare-parse
+    // precedence; explicit provider configuration selects the Vercel route
+    // (same convention as Merge Gateway's curated upstream ids).
+    assert_eq!(
+        vtcode_core::config::models::ModelId::from_str(models::vercel::ANTHROPIC_CLAUDE_SONNET_5)
+            .expect("gateway id should parse to a ModelId")
+            .provider(),
+        Provider::OpenRouter
+    );
 }
 
 #[test]

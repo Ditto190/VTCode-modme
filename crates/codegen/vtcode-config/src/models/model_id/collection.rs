@@ -168,6 +168,24 @@ impl ModelId {
             ModelId::PoolsideLagunaM1,
             ModelId::PoolsideLagunaXs2,
             ModelId::PoolsideLagunaS21,
+            // Vercel AI Gateway models
+            ModelId::VercelAnthropicClaudeSonnet5,
+            ModelId::VercelAnthropicClaudeOpus5,
+            ModelId::VercelAnthropicClaudeHaiku45,
+            ModelId::VercelOpenAiGpt56Sol,
+            ModelId::VercelOpenAiGpt6Astra,
+            ModelId::VercelOpenAiGpt56Luna,
+            ModelId::VercelOpenAiGpt53Codex,
+            ModelId::VercelGoogleGemini31ProPreview,
+            ModelId::VercelGoogleGemini38Flash,
+            ModelId::VercelDeepseekV4Pro,
+            ModelId::VercelDeepseekV4Flash,
+            ModelId::VercelMoonshotaiKimiK3,
+            ModelId::VercelMoonshotaiKimiK27Code,
+            ModelId::VercelAlibabaQwen38Max,
+            ModelId::VercelAlibabaQwen3CoderNext,
+            ModelId::VercelMinimaxM3,
+            ModelId::VercelMistralDevstral2,
         ];
         models.extend(Self::openrouter_models());
         let mut seen = HashSet::new();

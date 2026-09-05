@@ -158,6 +158,7 @@ pub trait LLMProvider: Send + Sync {
             "poolside" => BackendKind::Poolside,
             "nvidia" => BackendKind::Nvidia,
             "merge-gateway" => BackendKind::MergeGateway,
+            "vercel" => BackendKind::Vercel,
             _ => BackendKind::OpenAI,
         }
     }

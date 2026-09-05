@@ -576,6 +576,15 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Provider whitelisting, Custom providers, Collapsed tool-result disclosure, Google Gemini, OpenAI
   - **User Questions**: "What can you tell me about Provider Guides?", "How does Provider whitelisting work?", "How does Custom providers work?"
 
+- **File**: `docs/providers/vercel-ai-gateway.md`
+  - **Content**: Vercel AI Gateway Integration
+  - **Topics**: Setup, Curated models, Persisting configuration, Shared model IDs and provider precedence, Runtime behaviour
+  - **User Questions**: "What can you tell me about Vercel AI Gateway Integration?", "How does Setup work?", "How does Curated models work?"
+
+- **File**: `docs/providers/vercel-ai-gateway-quick-reference.md`
+  - **Content**: Vercel AI Gateway Quick Reference
+  - **User Questions**: "What can you tell me about Vercel AI Gateway Quick Reference?"
+
 - **File**: `docs/providers/zai.md`
   - **Content**: Z.AI Provider Guide
   - **Topics**: Quickstart, Model API — GLM-5.3 Flash, Curated models, Vision-driven workflows (Flash), GLM Coding Plan

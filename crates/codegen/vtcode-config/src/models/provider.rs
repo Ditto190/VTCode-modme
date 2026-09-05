@@ -65,6 +65,7 @@ impl ProviderModelSupport for Provider {
             Provider::StepFun => models::stepfun::REASONING_MODELS.contains(&model),
             Provider::Evolink => models::evolink::REASONING_MODELS.contains(&model),
             Provider::Poolside => false,
+            Provider::Vercel => !models::vercel::NON_REASONING_MODELS.contains(&model),
             Provider::XAI => models::xai::REASONING_MODELS.contains(&model),
             Provider::NVIDIA => models::nvidia::REASONING_MODELS.contains(&model),
             Provider::MergeGateway => models::merge_gateway::route_supports_reasoning(model),

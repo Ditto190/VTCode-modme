@@ -382,6 +382,42 @@ pub enum ModelId {
     /// Laguna S 2.1 - Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks
     PoolsideLagunaS21,
 
+    // Vercel AI Gateway models (namespaced as `vendor/model` on the gateway)
+    /// Claude Sonnet 5 served through the Vercel AI Gateway
+    VercelAnthropicClaudeSonnet5,
+    /// Claude Opus 5 served through the Vercel AI Gateway
+    VercelAnthropicClaudeOpus5,
+    /// Claude Haiku 4.5 served through the Vercel AI Gateway
+    VercelAnthropicClaudeHaiku45,
+    /// GPT-5.6 Sol served through the Vercel AI Gateway
+    VercelOpenAiGpt56Sol,
+    /// GPT-6 Astra served through the Vercel AI Gateway
+    VercelOpenAiGpt6Astra,
+    /// GPT-5.6 Luna served through the Vercel AI Gateway
+    VercelOpenAiGpt56Luna,
+    /// GPT-5.3 Codex served through the Vercel AI Gateway
+    VercelOpenAiGpt53Codex,
+    /// Gemini 3.1 Pro Preview served through the Vercel AI Gateway
+    VercelGoogleGemini31ProPreview,
+    /// Gemini 3.8 Flash served through the Vercel AI Gateway
+    VercelGoogleGemini38Flash,
+    /// DeepSeek V4 Pro served through the Vercel AI Gateway
+    VercelDeepseekV4Pro,
+    /// DeepSeek V4 Flash served through the Vercel AI Gateway
+    VercelDeepseekV4Flash,
+    /// Kimi K3 served through the Vercel AI Gateway
+    VercelMoonshotaiKimiK3,
+    /// Kimi K2.7 Code served through the Vercel AI Gateway
+    VercelMoonshotaiKimiK27Code,
+    /// Qwen3.8 Max served through the Vercel AI Gateway
+    VercelAlibabaQwen38Max,
+    /// Qwen3 Coder Next served through the Vercel AI Gateway
+    VercelAlibabaQwen3CoderNext,
+    /// MiniMax M3 served through the Vercel AI Gateway
+    VercelMinimaxM3,
+    /// Devstral 2 served through the Vercel AI Gateway
+    VercelMistralDevstral2,
+
     // xAI models
     /// Grok Build 0.1 - xAI's fast coding model for agentic software engineering
     XaiGrokBuild01,

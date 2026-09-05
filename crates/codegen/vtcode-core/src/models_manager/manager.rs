@@ -489,6 +489,7 @@ impl ModelsManager {
             Provider::XAI => crate::config::constants::models::xai::DEFAULT_MODEL.to_string(),
             Provider::NVIDIA => crate::config::constants::models::nvidia::DEFAULT_MODEL.to_string(),
             Provider::MergeGateway => crate::config::constants::models::merge_gateway::DEFAULT_MODEL.to_string(),
+            Provider::Vercel => crate::config::constants::models::vercel::DEFAULT_MODEL.to_string(),
         }
     }
 

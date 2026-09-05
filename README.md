@@ -87,7 +87,7 @@ the terminal.
 | **Observable by design**   | A canonical `ThreadEvent` runtime contract supports replay, archives, checkpoints, memory views, and trajectory export.                       |
 | **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without core forks.                            |
 | **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, full automation, and cost guardrails scale autonomy safely.          |
-| **Runs anywhere**          | 30 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                     |
+| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                     |
 
 ## Quick start
 
@@ -153,9 +153,10 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 
 ## Providers
 
-30 built-in providers, custom OpenAI-compatible endpoints, and local backends.
-[Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
-for credentials and model defaults.
+31 built-in providers — including multi-model gateways like OpenRouter,
+Merge Gateway, and Vercel AI Gateway — custom OpenAI-compatible endpoints, and
+local backends. [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the
+source of truth for credentials and model defaults.
 
 ```bash
 vtcode models list

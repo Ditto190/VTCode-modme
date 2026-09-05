@@ -386,7 +386,7 @@ impl VTCodeConfig {
                      must be one of: gemini, openai, anthropic, copilot, deepseek, meta, \
                      openrouter, ollama, lmstudio, llamacpp, moonshot, zai, minimax, \
                      mimo, mistral, huggingface, opencodezen, opencodego, qwen, \
-                     stepfun, evolink, poolside"
+                     stepfun, evolink, poolside, nvidia, merge-gateway, vercel"
                 );
             }
         }

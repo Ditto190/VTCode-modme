@@ -75,6 +75,8 @@ fn catalog_provider_key(provider: &str) -> &str {
         "nvidia"
     } else if provider.eq_ignore_ascii_case("merge-gateway") {
         "merge-gateway"
+    } else if provider.eq_ignore_ascii_case("vercel") || provider.eq_ignore_ascii_case("vercel-ai-gateway") {
+        "vercel"
     } else {
         provider
     }
@@ -108,6 +110,7 @@ fn capability_provider_key(provider: Provider) -> &'static str {
         Provider::XAI => "xai",
         Provider::NVIDIA => "nvidia",
         Provider::MergeGateway => "merge-gateway",
+        Provider::Vercel => "vercel",
     }
 }
 
@@ -253,6 +256,10 @@ impl ModelId {
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::EvolinkGemini35Flash
                 | ModelId::EvolinkDeepseekV4Flash
+                | ModelId::VercelGoogleGemini38Flash
+                | ModelId::VercelDeepseekV4Flash
+                | ModelId::VercelOpenAiGpt56Luna
+                | ModelId::VercelAnthropicClaudeHaiku45
                 | ModelId::OpenRouterStepfunStep35FlashFree
                 | ModelId::HuggingFaceStep35Flash
                 | ModelId::StepFun37Flash
@@ -500,6 +507,23 @@ impl ModelId {
             | ModelId::MergeGatewayOpenAIGpt56Sol
             | ModelId::MergeGatewayOpenAIGpt56Terra => "5.6",
             ModelId::MergeGatewayOpenAIGpt6Astra => "6",
+            // Vercel AI Gateway models
+            ModelId::VercelAnthropicClaudeSonnet5 => "5",
+            ModelId::VercelAnthropicClaudeOpus5 => "5",
+            ModelId::VercelAnthropicClaudeHaiku45 => "4.5",
+            ModelId::VercelOpenAiGpt56Sol | ModelId::VercelOpenAiGpt56Luna => "5.6",
+            ModelId::VercelOpenAiGpt6Astra => "6",
+            ModelId::VercelOpenAiGpt53Codex => "5.3-codex",
+            ModelId::VercelGoogleGemini31ProPreview => "3.1-pro",
+            ModelId::VercelGoogleGemini38Flash => "3.8",
+            ModelId::VercelDeepseekV4Pro => "v4-pro",
+            ModelId::VercelDeepseekV4Flash => "v4-flash",
+            ModelId::VercelMoonshotaiKimiK3 => "k3",
+            ModelId::VercelMoonshotaiKimiK27Code => "k2.7",
+            ModelId::VercelAlibabaQwen38Max => "3.8-max",
+            ModelId::VercelAlibabaQwen3CoderNext => "coder-next",
+            ModelId::VercelMinimaxM3 => "M3",
+            ModelId::VercelMistralDevstral2 => "devstral-2",
             _ => "unknown",
         }
     }

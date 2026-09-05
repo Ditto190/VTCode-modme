@@ -130,6 +130,7 @@ All VT Code crates require Rust 1.88 or later due to dependencies (ratatui 0.30,
 | OpenCode Zen | Yes | `opencode-zen` | Full support |
 | OpenCode Go | Yes | `opencode-go` | Full support |
 | Mistral | Yes | `mistral` | Full support |
+| Vercel AI Gateway | Yes | `vercel` | Multi-model gateway; streaming, tools, structured output, and reasoning (all curated models except `alibaba/qwen3-coder-next` and `mistral/devstral-2`) |
 
 ---
 

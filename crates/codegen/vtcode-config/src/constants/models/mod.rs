@@ -22,6 +22,7 @@ pub mod openrouter;
 pub mod poolside;
 pub mod qwen;
 pub mod stepfun;
+pub mod vercel;
 pub mod xai;
 pub mod zai;
 

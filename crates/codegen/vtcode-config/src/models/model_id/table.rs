@@ -1006,6 +1006,126 @@ model_id_table! {
         display: "Laguna S 2.1",
         description: "Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks, tool use, and validation",
     },
+    // Vercel AI Gateway models (ids use the gateway's native `vendor/model` format)
+    VercelAnthropicClaudeSonnet5 {
+        provider: Vercel,
+        id: models::vercel::ANTHROPIC_CLAUDE_SONNET_5,
+        parse: [models::vercel::ANTHROPIC_CLAUDE_SONNET_5],
+        display: "Claude Sonnet 5 (Vercel AI Gateway)",
+        description: "Anthropic Claude Sonnet 5 served through the Vercel AI Gateway (ai-gateway.vercel.sh)",
+    },
+    VercelAnthropicClaudeOpus5 {
+        provider: Vercel,
+        id: models::vercel::ANTHROPIC_CLAUDE_OPUS_5,
+        parse: [models::vercel::ANTHROPIC_CLAUDE_OPUS_5],
+        display: "Claude Opus 5 (Vercel AI Gateway)",
+        description: "Anthropic Claude Opus 5 flagship model served through the Vercel AI Gateway (ai-gateway.vercel.sh)",
+    },
+    VercelAnthropicClaudeHaiku45 {
+        provider: Vercel,
+        id: models::vercel::ANTHROPIC_CLAUDE_HAIKU_4_5,
+        parse: [models::vercel::ANTHROPIC_CLAUDE_HAIKU_4_5],
+        display: "Claude Haiku 4.5 (Vercel AI Gateway)",
+        description: "Anthropic Claude Haiku 4.5 fast, cost-efficient model served through the Vercel AI Gateway",
+    },
+    VercelOpenAiGpt56Sol {
+        provider: Vercel,
+        id: models::vercel::OPENAI_GPT_5_6_SOL,
+        parse: [models::vercel::OPENAI_GPT_5_6_SOL],
+        display: "GPT-5.6 Sol (Vercel AI Gateway)",
+        description: "OpenAI GPT-5.6 Sol flagship reasoning model served through the Vercel AI Gateway",
+    },
+    VercelOpenAiGpt6Astra {
+        provider: Vercel,
+        id: models::vercel::OPENAI_GPT_6_ASTRA,
+        parse: [models::vercel::OPENAI_GPT_6_ASTRA],
+        display: "GPT-6 Astra (Vercel AI Gateway)",
+        description: "OpenAI GPT-6 Astra flagship reasoning model served through the Vercel AI Gateway",
+    },
+    VercelOpenAiGpt56Luna {
+        provider: Vercel,
+        id: models::vercel::OPENAI_GPT_5_6_LUNA,
+        parse: [models::vercel::OPENAI_GPT_5_6_LUNA],
+        display: "GPT-5.6 Luna (Vercel AI Gateway)",
+        description: "OpenAI GPT-5.6 Luna cost-efficient reasoning model served through the Vercel AI Gateway",
+    },
+    VercelOpenAiGpt53Codex {
+        provider: Vercel,
+        id: models::vercel::OPENAI_GPT_5_3_CODEX,
+        parse: [models::vercel::OPENAI_GPT_5_3_CODEX],
+        display: "GPT-5.3 Codex (Vercel AI Gateway)",
+        description: "OpenAI GPT-5.3 Codex coding-specialized model served through the Vercel AI Gateway",
+    },
+    VercelGoogleGemini31ProPreview {
+        provider: Vercel,
+        id: models::vercel::GOOGLE_GEMINI_3_1_PRO_PREVIEW,
+        parse: [models::vercel::GOOGLE_GEMINI_3_1_PRO_PREVIEW],
+        display: "Gemini 3.1 Pro Preview (Vercel AI Gateway)",
+        description: "Google Gemini 3.1 Pro Preview served through the Vercel AI Gateway",
+    },
+    VercelGoogleGemini38Flash {
+        provider: Vercel,
+        id: models::vercel::GOOGLE_GEMINI_3_8_FLASH,
+        parse: [models::vercel::GOOGLE_GEMINI_3_8_FLASH],
+        display: "Gemini 3.8 Flash (Vercel AI Gateway)",
+        description: "Google Gemini 3.8 Flash fast, cost-efficient model served through the Vercel AI Gateway",
+    },
+    VercelDeepseekV4Pro {
+        provider: Vercel,
+        id: models::vercel::DEEPSEEK_V4_PRO,
+        parse: [models::vercel::DEEPSEEK_V4_PRO],
+        display: "DeepSeek V4 Pro (Vercel AI Gateway)",
+        description: "DeepSeek V4 Pro flagship reasoning model served through the Vercel AI Gateway",
+    },
+    VercelDeepseekV4Flash {
+        provider: Vercel,
+        id: models::vercel::DEEPSEEK_V4_FLASH,
+        parse: [models::vercel::DEEPSEEK_V4_FLASH],
+        display: "DeepSeek V4 Flash (Vercel AI Gateway)",
+        description: "DeepSeek V4 Flash fast, cost-efficient reasoning model served through the Vercel AI Gateway",
+    },
+    VercelMoonshotaiKimiK3 {
+        provider: Vercel,
+        id: models::vercel::MOONSHOTAI_KIMI_K3,
+        parse: [models::vercel::MOONSHOTAI_KIMI_K3],
+        display: "Kimi K3 (Vercel AI Gateway)",
+        description: "Moonshot AI Kimi K3 flagship reasoning model served through the Vercel AI Gateway",
+    },
+    VercelMoonshotaiKimiK27Code {
+        provider: Vercel,
+        id: models::vercel::MOONSHOTAI_KIMI_K2_7_CODE,
+        parse: [models::vercel::MOONSHOTAI_KIMI_K2_7_CODE],
+        display: "Kimi K2.7 Code (Vercel AI Gateway)",
+        description: "Moonshot AI Kimi K2.7 Code coding-specialized model served through the Vercel AI Gateway",
+    },
+    VercelAlibabaQwen38Max {
+        provider: Vercel,
+        id: models::vercel::ALIBABA_QWEN_3_8_MAX,
+        parse: [models::vercel::ALIBABA_QWEN_3_8_MAX],
+        display: "Qwen3.8 Max (Vercel AI Gateway)",
+        description: "Alibaba Qwen3.8 Max flagship model served through the Vercel AI Gateway",
+    },
+    VercelAlibabaQwen3CoderNext {
+        provider: Vercel,
+        id: models::vercel::ALIBABA_QWEN_3_CODER_NEXT,
+        parse: [models::vercel::ALIBABA_QWEN_3_CODER_NEXT],
+        display: "Qwen3 Coder Next (Vercel AI Gateway)",
+        description: "Alibaba Qwen3 Coder Next coding-specialized model served through the Vercel AI Gateway",
+    },
+    VercelMinimaxM3 {
+        provider: Vercel,
+        id: models::vercel::MINIMAX_M3,
+        parse: [models::vercel::MINIMAX_M3],
+        display: "MiniMax M3 (Vercel AI Gateway)",
+        description: "MiniMax M3 long-context reasoning model served through the Vercel AI Gateway",
+    },
+    VercelMistralDevstral2 {
+        provider: Vercel,
+        id: models::vercel::MISTRAL_DEVSTRAL_2,
+        parse: [models::vercel::MISTRAL_DEVSTRAL_2],
+        display: "Devstral 2 (Vercel AI Gateway)",
+        description: "Mistral Devstral 2 coding model served through the Vercel AI Gateway",
+    },
 }
 
 #[cfg(test)]
@@ -1044,6 +1164,22 @@ mod tests {
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::MergeGatewayMetaMuseSpark13
                 | ModelId::MergeGatewayOpenAIGpt6Astra
+        )
+        // Vercel AI Gateway's curated `vendor/model` ids intentionally match
+        // OpenRouter ids; explicit provider configuration selects the Vercel
+        // route (bare parsing keeps the existing OpenRouter precedence).
+        || matches!(
+            model,
+            ModelId::VercelAnthropicClaudeSonnet5
+                | ModelId::VercelAnthropicClaudeOpus5
+                | ModelId::VercelOpenAiGpt6Astra
+                | ModelId::VercelOpenAiGpt56Sol
+                | ModelId::VercelOpenAiGpt56Luna
+                | ModelId::VercelGoogleGemini38Flash
+                | ModelId::VercelDeepseekV4Pro
+                | ModelId::VercelDeepseekV4Flash
+                | ModelId::VercelMoonshotaiKimiK3
+                | ModelId::VercelMoonshotaiKimiK27Code
         )
     }
 

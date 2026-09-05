@@ -80,6 +80,10 @@ Choose one of the supported LLM providers:
     -   Default model: `default_routing`; curated routes include `openai/gpt-5.5`, `anthropic/claude-opus-5`, and `google/gemini-3.6-flash`.
     -   Native Requests API and authenticated `/v1/models` catalog discovery are used by default; see the [Merge Gateway provider guide](../providers/merge-gateway.md) for legacy `/v1/openai` compatibility.
 
+-   **Vercel AI Gateway**: `export AI_GATEWAY_API_KEY=your_key_here`
+    -   Create a key in the [Vercel dashboard](https://vercel.com/dashboard) under AI Gateway, then configure `provider = "vercel"`.
+    -   Default model: `anthropic/claude-sonnet-5`; see the [Vercel AI Gateway provider guide](../providers/vercel-ai-gateway.md)
+
 For more providers, see the [Provider Guides](../providers/PROVIDER_GUIDES.md).
 
 ### User data and configuration paths

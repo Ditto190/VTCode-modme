@@ -33,6 +33,7 @@ pub const EVOLINK_BASE_URL: &str = "EVOLINK_BASE_URL";
 pub const POOLSIDE_BASE_URL: &str = "POOLSIDE_BASE_URL";
 pub const MERGE_GATEWAY_API_KEY: &str = "MERGE_GATEWAY_API_KEY";
 pub const MERGE_GATEWAY_BASE_URL: &str = "MERGE_GATEWAY_BASE_URL";
+pub const VERCEL_AI_GATEWAY_BASE_URL: &str = "VERCEL_AI_GATEWAY_BASE_URL";
 
 /// Environment variable for setting maximum thinking budget tokens
 /// Set to 63999 to get 2x the default thinking budget on 64K output models

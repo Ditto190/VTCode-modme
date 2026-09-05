@@ -414,6 +414,7 @@ fn provider_precedence(provider: Provider) -> usize {
         Provider::XAI => 23,
         Provider::NVIDIA => 24,
         Provider::MergeGateway => 25,
+        Provider::Vercel => 26,
     }
 }
 

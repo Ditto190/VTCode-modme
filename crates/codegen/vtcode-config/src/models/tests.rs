@@ -620,6 +620,19 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::MergeGatewayGoogleGemini38Flash
             | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt6Astra => continue,
+            // Vercel AI Gateway reuses `vendor/model` ids that overlap with
+            // OpenRouter/Merge Gateway; bare parsing preserves the existing
+            // precedence and explicit provider configuration selects Vercel.
+            ModelId::VercelAnthropicClaudeSonnet5
+            | ModelId::VercelAnthropicClaudeOpus5
+            | ModelId::VercelOpenAiGpt6Astra
+            | ModelId::VercelOpenAiGpt56Sol
+            | ModelId::VercelOpenAiGpt56Luna
+            | ModelId::VercelGoogleGemini38Flash
+            | ModelId::VercelDeepseekV4Pro
+            | ModelId::VercelDeepseekV4Flash
+            | ModelId::VercelMoonshotaiKimiK3
+            | ModelId::VercelMoonshotaiKimiK27Code => continue,
             _ => ModelId::from_str(&model.as_str()),
         };
         assert_eq!(parsed.unwrap(), model);

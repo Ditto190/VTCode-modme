@@ -323,6 +323,18 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Base URL:** `https://api.atlascloud.ai/v1`
 -   **Recommended model:** start with `deepseek-ai/deepseek-v4-flash` (DeepSeek's latest flash model, 1M context, $0.14/M input tokens).
 
+## Vercel AI Gateway
+
+-   **Guide:** [Vercel AI Gateway Integration](./vercel-ai-gateway.md) · [Quick Reference](./vercel-ai-gateway-quick-reference.md)
+-   **Official docs:** [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) · [Getting started](https://vercel.com/docs/ai-gateway/getting-started)
+-   **Provider key:** `vercel` (aliases: `vercel-ai-gateway`, `ai-gateway`)
+-   **Auth:** `AI_GATEWAY_API_KEY` (Bearer token; create a key in the [Vercel dashboard](https://vercel.com/dashboard) under AI Gateway)
+-   **Base URL:** `https://ai-gateway.vercel.sh/v1` (OpenAI Chat Completions compatible), override with `VERCEL_AI_GATEWAY_BASE_URL`
+-   **Default model:** `anthropic/claude-sonnet-5`
+-   **Curated models:** 17 models from Anthropic, OpenAI, Google, DeepSeek, Moonshot, Alibaba, MiniMax, and Mistral
+-   **Features:** Streaming, tool calls, structured output, reasoning traces (all curated models except `alibaba/qwen3-coder-next` and `mistral/devstral-2`), zero token markup, automatic failover, and unlisted gateway `vendor/model` IDs accepted
+-   **Shared IDs:** several curated IDs also exist in OpenRouter's catalog; set `provider = "vercel"` explicitly when configuring the model string (picking from the `/model` picker always routes to Vercel)
+
 ## OmniRoute
 
 -   **Guide:** [OmniRoute Integration](./omniroute.md)
