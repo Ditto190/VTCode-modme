@@ -15,8 +15,14 @@ pub(super) fn describe_fetch_action(_args: &Value) -> (String, HashSet<String>) 
     ("Use Fetch".into(), HashSet::new())
 }
 
-/// Ordered argument keys that may carry a shell command string.
-const SHELL_COMMAND_KEYS: &[&str] = &["command", "raw_command", "bash_command", "cmd"];
+/// Extract a shell command string from the common command argument keys.
+///
+/// Thin binary wrapper over [`command_args::extract_command_text_with_key`]:
+/// spool preview generation belongs to `vtcode-core`, the binary only keeps
+/// the typed `(text, key)` reference for highlight tracking.
+fn extract_command(args: &Value) -> Option<(String, &'static str)> {
+    command_args::extract_command_text_with_key(args)
+}
 
 /// Shared preview budgets so expanded, compact, and PTY headers stay in sync.
 /// Expanded summaries fold to 70 chars (wrapping to at most two `│` lines at
@@ -28,43 +34,6 @@ pub(super) const COMPACT_PREVIEW_LEN: usize = 120;
 /// Exact flag tokens that introduce an inline script for a runner.
 /// Token-exact (not substring) so `grep -c` / `--code-review` never match.
 const SCRIPT_RUNNER_FLAGS: &[&str] = &["-c", "-e", "--code"];
-
-/// Extract a shell command string from the common command argument keys.
-///
-/// Returns the (un-truncated) command text and the argument key it came from so
-/// callers can record which key was used. The `command` key may be a JSON array
-/// (joined with spaces) or a string; per-key emptiness/trim behavior is preserved
-/// for backwards compatibility.
-fn extract_command(args: &Value) -> Option<(String, &'static str)> {
-    if let Some(array) = args.get("command").and_then(Value::as_array) {
-        let joined: String = array
-            .iter()
-            .filter_map(|value| value.as_str())
-            .filter(|segment| !segment.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !joined.is_empty() {
-            return Some((joined, "command"));
-        }
-    }
-    for &key in SHELL_COMMAND_KEYS {
-        let Some(value) = args.get(key).and_then(Value::as_str) else {
-            continue;
-        };
-        // The `command` key trims before the emptiness check; the others do not,
-        // matching historical per-key behavior.
-        let (text, ok) = if key == "command" {
-            let trimmed = value.trim();
-            (trimmed.to_string(), !trimmed.is_empty())
-        } else {
-            (value.to_string(), !value.is_empty())
-        };
-        if ok {
-            return Some((text, key));
-        }
-    }
-    None
-}
 
 pub(super) fn describe_shell_command(args: &Value) -> Option<(String, HashSet<String>)> {
     let (command, key) = extract_command(args)?;

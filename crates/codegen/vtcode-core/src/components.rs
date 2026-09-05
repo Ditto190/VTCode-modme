@@ -470,7 +470,7 @@ fn hash_json_value<H: Hasher>(hasher: &mut H, value: &Value) {
 }
 
 fn build_execution_cache_key(tool_name: &str, args: &Value) -> ToolExecutionCacheKey {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = crate::core::agent::hash_utils::StableHasher::new();
     hasher.write(tool_name.as_bytes());
     hash_json_value(&mut hasher, args);
 

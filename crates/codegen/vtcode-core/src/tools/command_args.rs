@@ -150,6 +150,56 @@ pub fn command_text(args: &Value) -> Result<Option<String>, &'static str> {
     Ok(Some(shell_words::join(parts.iter().map(String::as_str))))
 }
 
+/// Ordered argument keys that may carry a shell command string for display.
+///
+/// Canonical display precedence shared by the binary's tool summaries so
+/// headline and detail extraction can never drift. Safety classification must
+/// keep using [`raw_command_text`]/[`command_words`], which re-parse via
+/// `shell_words` and intentionally exclude the legacy display-only
+/// `bash_command` key that core handlers never execute.
+pub const DISPLAY_COMMAND_KEYS: &[&str] = &["command", "raw_command", "bash_command", "cmd"];
+
+/// Display-only extraction of a shell command string plus the key it came from.
+///
+/// Unlike [`raw_command_text`], array commands are joined with plain spaces
+/// (no quoting) because the result is rendered, never executed or re-parsed:
+/// `["bash", "-lc", "ls -R"]` displays as `bash -lc ls -R`. The `command` key
+/// trims before the emptiness check while other keys use raw emptiness,
+/// preserving historical per-key behavior. Indexed `command.N` parts are
+/// handled by [`command_words`]'s primary path, not here.
+///
+/// Returns `None` when no key carries a non-empty command.
+pub fn extract_command_text_with_key(args: &Value) -> Option<(String, &'static str)> {
+    if let Some(array) = args.get("command").and_then(Value::as_array) {
+        let joined: String = array
+            .iter()
+            .filter_map(|value| value.as_str())
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.is_empty() {
+            return Some((joined, "command"));
+        }
+    }
+    for &key in DISPLAY_COMMAND_KEYS {
+        let Some(value) = args.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        // The `command` key trims before the emptiness check; the others do not,
+        // matching historical per-key behavior.
+        let (text, ok) = if key == "command" {
+            let trimmed = value.trim();
+            (trimmed.to_string(), !trimmed.is_empty())
+        } else {
+            (value.to_string(), !value.is_empty())
+        };
+        if ok {
+            return Some((text, key));
+        }
+    }
+    None
+}
+
 fn has_nonempty_string_field(args: &Value, key: &str) -> bool {
     args.get(key)
         .and_then(Value::as_str)
@@ -827,10 +877,10 @@ pub fn normalize_shell_args(args: &Value) -> Result<Value, &'static str> {
 mod tests {
     use super::{
         WriteStdinDispatch, command_session_missing_required_args, command_session_requires_command_safety,
-        command_text, command_words, contains_dynamic_shell_syntax, has_indexed_command_parts, interactive_input_text,
-        is_readonly_command_string, normalize_indexed_command_args, normalize_shell_args, normalized_command_value,
-        parse_indexed_command_parts, raw_command_text, session_id_text, session_id_text_from_payload, working_dir_text,
-        working_dir_text_from_payload, write_stdin_dispatch,
+        command_text, command_words, contains_dynamic_shell_syntax, extract_command_text_with_key,
+        has_indexed_command_parts, interactive_input_text, is_readonly_command_string, normalize_indexed_command_args,
+        normalize_shell_args, normalized_command_value, parse_indexed_command_parts, raw_command_text, session_id_text,
+        session_id_text_from_payload, working_dir_text, working_dir_text_from_payload, write_stdin_dispatch,
     };
     use serde_json::{Value, json};
 
@@ -1066,6 +1116,35 @@ mod tests {
         );
         assert_eq!(raw_command_text(&json!({"command": ["wc", "-l"]})), Some("wc -l".to_string()));
         assert!(raw_command_text(&json!({})).is_none());
+    }
+
+    #[test]
+    fn display_extraction_reports_key_and_preserves_precedence() {
+        assert_eq!(
+            extract_command_text_with_key(&json!({"command": ["bash", "-lc", "ls -R"]})),
+            Some(("bash -lc ls -R".to_string(), "command"))
+        );
+        assert_eq!(
+            extract_command_text_with_key(&json!({"bash_command": "pwd"})),
+            Some(("pwd".to_string(), "bash_command"))
+        );
+        assert_eq!(
+            extract_command_text_with_key(&json!({"raw_command": "cargo test"})),
+            Some(("cargo test".to_string(), "raw_command"))
+        );
+        // Missing `command` must not block later keys (the copilot
+        // early-return bug this canonical helper fixes).
+        assert_eq!(extract_command_text_with_key(&json!({"cmd": "ls -la"})), Some(("ls -la".to_string(), "cmd")));
+        // `command` trims; other keys keep raw emptiness semantics.
+        assert_eq!(extract_command_text_with_key(&json!({"command": "  "})), None);
+        // First non-empty key in canonical order wins.
+        assert_eq!(
+            extract_command_text_with_key(
+                &json!({"raw_command": "cargo check -p vtcode", "bash_command": "cargo test"})
+            ),
+            Some(("cargo check -p vtcode".to_string(), "raw_command"))
+        );
+        assert!(extract_command_text_with_key(&json!({})).is_none());
     }
 
     #[test]

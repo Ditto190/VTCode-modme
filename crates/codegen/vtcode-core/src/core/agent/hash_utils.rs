@@ -2,8 +2,10 @@
 //!
 //! Provides hashing functions for tool definitions, system prompts, and
 //! low-signal attempt deduplication keys.
+//!
+//! All hashes are stable across processes (FNV-1a) so cache keys remain
+//! comparable after restarts and in persisted harness artifacts.
 
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use serde::Serialize;
@@ -62,6 +64,31 @@ impl PromptCapabilityIdentity {
 #[cfg(test)]
 mod capability_tests {
     use super::*;
+
+    #[test]
+    fn stable_hasher_is_deterministic_across_instances() {
+        assert_eq!(hash_value(&"cache-key"), hash_value(&"cache-key"));
+        assert_ne!(hash_value(&"cache-key-a"), hash_value(&"cache-key-b"));
+    }
+
+    #[test]
+    fn stable_prefix_hash_strips_all_runtime_sections() {
+        let base = "Base prompt\n[Harness Limits]\n- max_tool_calls_per_turn: 5";
+        for suffix in [
+            "\n\n## Active Tools\n- Capabilities: read-only.",
+            "\n\n[Runtime Tool Catalog]\n- version: 1",
+            "\n\n[Deferred Tools]\n- code_search (2 tools): search",
+            "\n\n[Runtime Context]\n- turns: 1",
+            "\n\n[Context]\n- workspace: /tmp",
+        ] {
+            let with_section = format!("{base}{suffix}");
+            assert_eq!(
+                stable_system_prefix_hash(base),
+                stable_system_prefix_hash(&with_section),
+                "runtime section should not affect prefix hash: {suffix:?}"
+            );
+        }
+    }
 
     #[test]
     fn capability_identity_resolves_three_provider_families_without_transport() {
@@ -126,16 +153,53 @@ mod capability_tests {
     }
 }
 
-/// Hash a value using the default hasher.
+/// Stable FNV-1a 64-bit hasher with fixed offset basis.
+///
+/// `std::collections::hash_map::DefaultHasher` uses per-process random keys,
+/// so hashes differ across restarts. Cache and harness keys must be comparable
+/// across processes, hence this deterministic alternative shared by
+/// [`hash_value`], [`hash_json_value`], and execution-cache builders.
+#[derive(Debug, Clone)]
+pub struct StableHasher {
+    hash: u64,
+}
+
+impl Default for StableHasher {
+    fn default() -> Self {
+        Self { hash: 0xcbf29ce484222325 }
+    }
+}
+
+impl StableHasher {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Hasher for StableHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.hash ^= u64::from(*byte);
+            self.hash = self.hash.wrapping_mul(0x100000001b3);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
+
+/// Hash a value with a stable cross-process hash.
 pub fn hash_value<T: Hash>(value: &T) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = StableHasher::new();
     value.hash(&mut hasher);
     hasher.finish()
 }
 
-/// Hash a serializable value as JSON.
+/// Hash a serializable value as JSON with a stable cross-process hash.
 pub fn hash_json_value<T: Serialize + ?Sized>(value: &T) -> Option<u64> {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = StableHasher::new();
     serde_json::to_writer(HasherWriter::new(&mut hasher), value).ok().map(|_| {
         hasher.write_u8(0xff);
         hasher.finish()
@@ -151,22 +215,31 @@ pub fn hash_tool_definitions(tools: Option<&[ToolDefinition]>) -> Option<u64> {
 ///
 /// Strips runtime sections (tool catalog, context, active tools) so the hash
 /// remains stable across turns even as runtime context changes.
+///
+/// Section boundaries share [`crate::prompts::sections::find_prompt_section_bounds`]
+/// semantics with prompt construction (`BracketOrMarkdown`), so a renamed
+/// runtime header cannot silently change cache identity.
 pub fn stable_system_prefix_hash(system_prompt: &str) -> u64 {
-    let stable_prefix = system_prompt
-        .split("\n## Active Tools\n")
-        .next()
-        .unwrap_or(system_prompt)
-        .split("\n[Runtime Tool Catalog]\n")
-        .next()
-        .unwrap_or(system_prompt)
-        .split("\n[Runtime Context]\n")
-        .next()
-        .unwrap_or(system_prompt)
-        .split("\n[Context]\n")
-        .next()
-        .unwrap_or(system_prompt)
-        .trim_end();
-    hash_value(&stable_prefix)
+    const RUNTIME_HEADERS: &[&str] = &[
+        "## Active Tools",
+        "[Runtime Tool Catalog]",
+        "[Deferred Tools]",
+        "[Runtime Context]",
+        "[Context]",
+    ];
+    let earliest = RUNTIME_HEADERS
+        .iter()
+        .filter_map(|header| {
+            crate::prompts::sections::find_prompt_section_bounds(
+                system_prompt,
+                header,
+                crate::prompts::sections::SectionBoundaryMode::BracketOrMarkdown,
+            )
+            .map(|(start, _)| start)
+        })
+        .min();
+    let stable_prefix = earliest.map(|start| &system_prompt[..start]).unwrap_or(system_prompt);
+    hash_value(&stable_prefix.trim_end())
 }
 
 /// Generate a deduplication key for low-signal tool attempts.

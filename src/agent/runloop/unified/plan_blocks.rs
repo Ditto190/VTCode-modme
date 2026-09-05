@@ -544,12 +544,7 @@ fn normalize_plan_display_markdown(body: &str) -> String {
 }
 
 fn is_fence_delimiter(line: &str) -> bool {
-    let indent = line.len() - line.trim_start().len();
-    if indent > 3 {
-        return false;
-    }
-    let trimmed = line.trim_start();
-    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+    vtcode_commons::formatting::is_markdown_fence_delimiter(line)
 }
 
 fn is_ordered_list_item(trimmed: &str) -> bool {

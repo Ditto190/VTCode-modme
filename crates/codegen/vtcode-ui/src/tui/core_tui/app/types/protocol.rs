@@ -97,12 +97,22 @@ pub enum InlineCommand {
         segments: Vec<InlineSegment>,
     },
     /// Append a compact successful-command activity row.
+    ///
+    /// UI-only identity edge derived from the canonical `ThreadEvent` tool
+    /// outcome, not a new source of truth: grouping must stay consistent with
+    /// `vtcode_commons::ui_protocol::tool_summary` boundaries.
     AppendCompactActivity(CompactActivityMetadata),
     /// Replace the current compact successful-command activity row with an
     /// updated contiguous group.
+    ///
+    /// UI-only identity edge; see [`InlineCommand::AppendCompactActivity`].
+    /// Only contiguous successful command activity may group; transient PTY
+    /// rows stay separate.
     ReplaceCompactActivity(CompactActivityMetadata),
     /// Replace the live PTY preview block with a compact activity row after
     /// the command has completed. Complete output is retained separately.
+    ///
+    /// UI-only identity edge; see [`InlineCommand::AppendCompactActivity`].
     CollapsePtyBlock(CompactActivityMetadata),
     SetPrompt {
         prefix: String,
@@ -934,5 +944,21 @@ mod tests {
         handle.hide_local_agents();
         let deferred_event = session.next_event().await;
         assert!(matches!(deferred_event, Some(InlineEvent::WebmcpSubmit(input)) if input.text == "deferred"));
+    }
+
+    #[tokio::test]
+    async fn deferred_queue_overflow_fails_closed_without_dropping() {
+        let (handle, _session, _event_sender) = test_session();
+
+        for index in 0..MAX_DEFERRED_EVENTS {
+            handle
+                .defer_event(InlineEvent::WebmcpSubmit(format!("deferred-{index}").into()))
+                .expect("queue should accept up to the bound");
+        }
+        assert!(handle.has_deferred_event());
+
+        let overflow = handle.defer_event(InlineEvent::WebmcpSubmit("overflow".into()));
+        assert!(overflow.is_err(), "32-event bound must fail closed, not silently drop");
+        assert!(handle.has_deferred_event(), "overflow must not drain retained events");
     }
 }

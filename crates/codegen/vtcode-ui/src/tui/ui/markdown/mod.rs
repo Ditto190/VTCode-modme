@@ -329,12 +329,7 @@ fn preprocess_plan_wrappers(source: &str) -> String {
 }
 
 fn is_fence_delimiter(line: &str) -> bool {
-    let indent = line.len() - line.trim_start().len();
-    if indent > 3 {
-        return false;
-    }
-    let trimmed = line.trim_start();
-    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+    vtcode_commons::formatting::is_markdown_fence_delimiter(line)
 }
 
 #[cfg(test)]

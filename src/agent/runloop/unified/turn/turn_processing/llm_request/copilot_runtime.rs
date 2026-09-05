@@ -1631,20 +1631,11 @@ fn terminal_command_display(command: &str, args: &[String]) -> String {
 
 fn extract_command_from_args(arguments: Option<&Value>) -> Option<String> {
     let arguments = arguments?;
-    for key in ["command", "cmd", "raw_command"] {
-        let value = arguments.get(key)?;
-        match value {
-            Value::String(text) if !text.trim().is_empty() => return Some(text.to_string()),
-            Value::Array(parts) => {
-                let command = parts.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ");
-                if !command.trim().is_empty() {
-                    return Some(command);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+    // Display-only extraction shared with tool summaries. The previous
+    // per-key loop returned `None` via `?` when the `command` key was absent,
+    // never reaching `cmd`/`raw_command`; the canonical helper scans every
+    // key and also covers the legacy `bash_command` key.
+    vtcode_core::tools::command_args::extract_command_text_with_key(arguments).map(|(text, _)| text)
 }
 
 fn terminal_exit_status_from_code(code: i64) -> Option<CopilotTerminalExitStatus> {
