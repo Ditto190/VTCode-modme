@@ -1688,7 +1688,9 @@ mod tests {
 
     #[test]
     fn selected_model_image_support_uses_alias_modality_metadata() {
-        assert!(selected_model_supports_image_input("openai", "gpt-5.5-2026-04-23", false));
+        // `gpt-5.6` is the documented family alias routing to `gpt-5.6-sol`;
+        // modality metadata must come from the aliased model.
+        assert!(selected_model_supports_image_input("openai", "gpt-5.6", false));
     }
 
     #[test]
@@ -1698,7 +1700,9 @@ mod tests {
 
     #[test]
     fn selected_model_image_support_accepts_display_model_label() {
-        assert!(selected_model_supports_image_input("OpenAI (ChatGPT)", "GPT-5.5 (128K)", false));
+        // Picker-style labels may carry a context suffix; the stripped prefix
+        // must still resolve to the model's modality metadata.
+        assert!(selected_model_supports_image_input("OpenAI (ChatGPT)", "gpt-5.6-sol (128K)", false));
     }
 
     #[test]

@@ -116,10 +116,11 @@ pub(super) fn display_command_text(args: &Value) -> Option<String> {
 }
 
 /// Whether `program` names a known inline-script runner (`python3`, `bash`,
-/// `node`, …). Compared against the path basename so `/usr/bin/python3`
-/// matches, keeping the check token-exact instead of substring-based.
+/// `node`, …). Compared against the path basename so `/usr/bin/python3` and
+/// Windows-style `C:\Python\python.exe` both match, keeping the check
+/// token-exact instead of substring-based.
 fn is_script_runner_program(program: &str) -> bool {
-    let base = program.rsplit('/').next().unwrap_or(program).to_ascii_lowercase();
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
     base.starts_with("python")
         || matches!(
             base.as_str(),
@@ -761,6 +762,19 @@ mod tests {
         let preview = preview_command(command, 70);
         assert!(preview.contains("import json"), "got: {preview}");
         assert!(preview.contains("with open"), "got: {preview}");
+    }
+
+    #[test]
+    fn preview_command_windows_style_runner_folds_in_content() {
+        // Windows-style separators must still be recognized as script runners
+        // so the header folds in the script instead of a dangling
+        // `python.exe -c "` first line.
+        let command = "C:\\Python\\python.exe -c \"\nimport json\nprint('hi')\n\"";
+        let preview = preview_command(command, 70);
+        assert!(
+            preview.starts_with("C:\\Python\\python.exe -c \"import json"),
+            "windows runner should fold in script, got: {preview}"
+        );
     }
 
     #[test]

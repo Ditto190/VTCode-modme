@@ -534,10 +534,26 @@ impl AgentRunner {
                     prompt_bundle.tool_def_tokens as usize,
                     reserved_output_tokens,
                 );
-                anyhow::ensure!(
-                    fits,
-                    "Assembled prompt ({estimated} tokens) exceeds resolved prompt budget ({budget} tokens) after compaction"
-                );
+                if !fits {
+                    // Advisory only: the estimate can overshoot (un-droppable
+                    // messages, suppressed compaction), and the provider owns
+                    // the authoritative context limit. Aborting here turned a
+                    // recoverable situation into a dead `exec`/auto run.
+                    tracing::warn!(
+                        estimated,
+                        budget,
+                        "Pre-flight token check failed: prompt exceeds context budget after compaction"
+                    );
+                    #[allow(
+                        clippy::cast_sign_loss,
+                        reason = "Intentional compatibility, platform, or test-only suppression."
+                    )]
+                    let pct = (estimated as f64 / budget.max(1) as f64 * 100.0) as u32;
+                    runtime
+                        .state
+                        .warnings
+                        .push(format!("Pre-flight check: {pct}% of context budget used before LLM call"));
+                }
 
                 let parallel_tool_config = if self.model.len() < 20 {
                     None
@@ -584,22 +600,21 @@ impl AgentRunner {
                 }
 
                 let reasoning_effort = turn_reasoning
-                    .map(|requested| {
-                        crate::llm::reasoning_effort::ReasoningEffortMapper::resolve(
+                    .and_then(|requested| {
+                        crate::llm::reasoning_effort::ReasoningEffortMapper::resolve_or_omit(
                             self.provider_client.as_ref(),
                             &turn_model,
                             requested,
                             self.config().agent.allow_reasoning_effort_downgrade,
                         )
-                        .map(|mapping| {
-                            if mapping.degraded() {
-                                tracing::warn!(requested = %mapping.requested, effective = %mapping.effective,
-                                model = %turn_model, "Harness reasoning effort explicitly downgraded");
-                            }
-                            mapping.effective
-                        })
                     })
-                    .transpose()?;
+                    .map(|mapping| {
+                        if mapping.degraded() {
+                            tracing::warn!(requested = %mapping.requested, effective = %mapping.effective,
+                            model = %turn_model, "Harness reasoning effort explicitly downgraded");
+                        }
+                        mapping.effective
+                    });
                 let reasoning_active = reasoning_effort.is_some_and(|effort| {
                     !matches!(effort, ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown)
                 });

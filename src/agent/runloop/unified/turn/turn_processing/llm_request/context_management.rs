@@ -149,6 +149,7 @@ fn build_anthropic_context_management(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use vtcode_core::compaction::memory_envelope::DEFAULT_OUTPUT_RESERVE_TOKENS;
     use vtcode_core::config::loader::VTCodeConfig;
 
     use crate::agent::runloop::unified::turn::compaction::build_server_compaction_context_management;
@@ -159,9 +160,11 @@ mod tests {
         cfg.agent.harness.auto_compaction_enabled = true;
         cfg.agent.harness.auto_compaction_threshold_tokens = Some(512);
 
+        // Capacity well above the output reserve so the explicit threshold
+        // passes through unclamped.
         let payload = build_server_compaction_context_management(
             cfg.agent.harness.auto_compaction_threshold_tokens,
-            2_000,
+            2_000_000,
             cfg.context.max_context_tokens,
         );
 
@@ -180,14 +183,14 @@ mod tests {
             build_server_compaction_context_management(None, 500_000, 160_000),
             Some(json!([{
                 "type": "compaction",
-                "compact_threshold": 144000,
+                "compact_threshold": 160_000 - DEFAULT_OUTPUT_RESERVE_TOKENS,
             }]))
         );
         assert_eq!(
             build_server_compaction_context_management(None, 100_000, 160_000),
             Some(json!([{
                 "type": "compaction",
-                "compact_threshold": 90000,
+                "compact_threshold": 100_000 - DEFAULT_OUTPUT_RESERVE_TOKENS,
             }]))
         );
     }

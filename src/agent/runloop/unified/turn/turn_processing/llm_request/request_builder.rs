@@ -140,22 +140,21 @@ pub(super) async fn build_turn_request(
         None
     };
     let reasoning_effort = reasoning_effort
-        .map(|requested| {
-            vtcode_core::llm::reasoning_effort::ReasoningEffortMapper::resolve(
+        .and_then(|requested| {
+            vtcode_core::llm::reasoning_effort::ReasoningEffortMapper::resolve_or_omit(
                 ctx.provider_client.as_ref(),
                 request_model,
                 requested,
                 ctx.vt_cfg.is_some_and(|cfg| cfg.agent.allow_reasoning_effort_downgrade),
             )
-            .map(|mapping| {
-                if mapping.degraded() {
-                    tracing::warn!(requested = %mapping.requested, effective = %mapping.effective,
-                    model = request_model, "Harness reasoning effort explicitly downgraded");
-                }
-                mapping.effective
-            })
         })
-        .transpose()?;
+        .map(|mapping| {
+            if mapping.degraded() {
+                tracing::warn!(requested = %mapping.requested, effective = %mapping.effective,
+                model = request_model, "Harness reasoning effort explicitly downgraded");
+            }
+            mapping.effective
+        });
     let reasoning_active = reasoning_effort
         .is_some_and(|effort| !matches!(effort, ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown));
     let primary_agent_context = render_primary_agent_runtime_context(

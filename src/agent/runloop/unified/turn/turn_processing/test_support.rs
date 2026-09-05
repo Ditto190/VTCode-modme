@@ -66,6 +66,13 @@ impl uni::LLMProvider for NoopProvider {
         vec!["noop-model".to_string()]
     }
 
+    // The stub masquerades as the OpenAI provider, whose routes accept the
+    // standard effort levels; without this the mapper cannot pass a configured
+    // effort through.
+    fn supports_reasoning_effort(&self, _model: &str) -> bool {
+        true
+    }
+
     fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
         Ok(())
     }

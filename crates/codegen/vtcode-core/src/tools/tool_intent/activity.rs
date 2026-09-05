@@ -172,7 +172,9 @@ fn has_shell_sequence(command: &str) -> bool {
 /// (background), or `|` (pipeline) is present, since those operators let a
 /// downstream success mask an earlier verifier failure. `&&` short-circuits,
 /// so a pure `&&` chain of verifiers has a faithful aggregate exit status and
-/// may clear the anti-blind-editing gate.
+/// may clear the anti-blind-editing gate. Backslash escapes outside single
+/// quotes are honored, so a shell-literal `\"` cannot open a phantom quote
+/// state that hides a later live operator.
 fn shell_uses_only_and_chaining(command: &str) -> bool {
     let chars: Vec<char> = command.chars().collect();
     let mut index = 0;
@@ -181,6 +183,14 @@ fn shell_uses_only_and_chaining(command: &str) -> bool {
 
     while index < chars.len() {
         let character = chars[index];
+        // Outside single quotes a backslash escapes the next character for the
+        // shell: `\"` is a literal quote (no quote-state change) and `\;` is an
+        // inert character, not an operator. Skip the pair so the scanner stays
+        // aligned with the shell and fails closed.
+        if character == '\\' && !in_single_quote && index + 1 < chars.len() {
+            index += 2;
+            continue;
+        }
         if character == '\'' && !in_double_quote {
             in_single_quote = !in_single_quote;
             index += 1;
@@ -498,5 +508,19 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn escaped_quotes_fail_closed_instead_of_hiding_operators() {
+        // A backslash-escaped quote is a literal for the shell, so the trailing
+        // `;` is a live separator: the aggregate exit status can mask a failed
+        // verifier, and the chain must not classify as pure `&&`.
+        assert!(!shell_uses_only_and_chaining("cargo check --locked \\\"; echo ok"));
+        assert!(!shell_uses_only_and_chaining("echo \\\" ; cargo check --locked && echo done"));
+        // Escaped quotes inside real double quotes stay inert.
+        assert!(shell_uses_only_and_chaining("echo \"a\\\"b\" && cargo check --locked"));
+        assert!(shell_uses_only_and_chaining("echo \"path\" && cargo fmt --check"));
+        // Backslash is literal inside single quotes.
+        assert!(shell_uses_only_and_chaining("echo 'a\\b' && cargo check --locked"));
     }
 }

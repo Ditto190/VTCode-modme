@@ -29,6 +29,43 @@ impl ReasoningEffortMapper {
         Self::map(requested, provider.supported_reasoning_efforts(model), allow_downgrade)
     }
 
+    /// Best-effort counterpart to [`Self::resolve`] for session-persistent
+    /// config.
+    ///
+    /// A configured effort is durable state: when the active route does not
+    /// support it, the effort is omitted for this request (the provider keeps
+    /// its own default) instead of aborting request assembly on every turn.
+    #[must_use]
+    pub fn resolve_or_omit(
+        provider: &dyn LLMProvider,
+        model: &str,
+        requested: ReasoningEffortLevel,
+        allow_downgrade: bool,
+    ) -> Option<ReasoningEffortMapping> {
+        Self::map_or_omit(requested, provider.supported_reasoning_efforts(model), allow_downgrade)
+    }
+
+    /// Route-free variant of [`Self::resolve_or_omit`] for callers that
+    /// already hold the supported-level list.
+    #[must_use]
+    pub(crate) fn map_or_omit(
+        requested: ReasoningEffortLevel,
+        supported: &[&str],
+        allow_downgrade: bool,
+    ) -> Option<ReasoningEffortMapping> {
+        match Self::map(requested, supported, allow_downgrade) {
+            Ok(mapping) => Some(mapping),
+            Err(error) => {
+                tracing::warn!(
+                    requested = %requested,
+                    error = %error,
+                    "Configured reasoning effort is unsupported on this route; omitting it for this request"
+                );
+                None
+            }
+        }
+    }
+
     pub fn map(
         requested: ReasoningEffortLevel,
         supported: &[&str],
@@ -106,5 +143,19 @@ mod tests {
             ReasoningEffortLevel::High
         );
         assert!(ReasoningEffortMapper::map(ReasoningEffortLevel::Unknown, &["high"], true).is_err());
+    }
+
+    #[test]
+    fn lenient_resolution_omits_unsupported_effort_instead_of_failing() {
+        // A route without reasoning support cannot host any effort: omit, warn,
+        // and let the request proceed instead of failing every turn.
+        assert_eq!(ReasoningEffortMapper::map_or_omit(ReasoningEffortLevel::Max, &[], false), None);
+        assert_eq!(ReasoningEffortMapper::map_or_omit(ReasoningEffortLevel::Unknown, &["low", "high"], false), None);
+        // A supported request passes through untouched.
+        assert_eq!(
+            ReasoningEffortMapper::map_or_omit(ReasoningEffortLevel::High, &["low", "high"], false)
+                .map(|mapping| mapping.effective),
+            Some(ReasoningEffortLevel::High)
+        );
     }
 }

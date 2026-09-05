@@ -202,7 +202,10 @@ reasoning_effort = "xhigh"  # or "max" where natively supported
 ```
 
 - `/effort xhigh` / `/effort max [--persist]` validates against the active
-  model's preset; unsupported levels are rejected with the supported list.
+  model's preset; unsupported levels are rejected with the supported list. A
+  configured effort the active route does not support (for example after
+  switching models) is omitted for that request with a warning instead of
+  failing the turn.
 - The `/model` picker only lists `xhigh`/`max` when the selected model
   advertises them (`supports_xhigh/max_reasoning` + `builtin_model_presets`).
 - Harness config (`agent.harness`, `automation.full_auto`) intentionally has

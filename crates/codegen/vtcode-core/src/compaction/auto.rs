@@ -394,7 +394,9 @@ mod tests {
                 workspace_root: Path::new("."),
                 vt_cfg: Some(&vt_cfg),
                 reserved_output_tokens: 0,
-                current_token_usage: 900,
+                // Crosses the effective threshold (provider capacity 4_096,
+                // zero reserve) so the deterministic provider failure is reached.
+                current_token_usage: 4_100,
                 touched_files: &[],
                 engine_cfg: CompactionConfig {
                     keep_last_messages: 0,
@@ -442,7 +444,9 @@ mod tests {
                 workspace_root: workspace.path(),
                 vt_cfg: Some(&vt_cfg),
                 reserved_output_tokens: 0,
-                current_token_usage: 4_000,
+                // Crosses the effective threshold (provider capacity 4_096,
+                // zero reserve) so automatic compaction runs.
+                current_token_usage: 4_100,
                 touched_files: &[],
                 engine_cfg: CompactionConfig {
                     keep_last_messages: 0,

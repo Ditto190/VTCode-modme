@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn resolver_advertises_reasoning_only_for_known_merge_reasoning_routes() {
         let reasoning =
-            ModelResolver::resolve(Some("merge-gateway"), "openai/gpt-5.5", &[], None).expect("Merge route");
+            ModelResolver::resolve(Some("merge-gateway"), "openai/gpt-5.6-sol", &[], None).expect("Merge route");
         assert!(reasoning.known_model());
         assert!(reasoning.reasoning_supported());
 
