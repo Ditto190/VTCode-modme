@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.158.0 - 2026-09-05
+
+### Highlights
+#### Bug Fixes
+
+- Gate vendored-crossterm-only ColorSchemeReport behind cfg (6d51d679) 
+### Other Changes
 ## 0.157.0 - 2026-09-05
 
 ### Highlights
