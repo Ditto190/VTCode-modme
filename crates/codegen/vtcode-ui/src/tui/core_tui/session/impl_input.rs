@@ -1,4 +1,5 @@
 use super::*;
+#[cfg_attr(not(vendored_crossterm), allow(unused_imports))]
 use vtcode_commons::ansi_capabilities::ColorScheme;
 
 impl Session {
@@ -292,6 +293,7 @@ impl Session {
     /// suggestions agree with the reported scheme; the switch itself goes
     /// through the regular `SetTheme` path so retinting and caches stay
     /// consistent. The user's persisted theme preference is never touched.
+    #[cfg_attr(not(vendored_crossterm), allow(dead_code))]
     pub(crate) fn apply_terminal_color_scheme_report(&mut self, dark: bool) {
         if !self.auto_color_scheme {
             return;
