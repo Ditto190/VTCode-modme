@@ -78,6 +78,9 @@ fn effects_to_modifiers(effects: Effects) -> Modifier {
     if effects.contains(Effects::STRIKETHROUGH) {
         modifier.insert(Modifier::CROSSED_OUT);
     }
+    if effects.contains(Effects::HIDDEN) {
+        modifier.insert(Modifier::HIDDEN);
+    }
 
     modifier
 }
@@ -172,7 +175,8 @@ mod tests {
             | Effects::UNDERLINE
             | Effects::BLINK
             | Effects::INVERT
-            | Effects::STRIKETHROUGH;
+            | Effects::STRIKETHROUGH
+            | Effects::HIDDEN;
         let modifier = effects_to_modifiers(effects);
         assert!(modifier.contains(Modifier::BOLD));
         assert!(modifier.contains(Modifier::DIM));
@@ -181,6 +185,14 @@ mod tests {
         assert!(modifier.contains(Modifier::SLOW_BLINK));
         assert!(modifier.contains(Modifier::REVERSED));
         assert!(modifier.contains(Modifier::CROSSED_OUT));
+        assert!(modifier.contains(Modifier::HIDDEN));
+    }
+
+    #[test]
+    fn hidden_effect_maps_to_hidden_modifier() {
+        let input = AnstyleStyle::new().hidden();
+        let result = anstyle_to_ratatui_style(input);
+        assert!(result.add_modifier.contains(Modifier::HIDDEN));
     }
 
     #[test]

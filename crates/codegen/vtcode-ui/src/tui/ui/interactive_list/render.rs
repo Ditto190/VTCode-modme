@@ -32,6 +32,13 @@ pub(super) fn draw_selection_ui(
     terminal
         .draw(|frame| {
             let area = frame.area();
+            // Degenerate viewport (e.g. single-row terminal): the layout below
+            // cannot be satisfied and every chunk would be zero-area, which
+            // ratatui renders as a no-op. Return early so the empty selector
+            // is explicit rather than a silent blank screen.
+            if area.width == 0 || area.height == 0 {
+                return;
+            }
             let instruction_lines = instructions.lines().count().max(1) as u16;
             let instruction_height = instruction_lines.saturating_add(2);
             let footer_height: u16 = 4;

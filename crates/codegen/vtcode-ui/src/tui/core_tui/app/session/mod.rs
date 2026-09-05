@@ -727,16 +727,18 @@ impl AppSession {
         self.core.mark_dirty();
     }
 
-    /// Show a help modal using the ratatui-cheese Help widget
+    /// Show a help modal using the ratatui-cheese Help widget.
+    ///
+    /// The help flag travels on the request so a queued help modal still
+    /// renders as help when it activates instead of clobbering the overlay
+    /// that is currently visible.
     fn show_help_modal(&mut self) {
         self.show_transient(TransientRequest::Modal(crate::tui::core_tui::app::types::ModalOverlayRequest {
             title: "Keyboard Shortcuts".to_string(),
             lines: Vec::new(),
             secure_prompt: None,
+            is_help_modal: true,
         }));
-        if let Some(state) = self.core.modal_state_mut() {
-            state.is_help_modal = true;
-        }
     }
 
     fn should_auto_open_local_agents(&self) -> bool {

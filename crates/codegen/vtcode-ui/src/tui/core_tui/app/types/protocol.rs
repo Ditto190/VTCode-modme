@@ -595,7 +595,12 @@ impl InlineHandle {
     }
 
     pub fn show_modal(&self, title: String, lines: Vec<String>, secure_prompt: Option<SecurePromptConfig>) {
-        self.show_transient(TransientRequest::Modal(ModalOverlayRequest { title, lines, secure_prompt }));
+        self.show_transient(TransientRequest::Modal(ModalOverlayRequest {
+            title,
+            lines,
+            secure_prompt,
+            is_help_modal: false,
+        }));
     }
 
     pub fn show_list_modal(

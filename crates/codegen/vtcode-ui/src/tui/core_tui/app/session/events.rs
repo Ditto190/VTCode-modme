@@ -1,5 +1,6 @@
 use super::*;
 use ratatui::crossterm::event::KeyModifiers;
+use ratatui_cheese::input::InputState;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -11,6 +12,7 @@ use crate::tui::core_tui::app::types::InlineMessageKind;
 use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::action::{Action, is_readline_editing_key, normalize_terminal_control_event};
 use crate::tui::core_tui::session::clipboard_image::{ClipboardImageError, read_clipboard_image};
+use crate::tui::core_tui::session::modal;
 use crate::tui::core_tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::core_tui::session::reverse_search;
@@ -72,6 +74,21 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
         if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
             step.list.apply_search(&search.query);
         }
+        session.mark_dirty();
+    } else if let Some(wizard) = session.wizard_overlay_mut()
+        && let Some(step) = wizard.steps.get_mut(wizard.current_step)
+        && (step.notes_active || modal::inline_editor_for_step(step).is_some())
+    {
+        // Mirror typed input: pasted text lands in the custom-note editor when
+        // it is active (or when the custom-note item is selected).
+        step.notes_active = true;
+        let mut state = InputState::new();
+        state.set_value(step.notes.clone());
+        state.end();
+        for ch in content.chars().filter(|ch| !matches!(ch, '\n' | '\r')) {
+            state.insert_char(ch);
+        }
+        step.notes = state.value().to_owned();
         session.mark_dirty();
     } else if session.core.input_enabled()
         && !session.visible_transient_surface().is_some_and(|surface| {
@@ -1868,6 +1885,7 @@ mod tests {
             title: "Notice".to_string(),
             lines: Vec::new(),
             secure_prompt: None,
+            is_help_modal: false,
         }));
         session.core.set_input_enabled(true);
         let draft = session.core.input_manager.content().to_string();
@@ -1942,6 +1960,7 @@ mod tests {
             title: "nested".to_string(),
             lines: Vec::new(),
             secure_prompt: None,
+            is_help_modal: false,
         }));
         assert!(signal.is_active());
 
@@ -2692,6 +2711,7 @@ mod tests {
                 placeholder: None,
                 mask_input: true,
             }),
+            is_help_modal: false,
         }));
         assert!(session.has_active_overlay(), "secure prompt modal should be open");
         session

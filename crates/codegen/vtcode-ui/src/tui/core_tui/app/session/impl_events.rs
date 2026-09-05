@@ -145,59 +145,19 @@ impl Session {
 
     fn modal_visible_index_at(&self, row: u16) -> Option<usize> {
         let area = self.core.modal_list_area()?;
-        if row < area.y || row >= area.y.saturating_add(area.height) {
-            return None;
-        }
-
         let styles = modal_render_styles(self);
-        let content_width = area.width.saturating_sub(inline_list::selection_padding_width() as u16) as usize;
-        let relative_row = usize::from(row.saturating_sub(area.y));
-
         if let Some(wizard) = self.wizard_overlay() {
             let step = wizard.steps.get(wizard.current_step)?;
-            let offset = step.list.list_state.offset();
-            let visible_indices = &step.list.visible_indices;
-            let mut consumed_rows = 0usize;
-            for (visible_index, &item_index) in visible_indices.iter().enumerate().skip(offset) {
-                let lines = modal::modal_list_item_lines(
-                    &step.list,
-                    visible_index,
-                    item_index,
-                    &styles,
-                    content_width,
-                    None,
-                    false,
-                );
-                let height = usize::from(inline_list::row_height(&lines));
-                if relative_row < consumed_rows + height {
-                    return Some(visible_index);
-                }
-                consumed_rows += height;
-                if consumed_rows >= usize::from(area.height) {
-                    break;
-                }
-            }
-            return None;
+            // Render passes the inline custom-note editor, which appends one row
+            // to its item; the shared helper measures the same heights.
+            let inline_editor = modal::inline_editor_for_step(step);
+            return modal::visible_index_at_row(&step.list, None, inline_editor.as_ref(), &styles, area, row);
         }
 
         let modal = self.modal_state()?;
         let list = modal.list.as_ref()?;
-        let offset = list.list_state.offset();
-        let mut consumed_rows = 0usize;
-        for (visible_index, &item_index) in list.visible_indices.iter().enumerate().skip(offset) {
-            let lines =
-                modal::modal_list_item_lines(list, visible_index, item_index, &styles, content_width, None, false);
-            let height = usize::from(inline_list::row_height(&lines));
-            if relative_row < consumed_rows + height {
-                return Some(visible_index);
-            }
-            consumed_rows += height;
-            if consumed_rows >= usize::from(area.height) {
-                break;
-            }
-        }
-
-        None
+        // Plain modals never render an inline editor (render passes `None`).
+        modal::visible_index_at_row(list, modal.footer_hint.as_deref(), None, &styles, area, row)
     }
 
     fn handle_active_overlay_click(

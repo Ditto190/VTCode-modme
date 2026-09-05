@@ -365,10 +365,11 @@ impl Session {
         lines
     }
 
-    /// Check if a PTY block has actual content
-    fn pty_block_has_content(&self, index: usize) -> bool {
-        if self.lines.is_empty() {
-            return false;
+    /// Contiguous PTY-block range containing `index`, or `None` when `index`
+    /// is not a PTY line.
+    fn pty_block_range(&self, index: usize) -> Option<(usize, usize)> {
+        if self.lines.get(index)?.kind != InlineMessageKind::Pty {
+            return None;
         }
 
         let mut start = index;
@@ -393,18 +394,38 @@ impl Session {
             end += 1;
         }
 
-        if start > end || end >= self.lines.len() {
-            tracing::warn!("invalid range: start={}, end={}, len={}", start, end, self.lines.len());
+        Some((start, end))
+    }
+
+    /// Check whether any line in `[start, end]` carries non-blank text.
+    fn pty_block_has_content_in(&self, start: usize, end: usize) -> bool {
+        let Some(range) = self.lines.get(start..=end) else {
+            tracing::warn!("invalid range: start={start}, end={end}, len={}", self.lines.len());
             return false;
+        };
+        range
+            .iter()
+            .any(|line| line.segments.iter().any(|segment| !segment.text.trim().is_empty()))
+    }
+
+    /// Check if a PTY block has actual content.
+    ///
+    /// The answer is identical for every line of the same block. A non-blank
+    /// line answers for its whole block without scanning, which keeps per-line
+    /// reflow of large captures near-linear instead of quadratic.
+    fn pty_block_has_content(&self, index: usize) -> bool {
+        if self
+            .lines
+            .get(index)
+            .is_some_and(|line| line.segments.iter().any(|segment| !segment.text.trim().is_empty()))
+        {
+            return true;
         }
 
-        for line in &self.lines[start..=end] {
-            if line.segments.iter().any(|segment| !segment.text.trim().is_empty()) {
-                return true;
-            }
-        }
-
-        false
+        let Some((start, end)) = self.pty_block_range(index) else {
+            return false;
+        };
+        self.pty_block_has_content_in(start, end)
     }
 
     /// Reflow PTY output lines with appropriate borders and formatting
@@ -415,19 +436,22 @@ impl Session {
 
         let max_width = if width == 0 { usize::MAX } else { width as usize };
 
-        if !self.pty_block_has_content(index) {
-            return Vec::new();
-        }
-
-        let border_style = self.styles.border_style();
-
         let prev_is_pty = index
             .checked_sub(1)
             .and_then(|prev| self.lines.get(prev))
             .map(|prev| prev.kind == InlineMessageKind::Pty)
             .unwrap_or(false);
-
         let is_start = !prev_is_pty;
+
+        // A non-blank block start proves the block has content, so the full
+        // block scan below can be skipped on the hottest path.
+        let line_is_blank = line.segments.iter().all(|segment| segment.text.trim().is_empty());
+        if (line_is_blank || !is_start) && !self.pty_block_has_content(index) {
+            return Vec::new();
+        }
+
+        let border_style = self.styles.border_style();
+
         let is_end = !self
             .lines
             .get(index + 1)

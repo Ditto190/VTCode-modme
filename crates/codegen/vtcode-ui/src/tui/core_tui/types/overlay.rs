@@ -7,6 +7,7 @@ pub struct ModalOverlayRequest {
     pub(crate) title: String,
     pub(crate) lines: Vec<String>,
     pub(crate) secure_prompt: Option<SecurePromptConfig>,
+    pub(crate) is_help_modal: bool,
 }
 
 #[derive(Clone, Debug)]

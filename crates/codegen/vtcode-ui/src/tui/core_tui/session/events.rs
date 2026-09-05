@@ -1,5 +1,6 @@
 use super::*;
 use ratatui::crossterm::event::KeyModifiers;
+use ratatui_cheese::input::InputState;
 
 use super::super::types::{InlineSegment, OverlayEvent, OverlaySubmission, SubmittedInput};
 use crate::tui::core_tui::runner::TuiSessionDriver;
@@ -23,6 +24,23 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) {
             if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
                 step.list.apply_search(&search.query);
             }
+            session.mark_dirty();
+            return;
+        }
+        // Mirror typed input: pasted text lands in the custom-note editor when
+        // it is active (or when the custom-note item is selected, which typed
+        // input would auto-activate).
+        if let Some(step) = wizard.steps.get_mut(wizard.current_step)
+            && (step.notes_active || modal::inline_editor_for_step(step).is_some())
+        {
+            step.notes_active = true;
+            let mut state = InputState::new();
+            state.set_value(step.notes.clone());
+            state.end();
+            for ch in content.chars().filter(|ch| !matches!(ch, '\n' | '\r')) {
+                state.insert_char(ch);
+            }
+            step.notes = state.value().to_owned();
             session.mark_dirty();
         }
         return;

@@ -96,6 +96,9 @@ impl<'a, S: PanelStyleProvider> Panel<'a, S> {
 
     /// Render the panel and return the inner area for child widgets.
     pub(crate) fn render_and_get_inner(self, area: Rect, buf: &mut Buffer) -> Rect {
+        if area.is_empty() {
+            return area;
+        }
         if !self.mode.show_borders() {
             return area;
         }
@@ -175,6 +178,19 @@ mod tests {
         fn border_style(&self) -> Style {
             self.border
         }
+    }
+
+    #[test]
+    fn zero_area_returns_unchanged_without_painting() {
+        let styles = MockStyles::new();
+        let area = Rect::new(5, 5, 0, 0);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 10, 10));
+        let before = buf.clone();
+        let inner = Panel::new(&styles)
+            .mode(LayoutMode::Standard)
+            .render_and_get_inner(area, &mut buf);
+        assert_eq!(inner, area);
+        assert_eq!(buf, before, "zero-area panel must not touch the buffer");
     }
 
     #[test]

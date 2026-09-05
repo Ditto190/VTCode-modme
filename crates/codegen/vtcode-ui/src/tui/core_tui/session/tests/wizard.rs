@@ -153,3 +153,55 @@ fn wizard_tabbed_submit_closes_modal_immediately() {
     ));
     assert!(session.wizard_overlay().is_none());
 }
+
+#[test]
+fn wizard_notes_paste_appends_to_custom_note_editor() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    session.handle_command(InlineCommand::ShowOverlay {
+        request: Box::new(OverlayRequest::Wizard(WizardOverlayRequest {
+            title: "Question".to_string(),
+            steps: vec![WizardStep {
+                title: "Choose".to_string(),
+                question: "Pick one".to_string(),
+                items: vec![InlineListItem {
+                    title: "Other".to_string(),
+                    subtitle: None,
+                    badge: None,
+                    indent: 0,
+                    selection: Some(InlineListSelection::RequestUserInputAnswer {
+                        question_id: "q".to_string(),
+                        selected: Vec::new(),
+                        other: Some(String::new()),
+                    }),
+                    search_value: Some("other".to_string()),
+                }],
+                completed: false,
+                answer: None,
+                allow_freeform: true,
+                freeform_label: Some("Other".to_string()),
+                freeform_placeholder: Some("Type here...".to_string()),
+                freeform_default: None,
+            }],
+            current_step: 0,
+            search: None,
+            mode: WizardModalMode::MultiStep,
+        })),
+    });
+
+    // The first item is the custom-note answer, so notes start active.
+    assert!(session.wizard_overlay().is_some_and(|wizard| wizard.notes_active()));
+
+    session.handle_event(CrosstermEvent::Paste("hello".to_string()), &tx, None);
+
+    let wizard = session.wizard_overlay().expect("wizard should stay open after notes paste");
+    let step = wizard.steps.get(wizard.current_step).expect("current step should exist");
+    assert_eq!(step.notes.as_str(), "hello");
+
+    // Pasted newlines are stripped, mirroring search-field paste behavior.
+    session.handle_event(CrosstermEvent::Paste("a\nb\rc".to_string()), &tx, None);
+    let wizard = session.wizard_overlay().expect("wizard should stay open after second paste");
+    let step = wizard.steps.get(wizard.current_step).expect("current step should exist");
+    assert_eq!(step.notes.as_str(), "helloabc");
+}

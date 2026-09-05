@@ -12,7 +12,6 @@
 - Re-export key types from `lib.rs`: `WorkspacePaths`, `TelemetrySink`, `ErrorFormatter`, `BackendKind`, etc.
 - `reference.rs` provides in-memory test adapters: `StaticWorkspacePaths`, `MemoryTelemetry`, `MemoryErrorReporter`.
 - `ui_protocol/` is a submodule, not a flat module.
-- `anstyle_utils` gated behind `tui` feature.
 
 ## Gotchas
 

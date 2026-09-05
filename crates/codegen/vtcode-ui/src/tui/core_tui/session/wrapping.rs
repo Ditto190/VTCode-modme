@@ -8,7 +8,6 @@ use ratatui::widgets::Paragraph;
 use regex::Regex;
 use std::borrow::Cow;
 use std::sync::LazyLock;
-use unicode_width::UnicodeWidthStr;
 
 /// URL/file token detection pattern - matches common URL formats and path-like tokens.
 static PRESERVED_TOKEN_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -50,7 +49,11 @@ pub(crate) fn wrap_line_preserving_urls(line: Line<'static>, max_width: usize) -
         .collect();
 
     // Single URL that fits - return unwrapped for terminal link detection
-    if urls.len() == 1 && urls[0].0 == 0 && urls[0].1 == text.len() && text.width() <= max_width {
+    if urls.len() == 1
+        && urls[0].0 == 0
+        && urls[0].1 == text.len()
+        && super::text_utils::display_width(&text) <= max_width
+    {
         return vec![line];
     }
     // URL too wide - fall through to wrap it
@@ -82,7 +85,6 @@ fn wrap_mixed_content(
     urls: &[(usize, usize, &str)],
 ) -> Vec<Line<'static>> {
     use unicode_segmentation::UnicodeSegmentation;
-    use unicode_width::UnicodeWidthStr;
 
     let mut result = Vec::with_capacity(urls.len() + 1);
     let mut current_line: Vec<Span<'static>> = Vec::new();
@@ -121,7 +123,7 @@ fn wrap_mixed_content(
                               current_width: &mut usize,
                               result: &mut Vec<Line<'static>>| {
         for grapheme in UnicodeSegmentation::graphemes(token, true) {
-            let grapheme_width = grapheme.width();
+            let grapheme_width = super::text_utils::display_width(grapheme);
             if grapheme_width == 0 {
                 current_line.push(Span::styled(grapheme.to_string(), default_style));
                 continue;
@@ -155,7 +157,7 @@ fn wrap_mixed_content(
                     continue;
                 }
 
-                let token_width = token.width();
+                let token_width = super::text_utils::display_width(token);
                 if token_width == 0 {
                     current_line.push(Span::styled(token.to_string(), default_style));
                     continue;
@@ -209,7 +211,7 @@ fn wrap_mixed_content(
         }
 
         // Add URL — keep atomic if it fits, otherwise break it across lines
-        let url_width = url_text.width();
+        let url_width = super::text_utils::display_width(url_text);
         if url_width <= max_width {
             if current_width > 0 && current_width + url_width > max_width {
                 flush_line(&mut current_line, &mut result);
