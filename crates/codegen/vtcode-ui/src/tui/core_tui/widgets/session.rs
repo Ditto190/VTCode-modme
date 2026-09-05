@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use super::{FooterWidget, HeaderWidget, LayoutMode, SidebarWidget, TranscriptWidget, footer_hints, panel::new_panel};
+use crate::tui::core_tui::blocked_status;
 use crate::tui::ui::tui::session::{Session, pulse_spinner_frame_for_phase};
 
 /// Root compositor widget that orchestrates rendering of the entire session UI
@@ -338,11 +339,15 @@ impl<'a> SessionWidget<'a> {
             .unwrap_or("");
         let right_status = self.session.status_right_text().unwrap_or("");
 
-        let is_blocked = right_status.contains("[BLOCKED]")
-            || left_status.to_ascii_lowercase().contains("blocked")
-            || left_status.to_ascii_lowercase().contains("tools disabled");
-        let is_recovery = left_status.to_ascii_lowercase().contains("recovery")
-            || left_status.to_ascii_lowercase().contains("tools disabled");
+        // Blocked/recovery detection combines the first-class activity state
+        // with the status-text needles shared with the header badge (see
+        // blocked_status) so a reword cannot silently break the hint.
+        let is_blocked = matches!(self.session.activity_state, vtcode_commons::ui_protocol::ActivityState::Blocked)
+            || blocked_status::right_status_is_blocked(right_status)
+            || blocked_status::left_status_is_blocked(left_status)
+            || blocked_status::left_status_mentions_tools_disabled(left_status);
+        let is_recovery = matches!(self.session.activity_state, vtcode_commons::ui_protocol::ActivityState::Recovery)
+            || blocked_status::left_status_is_recovery(left_status);
         let hint = if let Some(hint) = self.footer_hint_override {
             hint
         } else if is_blocked {

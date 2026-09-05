@@ -328,6 +328,28 @@ impl CrossTurnTracker {
     }
 }
 
+/// Telemetry captured when the blocked-tool-call fuse trips. Consumed by
+/// `finalize_turn` to populate `TurnBlockedEvent` (`last_tool`, the enforced
+/// caps, and the streak/total at trip time) instead of `None`/zeros.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlockedToolRecoveryTelemetry {
+    pub(crate) last_tool: String,
+    pub(crate) consecutive_cap: usize,
+    pub(crate) total_cap: usize,
+    pub(crate) blocked_streak: usize,
+    pub(crate) blocked_total: usize,
+}
+
+/// A tool call whose harness item the LLM runtime started while streaming,
+/// keyed by provider call id. Entries are removed when the call is dispatched
+/// (executed or rejected); leftovers at turn end never reached the pipeline
+/// and are closed by teardown so the session log has no dangling items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StreamedToolCallItem {
+    pub(crate) item_id: String,
+    pub(crate) tool_name: String,
+}
+
 pub(crate) struct HarnessTurnState {
     pub run_id: TurnRunId,
     pub turn_id: TurnId,
@@ -394,7 +416,7 @@ pub(crate) struct HarnessTurnState {
     /// key lets through. Reset every turn.
     file_read_path_counts: HashMap<String, usize>,
     pub(crate) seen_successful_readonly_signatures: HashSet<String>,
-    streamed_tool_call_item_ids: HashMap<String, String>,
+    streamed_tool_call_item_ids: HashMap<String, StreamedToolCallItem>,
     pub stop_hook_active: bool,
     pub seen_task_tracker_create_signatures: HashSet<String>,
     pub replaceable_task_tracker_block: Option<Vec<String>>,
@@ -480,6 +502,9 @@ pub(crate) struct HarnessTurnState {
     /// tool-free synthesis pass instead of terminating the turn immediately.
     blocked_tool_recovery_pending: bool,
     blocked_tool_recovery_reason: Option<String>,
+    /// Blocked-call telemetry captured when the fuse armed or hard-broke the
+    /// turn. Consumed once by `finalize_turn` for `TurnBlockedEvent` fields.
+    blocked_tool_recovery_telemetry: Option<BlockedToolRecoveryTelemetry>,
     pub max_tool_calls: usize,
     pub max_tool_wall_clock: Duration,
     pub max_tool_retries: u32,
@@ -571,6 +596,7 @@ impl HarnessTurnState {
             preflight_circuit_recovery_pending: false,
             blocked_tool_recovery_pending: false,
             blocked_tool_recovery_reason: None,
+            blocked_tool_recovery_telemetry: None,
             max_tool_calls,
             max_tool_wall_clock: Duration::from_secs(max_tool_wall_clock_secs),
             max_tool_retries,
@@ -1023,10 +1049,30 @@ impl HarnessTurnState {
 
     /// Arm the bounded tool-free recovery used after repeated blocked calls.
     /// The response batch consumes this flag after appending every required
-    /// tool response, preserving provider message ordering.
-    pub(crate) fn arm_blocked_tool_recovery(&mut self, reason: impl Into<String>) {
+    /// tool response, preserving provider message ordering. The telemetry
+    /// snapshot is kept for the `TurnBlockedEvent` emitted at turn finalize.
+    pub(crate) fn arm_blocked_tool_recovery(
+        &mut self,
+        reason: impl Into<String>,
+        telemetry: BlockedToolRecoveryTelemetry,
+    ) {
         self.blocked_tool_recovery_pending = true;
         self.blocked_tool_recovery_reason = Some(reason.into());
+        self.blocked_tool_recovery_telemetry = Some(telemetry);
+    }
+
+    /// Record blocked-call telemetry without arming recovery. Used when the
+    /// fuse hard-breaks the turn in recovery mode: no recovery pass is
+    /// scheduled, but `finalize_turn` still needs the values for
+    /// `TurnBlockedEvent`.
+    pub(crate) fn record_blocked_tool_recovery_telemetry(&mut self, telemetry: BlockedToolRecoveryTelemetry) {
+        self.blocked_tool_recovery_telemetry = Some(telemetry);
+    }
+
+    /// One-shot accessor for the blocked-call telemetry captured at fuse-trip
+    /// time; consumed by `finalize_turn`.
+    pub(crate) fn take_blocked_tool_recovery_telemetry(&mut self) -> Option<BlockedToolRecoveryTelemetry> {
+        self.blocked_tool_recovery_telemetry.take()
     }
 
     pub(crate) fn take_blocked_tool_recovery(&mut self) -> bool {
@@ -1280,13 +1326,21 @@ impl HarnessTurnState {
 
     pub(crate) fn remember_streamed_tool_call_items<I>(&mut self, items: I)
     where
-        I: IntoIterator<Item = (String, String)>,
+        I: IntoIterator<Item = (String, StreamedToolCallItem)>,
     {
         self.streamed_tool_call_item_ids.extend(items);
     }
 
-    pub(crate) fn take_streamed_tool_call_item_id(&mut self, tool_call_id: &str) -> Option<String> {
+    pub(crate) fn take_streamed_tool_call_item_id(&mut self, tool_call_id: &str) -> Option<StreamedToolCallItem> {
         self.streamed_tool_call_item_ids.remove(tool_call_id)
+    }
+
+    /// Drain every streamed tool-call item still registered. Turn teardown
+    /// uses this to close items the LLM runtime started but whose calls never
+    /// reached the pipeline (rejected, dropped, or interrupted mid-batch), so
+    /// they do not dangle as `item.started` forever.
+    pub(crate) fn take_all_streamed_tool_call_item_ids(&mut self) -> Vec<(String, StreamedToolCallItem)> {
+        self.streamed_tool_call_item_ids.drain().collect()
     }
 
     pub(crate) fn replaceable_task_tracker_count(&self) -> Option<usize> {

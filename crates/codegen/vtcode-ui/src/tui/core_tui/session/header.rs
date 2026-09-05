@@ -8,6 +8,8 @@ use ratatui::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::tui::config::constants::ui;
+use crate::tui::core_tui::blocked_status;
+use crate::tui::core_tui::style::convert_style;
 
 use super::super::types::{InlineHeaderContext, InlineHeaderHighlight};
 use super::terminal_capabilities;
@@ -469,21 +471,27 @@ impl Session {
         }
 
         // Show blocked/recovery badge so a stalled turn is visible in the header,
-        // not only in the footer hint. Uses ActivityState plus the [BLOCKED]
-        // input-status flag set by the runloop on blocked turns.
+        // not only in the footer hint. Uses ActivityState plus the blocked
+        // status needles shared with the footer hint (see blocked_status): the
+        // runloop flags blocked turns through status text, not a dedicated flag.
         let is_blocked_header = matches!(
             self.activity_state,
             vtcode_commons::ui_protocol::ActivityState::Blocked | vtcode_commons::ui_protocol::ActivityState::Recovery
         ) || self
             .input_status_right
             .as_deref()
-            .is_some_and(|status| status.contains("[BLOCKED]"))
+            .is_some_and(blocked_status::right_status_is_blocked)
             || self
                 .input_status_left
                 .as_deref()
-                .is_some_and(|status| status.to_ascii_lowercase().contains("blocked"));
+                .is_some_and(blocked_status::left_status_is_blocked);
         if is_blocked_header {
-            let blocked_style = Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD);
+            // Use the active theme's contrast-validated alert token instead of a
+            // hardcoded color so the badge adapts to the selected theme. The
+            // token carries bold unless the bold-is-bright accessibility mode
+            // suppresses it.
+            let blocked_inline = convert_style(crate::theme::active_styles().error);
+            let blocked_style = ratatui_style_from_inline(&blocked_inline, self.theme.foreground);
             push_badge(&mut spans, "Blocked".to_string(), blocked_style, &mut first_section);
         }
 

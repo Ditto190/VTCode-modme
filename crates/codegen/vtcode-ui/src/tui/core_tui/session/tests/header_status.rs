@@ -680,3 +680,44 @@ fn agent_label_uses_accent_color_without_border() {
         "agent prefix should not include decorative symbols",
     );
 }
+
+#[test]
+fn header_blocked_badge_uses_theme_error_style() {
+    let mut session = fresh_session();
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Blocked));
+
+    let error_inline = vtcode_commons::ui_protocol::convert_style(crate::theme::active_styles().error);
+    let expected = ratatui_style_from_inline(&error_inline, None);
+    let lines = session.header_lines();
+    let badge = lines[0]
+        .spans
+        .iter()
+        .find(|span| span.content.as_ref() == "Blocked")
+        .expect("blocked badge span should be present");
+
+    assert_eq!(badge.style, expected, "badge must use the theme alert token, not a hardcoded color");
+    assert!(matches!(badge.style.fg, Some(Color::Rgb(_, _, _))), "badge color must come from the theme palette");
+}
+
+#[test]
+fn header_shows_blocked_badge_from_blocked_status_needle() {
+    let mut session = fresh_session();
+    session.handle_command(InlineCommand::SetInputStatus {
+        left: None,
+        right: Some("[BLOCKED] 84% context left".to_string()),
+    });
+
+    assert_header_contains_badge(&mut session, "Blocked");
+}
+
+#[test]
+fn header_hides_blocked_badge_without_blocked_signals() {
+    let mut session = fresh_session();
+    session.handle_command(InlineCommand::SetInputStatus {
+        left: None,
+        right: Some("84% context left".to_string()),
+    });
+
+    let text = header_line_text(&mut session);
+    assert!(!text.contains("Blocked"), "header should not show blocked badge, got: {text}");
+}

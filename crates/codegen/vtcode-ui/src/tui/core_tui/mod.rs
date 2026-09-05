@@ -6,6 +6,7 @@ use crate::tui::config::types::UiSurfacePreference;
 
 pub mod alternate_screen;
 pub mod app;
+pub(crate) mod blocked_status;
 pub(crate) mod language_badge;
 pub mod log;
 pub mod panic_hook;

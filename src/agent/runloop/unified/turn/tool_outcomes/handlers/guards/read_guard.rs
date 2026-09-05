@@ -286,7 +286,7 @@ pub(crate) fn enforce_read_after_write_guard(
     }
 
     let content = build_read_after_write_error(&path);
-    ctx.push_tool_response(tool_call_id, Some(canonical_tool_name), content);
+    ctx.push_rejected_tool_response(tool_call_id, Some(canonical_tool_name), Some(effective_args), content);
     Some(ValidationResult::Blocked)
 }
 

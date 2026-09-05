@@ -105,11 +105,18 @@ impl TurnProcessingContext<'_> {
     ) -> Result<Option<TurnLoopResult>> {
         repeated_tool_attempts.mark_verification_pending();
         if !repeated_tool_attempts.verification_warning_emitted {
-            self.renderer
-                .line(MessageStyle::Warning, helpers::ANTI_BLIND_EDITING_WARNING)
-                .unwrap_or(());
-            self.working_history
-                .push(uni::Message::system(helpers::ANTI_BLIND_EDITING_DIRECTIVE.to_string()));
+            // When the failed-verifier fix window is active the verifier already
+            // ran and failed; the generic "run verification" notice would be
+            // circular (it demanded verification the model already attempted
+            // while its fix attempts got no feedback). Say the verifier failed
+            // and bounded fix edits are granted instead.
+            let (warning, directive) = if repeated_tool_attempts.fix_edits_remaining > 0 {
+                (helpers::FAILED_VERIFICATION_FIX_WARNING, helpers::FAILED_VERIFICATION_FIX_DIRECTIVE)
+            } else {
+                (helpers::ANTI_BLIND_EDITING_WARNING, helpers::ANTI_BLIND_EDITING_DIRECTIVE)
+            };
+            self.renderer.line(MessageStyle::Warning, warning).unwrap_or(());
+            self.working_history.push(uni::Message::system(directive.to_string()));
             repeated_tool_attempts.verification_warning_emitted = true;
         }
 
@@ -624,6 +631,48 @@ mod tests {
 
         assert!(matches!(second_outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(_) })));
         assert!(!backing.last_history_message_contains("The change is complete."));
+    }
+
+    #[tokio::test]
+    async fn pending_verification_notice_reports_failed_verifier_during_fix_window() {
+        use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
+            ANTI_BLIND_EDITING_DIRECTIVE, FAILED_VERIFICATION_FIX_ALLOWANCE,
+        };
+
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut repeated_tool_attempts =
+            LoopTracker::with_verification_snapshot((true, FAILED_VERIFICATION_FIX_ALLOWANCE));
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = {
+            let mut ctx = backing.turn_processing_context();
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::TextResponse {
+                    text: "The build failure is in the parser module.".to_string(),
+                    reasoning: Vec::new(),
+                    reasoning_details: None,
+                    proposed_plan: None,
+                },
+                response_streamed: false,
+                step_count: 1,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+                max_tool_loops: 4,
+                tool_repeat_limit: 4,
+            })
+            .await
+            .expect("fix-window notice should be handled")
+        };
+
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        // The active fix window means the verifier already ran and failed: the
+        // notice must say so instead of implying verification was never run.
+        assert!(backing.last_history_message_contains("verification command ran and FAILED"));
+        assert!(
+            !backing.last_history_message_contains(ANTI_BLIND_EDITING_DIRECTIVE),
+            "generic never-ran directive must not be used while fix edits are granted"
+        );
     }
 
     #[tokio::test]

@@ -15,10 +15,11 @@ use anyhow::Result;
 use tokio::sync::RwLock;
 use vtcode_core::acp::ToolPermissionCache;
 use vtcode_core::config::loader::VTCodeConfig;
+use vtcode_core::core::agent::events::{tool_invocation_completed_event, tool_output_completed_event};
 use vtcode_core::core::agent::runtime::RuntimeSteering;
 use vtcode_core::core::decision_tracker::DecisionTracker;
 use vtcode_core::core::trajectory::TrajectoryLogger;
-use vtcode_core::exec::events::Usage as HarnessUsage;
+use vtcode_core::exec::events::{ToolCallStatus, Usage as HarnessUsage, tool_outcome_from_status};
 use vtcode_core::hooks::LifecycleHookEngine;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::{ApprovalRecorder, ToolRegistry, ToolResultCache};
@@ -107,6 +108,11 @@ const MAX_RECOVERY_RETRIES: u8 = 3;
 /// consecutive responses terminate the runaway loop while still allowing one
 /// retry for genuine recovery scenarios.
 pub(crate) const MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN: u32 = 2;
+/// Closure text for streamed tool-call items whose calls never reached the
+/// pipeline (rejected pre-flight, dropped from a batch, or interrupted when
+/// the turn ended). Teardown emits it so the session log carries a terminal
+/// `tool_output` instead of a dangling `item.started`.
+const UNDISPATCHED_TOOL_CALL_CLOSURE_TEXT: &str = "Tool call ended when the turn finished before it could execute.";
 pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
     "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.";
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
@@ -1684,13 +1690,34 @@ async fn finalize_turn(
         }
         if let TurnLoopResult::Blocked { reason } = result {
             let message = reason.clone().unwrap_or_else(|| "turn blocked".to_string());
+            // Blocked-call fuse telemetry (last tool, enforced caps) captured
+            // at trip time; blocks that did not trip the fuse keep the
+            // previous `None`/zero fields.
+            let fuse_telemetry = ctx.harness_state.take_blocked_tool_recovery_telemetry();
+            let (last_tool, consecutive_cap, total_cap, blocked_streak, blocked_total) = fuse_telemetry
+                .map(|telemetry| {
+                    (
+                        Some(telemetry.last_tool),
+                        telemetry.consecutive_cap,
+                        telemetry.total_cap,
+                        telemetry.blocked_streak,
+                        telemetry.blocked_total,
+                    )
+                })
+                .unwrap_or((
+                    None,
+                    0,
+                    0,
+                    ctx.harness_state.consecutive_blocked_tool_calls,
+                    ctx.harness_state.blocked_tool_calls,
+                ));
             let blocked_event = vtcode_core::exec::events::TurnBlockedEvent {
                 message: message.clone(),
-                last_tool: None,
-                blocked_streak: ctx.harness_state.consecutive_blocked_tool_calls,
-                blocked_total: ctx.harness_state.blocked_tool_calls,
-                consecutive_cap: 0,
-                total_cap: 0,
+                last_tool,
+                blocked_streak,
+                blocked_total,
+                consecutive_cap,
+                total_cap,
                 recovery_active: ctx.harness_state.is_recovery_active() || ctx.harness_state.recovery_pass_used(),
                 usage: has_turn_usage(turn_usage).then(|| turn_usage.clone()),
             };
@@ -1706,6 +1733,31 @@ async fn finalize_turn(
             )) {
                 tracing::debug!(error = %e, "harness TurnBlocked event emission failed");
             }
+        }
+
+        // Close streamed tool-call items whose calls never reached the
+        // pipeline. Entries only survive here when the call was rejected
+        // pre-flight, dropped from a batch, or interrupted by the turn ending;
+        // dispatched calls remove themselves on execution or rejection.
+        for (tool_call_id, streamed) in ctx.harness_state.take_all_streamed_tool_call_item_ids() {
+            let failed = ToolCallStatus::Failed;
+            let raw_id = (!tool_call_id.trim().is_empty()).then_some(tool_call_id.as_str());
+            let _ = emitter.emit(tool_invocation_completed_event(
+                streamed.item_id.clone(),
+                &streamed.tool_name,
+                None,
+                raw_id,
+                failed.clone(),
+                tool_outcome_from_status(&failed),
+            ));
+            let _ = emitter.emit(tool_output_completed_event(
+                streamed.item_id,
+                raw_id,
+                failed,
+                None,
+                None,
+                UNDISPATCHED_TOOL_CALL_CLOSURE_TEXT,
+            ));
         }
     }
     emit_turn_outcome_notification(

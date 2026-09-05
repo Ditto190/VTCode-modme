@@ -106,7 +106,7 @@ pub(crate) fn handle_preflight_failure(
     if let Some(object) = payload.as_object_mut() {
         object.insert("diagnosis".to_string(), diagnosis.to_value());
     }
-    ctx.push_tool_response(tool_call_id, Some(tool_name), payload.to_string());
+    ctx.push_rejected_tool_response(tool_call_id, Some(tool_name), None, payload.to_string());
     super::execution_result::render_and_emit(ctx, tool_name, &diagnosis);
 
     circuit_tripped.then(|| {
@@ -160,7 +160,7 @@ pub(crate) fn drain_preflight_circuit_responses(
         if let Some(object) = payload.as_object_mut() {
             object.insert("diagnosis".to_string(), diagnosis.to_value());
         }
-        ctx.push_tool_response(tool_call.call_id(), Some(tool_name), payload.to_string());
+        ctx.push_rejected_tool_response(tool_call.call_id(), Some(tool_name), tool_call.args(), payload.to_string());
         super::execution_result::render_and_emit(ctx, tool_name, &diagnosis);
     }
 }
@@ -264,7 +264,7 @@ pub(crate) fn push_blocked_tool_recovery_response(
         "next_action": "Do not retry this call. Tools are disabled for the next pass; synthesize a plain-text response from the available context.",
         "retryable": false,
     });
-    ctx.push_tool_response(tool_call.call_id(), Some(tool_name), payload.to_string());
+    ctx.push_rejected_tool_response(tool_call.call_id(), Some(tool_name), tool_call.args(), payload.to_string());
 }
 
 /// Push the one-time budget-exhaustion synthesis directive (wall-clock or
@@ -417,9 +417,10 @@ async fn run_safety_validation_loop(
         Ok(()) => Ok(None),
         Err(SafetyValidationFailure::SessionLimitNotIncreased)
         | Err(SafetyValidationFailure::SessionLimitPromptFailed(_)) => {
-            ctx.push_tool_response(
+            ctx.push_rejected_tool_response(
                 tool_call_id,
                 Some(canonical_tool_name),
+                Some(effective_args),
                 build_failure_error_content(
                     "Session tool limit reached and not increased by user".to_string(),
                     "safety_limit",
@@ -433,9 +434,10 @@ async fn run_safety_validation_loop(
         Err(SafetyValidationFailure::Validation(err)) => {
             ctx.renderer
                 .line(MessageStyle::Error, &format!("Safety validation failed: {err}"))?;
-            ctx.push_tool_response(
+            ctx.push_rejected_tool_response(
                 tool_call_id,
                 Some(canonical_tool_name),
+                Some(effective_args),
                 build_failure_error_content(format!("Safety validation failed: {err}"), "safety_validation"),
             );
             Ok(Some((ValidationResult::Blocked, None)))
@@ -621,9 +623,10 @@ pub(crate) fn block_mutation_until_verification(
         ctx.renderer.line(MessageStyle::Warning, &message)?;
         repeated_tool_attempts.verification_block_notice_emitted = true;
     }
-    ctx.push_tool_response(
+    ctx.push_rejected_tool_response(
         tool_call_id,
         Some(tool_name),
+        Some(args_val),
         serde_json::json!({
             "success": false,
             "blocked": true,
@@ -677,7 +680,12 @@ pub(crate) async fn validate_tool_call<'a>(
         } else {
             notice.exhaustion.skipped_call_message()
         };
-        ctx.push_tool_response(tool_call_id, Some(tool_name), build_failure_error_content(error_msg, "policy"));
+        ctx.push_rejected_tool_response(
+            tool_call_id,
+            Some(tool_name),
+            Some(args_val),
+            build_failure_error_content(error_msg, "policy"),
+        );
         return Ok(ValidationResult::Blocked);
     }
 
@@ -692,7 +700,12 @@ pub(crate) async fn validate_tool_call<'a>(
         } else {
             notice.exhaustion.skipped_call_message()
         };
-        ctx.push_tool_response(tool_call_id, Some(tool_name), build_failure_error_content(error_msg, "policy"));
+        ctx.push_rejected_tool_response(
+            tool_call_id,
+            Some(tool_name),
+            Some(args_val),
+            build_failure_error_content(error_msg, "policy"),
+        );
         return Ok(ValidationResult::Blocked);
     }
 
@@ -719,9 +732,10 @@ pub(crate) async fn validate_tool_call<'a>(
                     let outcome = handle_preflight_failure(ctx, tool_call_id, tool_name, &error_text, fallback);
                     return Ok(outcome.map_or(ValidationResult::Handled, ValidationResult::Outcome));
                 }
-                ctx.push_tool_response(
+                ctx.push_rejected_tool_response(
                     tool_call_id,
                     Some(tool_name),
+                    Some(args_val),
                     build_validation_error_content_with_fallback(
                         format!("Tool preflight validation failed: {err}"),
                         "preflight",
@@ -741,9 +755,10 @@ pub(crate) async fn validate_tool_call<'a>(
 
     let canonical_tool_name = prepared.canonical_name.clone();
     if !primary_agent_allows_tool(ctx.active_primary_agent.active(), &canonical_tool_name) {
-        ctx.push_tool_response(
+        ctx.push_rejected_tool_response(
             tool_call_id,
             Some(&canonical_tool_name),
+            Some(args_val),
             serde_json::to_string(
                 &ToolExecutionError::policy_violation(
                     canonical_tool_name.clone(),
@@ -779,9 +794,10 @@ pub(crate) async fn validate_tool_call<'a>(
             ctx.harness_state.record_denied_tool_call();
             // Surface the denial to the model so it does not silently retry
             // the same call; the reason is also rendered for the user.
-            ctx.push_tool_response(
+            ctx.push_rejected_tool_response(
                 tool_call_id,
                 Some(&canonical_tool_name),
+                Some(effective_args),
                 build_failure_error_content(
                     format!("Tool '{canonical_tool_name}' denied by PreToolUse hook"),
                     "policy",
@@ -799,9 +815,10 @@ pub(crate) async fn validate_tool_call<'a>(
                 .preflight_validate_harness_call(&canonical_tool_name, &rewritten)
             {
                 ctx.harness_state.record_denied_tool_call();
-                ctx.push_tool_response(
+                ctx.push_rejected_tool_response(
                     tool_call_id,
                     Some(&canonical_tool_name),
+                    Some(effective_args),
                     build_failure_error_content(
                         format!("PreToolUse hook produced invalid arguments for '{canonical_tool_name}': {err}"),
                         "policy",
@@ -824,9 +841,10 @@ pub(crate) async fn validate_tool_call<'a>(
         Err(err) => {
             ctx.harness_state.record_denied_tool_call();
             ctx.push_system_message(format!("Pre-tool hook phase failed: {err}"));
-            ctx.push_tool_response(
+            ctx.push_rejected_tool_response(
                 tool_call_id,
                 Some(&canonical_tool_name),
+                Some(effective_args),
                 build_failure_error_content(format!("Pre-tool hook phase failed: {err}"), "policy"),
             );
             return Ok(ValidationResult::Blocked);
@@ -945,9 +963,10 @@ pub(crate) async fn validate_tool_call<'a>(
                     .preflight_validate_harness_call(&canonical_tool_name, &updated_args)
                 {
                     ctx.harness_state.record_denied_tool_call();
-                    ctx.push_tool_response(
+                    ctx.push_rejected_tool_response(
                         tool_call_id,
                         Some(&canonical_tool_name),
+                        Some(effective_args),
                         build_failure_error_content(
                             format!(
                                 "PermissionRequest hook produced invalid arguments for '{canonical_tool_name}': {err}"
@@ -1014,9 +1033,10 @@ pub(crate) async fn validate_tool_call<'a>(
                 }
                 error_json
             };
-            ctx.push_tool_response(
+            ctx.push_rejected_tool_response(
                 tool_call_id,
                 Some(&canonical_tool_name),
+                Some(effective_args),
                 serde_json::to_string(&denial).unwrap_or_else(|_| "{}".to_string()),
             );
             Ok(ValidationResult::Blocked)
@@ -1034,7 +1054,7 @@ pub(crate) async fn validate_tool_call<'a>(
             let err_json = serde_json::json!({
                 "error": format!("Failed to evaluate policy for tool '{}': {}", tool_name, err)
             });
-            ctx.push_tool_response(tool_call_id, Some(tool_name), err_json.to_string());
+            ctx.push_rejected_tool_response(tool_call_id, Some(tool_name), Some(args_val), err_json.to_string());
             Ok(ValidationResult::Blocked)
         }
     }

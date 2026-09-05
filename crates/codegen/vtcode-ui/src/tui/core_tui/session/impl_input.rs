@@ -118,6 +118,14 @@ impl Session {
                     self.input_status_left = state.status().map(ToOwned::to_owned);
                     self.input_enabled = true;
                     self.cursor_visible = true;
+                } else if matches!(state, ActivityState::Blocked) {
+                    // Blocked keeps input enabled; persist its status so direct
+                    // left-status readers (terminal title, input status line)
+                    // surface the blocked state instead of relying on the
+                    // status_left_text activity-state fallback.
+                    self.input_status_left = state.status().map(ToOwned::to_owned);
+                    self.input_enabled = true;
+                    self.cursor_visible = true;
                 } else {
                     self.input_status_left = None;
                     self.input_enabled = true;

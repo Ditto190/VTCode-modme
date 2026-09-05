@@ -359,6 +359,29 @@ fn busy_state_disables_input_and_shows_busy_status() {
 }
 
 #[test]
+fn blocked_state_persists_status_for_direct_left_status_readers() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Blocked));
+
+    assert!(session.input_enabled(), "blocked state must keep input enabled");
+    let left = session
+        .input_status_left
+        .as_deref()
+        .expect("blocked state must persist its status for direct left-status readers");
+    assert_eq!(left, ActivityState::Blocked.status().expect("blocked state has a status"));
+    assert_eq!(session.status_left_text(), Some(left));
+}
+
+#[test]
+fn idle_state_clears_left_status() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Blocked));
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Idle));
+
+    assert_eq!(session.input_status_left, None, "idle must clear the persisted blocked status");
+}
+
+#[test]
 fn timeline_visible_selects_latest_item() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(InlineMessageKind::Agent, vec![make_segment("First")]);

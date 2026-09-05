@@ -103,6 +103,28 @@ fn test_all_themes_have_readable_foreground_and_accents() {
 }
 
 #[test]
+fn test_all_themes_error_accent_meets_contrast() {
+    // The error/alert token backs the Blocked header badge and error copy, so
+    // it must meet the WCAG AA contrast floor against the background in every
+    // built-in theme. Unlike body-text tokens it is an accent, so the
+    // readability luminance window does not apply.
+    let accessibility = ColorAccessibilityConfig::default();
+    let min_contrast = accessibility.minimum_contrast;
+    for definition in all_theme_definitions().values() {
+        let styles = definition.palette.build_styles_with_accessibility(&accessibility);
+        let color = style_rgb(styles.error).unwrap_or_else(|| panic!("error token missing fg for {}", definition.id));
+        let ratio = contrast_ratio(color, definition.palette.background);
+        assert!(
+            ratio >= min_contrast,
+            "theme={} error accent contrast {:.2} < {:.1}",
+            definition.id,
+            ratio,
+            min_contrast
+        );
+    }
+}
+
+#[test]
 fn test_syntax_theme_mapping_dark_themes() {
     assert_eq!(get_syntax_theme_for_ui_theme("dracula"), "Dracula");
     assert_eq!(get_syntax_theme_for_ui_theme("monokai-classic"), "monokai-classic");
