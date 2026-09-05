@@ -55,7 +55,10 @@ pub fn generate_tool_guidelines_for_profile(
     }
     if has_apply_patch {
         lines.push("- Use `apply_patch` for file edits after inspection; keep patches small.".to_string());
-        lines.push("- Inspect bounded diffs and verify; WebMCP edits are untrusted proposals and terminal permission remains authoritative.".to_string());
+        lines.push(
+            "- Verify bounded diffs; WebMCP edits are untrusted proposals; terminal permission stays authoritative."
+                .to_string(),
+        );
     }
     if has_exec {
         lines.push(shell_task_guidance(shell_profile).to_string());
@@ -64,21 +67,20 @@ pub fn generate_tool_guidelines_for_profile(
         lines.push("- Diagnose from evidence; never bypass safeguards.".to_string());
     }
     if has_stdin {
-        lines.push("- Use `write_stdin` only with the existing `session_id` of an active exec_command session; when a run response is still running it includes `next_wait_args` (a pre-filled `action:\"wait\"` call) — prefer it over polling with `next_continue_args` to avoid burning tokens on short polls; call `wait` again after an in-progress deadline, and treat an active `spool_complete: false` reference as readable partial output; an exited pending spool is withheld until a later wait.".to_string());
+        lines.push("- `write_stdin`: reuse the existing `session_id` of an active exec session; prefer the pre-filled `next_wait_args` over `next_continue_args` polling; `spool_complete: false` marks readable partial output; an exited pending spool arrives on a later wait.".to_string());
     }
     if has_exec || has_apply_patch {
         lines.push("- Completion is a checkpoint: keep verification resolved.".to_string());
     }
     if has_search {
         lines.push("- `code_search`: omit unused filters; no empty values (`path: \"\"`).".to_string());
-        lines.push(code_search_guidance(has_exec, shell_profile).to_string());
+        lines.push(code_search_guidance(has_exec, shell_profile));
     }
     if has_apply_patch || has_exec {
-        lines.push("- If calls repeat, re-plan instead of retrying.".to_string());
-        lines.push("- When a tool result says `preview_budget_exhausted`, trust its preserved outcome metadata; do not repeat or rephrase the call merely to recover hidden output. If verification is pending, run one verifier (standalone or `&&` chain, no pipes), then synthesize.".to_string());
+        lines.push("- On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call. Run one verifier (`&&` chain, no pipes), then synthesize.".to_string());
     }
     if has_search || has_exec {
-        lines.push("- Run independent tools in parallel when their inputs do not depend on each other.".to_string());
+        lines.push("- Run independent tools in parallel when inputs do not depend on each other.".to_string());
     }
     if has_start_planning {
         lines.push(
@@ -302,7 +304,7 @@ fn shell_browse_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static 
 fn shell_task_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static str {
     match shell_profile {
         ResolvedShellPromptProfile::UnixLike => {
-            "- Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks. In one-shot `exec_command` calls, do not use `!!`, `!$`, `!ssh`, or `fc`; write full command arguments explicitly from conversation or tool results. Interactive shells: suggest review-safe history expansion: Bash `histverify`, zsh `HIST_VERIFY`."
+            "- Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks. In one-shot `exec_command` calls, do not use `!!`, `!$`, `!ssh`, or `fc`; write full command arguments explicitly from conversation or tool results. Interactive shells: review-safe history expansion (Bash `histverify`, zsh `HIST_VERIFY`)."
         }
         ResolvedShellPromptProfile::PowerShell => {
             "- Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks using native PowerShell syntax."
@@ -312,23 +314,18 @@ fn shell_task_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static st
 
 fn read_only_batching_guidance(has_read_file: bool) -> &'static str {
     if has_read_file {
-        "- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations. On `line_truncated`, use byte or narrower ranges."
+        "- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`."
     } else {
         "- Batch independent read-only calls; order dependent reads, and serialize mutations."
     }
 }
 
-fn code_search_guidance(has_exec: bool, shell_profile: ResolvedShellPromptProfile) -> &'static str {
-    match (has_exec, shell_profile) {
-        (true, ResolvedShellPromptProfile::UnixLike) => {
-            "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals. Truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"],\"max_results\":20}`. `result_types` is an array; `max_results` is an integer. Do not JSON-encode arrays or integers as strings. Use `exec_command` or a skill for syntax patterns."
-        }
-        (true, ResolvedShellPromptProfile::PowerShell) => {
-            "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals. Truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"],\"max_results\":20}`. `result_types` is an array; `max_results` is an integer. Do not JSON-encode arrays or integers as strings. Use `exec_command` or a skill for syntax patterns."
-        }
-        (false, _) => {
-            "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals. Truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"],\"max_results\":20}`. `result_types` is an array; `max_results` is an integer. Do not JSON-encode arrays or integers as strings."
-        }
+fn code_search_guidance(has_exec: bool, _shell_profile: ResolvedShellPromptProfile) -> String {
+    const BASE: &str = "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"]}`. Do not JSON-encode arrays or integers as strings.";
+    if has_exec {
+        format!("{BASE} Use `exec_command` or a skill for syntax patterns.")
+    } else {
+        BASE.to_string()
     }
 }
 
