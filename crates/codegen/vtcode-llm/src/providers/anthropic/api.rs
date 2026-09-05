@@ -113,7 +113,9 @@ async fn messages_handler(
 
         // Spawn a task to convert the stream
         tokio::spawn(async move {
-            let mut stream = Box::pin(stream);
+            // LLMStream is already Pin<Box<dyn Stream>>; Pin<Box<T>> is itself
+            // Unpin, so no re-pinning is needed to call StreamExt::next.
+            let mut stream = stream;
             let mut next_content_block_idx = 0u32;
             let mut open_text_block = None;
             let mut open_reasoning_block = None;

@@ -383,7 +383,8 @@ async fn run_single_tool_attempt(
             Cancelled,
         }
 
-        let mut exec_future = Box::pin(tokio::time::timeout(tool_timeout, exec_future));
+        let exec_future = tokio::time::timeout(tool_timeout, exec_future);
+        tokio::pin!(exec_future);
         let keepalive_started_at = tokio::time::Instant::now();
         let mut next_keepalive_at = keepalive_started_at + WAIT_KEEPALIVE_INITIAL;
         let wait_subject = format!("Tool '{name}'");

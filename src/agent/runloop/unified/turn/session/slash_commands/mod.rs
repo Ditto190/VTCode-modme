@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -124,9 +126,14 @@ impl<'a> SlashCommandContext<'a> {
     }
 }
 
-pub(crate) async fn handle_outcome(
+/// Routes a slash-command outcome.
+///
+/// The routing chain recurses (e.g. `ManageSkills` → built-in command skills →
+/// `handle_outcome`), so the recursive edge is boxed here at the definition
+/// instead of requiring each call site to remember to `Box::pin`.
+pub(crate) fn handle_outcome(
     outcome: SlashCommandOutcome,
     ctx: SlashCommandContext<'_>,
-) -> Result<SlashCommandControl> {
-    outcome_router::route_outcome(outcome, ctx).await
+) -> Pin<Box<dyn Future<Output = Result<SlashCommandControl>> + Send + '_>> {
+    Box::pin(outcome_router::route_outcome(outcome, ctx))
 }
