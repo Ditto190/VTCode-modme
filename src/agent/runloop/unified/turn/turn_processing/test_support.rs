@@ -122,6 +122,7 @@ pub(crate) struct TestTurnProcessingBacking {
     harness_state: HarnessTurnState,
     harness_emitter: Option<HarnessEventEmitter>,
     auto_finish_planning_attempted: bool,
+    skip_confirmations_for_test: bool,
     working_history: Vec<uni::Message>,
     tool_catalog: Arc<ToolCatalogState>,
     default_placeholder: Option<String>,
@@ -230,6 +231,7 @@ impl TestTurnProcessingBacking {
             harness_state,
             harness_emitter: None,
             auto_finish_planning_attempted: false,
+            skip_confirmations_for_test: true,
             working_history: Vec::new(),
             tool_catalog,
             default_placeholder: None,
@@ -261,6 +263,16 @@ impl TestTurnProcessingBacking {
         )
         .await
         .expect("test plan should persist");
+    }
+
+    /// Persist a plan and then return the registry to the post-approval state
+    /// (planning finished, plan file retained) — mirrors what
+    /// `complete_approved_plan_handoff` leaves behind for execution turns.
+    pub(crate) async fn persist_approved_plan_for_test(&self, plan_text: &str) {
+        self.enable_planning();
+        self.persist_plan_for_test(plan_text).await;
+        self.tool_registry.disable_planning();
+        self.tool_registry.planning_workflow_state().disable();
     }
 
     pub(crate) fn select_primary_agent_from_specs(&mut self, specs: &[vtcode_config::SubagentSpec], requested: &str) {
@@ -340,6 +352,19 @@ impl TestTurnProcessingBacking {
 
     pub(crate) fn mark_interview_denied_for_test(&mut self) {
         self.plan_session.mark_interview_denied();
+    }
+
+    /// Control the confirmation policy surfaced through `turn_processing_context`.
+    /// Defaults to `true`; revision-routing tests set `false` to exercise the
+    /// interactive confirmation-policy path without an overlay.
+    pub(crate) fn set_skip_confirmations_for_test(&mut self, skip: bool) {
+        self.skip_confirmations_for_test = skip;
+    }
+
+    /// Mark the turn as an approved-plan execution turn, mirroring what the
+    /// session loop does for the scheduled implementation turn.
+    pub(crate) fn set_approved_plan_execution_for_test(&mut self, active: bool) {
+        self.harness_state.set_approved_plan_execution(active);
     }
 
     pub(crate) fn last_history_message_contains(&self, needle: &str) -> bool {
@@ -438,7 +463,7 @@ impl TestTurnProcessingBacking {
             mcp_panel_state: &mut self.mcp_panel_state,
             working_history: &mut self.working_history,
             turn_metadata_cache: &mut self.turn_metadata_cache,
-            skip_confirmations: true,
+            skip_confirmations: self.skip_confirmations_for_test,
             full_auto: false,
             harness_state: &mut self.harness_state,
             harness_emitter: self.harness_emitter.as_ref(),

@@ -83,12 +83,6 @@ Blocked handoff:
 
 note: i want you to fix and improve vtcode harness based on the session run log. The harness should be able to handle blocked calls more gracefully, provide better feedback to the user, and ensure that the session can resume smoothly after a blockage. Additionally, improve the UI to clearly indicate when a turn is blocked and what actions the user can take to resolve it. not do it yourself
 
----
-
-check plan mode: vtcode on user approval confirmation dialog -> accept and implement -> the agent use auto mode -> then later the agent switch to propose plan mode, but not implement it? User has to nudge `start implement` manually. The harness should ensure that when the agent switches to propose plan mode, it automatically implements the proposed plan without requiring additional user intervention. Additionally, provide clear feedback to the user about the current mode and any actions they need to take to ensure the plan is implemented correctly.
-
-log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260904T034530Z_179873-58689
-
 ===
 
 ## VT520 dumb-chat mode — plan only (2026-09-05)

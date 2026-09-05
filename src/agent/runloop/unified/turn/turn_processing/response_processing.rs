@@ -118,6 +118,25 @@ pub(crate) fn process_llm_response(
         proposed_plan = None;
     }
 
+    // A write-capable execution agent can emit a bounded replan when the plan
+    // it is executing no longer matches the repository. Outside planning only
+    // the canonical tagged block counts — ordinary prose is never mistaken for
+    // a plan — and the response must be text-only so tool work in flight is
+    // not discarded. Extracting here lets the response handler persist and
+    // route the revision instead of ending the turn behind plain-text output.
+    if !planning_active
+        && allow_tool_calls
+        && tool_calls.is_empty()
+        && proposed_plan.is_none()
+        && let Some(ref text) = final_text
+    {
+        let extraction = extract_any_plan(text);
+        if extraction.plan_text.is_some() {
+            proposed_plan = extraction.plan_text;
+            final_text = Some(strip_plan_persistence_policy_line(&extraction.stripped_text));
+        }
+    }
+
     // Providers occasionally omit the plan tags while still returning a
     // structured synthesis. Treat a Summary/Steps response as the plan so it
     // is persisted and shown to the user instead of being treated as an
@@ -734,6 +753,74 @@ mod tests {
                 assert_eq!(text, "run()");
             }
             _ => panic!("Expected textual invalid exec_command to stay a text response"),
+        }
+    }
+
+    #[test]
+    fn process_llm_response_extracts_execution_replan_block() {
+        let response = LLMResponse {
+            content: Some(
+                "Replanning: the approved paths no longer exist.\n<proposed_plan>\n## Summary\nRevised scope.\n</proposed_plan>"
+                    .to_string(),
+            ),
+            tool_calls: None,
+            model: "test".to_string(),
+            usage: None,
+            finish_reason: FinishReason::Stop,
+            reasoning: None,
+            reasoning_details: None,
+            tool_references: Vec::new(),
+            compaction: None,
+            request_id: None,
+            organization_id: None,
+        };
+
+        let mut renderer = AnsiRenderer::stdout();
+        // planning_active=false: execution turns must still surface an
+        // explicit `<proposed_plan>` replan instead of leaking it as text.
+        let result = process_llm_response(&response, &mut renderer, 0, false, false, true, true, None, None)
+            .expect("processing should succeed");
+
+        match result {
+            TurnProcessingResult::TextResponse { text, proposed_plan, .. } => {
+                assert!(proposed_plan.is_some_and(|plan| plan.contains("Revised scope")));
+                assert!(!text.contains("<proposed_plan>"));
+                assert!(text.contains("Replanning: the approved paths no longer exist."));
+            }
+            _ => panic!("Expected text response with extracted execution replan"),
+        }
+    }
+
+    #[test]
+    fn process_llm_response_keeps_execution_replan_with_tool_calls_unextracted() {
+        let response = LLMResponse {
+            content: Some("Continuing work.\n<proposed_plan>\n## Summary\nDraft only.\n</proposed_plan>".to_string()),
+            tool_calls: Some(vec![vtcode_core::llm::provider::ToolCall::function(
+                "call_1".to_string(),
+                "code_search".to_string(),
+                r#"{"query":"x"}"#.to_string(),
+            )]),
+            model: "test".to_string(),
+            usage: None,
+            finish_reason: FinishReason::Stop,
+            reasoning: None,
+            reasoning_details: None,
+            tool_references: Vec::new(),
+            compaction: None,
+            request_id: None,
+            organization_id: None,
+        };
+
+        let mut renderer = AnsiRenderer::stdout();
+        let result = process_llm_response(&response, &mut renderer, 0, false, false, true, true, None, None)
+            .expect("processing should succeed");
+
+        match result {
+            TurnProcessingResult::ToolCalls { tool_calls, assistant_text, .. } => {
+                assert_eq!(tool_calls.len(), 1);
+                assert!(assistant_text.contains("<proposed_plan>"));
+            }
+            _ => panic!("Expected tool-call dispatch when the response carries native calls"),
         }
     }
 

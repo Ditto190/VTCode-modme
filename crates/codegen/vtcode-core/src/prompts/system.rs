@@ -140,7 +140,7 @@ pub const SPECIALIZED_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 - Explore, plan, then execute.
 - Use `task_tracker` for multi-step work and Planning workflow when scope or verification is still open.
 - Treat completion language as a checkpoint, not proof; only stop when tracker state, verification, and resumable state agree.
-- End plan work with one `<proposed_plan>` block; if a path stalls, re-plan into smaller verified slices.
+- End plan work with one `<proposed_plan>` block; mid-execution, re-plan only when the approved plan is stale — the runtime persists and continues it.
 - Use the project instruction map (`AGENTS.md` and `CLAUDE.md`) plus `docs/harness/ARCHITECTURAL_INVARIANTS.md` when repo-wide invariants matter."#;
 
 const STRUCTURED_REASONING_INSTRUCTIONS: &str = r#"
