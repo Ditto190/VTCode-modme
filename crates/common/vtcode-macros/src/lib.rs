@@ -138,7 +138,7 @@ fn is_string_type(ty: &syn::Type) -> bool {
         && type_path.qself.is_none()
         && type_path.path.segments.len() == 1
     {
-        return type_path.path.segments[0].ident == "String";
+        return type_path.path.segments.first().is_some_and(|segment| segment.ident == "String");
     }
     false
 }
