@@ -9,7 +9,7 @@ use ratatui::crossterm::{
     terminal::{Clear, ClearType, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled},
 };
 
-use super::state::{self, KEYBOARD_ENHANCEMENTS_PUSHED};
+use super::state::{self, COLOR_SCHEME_REPORTS_ENABLED, KEYBOARD_ENHANCEMENTS_PUSHED};
 
 /// Emit the terminal-restoration escape sequence.
 ///
@@ -45,6 +45,12 @@ fn emit_restore_sequence(writer: &mut impl Write, clear_alternate: bool) -> io::
     // Only pop keyboard enhancement flags if actually pushed
     if KEYBOARD_ENHANCEMENTS_PUSHED.swap(false, Ordering::SeqCst) {
         execute!(writer, PopKeyboardEnhancementFlags)?;
+    }
+
+    // Only disable color-scheme reports if actually enabled; the flag is only
+    // set on unix where the TUI turns Contour palette reports on.
+    if COLOR_SCHEME_REPORTS_ENABLED.swap(false, Ordering::SeqCst) {
+        writer.write_all(vtcode_commons::ansi_codes::COLOR_SCHEME_REPORTS_DISABLE.as_bytes())?;
     }
 
     Ok(())

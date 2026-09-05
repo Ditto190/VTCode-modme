@@ -133,6 +133,38 @@ fn test_syntax_theme_mapping_gruvbox() {
     assert_eq!(get_syntax_theme_for_ui_theme("gruvbox-material-light"), "gruvbox-light");
 }
 
+#[test]
+fn test_theme_for_terminal_scheme_change_prefers_suite_twin() {
+    // Catppuccin spans both schemes: a report must land on the suite twin.
+    let light_twin = theme_for_terminal_scheme_change("catppuccin-mocha", false);
+    assert_eq!(theme_suite_id(light_twin), Some("catppuccin"));
+    assert!(is_light_theme(light_twin));
+
+    let dark_twin = theme_for_terminal_scheme_change("catppuccin-latte", true);
+    assert_eq!(theme_suite_id(dark_twin), Some("catppuccin"));
+    assert!(!is_light_theme(dark_twin));
+}
+
+#[test]
+fn test_theme_for_terminal_scheme_change_falls_back_without_twin() {
+    // mono is a single dark theme with no light twin; a light report falls
+    // back to the default suggestion for the reported scheme.
+    vtcode_commons::ansi_capabilities::set_color_scheme_override(Some(
+        vtcode_commons::ansi_capabilities::ColorScheme::Light,
+    ));
+    assert_eq!(theme_for_terminal_scheme_change("mono", false), "vitesse-light");
+    vtcode_commons::ansi_capabilities::set_color_scheme_override(None);
+}
+
+#[test]
+fn test_theme_for_terminal_scheme_change_falls_back_for_unknown_theme() {
+    vtcode_commons::ansi_capabilities::set_color_scheme_override(Some(
+        vtcode_commons::ansi_capabilities::ColorScheme::Dark,
+    ));
+    assert_eq!(theme_for_terminal_scheme_change("not-a-theme", true), DEFAULT_THEME_ID);
+    vtcode_commons::ansi_capabilities::set_color_scheme_override(None);
+}
+
 fn style_rgb(style: Style) -> Option<RgbColor> {
     match style.get_fg_color() {
         Some(Color::Rgb(rgb)) => Some(rgb),

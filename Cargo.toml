@@ -176,6 +176,7 @@ exclude = [
 ]
 
 [patch.crates-io]
+crossterm = { path = "patches/crossterm" }
 vtcode-commons = { path = "crates/common/vtcode-commons" }
 vtcode-acp = { path = "crates/codegen/vtcode-acp" }
 vtcode-auth = { path = "crates/codegen/vtcode-auth" }

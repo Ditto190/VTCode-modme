@@ -278,6 +278,17 @@ pub(crate) async fn initialize_session_ui(
     }
 
     let handle = session.clone_inline_handle();
+    // Follow live terminal light/dark reports only when the user opted into
+    // automatic color-scheme detection; forced Light/Dark modes must win.
+    let color_scheme_auto = vt_cfg
+        .map(|cfg| {
+            matches!(
+                cfg.ui.color_scheme_mode,
+                vtcode_config::root::ColorSchemeMode::Auto | vtcode_config::root::ColorSchemeMode::Unknown
+            )
+        })
+        .unwrap_or(true);
+    session.set_color_scheme_auto(color_scheme_auto);
     let (editor_open_sender, editor_open_coordinator_task_guard) =
         spawn_editor_open_coordinator(config.workspace.clone(), &handle);
     let highlight_config = vt_cfg.as_ref().map(|cfg| cfg.syntax_highlighting.clone()).unwrap_or_default();

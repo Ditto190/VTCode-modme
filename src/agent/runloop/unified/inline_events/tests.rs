@@ -1140,6 +1140,7 @@ fn other_name(command: &InlineCommand) -> &'static str {
         InlineCommand::SetTerminalTitleThreadLabel { .. } => "SetTerminalTitleThreadLabel",
         InlineCommand::SetTerminalTitleGitBranch { .. } => "SetTerminalTitleGitBranch",
         InlineCommand::SetTheme { .. } => "SetTheme",
+        InlineCommand::SetColorSchemeAuto { .. } => "SetColorSchemeAuto",
         InlineCommand::SetAppearance { .. } => "SetAppearance",
         InlineCommand::SetVimModeEnabled(_) => "SetVimModeEnabled",
         InlineCommand::SetQueuedInputs { .. } => "SetQueuedInputs",

@@ -85,6 +85,7 @@ impl Session {
             styles: SessionStyles::new(theme.clone()),
             theme,
             appearance,
+            auto_color_scheme: false,
             header_context: InlineHeaderContext::default(),
             labels: MessageLabels::default(),
 

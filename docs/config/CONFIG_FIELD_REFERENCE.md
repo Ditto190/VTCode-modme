@@ -827,7 +827,7 @@ python3 scripts/generate_config_field_reference.py
 | `tui.show_tooltips` | `boolean \| null` | no | `null` | - |
 | `ui.allow_tool_ansi` | `boolean` | no | `false` | Allow ANSI escape sequences in tool output (enables colors but may cause layout issues) |
 | `ui.bold_is_bright` | `boolean` | no | `false` | Compatibility mode for legacy terminals that map bold to bright colors. When enabled, avoids using bold styling on text that would become bright colors, preventing visibility issues in terminals with "bold is bright" behavior. |
-| `ui.color_scheme_mode` | `string` | no | `"auto"` | Color scheme mode for automatic light/dark theme switching. - "auto": Detect from terminal (via OSC 11 or COLORFGBG env var) - "light": Force light mode theme selection - "dark": Force dark mode theme selection |
+| `ui.color_scheme_mode` | `string` | no | `"auto"` | Color scheme mode for automatic light/dark theme switching. - "auto": Detect from terminal (via the Contour dark/light query where supported, else OSC 11, or the COLORFGBG env var) and follow live palette changes - "light": Force light mode theme selection - "dark": Force dark mode theme selection |
 | `ui.dim_completed_todos` | `boolean` | no | `true` | Dim completed todo items (- \[x\]) in agent output |
 | `ui.display_mode` | `string` | no | `"minimal"` | UI display mode preset (full, minimal, focused) |
 | `ui.fullscreen.copy_on_select` | `boolean` | no | `true` | Copy selected transcript text immediately when the mouse selection ends. Can also be controlled via VTCODE_FULLSCREEN_COPY_ON_SELECT=0/1. |

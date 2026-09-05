@@ -20,7 +20,9 @@ pub use runtime::{
     rebuild_active_styles, resolve_theme, set_active_theme, set_color_accessibility_config, set_preview_theme,
     validate_theme_contrast,
 };
-pub use scheme::{is_light_theme, suggest_theme_for_terminal, theme_matches_terminal_scheme};
+pub use scheme::{
+    is_light_theme, suggest_theme_for_terminal, theme_for_terminal_scheme_change, theme_matches_terminal_scheme,
+};
 pub use syntax::{get_active_syntax_theme, get_syntax_theme_for_ui_theme};
 pub use types::{
     ColorAccessibilityConfig, DEFAULT_THEME_ID, ThemeDefinition, ThemePalette, ThemeStyles, ThemeSuite,

@@ -24,6 +24,8 @@ pub(super) struct TerminalModeState {
     mouse_capture_enabled: bool,
     /// Whether VT Code enabled focus change events.
     focus_change_enabled: bool,
+    /// Whether VT Code enabled Contour color-scheme change reports (unix only).
+    color_scheme_reports_enabled: bool,
     /// Whether VT Code pushed keyboard enhancement flags.
     keyboard_enhancements_pushed: bool,
     /// Whether the cursor position was saved before entering fullscreen
@@ -40,6 +42,7 @@ impl TerminalModeState {
             raw_mode_enabled: false,
             mouse_capture_enabled: false,
             focus_change_enabled: false,
+            color_scheme_reports_enabled: false,
             keyboard_enhancements_pushed: false,
             cursor_position_saved: false,
             alternate_screen_active: false,
@@ -64,6 +67,32 @@ impl TerminalModeState {
         self.alternate_screen_active = true;
         crate::tui::ui::tui::panic_hook::mark_terminal_modified();
         Ok(())
+    }
+
+    /// Enable unsolicited Contour color-scheme reports (`CSI ? 2031 h`).
+    ///
+    /// Unix only: the Windows backend consumes console input records instead
+    /// of parsing VT byte streams, so DSR replies could surface as garbage
+    /// input there. The canonical restore path disables the mode via the
+    /// [`crate::tui::core_tui::panic_hook`] state flag.
+    #[cfg(unix)]
+    fn enable_color_scheme_reports(&mut self, stderr: &mut io::Stderr) {
+        use std::io::Write as _;
+        use vtcode_commons::ansi_codes::COLOR_SCHEME_REPORTS_ENABLE;
+
+        match stderr
+            .write_all(COLOR_SCHEME_REPORTS_ENABLE.as_bytes())
+            .and_then(|()| stderr.flush())
+        {
+            Ok(()) => {
+                self.color_scheme_reports_enabled = true;
+                crate::tui::ui::tui::panic_hook::mark_color_scheme_reports_enabled(true);
+                crate::tui::ui::tui::panic_hook::mark_terminal_modified();
+            }
+            Err(error) => {
+                tracing::debug!(%error, "failed to enable color-scheme change reports");
+            }
+        }
     }
 
     pub(super) fn push_keyboard_enhancement_flags(
@@ -166,6 +195,12 @@ pub(super) fn enable_terminal_modes(
             tracing::debug!(%error, "failed to enable focus change events");
         }
     }
+
+    // Enable unsolicited Contour color-scheme change reports (dark/light).
+    // Reports are parsed by the vendored crossterm fork and ignored unless
+    // the session opted into automatic color-scheme following.
+    #[cfg(unix)]
+    state.enable_color_scheme_reports(stderr);
 
     Ok(state)
 }

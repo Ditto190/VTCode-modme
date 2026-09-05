@@ -1,4 +1,5 @@
 use super::*;
+use vtcode_commons::ansi_capabilities::ColorScheme;
 
 impl Session {
     pub(crate) fn cursor(&self) -> usize {
@@ -158,6 +159,10 @@ impl Session {
                 self.ensure_prompt_style_color();
                 self.invalidate_transcript_cache();
             }
+            InlineCommand::SetColorSchemeAuto { enabled } => {
+                self.auto_color_scheme = enabled;
+                command_needs_redraw = false;
+            }
             InlineCommand::SetAppearance { appearance } => {
                 self.appearance = appearance;
                 self.invalidate_header_cache();
@@ -268,5 +273,32 @@ impl Session {
         if command_needs_redraw {
             self.needs_redraw = true;
         }
+    }
+
+    /// Apply an unsolicited terminal color-scheme report (Contour VT extension,
+    /// `CSI ? 997 ; Ps n`). No-op unless automatic color-scheme following is
+    /// enabled via `SetColorSchemeAuto`, which the host wires from
+    /// `ui.color_scheme_mode = "auto"`.
+    ///
+    /// The shared scheme override is updated first so theme matching and
+    /// suggestions agree with the reported scheme; the switch itself goes
+    /// through the regular `SetTheme` path so retinting and caches stay
+    /// consistent. The user's persisted theme preference is never touched.
+    pub(crate) fn apply_terminal_color_scheme_report(&mut self, dark: bool) {
+        if !self.auto_color_scheme {
+            return;
+        }
+        let scheme = if dark { ColorScheme::Dark } else { ColorScheme::Light };
+        vtcode_commons::ansi_capabilities::set_color_scheme_override(Some(scheme));
+        let active = crate::theme::active_theme_id();
+        if crate::theme::theme_matches_terminal_scheme(&active) {
+            return;
+        }
+        let next = crate::theme::theme_for_terminal_scheme_change(&active, dark);
+        if crate::theme::set_active_theme(next).is_err() {
+            return;
+        }
+        let theme = crate::tui::core_tui::style::theme_from_styles(&crate::theme::active_styles());
+        self.handle_command(InlineCommand::SetTheme { theme });
     }
 }

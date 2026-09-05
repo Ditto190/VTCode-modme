@@ -382,6 +382,9 @@ impl Session {
             CrosstermEvent::FocusLost => {
                 self.clear_held_key_modifiers();
             }
+            CrosstermEvent::ColorSchemeReport { dark } => {
+                self.apply_terminal_color_scheme_report(dark);
+            }
         }
     }
 

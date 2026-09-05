@@ -150,6 +150,9 @@ pub enum InlineCommand {
     SetTheme {
         theme: InlineTheme,
     },
+    SetColorSchemeAuto {
+        enabled: bool,
+    },
     SetAppearance {
         appearance: AppearanceConfig,
     },
@@ -344,6 +347,10 @@ impl InlineHandle {
         self.send_command(InlineCommand::SetTheme { theme });
     }
 
+    pub fn set_color_scheme_auto(&self, enabled: bool) {
+        self.send_command(InlineCommand::SetColorSchemeAuto { enabled });
+    }
+
     pub fn set_appearance(&self, appearance: AppearanceConfig) {
         self.send_command(InlineCommand::SetAppearance { appearance });
     }
@@ -477,6 +484,10 @@ impl InlineSession {
 
     pub fn set_skip_confirmations(&mut self, skip: bool) {
         self.handle.set_skip_confirmations(skip);
+    }
+
+    pub fn set_color_scheme_auto(&mut self, enabled: bool) {
+        self.handle.set_color_scheme_auto(enabled);
     }
 
     pub fn clone_inline_handle(&self) -> InlineHandle {

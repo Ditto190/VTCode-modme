@@ -213,6 +213,9 @@ pub struct Session {
     pub(crate) theme: InlineTheme,
     pub(crate) styles: SessionStyles,
     pub(crate) appearance: AppearanceConfig,
+    /// Follow live terminal light/dark reports (Contour `CSI ? 997` DSR) and
+    /// switch themes automatically. Opt-in via `SetColorSchemeAuto`.
+    pub(crate) auto_color_scheme: bool,
     header_context: InlineHeaderContext,
     pub(crate) header_rows: u16,
     pub(crate) labels: MessageLabels,

@@ -1035,6 +1035,7 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
             CoreCommand::SetTerminalTitleGitBranch { branch: branch.clone() }
         }
         InlineCommand::SetTheme { theme } => CoreCommand::SetTheme { theme: theme.clone() },
+        InlineCommand::SetColorSchemeAuto { enabled } => CoreCommand::SetColorSchemeAuto { enabled: *enabled },
         InlineCommand::SetAppearance { appearance } => CoreCommand::SetAppearance { appearance: appearance.clone() },
         InlineCommand::SetVimModeEnabled(enabled) => CoreCommand::SetVimModeEnabled(*enabled),
         InlineCommand::SetQueuedInputs { entries } => CoreCommand::SetQueuedInputs { entries: entries.clone() },

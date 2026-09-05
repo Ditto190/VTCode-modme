@@ -3,9 +3,12 @@
 //! This follows the same interactive detection path as the reference script:
 //! - Query OSC 10/11 for foreground/background
 //! - Query OSC 4;16 and OSC 4;231 for palette endpoints
+//! - Query the Contour color-scheme mode (`CSI ? 996 n`) for an explicit
+//!   dark/light answer (`CSI ? 997 ; Ps n`) from terminals that support it
 //! - Send DA1 (`ESC [ c`) as a flush sentinel
 //! - Read until a DA1 response begins (`ESC [ ?`)
-//! - Infer terminal light/dark scheme and palette harmony
+//! - Infer terminal light/dark scheme and palette harmony; the explicit
+//!   Contour report wins over luminance inference when available
 
 #[cfg(unix)]
 use std::fs::{File, OpenOptions};
@@ -27,7 +30,9 @@ use std::os::fd::AsFd;
 #[cfg(unix)]
 use vtcode_commons::ansi_capabilities::{ColorScheme, set_color_scheme_override};
 #[cfg(unix)]
-use vtcode_commons::ansi_codes::{DEVICE_ATTRIBUTES_REQUEST, ESC_BYTE, ESC_CHAR, OSC, ST};
+use vtcode_commons::ansi_codes::{
+    COLOR_SCHEME_MODE_REQUEST, COLOR_SCHEME_REPORT_PREFIX, DEVICE_ATTRIBUTES_REQUEST, ESC_BYTE, ESC_CHAR, OSC, ST,
+};
 #[cfg(unix)]
 use vtcode_commons::color256_theme::set_harmonious_runtime_hint;
 
@@ -47,14 +52,19 @@ pub fn probe_and_cache_terminal_palette_harmony() {
         let timeout = Duration::from_millis(200);
         match probe_terminal_colors(timeout) {
             Ok(result) => {
-                let scheme = if result.is_term_light_theme {
+                // The Contour color-scheme report is an explicit answer from the
+                // terminal; fall back to foreground/background luminance inference
+                // for terminals that ignore the `CSI ? 996 n` query.
+                let scheme = result.scheme_report.unwrap_or(if result.is_term_light_theme {
                     ColorScheme::Light
                 } else {
                     ColorScheme::Dark
-                };
+                });
                 set_color_scheme_override(Some(scheme));
                 set_harmonious_runtime_hint(Some(result.is_harmonious));
                 tracing::trace!(
+                    scheme = scheme.name(),
+                    explicit_scheme = result.scheme_report.is_some(),
                     term_light = result.is_term_light_theme,
                     palette_light = result.is_palette_light_theme,
                     harmonious = result.is_harmonious,
@@ -76,6 +86,9 @@ struct ProbeResult {
     is_palette_light_theme: bool,
     is_harmonious: bool,
     is_generated: bool,
+    /// Explicit dark/light answer from a `CSI ? 997 ; Ps n` reply, when the
+    /// terminal supports the Contour color-scheme query.
+    scheme_report: Option<ColorScheme>,
 }
 
 #[cfg(unix)]
@@ -91,6 +104,8 @@ fn probe_terminal_colors(timeout: Duration) -> Result<ProbeResult> {
     for code in ["10", "11", "4;16", "4;231"] {
         write!(tty, "{OSC}{code};?{ST}").context("failed to write OSC query")?;
     }
+    tty.write_all(COLOR_SCHEME_MODE_REQUEST.as_bytes())
+        .context("failed to write Contour color-scheme mode query")?;
     tty.write_all(DEVICE_ATTRIBUTES_REQUEST.as_bytes())
         .context("failed to write DA1 sentinel query")?;
     tty.flush().context("failed to flush OSC probe queries")?;
@@ -119,7 +134,34 @@ fn probe_terminal_colors(timeout: Duration) -> Result<ProbeResult> {
         is_palette_light_theme,
         is_harmonious: is_term_light_theme == is_palette_light_theme,
         is_generated: bg == c16 && fg == c231,
+        scheme_report: parse_scheme_report(&response),
     })
+}
+
+/// Parse the Contour color-scheme report (`CSI ? 997 ; Ps n`) out of the probe
+/// response. `Ps` 1 means dark mode and 2 means light mode; anything else is
+/// ignored. The last valid report wins if the terminal emits several.
+#[cfg(unix)]
+fn parse_scheme_report(response: &[u8]) -> Option<ColorScheme> {
+    let decoded = String::from_utf8_lossy(response);
+    let mut scheme = None;
+    for (pos, _) in decoded.match_indices(COLOR_SCHEME_REPORT_PREFIX) {
+        // `get` keeps the strict workspace slicing/indexing lints happy.
+        let Some(after) = decoded.get(pos + COLOR_SCHEME_REPORT_PREFIX.len()..) else {
+            continue;
+        };
+        // The payload must be exactly `Ps` followed by the `n` final byte;
+        // `split_once` fails when the terminator is missing entirely.
+        let Some((payload, _)) = after.split_once('n') else {
+            continue;
+        };
+        match payload {
+            "1" => scheme = Some(ColorScheme::Dark),
+            "2" => scheme = Some(ColorScheme::Light),
+            _ => {}
+        }
+    }
+    scheme
 }
 
 /// Best-effort drain of pending TTY input to prevent escape code leakage.
@@ -340,5 +382,27 @@ mod tests {
             "{OSC}10;rgb:dddd/dddd/dddd{ST}{OSC}11;rgb:1111/1111/1111{ST}{OSC}4;16;rgb:1111/1111/1111{ST}{OSC}4;231;rgb:dddd/dddd/dddd{ST}{CSI}?62;4c"
         );
         assert!(has_complete_probe_response(response.as_bytes()));
+    }
+
+    #[test]
+    fn parses_contour_scheme_report_from_mixed_response() {
+        let response = format!("{OSC}10;rgb:dddd/dddd/dddd{ST}{OSC}11;rgb:1111/1111/1111{ST}{CSI}?997;1n{CSI}?62;4c");
+        assert_eq!(parse_scheme_report(response.as_bytes()), Some(ColorScheme::Dark));
+        assert_eq!(parse_scheme_report(b"\x1b[?997;2n"), Some(ColorScheme::Light));
+    }
+
+    #[test]
+    fn ignores_absent_and_malformed_scheme_reports() {
+        assert_eq!(parse_scheme_report(b""), None);
+        assert_eq!(parse_scheme_report(b"\x1b[?62;22;52c"), None);
+        assert_eq!(parse_scheme_report(b"\x1b[?997;0n"), None);
+        assert_eq!(parse_scheme_report(b"\x1b[?997;12n"), None);
+        assert_eq!(parse_scheme_report(b"\x1b[?997;1"), None);
+    }
+
+    #[test]
+    fn last_valid_scheme_report_wins() {
+        let response = b"\x1b[?997;1nnoise\x1b[?997;2n";
+        assert_eq!(parse_scheme_report(response), Some(ColorScheme::Light));
     }
 }

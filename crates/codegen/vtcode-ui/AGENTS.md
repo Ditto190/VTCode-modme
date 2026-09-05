@@ -18,7 +18,7 @@
 - `tui/config/constants/` holds TUI-specific defaults — keep them here, not in `vtcode-config`; snapshot tests live in `tui/core_tui/widgets/snapshots/`.
 ## Gotchas
 - Style bridging is centralized in `design/color.rs` + `design/style.rs` (crate-internal); downstream code uses the `tui/core_tui/style.rs` wrappers — do not fork new converters.
-- The `crossterm` dependency enables `event-stream` and `osc52` features; do not duplicate these in downstream crates.
+- The `crossterm` dependency enables `event-stream` and `osc52` features; do not duplicate these in downstream crates. It is a maintained fork at `patches/crossterm` (root `[patch.crates-io]`) that adds `Event::ColorSchemeReport` for the Contour `CSI ? 997`/`2031` dark-light extension — re-apply that patch when upgrading crossterm, and treat the fork as workspace code for `-D warnings`.
 - Standalone and core session defaults are inline; callers that need alternate-screen rendering must opt in explicitly.
 - Floating approval/list overlays own mouse input only inside `modal_list_area`; wheel events outside that hitbox must pass through to the transcript so long plan markdown remains scrollable.
 - Floating overlays reuse one bottom-half rectangle for popup rendering and transcript clipping; keep `transcript_area` as the source of truth for scroll metrics and hit-testing, and do not pass an explicit transcript rectangle to `apply_view_rows` as if it were the full viewport before rendering (that breaks scroll-anchor restoration). Modal list hit-testing must go through `modal::visible_index_at_row` with the same `footer_hint`/inline-editor inputs render used, or clicks drift by the summary/editor rows.
