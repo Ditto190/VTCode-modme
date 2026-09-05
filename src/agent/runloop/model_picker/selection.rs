@@ -418,10 +418,17 @@ pub(super) fn supports_xhigh_reasoning(model_id: &str) -> bool {
             | "gpt-5-codex"
             | "gpt-5.6-terra"
             | "gpt-5.6-luna"
+            | "gpt-6-astra"
             | "claude-sonnet-5"
             | "claude-fable-5"
             | "claude-mythos-5"
             | "claude-opus-5"
+            | "grok-4.6"
+            | "muse-spark-1.1"
+            | "muse-spark-1.2"
+            | "muse-spark-1.2-contributor"
+            | "muse-spark-1.3"
+            | "muse-spark-1.3-contributor"
     )
 }
 
@@ -432,10 +439,17 @@ pub(super) fn supports_max_reasoning(model_id: &str) -> bool {
             | "gpt-5.6-terra"
             | "gpt-5.6-luna"
             | "gpt-5.6"
+            | "gpt-6-astra"
             | "claude-sonnet-5"
             | "claude-fable-5"
             | "claude-mythos-5"
             | "claude-opus-5"
+            | "deepseek-v4-pro"
+            | "deepseek-v4-flash"
+            | "kimi-k3"
+            | "glm-5.3"
+            | "glm-5.3-flash"
+            | "glm-5.2"
     )
 }
 
@@ -447,12 +461,8 @@ pub(super) fn reasoning_level_description(level: ReasoningEffortLevel) -> &'stat
         ReasoningEffortLevel::Low => reasoning::DESCRIPTION_LOW,
         ReasoningEffortLevel::Medium => reasoning::DESCRIPTION_MEDIUM,
         ReasoningEffortLevel::High => reasoning::DESCRIPTION_HIGH,
-        ReasoningEffortLevel::XHigh => {
-            "Maximum reasoning for hardest long-running tasks (GPT-5.3+/GPT-5.4 family, GPT-5.6, and Claude Opus 4.8/4.7)"
-        }
-        ReasoningEffortLevel::Max => {
-            "Maximum adaptive reasoning for GPT-5.6 and supported Anthropic models; may use more tokens"
-        }
+        ReasoningEffortLevel::XHigh => "Hardest long-running tasks; high cost and latency",
+        ReasoningEffortLevel::Max => "Uncapped maximum reasoning; highest cost and latency",
     }
 }
 

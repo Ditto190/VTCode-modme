@@ -268,7 +268,25 @@ mod tests {
 
         let payload = provider.core.convert_request(&request).expect("payload should be valid");
         assert_eq!(payload.get("thinking").and_then(|v| v.get("type")).and_then(|v| v.as_str()), Some("enabled"));
-        assert_eq!(payload.get("thinking_effort").and_then(|v| v.as_str()), Some("low"));
+        assert_eq!(payload.get("reasoning_effort").and_then(|v| v.as_str()), Some("low"));
+    }
+
+    #[test]
+    fn payload_maps_xhigh_and_max_to_native_max() {
+        let provider = ZAIProvider::new("test-key".to_string());
+        for effort in [ReasoningEffortLevel::XHigh, ReasoningEffortLevel::Max] {
+            let request = LLMRequest {
+                model: models::zai::GLM_5_3.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                reasoning_effort: Some(effort),
+                ..Default::default()
+            };
+
+            let payload = provider.core.convert_request(&request).expect("payload should be valid");
+            assert_eq!(payload.get("thinking").and_then(|v| v.get("type")).and_then(|v| v.as_str()), Some("enabled"));
+            // `xhigh` aliases to native `max`.
+            assert_eq!(payload.get("reasoning_effort").and_then(|v| v.as_str()), Some("max"));
+        }
     }
 
     #[test]

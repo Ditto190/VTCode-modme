@@ -884,6 +884,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Principles, Lifecycle, Evidence-bounded replanning, Cross-references
   - **User Questions**: "What can you tell me about PLAN Loop Engineering?", "How does Principles work?", "How does Lifecycle work?"
 
+- **File**: `docs/project/PLAN-vt520-dumb-chat.md`
+  - **Content**: PLAN: VT520 Dumb-Terminal Chat Mode
+  - **Topics**: 1. Goal, 2. Background and constraints, 3. What already works (VT520-safe today), 4. Proposed design: `chat --dumb`, 5. Verification (emulator-only)
+  - **User Questions**: "What can you tell me about PLAN: VT520 Dumb-Terminal Chat Mode?", "How does 1. Goal work?", "How does 2. Background and constraints work?"
+
 - **File**: `docs/pty/PTY_ANSI_HANDLING.md`
   - **Content**: PTY Output ANSI Handling
   - **Topics**: Overview, Architecture, ANSI Parser Implementation, Data Flow, Testing

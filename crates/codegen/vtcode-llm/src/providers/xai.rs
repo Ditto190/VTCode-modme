@@ -31,8 +31,20 @@ impl OpenAiCompatSpec for XaiSpec {
         payload: &mut Map<String, Value>,
     ) -> Result<(), crate::provider::LLMError> {
         if let Some(effort) = request.reasoning_effort {
-            if effort != vtcode_config::types::ReasoningEffortLevel::None {
-                payload.insert("reasoning_effort".to_owned(), serde_json::json!(effort.as_str()));
+            if !matches!(
+                effort,
+                vtcode_config::types::ReasoningEffortLevel::None | vtcode_config::types::ReasoningEffortLevel::Unknown
+            ) {
+                // xAI natively supports `low`/`medium`/`high`/`xhigh` only:
+                // no native `minimal` (clamp to `low`) or `max` (clamp to `xhigh`).
+                // Older models treat `xhigh` as `high`.
+                let value = match effort {
+                    vtcode_config::types::ReasoningEffortLevel::Minimal
+                    | vtcode_config::types::ReasoningEffortLevel::Low => "low",
+                    vtcode_config::types::ReasoningEffortLevel::Max => "xhigh",
+                    other => other.as_str(),
+                };
+                payload.insert("reasoning_effort".to_owned(), serde_json::json!(value));
             }
         }
         Ok(())
@@ -120,5 +132,21 @@ mod tests {
         request.reasoning_effort = Some(ReasoningEffortLevel::High);
         let payload = provider.core.convert_request(&request).unwrap();
         assert_eq!(payload["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn max_effort_clamps_to_xhigh() {
+        let provider = XAIProvider::new("test-key".to_string());
+
+        let mut request = base_request();
+        request.reasoning_effort = Some(ReasoningEffortLevel::Max);
+        let payload = provider.core.convert_request(&request).unwrap();
+        // No native `max`; closest supported level is `xhigh`.
+        assert_eq!(payload["reasoning_effort"], "xhigh");
+
+        // No native `minimal` either; closest supported level is `low`.
+        request.reasoning_effort = Some(ReasoningEffortLevel::Minimal);
+        let payload = provider.core.convert_request(&request).unwrap();
+        assert_eq!(payload["reasoning_effort"], "low");
     }
 }

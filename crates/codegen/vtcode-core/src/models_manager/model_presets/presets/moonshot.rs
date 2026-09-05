@@ -15,10 +15,11 @@ pub(crate) fn moonshot_presets() -> Vec<ModelPreset> {
                     .to_string(),
             provider: Provider::Moonshot,
             default_reasoning_effort: ReasoningEffortLevel::Max,
-            supported_reasoning_efforts: vec![reasoning_preset(
-                ReasoningEffortLevel::Max,
-                "Maximum (only supported level)",
-            )],
+            supported_reasoning_efforts: vec![
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast, light reasoning"),
+                reasoning_preset(ReasoningEffortLevel::High, "Deep reasoning"),
+                reasoning_preset(ReasoningEffortLevel::Max, "Maximum reasoning (default)"),
+            ],
             is_default: true,
             upgrade: None,
             show_in_picker: true,

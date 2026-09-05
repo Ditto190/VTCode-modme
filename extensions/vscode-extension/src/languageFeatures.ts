@@ -95,8 +95,8 @@ const SECTION_KEYS: Record<string, Record<string, KeyMetadata>> = {
         reasoning_effort: {
             detail: "Reasoning effort level",
             documentation:
-                "Controls how much deliberation VT Code applies when solving a task.",
-            insertText: 'reasoning_effort = "${1|low,medium,high|}"',
+                "Controls how much deliberation VT Code applies when solving a task. Availability depends on the selected model.",
+            insertText: 'reasoning_effort = "${1|none,minimal,low,medium,high,xhigh,max|}"',
         },
     },
     "agent.onboarding": {

@@ -335,11 +335,11 @@ impl ModelsManager {
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffortLevel::High,
-                description: "Maximum reasoning depth for complex problems".to_string(),
+                description: "Deep reasoning for complex problems".to_string(),
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffortLevel::XHigh,
-                description: "Extra high effort for long-running tasks".to_string(),
+                description: "Extra reasoning for the hardest long-running tasks".to_string(),
             },
         ]
     }

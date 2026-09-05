@@ -1,7 +1,3 @@
-Out of curiosity, since I don't understand this too much. Since it is terminal coding, could this be ported to work on a vt520 terminal and just use the terminal as a chat bot?
-
-Right now I am running a python script and API key to run an AI bot on my vt520. It was a neat little project - I had help from Gemeni
-
 ===
 
 Areas that are complex
@@ -95,4 +91,119 @@ log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/sess
 
 ===
 
-check and add xhigh, max effort to supported models/providers. use websearch research for the supported models/providers to determine if they support xhigh and max effort parameters. If they do, update the harness to include these parameters in the model configuration. Additionally, provide clear documentation on how to use these parameters and any limitations or considerations when using them with different models/providers. also revise the notes for each effort in the /model picker.
+## VT520 dumb-chat mode — plan only (2026-09-05)
+
+- Plan: [PLAN-vt520-dumb-chat.md](PLAN-vt520-dumb-chat.md)
+- Scope: emulator-only testing, chat + tools with numbered approvals.
+- Status: plan drafted, not implemented. No code changes.
+- Workaround today: `TERM=dumb NO_COLOR=1 vtcode exec "..." --no-color`.
+
+====
+
+You are improving VT Code itself (/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode, Cargo workspace ~30 crates, Rust 1.88, edition 2024).
+
+Bias to action: infer intent and carry to completion. Treat "can you...", "help me..." as do-it orders. Do concrete reviewable work before asking; approval is final step only for irreversible/destructive. Reversible/read-only/fixes need no permission.
+
+User instructions > AGENTS.md > SKILL.md. If a skill makes you pause/diverge, quote SKILL.md path + line and continue per user intent.
+
+Delegate in parallel whenever independent via collaboration tools. Messages to subagents must be legible.
+
+Do not over-test: no tests for reversible low-impact mirrors. Run: ./scripts/check-dev.sh, cargo nextest run -p <crate> (never cargo test), cargo check --locked with RUSTFLAGS="-D warnings".
+
+Task: find top 5 self-improvements across agent-loop, tools, prompts, safety that reduce tokens + failures. Output table: problem|evidence file:line|fix|verify cmd. Then implement #1 surgically with Conventional Commits style, 4-space, anyhow::Result+with_context, CompactString for small strings, preserve vtcode-exec-events::ThreadEvent contract.
+
+===
+
+In vtcode + gpt-6-astra (1.05M ctx / 922k max in / 128k out / $10 in / $50 out / reasoning.effort: low,medium,high,xhigh,max):
+Astra is built for exactly this: long multi-step coding, computer-use, multi-agent delegation, with fewer tokens/task than GPT-5.6 Sol. Gotchas for VT Code: >272k in = 2x in + 1.5x out, no temperature/top_p, use Responses API, and it over-asks + over-tests + over-obeys AGENTS.md/SKILL.md by default. 0. Wire it up (once)
+
+# vtcode.toml
+
+[agent.harness]
+max_parallel_tool_calls = 8 # let Astra parallelize
+
+[models]
+
+# via adding-llm-providers skill: ModelId::all_models() + builtin_model_presets()
+
+# model = "gpt-6-astra", reasoning.effort = "high" for code, "max" for harness/security
+
+# use prompt_cache_options.ttl="30m", keep prefix stable, change effort via configuration_update
+
+Run as: vtcode exec --dry-run "<prompt>" first, then real. Discover tools via vtcode schema tools.
+
+===
+
+2. 1M-context architecture audit
+   reasoning.effort=xhigh. Use file_search + code_search, not full-file dumps.
+
+Audit crates/codegen/vtcode-core/core/agent/, tools/, llm/, prompts/sections + guidelines.rs:22, runtime_guidance.rs:7 against docs/harness/ARCHITECTURAL_INVARIANTS.md, docs/guides/agent-loop-contract.md.
+
+Find: duplicate types vs ThreadEvent, prompt bloat >256 tokens, spool/preview budget leaks, sync fs in async paths, policy bypasses. Return: 10 findings ranked by blast radius with file:line + minimal patch via apply_patch.
+
+===
+
+3. Harness loop tuner for Astra behavior
+   VT Code prompts live in crates/codegen/vtcode-core/src/prompts/guidelines.rs + runtime_guidance.rs. Astra needs explicit autonomy/delegation/testing calibration.
+
+Propose new RUNTIME_GUIDANCE_SECTION + Active Tools lines that: 1) force subagent parallelization, 2) forbid approval pauses for read-only/reversible, 3) limit verification to one verifier unless failed. Keep <256 tokens, deterministic, idempotent via ensure_runtime_guidance. Include golden/compactness test updates.
+
+===
+
+4. Sandbox / safety red-team (use Astra cyber strength, fenced)
+   reasoning.effort=max. You are defensive auditor only. No weaponization, no exfil.
+
+Target: vtcode-bash-runner sandbox launch, vtcode-core/tools/registry/executors/, mcp/plugin_providers.rs ./-canonicalization, WebMCP edits, exec_policy vs command_safety layers.
+
+Try: command injection, path/symlink escape, env leakage, spool recursion (.vtcode/context/tool_outputs/ must use no_spool), fail-open on saturation. For each: PoC test in scripts/tests/ or Rust unit test, fail-closed fix, add adversarial regression. Verify: cargo nextest run -p vtcode-core -E 'binary(/pty_tests/)', -p vtcode-bash-runner -E 'binary(/pipe_tests/)'.
+
+===
+
+5. Rust quality / perf sweep
+   reasoning.effort=medium. Follow AGENTS.md: surgical, preserve APIs, CompactString, Cow<'static,str>, Arc<Vec<Message>> via messages_mut(), tokio fs or spawn_blocking for scans, ast-grep for shape (not rg), hawk for dead code.
+
+Run: cargo clippy -- -D warnings, ./scripts/hawk.sh --deny, ast-grep scan. Fix only main logic, no test churn. Verify with ./scripts/check-dev.sh --lints.
+
+===
+
+6. Docs/eval closer (VT Code definition of done)
+   Every major feature must update: docs/development/ guide + quick-ref row, prompts/guidelines.rs + vtcode-utility-tool-specs schema if tool surface changed, ThreadEvent if runtime contract changed. Check AGENTS.md links still resolve.
+
+Generate missing docs + vtcode-eval regression (pass@k, env-verified outcome) + nextest test. Plain language, no "delve/leverage/Bottom Line:", paragraphs over lists unless parallel/sequential.
+
+===
+
+7. Cheap long-runner pattern
+   Use low for edits, configuration_update to xhigh/max only for hard segments to preserve cache. Batch/Flex at 50% for sweeps. Chunk under 272k to avoid 2x pricing.
+
+=====
+
+More prompts (8-17) 8. Cache-stability + token-bloat fix:
+reasoning.effort=xhigh. Audit prompt caching: stable_system_prefix_hash in core/agent/hash_utils.rs:39-55 strips Active-Tools/Catalog/Context but not [Harness Limits] or ## Environment/Shell Profile. cache_key in prompts/system.rs:576-606 omits prompt_context. system_prompt_budget in system.rs:305-462 is warn-only trim-off by default, estimator len/4. Fix to keep PROMPT_CACHE hits, include digests in envelope instruction_digest, enable safe trim, add hit-rate assert via Usage.cache_hit_rate. Verify: cargo nextest run -p vtcode-core prompts::
+
+9. Compaction vs reset unification:
+   Compaction preserves+new segment (compaction_checkpoint.rs:25-130, compaction/mod.rs:21-43) vs context_reset.rs discards to .vtcode/tasks/current_context_reset.md. Session clear wipes all in session/mod.rs:487-505. Auto trigger 90% min(provider,session) in compaction/memory_envelope.rs:1338-1349. Unify to single manifest referencing ThreadCompactBoundary + ContextReset events, test stall->reset->orient roundtrip. Keep ThreadEvent schema 0.14.0 compatible.
+
+10. Parallel fan-out:
+    can_parallelize=readonly&&preflight in tool_batching.rs:81-83 over-serializes; duplicate exec_command forced sequential; guidance is one line in guidelines.rs:80-82. Widen parallel_safe_after_preflight for pure reads (read_file/batch.rs), add few-shot parallel example, surface fan-out in telemetry. Verify max_parallel_tool_calls honored in tool_exec.rs:417,750.
+
+11. Failure taxonomy collapse:
+    Unify harness_kernel.ExecutionFailure, cargo_failure_diagnostics, Reasoning stage diagnosis, ErrorRecoveryState+circuit, HarnessEventKind::ToolRetry/ErrorRecovered into ErrorCategory+ToolOutcome path. Always emit HarnessEventItem{attempt,error_category,duration_ms}. No new ThreadEvent variants.
+
+12. Spool hardening:
+    Spool 8192B in output_spooler.rs:34 vs 32KiB/turn budget vs OUTPUT_PREVIEW_CHARS_PER_TOKEN=4. Reducers only cover read_file/unified_exec. Anti-recursion depends on caller no_spool, is_tool_output_spool_path is substring match. Enforce no_spool at gateway via canonical containment, append-only+digest reads via SpooledOutputReference only, add recursion/poisoning tests.
+
+13. Shell injection + redirection blindspot:
+    reasoning.effort=max, defensive only. executor.rs:166-169 sh -c + shell_handler.rs:86-92 join(" ") + preflight skip(1) in sandbox_runtime.rs:674-729 misses > ~/.ssh/authorized_keys, python -c, $BIN/curl, sudo unwrap. Enforce argv-only exec unless validate_command_safety+redirection-aware preflight pass, deny > to sensitive, expand interpreter -c/-e list. Add regression tests, run pty_tests+pipe_tests.
+
+14. Env leakage + containment TOCTOU:
+    manager.rs:56-62 uses denylist filter_sensitive_env not allowlist build_sanitized_env; PYTHONPATH/NODE_PATH/RUSTFLAGS/NODE_OPTIONS/GIT_SSH_COMMAND leak. WorkspaceGuardPolicy lexical vs ensure_path_within_workspace_resolved, skill_additional_permissions normalize only. Switch restrictive to allowlist, scope PYTHONPATH to workspace, fail-closed canonicalize, add symlink-swap harness.
+
+15. Skill/MCP trust:
+    NETWORK_TOOLS misses exec/shell egress in skill_policy.rs:14-44, silent UseDefault->WithAdditional merge, SKILL.md unfenced, SkillToolScope checked once. MCP parse_mcp_tool verbatim no size/name cap. Treat shell as network unless BlockAll, require human approval for out-of-workspace paths, fence skill/MCP descriptions + injection probe, cap schema bytes, namespace names, rate-limit list_changed.
+
+16. Eval + memory fix:
+    metric.rs:13-25 fake pass@k, suite attempts:0 deserializes, executor sequential cost-blind, search_memory substring count, eviction truncates without summarize. Implement true pass@k/pass^k, attempts>=1 guard, parallel run_suite with cost_usd aggregation, wire eviction->grounded_facts summarizer, BM25+recency search. Add gpt-6-astra capability suite.
+
+17. Astra routing/cost/budget:
+    GPT6Astra exists in table.rs:109-115 + openai.rs:85 + merge_gateway.rs:21 but pricing None => estimate_session_costs returns None => max_budget_usd skipped in runner/execute.rs:761-799. Duplicate estimate in model_resolver.rs:286-301 vs usage_cost.rs:105-136. Unify on usage_cost, audit models.json for 3 Astra IDs, fail-closed on pricing None when budget set, document raw=enforcement vs effective=display.

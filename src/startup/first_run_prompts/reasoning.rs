@@ -16,11 +16,8 @@ pub(crate) fn prompt_reasoning_effort(
         (ReasoningEffortLevel::Low, "Low – faster responses, less reasoning"),
         (ReasoningEffortLevel::Medium, "Medium – balanced reasoning for harder multi-step work"),
         (ReasoningEffortLevel::High, "High – deeper reasoning, slower responses"),
-        (ReasoningEffortLevel::XHigh, "Extra High – best default for advanced coding and agentic work"),
-        (
-            ReasoningEffortLevel::Max,
-            "Max – highest adaptive effort for supported Anthropic models, highest latency and token use",
-        ),
+        (ReasoningEffortLevel::XHigh, "Extra High – hardest tasks, high cost"),
+        (ReasoningEffortLevel::Max, "Max – uncapped reasoning, highest cost"),
     ];
 
     match select_reasoning_with_ratatui(&levels, default) {

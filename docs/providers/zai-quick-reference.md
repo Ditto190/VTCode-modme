@@ -20,6 +20,6 @@ Official Z.AI models:
 - `glm-5.3-flash` — efficient multimodal (320B/18B, hybrid attention), 1M context, native vision (image_url)
 - `glm-5.2` — flagship long-horizon, 1M context
 
-Recommended Flash settings: `temperature: 1`, `top_p: 0.95`, `reasoning_effort: max` (`xhigh` in VT Code), `thinking.type: enabled` (cannot be disabled), `tool_stream: true` with streaming.
+Recommended Flash settings: `temperature: 1`, `top_p: 0.95`, `reasoning_effort: max` (native; `low`/`high` also supported, `xhigh` aliases to `max`), `thinking.type: enabled` (cannot be disabled), `tool_stream: true` with streaming.
 
 See the [full Z.AI provider guide](./zai.md) and [GLM-5.3 Flash guide](https://docs.z.ai/guides/vlm/glm-5.3-flash).
