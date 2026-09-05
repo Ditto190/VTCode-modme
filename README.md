@@ -24,19 +24,19 @@
 - [Overview](#overview)
 - [Why VT Code](#why-vt-code)
 - [Quick start](#quick-start)
-  - [1. Install](#1-install)
-  - [2. Configure](#2-configure)
-  - [3. Run](#3-run)
-  - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
+    - [1. Install](#1-install)
+    - [2. Configure](#2-configure)
+    - [3. Run](#3-run)
+    - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
 - [Documentation](#documentation)
 - [Providers](#providers)
 - [Development](#development)
 - [Contributing](#contributing)
-  - [Ways to contribute](#ways-to-contribute)
-  - [Getting started](#getting-started)
-  - [Contributors](#contributors)
+    - [Ways to contribute](#ways-to-contribute)
+    - [Getting started](#getting-started)
+    - [Contributors](#contributors)
 - [Support](#support)
-  - [Sponsorship](#sponsorship)
+    - [Sponsorship](#sponsorship)
 - [License](#license)
 
 </details>
@@ -75,7 +75,7 @@ the terminal.
 | Podcast companion                                                                                                                                                            | Video companion                                                                                                                                                            |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <a href="https://www.youtube.com/watch?v=XLoswcd5rH0"><img src="https://img.youtube.com/vi/XLoswcd5rH0/maxresdefault.jpg" alt="VT Code podcast companion" width="400" /></a> | <a href="https://www.youtube.com/watch?v=PvL_kPjgU6o"><img src="https://img.youtube.com/vi/PvL_kPjgU6o/maxresdefault.jpg" alt="VT Code video companion" width="400" /></a> |
-| [Watch the podcast](https://www.youtube.com/watch?v=XLoswcd5rH0)                                                                                                             | [Watch the video](https://www.youtube.com/watch?v=PvL_kPjgU6o)                                                                                                             |
+| [Watch the podcast](https://www.youtube.com/watch?v=XLoswcd5rH0)                                                                                                             | [Watch the video](https://youtu.be/6ZVLAb1-QAQ?si=rHr3O44qg5-PmISQ)                                                                                                        |
 
 ## Why VT Code
 
