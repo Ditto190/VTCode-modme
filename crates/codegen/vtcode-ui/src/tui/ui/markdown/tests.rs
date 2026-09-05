@@ -885,12 +885,12 @@ fn test_plain_file_paths_get_link_targets() {
     assert!(
         targets
             .iter()
-            .any(|(text, target)| text == "src/main.rs" && target == "src/main.rs")
+            .any(|(text, target)| text == "src/main.rs" && **target == *"src/main.rs")
     );
     assert!(
         targets
             .iter()
-            .any(|(text, target)| text == "README.md" && target == "README.md")
+            .any(|(text, target)| text == "README.md" && **target == *"README.md")
     );
     assert!(!targets.iter().any(|(text, _)| text.ends_with('.')));
 }

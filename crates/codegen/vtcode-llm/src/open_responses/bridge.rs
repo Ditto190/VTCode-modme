@@ -1468,13 +1468,13 @@ mod tests {
 
         let item = ThreadItem {
             id: "tool_1".to_string(),
-            details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+            details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                 tool_name: "exec_command".to_string(),
                 arguments: Some(arguments.clone()),
                 tool_call_id: Some("tool_call_0".to_string()),
                 status: ToolCallStatus::Completed,
                 outcome: None,
-            }),
+            })),
         };
 
         builder.process_event(&ThreadEvent::ItemCompleted(ItemCompletedEvent { item }), &mut emitter);
@@ -1504,13 +1504,13 @@ mod tests {
         });
         let item = ThreadItem {
             id: "tool_2".to_string(),
-            details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+            details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                 tool_name: "write_stdin".to_string(),
                 arguments: Some(arguments.clone()),
                 tool_call_id: Some("tool_call_1".to_string()),
                 status: ToolCallStatus::InProgress,
                 outcome: None,
-            }),
+            })),
         };
 
         builder.process_event(&ThreadEvent::ItemStarted(ItemStartedEvent { item }), &mut emitter);
@@ -1538,13 +1538,13 @@ mod tests {
         });
         let item = ThreadItem {
             id: "tool_legacy".to_string(),
-            details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+            details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                 tool_name: "shell".to_string(),
                 arguments: Some(arguments.clone()),
                 tool_call_id: Some("tool_call_legacy".to_string()),
                 status: ToolCallStatus::Completed,
                 outcome: None,
-            }),
+            })),
         };
 
         builder.process_event(&ThreadEvent::ItemCompleted(ItemCompletedEvent { item }), &mut emitter);
@@ -1568,14 +1568,14 @@ mod tests {
             &ThreadEvent::ItemStarted(ItemStartedEvent {
                 item: ThreadItem {
                     id: "tool_1:output".to_string(),
-                    details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                    details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                         call_id: "tool_1".to_string(),
                         tool_call_id: Some("tool_call_0".to_string()),
                         spool_path: None,
                         output: String::new(),
                         exit_code: None,
                         status: ToolCallStatus::InProgress,
-                    }),
+                    })),
                 },
             }),
             &mut emitter,
@@ -1584,14 +1584,14 @@ mod tests {
             &ThreadEvent::ItemUpdated(vtcode_exec_events::ItemUpdatedEvent {
                 item: ThreadItem {
                     id: "tool_1:output".to_string(),
-                    details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                    details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                         call_id: "tool_1".to_string(),
                         tool_call_id: Some("tool_call_0".to_string()),
                         spool_path: None,
                         output: "On branch".to_string(),
                         exit_code: None,
                         status: ToolCallStatus::InProgress,
-                    }),
+                    })),
                 },
             }),
             &mut emitter,
@@ -1600,14 +1600,14 @@ mod tests {
             &ThreadEvent::ItemCompleted(ItemCompletedEvent {
                 item: ThreadItem {
                     id: "tool_1:output".to_string(),
-                    details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                    details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                         call_id: "tool_1".to_string(),
                         tool_call_id: Some("tool_call_0".to_string()),
                         spool_path: None,
                         output: "On branch main".to_string(),
                         exit_code: Some(0),
                         status: ToolCallStatus::Completed,
-                    }),
+                    })),
                 },
             }),
             &mut emitter,
@@ -1645,14 +1645,14 @@ mod tests {
             &ThreadEvent::ItemCompleted(ItemCompletedEvent {
                 item: ThreadItem {
                     id: "tool_1:output".to_string(),
-                    details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                    details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                         call_id: "tool_1".to_string(),
                         tool_call_id: None,
                         spool_path: None,
                         output: "done".to_string(),
                         exit_code: Some(0),
                         status: ToolCallStatus::Completed,
-                    }),
+                    })),
                 },
             }),
             &mut emitter,
@@ -1676,14 +1676,14 @@ mod tests {
             &ThreadEvent::ItemCompleted(ItemCompletedEvent {
                 item: ThreadItem {
                     id: "tool_1:output".to_string(),
-                    details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                    details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                         call_id: "tool_1".to_string(),
                         tool_call_id: Some("tool_call_0".to_string()),
                         spool_path: Some(".vtcode/context/tool_outputs/run-1.txt".to_string()),
                         output: String::new(),
                         exit_code: Some(0),
                         status: ToolCallStatus::Completed,
-                    }),
+                    })),
                 },
             }),
             &mut emitter,
@@ -1705,34 +1705,34 @@ mod tests {
         for item in [
             ThreadItem {
                 id: "tool_1".to_string(),
-                details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+                details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                     tool_name: "exec_command".to_string(),
                     arguments: Some(json!({ "command": ["cargo", "check"] })),
                     tool_call_id: Some("tool_call_0".to_string()),
                     status: ToolCallStatus::Completed,
                     outcome: None,
-                }),
+                })),
             },
             ThreadItem {
                 id: "tool_2".to_string(),
-                details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+                details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                     tool_name: "exec_command".to_string(),
                     arguments: Some(json!({ "command": ["cargo", "test"] })),
                     tool_call_id: Some("tool_call_0".to_string()),
                     status: ToolCallStatus::Completed,
                     outcome: None,
-                }),
+                })),
             },
             ThreadItem {
                 id: "tool_2:output".to_string(),
-                details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                     call_id: "tool_2".to_string(),
                     tool_call_id: Some("tool_call_0".to_string()),
                     spool_path: None,
                     output: "ok".to_string(),
                     exit_code: Some(0),
                     status: ToolCallStatus::Completed,
-                }),
+                })),
             },
         ] {
             builder.process_event(&ThreadEvent::ItemCompleted(ItemCompletedEvent { item }), &mut emitter);

@@ -7,11 +7,14 @@
 use anstyle::Style;
 
 /// A styled segment inside a rendered markdown line.
+///
+/// Keep field-compatible with the TUI variant `vtcode_ui::tui::ui::markdown::MarkdownSegment`;
+/// `vtcode-core` picks one of the two by feature and streams both through the same shapes.
 #[derive(Clone, Debug)]
 pub struct MarkdownSegment {
     style: Style,
     text: String,
-    link_target: Option<String>,
+    link_target: Option<Box<str>>,
 }
 
 /// A single rendered markdown line made up of styled segments.

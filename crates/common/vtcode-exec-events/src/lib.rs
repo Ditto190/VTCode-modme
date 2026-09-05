@@ -371,10 +371,10 @@ pub enum ThreadEvent {
     ThreadStarted(ThreadStartedEvent),
     /// Indicates that an execution thread has reached a terminal outcome.
     #[serde(rename = "thread.completed")]
-    ThreadCompleted(ThreadCompletedEvent),
+    ThreadCompleted(Box<ThreadCompletedEvent>),
     /// Indicates that conversation compaction replaced older history with a boundary.
     #[serde(rename = "thread.compact_boundary")]
-    ThreadCompactBoundary(ThreadCompactBoundaryEvent),
+    ThreadCompactBoundary(Box<ThreadCompactBoundaryEvent>),
     /// Indicates that the approved plan handoff rebuilt a fresh execution context.
     #[serde(rename = "context.reset")]
     ContextReset(ContextResetEvent),
@@ -391,7 +391,7 @@ pub enum ThreadEvent {
     /// alongside `turn.failed` so UI subscribers get a first-class signal
     /// with the fuse counters and last tool instead of inferring it.
     #[serde(rename = "turn.blocked")]
-    TurnBlocked(TurnBlockedEvent),
+    TurnBlocked(Box<TurnBlockedEvent>),
     /// Indicates that an item has started processing.
     #[serde(rename = "item.started")]
     ItemStarted(ItemStartedEvent),
@@ -412,7 +412,7 @@ pub enum ThreadEvent {
     Interjected(InterjectedEvent),
     /// Streaming delta for a plan item in Planning workflow.
     #[serde(rename = "plan.delta")]
-    PlanDelta(PlanDeltaEvent),
+    PlanDelta(Box<PlanDeltaEvent>),
     /// Indicates that a completed plan is waiting for an implementation decision.
     #[serde(rename = "plan.approval.requested")]
     PlanApprovalRequested(PlanApprovalRequestedEvent),
@@ -856,17 +856,17 @@ pub enum ThreadItemDetails {
     /// Command execution lifecycle update for an actual shell/PTY process.
     CommandExecution(Box<CommandExecutionItem>),
     /// Tool invocation lifecycle update.
-    ToolInvocation(ToolInvocationItem),
+    ToolInvocation(Box<ToolInvocationItem>),
     /// Tool output lifecycle update tied to a tool invocation.
-    ToolOutput(ToolOutputItem),
+    ToolOutput(Box<ToolOutputItem>),
     /// File change summary associated with the turn.
     FileChange(Box<FileChangeItem>),
     /// MCP tool invocation status.
-    McpToolCall(McpToolCallItem),
+    McpToolCall(Box<McpToolCallItem>),
     /// Web search event emitted by a registered search provider.
-    WebSearch(WebSearchItem),
+    WebSearch(Box<WebSearchItem>),
     /// Harness-managed continuation or verification lifecycle event.
-    Harness(HarnessEventItem),
+    Harness(Box<HarnessEventItem>),
     /// General error captured for auditing.
     Error(ErrorItem),
 }
@@ -1255,6 +1255,33 @@ pub struct ErrorItem {
 mod tests {
     use super::*;
     use std::error::Error;
+    use std::mem::size_of;
+
+    /// `ThreadEvent` is pushed into `Vec`s per streaming delta and accumulated
+    /// for whole sessions. Large sparse payloads must stay boxed so the enum
+    /// does not balloon from alignment/discriminant padding (see
+    /// docs/development/rust-performance-principles.md, "Enum footprint").
+    #[test]
+    fn thread_event_stays_compact() {
+        assert!(
+            size_of::<ThreadEvent>() <= 80,
+            "ThreadEvent grew to {} bytes; box new large payloads instead of inlining them",
+            size_of::<ThreadEvent>()
+        );
+    }
+
+    /// Boxing only pays off while the inline (unboxed) payload is larger than
+    /// a pointer. Guard each boxed variant against accidental unboxing.
+    #[test]
+    fn boxed_thread_item_details_payloads_stay_boxed() {
+        assert!(size_of::<Option<Box<CommandExecutionItem>>>() < size_of::<Option<CommandExecutionItem>>());
+        assert!(size_of::<Option<Box<ToolInvocationItem>>>() < size_of::<Option<ToolInvocationItem>>());
+        assert!(size_of::<Option<Box<ToolOutputItem>>>() < size_of::<Option<ToolOutputItem>>());
+        assert!(size_of::<Option<Box<FileChangeItem>>>() < size_of::<Option<FileChangeItem>>());
+        assert!(size_of::<Option<Box<McpToolCallItem>>>() < size_of::<Option<McpToolCallItem>>());
+        assert!(size_of::<Option<Box<WebSearchItem>>>() < size_of::<Option<WebSearchItem>>());
+        assert!(size_of::<Option<Box<HarnessEventItem>>>() < size_of::<Option<HarnessEventItem>>());
+    }
 
     #[test]
     fn thread_event_round_trip() -> Result<(), Box<dyn Error>> {
@@ -1276,7 +1303,7 @@ mod tests {
 
     #[test]
     fn turn_blocked_event_round_trip() -> Result<(), Box<dyn Error>> {
-        let event = ThreadEvent::TurnBlocked(TurnBlockedEvent {
+        let event = ThreadEvent::TurnBlocked(Box::new(TurnBlockedEvent {
             message: "Blocked tool-call limit reached after 3 consecutive blocked calls.".to_string(),
             last_tool: Some("exec_command".to_string()),
             blocked_streak: 4,
@@ -1285,7 +1312,7 @@ mod tests {
             total_cap: 6,
             recovery_active: false,
             usage: None,
-        });
+        }));
 
         let json = serde_json::to_string(&event)?;
         assert!(json.contains("turn.blocked"));
@@ -1516,13 +1543,13 @@ mod tests {
         let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "tool_1".to_string(),
-                details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+                details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                     tool_name: "read_file".to_string(),
                     arguments: Some(serde_json::json!({ "path": "README.md" })),
                     tool_call_id: Some("tool_call_0".to_string()),
                     status: ToolCallStatus::Completed,
                     outcome: None,
-                }),
+                })),
             },
         });
 
@@ -1556,13 +1583,13 @@ mod tests {
         let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "tool_1".to_string(),
-                details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+                details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                     tool_name: "exec_command".to_string(),
                     arguments: Some(serde_json::json!({ "command": ["pwd"] })),
                     tool_call_id: Some("tool_call_0".to_string()),
                     status: ToolCallStatus::Failed,
                     outcome: Some(ToolOutcome::PermissionRejected),
-                }),
+                })),
             },
         });
 
@@ -1578,14 +1605,14 @@ mod tests {
         let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "tool_1:output".to_string(),
-                details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                     call_id: "tool_1".to_string(),
                     tool_call_id: Some("tool_call_0".to_string()),
                     spool_path: None,
                     output: "done".to_string(),
                     exit_code: Some(0),
                     status: ToolCallStatus::Completed,
-                }),
+                })),
             },
         });
 
@@ -1601,7 +1628,7 @@ mod tests {
         let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "harness_1".to_string(),
-                details: ThreadItemDetails::Harness(HarnessEventItem {
+                details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                     event: HarnessEventKind::VerificationFailed,
                     message: Some("cargo check failed".to_string()),
                     command: Some("cargo check".to_string()),
@@ -1610,7 +1637,7 @@ mod tests {
                     attempt: None,
                     error_category: None,
                     duration_ms: None,
-                }),
+                })),
             },
         });
 
@@ -1626,7 +1653,7 @@ mod tests {
         let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "harness_resolved".to_string(),
-                details: ThreadItemDetails::Harness(HarnessEventItem {
+                details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                     event: HarnessEventKind::BlockedHandoffResolved,
                     message: Some("resolved".to_string()),
                     command: None,
@@ -1635,7 +1662,7 @@ mod tests {
                     attempt: None,
                     error_category: None,
                     duration_ms: None,
-                }),
+                })),
             },
         });
 
@@ -1649,7 +1676,7 @@ mod tests {
 
     #[test]
     fn thread_completed_round_trip() -> Result<(), Box<dyn Error>> {
-        let event = ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+        let event = ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
             thread_id: "thread-1".to_string(),
             session_id: "session-1".to_string(),
             subtype: ThreadCompletionSubtype::ErrorMaxBudgetUsd,
@@ -1664,7 +1691,7 @@ mod tests {
             },
             total_cost_usd: serde_json::Number::from_f64(1.25),
             num_turns: 3,
-        });
+        }));
 
         let json = serde_json::to_string(&event)?;
         let restored: ThreadEvent = serde_json::from_str(&json)?;
@@ -1675,7 +1702,7 @@ mod tests {
 
     #[test]
     fn compact_boundary_round_trip() -> Result<(), Box<dyn Error>> {
-        let event = ThreadEvent::ThreadCompactBoundary(ThreadCompactBoundaryEvent {
+        let event = ThreadEvent::ThreadCompactBoundary(Box::new(ThreadCompactBoundaryEvent {
             thread_id: "thread-1".to_string(),
             trigger: CompactionTrigger::Recovery,
             mode: CompactionMode::Provider,
@@ -1688,7 +1715,7 @@ mod tests {
             new_prefix_hash: Some("prefix-after".to_string()),
             previous_catalog_hash: Some("catalog-before".to_string()),
             new_catalog_hash: Some("catalog-after".to_string()),
-        });
+        }));
 
         let json = serde_json::to_string(&event)?;
         let restored: ThreadEvent = serde_json::from_str(&json)?;

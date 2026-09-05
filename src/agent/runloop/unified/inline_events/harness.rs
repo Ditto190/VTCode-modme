@@ -501,7 +501,7 @@ pub(crate) fn turn_failed_event(message: impl Into<String>, usage: Option<Usage>
 }
 
 pub(crate) fn turn_blocked_event(event: TurnBlockedEvent) -> ThreadEvent {
-    ThreadEvent::TurnBlocked(event)
+    ThreadEvent::TurnBlocked(Box::new(event))
 }
 
 pub(crate) fn thread_completed_event(
@@ -515,7 +515,7 @@ pub(crate) fn thread_completed_event(
     total_cost_usd: Option<serde_json::Number>,
     num_turns: usize,
 ) -> ThreadEvent {
-    ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+    ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
         thread_id: thread_id.into(),
         session_id: session_id.into(),
         subtype,
@@ -525,7 +525,7 @@ pub(crate) fn thread_completed_event(
         usage,
         total_cost_usd,
         num_turns,
-    })
+    }))
 }
 
 pub(crate) fn compact_boundary_event(
@@ -537,7 +537,7 @@ pub(crate) fn compact_boundary_event(
     history_artifact_path: Option<String>,
     segment_transition: Option<&crate::agent::runloop::unified::state::RequestSegmentTransition>,
 ) -> ThreadEvent {
-    ThreadEvent::ThreadCompactBoundary(ThreadCompactBoundaryEvent {
+    ThreadEvent::ThreadCompactBoundary(Box::new(ThreadCompactBoundaryEvent {
         thread_id: thread_id.into(),
         trigger,
         mode,
@@ -550,7 +550,7 @@ pub(crate) fn compact_boundary_event(
         new_prefix_hash: None,
         previous_catalog_hash: segment_transition.and_then(|transition| transition.previous_catalog_hash.clone()),
         new_catalog_hash: None,
-    })
+    }))
 }
 
 pub(crate) fn harness_event(
@@ -563,7 +563,7 @@ pub(crate) fn harness_event(
     ThreadEvent::ItemCompleted(ItemCompletedEvent {
         item: ThreadItem {
             id: format!("harness-{}", Uuid::new_v4()),
-            details: ThreadItemDetails::Harness(HarnessEventItem {
+            details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                 event,
                 message,
                 command: None,
@@ -572,7 +572,7 @@ pub(crate) fn harness_event(
                 attempt,
                 error_category,
                 duration_ms: None,
-            }),
+            })),
         },
     })
 }

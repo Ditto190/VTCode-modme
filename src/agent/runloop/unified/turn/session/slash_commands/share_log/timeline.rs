@@ -332,13 +332,13 @@ mod tests {
                 ThreadEvent::ItemStarted(ItemStartedEvent {
                     item: ThreadItem {
                         id: "tool-1".to_string(),
-                        details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+                        details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                             tool_name: "exec_command".to_string(),
                             arguments: Some(json!({"cmd": "pwd"})),
                             tool_call_id: Some("call-1".to_string()),
                             status: ToolCallStatus::InProgress,
                             outcome: None,
-                        }),
+                        })),
                     },
                 }),
             ),

@@ -538,7 +538,7 @@ impl ExecEventRecorder {
     }
 
     pub fn turn_blocked(&mut self, event: TurnBlockedEvent) {
-        self.record(ThreadEvent::TurnBlocked(event));
+        self.record(ThreadEvent::TurnBlocked(Box::new(event)));
     }
 
     pub fn thread_completed(
@@ -552,7 +552,7 @@ impl ExecEventRecorder {
         total_cost_usd: Option<serde_json::Number>,
         num_turns: usize,
     ) {
-        self.record(ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+        self.record(ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
             thread_id: self.thread_id.clone(),
             session_id: session_id.to_string(),
             subtype,
@@ -562,7 +562,7 @@ impl ExecEventRecorder {
             usage,
             total_cost_usd,
             num_turns,
-        }));
+        })));
     }
 
     /// Record the terminal lifecycle events for an execution failure.
@@ -588,7 +588,7 @@ impl ExecEventRecorder {
         compacted_message_count: usize,
         history_artifact_path: Option<&str>,
     ) {
-        self.record(ThreadEvent::ThreadCompactBoundary(ThreadCompactBoundaryEvent {
+        self.record(ThreadEvent::ThreadCompactBoundary(Box::new(ThreadCompactBoundaryEvent {
             thread_id: self.thread_id.clone(),
             trigger,
             mode,
@@ -601,7 +601,7 @@ impl ExecEventRecorder {
             new_prefix_hash: None,
             previous_catalog_hash: None,
             new_catalog_hash: None,
-        }));
+        })));
     }
 
     fn finish_turn(&mut self) {
@@ -853,7 +853,7 @@ impl ExecEventRecorder {
     ) {
         let item = ThreadItem {
             id: self.next_item_id(),
-            details: ThreadItemDetails::Harness(HarnessEventItem {
+            details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                 event,
                 message,
                 command,
@@ -862,7 +862,7 @@ impl ExecEventRecorder {
                 attempt,
                 error_category,
                 duration_ms: None,
-            }),
+            })),
         };
         self.record(ThreadEvent::ItemCompleted(ItemCompletedEvent { item }));
     }
@@ -871,7 +871,7 @@ impl ExecEventRecorder {
     pub fn record_tool_latency(&mut self, tool_name: &str, duration_ms: u64) {
         let item = ThreadItem {
             id: self.next_item_id(),
-            details: ThreadItemDetails::Harness(HarnessEventItem {
+            details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                 event: HarnessEventKind::ToolLatencyRecorded,
                 message: Some(format!("{tool_name} completed in {duration_ms}ms")),
                 command: None,
@@ -880,7 +880,7 @@ impl ExecEventRecorder {
                 attempt: None,
                 error_category: None,
                 duration_ms: Some(duration_ms),
-            }),
+            })),
         };
         self.record(ThreadEvent::ItemCompleted(ItemCompletedEvent { item }));
     }
@@ -1132,11 +1132,9 @@ mod tests {
         assert!(events.iter().any(|event| {
             matches!(
                 event,
-                ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
-                    subtype: ThreadCompletionSubtype::ErrorDuringExecution,
-                    outcome_code,
-                    ..
-                }) if outcome_code == "error"
+                ThreadEvent::ThreadCompleted(item)
+                    if item.subtype == ThreadCompletionSubtype::ErrorDuringExecution
+                        && item.outcome_code == "error"
             )
         }));
     }

@@ -520,7 +520,7 @@ fn append_submitted_attachments(content: &mut uni::MessageContent, attachments: 
 
     parts.extend(attachments.iter().map(|attachment| match attachment {
         UiContentPart::Text { text } => uni::ContentPart::text(text.clone()),
-        UiContentPart::Image { data, media_type } => uni::ContentPart::image(data.clone(), media_type.clone()),
+        UiContentPart::Image { data, media_type } => uni::ContentPart::image(data.to_string(), media_type.clone()),
     }));
 
     *content = uni::MessageContent::parts(parts);

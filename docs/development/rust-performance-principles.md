@@ -436,6 +436,51 @@ obvious — and so the `memchr`-vs-branchless and value-speculation-vs-branchles
 distinctions are not re-derived. Full candidate-by-candidate reasoning lives in
 `.vtcode/memory/branchless-2026-08-06.md`.
 
+## Enum Footprint in Bulk Collections
+
+Rust lays out an enum as discriminant + payload of the largest variant, with
+alignment padding. A "small" enum can therefore be several times larger than any
+individual variant — a 15-variant enum whose every payload fits in 8 bytes
+still occupies 16 bytes because the 8-bit discriminant forces 16-byte
+alignment (the motivation behind [Replacing a Rust Enum with a 64-bit
+Word](https://pointersgonewild.com/2026-08-25-replacing-a-rust-enum-with-a-64-bit-word/),
+where shrinking a 16-byte value union to one machine word yielded a 17%
+interpreter speedup and up to 37% lower peak RSS). VT Code has no interpreter
+value union, but it *does* have enums pushed into `Vec`s in hot paths — token
+streaming deltas, per-delta UI events, per-segment rendered markdown. For those
+types the footprint *is* the performance.
+
+### VT Code guidelines
+
+- **Box sparse large payloads.** If one variant's payload is much larger than
+  the others (a `String` that is usually empty, a `Vec`, a `serde_json::Value`,
+  base64 data), wrap it in `Box<T>` so every other variant stops paying its
+  inline size. `SessionMessage` (`vtcode-core/src/utils/session_archive.rs`)
+  and `ThreadItemDetails` / `ThreadEvent`
+  (`vtcode-exec-events/src/lib.rs`, 216 → 80 bytes) follow this convention.
+  `Box<T>` is transparent to `serde` and `schemars`, so the wire/schema
+  contract is unchanged.
+- **Do not box small, hot payloads.** Boxing adds an allocation per value.
+  Variants constructed per streaming delta with small payloads (e.g.
+  `AgentMessageItem`) stay inline.
+- **Prefer `Option<Box<str>>` / `Box<str>` over `String` for rarely-present or
+  large string fields** in types stored per-unit (segments, lines, cells):
+  `Option<Box<str>>` is 16 bytes with a niche vs 24 bytes for `Option<String>`.
+  For *small* string fields (IDs, short names) prefer `CompactStr` per the
+  workspace convention in AGENTS.md — inline storage beats both.
+- **`#[repr(u8)]` fieldless enums** that are stored in bulk or hashed, so the
+  discriminant never inflates the layout (see
+  `vtcode-core/src/tools/registry/circuit_breaker.rs`).
+- **Pin the size with a test.** Follow the `size_of` guard convention (e.g.
+  `vtcode-exec-events/tests::thread_event_stays_compact`,
+  `vtcode-skills/src/types.rs`:
+  `assert!(size_of::<Option<Box<T>>>() < size_of::<Option<T>>())`) so a new
+  variant that balloons a bulk-stored enum fails CI instead of silently
+  doubling a queue's memory traffic.
+- **Downstream sizes follow automatically.** Queues and budgets keyed on
+  `size_of::<T>()` (e.g. the `QueuedSessionEvent` channel budget) shrink with
+  the enum — no separate tuning needed.
+
 ## Checklist for VT Code Hot Paths
 
 When reviewing or writing a hot path in vtcode:
@@ -448,6 +493,7 @@ When reviewing or writing a hot path in vtcode:
 - [ ] Does the code use indexed `for i in 0..n` when an iterator would eliminate bounds checks?
 - [ ] If a hot loop branches on per-element data, is the predicate unpredictable (~50% selectivity, no pattern)? If so, consider [branchless](#branchless-programming-removing-unpredictable-branches) — but run the sorted-vs-shuffled diagnostic first, and prefer `memchr` for delimiter scans.
 - [ ] Does the code use `Arc<RwLock<T>>` when `&mut T` or `Box<T>` would suffice?
+- [ ] Is the type stored in a bulk collection (`Vec`, queue, per-line buffer)? If so, is its enum footprint minimal — sparse large payloads boxed, and a `size_of` guard test pinning it? See [Enum Footprint](#enum-footprint-in-bulk-collections).
 - [ ] Is overflow handling explicit (`checked_*`/`saturating_*`/`wrapping_*`) rather than relying on implicit wrap?
 - [ ] Has the performance been measured against baseline before/after?
 
@@ -463,6 +509,7 @@ When reviewing or writing a hot path in vtcode:
 - [Branchless Rust: Making a Filter 4x Faster by Removing an if](https://www.greyblake.com/blog/branchless-rust/) — Serhii Potapov, 2026 (source of the Branchless section: misprediction cost, the sorted-vs-shuffled diagnostic, the always-write/conditionally-advance transform, and the "trade not magic" caveat).
 - [Why is processing a sorted array faster than processing an unsorted array?](https://stackoverflow.com/questions/11227809) — Stack Overflow, 27K upvotes (the classic misprediction demo).
 - [Mispredicted branches can multiply your running times](https://lemire.me/blog/2019/10/15/mispredicted-branches-can-multiply-your-running-times/) — Daniel Lemire.
+- [Replacing a Rust Enum with a 64-bit Word](https://pointersgonewild.com/2026-08-25-replacing-a-rust-enum-with-a-64-bit-word/) — 2026 (source of the Enum Footprint section: discriminant/alignment padding, boxing sparse payloads, and the measured 17% speedup / 37% peak-RSS reduction from shrinking a bulk-stored value type).
 - VT Code internal: `docs/development/performance.md`
 - VT Code internal: `docs/development/performance-hasher-policy.md`
 - VT Code internal: `docs/development/async-performance-audit.md`

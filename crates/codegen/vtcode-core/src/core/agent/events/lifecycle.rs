@@ -1094,13 +1094,13 @@ fn tool_invocation_item(
 ) -> ThreadItem {
     ThreadItem {
         id: item_id,
-        details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+        details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
             tool_name: tool_name.to_string(),
             arguments: arguments.cloned(),
             tool_call_id: tool_call_id.map(str::to_string),
             status,
             outcome,
-        }),
+        })),
     }
 }
 
@@ -1114,14 +1114,14 @@ fn tool_output_item(
 ) -> ThreadItem {
     ThreadItem {
         id: tool_output_item_id(call_item_id),
-        details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+        details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
             call_id: call_item_id.to_string(),
             tool_call_id: tool_call_id.map(str::to_string),
             spool_path: spool_path.map(str::to_string),
             output: output.into(),
             exit_code,
             status,
-        }),
+        })),
     }
 }
 

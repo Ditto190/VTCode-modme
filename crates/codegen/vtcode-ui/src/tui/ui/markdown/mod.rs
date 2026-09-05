@@ -26,11 +26,15 @@ pub(crate) const LIST_INDENT_WIDTH: usize = 2;
 pub(crate) const CODE_LINE_NUMBER_MIN_WIDTH: usize = 3;
 
 /// A styled text segment.
+///
+/// Keep field-compatible with the headless `vtcode_commons::ui_protocol::MarkdownSegment`
+/// (this TUI variant is used when the `tui` feature is on); both are serialized into
+/// the same inline-stream shapes.
 #[derive(Clone, Debug)]
 pub struct MarkdownSegment {
     pub style: Style,
     pub text: String,
-    pub link_target: Option<String>,
+    pub link_target: Option<Box<str>>,
 }
 
 impl MarkdownSegment {
@@ -38,8 +42,12 @@ impl MarkdownSegment {
         Self { style, text: text.into(), link_target: None }
     }
 
-    fn with_link(style: Style, text: impl Into<String>, link_target: Option<String>) -> Self {
-        Self { style, text: text.into(), link_target }
+    fn with_link(style: Style, text: impl Into<String>, link_target: Option<impl Into<Box<str>>>) -> Self {
+        Self {
+            style,
+            text: text.into(),
+            link_target: link_target.map(Into::into),
+        }
     }
 }
 
@@ -51,10 +59,11 @@ pub struct MarkdownLine {
 
 impl MarkdownLine {
     fn push_segment(&mut self, style: Style, text: &str) {
-        self.push_segment_with_link(style, text, None);
+        self.push_segment_with_link(style, text, None::<String>);
     }
 
-    fn push_segment_with_link(&mut self, style: Style, text: &str, link_target: Option<String>) {
+    fn push_segment_with_link(&mut self, style: Style, text: &str, link_target: Option<impl Into<Box<str>>>) {
+        let link_target = link_target.map(Into::into);
         if text.is_empty() {
             return;
         }

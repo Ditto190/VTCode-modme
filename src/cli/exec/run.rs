@@ -367,7 +367,7 @@ async fn handle_codex_exec_command_impl(
             let turn_completed = ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() });
             emit_canonical_event(&canonical, &turn_completed, "turn.completed").await?;
             event_processor.process_event(&turn_completed);
-            let thread_completed = ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+            let thread_completed = ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
                 thread_id: completed.thread_id.clone(),
                 session_id: session_id.clone(),
                 subtype: ThreadCompletionSubtype::Success,
@@ -377,7 +377,7 @@ async fn handle_codex_exec_command_impl(
                 usage: Usage::default(),
                 total_cost_usd: None,
                 num_turns: 1,
-            });
+            }));
             emit_canonical_event(&canonical, &thread_completed, "thread.completed").await?;
             event_processor.process_event(&thread_completed);
             let persistence_result = canonical.close().await.context("failed to finalize Codex session events");
@@ -394,7 +394,7 @@ async fn handle_codex_exec_command_impl(
                 tracing::error!(target: "vtcode.exec", error = %event_error, "failed to enqueue turn.failed canonical session event");
             }
             event_processor.process_event(&turn_failed);
-            let thread_completed = ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+            let thread_completed = ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
                 thread_id: session_id.clone(),
                 session_id: session_id.clone(),
                 subtype: ThreadCompletionSubtype::ErrorDuringExecution,
@@ -404,7 +404,7 @@ async fn handle_codex_exec_command_impl(
                 usage: Usage::default(),
                 total_cost_usd: None,
                 num_turns: 1,
-            });
+            }));
             if let Err(event_error) = canonical.emit(&thread_completed) {
                 tracing::error!(target: "vtcode.exec", error = %event_error, "failed to enqueue thread.completed canonical session event");
             }

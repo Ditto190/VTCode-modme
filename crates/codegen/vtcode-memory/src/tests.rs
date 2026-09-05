@@ -18,7 +18,7 @@ fn sample_turn() -> Vec<ThreadEvent> {
         ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "thread".to_string() }),
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
         ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
-        ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+        ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
             thread_id: "thread".to_string(),
             session_id: "session".to_string(),
             subtype: ThreadCompletionSubtype::Success,
@@ -28,7 +28,7 @@ fn sample_turn() -> Vec<ThreadEvent> {
             usage: Usage::default(),
             total_cost_usd: None,
             num_turns: 1,
-        }),
+        })),
     ]
 }
 
