@@ -2,6 +2,47 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.157.0 - 2026-09-05
+
+### Highlights
+#### Bug Fixes
+
+- Preserve agent state across limit grants (f6793f85) 
+- Route paste to overlay search instead of composer (64aa66d2) 
+- Always re-execute verification commands (de7c491e) 
+- Render ordered step metadata as nested bullets (288375cb) 
+- Use stable FNV-1a hasher for cross-process cache keys (ddec989c) 
+- Guard empty panel render and centralize style bridging (1fa8368f) 
+- Make pre-flight token budget check advisory (cf3a314f) 
+- Trim shared tool guidelines below the 400-token budget (4fa9be8a) 
+#### Documentation
+
+- Document llmman as Ollama-compatible local runner (0aaf1221) (@ericcurtin)
+- Add Vercel AI Gateway as 31st built-in provider (453d2412) 
+#### Features
+
+- Add GPT-6 Astra to OpenRouter and Merge Gateway (29c083a4) 
+- Expand and clarify reasoning effort presets (90faa53e) 
+- Add reasoning efforts and lightweight model metadata (0e8ec0b5) 
+- Vendor crossterm to add Windows set_size support (be5b61cf) 
+- Support mid-execution replans with auto-continuation (85a8e99f) 
+- Centralize blocked status needles and track tool call names (58488e40) 
+### Other Changes
+#### Build
+
+- Inherit workspace lints everywhere and prune dead deps (56fabeee) 
+#### Other
+
+- Update README (1ed4a596) 
+- Update TODO (5953d235) 
+- Update TODO (3819a730) 
+#### Performance
+
+- Box sparse payloads to shrink bulk-stored enum footprint (2a0e8d80) 
+#### Refactors
+
+- Share command preview pipeline for tool headers (6d23f41f) 
+- Drop redundant pin boxing, centralize recursion edge (176ec177) 
 ## 0.156.1 - 2026-09-04
 
 ### Highlights
