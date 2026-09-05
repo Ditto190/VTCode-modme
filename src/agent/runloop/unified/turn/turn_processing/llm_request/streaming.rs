@@ -34,7 +34,7 @@ impl HarnessStreamingBridge {
         self.inner.complete_open_items();
     }
 
-    pub(super) fn take_streamed_tool_call_items(&mut self) -> hashbrown::HashMap<String, String> {
+    pub(super) fn take_streamed_tool_call_items(&mut self) -> hashbrown::HashMap<String, (String, String)> {
         self.inner.take_streamed_tool_call_items()
     }
 

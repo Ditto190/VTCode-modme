@@ -335,11 +335,11 @@ impl ModelsManager {
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffortLevel::High,
-                description: "Maximum reasoning depth for complex problems".to_string(),
+                description: "Deep reasoning for complex problems".to_string(),
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffortLevel::XHigh,
-                description: "Extra high effort for long-running tasks".to_string(),
+                description: "Extra reasoning for the hardest long-running tasks".to_string(),
             },
         ]
     }
@@ -489,6 +489,7 @@ impl ModelsManager {
             Provider::XAI => crate::config::constants::models::xai::DEFAULT_MODEL.to_string(),
             Provider::NVIDIA => crate::config::constants::models::nvidia::DEFAULT_MODEL.to_string(),
             Provider::MergeGateway => crate::config::constants::models::merge_gateway::DEFAULT_MODEL.to_string(),
+            Provider::Vercel => crate::config::constants::models::vercel::DEFAULT_MODEL.to_string(),
         }
     }
 

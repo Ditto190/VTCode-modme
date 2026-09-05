@@ -945,6 +945,8 @@ fn harness_title(event: &HarnessEventKind) -> &'static str {
         HarnessEventKind::ToolLatencyRecorded => "Tool latency recorded",
         HarnessEventKind::SnapshotCreated => "Snapshot created",
         HarnessEventKind::SnapshotRestored => "Snapshot restored",
+        HarnessEventKind::SessionToolLimitIncreased => "Session tool limit increased",
+        HarnessEventKind::ToolLoopLimitIncreased => "Tool loop limit increased",
     }
 }
 
@@ -969,7 +971,10 @@ fn harness_status_label(event: &HarnessEventKind) -> &'static str {
         | HarnessEventKind::ToolRetryAttempted => "in_progress",
         HarnessEventKind::EscalationBypassed | HarnessEventKind::ErrorRecovered => "completed",
         HarnessEventKind::ToolLatencyRecorded => "completed",
-        HarnessEventKind::SnapshotCreated | HarnessEventKind::SnapshotRestored => "completed",
+        HarnessEventKind::SnapshotCreated
+        | HarnessEventKind::SnapshotRestored
+        | HarnessEventKind::SessionToolLimitIncreased
+        | HarnessEventKind::ToolLoopLimitIncreased => "completed",
     }
 }
 

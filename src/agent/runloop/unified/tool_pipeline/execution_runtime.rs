@@ -447,7 +447,23 @@ fn is_command_tool(name: &str) -> bool {
 }
 
 fn extract_pty_stream_command(tool_name: &str, args: &Value) -> Option<String> {
-    stream_command_parts(tool_name, args).map(|parts| parts.join(" "))
+    if let Some(parts) = stream_command_parts(tool_name, args) {
+        return Some(parts.join(" "));
+    }
+    // Display-only fallback: `stream_command_parts` needs `shell_words::split`,
+    // which fails on unbalanced quotes. Show the raw string (folded and capped
+    // downstream) instead of no header. Cache paths stay strict via
+    // `command_parts_for_cache` and are untouched.
+    if !tool_intent::is_command_run_tool_call(tool_name, args) {
+        return None;
+    }
+    let raw = args
+        .get("command")
+        .or_else(|| args.get("cmd"))
+        .or_else(|| args.get("raw_command"))
+        .and_then(Value::as_str)?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 fn workspace_scoped_cache_key(
@@ -552,6 +568,14 @@ mod tests {
             extract_pty_stream_command(tools::UNIFIED_EXEC, &args),
             Some("cargo check -p vtcode-core".to_string())
         );
+    }
+
+    #[test]
+    fn falls_back_to_raw_on_unbalanced_quotes() {
+        // `shell_words::split` fails on `python3 -c "`; display still shows
+        // the raw string instead of dropping the header entirely.
+        let args = json!({ "command": "python3 -c \"" });
+        assert_eq!(extract_pty_stream_command(tools::RUN_PTY_CMD, &args), Some("python3 -c \"".to_string()));
     }
 
     #[test]

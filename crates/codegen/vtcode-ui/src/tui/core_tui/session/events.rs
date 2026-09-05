@@ -1,5 +1,6 @@
 use super::*;
 use ratatui::crossterm::event::KeyModifiers;
+use ratatui_cheese::input::InputState;
 
 use super::super::types::{InlineSegment, OverlayEvent, OverlaySubmission, SubmittedInput};
 use crate::tui::core_tui::runner::TuiSessionDriver;
@@ -7,22 +8,46 @@ use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::ui::tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 
 pub(super) fn handle_paste(session: &mut Session, content: &str) {
+    if let Some(modal) = session.modal_state_mut() {
+        if let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut()) {
+            search.insert(content);
+            list.apply_search(&search.query);
+            session.mark_dirty();
+            return;
+        }
+        if modal.secure_prompt.is_none() || modal.list.is_some() {
+            return;
+        }
+    } else if let Some(wizard) = session.wizard_overlay_mut() {
+        if let Some(search) = wizard.search.as_mut() {
+            search.insert(content);
+            if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
+                step.list.apply_search(&search.query);
+            }
+            session.mark_dirty();
+            return;
+        }
+        // Mirror typed input: pasted text lands in the custom-note editor when
+        // it is active (or when the custom-note item is selected, which typed
+        // input would auto-activate).
+        if let Some(step) = wizard.steps.get_mut(wizard.current_step)
+            && (step.notes_active || modal::inline_editor_for_step(step).is_some())
+        {
+            step.notes_active = true;
+            let mut state = InputState::new();
+            state.set_value(step.notes.clone());
+            state.end();
+            for ch in content.chars().filter(|ch| !matches!(ch, '\n' | '\r')) {
+                state.insert_char(ch);
+            }
+            step.notes = state.value().to_owned();
+            session.mark_dirty();
+        }
+        return;
+    }
+
     if session.input_enabled {
         session.insert_paste_text(content);
-        session.mark_dirty();
-    } else if let Some(modal) = session.modal_state_mut()
-        && let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut())
-    {
-        search.insert(content);
-        list.apply_search(&search.query);
-        session.mark_dirty();
-    } else if let Some(wizard) = session.wizard_overlay_mut()
-        && let Some(search) = wizard.search.as_mut()
-    {
-        search.insert(content);
-        if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
-            step.list.apply_search(&search.query);
-        }
         session.mark_dirty();
     }
 }
@@ -337,7 +362,7 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
             }
             None
         }
-        KeyCode::Char('j') if has_control => {
+        KeyCode::Char('j') if has_control && session.input_enabled => {
             // Ctrl+J is a line feed character, insert newline for multiline input
             session.insert_char('\n');
             session.mark_dirty();
@@ -534,8 +559,7 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
 
             session.clear_inline_prompt_suggestion();
             session.mark_dirty();
-            if session.is_running_activity() {
-                push_mode_switch_busy_notice(session);
+            if !mode_switch_guard::try_cycle_primary_agent(session, &key) {
                 return None;
             }
             Some(InlineEvent::CyclePrimaryAgentPrevious)
@@ -708,7 +732,13 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
 }
 
 fn can_cycle_primary_agent(session: &Session, key: &KeyEvent) -> bool {
-    key.modifiers == KeyModifiers::NONE && !session.has_active_overlay()
+    let valid_modifiers = match key.code {
+        // Crossterm reports Shift+Tab as BackTab with the SHIFT bit set.
+        // Keep accepting the explicit bit while rejecting unrelated combos.
+        KeyCode::BackTab => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
+        _ => key.modifiers == KeyModifiers::NONE,
+    };
+    valid_modifiers && !session.has_active_overlay()
 }
 
 /// Notice shown when the user requests a primary-agent mode switch while a turn
@@ -727,6 +757,10 @@ fn push_mode_switch_busy_notice(session: &mut Session) {
 impl mode_switch_guard::ModeSwitchGuardSession for Session {
     fn is_running_activity(&self) -> bool {
         TuiSessionDriver::is_running_activity(self)
+    }
+
+    fn is_mode_switch_locked(&self) -> bool {
+        self.activity_state.locks_mode_switch()
     }
 
     fn can_cycle_primary_agent(&self, key: &KeyEvent) -> bool {

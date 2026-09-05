@@ -15,51 +15,31 @@ pub(super) fn describe_fetch_action(_args: &Value) -> (String, HashSet<String>) 
     ("Use Fetch".into(), HashSet::new())
 }
 
-/// Ordered argument keys that may carry a shell command string.
-const SHELL_COMMAND_KEYS: &[&str] = &["command", "raw_command", "bash_command", "cmd"];
-
 /// Extract a shell command string from the common command argument keys.
 ///
-/// Returns the (un-truncated) command text and the argument key it came from so
-/// callers can record which key was used. The `command` key may be a JSON array
-/// (joined with spaces) or a string; per-key emptiness/trim behavior is preserved
-/// for backwards compatibility.
+/// Thin binary wrapper over [`command_args::extract_command_text_with_key`]:
+/// spool preview generation belongs to `vtcode-core`, the binary only keeps
+/// the typed `(text, key)` reference for highlight tracking.
 fn extract_command(args: &Value) -> Option<(String, &'static str)> {
-    if let Some(array) = args.get("command").and_then(Value::as_array) {
-        let joined: String = array
-            .iter()
-            .filter_map(|value| value.as_str())
-            .filter(|segment| !segment.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !joined.is_empty() {
-            return Some((joined, "command"));
-        }
-    }
-    for &key in SHELL_COMMAND_KEYS {
-        let Some(value) = args.get(key).and_then(Value::as_str) else {
-            continue;
-        };
-        // The `command` key trims before the emptiness check; the others do not,
-        // matching historical per-key behavior.
-        let (text, ok) = if key == "command" {
-            let trimmed = value.trim();
-            (trimmed.to_string(), !trimmed.is_empty())
-        } else {
-            (value.to_string(), !value.is_empty())
-        };
-        if ok {
-            return Some((text, key));
-        }
-    }
-    None
+    command_args::extract_command_text_with_key(args)
 }
+
+/// Shared preview budgets so expanded, compact, and PTY headers stay in sync.
+/// Expanded summaries fold to 70 chars (wrapping to at most two `│` lines at
+/// 62/58); compact and live PTY headers allow 120 chars (single row / wrapped
+/// `│` lines without premature `…` truncation).
+pub(super) const SUMMARY_PREVIEW_LEN: usize = 70;
+pub(super) const COMPACT_PREVIEW_LEN: usize = 120;
+
+/// Exact flag tokens that introduce an inline script for a runner.
+/// Token-exact (not substring) so `grep -c` / `--code-review` never match.
+const SCRIPT_RUNNER_FLAGS: &[&str] = &["-c", "-e", "--code"];
 
 pub(super) fn describe_shell_command(args: &Value) -> Option<(String, HashSet<String>)> {
     let (command, key) = extract_command(args)?;
     let mut used = HashSet::new();
     used.insert(key.to_string());
-    Some((preview_command(&command, 70), used))
+    Some((preview_command(&command, SUMMARY_PREVIEW_LEN), used))
 }
 
 /// Join command words for display, quoting only words that contain whitespace.
@@ -67,14 +47,31 @@ pub(super) fn describe_shell_command(args: &Value) -> Option<(String, HashSet<St
 /// Unlike `shell_words::join`, shell metacharacters (`|`, `>`, `;`) are left
 /// bare: this string is rendered, never executed, and quoting every operator
 /// made the `• Ran` headers read as broken shell.
+///
+/// Each word is collapsed to a single line first so a multi-line `python3 -c`
+/// script does not leak raw newlines (with an unclosed quote) into the
+/// header. When quoting is needed the outer quote is chosen to avoid nesting:
+/// words containing `'` use `"`, and vice versa, so
+/// `open('.vtcode/x.json')` does not render as nested `'...open('...')...'`.
 fn display_join_words(words: &[String]) -> String {
     words
         .iter()
-        .map(|word| {
-            if word.chars().any(char::is_whitespace) {
-                format!("'{word}'")
+        .map(|word| collapse_whitespace(word))
+        .filter(|collapsed| !collapsed.is_empty())
+        .map(|collapsed| {
+            if collapsed.chars().any(char::is_whitespace) {
+                if !collapsed.contains('\'') {
+                    format!("'{collapsed}'")
+                } else if !collapsed.contains('"') {
+                    format!("\"{collapsed}\"")
+                } else {
+                    // Contains both quote styles (e.g. `print("it's")`):
+                    // display-only, so keep single-quote wrapping rather than
+                    // emitting escaped `\'\'` noise.
+                    format!("'{collapsed}'")
+                }
             } else {
-                word.as_str().to_owned()
+                collapsed
             }
         })
         .collect::<Vec<_>>()
@@ -84,29 +81,133 @@ fn display_join_words(words: &[String]) -> String {
 /// Readable one-line display text for a command's arguments.
 ///
 /// Words come from the `command` array/string (plus the `args` array when
-/// present) and are joined with [`display_join_words`].
+/// present) and are joined with [`display_join_words`]. Falls back to the raw
+/// string for keys like `bash_command` that `command_words` does not cover so
+/// those headers do not degrade to a bare tool name.
 pub(super) fn display_command_text(args: &Value) -> Option<String> {
-    let words = command_args::command_words(args).ok().flatten()?;
-    let joined = display_join_words(&words);
-    (!joined.is_empty()).then_some(joined)
+    if let Some(words) = command_args::command_words(args).ok().flatten() {
+        let joined = display_join_words(&words);
+        if !joined.is_empty() {
+            return Some(joined);
+        }
+    }
+    // Fallback delegates to `extract_command` (single canonical key order) so
+    // display precedence can never drift from `describe_shell_command`.
+    // `command_words` fails on unbalanced quotes while the raw string is still
+    // readable; `args[]` extras are appended to match the primary path.
+    let (raw, _) = extract_command(args)?;
+    let mut base = collapse_whitespace(&raw);
+    if base.is_empty() {
+        return None;
+    }
+    if let Some(extra) = args.get("args").and_then(Value::as_array) {
+        let extra_words: Vec<String> = extra
+            .iter()
+            .filter_map(Value::as_str)
+            .map(collapse_whitespace)
+            .filter(|word| !word.is_empty())
+            .collect();
+        if !extra_words.is_empty() {
+            base.push(' ');
+            base.push_str(&display_join_words(&extra_words));
+        }
+    }
+    Some(base)
+}
+
+/// Whether `program` names a known inline-script runner (`python3`, `bash`,
+/// `node`, …). Compared against the path basename so `/usr/bin/python3` and
+/// Windows-style `C:\Python\python.exe` both match, keeping the check
+/// token-exact instead of substring-based.
+fn is_script_runner_program(program: &str) -> bool {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
+    base.starts_with("python")
+        || matches!(
+            base.as_str(),
+            "bash" | "sh" | "zsh" | "node" | "ruby" | "perl" | "php" | "deno" | "bun" | "pwsh" | "powershell"
+        )
+}
+
+/// Whether the first preview line is just a script-runner prefix with no
+/// usable script content (e.g. `python3 -c "` or bare `python3 -c`).
+///
+/// Rendering such a prefix alone reads as broken (`• Ran python3 -c "`).
+/// Token-exact on both program and flag so `grep -c`, `grep -e`, and
+/// `--code-review` never match. Unclosed quoting is detected with the
+/// canonical `shell_words` parser (not raw `'` counting) so contractions
+/// inside a balanced script (`python3 -c "don't …"`) do not misfire.
+fn is_script_prefix_only(first_line: &str) -> bool {
+    let mut tokens = first_line.split_whitespace();
+    let Some(program) = tokens.next() else {
+        return false;
+    };
+    if !is_script_runner_program(program) {
+        return false;
+    }
+    if !tokens.clone().any(|token| SCRIPT_RUNNER_FLAGS.contains(&token)) {
+        return false;
+    }
+    // Bare flag with no script yet: `python3 -c`.
+    let token_count = 1 + tokens.clone().count();
+    if token_count == 2 {
+        return true;
+    }
+    // Unclosed quoting means the script continues on later lines, e.g.
+    // `python3 -c "` or `python3 -c "import json`.
+    shell_words::split(first_line).is_err()
 }
 
 /// Compact single-line preview of a command for `• Ran …` headers.
 ///
-/// Multi-line commands preview only their first non-empty line; long commands
+/// Multi-line commands preview their first non-empty line; long commands
 /// are head-truncated at a word boundary with a trailing ellipsis. The
 /// mid-string ellipsis of `truncate_middle` is avoided on purpose: cutting
 /// `checkpoints/turn_1032` into `tur…ool_calls` reads as a rendering bug.
+///
+/// When the first line is only a script-runner prefix (`python3 -c "`,
+/// bare `python3 -c`, or an unclosed quote on a `-c`/`-e`/`--code` runner),
+/// the following lines are folded in so the header shows real script content
+/// (`python3 -c "import json …`) instead of a dangling `python3 -c "`.
 pub(super) fn preview_command(command: &str, max_len: usize) -> String {
     if max_len == 0 {
         return String::new();
     }
-    let first_line = command
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(collapse_whitespace)
-        .unwrap_or_default();
+    let lines: Vec<&str> = command.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut first_line = collapse_whitespace(lines[0]);
+    if is_script_prefix_only(&first_line) && lines.len() > 1 {
+        // Bounded: only fold enough continuation lines to fill the preview
+        // budget instead of materializing a 100-line script into one String.
+        let need = max_len.saturating_sub(first_line.chars().count()).saturating_add(16);
+        let mut rest_parts = Vec::new();
+        let mut rest_len = 0usize;
+        for line in &lines[1..] {
+            let collapsed = collapse_whitespace(line);
+            if collapsed.is_empty() {
+                continue;
+            }
+            rest_len += collapsed.chars().count() + 1;
+            rest_parts.push(collapsed);
+            if rest_len >= need {
+                break;
+            }
+        }
+        if !rest_parts.is_empty() {
+            let rest = rest_parts.join(" ");
+            if first_line.ends_with('"') || first_line.ends_with('\'') {
+                // `python3 -c "` + `import json` -> `python3 -c "import json`
+                // (no extra space: the newline after the opening quote is
+                // insignificant, and `collapse_whitespace` would leave a
+                // distracting `" import` gap).
+                first_line.push_str(&rest);
+            } else {
+                first_line.push(' ');
+                first_line.push_str(&rest);
+            }
+        }
+    }
     if first_line.chars().count() <= max_len {
         return first_line;
     }
@@ -175,10 +276,19 @@ pub(super) fn describe_grep_file(args: &Value, workspace_root: Option<&Path>) ->
 }
 
 pub(super) fn describe_code_search(args: &Value) -> Option<(String, HashSet<String>)> {
-    let query = lookup_string(args, "query")?;
-    let mut used = HashSet::new();
-    used.insert("query".to_string());
-    Some((format!("Search code for {}", truncate_middle(&query, 40)), used))
+    // The schema requires `query`, but accept common aliases defensively so a
+    // valid search never degrades to a generic "Search code" header with the
+    // query hidden. Record the actual matched key so detail collection and
+    // headline highlights stay in sync (a hardcoded "query" would leak e.g.
+    // `Pattern: …` as a duplicate detail line).
+    for key in ["query", "pattern", "q", "text"] {
+        if let Some(query) = lookup_string(args, key) {
+            let mut used = HashSet::new();
+            used.insert(key.to_string());
+            return Some((format!("Search code for {}", truncate_middle(&query, 40)), used));
+        }
+    }
+    None
 }
 
 pub(super) fn describe_path_action(
@@ -630,12 +740,58 @@ mod tests {
     }
 
     #[test]
-    fn preview_command_multi_line_shows_first_line_only() {
+    fn preview_command_multiline_script_folds_in_content() {
+        // Screenshot 2026-09-02: `• Ran python3 -c "` with `tur…ool_calls`
+        // continuations. A prefix-only first line must fold in script lines so
+        // the header shows real content instead of a dangling quote.
         let command = "python3 -c \"\nimport json\nwith open('.vtcode/checkpoints/turn_1032.json') as f:\n    pass\n\"";
         let preview = preview_command(command, 70);
-        assert_eq!(preview, "python3 -c \"");
-        assert!(!preview.contains('…'));
-        assert!(!preview.contains("ool_calls"));
+        assert!(
+            preview.starts_with("python3 -c \"import json"),
+            "prefix-only line should fold in script, got: {preview}"
+        );
+        assert!(!preview.contains("tur…ool"), "mid-string ellipsis leaked: {preview}");
+        assert_ne!(preview, "python3 -c \"");
+    }
+
+    #[test]
+    fn preview_command_unclosed_first_line_appends_continuation() {
+        // `python3 -c "import json` (unclosed, partial content) must also pull
+        // the next line instead of rendering a dangling open quote.
+        let command = "python3 -c \"import json\nwith open('a.json') as f: pass\"";
+        let preview = preview_command(command, 70);
+        assert!(preview.contains("import json"), "got: {preview}");
+        assert!(preview.contains("with open"), "got: {preview}");
+    }
+
+    #[test]
+    fn preview_command_windows_style_runner_folds_in_content() {
+        // Windows-style separators must still be recognized as script runners
+        // so the header folds in the script instead of a dangling
+        // `python.exe -c "` first line.
+        let command = "C:\\Python\\python.exe -c \"\nimport json\nprint('hi')\n\"";
+        let preview = preview_command(command, 70);
+        assert!(
+            preview.starts_with("C:\\Python\\python.exe -c \"import json"),
+            "windows runner should fold in script, got: {preview}"
+        );
+    }
+
+    #[test]
+    fn preview_command_plain_multiline_keeps_first_line() {
+        // Ordinary multi-line shell still previews only the first line.
+        assert_eq!(preview_command("ls -R\npwd", 70), "ls -R");
+    }
+
+    #[test]
+    fn preview_command_ignores_contractions_and_non_runners() {
+        // `echo don't` has an apostrophe but no runner flag: never fold.
+        assert_eq!(preview_command("echo don't\nnext-line", 70), "echo don't");
+        // `grep -c` / `--code-review` are substring traps, not script runners.
+        assert_eq!(preview_command("grep -c 'pat\nnext-line", 70), "grep -c 'pat");
+        assert_eq!(preview_command("tool --code-review\nnext-line", 70), "tool --code-review");
+        // Balanced runner script with a contraction inside stays single-line.
+        assert_eq!(preview_command("python3 -c \"print('hi') # don't\"", 70), "python3 -c \"print('hi') # don't\"");
     }
 
     #[test]
@@ -687,6 +843,45 @@ mod tests {
         assert_eq!(used.iter().collect::<Vec<_>>(), ["command"]);
         assert!(!summary.contains("tur…ool"), "mid-string ellipsis leaked: {summary}");
         assert!(summary.starts_with("python3"));
+        assert!(summary.contains("import json"), "script content folded in: {summary}");
+        assert_ne!(summary, "python3 -c \"");
+    }
+
+    #[test]
+    fn display_command_text_collapses_script_newlines_without_nesting() {
+        // `python3 -c "a\nb"` splits into a script word with newlines and `'`.
+        // The header must stay single-line and prefer `"` outer quotes so
+        // `open('…')` does not render as nested `'...open('...')...'`.
+        let args = json!({
+            "command": "python3 -c \"import json\nwith open('.vtcode/x.json') as f: pass\""
+        });
+        let display = display_command_text(&args).expect("command display text");
+        assert!(!display.contains('\n'), "newlines leaked: {display:?}");
+        assert!(display.starts_with("python3 -c "), "got: {display}");
+        assert!(display.contains("import json"), "got: {display}");
+        assert!(!display.contains("'import json"), "nested single quotes: {display}");
+    }
+
+    #[test]
+    fn display_command_text_falls_back_to_bash_command() {
+        let args = json!({ "bash_command": "cargo check -p vtcode" });
+        assert_eq!(display_command_text(&args).as_deref(), Some("cargo check -p vtcode"));
+        // Both present: fallback follows `extract_command` order
+        // (`raw_command` before `bash_command`) so display and describe agree.
+        let args = json!({ "raw_command": "cargo check -p vtcode", "bash_command": "cargo test" });
+        assert_eq!(display_command_text(&args).as_deref(), Some("cargo check -p vtcode"));
+    }
+
+    #[test]
+    fn display_command_text_skips_blank_words_and_keeps_args() {
+        // Whitespace-only array elements collapse away instead of leaving a
+        // trailing space (`echo '  '` -> `echo`).
+        let args = json!({ "command": ["echo", "  "] });
+        assert_eq!(display_command_text(&args).as_deref(), Some("echo"));
+        // Unbalanced `command` still yields a header via the raw fallback and
+        // preserves `args[]` extras like the primary path does.
+        let args = json!({ "command": "echo 'unclosed", "args": ["extra"] });
+        assert_eq!(display_command_text(&args).as_deref(), Some("echo 'unclosed extra"));
     }
 
     #[test]
@@ -696,5 +891,18 @@ mod tests {
         assert_eq!(summary, "Search code for agent loop implementation");
         assert!(used.contains("query"));
         assert!(!used.contains("max_results"));
+    }
+
+    #[test]
+    fn describe_code_search_accepts_query_aliases() {
+        // A valid search must never degrade to a generic header when the
+        // query arrives under an alias key. The used set must record the
+        // actual key so the value is not duplicated as a detail line.
+        for key in ["pattern", "q", "text"] {
+            let args = json!({ key: "core agent loop", "file_types": ["rs"] });
+            let (summary, used) = describe_code_search(&args).expect("alias query should describe");
+            assert_eq!(summary, "Search code for core agent loop");
+            assert!(used.contains(key), "used should record the matched key, got {used:?}");
+        }
     }
 }

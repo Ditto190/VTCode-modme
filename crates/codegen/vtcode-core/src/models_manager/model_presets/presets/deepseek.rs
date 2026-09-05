@@ -14,6 +14,10 @@ pub(crate) fn deepseek_presets() -> Vec<ModelPreset> {
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast, light reasoning".to_string(),
+                },
+                ReasoningEffortPreset {
                     effort: ReasoningEffortLevel::High,
                     description: "Balanced".to_string(),
                 },
@@ -37,6 +41,10 @@ pub(crate) fn deepseek_presets() -> Vec<ModelPreset> {
             provider: Provider::DeepSeek,
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast, light reasoning".to_string(),
+                },
                 ReasoningEffortPreset {
                     effort: ReasoningEffortLevel::High,
                     description: "Balanced".to_string(),

@@ -8,7 +8,6 @@ use anyhow::anyhow;
 use serde_json::Map;
 use serde_json::Value;
 use std::sync::Arc;
-#[cfg(test)]
 use std::sync::Mutex;
 use thiserror::Error;
 #[cfg(test)]
@@ -48,6 +47,11 @@ pub(crate) struct ToolCallSafetyValidator {
     safety_gateway: Arc<SafetyGateway>,
     /// Validator-scoped execution context
     gateway_ctx: SafetyContext,
+    /// Highest session limit granted by the user. Runtime config refreshes
+    /// call `set_limits`, so retain this fuse separately from the gateway's
+    /// mutable config and reapply it until a fresh execution explicitly
+    /// resets the session.
+    granted_session_limit: Mutex<Option<usize>>,
     #[cfg(test)]
     test_rate_limits: Mutex<TestRateLimits>,
 }
@@ -78,6 +82,7 @@ impl ToolCallSafetyValidator {
         Self {
             safety_gateway,
             gateway_ctx: SafetyContext::new("runloop-safety-validator"),
+            granted_session_limit: Mutex::new(None),
             #[cfg(test)]
             test_rate_limits: Mutex::new(test_rate_limits),
         }
@@ -93,6 +98,7 @@ impl ToolCallSafetyValidator {
         Self {
             safety_gateway,
             gateway_ctx: SafetyContext::new("runloop-safety-validator"),
+            granted_session_limit: Mutex::new(None),
             #[cfg(test)]
             test_rate_limits: Mutex::new(test_rate_limits),
         }
@@ -106,17 +112,40 @@ impl ToolCallSafetyValidator {
     /// Rebuild the shared gateway budget for a fresh approved-plan execution
     /// context. This clears both per-turn and accumulated session counters.
     pub(crate) fn reset_for_fresh_execution(&self, max_per_turn: usize, max_per_session: usize) {
+        *self
+            .granted_session_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.safety_gateway.reset_for_fresh_execution(max_per_turn, max_per_session);
     }
 
     /// Override per-turn and session limits based on runtime config
     pub(crate) fn set_limits(&self, max_per_turn: usize, max_per_session: usize) {
-        self.safety_gateway.set_limits(max_per_turn, max_per_session);
+        let granted_session_limit = self
+            .granted_session_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .copied();
+        self.safety_gateway.set_limits(
+            max_per_turn,
+            granted_session_limit.map_or(max_per_session, |granted| max_per_session.max(granted)),
+        );
     }
 
     /// Increase the session tool limit
     pub(crate) fn increase_session_limit(&self, increment: usize) {
         self.safety_gateway.increase_session_limit(increment);
+        *self
+            .granted_session_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(self.safety_gateway.max_per_session());
+    }
+
+    /// Return the current session tool limit, including any user-granted
+    /// headroom that must survive a turn-boundary limit refresh.
+    pub(crate) fn max_per_session(&self) -> usize {
+        self.safety_gateway.max_per_session()
     }
 
     #[cfg(test)]
@@ -275,5 +304,25 @@ mod tests {
 
         validator.reset_for_fresh_execution(1, 1);
         validator.validate_call("read_file", &json!({})).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn granted_session_limit_survives_runtime_limit_refresh_and_new_turn() {
+        let validator = ToolCallSafetyValidator::new();
+        validator.set_limits(10, 2);
+        assert_eq!(validator.max_per_session(), 2);
+        validator.start_turn();
+        validator.validate_call("read_file", &json!({})).await.unwrap();
+        validator.increase_session_limit(3);
+        assert_eq!(validator.max_per_session(), 5);
+
+        // A config refresh must not discard user-granted session headroom.
+        validator.set_limits(10, 2);
+        validator.start_turn();
+        assert_eq!(validator.max_per_session(), 5);
+        for _ in 0..4 {
+            validator.validate_call("read_file", &json!({})).await.unwrap();
+        }
+        assert!(validator.validate_call("read_file", &json!({})).await.is_err());
     }
 }

@@ -55,6 +55,8 @@ pub enum SecretProvider {
     Nvidia,
     #[value(name = "merge-gateway")]
     MergeGateway,
+    #[value(name = "vercel")]
+    Vercel,
 }
 
 /// Secret management subcommands

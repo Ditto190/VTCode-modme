@@ -13,7 +13,9 @@ use vtcode_ui::tui::app::InlineLinkRange;
 use vtcode_ui::tui::app::InlineSegment;
 
 use super::segments::{PtyLineStyles, line_to_segments};
-use crate::agent::runloop::unified::tool_summary_helpers::relativize_command_paths;
+use crate::agent::runloop::unified::tool_summary_helpers::{
+    COMPACT_PREVIEW_LEN, preview_command, relativize_command_paths,
+};
 
 const LIVE_PREVIEW_HEAD_LINES: usize = 3;
 const MAX_BUFFERED_TAIL_LINES: usize = 64;
@@ -318,8 +320,14 @@ fn format_command_header_lines(command: &str, workspace_root: Option<&Path>) -> 
     const FIRST_LINE_WIDTH: usize = 62;
     const CONTINUATION_WIDTH: usize = 58;
 
+    // Fold prefix-only `python3 -c "` / unclosed-quote scripts into readable
+    // content first (same pipeline as `• Ran` summaries) so live PTY headers
+    // do not echo a dangling prefix. Budget matches the compact preview so
+    // ordinary long commands still wrap across `│` lines instead of
+    // collapsing to a head-truncated `…` row.
     let relative = relativize_command_paths(command, workspace_root);
-    let wrapped = wrap_text_words(&relative, FIRST_LINE_WIDTH, CONTINUATION_WIDTH);
+    let preview = preview_command(&relative, COMPACT_PREVIEW_LEN);
+    let wrapped = wrap_text_words(&preview, FIRST_LINE_WIDTH, CONTINUATION_WIDTH);
     if wrapped.is_empty() {
         return vec!["• Ran command".to_string()];
     }

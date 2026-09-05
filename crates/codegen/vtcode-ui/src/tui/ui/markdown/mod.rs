@@ -26,11 +26,15 @@ pub(crate) const LIST_INDENT_WIDTH: usize = 2;
 pub(crate) const CODE_LINE_NUMBER_MIN_WIDTH: usize = 3;
 
 /// A styled text segment.
+///
+/// Keep field-compatible with the headless `vtcode_commons::ui_protocol::MarkdownSegment`
+/// (this TUI variant is used when the `tui` feature is on); both are serialized into
+/// the same inline-stream shapes.
 #[derive(Clone, Debug)]
 pub struct MarkdownSegment {
     pub style: Style,
     pub text: String,
-    pub link_target: Option<String>,
+    pub link_target: Option<Box<str>>,
 }
 
 impl MarkdownSegment {
@@ -38,8 +42,12 @@ impl MarkdownSegment {
         Self { style, text: text.into(), link_target: None }
     }
 
-    fn with_link(style: Style, text: impl Into<String>, link_target: Option<String>) -> Self {
-        Self { style, text: text.into(), link_target }
+    fn with_link(style: Style, text: impl Into<String>, link_target: Option<impl Into<Box<str>>>) -> Self {
+        Self {
+            style,
+            text: text.into(),
+            link_target: link_target.map(Into::into),
+        }
     }
 }
 
@@ -51,10 +59,11 @@ pub struct MarkdownLine {
 
 impl MarkdownLine {
     fn push_segment(&mut self, style: Style, text: &str) {
-        self.push_segment_with_link(style, text, None);
+        self.push_segment_with_link(style, text, None::<String>);
     }
 
-    fn push_segment_with_link(&mut self, style: Style, text: &str, link_target: Option<String>) {
+    fn push_segment_with_link(&mut self, style: Style, text: &str, link_target: Option<impl Into<Box<str>>>) {
+        let link_target = link_target.map(Into::into);
         if text.is_empty() {
             return;
         }
@@ -110,10 +119,14 @@ pub fn render_markdown_to_lines_with_options(
     highlight_config: Option<&SyntaxHighlightingConfig>,
     render_options: RenderMarkdownOptions,
 ) -> Vec<MarkdownLine> {
+    // Plan wrappers are control markup rather than user-visible prose. Remove
+    // them only outside fenced code blocks so ordinary markdown and code
+    // examples remain lossless.
+    let preprocessed = preprocess_plan_wrappers(source);
     let parser_options =
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS | Options::ENABLE_FOOTNOTES;
 
-    let parser = Parser::new_ext(source, parser_options);
+    let parser = Parser::new_ext(&preprocessed, parser_options);
 
     // Output lines track the source roughly 1:1, so size from the source line
     // count to avoid reallocations during per-message rendering.
@@ -185,7 +198,13 @@ pub fn render_markdown_to_lines_with_options(
                 ctx.ensure_prefix();
                 ctx.current_line.push_segment(base_style, if checked { "[x] " } else { "[ ] " });
             }
-            Event::Html(html) | Event::InlineHtml(html) => append_text(&html, &mut ctx),
+            Event::Html(html) | Event::InlineHtml(html) => {
+                // Keep the event-level guard for split or oddly-cased tags;
+                // other HTML is preserved as text.
+                if !is_plan_markup_html(&html) {
+                    append_text(&html, &mut ctx);
+                }
+            }
             Event::FootnoteReference(r) => append_text(&format!("[^{r}]"), &mut ctx),
             Event::InlineMath(m) => append_text(&format!("${m}$"), &mut ctx),
             Event::DisplayMath(m) => append_text(&format!("$$\n{m}\n$$"), &mut ctx),
@@ -241,6 +260,85 @@ fn code_block_render_env<'a>(
         highlight_config,
         render_options,
     }
+}
+
+/// Plan wrappers that must never appear literally in rendered output.
+const PLAN_MARKUP_TAGS: &[&str] = &["<proposed_plan>", "</proposed_plan>", "<plan>", "</plan>"];
+
+fn is_plan_markup_html(html: &str) -> bool {
+    let normalized: String = html.chars().filter(|ch| !ch.is_whitespace()).collect();
+    let lowered = normalized.to_ascii_lowercase();
+    PLAN_MARKUP_TAGS.iter().any(|tag| lowered.contains(tag))
+}
+
+fn strip_plan_markup_tags(text: &str, inline_code_ticks: &mut Option<usize>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+
+    while cursor < text.len() {
+        let remainder = &text[cursor..];
+        if remainder.starts_with('`') {
+            let run_length = remainder.bytes().take_while(|byte| *byte == b'`').count();
+            out.push_str(&remainder[..run_length]);
+            if inline_code_ticks.is_some_and(|ticks| ticks == run_length) {
+                *inline_code_ticks = None;
+            } else if inline_code_ticks.is_none() {
+                *inline_code_ticks = Some(run_length);
+            }
+            cursor += run_length;
+            continue;
+        }
+
+        if inline_code_ticks.is_none()
+            && let Some(tag) = PLAN_MARKUP_TAGS.iter().find(|tag| {
+                remainder
+                    .get(..tag.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(tag))
+            })
+        {
+            cursor += tag.len();
+            continue;
+        }
+
+        let character = remainder.chars().next().expect("cursor is on a character boundary");
+        out.push(character);
+        cursor += character.len_utf8();
+    }
+
+    out
+}
+
+fn preprocess_plan_wrappers(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut in_fenced_code = false;
+    let mut inline_code_ticks = None;
+
+    for (index, line) in source.lines().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+
+        let is_fence = is_fence_delimiter(line);
+        if in_fenced_code || is_fence {
+            out.push_str(line);
+        } else {
+            out.push_str(&strip_plan_markup_tags(line, &mut inline_code_ticks));
+        }
+
+        if is_fence {
+            in_fenced_code = !in_fenced_code;
+            inline_code_ticks = None;
+        }
+    }
+
+    if source.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn is_fence_delimiter(line: &str) -> bool {
+    vtcode_commons::formatting::is_markdown_fence_delimiter(line)
 }
 
 #[cfg(test)]

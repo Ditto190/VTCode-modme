@@ -30,6 +30,7 @@ pub enum BackendKind {
     Xai,
     Nvidia,
     MergeGateway,
+    Vercel,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

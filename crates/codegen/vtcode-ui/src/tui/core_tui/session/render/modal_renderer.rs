@@ -7,7 +7,6 @@ use crate::tui::core_tui::types::InlineMessageKind;
 use crate::tui::ui::tui::session::modal::{
     ModalBodyContext, ModalListState, ModalRenderStyles, render_modal_body, render_wizard_modal_body,
 };
-use crate::tui::ui::tui::types::InlineListSelection;
 use anstyle::{Ansi256Color, Color as AnsiColorEnum};
 use ratatui::widgets::{Block, Clear, Fill, Paragraph, Wrap};
 use tracing::warn;
@@ -90,26 +89,13 @@ fn render_modal_divider(frame: &mut Frame<'_>, area: Rect, style: Style) {
 }
 
 fn wizard_step_has_inline_custom_editor(wizard: &crate::tui::ui::tui::session::modal::WizardModalState) -> bool {
+    // Single predicate shared with render and hit-testing: the editor is
+    // visible exactly when the selected item is an unanswered custom-note
+    // answer. See `modal::inline_editor_for_step`.
     let Some(step) = wizard.steps.get(wizard.current_step) else {
         return false;
     };
-    let Some(selected_visible) = step.list.list_state.selected() else {
-        return false;
-    };
-    let Some(&item_index) = step.list.visible_indices.get(selected_visible) else {
-        return false;
-    };
-    let Some(item) = step.list.items.get(item_index) else {
-        return false;
-    };
-    matches!(
-        item.selection.as_ref(),
-        Some(InlineListSelection::RequestUserInputAnswer {
-            selected,
-            other,
-            ..
-        }) if selected.is_empty() && other.is_some()
-    )
+    crate::tui::core_tui::session::modal::inline_editor_for_step(step).is_some()
 }
 
 pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<Rect>) {
@@ -165,8 +151,10 @@ pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<R
         lines
     } else if let Some(modal) = session.modal_state() {
         let mut lines = modal.lines.len().clamp(1, MAX_INLINE_INSTRUCTION_ROWS);
-        if modal.search.is_some() {
-            lines = lines.saturating_add(2);
+        if let Some(search) = modal.search.as_ref() {
+            // Match `render_modal_body`: prompt-only search costs 1 row, a
+            // titled search field costs 2.
+            lines = lines.saturating_add(if search.label.is_empty() { 1 } else { 2 });
         }
         if modal.secure_prompt.is_some() {
             lines = lines.saturating_add(2);
@@ -205,7 +193,10 @@ pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<R
 
     let [transcript_area, modal_area] = area
         .try_layout(&Layout::vertical([Constraint::Min(1), Constraint::Length(desired_height)]))
-        .unwrap_or([area; 2]);
+        // Unreachable: `desired_height <= max_panel_height = height - 1`, so
+        // `Min(1) + Length(desired)` always fits. Fail closed (empty modal)
+        // instead of double-claiming `area` for both halves.
+        .unwrap_or([area, Rect::ZERO]);
     (transcript_area, Some(modal_area))
 }
 
@@ -307,7 +298,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
             hovered_link_style,
         );
         if let Some(title_area) = title_area {
-            outcome.text_areas.push(title_area);
+            outcome.push_text_area(title_area);
             outcome.link_targets.extend(title_link_targets.clone());
         }
         session.set_modal_list_area(outcome.list_area);
@@ -416,7 +407,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
         hovered_link_style,
     );
     if let Some(title_area) = title_area {
-        outcome.text_areas.push(title_area);
+        outcome.push_text_area(title_area);
         outcome.link_targets.extend(title_link_targets);
     }
     session.set_modal_list_area(outcome.list_area);

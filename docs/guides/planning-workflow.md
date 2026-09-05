@@ -173,6 +173,17 @@ Approval is accepted only for a persisted plan that passes the artifact validato
 
 Creating the `task_tracker` checklist is part of the approval gate. If the tracker tool is unavailable, fails, or does not persist its tracker file, the planning workflow remains active and no write-capable execution turn is started. All approval routes share the same typed handoff, including direct, queued, automatic, and fresh-context execution.
 
+### Mid-Execution Replans
+
+Execution agents may emit one `<proposed_plan>` block while implementing when the plan they are executing no longer matches the repository (for example, the approved paths were renamed or the scope changed materially). The runtime extracts that block from the response, validates and persists it exactly like a planning draft — overwriting the plan file and refreshing its tracker sidecar — and publishes the normal `plan.delta` and `plan.approval.requested` events.
+
+Routing follows the session state and confirmation policy:
+
+- While an approved-plan execution turn is in flight, the revision continues automatically: the user already approved implementing this goal, so no second confirmation gate is shown. The transcript reports the revision, the persisted plan is updated, and the continuation implementation turn is scheduled with the session's existing confirmation policy preserved.
+- Otherwise the ordinary approval routes apply: interactive sessions show the "Ready to code?" overlay with a notice that the plan was proposed during execution, full-auto or skip-confirmations policies continue without a prompt, and headless sessions wait for `approve` or `implement`.
+
+An invalid revision is rejected with visible feedback, never overwrites the persisted plan, and never pushes planning-repair directives into the execution turn; no continuation turn is scheduled in that case.
+
 ### Streaming-to-persistence handoff
 
 In streaming mode, `<proposed_plan>` markup is removed from the live transcript
@@ -458,6 +469,16 @@ only after the complete batch, so a provider never receives a directive between
 the assistant call and its results. Request assembly may create a repaired,
 request-only view when older history contains split, orphaned, duplicate, or
 missing results; the durable session history is not rewritten by this repair.
+
+If the session tool-call limit is reached during an active turn, VT Code shows
+the current primary agent and asks whether to grant more calls. A grant retries
+the pending call in the same turn, emits `session_tool_limit_increased`, and
+preserves the granted session fuse across runtime limit refreshes and the next
+turn. A denial remains an explicit denial. The analogous tool-loop prompt emits
+`tool_loop_limit_increased` and keeps tools enabled for the current agent; it
+does not enter tool-free recovery. Transient bridge submissions, including
+mode-switch input, are deferred or ignored while the prompt owns input and are
+not interpreted as a denial.
 
 ## Plan File Persistence
 

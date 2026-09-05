@@ -200,9 +200,12 @@ impl Session {
 
         let remove_count = excess.max(ui::TUI_TRANSCRIPT_EVICT_CHUNK);
         let previous_max_offset = self.current_max_scroll_offset();
-        let first_removed = self.lines.len().saturating_sub(remove_count);
 
-        self.collapsed_pastes.retain(|paste| paste.line_index < first_removed);
+        // Lines are evicted from the front (drain(..remove_count)), so pastes
+        // pointing into the evicted prefix are dropped and surviving pastes
+        // shift down by remove_count. Retaining a paste whose line_index < remove_count
+        // would underflow the subtraction below.
+        self.collapsed_pastes.retain(|paste| paste.line_index >= remove_count);
         for paste in &mut self.collapsed_pastes {
             paste.line_index -= remove_count;
         }

@@ -126,6 +126,7 @@ pub(crate) async fn initialize_session(
     primary_agent_explicitly_configured: bool,
     resume: Option<&ResumeSession>,
     parent_session_id: &str,
+    session_primary_agent_override: Option<&str>,
 ) -> Result<SessionState> {
     if let Some(cfg) = vt_cfg {
         if let Err(err) = apply_global_notification_config_from_vtcode(cfg) {
@@ -193,7 +194,12 @@ pub(crate) async fn initialize_session(
     let auto_permission_review_active = full_auto;
     apply_workspace_trust_prompt_policy(&mut tool_registry, auto_permission_review_active, workspace_trust_level).await;
 
-    let resumed_primary_agent = resume.and_then(|r| r.snapshot().metadata.primary_agent.clone());
+    // Archive metadata is authoritative when resuming an existing thread.
+    // A fresh `/new` session can carry the live mode explicitly so it does
+    // not silently fall back to the configured default after a handoff.
+    let resumed_primary_agent = resume
+        .and_then(|r| r.snapshot().metadata.primary_agent.clone())
+        .or_else(|| session_primary_agent_override.map(str::to_owned));
 
     let subagent_controller = if resume.is_none_or(ResumeSession::is_root_thread)
         && let Some(cfg) = vt_cfg

@@ -805,6 +805,12 @@ pub(crate) async fn maybe_auto_compact_history(
             workspace_root,
             vt_cfg,
             current_token_usage: current_prompt_pressure_tokens,
+            reserved_output_tokens: provider
+                .sampling_overrides(model)
+                .max_tokens
+                .map_or(vtcode_core::compaction::memory_envelope::DEFAULT_OUTPUT_RESERVE_TOKENS, |value| {
+                    value as usize
+                }),
             touched_files: &session_stats.recent_touched_files(),
             engine_cfg: local_compaction_config(vt_cfg, false),
             manual_options: vtcode_core::compaction::ManualCompactionOptions::default(),

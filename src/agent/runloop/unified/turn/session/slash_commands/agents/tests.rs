@@ -113,14 +113,14 @@ fn summarize_thread_event_preview_uses_latest_live_updates() {
         ThreadEvent::ItemUpdated(ItemUpdatedEvent {
             item: ThreadItem {
                 id: "tool-output-1".to_string(),
-                details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                     call_id: "call-1".to_string(),
                     tool_call_id: None,
                     spool_path: None,
                     output: "line 1\nFinished `cargo check`".to_string(),
                     exit_code: Some(0),
                     status: ToolCallStatus::Completed,
-                }),
+                })),
             },
         }),
     ]);

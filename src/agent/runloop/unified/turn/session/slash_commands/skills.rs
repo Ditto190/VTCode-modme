@@ -190,11 +190,9 @@ async fn apply_skill_command_outcome(
             )
             .await?;
             drop(loading_spinner);
-            let control = Box::pin(crate::agent::runloop::unified::turn::session::slash_commands::handle_outcome(
-                outcome,
-                ctx.reborrow(),
-            ))
-            .await?;
+            let control =
+                crate::agent::runloop::unified::turn::session::slash_commands::handle_outcome(outcome, ctx.reborrow())
+                    .await?;
             match control {
                 SlashCommandControl::Continue => Ok(SlashCommandControl::Continue),
                 SlashCommandControl::SubmitPrompt(prompt) => Ok(SlashCommandControl::SubmitPrompt(prompt)),

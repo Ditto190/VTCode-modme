@@ -58,6 +58,10 @@ fn constants_cover_models_json() {
                 let _inserted = validated_providers.insert("zai");
                 Some(models::zai::SUPPORTED_MODELS)
             }
+            "vercel" => {
+                let _inserted = validated_providers.insert("vercel");
+                Some(models::vercel::SUPPORTED_MODELS)
+            }
             _ => None, // Skip providers we don't have constants for yet
         };
 
@@ -109,7 +113,15 @@ fn constants_cover_models_json() {
     }
 
     // Ensure we validated the expected providers
-    let expected_providers = ["openai", "anthropic", "google", "openrouter", "deepseek", "zai"];
+    let expected_providers = [
+        "openai",
+        "anthropic",
+        "google",
+        "openrouter",
+        "deepseek",
+        "zai",
+        "vercel",
+    ];
     for expected in &expected_providers {
         assert!(
             validated_providers.contains(expected),

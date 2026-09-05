@@ -302,6 +302,55 @@ async fn actor_loop(mut rx: mpsc::Receiver<ActorMessage>) {
 
 7. **Avoid cycles of bounded channels.** If Actor A sends to Actor B and B sends to A, both using bounded channels, a deadlock can occur if both channels fill up. Break cycles with `tokio::select!` on a "primary" channel, or use `try_send` for the cycle-closing path.
 
+### Pattern 8: Pinning futures (stack first, boxes only at type-erasure boundaries)
+
+`Pin` exists for address-sensitive types — futures whose compiled state holds
+pointers into themselves across `.await` points. Pinning is an ordinary type
+system feature, not compiler magic: `Pin<Ptr>` pins the *pointee*, so a
+`Pin<Box<dyn Future>>` handle is itself freely movable (`Unpin`) even though
+the future it targets is not. VT Code keeps all pinning inside standard
+combinators (`Box::pin`, `tokio::pin!`, `async_stream`) and never projects
+through pins manually — no `get_unchecked_mut`, `Pin::new_unchecked`, or
+`PhantomPinned` anywhere in the workspace.
+
+Conventions, in order of preference:
+
+1. **Plain `.await` needs no pinning at all.** Never write
+   `Box::pin(fut).await` — allocation for nothing. Reach for pinning only when
+   a future must be *held* across other awaits (e.g. polled in a
+   `tokio::select!` loop) or stored in a struct.
+2. **Stack-pin held locals with `tokio::pin!`.** This is allocation-free and
+   keeps the borrow local. The tool-execution and LLM-request keepalive loops
+   both follow this shape:
+
+   ```rust
+   let generate_future = ctx.provider_client.generate(request);
+   tokio::pin!(generate_future);
+
+   loop {
+       let cancel_notifier = ctx.ctrl_c_notify.notified();
+       tokio::pin!(cancel_notifier);
+       tokio::select! {
+           res = &mut generate_future => { /* ... */ }
+           _ = &mut cancel_notifier => { /* ... */ }
+       }
+   }
+   ```
+
+3. **`Box::pin` only where a `Pin<Box<dyn Future/Stream>>` boundary exists:**
+   type-erased returns from traits, `tokio::spawn` payloads, recursive async
+   fns (breaking infinite future size), and match arms that must unify to one
+   type. All other uses are wasted allocations.
+4. **Do not re-box already-pinned handles.** `LLMStream` is
+   `Pin<Box<dyn Stream + Send>>`, which implements `Stream` *and* `Unpin` —
+   call `stream.next().await` on it directly.
+5. **If you must poll by hand** (e.g. a `futures::Sink` impl on an `Unpin`
+   wrapper like `LegacyMessageSink` in `vtcode-webmcp`), take
+   `self: Pin<&mut Self>` and get `&mut Self` via `self.get_mut()` — the
+   conditional `Unpin` impl makes that safe without `unsafe`. If the inner
+   type is genuinely `!Unpin`, use `self.project()` from `pin-project` rather
+   than hand-written unsafe projections.
+
 ### Local stdio transport decision
 
 The [stdio MCP/LSP analysis](https://developerlife.com/2026/08/22/to-async-or-not-to-async-rust-mcp-server/)

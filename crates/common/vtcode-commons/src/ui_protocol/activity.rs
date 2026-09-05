@@ -26,6 +26,21 @@ impl ActivityState {
         matches!(self, Self::PreparingFreshExecutionThread | Self::RestoringApprovedPlan | Self::StartingBuild)
     }
 
+    /// Whether primary-agent/mode switching must be rejected while this state
+    /// is visible. Long-lived Build, Recovery, and Blocked states keep input
+    /// enabled, but their active turn state still owns the mode boundary.
+    pub const fn locks_mode_switch(self) -> bool {
+        matches!(
+            self,
+            Self::PreparingFreshExecutionThread
+                | Self::RestoringApprovedPlan
+                | Self::Building
+                | Self::StartingBuild
+                | Self::Recovery
+                | Self::Blocked
+        )
+    }
+
     /// Long-lived display stages that keep input enabled between turns.
     pub const fn is_stage(self) -> bool {
         matches!(self, Self::Planning | Self::Building | Self::Recovery)
@@ -78,5 +93,21 @@ mod tests {
             assert!(!state.is_stage());
             assert!(state.status().is_some());
         }
+    }
+
+    #[test]
+    fn mode_switch_is_locked_for_active_build_recovery_and_blocked_states() {
+        for state in [
+            ActivityState::PreparingFreshExecutionThread,
+            ActivityState::RestoringApprovedPlan,
+            ActivityState::Building,
+            ActivityState::StartingBuild,
+            ActivityState::Recovery,
+            ActivityState::Blocked,
+        ] {
+            assert!(state.locks_mode_switch(), "{state:?} must lock mode switching");
+        }
+        assert!(!ActivityState::Idle.locks_mode_switch());
+        assert!(!ActivityState::Planning.locks_mode_switch());
     }
 }

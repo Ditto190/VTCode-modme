@@ -89,6 +89,104 @@ fn append_message(handle: &InlineHandle, kind: InlineMessageKind, text: impl Int
     handle.append_pasted_message(kind, text.clone(), line_count(&text));
 }
 
+/// Append markdown content as pre-rendered styled lines so the TUI transcript
+/// shows headings, lists, code, and other formatting instead of raw source.
+///
+/// `append_pasted_message` stores raw text verbatim: the reflow path wraps it
+/// as plain text without invoking the markdown parser. Normal assistant output
+/// goes through `AnsiRenderer::line(Response, …)` → `write_markdown` →
+/// `append_line`, which is why it renders correctly. The approval flow
+/// bypassed that pipeline and therefore displayed raw `<proposed_plan>`
+/// wrappers and unstyled `Summary:` / `•` prose (see the Sep-04 screenshot).
+/// This helper restores the same pipeline for approval transcript content by
+/// rendering markdown to `InlineSegment`s and emitting them via `append_line`.
+///
+/// On rendering failure or empty output the caller receives `false` and should
+/// fall back to plain text plus an explicit warning so the user gets clear
+/// feedback instead of a silent blank block.
+fn append_markdown_message(handle: &InlineHandle, kind: InlineMessageKind, markdown: &str) -> bool {
+    use std::sync::Arc;
+    use vtcode_core::ui::markdown::{RenderMarkdownOptions, render_markdown_to_lines_with_options};
+    use vtcode_core::ui::theme;
+    use vtcode_core::ui::tui::{InlineSegment, convert_style};
+    use vtcode_core::utils::ansi::MessageStyle;
+
+    if markdown.trim().is_empty() {
+        return false;
+    }
+
+    let base_style = match kind {
+        InlineMessageKind::Agent => MessageStyle::Response.style(),
+        InlineMessageKind::Info => MessageStyle::Info.style(),
+        InlineMessageKind::Warning => MessageStyle::Warning.style(),
+        InlineMessageKind::Error => MessageStyle::Error.style(),
+        _ => MessageStyle::Info.style(),
+    };
+    let theme_styles = theme::active_styles();
+    let rendered = render_markdown_to_lines_with_options(
+        markdown,
+        base_style,
+        &theme_styles,
+        None,
+        RenderMarkdownOptions {
+            preserve_code_indentation: true,
+            disable_code_block_table_reparse: false,
+            table_max_width: None,
+        },
+    );
+
+    // Collapse consecutive blanks (mirrors AnsiRenderer) and drop a leading
+    // failure mode where the parser yields no visible lines.
+    let mut lines: Vec<Vec<InlineSegment>> = Vec::with_capacity(rendered.len().max(1));
+    let mut fallback = convert_style(base_style);
+    if fallback.color.is_none() {
+        fallback = fallback.merge_color(Some(theme_styles.foreground));
+    }
+    let mut last_blank = false;
+    for line in rendered {
+        let is_blank = line.is_empty();
+        if is_blank {
+            if last_blank {
+                continue;
+            }
+            last_blank = true;
+            lines.push(Vec::new());
+            continue;
+        }
+        last_blank = false;
+        let mut segments = Vec::with_capacity(line.segments.len().max(1));
+        for seg in line.segments {
+            if seg.text.is_empty() {
+                continue;
+            }
+            let converted = convert_style(seg.style);
+            let mut inline_style = fallback.clone();
+            inline_style.color = None;
+            if let Some(color) = converted.color
+                && Some(color) != fallback.color
+            {
+                inline_style.color = Some(color);
+            }
+            if let Some(bg) = converted.bg_color {
+                inline_style.bg_color = Some(bg);
+            }
+            inline_style.effects = converted.effects | fallback.effects;
+            segments.push(InlineSegment { text: seg.text, style: Arc::new(inline_style) });
+        }
+        lines.push(segments);
+    }
+
+    let has_visible = lines.iter().any(|segs| segs.iter().any(|s| !s.text.trim().is_empty()));
+    if !has_visible {
+        return false;
+    }
+
+    for segments in lines {
+        handle.append_line(kind, segments);
+    }
+    true
+}
+
 fn render_confirmation_prompt(handle: &InlineHandle, plan: &PlanContent) {
     tracing::info!(
         target: "vtcode.planning_workflow",
@@ -99,7 +197,14 @@ fn render_confirmation_prompt(handle: &InlineHandle, plan: &PlanContent) {
     append_message(handle, InlineMessageKind::Info, "A plan is ready to execute. Would you like to proceed?");
 
     if !plan.summary.trim().is_empty() {
-        append_message(handle, InlineMessageKind::Agent, plan.summary.clone());
+        if !append_markdown_message(handle, InlineMessageKind::Agent, plan.summary.trim()) {
+            append_message(handle, InlineMessageKind::Agent, plan.summary.clone());
+            append_message(
+                handle,
+                InlineMessageKind::Warning,
+                "Plan summary needed a plain-text fallback; markdown rendering produced no visible lines.",
+            );
+        }
     } else if !plan.title.trim().is_empty() {
         append_message(handle, InlineMessageKind::Info, format!("Plan: {}", plan.title));
     }
@@ -108,9 +213,32 @@ fn render_confirmation_prompt(handle: &InlineHandle, plan: &PlanContent) {
     // in the scrollable transcript so users can review every section before
     // choosing an execution mode. The overlay's `lines` field is intentionally
     // bounded by `render_plan_summary` and must not be used for this content.
+    // The harness normalizes plan markdown here so headings, lists, and other
+    // formatting render accurately instead of leaking raw `<proposed_plan>`
+    // wrappers or collapsing into a wall of text. Content goes through the
+    // markdown pipeline (`append_line` with rendered segments) rather than raw
+    // `append_pasted_message`, otherwise headings/lists show as source text.
     if !plan.raw_content.trim().is_empty() {
+        let (display_markdown, warnings) =
+            crate::agent::runloop::unified::plan_blocks::prepare_plan_markdown_for_display(&plan.raw_content);
         append_message(handle, InlineMessageKind::Info, "Implementation plan (full):");
-        append_message(handle, InlineMessageKind::Agent, plan.raw_content.clone());
+        if display_markdown.trim().is_empty() {
+            append_message(
+                handle,
+                InlineMessageKind::Warning,
+                "Plan content could not be rendered (empty after cleanup). See the plan file for details.",
+            );
+        } else if !append_markdown_message(handle, InlineMessageKind::Agent, &display_markdown) {
+            append_message(handle, InlineMessageKind::Agent, display_markdown.clone());
+            append_message(
+                handle,
+                InlineMessageKind::Warning,
+                "Plan markdown could not be styled and is shown as plain text; see the plan file for the formatted version.",
+            );
+        }
+        for warning in warnings {
+            append_message(handle, InlineMessageKind::Warning, warning);
+        }
     }
 
     if let Some(path) = plan.file_path.as_deref()
@@ -840,17 +968,31 @@ mod tests {
         assert_eq!(outcome, PlanConfirmationOutcome::FreshContext);
 
         let mut transcript_messages = Vec::new();
+        let mut saw_markdown_append_line = false;
         let request = loop {
             let command = command_rx.try_recv().expect("confirmation command");
             match command {
                 InlineCommand::AppendPastedMessage { kind: InlineMessageKind::Agent, text, .. } => {
                     transcript_messages.push(text);
                 }
+                InlineCommand::AppendLine { kind: InlineMessageKind::Agent, segments } => {
+                    saw_markdown_append_line = true;
+                    let text: String = segments.into_iter().map(|seg| seg.text).collect();
+                    transcript_messages.push(text);
+                }
                 InlineCommand::ShowTransient { request } => break request,
                 _ => {}
             }
         };
-        assert!(transcript_messages.iter().any(|text| text == "RAW fallback content"));
+        assert!(
+            saw_markdown_append_line,
+            "plan body must go through the markdown pipeline (AppendLine), not raw pasted text"
+        );
+        assert!(transcript_messages.iter().any(|text| text.contains("RAW fallback content")));
+        assert!(
+            transcript_messages.iter().all(|text| !text.contains("<proposed_plan>")),
+            "raw plan wrappers must never leak into the transcript: {transcript_messages:?}"
+        );
 
         match *request {
             TransientRequest::List(request) => {

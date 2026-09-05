@@ -196,6 +196,421 @@ pub(crate) fn strip_plan_persistence_policy_line(text: &str) -> String {
     }
 }
 
+/// Harness display contract for propose-plan markdown.
+///
+/// The harness must guarantee that any markdown content shown to the user is
+/// parsed and rendered accurately: plan wrappers are removed, headings/lists
+/// keep their structure, and failures produce clear, actionable feedback
+/// instead of raw `<proposed_plan>` text.
+///
+/// Returns `(display_markdown, warnings)` where `display_markdown` is safe to
+/// hand to the markdown renderer and `warnings` describes anything that had to
+/// be repaired (unclosed blocks, empty plans, stray markup).
+pub(crate) fn prepare_plan_markdown_for_display(raw: &str) -> (String, Vec<String>) {
+    let mut warnings = Vec::new();
+    if raw.trim().is_empty() {
+        warnings.push("Plan content was empty; nothing to render.".to_string());
+        return (String::new(), warnings);
+    }
+
+    let had_open = contains_plan_tag_outside_fences(raw, &[OPEN_TAG, ALT_OPEN_TAG]);
+    let had_close = contains_plan_tag_outside_fences(raw, &[CLOSE_TAG, ALT_CLOSE_TAG]);
+    if had_open && !had_close {
+        warnings.push("Plan block was missing its closing tag; showing the partial draft.".to_string());
+    }
+
+    // Prefer the extracted plan body, but fall back to tag-stripped prose so a
+    // tag-less structured synthesis still renders instead of vanishing.
+    let mut body = extract_plan_body_for_display(raw).unwrap_or_else(|| strip_all_plan_tags(raw));
+    body = strip_plan_persistence_policy_line(&body);
+
+    if body.trim().is_empty() {
+        warnings.push("Plan block was empty after removing markup; check the model output.".to_string());
+        return (String::new(), warnings);
+    }
+
+    let normalized = normalize_plan_display_markdown(&body);
+
+    if contains_plan_tag_outside_fences(&normalized, &[OPEN_TAG, CLOSE_TAG, ALT_OPEN_TAG, ALT_CLOSE_TAG]) {
+        warnings.push("Stray plan markup remained after cleanup and was left as-is.".to_string());
+    }
+
+    (normalized, warnings)
+}
+
+/// Strip every plan wrapper tag outside fenced code for display purposes,
+/// regardless of pairing. Literal tags in code examples remain untouched.
+pub(crate) fn strip_all_plan_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_fenced_code = false;
+    let mut inline_code_ticks = None;
+    for (index, raw_line) in text.split_inclusive('\n').enumerate() {
+        if index > 0 && !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let is_fence = is_fence_delimiter(line);
+        if in_fenced_code || is_fence {
+            out.push_str(raw_line);
+        } else {
+            out.push_str(&strip_plan_tags(raw_line, &mut inline_code_ticks));
+        }
+        if is_fence {
+            in_fenced_code = !in_fenced_code;
+            inline_code_ticks = None;
+        }
+    }
+    out.trim().to_string()
+}
+
+fn strip_plan_tags(text: &str, inline_code_ticks: &mut Option<usize>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let Some((index, tag)) = find_plan_tag_outside_inline_code(
+            &text[cursor..],
+            &[OPEN_TAG, CLOSE_TAG, ALT_OPEN_TAG, ALT_CLOSE_TAG],
+            inline_code_ticks,
+        ) else {
+            out.push_str(&text[cursor..]);
+            break;
+        };
+        out.push_str(&text[cursor..cursor + index]);
+        cursor += index + tag.len();
+    }
+    out
+}
+
+fn contains_plan_tag_outside_fences(text: &str, tags: &[&'static str]) -> bool {
+    let mut in_fenced_code = false;
+    let mut inline_code_ticks = None;
+    for raw_line in text.split_inclusive('\n') {
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let is_fence = is_fence_delimiter(line);
+        if !in_fenced_code
+            && !is_fence
+            && find_plan_tag_outside_inline_code(line, tags, &mut inline_code_ticks).is_some()
+        {
+            return true;
+        }
+        if is_fence {
+            in_fenced_code = !in_fenced_code;
+            inline_code_ticks = None;
+        }
+    }
+    false
+}
+
+/// Find a plan wrapper outside inline-code spans while carrying the span state
+/// across lines. The returned tag is static because all callers pass one of
+/// the module's canonical wrapper constants.
+fn find_plan_tag_outside_inline_code(
+    text: &str,
+    tags: &[&'static str],
+    inline_code_ticks: &mut Option<usize>,
+) -> Option<(usize, &'static str)> {
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let remainder = &text[cursor..];
+        if remainder.starts_with('`') {
+            let run_length = remainder.bytes().take_while(|byte| *byte == b'`').count();
+            if inline_code_ticks.is_some_and(|ticks| ticks == run_length) {
+                *inline_code_ticks = None;
+            } else if inline_code_ticks.is_none() {
+                *inline_code_ticks = Some(run_length);
+            }
+            cursor += run_length;
+            continue;
+        }
+
+        if inline_code_ticks.is_none()
+            && let Some(tag) = tags.iter().find(|tag| {
+                remainder
+                    .get(..tag.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(tag))
+            })
+        {
+            return Some((cursor, *tag));
+        }
+
+        let character = remainder.chars().next().expect("cursor is on a character boundary");
+        cursor += character.len_utf8();
+    }
+    None
+}
+
+/// Extract a plan body while ignoring wrapper-looking text inside fenced code.
+/// The streaming parser remains responsible for live transcript suppression;
+/// this full-input path is used for the approval display, where preserving the
+/// exact code block is more important than incremental output.
+fn extract_plan_body_for_display(text: &str) -> Option<String> {
+    let mut close_tag: Option<&'static str> = None;
+    let mut body = String::new();
+    let mut in_fenced_code = false;
+    let mut inline_code_ticks = None;
+    let mut saw_plan = false;
+
+    for raw_line in text.split_inclusive('\n') {
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let is_fence = is_fence_delimiter(line);
+        if in_fenced_code || is_fence {
+            if saw_plan {
+                body.push_str(raw_line);
+            }
+            if is_fence {
+                in_fenced_code = !in_fenced_code;
+                inline_code_ticks = None;
+            }
+            continue;
+        }
+
+        let mut remaining = raw_line;
+        loop {
+            if let Some(expected_close) = close_tag {
+                if let Some((index, tag)) =
+                    find_plan_tag_outside_inline_code(remaining, &[expected_close], &mut inline_code_ticks)
+                {
+                    body.push_str(&remaining[..index]);
+                    remaining = &remaining[index + tag.len()..];
+                    close_tag = None;
+                    continue;
+                }
+                body.push_str(remaining);
+                break;
+            }
+
+            let Some((index, tag)) =
+                find_plan_tag_outside_inline_code(remaining, &[OPEN_TAG, ALT_OPEN_TAG], &mut inline_code_ticks)
+            else {
+                break;
+            };
+            saw_plan = true;
+            close_tag = Some(if tag == OPEN_TAG { CLOSE_TAG } else { ALT_CLOSE_TAG });
+            remaining = &remaining[index + tag.len()..];
+        }
+    }
+
+    saw_plan.then(|| body.trim().to_string())
+}
+
+/// Normalize plan prose so the markdown renderer preserves structure:
+/// - `•` bullets become `-` (the marker pulldown-cmark recognizes)
+/// - bare `Summary:` / `Test Cases and Validation:` / `Assumptions…` labels
+///   become `##` headings so they read as sections instead of a wall of text
+/// - long `1. Action -> files: […] -> verify: […]` steps are split so the
+///   metadata renders as nested bullets instead of one unwrapped wall of text
+/// - missing blank lines around headings/lists are repaired so the parser
+///   emits distinct blocks instead of one collapsed paragraph.
+fn normalize_plan_display_markdown(body: &str) -> String {
+    const HEADING_ALIASES: &[(&str, &str)] = &[
+        ("summary", "## Summary"),
+        ("implementation steps", "## Implementation Steps"),
+        ("test cases and validation", "## Test Cases and Validation"),
+        ("validation", "## Test Cases and Validation"),
+        ("assumptions and defaults", "## Assumptions and Defaults"),
+        ("assumptions", "## Assumptions and Defaults"),
+        ("open questions", "## Open Questions"),
+    ];
+
+    struct DisplayLine {
+        text: String,
+        structural: bool,
+    }
+
+    let mut lines: Vec<DisplayLine> = Vec::with_capacity(body.lines().count() + 8);
+    let mut in_fenced_code = false;
+    for line in body.lines() {
+        let trimmed_start = line.trim_start();
+        let is_fence = is_fence_delimiter(line);
+        if in_fenced_code || is_fence {
+            lines.push(DisplayLine { text: line.to_string(), structural: false });
+            if is_fence {
+                in_fenced_code = !in_fenced_code;
+            }
+            continue;
+        }
+
+        let indent_len = line.len() - trimmed_start.len();
+        let indent = &line[..indent_len];
+
+        // Normalize bullets first so list structure survives rendering.
+        let mut current = if let Some(rest) = trimmed_start.strip_prefix("• ") {
+            format!("{indent}- {rest}")
+        } else if trimmed_start == "•" {
+            format!("{indent}-")
+        } else {
+            line.to_string()
+        };
+
+        // Promote sparse `Label:` lines to headings. Only exact label matches
+        // (case-insensitive, optional trailing colon) or `Label: prose` inline
+        // forms are rewritten; numbered steps and prose containing those words
+        // elsewhere are left untouched.
+        let trimmed_owned = current.trim().to_string();
+        let trimmed: &str = &trimmed_owned;
+        let label = trimmed.strip_suffix(':').unwrap_or(trimmed).trim();
+        let lowered = label.to_ascii_lowercase();
+        if !label.is_empty() && label.len() <= 64 {
+            if let Some((_, heading)) = HEADING_ALIASES.iter().find(|(alias, _)| *alias == lowered) {
+                if trimmed.ends_with(':') {
+                    current = heading.to_string();
+                }
+            }
+        }
+
+        if trimmed.len() <= 256
+            && let Some((_, heading)) = HEADING_ALIASES
+                .iter()
+                .find(|(alias, _)| trimmed.to_ascii_lowercase().starts_with(&format!("{alias}:")))
+        {
+            // e.g. `Summary: the fix ...` -> heading + paragraph.
+            if let Some(colon) = trimmed.find(':') {
+                let after = trimmed[colon + 1..].trim();
+                let heading_owned = heading.to_string();
+                if !after.is_empty() {
+                    lines.push(DisplayLine { text: heading_owned, structural: true });
+                    lines.push(DisplayLine { text: String::new(), structural: true });
+                    lines.push(DisplayLine { text: after.to_string(), structural: true });
+                    continue;
+                }
+                current = heading_owned;
+            }
+        }
+
+        // Split long `1. Action -> files: […] -> verify: […]` steps so the
+        // metadata renders as nested bullets. A single-line step with two
+        // `->` clauses wraps without a hanging indent and reads as a wall of
+        // text (Sep-04 screenshot); nested `- files:` / `- verify:` lines keep
+        // the ordered-list structure while staying scannable. Fenced code is
+        // already excluded above. Splits happen only at ` -> files:` /
+        // ` -> verify:` outside inline-code spans so `` `a -> files: b` ``
+        // and prose arrows (`A -> B`) stay intact.
+        if is_ordered_list_item(current.trim())
+            && let Some(parts) = split_ordered_step_metadata(current.trim())
+        {
+            let marker_width = ordered_marker_width(current.trim());
+            let nested_prefix = format!("{indent}{:width$}- ", "", width = marker_width);
+            lines.push(DisplayLine {
+                text: format!("{indent}{}", parts[0].trim_end()),
+                structural: true,
+            });
+            for part in &parts[1..] {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                lines.push(DisplayLine {
+                    text: format!("{nested_prefix}{part}"),
+                    structural: true,
+                });
+            }
+            continue;
+        }
+
+        lines.push(DisplayLine { text: current, structural: true });
+    }
+
+    // Ensure blank lines around headings and lists so the markdown parser does
+    // not collapse them into a single paragraph.
+    let mut spaced: Vec<String> = Vec::with_capacity(lines.len() * 2);
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.text.trim();
+        let is_heading = line.structural && trimmed.starts_with("## ");
+        let is_list = line.structural
+            && (trimmed.starts_with("- ")
+                || trimmed.starts_with("* ")
+                || trimmed.starts_with("+ ")
+                || is_ordered_list_item(trimmed));
+        let prev_blank = spaced.last().is_some_and(|prev: &String| prev.trim().is_empty());
+        if (is_heading || is_list) && idx > 0 && !prev_blank {
+            spaced.push(String::new());
+        }
+        spaced.push(line.text.clone());
+        let next_is_list_or_heading = lines.get(idx + 1).map(|next| {
+            let t = next.text.trim();
+            next.structural
+                && (t.starts_with("## ") || t.starts_with("- ") || t.starts_with("* ") || is_ordered_list_item(t))
+        });
+        if (is_heading || is_list) && next_is_list_or_heading == Some(false) {
+            if let Some(next) = lines.get(idx + 1)
+                && !next.text.trim().is_empty()
+            {
+                spaced.push(String::new());
+            }
+        }
+    }
+
+    spaced.join("\n").trim().to_string()
+}
+
+fn is_fence_delimiter(line: &str) -> bool {
+    vtcode_commons::formatting::is_markdown_fence_delimiter(line)
+}
+
+fn is_ordered_list_item(trimmed: &str) -> bool {
+    let mut chars = trimmed.chars();
+    let mut saw_digit = false;
+    for ch in chars.by_ref() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+        } else {
+            break;
+        }
+    }
+    if !saw_digit {
+        return false;
+    }
+    let rest: String = trimmed.chars().skip_while(|c| c.is_ascii_digit()).collect();
+    rest.starts_with(". ") || rest.starts_with(") ")
+}
+
+/// Width of the ordered marker (`1. ` -> 3, `10. ` -> 4) so nested bullets
+/// align under the item content instead of a fixed 3-space guess.
+fn ordered_marker_width(trimmed: &str) -> usize {
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits + 2
+}
+
+/// Split `1. Action -> files: […] -> verify: […]` at metadata boundaries
+/// outside inline-code spans. Returns head + metadata parts; `None` when no
+/// ` -> files:` / ` -> verify:` marker exists outside backticks.
+fn split_ordered_step_metadata(trimmed: &str) -> Option<Vec<String>> {
+    let mut splits = Vec::new();
+    let mut inline_ticks: Option<usize> = None;
+    let mut cursor = 0;
+    while cursor < trimmed.len() {
+        let remainder = &trimmed[cursor..];
+        if remainder.starts_with('`') {
+            let run = remainder.bytes().take_while(|byte| *byte == b'`').count();
+            if inline_ticks.is_some_and(|ticks| ticks == run) {
+                inline_ticks = None;
+            } else if inline_ticks.is_none() {
+                inline_ticks = Some(run);
+            }
+            cursor += run;
+            continue;
+        }
+        if inline_ticks.is_none() && (remainder.starts_with(" -> files:") || remainder.starts_with(" -> verify:")) {
+            splits.push(cursor);
+            cursor += " -> ".len();
+            continue;
+        }
+        let character = remainder.chars().next().expect("cursor is on a character boundary");
+        cursor += character.len_utf8();
+    }
+    if splits.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::with_capacity(splits.len() + 1);
+    let mut start = 0;
+    for split in splits {
+        parts.push(trimmed[start..split].to_string());
+        start = split + " -> ".len();
+    }
+    parts.push(trimmed[start..].to_string());
+    Some(parts)
+}
+
 fn find_next_open_tag(text: &str) -> Option<(usize, PlanTag)> {
     [PlanTag::Proposed, PlanTag::Alternate]
         .into_iter()
@@ -283,7 +698,7 @@ fn safe_char_boundary(text: &str, idx: usize) -> usize {
 mod tests {
     use super::{
         ProposedPlanStreamParser, extract_any_plan, extract_proposed_plan, has_exactly_one_proposed_plan_block,
-        has_unclosed_plan_block, strip_plan_persistence_policy_line,
+        has_unclosed_plan_block, prepare_plan_markdown_for_display, strip_plan_persistence_policy_line,
     };
 
     #[test]
@@ -402,5 +817,84 @@ mod tests {
         assert!(!has_exactly_one_proposed_plan_block("<proposed_plan>\n- Missing close"));
         assert!(!has_exactly_one_proposed_plan_block("<proposed_plan>\n- A\n</proposed_plan>\n</proposed_plan>"));
         assert!(!has_exactly_one_proposed_plan_block("</proposed_plan>\n<proposed_plan>\n- A\n"));
+    }
+
+    #[test]
+    fn display_preparation_strips_plan_wrappers_and_preserves_structure() {
+        let raw = "<proposed_plan>\nSummary: Fix scrolling.\n\n1. Locate modal -> files: [src/modal.rs] -> verify: [cargo check]\n\nTest Cases and Validation:\n\n• Down reaches the final item.\n\nAssumptions and Defaults:\n\n• Paths are stale.\n</proposed_plan>";
+        let (display, warnings) = prepare_plan_markdown_for_display(raw);
+        assert!(!display.contains("<proposed_plan>"));
+        assert!(!display.contains("</proposed_plan>"));
+        assert!(display.contains("## Summary"));
+        assert!(display.contains("## Test Cases and Validation"));
+        assert!(display.contains("## Assumptions and Defaults"));
+        assert!(display.contains("- Down reaches the final item."));
+        assert!(display.contains("1. Locate modal"));
+        // Long steps are split so metadata renders as nested bullets instead
+        // of one unwrapped wall of text (Sep-04 screenshot).
+        assert!(display.contains("- files: [src/modal.rs]"));
+        assert!(display.contains("- verify: [cargo check]"));
+        assert!(warnings.is_empty(), "well-formed plan should not warn: {warnings:?}");
+    }
+
+    #[test]
+    fn display_preparation_splits_screenshot_style_long_steps() {
+        let raw = "<proposed_plan>\nSummary: The approved /config scrolling fix could not be implemented.\n\n1. Locate the actual /config list-modal implementation -> files: [src/a.rs, crates/b.rs] -> verify: [rg -n \"x\" src]\n\nTest Cases and Validation:\n\n• Down reaches the final item.\n\nAssumptions and Defaults:\n\n• Paths are stale.\n</proposed_plan>";
+        let (display, warnings) = prepare_plan_markdown_for_display(raw);
+        assert!(!display.contains("<proposed_plan>"));
+        assert!(display.contains("## Summary"));
+        assert!(display.contains("1. Locate the actual /config list-modal implementation"));
+        assert!(display.contains("- files: [src/a.rs, crates/b.rs]"));
+        assert!(display.contains("- verify:"));
+        assert!(display.contains("## Test Cases and Validation"));
+        assert!(display.contains("- Down reaches the final item."));
+        assert!(warnings.is_empty(), "well-formed plan should not warn: {warnings:?}");
+    }
+
+    #[test]
+    fn display_preparation_warns_on_unclosed_and_empty_plans() {
+        let (partial, warnings) = prepare_plan_markdown_for_display("<proposed_plan>\n- Step 1");
+        assert!(partial.contains("- Step 1"));
+        assert!(warnings.iter().any(|w| w.contains("closing tag")));
+
+        let (empty, warnings) = prepare_plan_markdown_for_display("<proposed_plan>\n   \n</proposed_plan>");
+        assert!(empty.is_empty());
+        assert!(!warnings.is_empty());
+
+        let (blank, warnings) = prepare_plan_markdown_for_display("   ");
+        assert!(blank.is_empty());
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn display_preparation_preserves_fenced_code() {
+        let raw = "<proposed_plan>\n## Summary\n```text\n• literal\nSummary:\n```\n</proposed_plan>";
+        let (display, warnings) = prepare_plan_markdown_for_display(raw);
+
+        assert!(warnings.is_empty(), "well-formed plan should not warn: {warnings:?}");
+        assert!(display.contains("```text\n• literal\nSummary:\n```"));
+    }
+
+    #[test]
+    fn display_preparation_does_not_treat_fenced_plan_tags_as_wrappers() {
+        let raw = "<proposed_plan>\n```text\n<proposed_plan>\nliteral\n</proposed_plan>\n```\n</proposed_plan>";
+        let (display, warnings) = prepare_plan_markdown_for_display(raw);
+
+        assert!(warnings.is_empty(), "well-formed plan should not warn: {warnings:?}");
+        assert!(display.contains("<proposed_plan>\nliteral\n</proposed_plan>"));
+
+        let code_only = "```text\n<plan>\nliteral\n</plan>\n```";
+        let (display, warnings) = prepare_plan_markdown_for_display(code_only);
+        assert!(warnings.is_empty(), "code-only markdown should not warn: {warnings:?}");
+        assert_eq!(display, code_only);
+    }
+
+    #[test]
+    fn display_preparation_preserves_inline_plan_tags() {
+        let code_only = "Use `<plan>` and `<proposed_plan>` as literal wrapper names.";
+        let (display, warnings) = prepare_plan_markdown_for_display(code_only);
+
+        assert!(warnings.is_empty(), "inline code should not be treated as plan markup: {warnings:?}");
+        assert_eq!(display, code_only);
     }
 }

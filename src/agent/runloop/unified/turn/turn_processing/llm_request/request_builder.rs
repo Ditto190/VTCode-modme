@@ -31,7 +31,7 @@ use super::metrics::{
 };
 use super::prompt_assembly::{PromptAssemblyInput, assemble_prompt, render_primary_agent_runtime_context};
 use super::response_chain::{prepare_responses_request_history, prepend_request_context_message};
-use super::snapshot::{TurnRequestSnapshot, resolve_effective_reasoning_effort};
+use super::snapshot::TurnRequestSnapshot;
 use super::tool_shaping::{client_local_wire_tools, uses_out_of_band_copilot_tools};
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 
@@ -131,13 +131,30 @@ pub(super) async fn build_turn_request(
     let mut prompt_output = assemble_prompt(ctx, PromptAssemblyInput { turn: turn_snapshot }).await?;
 
     let sampling_overrides = ctx.provider_client.sampling_overrides(request_model);
-    let reasoning_effort = if turn_snapshot.capabilities.reasoning_effort && !turn_snapshot.tool_free_recovery {
+    let reasoning_effort = if !turn_snapshot.tool_free_recovery {
         sampling_overrides
             .reasoning_effort
-            .or_else(|| resolve_effective_reasoning_effort(ctx.vt_cfg, turn_snapshot))
+            .or(turn_snapshot.active_primary_agent.reasoning_effort)
+            .or_else(|| ctx.vt_cfg.map(|cfg| cfg.agent.reasoning_effort))
     } else {
         None
     };
+    let reasoning_effort = reasoning_effort
+        .and_then(|requested| {
+            vtcode_core::llm::reasoning_effort::ReasoningEffortMapper::resolve_or_omit(
+                ctx.provider_client.as_ref(),
+                request_model,
+                requested,
+                ctx.vt_cfg.is_some_and(|cfg| cfg.agent.allow_reasoning_effort_downgrade),
+            )
+        })
+        .map(|mapping| {
+            if mapping.degraded() {
+                tracing::warn!(requested = %mapping.requested, effective = %mapping.effective,
+                model = request_model, "Harness reasoning effort explicitly downgraded");
+            }
+            mapping.effective
+        });
     let reasoning_active = reasoning_effort
         .is_some_and(|effort| !matches!(effort, ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown));
     let primary_agent_context = render_primary_agent_runtime_context(
@@ -211,6 +228,13 @@ pub(super) async fn build_turn_request(
     };
     let few_shot_context = prompt_output.few_shot_context.take();
     let assembled_prefix_hash = stable_system_prefix_hash(&prompt_output.system_prompt);
+    let capability_prefix_hash = vtcode_core::core::agent::hash_utils::PromptCapabilityIdentity::resolve(
+        ctx.provider_client.as_ref(),
+        request_model,
+        reasoning_effort,
+        prompt_output.tool_snapshot.epoch,
+    )
+    .prefix_hash(assembled_prefix_hash);
     let envelope_mode = format!(
         "planning={};full_auto={};tool_free={};request_user_input={}",
         turn_snapshot.planning_active,
@@ -225,7 +249,7 @@ pub(super) async fn build_turn_request(
         prompt_output.system_prompt,
         selected_tools,
         assembled_prefix_hash,
-        assembled_prefix_hash,
+        capability_prefix_hash,
     );
     let ordered_wire_tools = request_envelope.ordered_tools();
     let ordered_wire_tool_names: Vec<String> =
@@ -339,7 +363,7 @@ pub(super) async fn build_turn_request(
         metadata,
         context_management,
         previous_response_id,
-        prompt_cache_key,
+        prompt_cache_key: prompt_cache_key.map(|key| format!("{key}-{stable_prefix_hash:016x}")),
         prompt_cache_profile: ctx.session_stats.prompt_cache_profile(),
         tool_catalog_hash,
         system_prompt_prefix_hash: Some(stable_prefix_hash),

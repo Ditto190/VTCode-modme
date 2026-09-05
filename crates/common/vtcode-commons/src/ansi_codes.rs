@@ -447,6 +447,18 @@ pub const DEVICE_ATTRIBUTES_REQUEST: &str = "\x1b[c";
 pub const CURSOR_POSITION_REQUEST: &str = "\x1b[6n";
 /// Device Status Report — request terminal status
 pub const DEVICE_STATUS_REQUEST: &str = "\x1b[5n";
+/// Contour VT extension — query the terminal's color-scheme mode (`CSI ? 996 n`).
+/// Supported terminals answer with a color-scheme report ([`COLOR_SCHEME_REPORT_PREFIX`]).
+pub const COLOR_SCHEME_MODE_REQUEST: &str = "\x1b[?996n";
+/// Contour VT extension — color-scheme report (`CSI ? 997 ; Ps n`), where
+/// `Ps` 1 means dark mode and `Ps` 2 means light mode.
+pub const COLOR_SCHEME_REPORT_PREFIX: &str = "\x1b[?997;";
+/// Contour VT extension — enable unsolicited color-scheme reports
+/// (`CSI ? 2031 h`); the terminal then emits [`COLOR_SCHEME_REPORT_PREFIX`]
+/// DSRs whenever its palette changes.
+pub const COLOR_SCHEME_REPORTS_ENABLE: &str = "\x1b[?2031h";
+/// Contour VT extension — disable unsolicited color-scheme reports (`CSI ? 2031 l`).
+pub const COLOR_SCHEME_REPORTS_DISABLE: &str = "\x1b[?2031l";
 
 // === OSC Sequences (Operating System Commands) ===
 /// Set window title — OSC 2 ; Pt BEL

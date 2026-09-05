@@ -305,7 +305,7 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaZaiGlm52));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 21);
+    assert_eq!(merge_gateway_models.len(), 22);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt55));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini37Flash));
@@ -315,6 +315,7 @@ fn test_models_for_provider() {
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekV4Pro0813));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt56Terra));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayMetaMuseSpark13));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt6Astra));
 
     let openrouter_models = ModelId::models_for_provider(Provider::OpenRouter);
     assert!(openrouter_models.contains(&ModelId::OpenRouterOpenAIGpt5));
@@ -617,7 +618,21 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::MergeGatewayGoogleGemini36Flash
             | ModelId::MergeGatewayGoogleGemini37Flash
             | ModelId::MergeGatewayGoogleGemini38Flash
-            | ModelId::MergeGatewayMetaMuseSpark13 => continue,
+            | ModelId::MergeGatewayMetaMuseSpark13
+            | ModelId::MergeGatewayOpenAIGpt6Astra => continue,
+            // Vercel AI Gateway reuses `vendor/model` ids that overlap with
+            // OpenRouter/Merge Gateway; bare parsing preserves the existing
+            // precedence and explicit provider configuration selects Vercel.
+            ModelId::VercelAnthropicClaudeSonnet5
+            | ModelId::VercelAnthropicClaudeOpus5
+            | ModelId::VercelOpenAiGpt6Astra
+            | ModelId::VercelOpenAiGpt56Sol
+            | ModelId::VercelOpenAiGpt56Luna
+            | ModelId::VercelGoogleGemini38Flash
+            | ModelId::VercelDeepseekV4Pro
+            | ModelId::VercelDeepseekV4Flash
+            | ModelId::VercelMoonshotaiKimiK3
+            | ModelId::VercelMoonshotaiKimiK27Code => continue,
             _ => ModelId::from_str(&model.as_str()),
         };
         assert_eq!(parsed.unwrap(), model);

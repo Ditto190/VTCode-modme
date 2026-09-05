@@ -51,17 +51,55 @@ fn show_overlay(
     items: Vec<InlineListItem>,
     selected: Option<InlineListSelection>,
 ) {
+    show_overlay_with_hint(session, title, lines, items, selected, None);
+}
+
+fn show_overlay_with_hint(
+    session: &mut Session,
+    title: &str,
+    lines: Vec<&str>,
+    items: Vec<InlineListItem>,
+    selected: Option<InlineListSelection>,
+    footer_hint: Option<&str>,
+) {
     session.handle_command(InlineCommand::ShowOverlay {
         request: Box::new(OverlayRequest::List(ListOverlayRequest {
             title: title.to_string(),
             lines: lines.into_iter().map(|s| s.to_string()).collect(),
-            footer_hint: None,
+            footer_hint: footer_hint.map(str::to_string),
             items,
             selected,
             search: None,
             hotkeys: Vec::new(),
         })),
     });
+}
+
+fn show_list_modal_with_hint(
+    session: &mut AppSession,
+    title: &str,
+    lines: Vec<&str>,
+    items: Vec<InlineListItem>,
+    footer_hint: Option<&str>,
+) {
+    session.handle_command(app_types::InlineCommand::ShowTransient {
+        request: Box::new(app_types::TransientRequest::List(app_types::ListOverlayRequest {
+            title: title.to_string(),
+            lines: lines.into_iter().map(|s| s.to_string()).collect(),
+            footer_hint: footer_hint.map(str::to_string),
+            items,
+            selected: None,
+            search: None,
+            hotkeys: Vec::new(),
+        })),
+    });
+}
+
+fn modal_selection(session: &Session) -> Option<InlineListSelection> {
+    session
+        .modal_state()
+        .and_then(|modal| modal.list.as_ref())
+        .and_then(|list| list.current_selection())
 }
 
 #[test]
@@ -417,5 +455,218 @@ fn render_always_reserves_input_status_row() {
     assert!(
         session.input_height >= base_input_height + ui::INLINE_INPUT_STATUS_HEIGHT,
         "input should always reserve persistent status row"
+    );
+}
+
+#[test]
+fn modal_click_on_summary_row_keeps_selection() {
+    let mut session = Session::new(InlineTheme::default(), None, 30);
+    show_overlay_with_hint(
+        &mut session,
+        "Pick one",
+        vec!["Choose an option"],
+        vec![
+            make_list_item("First", "first"),
+            make_list_item("Second", "second"),
+            make_list_item("Third", "third"),
+        ],
+        None,
+        Some("footer hint"),
+    );
+
+    let info_rows = session
+        .modal_state()
+        .and_then(|modal| {
+            modal
+                .list
+                .as_ref()
+                .map(|list| list.summary_line_rows(modal.footer_hint.as_deref()))
+        })
+        .unwrap_or(0);
+    assert_eq!(info_rows, 1, "footer hint should render one summary row above the list");
+
+    let _terminal = render_session_to_terminal_app(&mut session, 30);
+    let area = session
+        .modal_list_area()
+        .expect("modal list area should be published after render");
+    assert_eq!(
+        modal_selection(&session),
+        Some(InlineListSelection::SlashCommand("first".to_string())),
+        "initial selection should be the first item"
+    );
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    // The summary row is not an item: clicking it must neither move selection
+    // nor submit (previously it submitted the already-selected first item).
+    left_click_session(&mut session, &tx, area.x + 2, area.y, KeyModifiers::NONE);
+
+    assert!(session.has_active_overlay(), "clicking the summary row must not submit and close the modal");
+    assert_eq!(
+        modal_selection(&session),
+        Some(InlineListSelection::SlashCommand("first".to_string())),
+        "clicking the summary row must not move selection"
+    );
+}
+
+#[test]
+fn modal_click_on_item_blank_row_maps_to_owning_item() {
+    let mut session = Session::new(InlineTheme::default(), None, 30);
+    show_overlay_with_hint(
+        &mut session,
+        "Pick one",
+        vec!["Choose an option"],
+        vec![
+            make_list_item("First", "first"),
+            make_list_item("Second", "second"),
+            make_list_item("Third", "third"),
+        ],
+        None,
+        Some("footer hint"),
+    );
+
+    let _terminal = render_session_to_terminal_app(&mut session, 30);
+    let area = session
+        .modal_list_area()
+        .expect("modal list area should be published after render");
+
+    // Layout is [summary, item0 title, item0 pad, item1 title, ...]: the blank
+    // padding row belongs to the first item, so clicking it re-clicks the
+    // already-selected first item and submits it (previously it selected the
+    // second item instead).
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    left_click_session(&mut session, &tx, area.x + 2, area.y + 2, KeyModifiers::NONE);
+
+    assert!(!session.has_active_overlay(), "clicking the selected item must submit and close the modal");
+    assert!(
+        matches!(
+            rx.try_recv(),
+            Ok(InlineEvent::Overlay(OverlayEvent::Submitted(OverlaySubmission::Selection(
+                InlineListSelection::SlashCommand(cmd)
+            )))) if cmd == "first"
+        ),
+        "clicking the first item padding row should submit the first item"
+    );
+}
+
+#[test]
+fn wizard_click_below_inline_editor_selects_correct_item() {
+    let mut session = Session::new(InlineTheme::default(), None, 30);
+    session.handle_command(InlineCommand::ShowOverlay {
+        request: Box::new(OverlayRequest::Wizard(WizardOverlayRequest {
+            title: "Question".to_string(),
+            steps: vec![WizardStep {
+                title: "Choose".to_string(),
+                question: "Pick one".to_string(),
+                items: vec![
+                    InlineListItem {
+                        title: "Other".to_string(),
+                        subtitle: None,
+                        badge: None,
+                        indent: 0,
+                        selection: Some(InlineListSelection::RequestUserInputAnswer {
+                            question_id: "q".to_string(),
+                            selected: Vec::new(),
+                            other: Some(String::new()),
+                        }),
+                        search_value: Some("other".to_string()),
+                    },
+                    make_list_item("Scope", "scope"),
+                    make_list_item("Priority", "priority"),
+                ],
+                completed: false,
+                answer: None,
+                allow_freeform: true,
+                freeform_label: Some("Other".to_string()),
+                freeform_placeholder: Some("Type here...".to_string()),
+                freeform_default: None,
+            }],
+            current_step: 0,
+            search: None,
+            mode: WizardModalMode::MultiStep,
+        })),
+    });
+
+    let _terminal = render_session_to_terminal_app(&mut session, 30);
+    let area = session
+        .modal_list_area()
+        .expect("modal list area should be published after render");
+
+    // The selected custom-note item renders an extra editor row, so the second
+    // item starts two rows lower than a plain row-count would suggest. Clicking
+    // its title row must select it (previously the stale height mapped here to
+    // the third item).
+    let (tx, _rx) = mpsc::unbounded_channel();
+    left_click_session(&mut session, &tx, area.x + 2, area.y + 4, KeyModifiers::NONE);
+
+    assert!(session.has_active_overlay(), "selecting a new item must keep the wizard open");
+    let wizard = session.wizard_overlay().expect("wizard should stay open");
+    let step = wizard.steps.get(wizard.current_step).expect("current step should exist");
+    assert_eq!(
+        step.list.list_state.selected(),
+        Some(1),
+        "clicking the second item row should select the second item"
+    );
+    assert_eq!(
+        step.list.current_selection(),
+        Some(InlineListSelection::SlashCommand("scope".to_string())),
+        "clicking the second item row should select Scope, not Priority"
+    );
+}
+
+#[test]
+fn queued_help_modal_does_not_clobber_active_list_modal() {
+    let mut session = Session::new(InlineTheme::default(), None, 30);
+    show_overlay(
+        &mut session,
+        "Pick one",
+        vec!["Choose an option"],
+        vec![make_list_item("First", "first"), make_list_item("Second", "second")],
+        None,
+    );
+
+    session.show_help_modal();
+
+    // The visible overlay must still be the list modal, not help.
+    let modal = session.modal_state().expect("list modal should stay active");
+    assert!(!modal.is_help_modal, "queued help must not flag the active list modal");
+    assert!(modal.list.is_some(), "active overlay should still be the list modal");
+
+    session.handle_command(InlineCommand::CloseOverlay);
+
+    // The queued help modal activates with the help flag carried on the request.
+    let modal = session.modal_state().expect("queued help modal should activate after close");
+    assert!(modal.is_help_modal, "queued help request should render as help when activated");
+    assert!(modal.list.is_none(), "help modal should not carry the previous list");
+}
+
+#[test]
+fn app_modal_click_on_summary_row_keeps_selection() {
+    let mut session = AppSession::new(InlineTheme::default(), None, 30);
+    show_list_modal_with_hint(
+        &mut session,
+        "Pick one",
+        vec!["Choose an option"],
+        vec![make_list_item("First", "first"), make_list_item("Second", "second")],
+        Some("footer hint"),
+    );
+
+    let _terminal = render_session_to_terminal(&mut session, 30);
+    let area = session
+        .core
+        .modal_list_area()
+        .expect("modal list area should be published after render");
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    left_click_app_session(&mut session, &tx, area.x + 2, area.y, KeyModifiers::NONE);
+
+    assert!(session.has_active_overlay(), "clicking the summary row must not submit and close the modal");
+    let selection = session
+        .modal_state()
+        .and_then(|modal| modal.list.as_ref())
+        .and_then(|list| list.current_selection());
+    assert_eq!(
+        selection,
+        Some(InlineListSelection::SlashCommand("first".to_string())),
+        "clicking the summary row must not move selection"
     );
 }

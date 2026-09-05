@@ -17,15 +17,15 @@ use super::provider_config::{
     MergeGatewayProviderConfig, MetaProviderConfig, MiMoProviderConfig, MinimaxProviderConfig, MistralProviderConfig,
     MoonshotProviderConfig, NvidiaProviderConfig, OllamaCloudProviderConfig, OllamaProviderConfig,
     OpenAIProviderConfig, OpenCodeGoProviderConfig, OpenCodeZenProviderConfig, OpenResponsesProviderConfig,
-    OpenRouterProviderConfig, PoolsideProviderConfig, QwenProviderConfig, StepFunProviderConfig, XAIProviderConfig,
-    ZAIProviderConfig,
+    OpenRouterProviderConfig, PoolsideProviderConfig, QwenProviderConfig, StepFunProviderConfig, VercelProviderConfig,
+    XAIProviderConfig, ZAIProviderConfig,
 };
 use super::providers::{
     AnthropicProvider, CopilotProvider, DeepSeekProvider, EvolinkProvider, GeminiProvider, HuggingFaceProvider,
     LlamaCppProvider, LmStudioProvider, MergeGatewayProvider, MetaProvider, MiMoProvider, MinimaxProvider,
     MistralProvider, MoonshotProvider, NvidiaProvider, OllamaProvider, OpenCodeGoProvider, OpenCodeZenProvider,
-    OpenResponsesProvider, OpenRouterProvider, PoolsideProvider, QwenProvider, StepFunProvider, XAIProvider,
-    ZAIProvider,
+    OpenResponsesProvider, OpenRouterProvider, PoolsideProvider, QwenProvider, StepFunProvider, VercelProvider,
+    XAIProvider, ZAIProvider,
 };
 use vtcode_commons::cgp::{ComponentProvider, HasComponent};
 use vtcode_config::TimeoutsConfig;
@@ -267,6 +267,7 @@ impl_standard_provider_constructor!(
     XAIProvider,
     NvidiaProvider,
     MergeGatewayProvider,
+    VercelProvider,
 );
 
 crate::delegate_components!(GeminiProviderConfig {
@@ -377,6 +378,10 @@ crate::delegate_components!(MergeGatewayProviderConfig {
     ProviderMetadataComponent => MergeGatewayProviderConfig,
     ProviderBuildComponent => StandardProviderBuild<MergeGatewayProvider>,
 });
+crate::delegate_components!(VercelProviderConfig {
+    ProviderMetadataComponent => VercelProviderConfig,
+    ProviderBuildComponent => StandardProviderBuild<VercelProvider>,
+});
 
 /// Register all built-in provider contexts into the runtime factory.
 pub fn register_builtin_cgp_providers(factory: &mut LLMFactory) {
@@ -407,6 +412,7 @@ pub fn register_builtin_cgp_providers(factory: &mut LLMFactory) {
     factory.register_cgp_provider::<XAIProviderConfig>();
     factory.register_cgp_provider::<NvidiaProviderConfig>();
     factory.register_cgp_provider::<MergeGatewayProviderConfig>();
+    factory.register_cgp_provider::<VercelProviderConfig>();
 }
 
 #[cfg(test)]
@@ -525,6 +531,7 @@ mod tests {
                 "poolside",
                 "qwen",
                 "stepfun",
+                "vercel",
                 "xai",
                 "zai",
             ]

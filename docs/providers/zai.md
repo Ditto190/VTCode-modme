@@ -61,17 +61,17 @@ Add a content block with `type: image_url` to `messages[].content[]` and pass an
 
 From [Z.AI GLM-5.3 Flash guide](https://docs.z.ai/guides/vlm/glm-5.3-flash):
 
--   `temperature: 1`, `top_p: 0.95`, `reasoning_effort: max` (VT Code maps `max` → `xhigh`)
+-   `temperature: 1`, `top_p: 0.95`, `reasoning_effort: max` (VT Code sends native `max`; `xhigh` is accepted as an alias for `max`)
 -   `thinking.type` only supports `enabled` (thinking cannot be disabled); we recommend `thinking.clear_thinking: false`
 -   For streaming, enable both `stream: true` and `tool_stream: true` (VT Code does this by default)
 
-In VT Code, reasoning effort for Flash is exposed as:
+In VT Code, reasoning effort for GLM models is exposed as:
 
 | Effort | Notes |
 | --- | --- |
-| `medium` | Balanced |
+| `low` | Fast, light reasoning |
 | `high` | Deep thinking |
-| `xhigh` | Max reasoning (recommended for Flash per Z.AI) |
+| `max` | Maximum deep reasoning (provider default, recommended for Flash) |
 
 Set via `vtcode.toml` or the `/model` picker:
 
@@ -79,7 +79,7 @@ Set via `vtcode.toml` or the `/model` picker:
 [agent]
 provider = "zai"
 default_model = "glm-5.3-flash"
-reasoning_effort = "xhigh"
+reasoning_effort = "max"
 ```
 
 ## Curated models

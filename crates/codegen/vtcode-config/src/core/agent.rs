@@ -96,6 +96,9 @@ pub struct AgentConfig {
     /// Applies to: Claude, GPT-5 family, Gemini, Qwen3, DeepSeek with reasoning capability
     #[serde(default = "default_reasoning_effort")]
     pub reasoning_effort: ReasoningEffortLevel,
+    /// Permit a lower supported effort with an explicit harness diagnostic.
+    #[serde(default)]
+    pub allow_reasoning_effort_downgrade: bool,
 
     /// Verbosity level for output text (low, medium, high)
     /// Applies to: GPT-5.4-family Responses workflows and other models that support verbosity control
@@ -436,10 +439,9 @@ pub struct AgentHarnessConfig {
     pub auto_compaction_enabled: bool,
     /// Optional absolute compaction threshold (tokens) for native and local compaction.
     ///
-    /// When set, this overrides the session budget but remains capped by the
-    /// provider's hard context capacity. When unset, VT Code derives a 90%
-    /// trigger from the smaller of the provider capacity and
-    /// `context.max_context_tokens`.
+    /// When set, this may lower the trigger but cannot bypass the resolved
+    /// model capacity or `context.max_context_tokens` safety ceiling.
+    /// The next response budget is reserved before deriving the trigger.
     #[serde(default)]
     pub auto_compaction_threshold_tokens: Option<u64>,
     /// Optional custom instructions for the compaction summarization prompt.
@@ -965,6 +967,7 @@ impl Default for AgentConfig {
             max_conversation_turns: default_max_conversation_turns(),
             idle_turn_limit: default_idle_turn_limit(),
             reasoning_effort: default_reasoning_effort(),
+            allow_reasoning_effort_downgrade: false,
             verbosity: default_verbosity(),
             temperature: default_temperature(),
             refine_temperature: default_refine_temperature(),

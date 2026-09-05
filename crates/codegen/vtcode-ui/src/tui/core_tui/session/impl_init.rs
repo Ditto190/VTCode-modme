@@ -85,6 +85,7 @@ impl Session {
             styles: SessionStyles::new(theme.clone()),
             theme,
             appearance,
+            auto_color_scheme: false,
             header_context: InlineHeaderContext::default(),
             labels: MessageLabels::default(),
 
@@ -156,6 +157,7 @@ impl Session {
             last_overlay_list_was_last: false,
             header_rows: initial_header_rows,
             line_revision_counter: 0,
+            transcript_presentation_revision: 0,
             first_dirty_line: None,
             in_tool_code_fence: false,
 

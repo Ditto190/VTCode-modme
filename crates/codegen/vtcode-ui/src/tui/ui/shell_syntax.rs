@@ -26,7 +26,8 @@ pub struct ShellLineStyles {
     /// Structural tokens (`|`, `;`, `&&`, redirections) — muted so command
     /// words and args carry the color hierarchy.
     pub separator: Arc<InlineTextStyle>,
-    /// Grouped `N commands` counts — subtle accent, one step below the verb.
+    /// Grouped `N commands` counts — bold accent matching the verb so the
+    /// collapsed row stays prominent instead of washing out.
     pub count: Arc<InlineTextStyle>,
 }
 
@@ -57,6 +58,10 @@ impl ShellLineStyles {
         ));
         let accent_bold = Arc::new(convert_style(primary | Effects::BOLD));
         let yellow = Arc::new(convert_style(AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Yellow)))));
+        // Args use the themed body color (opaque) instead of hardcoded dimmed
+        // white so paths/args stay legible on light themes; separators stay
+        // dimmed so command words keep the visual hierarchy.
+        let args = Arc::new(convert_style(pty_output));
 
         Self {
             output: Arc::clone(&output),
@@ -68,18 +73,14 @@ impl ShellLineStyles {
                     .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Green)))
                     .effects(Effects::BOLD),
             )),
-            args: Arc::new(convert_style(
-                AnsiStyle::new()
-                    .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::White)))
-                    .effects(Effects::DIMMED),
-            )),
+            args: Arc::clone(&args),
             keyword: magenta_bold,
             variable: Arc::clone(&yellow),
             string: yellow,
             option: Arc::new(convert_style(AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Red))))),
-            truncation: Arc::new(convert_style(pty_output)),
+            truncation: Arc::new(convert_style(pty_output | Effects::DIMMED)),
             separator: Arc::new(convert_style(pty_output | Effects::DIMMED)),
-            count: Arc::new(convert_style(primary | Effects::DIMMED)),
+            count: Arc::new(convert_style(primary | Effects::BOLD)),
         }
     }
 }
@@ -211,14 +212,39 @@ fn style_for_token<'a>(token: &'a str, expect_command: &mut bool, styles: &'a Sh
     Arc::clone(&styles.args)
 }
 
+/// Split trailing `;`/`&`/`|` runs off a whitespace-delimited token so
+/// attached separators (`-120;`, `'---';`) color as separators instead of
+/// inheriting the word's option/string style. Redirections (`2>/dev/null`,
+/// `2>&1`) end in word characters and are left intact.
+fn split_trailing_command_operators(token: &str) -> Vec<&str> {
+    let bytes = token.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && matches!(bytes[end - 1], b';' | b'&' | b'|') {
+        end -= 1;
+    }
+    if end == 0 || end == bytes.len() {
+        return vec![token];
+    }
+    vec![&token[..end], &token[end..]]
+}
+
 fn bash_segments(text: &str, styles: &ShellLineStyles, expect_command: bool) -> Vec<InlineSegment> {
     let mut segments = Vec::new();
     let mut command_expected = expect_command;
     for token in tokenize_preserve_whitespace(text) {
-        segments.push(InlineSegment {
-            text: token.to_string(),
-            style: style_for_token(token, &mut command_expected, styles),
-        });
+        if token.trim().is_empty() {
+            segments.push(InlineSegment {
+                text: token.to_string(),
+                style: Arc::clone(&styles.output),
+            });
+            continue;
+        }
+        for part in split_trailing_command_operators(token) {
+            segments.push(InlineSegment {
+                text: part.to_string(),
+                style: style_for_token(part, &mut command_expected, styles),
+            });
+        }
     }
     segments
 }
@@ -298,7 +324,8 @@ pub fn line_to_compact_segments(
     });
 
     if metadata.command_count > 1 {
-        // Grouped: subtle accent count for hierarchy — keeps •/Ran prominent.
+        // Grouped: bold accent count matches the verb so `Ran 4 commands`
+        // stays prominent instead of washing out.
         segments.push(InlineSegment {
             text: format!("{} commands", metadata.command_count),
             style: Arc::clone(&styles.count),
@@ -306,14 +333,9 @@ pub fn line_to_compact_segments(
     } else if let Some(cmd) = metadata.command.as_deref() {
         segments.extend(shell_syntax_segments(cmd, styles, true));
         if metadata.hidden_line_count > 0 {
-            let dim_style = Arc::new(InlineTextStyle {
-                color: None,
-                bg_color: None,
-                effects: Effects::DIMMED,
-            });
             segments.push(InlineSegment {
                 text: format!(" · … +{} lines", metadata.hidden_line_count),
-                style: dim_style,
+                style: Arc::clone(&styles.truncation),
             });
         }
     } else {
@@ -324,16 +346,14 @@ pub fn line_to_compact_segments(
     }
 
     if let Some(suffix) = metadata.suffix.as_deref().filter(|s| !s.is_empty()) {
-        let dim_style = Arc::new(InlineTextStyle {
-            color: None,
-            bg_color: None,
-            effects: Effects::DIMMED,
-        });
         segments.push(InlineSegment {
             text: " · ".to_string(),
-            style: Arc::clone(&dim_style),
+            style: Arc::clone(&styles.truncation),
         });
-        segments.push(InlineSegment { text: suffix.to_string(), style: dim_style });
+        segments.push(InlineSegment {
+            text: suffix.to_string(),
+            style: Arc::clone(&styles.truncation),
+        });
     }
 
     segments
@@ -375,5 +395,29 @@ mod tests {
         let text: String = segs.iter().map(|s| s.text.as_str()).collect();
         assert!(text.contains("4 commands"));
         assert!(text.contains("output retained"));
+    }
+
+    #[test]
+    fn grouped_count_stays_bold_instead_of_dimmed() {
+        let styles = ShellLineStyles::new();
+        assert!(styles.count.effects.contains(Effects::BOLD));
+        assert!(!styles.count.effects.contains(Effects::DIMMED));
+    }
+
+    #[test]
+    fn args_use_themed_body_color_for_light_theme_legibility() {
+        let styles = ShellLineStyles::new();
+        assert_eq!(styles.args.color, styles.output.color);
+    }
+
+    #[test]
+    fn attached_separator_splits_from_word_style() {
+        let styles = ShellLineStyles::new();
+        let segments = bash_segments("head -120; echo hi", &styles, true);
+        let option = segments.iter().find(|s| s.text == "-120").expect("option part");
+        let separator = segments.iter().find(|s| s.text == ";").expect("separator part");
+        assert_eq!(option.style.color, styles.option.color);
+        assert_eq!(separator.style.color, styles.separator.color);
+        assert!(separator.style.effects.contains(Effects::DIMMED));
     }
 }

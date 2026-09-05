@@ -10,6 +10,22 @@ fn is_thinking_model(model: &str) -> bool {
     model.contains("kimi-k3") || model.contains("k2-thinking") || model.contains("kimi-k2-thinking")
 }
 
+/// Map portable effort levels onto Kimi K3's native `low` / `high` / `max` scale.
+fn kimi_k3_effort_value(effort: vtcode_config::types::ReasoningEffortLevel) -> Option<&'static str> {
+    match effort {
+        vtcode_config::types::ReasoningEffortLevel::None | vtcode_config::types::ReasoningEffortLevel::Unknown => None,
+        vtcode_config::types::ReasoningEffortLevel::Minimal | vtcode_config::types::ReasoningEffortLevel::Low => {
+            Some("low")
+        }
+        vtcode_config::types::ReasoningEffortLevel::Medium | vtcode_config::types::ReasoningEffortLevel::High => {
+            Some("high")
+        }
+        vtcode_config::types::ReasoningEffortLevel::XHigh | vtcode_config::types::ReasoningEffortLevel::Max => {
+            Some("max")
+        }
+    }
+}
+
 impl OpenAiCompatSpec for MoonshotSpec {
     const NAME: &'static str = "Moonshot";
     const KEY: &'static str = "moonshot";
@@ -36,11 +52,13 @@ impl OpenAiCompatSpec for MoonshotSpec {
         request: &LLMRequest,
         payload: &mut Map<String, Value>,
     ) -> Result<(), LLMError> {
-        // Add reasoning_effort for Kimi K2 Thinking model
+        // Kimi K3 accepts only `low`, `high`, and `max`. Kimi K2.7 Code omits
+        // effort fields (always-on native thinking).
         if let Some(effort) = request.reasoning_effort
             && is_thinking_model(&request.model)
+            && let Some(value) = kimi_k3_effort_value(effort)
         {
-            payload.insert("reasoning_effort".to_string(), Value::String(effort.as_str().to_string()));
+            payload.insert("reasoning_effort".to_string(), Value::String(value.to_string()));
         }
         Ok(())
     }
@@ -118,6 +136,29 @@ mod tests {
 
         let mut request = base_request("kimi-k2.7");
         request.reasoning_effort = Some(ReasoningEffortLevel::Low);
+        let payload = provider().core.convert_request(&request).unwrap();
+        assert!(payload.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn kimi_k3_effort_maps_to_native_scale() {
+        for (effort, expected) in [
+            (ReasoningEffortLevel::Minimal, "low"),
+            (ReasoningEffortLevel::Low, "low"),
+            (ReasoningEffortLevel::Medium, "high"),
+            (ReasoningEffortLevel::High, "high"),
+            (ReasoningEffortLevel::XHigh, "max"),
+            (ReasoningEffortLevel::Max, "max"),
+        ] {
+            let mut request = base_request("kimi-k3");
+            request.reasoning_effort = Some(effort);
+            let payload = provider().core.convert_request(&request).unwrap();
+            assert_eq!(payload["reasoning_effort"], expected);
+        }
+
+        // Kimi K2.7 Code always uses native thinking; effort fields are omitted.
+        let mut request = base_request("kimi-k2.7-code");
+        request.reasoning_effort = Some(ReasoningEffortLevel::Max);
         let payload = provider().core.convert_request(&request).unwrap();
         assert!(payload.get("reasoning_effort").is_none());
     }

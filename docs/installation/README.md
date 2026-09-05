@@ -99,6 +99,7 @@ vtcode
 -   **xAI** (XAI_API_KEY)
 -   **DeepSeek** (DEEPSEEK_API_KEY)
 -   **OpenRouter** (OPENROUTER_API_KEY)
+-   **Vercel AI Gateway** (AI_GATEWAY_API_KEY; see [Vercel AI Gateway Provider](../providers/vercel-ai-gateway.md))
 -   **Ollama** (local, no API key)
 -   **LM Studio** (local, no API key by default)
 

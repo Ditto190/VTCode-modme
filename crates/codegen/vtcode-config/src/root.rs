@@ -407,7 +407,7 @@ pub struct UiConfig {
     pub safe_colors_only: bool,
 
     /// Color scheme mode for automatic light/dark theme switching.
-    /// - "auto": Detect from terminal (via OSC 11 or COLORFGBG env var)
+    /// - "auto": Detect from terminal (via the Contour dark/light query where supported, else OSC 11, or the COLORFGBG env var) and follow live palette changes
     /// - "light": Force light mode theme selection
     /// - "dark": Force dark mode theme selection
     #[serde(default = "default_color_scheme_mode")]

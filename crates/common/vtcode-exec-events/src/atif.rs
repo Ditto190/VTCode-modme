@@ -744,13 +744,13 @@ mod tests {
         let inv_event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "tool_1".to_string(),
-                details: ThreadItemDetails::ToolInvocation(ToolInvocationItem {
+                details: ThreadItemDetails::ToolInvocation(Box::new(ToolInvocationItem {
                     tool_name: "read_file".to_string(),
                     arguments: Some(serde_json::json!({"path": "README.md"})),
                     tool_call_id: Some("tc_0".to_string()),
                     status: ToolCallStatus::Completed,
                     outcome: None,
-                }),
+                })),
             },
         });
         builder.process_event_at(&inv_event, ts);
@@ -759,14 +759,14 @@ mod tests {
         let out_event = ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "tool_1:output".to_string(),
-                details: ThreadItemDetails::ToolOutput(ToolOutputItem {
+                details: ThreadItemDetails::ToolOutput(Box::new(ToolOutputItem {
                     call_id: "tool_1".to_string(),
                     tool_call_id: Some("tc_0".to_string()),
                     spool_path: None,
                     output: "file contents here".to_string(),
                     exit_code: Some(0),
                     status: ToolCallStatus::Completed,
-                }),
+                })),
             },
         });
         builder.process_event_at(&out_event, ts);
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn compact_boundary_with_segment_metadata_preserves_atif_export() {
         let mut builder = AtifTrajectoryBuilder::new(AtifAgent::vtcode());
-        let event = ThreadEvent::ThreadCompactBoundary(ThreadCompactBoundaryEvent {
+        let event = ThreadEvent::ThreadCompactBoundary(Box::new(ThreadCompactBoundaryEvent {
             thread_id: "thread-1".to_string(),
             trigger: CompactionTrigger::Auto,
             mode: CompactionMode::Local,
@@ -854,7 +854,7 @@ mod tests {
             new_prefix_hash: Some("prefix-after".to_string()),
             previous_catalog_hash: Some("catalog-before".to_string()),
             new_catalog_hash: Some("catalog-after".to_string()),
-        });
+        }));
 
         builder.process_event_at(&event, fixed_ts());
         let trajectory = builder.finish(None);

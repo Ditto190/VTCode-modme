@@ -60,12 +60,12 @@ pub(crate) async fn emit_plan_ready_events(
     };
     let _ = emitter.emit(ThreadEvent::ItemStarted(ItemStartedEvent { item: start_item }));
 
-    let _ = emitter.emit(ThreadEvent::PlanDelta(PlanDeltaEvent {
+    let _ = emitter.emit(ThreadEvent::PlanDelta(Box::new(PlanDeltaEvent {
         thread_id: thread_id.to_owned(),
         turn_id: turn_id.to_owned(),
         item_id: item_id.clone(),
         delta: plan_text.to_owned(),
-    }));
+    })));
 
     let completed_item = ThreadItem {
         id: item_id,

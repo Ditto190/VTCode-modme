@@ -24,19 +24,19 @@
 - [Overview](#overview)
 - [Why VT Code](#why-vt-code)
 - [Quick start](#quick-start)
-  - [1. Install](#1-install)
-  - [2. Configure](#2-configure)
-  - [3. Run](#3-run)
-  - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
+    - [1. Install](#1-install)
+    - [2. Configure](#2-configure)
+    - [3. Run](#3-run)
+    - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
 - [Documentation](#documentation)
 - [Providers](#providers)
 - [Development](#development)
 - [Contributing](#contributing)
-  - [Ways to contribute](#ways-to-contribute)
-  - [Getting started](#getting-started)
-  - [Contributors](#contributors)
+    - [Ways to contribute](#ways-to-contribute)
+    - [Getting started](#getting-started)
+    - [Contributors](#contributors)
 - [Support](#support)
-  - [Sponsorship](#sponsorship)
+    - [Sponsorship](#sponsorship)
 - [License](#license)
 
 </details>
@@ -75,7 +75,7 @@ the terminal.
 | Podcast companion                                                                                                                                                            | Video companion                                                                                                                                                            |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <a href="https://www.youtube.com/watch?v=XLoswcd5rH0"><img src="https://img.youtube.com/vi/XLoswcd5rH0/maxresdefault.jpg" alt="VT Code podcast companion" width="400" /></a> | <a href="https://www.youtube.com/watch?v=PvL_kPjgU6o"><img src="https://img.youtube.com/vi/PvL_kPjgU6o/maxresdefault.jpg" alt="VT Code video companion" width="400" /></a> |
-| [Watch the podcast](https://www.youtube.com/watch?v=XLoswcd5rH0)                                                                                                             | [Watch the video](https://www.youtube.com/watch?v=PvL_kPjgU6o)                                                                                                             |
+| [Watch the podcast](https://www.youtube.com/watch?v=XLoswcd5rH0)                                                                                                             | [Watch the video](https://youtu.be/6ZVLAb1-QAQ?si=rHr3O44qg5-PmISQ)                                                                                                        |
 
 ## Why VT Code
 
@@ -87,7 +87,7 @@ the terminal.
 | **Observable by design**   | A canonical `ThreadEvent` runtime contract supports replay, archives, checkpoints, memory views, and trajectory export.                       |
 | **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without core forks.                            |
 | **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, full automation, and cost guardrails scale autonomy safely.          |
-| **Runs anywhere**          | 30 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                     |
+| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                     |
 
 ## Quick start
 
@@ -153,9 +153,10 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 
 ## Providers
 
-30 built-in providers, custom OpenAI-compatible endpoints, and local backends.
-[Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
-for credentials and model defaults.
+31 built-in providers — including multi-model gateways like OpenRouter,
+Merge Gateway, and Vercel AI Gateway — custom OpenAI-compatible endpoints, and
+local backends. [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the
+source of truth for credentials and model defaults.
 
 ```bash
 vtcode models list

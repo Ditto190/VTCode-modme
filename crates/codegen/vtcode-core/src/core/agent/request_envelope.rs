@@ -100,6 +100,13 @@ impl SessionRequestEnvelope {
         self.prefix_hash
     }
 
+    /// Include the resolved capability digest without changing frozen prompt bytes.
+    #[must_use]
+    pub fn with_capability_digest(mut self, digest: u64) -> Self {
+        self.prefix_hash = hash_value(&(self.prefix_hash, digest));
+        self
+    }
+
     #[must_use]
     pub fn catalog_hash(&self) -> Option<u64> {
         self.catalog_hash

@@ -73,6 +73,8 @@ pub enum Provider {
     NVIDIA,
     /// Merge Gateway multi-provider routing gateway
     MergeGateway,
+    /// Vercel AI Gateway multi-provider routing gateway
+    Vercel,
 }
 
 impl Provider {
@@ -105,6 +107,7 @@ impl Provider {
             Provider::XAI => "XAI_API_KEY",
             Provider::NVIDIA => "NVIDIA_API_KEY",
             Provider::MergeGateway => "MERGE_GATEWAY_API_KEY",
+            Provider::Vercel => "AI_GATEWAY_API_KEY",
         }
     }
 
@@ -137,6 +140,7 @@ impl Provider {
             Provider::XAI,
             Provider::NVIDIA,
             Provider::MergeGateway,
+            Provider::Vercel,
         ]
     }
 
@@ -169,6 +173,7 @@ impl Provider {
             Provider::XAI => "xAI",
             Provider::NVIDIA => "NVIDIA",
             Provider::MergeGateway => "Merge Gateway",
+            Provider::Vercel => "Vercel AI Gateway",
         }
     }
 
@@ -227,6 +232,7 @@ impl Provider {
             Provider::XAI => Some("https://docs.x.ai"),
             Provider::NVIDIA => Some("https://build.nvidia.com"),
             Provider::MergeGateway => Some("https://dashboard.merge.dev"),
+            Provider::Vercel => Some("https://vercel.com/docs/ai-gateway/getting-started"),
         }
     }
 }
@@ -260,6 +266,7 @@ impl fmt::Display for Provider {
             Provider::XAI => write!(f, "xai"),
             Provider::NVIDIA => write!(f, "nvidia"),
             Provider::MergeGateway => write!(f, "merge-gateway"),
+            Provider::Vercel => write!(f, "vercel"),
         }
     }
 }
@@ -293,6 +300,7 @@ impl AsRef<str> for Provider {
             Provider::XAI => "xai",
             Provider::NVIDIA => "nvidia",
             Provider::MergeGateway => "merge-gateway",
+            Provider::Vercel => "vercel",
         }
     }
 }
@@ -328,6 +336,7 @@ impl FromStr for Provider {
             "xai" => Ok(Provider::XAI),
             "nvidia" | "nvidia-nim" => Ok(Provider::NVIDIA),
             "merge-gateway" | "merge_gateway" | "mergegateway" => Ok(Provider::MergeGateway),
+            "vercel" | "vercel-ai-gateway" | "ai-gateway" => Ok(Provider::Vercel),
             _ => Err(ProviderParseError::InvalidProvider(s.to_string())),
         }
     }

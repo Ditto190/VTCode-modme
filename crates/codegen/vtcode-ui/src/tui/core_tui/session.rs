@@ -213,6 +213,9 @@ pub struct Session {
     pub(crate) theme: InlineTheme,
     pub(crate) styles: SessionStyles,
     pub(crate) appearance: AppearanceConfig,
+    /// Follow live terminal light/dark reports (Contour `CSI ? 997` DSR) and
+    /// switch themes automatically. Opt-in via `SetColorSchemeAuto`.
+    pub(crate) auto_color_scheme: bool,
     header_context: InlineHeaderContext,
     pub(crate) header_rows: u16,
     pub(crate) labels: MessageLabels,
@@ -290,6 +293,7 @@ pub struct Session {
     last_overlay_list_selection: Option<InlineListSelection>,
     last_overlay_list_was_last: bool,
     line_revision_counter: u64,
+    pub(crate) transcript_presentation_revision: u64,
     /// Track the first line that needs reflow/update to avoid O(N) scans
     first_dirty_line: Option<usize>,
     in_tool_code_fence: bool,

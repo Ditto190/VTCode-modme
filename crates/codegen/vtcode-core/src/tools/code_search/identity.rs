@@ -1,7 +1,37 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::tools::code_search::CodeSearchRequest;
 use vtcode_commons::canonicalize;
+
+/// Lexically normalize a search path without erasing leading `..` components.
+///
+/// The shared path helper intentionally clamps a relative path at an empty
+/// buffer, which is useful for some workspace display paths but would make an
+/// escaping `../target` search collide with an in-workspace `target` cache
+/// entry. Preserve unresolved parents so replay identity remains fail-closed.
+pub fn normalised_path(path: &str) -> String {
+    let mut normalised = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::ParentDir => {
+                if matches!(normalised.components().next_back(), Some(Component::Normal(_))) {
+                    normalised.pop();
+                } else if !normalised.has_root() {
+                    normalised.push("..");
+                }
+            }
+            Component::CurDir => {}
+            Component::Prefix(prefix) => normalised.push(prefix.as_os_str()),
+            Component::RootDir => normalised.push(component.as_os_str()),
+            Component::Normal(part) => normalised.push(part),
+        }
+    }
+    if normalised.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        normalised.to_string_lossy().into_owned()
+    }
+}
 
 fn normalised_identity_value(args: &serde_json::Value, include_max_results: bool) -> Option<serde_json::Value> {
     let request = serde_json::from_value::<CodeSearchRequest>(args.clone()).ok()?;
@@ -9,7 +39,7 @@ fn normalised_identity_value(args: &serde_json::Value, include_max_results: bool
     normalised.filters.file_types.sort_unstable();
     let mut identity = serde_json::json!({
         "query": normalised.query,
-        "path": normalised.filters.path,
+        "path": normalised_path(normalised.filters.path.as_str()),
         "file_types": normalised.filters.file_types,
         "result_types": normalised.filters.result_types,
     });

@@ -364,6 +364,15 @@ async fn handle_failure<'a>(
             let display_tool = tool_action_label(tool_name, args_val);
             let recovery_active = t_ctx.ctx.is_recovery_active();
             let blocked_total = t_ctx.ctx.harness_state.blocked_tool_calls;
+            // Captured before arming/breaking so `finalize_turn` can populate
+            // the `TurnBlockedEvent` fields instead of `None`/zeros.
+            let telemetry = crate::agent::runloop::unified::run_loop_context::BlockedToolRecoveryTelemetry {
+                last_tool: display_tool.to_string(),
+                consecutive_cap: limits.consecutive_cap,
+                total_cap: limits.total_cap,
+                blocked_streak: streak,
+                blocked_total,
+            };
             let (block_reason, _) = super::handlers::blocked_tool_call_messages_detailed(
                 fuse_trip,
                 recovery_active,
@@ -374,9 +383,10 @@ async fn handle_failure<'a>(
             );
             emit_turn_metric_log(t_ctx.ctx, fuse_trip.metric(), tool_name, streak, fuse_trip.cap());
             if !recovery_active {
-                t_ctx.ctx.harness_state.arm_blocked_tool_recovery(block_reason);
+                t_ctx.ctx.harness_state.arm_blocked_tool_recovery(block_reason, telemetry);
                 return Ok(Some(TurnHandlerOutcome::Continue));
             }
+            t_ctx.ctx.harness_state.record_blocked_tool_recovery_telemetry(telemetry);
             t_ctx.ctx.push_system_message(block_reason.clone());
             return Ok(Some(TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(block_reason) })));
         }

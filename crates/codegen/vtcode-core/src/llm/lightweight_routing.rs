@@ -367,6 +367,7 @@ fn known_provider_from_name(provider_name: &str) -> Option<Provider> {
         "evolink" => Some(Provider::Evolink),
         "nvidia" | "nvidia-nim" => Some(Provider::NVIDIA),
         "merge-gateway" | "merge_gateway" | "mergegateway" => Some(Provider::MergeGateway),
+        "vercel" | "vercel-ai-gateway" | "ai-gateway" => Some(Provider::Vercel),
         _ => None,
     }
 }

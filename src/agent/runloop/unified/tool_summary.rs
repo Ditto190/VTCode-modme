@@ -536,38 +536,64 @@ fn split_command_and_args(text: &str) -> (&str, &str) {
 
 fn build_tool_summary(action_label: &str, headline: &str) -> String {
     let normalized = headline.trim().trim_start_matches("MCP ");
-    if action_label == "Run command" {
+    let action = action_label.trim().trim_start_matches("MCP ");
+    if action == "Run command" {
         if normalized.is_empty() {
             return "Ran command".to_string();
         }
         return format!("Ran {normalized}");
     }
     if normalized.is_empty() {
-        return action_label.to_string();
+        return action.to_string();
     }
-    if normalized == action_label {
+    if normalized == action {
         return normalized.to_string();
     }
-    if normalized.starts_with(action_label) {
+    if normalized.starts_with(action) {
         return normalized.to_string();
     }
     if let Some(stripped) = normalized.strip_prefix("Use ")
-        && same_words_ignoring_case(stripped, action_label)
+        && same_words_ignoring_case(stripped, action)
     {
-        return action_label.to_string();
+        return action.to_string();
     }
-    format!("{action_label} {normalized}")
+    // Symmetric case: a generic "Use X" action label must never prefix a
+    // canonical headline (e.g. action "Use Code search" vs headline
+    // "Search code for …"). Prefer the specific headline when it opens with
+    // the same word bag as the action's.
+    if let Some(stripped_action) = action.strip_prefix("Use ")
+        && (headline_starts_with_word_bag(normalized, stripped_action) || normalized.starts_with(stripped_action))
+    {
+        return normalized.to_string();
+    }
+    format!("{action} {normalized}")
+}
+
+/// Whether `headline` opens with the same word bag as `action_phrase`
+/// (case-insensitive, order-insensitive), so a generic "Use Code search"
+/// label collapses against "Search code for …". Delegates to
+/// [`same_words_ignoring_case`] so there is one bag-compare implementation.
+fn headline_starts_with_word_bag(headline: &str, action_phrase: &str) -> bool {
+    let width = action_phrase.split_whitespace().count();
+    if width == 0 {
+        return false;
+    }
+    let head = headline.split_whitespace().take(width).collect::<Vec<_>>().join(" ");
+    same_words_ignoring_case(&head, action_phrase)
 }
 
 /// Case- and word-order-insensitive equality for short display phrases, so a
 /// headline like "Use Code search" still collapses against the label
 /// "Search code" instead of concatenating into "Search code Use Code search".
 fn same_words_ignoring_case(a: &str, b: &str) -> bool {
-    let mut left: Vec<&str> = a.split_whitespace().collect();
-    let mut right: Vec<&str> = b.split_whitespace().collect();
-    left.sort_unstable_by_key(|word| word.to_ascii_lowercase());
-    right.sort_unstable_by_key(|word| word.to_ascii_lowercase());
-    left.len() == right.len() && left.iter().zip(right.iter()).all(|(l, r)| l.eq_ignore_ascii_case(r))
+    let mut left: Vec<String> = a.split_whitespace().map(|word| word.to_ascii_lowercase()).collect();
+    let mut right: Vec<String> = b.split_whitespace().map(|word| word.to_ascii_lowercase()).collect();
+    if left.len() != right.len() {
+        return false;
+    }
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
 }
 
 fn run_summary_is_placeholder(summary: &str) -> bool {
@@ -775,6 +801,18 @@ mod tests {
             build_tool_summary("Search code", "Use Code search workspace"),
             "Search code Use Code search workspace"
         );
+    }
+
+    #[test]
+    fn build_tool_summary_prefers_headline_over_generic_use_action() {
+        // A generic "Use X" action label must never prefix a canonical
+        // headline: prefer "Search code for …" over
+        // "Use Code search Search code for …".
+        assert_eq!(
+            build_tool_summary("Use Code search", "Search code for core agent loop"),
+            "Search code for core agent loop"
+        );
+        assert_eq!(build_tool_summary("Use Code search", "Search code"), "Search code");
     }
 
     #[test]

@@ -98,11 +98,11 @@ fn render_markdown_lines_for_modal(text: &str, width: usize, style: Style) -> Ve
 
 #[derive(Clone, Debug)]
 pub struct ModalInlineEditor {
-    item_index: usize,
-    label: String,
-    text: String,
-    placeholder: Option<String>,
-    active: bool,
+    pub(crate) item_index: usize,
+    pub(crate) label: String,
+    pub(crate) text: String,
+    pub(crate) placeholder: Option<String>,
+    pub(crate) active: bool,
 }
 
 #[derive(Default)]
@@ -113,7 +113,7 @@ pub(crate) struct ModalRenderOutcome {
 }
 
 impl ModalRenderOutcome {
-    fn push_text_area(&mut self, area: Rect) {
+    pub(crate) fn push_text_area(&mut self, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
         }
@@ -301,7 +301,7 @@ pub fn render_wizard_tabs(
     frame.render_widget(tabs, area);
 }
 
-fn inline_editor_for_step(step: &WizardStepState) -> Option<ModalInlineEditor> {
+pub(crate) fn inline_editor_for_step(step: &WizardStepState) -> Option<ModalInlineEditor> {
     let selected_visible = step.list.list_state.selected()?;
     let item_index = *step.list.visible_indices.get(selected_visible)?;
     let item = step.list.items.get(item_index)?;
@@ -593,6 +593,12 @@ pub(crate) fn render_modal_body(
     }
     let show_list_divider = context.list.is_some() && context.search.is_some();
     if show_list_divider {
+        // The divider is spliced directly before the List chunk, so List must
+        // be the final section for the `chunk_idx` bookkeeping below to hold.
+        debug_assert!(
+            matches!(sections.last(), Some(ModalSection::List)),
+            "list divider assumes List is the final modal section"
+        );
         let insert_at = constraints.len().saturating_sub(1);
         constraints.insert(insert_at, Constraint::Length(1));
     }

@@ -174,6 +174,62 @@ And fix any issues you find.
 | Complex STEM problems   | 16384-32768        | 4D visualizations, physics simulations   |
 | Constraint optimization | 16384-32768        | Multi-variable planning with constraints |
 
+## Reasoning Effort `xhigh` and `max` Across Providers
+
+VT Code exposes a portable effort ladder (`none`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, `max`) via `agent.reasoning_effort`, `/effort`, and the
+`/model` picker. `xhigh` and `max` are only offered for models that natively
+support them; other models hide those levels instead of aliasing silently.
+
+| Provider / models | `xhigh` | `max` | Wire shape |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.6 family (`gpt-5.6`, `-sol`, `-terra`, `-luna`), `gpt-6-astra` | Native | Native (5.6+ only; `minimal` dropped on 5.6+) | `reasoning: { effort, summary: "auto" }` |
+| OpenAI GPT-5 Codex / 5.2 Codex, GPT-5.1-mini, `gpt-oss-*` | Codex only | Not supported | Same Responses shape |
+| Anthropic adaptive (`claude-sonnet-5`, `-fable-5`/`-5-1`, `-mythos-5`/`-5-1`, `claude-opus-5`, Opus 4.8/4.7) | Native (4.7+; 4.6 exposes `max` without `xhigh`) | Native | `thinking: { type: "adaptive" }` + `output_config: { effort }` |
+| xAI `grok-4.6+` | Native | Clamped to `xhigh` (no native `max`; older models treat `xhigh` as `high`) | `reasoning_effort` |
+| Meta Muse Spark 1.1–1.3 | Native | Aliased to `xhigh` (`max` ships after additional safety testing) | `reasoning_effort` |
+| DeepSeek V4 Pro / Flash | Alias to `high` | Native (`low` also native; `medium` maps to `high`) | `thinking: { type: "enabled" }` + `reasoning_effort` |
+| Moonshot Kimi K3 | Alias to `max` | Native (default; `minimal` maps to `low`, `medium`/`high` map to `high`) | Top-level `reasoning_effort` |
+| ZAI GLM-5.3 / 5.3-Flash / 5.2 | Alias to `max` (5.2) | Native (`low`/`high`/`max`; `medium` maps to `high`) | `thinking: { type: "enabled" }` + `reasoning_effort` |
+| Gemini 3.x, Ollama, LlamaCpp, StepFun/Evolink, HuggingFace, Mistral | Hidden (collapse to `high`) | Hidden (collapse to `high`) | `thinking_level` / omitted |
+
+### How to use
+
+```toml
+# vtcode.toml
+[agent]
+reasoning_effort = "xhigh"  # or "max" where natively supported
+```
+
+- `/effort xhigh` / `/effort max [--persist]` validates against the active
+  model's preset; unsupported levels are rejected with the supported list. A
+  configured effort the active route does not support (for example after
+  switching models) is omitted for that request with a warning instead of
+  failing the turn.
+- The `/model` picker only lists `xhigh`/`max` when the selected model
+  advertises them (`supports_xhigh/max_reasoning` + `builtin_model_presets`).
+- Harness config (`agent.harness`, `automation.full_auto`) intentionally has
+  no effort field: effort flows through the existing model configuration
+  (`agent.reasoning_effort`, per-subagent `reasoning_effort`,
+  `provider.anthropic.effort`) into every turn, including full-auto runs.
+
+### Limitations and considerations
+
+- `max` is uncapped and has the highest token cost and latency. Reserve it for
+  tasks where a wrong answer costs more than the extra inference spend; start
+  at `high`, step up to `xhigh`, then `max` only on measured headroom.
+- Anthropic at `xhigh`/`max`: set `max_tokens` to at least 64k so the model
+  has room to think across subagents and tool calls; sampling parameters are
+  rejected on Opus 4.7+.
+- DeepSeek thinking mode ignores `temperature`, `top_p`, `presence_penalty`,
+  and `frequency_penalty`; Kimi K3 fixes `temperature` to `1.0` and switching
+  effort mid-conversation invalidates prefix-cache hits.
+- `reasoning.mode: pro`, `reasoning.context`, and multi-agent `ultra` are
+  separate OpenAI axes and are not controlled by `xhigh`/`max`.
+- ZAI GLM models always reason; `none` disables thinking only where the
+  provider allows it, and preserved `reasoning_content` must round-trip
+  unmodified for multi-turn coherence.
+
 ## References
 
 - [Anthropic Extended Thinking Documentation](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)

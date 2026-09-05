@@ -374,7 +374,7 @@ mod tests {
         match part {
             ContentPart::Image { data, media_type } => {
                 assert_eq!(media_type, PNG_MEDIA_TYPE);
-                BASE64.decode(data).expect("image data should be base64")
+                BASE64.decode(data.as_bytes()).expect("image data should be base64")
             }
             ContentPart::Text { .. } => panic!("expected image content part"),
         }

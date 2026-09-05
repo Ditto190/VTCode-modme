@@ -296,6 +296,29 @@ pub fn truncate_byte_budget(text: &str, max_bytes: usize, suffix: &str) -> Strin
     format!("{}{suffix}", &text[..end])
 }
 
+/// Whether `line` opens or closes a fenced markdown code block.
+///
+/// Matches CommonMark-style ```` ``` ```` / `~~~` fences with up to three
+/// leading spaces. Shared so plan-markup stripping in the binary and markdown
+/// rendering in `vtcode-ui` cannot drift.
+///
+/// ```
+/// # use vtcode_commons::formatting::is_markdown_fence_delimiter;
+/// assert!(is_markdown_fence_delimiter("```text"));
+/// assert!(is_markdown_fence_delimiter("   ~~~"));
+/// assert!(!is_markdown_fence_delimiter("    ```"));
+/// assert!(!is_markdown_fence_delimiter("`inline`"));
+/// ```
+#[inline]
+pub fn is_markdown_fence_delimiter(line: &str) -> bool {
+    let indent = line.len() - line.trim_start().len();
+    if indent > 3 {
+        return false;
+    }
+    let trimmed = line.trim_start();
+    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
 /// Collapse consecutive whitespace into single spaces, trimming leading/trailing.
 ///
 /// ```

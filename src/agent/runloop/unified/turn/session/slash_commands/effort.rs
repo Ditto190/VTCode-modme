@@ -248,12 +248,10 @@ fn effort_description(level: ReasoningEffortLevel, model: &str) -> &'static str 
         ReasoningEffortLevel::Medium => "Balanced approach with standard implementation and testing",
         ReasoningEffortLevel::High => "Comprehensive implementation with extensive testing and documentation",
         ReasoningEffortLevel::XHigh if model == "claude-opus-5" => {
-            "Deeper reasoning than high, just below maximum (Opus 5 only)"
+            "Deeper reasoning than high, just below maximum (Opus 4.8/5 only)"
         }
-        ReasoningEffortLevel::XHigh => "Deeper reasoning for harder, longer-running problems",
-        ReasoningEffortLevel::Max => {
-            "Maximum adaptive effort for the most demanding tasks on supported Anthropic models"
-        }
+        ReasoningEffortLevel::XHigh => "Extra reasoning for the hardest long-running tasks",
+        ReasoningEffortLevel::Max => "Uncapped maximum reasoning; highest cost and latency",
     }
 }
 

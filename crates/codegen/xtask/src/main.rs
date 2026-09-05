@@ -87,7 +87,7 @@ fn package_release(args: PackageReleaseArgs) -> Result<(), Box<dyn std::error::E
     fs::create_dir_all(&stage_dir)?;
 
     // Keep the binary at archive root so the native updater can discover it.
-    fs::copy(workspace_root.join(&args.binary), stage_dir.join("vtcode"))?;
+    let _ = fs::copy(workspace_root.join(&args.binary), stage_dir.join("vtcode"))?;
 
     // Extra files in subdirectories for cargo-binstall and install.sh.
     fs::create_dir_all(stage_dir.join("man/man1"))?;
@@ -102,7 +102,9 @@ fn package_release(args: PackageReleaseArgs) -> Result<(), Box<dyn std::error::E
         Ok(()) => {}
         Err(e) => {
             eprintln!("warning: skipping shell completions: {e}");
-            let _ = fs::remove_dir_all(stage_dir.join("completions"));
+            if let Err(cleanup_err) = fs::remove_dir_all(stage_dir.join("completions")) {
+                eprintln!("warning: failed to clean up completions dir: {cleanup_err}");
+            }
         }
     }
 
@@ -189,9 +191,9 @@ fn create_archive(
     // Archive from stage_dir parent so entries have no directory prefix.
     // The native updater discovers the executable by its exact name.
     let mut cmd = Command::new("tar");
-    cmd.current_dir(out_dir).arg("-czf").arg(archive).arg("-C").arg(stage_dir);
+    let _ = cmd.current_dir(out_dir).arg("-czf").arg(archive).arg("-C").arg(stage_dir);
     for entry in &entries {
-        cmd.arg(entry);
+        let _ = cmd.arg(entry);
     }
 
     let status = cmd.status()?;
@@ -209,10 +211,13 @@ fn bump_version(args: BumpVersionArgs) -> Result<(), Box<dyn std::error::Error>>
     let content = fs::read_to_string(&cargo_toml_path)?;
     let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| format!("Failed to parse Cargo.toml: {e}"))?;
 
-    let current_str = doc["workspace"]["package"]["version"]
-        .as_str()
-        .ok_or("[workspace.package] version not found in root Cargo.toml")?
-        .to_string();
+    let current_str = doc
+        .get("workspace")
+        .and_then(|workspace| workspace.get("package"))
+        .and_then(|package| package.get("version"))
+        .and_then(|version| version.as_str())
+        .map(str::to_string)
+        .ok_or("[workspace.package] version not found in root Cargo.toml")?;
     let current = semver::Version::parse(&current_str)?;
 
     let new_version = match (args.bump, args.set) {
@@ -243,18 +248,28 @@ fn bump_version(args: BumpVersionArgs) -> Result<(), Box<dyn std::error::Error>>
     let new_str = new_version.to_string();
 
     // Update both version locations: [package].version and [workspace.package].version.
-    doc["workspace"]["package"]["version"] = toml_edit::value(&new_str);
-    doc["package"]["version"] = toml_edit::value(&new_str);
+    let workspace_package = doc
+        .get_mut("workspace")
+        .and_then(|item| item.as_table_like_mut())
+        .and_then(|workspace| workspace.get_mut("package"))
+        .and_then(|item| item.as_table_like_mut())
+        .ok_or("[workspace.package] table not found in root Cargo.toml")?;
+    let _ = workspace_package.insert("version", toml_edit::value(&new_str));
+    let package_table = doc
+        .get_mut("package")
+        .and_then(|item| item.as_table_like_mut())
+        .ok_or("[package] table not found in root Cargo.toml")?;
+    let _ = package_table.insert("version", toml_edit::value(&new_str));
 
     // Update hardcoded inter-crate version pins in the root [dependencies] section.
     // These use the pattern: vtcode-core = { path = "...", version = "0.123.7" }
-    if let Some(deps) = doc["dependencies"].as_table_like_mut() {
+    if let Some(deps) = doc.get_mut("dependencies").and_then(|item| item.as_table_like_mut()) {
         for (_dep_name, entry) in deps.iter_mut() {
             if let Some(dep_table) = entry.as_table_like_mut() {
                 let has_path = dep_table.get("path").and_then(|v| v.as_str()).is_some();
                 let ver = dep_table.get("version").and_then(|v| v.as_str());
                 if has_path && ver == Some(current_str.as_str()) {
-                    dep_table.insert("version", toml_edit::value(&new_str));
+                    let _ = dep_table.insert("version", toml_edit::value(&new_str));
                 }
             }
         }
@@ -280,14 +295,19 @@ fn check_versions_inner(workspace_root: &Path) -> Result<(), Box<dyn std::error:
     let content = fs::read_to_string(&root_cargo_toml)?;
     let doc: toml_edit::DocumentMut = content.parse()?;
 
-    let workspace_version_str = doc["workspace"]["package"]["version"]
-        .as_str()
+    let workspace_version_str = doc
+        .get("workspace")
+        .and_then(|workspace| workspace.get("package"))
+        .and_then(|package| package.get("version"))
+        .and_then(|version| version.as_str())
         .ok_or("[workspace.package] version not found in root Cargo.toml")?;
     let workspace_version = semver::Version::parse(workspace_version_str)?;
 
     // Collect member paths from [workspace].members.
-    let members: Vec<String> = doc["workspace"]["members"]
-        .as_array()
+    let members: Vec<String> = doc
+        .get("workspace")
+        .and_then(|workspace| workspace.get("members"))
+        .and_then(|members| members.as_array())
         .ok_or("[workspace].members not found in root Cargo.toml")?
         .iter()
         .filter_map(|v| v.as_str().map(String::from))

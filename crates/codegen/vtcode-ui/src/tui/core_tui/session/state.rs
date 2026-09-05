@@ -545,19 +545,26 @@ impl Session {
         lines: Vec<String>,
         secure_prompt: Option<super::super::types::SecurePromptConfig>,
     ) {
-        self.show_overlay(OverlayRequest::Modal(ModalOverlayRequest { title, lines, secure_prompt }));
+        self.show_overlay(OverlayRequest::Modal(ModalOverlayRequest {
+            title,
+            lines,
+            secure_prompt,
+            is_help_modal: false,
+        }));
     }
 
-    /// Show a help modal using the ratatui-cheese Help widget
+    /// Show a help modal using the ratatui-cheese Help widget.
+    ///
+    /// The help flag travels on the request so a queued help modal still
+    /// renders as help when it activates instead of clobbering the overlay
+    /// that is currently visible.
     pub(crate) fn show_help_modal(&mut self) {
         self.show_overlay(OverlayRequest::Modal(ModalOverlayRequest {
             title: "Keyboard Shortcuts".to_string(),
             lines: Vec::new(),
             secure_prompt: None,
+            is_help_modal: true,
         }));
-        if let Some(ActiveOverlay::Modal(state)) = self.active_overlay.as_mut() {
-            state.is_help_modal = true;
-        }
     }
 
     pub(crate) fn show_overlay(&mut self, request: OverlayRequest) {
@@ -647,9 +654,9 @@ impl Session {
             list: None,
             search: None,
             secure_prompt: request.secure_prompt,
+            is_help_modal: request.is_help_modal,
             restore_input: true,
             restore_cursor: true,
-            is_help_modal: false,
         };
         if state.secure_prompt.is_none() {
             self.input_enabled = false;
@@ -828,6 +835,7 @@ impl Session {
 
     /// Invalidate the transcript cache
     pub(crate) fn invalidate_transcript_cache(&mut self) {
+        self.transcript_presentation_revision = self.transcript_presentation_revision.wrapping_add(1);
         let had_cache = if let Some(cache) = self.transcript_cache.as_mut() {
             cache.invalidate_content();
             true

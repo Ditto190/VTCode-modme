@@ -1208,7 +1208,13 @@ async fn test_run_tool_call_reuses_streamed_invocation_item_without_duplicate_st
     let mut harness_state = build_harness_state();
     let tool_call_id = "call_streamed".to_string();
     let streamed_item_id = "streamed-tool-item".to_string();
-    harness_state.remember_streamed_tool_call_items([(tool_call_id.clone(), streamed_item_id.clone())]);
+    harness_state.remember_streamed_tool_call_items([(
+        tool_call_id.clone(),
+        crate::agent::runloop::unified::run_loop_context::StreamedToolCallItem {
+            item_id: streamed_item_id.clone(),
+            tool_name: tools::READ_FILE.to_string(),
+        },
+    )]);
     emitter
         .emit(crate::agent::runloop::unified::inline_events::harness::tool_started_event(
             streamed_item_id.clone(),

@@ -212,6 +212,9 @@ pub fn builtin_model_presets() -> Vec<ModelPreset> {
     // Evolink presets
     presets.extend(presets::evolink_presets());
 
+    // Vercel AI Gateway presets
+    presets.extend(presets::vercel_presets());
+
     presets
 }
 
@@ -244,6 +247,7 @@ pub fn presets_for_provider(provider: Provider) -> Vec<ModelPreset> {
         Provider::XAI => presets::xai_presets(),
         Provider::NVIDIA => presets::nvidia_presets(),
         Provider::MergeGateway => presets::merge_gateway_presets(),
+        Provider::Vercel => presets::vercel_presets(),
     }
 }
 
@@ -362,7 +366,7 @@ mod tests {
     #[test]
     fn merge_gateway_presets_expose_curated_routes_and_default() {
         let presets = presets::merge_gateway_presets();
-        assert_eq!(presets.len(), 21);
+        assert_eq!(presets.len(), 22);
         let default = presets
             .iter()
             .find(|preset| preset.is_default)

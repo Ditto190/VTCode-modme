@@ -528,7 +528,7 @@ fn append_text_segment(segment: &str, ctx: &mut MarkdownContext<'_>, style: Styl
 
     let matches = detect_file_link_matches(segment);
     if matches.is_empty() {
-        ctx.current_line.push_segment_with_link(style, segment, None);
+        ctx.current_line.push_segment_with_link(style, segment, None::<String>);
         return;
     }
 
@@ -537,7 +537,7 @@ fn append_text_segment(segment: &str, ctx: &mut MarkdownContext<'_>, style: Styl
     for link_match in matches {
         if link_match.start > cursor {
             ctx.current_line
-                .push_segment_with_link(style, &segment[cursor..link_match.start], None);
+                .push_segment_with_link(style, &segment[cursor..link_match.start], None::<String>);
         }
         if link_match.end > link_match.start {
             ctx.current_line.push_segment_with_link(
@@ -549,7 +549,8 @@ fn append_text_segment(segment: &str, ctx: &mut MarkdownContext<'_>, style: Styl
         cursor = link_match.end;
     }
     if cursor < segment.len() {
-        ctx.current_line.push_segment_with_link(style, &segment[cursor..], None);
+        ctx.current_line
+            .push_segment_with_link(style, &segment[cursor..], None::<String>);
     }
 }
 

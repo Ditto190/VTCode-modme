@@ -119,7 +119,7 @@ The AI provider that VT Code should use.
 
 ```toml
 [agent]
-provider = "anthropic"  # available: openai, anthropic, google, meta, deepseek, copilot, openrouter, mimo, huggingface, zai, moonshot, minimax, mistral, qwen, stepfun, evolink, poolside, xai, nvidia, merge-gateway, ollama, lmstudio, llamacpp
+provider = "anthropic"  # available: openai, anthropic, google, meta, deepseek, copilot, openrouter, vercel, mimo, huggingface, zai, moonshot, minimax, mistral, qwen, stepfun, evolink, poolside, xai, nvidia, merge-gateway, ollama, lmstudio, llamacpp
 default_model = "claude-sonnet-5"  # overrides the default model for the selected provider
 ```
 
@@ -171,6 +171,12 @@ env_key = "MERGE_GATEWAY_API_KEY"
 name = "Meta AI"
 base_url = "https://api.meta.ai/v1"
 env_key = "META_API_KEY"
+
+[agent.provider_settings.vercel]
+name = "Vercel AI Gateway"
+base_url = "https://ai-gateway.vercel.sh/v1"
+env_key = "AI_GATEWAY_API_KEY"
+# OpenAI Chat Completions compatible; override the endpoint with VERCEL_AI_GATEWAY_BASE_URL.
 ```
 
 Note this makes it possible to use VT Code with non-default models, so long as they are properly configured with the correct API endpoints and authentication.
@@ -1068,6 +1074,9 @@ META_API_KEY=your_meta_api_key
 # Meta's documentation also names MODEL_API_KEY as the credential variable.
 MODEL_API_KEY=your_meta_api_key
 OPENROUTER_API_KEY=your_openrouter_api_key
+AI_GATEWAY_API_KEY=your_vercel_ai_gateway_api_key
+# Optional Vercel AI Gateway endpoint override:
+# VERCEL_AI_GATEWAY_BASE_URL=https://ai-gateway.vercel.sh/v1
 MIMO_API_KEY=your_mimo_api_key
 EVOLINK_API_KEY=your_evolink_api_key
 STEPFUN_API_KEY=your_stepfun_api_key

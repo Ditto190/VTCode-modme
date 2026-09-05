@@ -39,6 +39,7 @@ use crate::agent::runloop::unified::extract_action_from_messages;
 #[cfg(test)]
 use crate::agent::runloop::unified::incremental_system_prompt::PromptCacheShapingMode;
 use crate::agent::runloop::unified::reasoning::resolve_reasoning_visibility;
+use crate::agent::runloop::unified::run_loop_context::StreamedToolCallItem;
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::LoopTracker;
 use crate::agent::runloop::unified::ui_interaction::{PlaceholderSpinner, StreamProgressEvent, StreamSpinnerOptions};
@@ -95,8 +96,11 @@ async fn run_standard_stream_attempt(
 }
 
 fn finish_streaming_bridge_success(ctx: &mut TurnProcessingContext<'_>, stream_bridge: &mut HarnessStreamingBridge) {
-    ctx.harness_state
-        .remember_streamed_tool_call_items(stream_bridge.take_streamed_tool_call_items());
+    let streamed_items = stream_bridge
+        .take_streamed_tool_call_items()
+        .into_iter()
+        .map(|(call_id, (item_id, tool_name))| (call_id, StreamedToolCallItem { item_id, tool_name }));
+    ctx.harness_state.remember_streamed_tool_call_items(streamed_items);
     stream_bridge.complete_open_items();
     if stream_bridge.assistant_output_observed() {
         ctx.harness_state.mark_streamed_response_event_emitted();
@@ -349,6 +353,7 @@ async fn execute_llm_request_with_options_impl(
                     ctx.skip_confirmations,
                     ctx.harness_emitter,
                     format!("{}-step-{}", ctx.harness_state.turn_id.0, step_count),
+                    Some(turn_snapshot.active_primary_agent.name().to_string()),
                 );
                 let exposed_tools = runtime_host.exposed_tools().to_vec();
 

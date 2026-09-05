@@ -34,7 +34,7 @@ use super::validation::{SafetyValidationFailure, validate_tool_call_with_limit_p
 use crate::agent::runloop::unified::planning_workflow::handle_start_planning;
 use vtcode_commons::canonicalize;
 
-fn resolve_harness_item_identity(tool_item_id: &str) -> (ToolInvocationId, String) {
+pub(crate) fn resolve_harness_item_identity(tool_item_id: &str) -> (ToolInvocationId, String) {
     match ToolInvocationId::parse(tool_item_id) {
         Ok(invocation_id) => (invocation_id, tool_item_id.to_string()),
         Err(_) => {
@@ -158,7 +158,10 @@ pub(crate) async fn run_tool_call_with_args(
     let name = canonical_name.as_deref().unwrap_or(requested_name);
 
     let harness_emitter = ctx.harness_emitter;
-    let streamed_harness_item_id = ctx.harness_state.take_streamed_tool_call_item_id(tool_call_id);
+    let streamed_harness_item_id = ctx
+        .harness_state
+        .take_streamed_tool_call_item_id(tool_call_id)
+        .map(|streamed| streamed.item_id);
     let mut tool_started_emitted = streamed_harness_item_id.is_some();
     let harness_item_id = streamed_harness_item_id.unwrap_or(fallback_harness_item_id);
     if !tool_started_emitted && let Some(emitter) = harness_emitter {
@@ -516,6 +519,9 @@ async fn check_tool_safety(
         name,
         args_val,
         invocation_id,
+        Some(ctx.harness_state),
+        ctx.harness_emitter,
+        ctx.agent_name.as_deref(),
     )
     .await
     {

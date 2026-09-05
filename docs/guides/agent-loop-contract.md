@@ -253,6 +253,17 @@ and directs the operator to resume after reducing context or switching models.
 Other blocked reasons use a generic retry handoff. Existing recovery text is
 reused when it was already published, so the assistant item is never duplicated.
 
+A lost verification result must not deadlock the anti-blind gate. While the
+checkpoint is pending, a verifier-level `Failure`/`Timeout` (for example, the
+exec session ended before the verifier's output was captured, reported by
+`write_stdin` as a missing session) grants the same bounded fix-up window as a
+genuine failed verifier and surfaces a "Verification result lost" directive; the
+gate still only clears on a successful standalone verifier re-run. The
+`turn.blocked` event also populates `last_tool`, `consecutive_cap`, and
+`total_cap` from the blocked-tool-call fuse when it tripped, and transcript
+block reasons are truncated (~600 chars) with a pointer to the handoff file,
+which retains the full reason.
+
 The fork/branch history builder (`build_summarized_fork_history`) deliberately
 omits the continuity tail and produces a minimal resume artifact (envelope +
 summary + retained users only).

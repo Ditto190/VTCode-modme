@@ -95,9 +95,11 @@ color_scheme_mode = "auto"
 
 VT Code can auto-detect terminal color scheme via:
 
-1. **COLORFGBG** environment variable (rxvt, xterm, many others)
-2. **TERM_PROGRAM** heuristics (iTerm2, Ghostty, Apple Terminal)
-3. **Default**: Dark (most common for development terminals)
+1. **Contour dark/light query** (`CSI ? 996 n`, answered explicitly by Contour, Ghostty 1.0+, Kitty 0.38.1+)
+2. **OSC 11** background-color query with luminance inference
+3. **COLORFGBG** environment variable (rxvt, xterm, many others)
+4. **TERM_PROGRAM** heuristics (iTerm2, Ghostty, Apple Terminal)
+5. **Default**: Dark (most common for development terminals)
 
 ```toml
 [ui]
@@ -110,6 +112,18 @@ color_scheme_mode = "auto"
 # Force dark mode (default behavior)
 # color_scheme_mode = "dark"
 ```
+
+### Following Live Palette Changes
+
+With `color_scheme_mode = "auto"` on unix, VT Code also subscribes to
+unsolicited dark/light reports (the Contour VT extension via `CSI ? 2031 h`),
+so the theme follows the terminal live — for example when the OS switches
+between light and dark mode, or when the terminal profile changes. The
+replacement theme prefers a light/dark twin from the same theme suite (e.g.
+`catppuccin-mocha` ⇄ `catppuccin-latte`) and falls back to the default
+suggestion otherwise. Automatic switching never rewrites your saved theme
+preference; `"light"` and `"dark"` disable following entirely. Terminals that
+do not support the extension simply never send reports.
 
 ## Bold-is-Bright Compatibility
 

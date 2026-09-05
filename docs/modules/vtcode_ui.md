@@ -49,7 +49,7 @@ pub use theme::*;
 ## Notes
 
 - Internal crate (`publish = false`) — not published to crates.io
-- Depends on `vtcode-commons` for `anstyle_utils` (gated behind `tui` feature)
+- Style bridging is centralized in `design/color.rs` + `design/style.rs` (crate-internal)
 - `crossterm` dependency enables `event-stream` and `osc52` features
 
 ## See Also

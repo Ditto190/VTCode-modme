@@ -31,7 +31,7 @@ use anyhow::anyhow;
 use serde_json::json;
 use vtcode_config::{builtin_primary_auto_agent, builtin_primary_build_agent};
 use vtcode_core::config::constants::tools as tool_names;
-use vtcode_core::exec::events::{ThreadEvent, ThreadItemDetails, VersionedThreadEvent};
+use vtcode_core::exec::events::{ThreadEvent, ThreadItemDetails, ToolCallStatus, VersionedThreadEvent};
 use vtcode_core::llm::provider as uni;
 use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_ui::tui::app::{
@@ -1790,6 +1790,161 @@ async fn blocked_recovery_does_not_duplicate_prior_harness_agent_message() {
         1
     );
     assert!(!events.iter().any(|event| matches!(event, ThreadEvent::TurnCompleted(_))));
+}
+
+#[tokio::test]
+async fn finalize_turn_blocked_event_populates_fuse_telemetry() {
+    use crate::agent::runloop::unified::run_loop_context::BlockedToolRecoveryTelemetry;
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let harness_path = backing.enable_harness_emitter();
+
+    let history = vec![uni::Message::user("resume the request".to_string())];
+    let blocked = TurnLoopResult::Blocked {
+        reason: Some("blocked tool-call limit reached".to_string()),
+    };
+    {
+        let mut context = backing.turn_loop_context();
+        context.harness_state.arm_blocked_tool_recovery(
+            "blocked tool-call limit reached",
+            BlockedToolRecoveryTelemetry {
+                last_tool: "exec_command 'cargo check'".to_string(),
+                consecutive_cap: 3,
+                total_cap: 6,
+                blocked_streak: 4,
+                blocked_total: 5,
+            },
+        );
+        finalize_turn(&mut context, &history, &blocked, &HarnessUsage::default()).await;
+    }
+
+    let harness = fs::read_to_string(harness_path).expect("read harness events");
+    let events = harness
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<VersionedThreadEvent>(line)
+                .expect("versioned harness event")
+                .into_event()
+        })
+        .collect::<Vec<_>>();
+    let blocked_events = events
+        .iter()
+        .filter_map(|event| match event {
+            ThreadEvent::TurnBlocked(blocked) => Some(blocked),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(blocked_events.len(), 1, "exactly one turn.blocked event");
+    let blocked_event = blocked_events[0];
+    assert_eq!(blocked_event.last_tool.as_deref(), Some("exec_command 'cargo check'"));
+    assert_eq!(blocked_event.consecutive_cap, 3);
+    assert_eq!(blocked_event.total_cap, 6);
+    assert_eq!(blocked_event.blocked_streak, 4);
+    assert_eq!(blocked_event.blocked_total, 5);
+}
+
+#[tokio::test]
+async fn finalize_turn_blocked_event_without_fuse_keeps_legacy_fields() {
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let harness_path = backing.enable_harness_emitter();
+
+    let history = vec![uni::Message::user("resume the request".to_string())];
+    let blocked = TurnLoopResult::Blocked {
+        reason: Some(PENDING_VERIFICATION_BLOCK_REASON.to_string()),
+    };
+    {
+        let mut context = backing.turn_loop_context();
+        context.harness_state.consecutive_blocked_tool_calls = 2;
+        context.harness_state.blocked_tool_calls = 7;
+        finalize_turn(&mut context, &history, &blocked, &HarnessUsage::default()).await;
+    }
+
+    let harness = fs::read_to_string(harness_path).expect("read harness events");
+    let events = harness
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<VersionedThreadEvent>(line)
+                .expect("versioned harness event")
+                .into_event()
+        })
+        .collect::<Vec<_>>();
+    let blocked_events = events
+        .iter()
+        .filter_map(|event| match event {
+            ThreadEvent::TurnBlocked(blocked) => Some(blocked),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(blocked_events.len(), 1, "exactly one turn.blocked event");
+    let blocked_event = blocked_events[0];
+    // Blocks that did not trip the fuse keep the live counters and the
+    // previous `None`/zero fields.
+    assert_eq!(blocked_event.last_tool, None);
+    assert_eq!(blocked_event.blocked_streak, 2);
+    assert_eq!(blocked_event.blocked_total, 7);
+    assert_eq!(blocked_event.consecutive_cap, 0);
+    assert_eq!(blocked_event.total_cap, 0);
+}
+
+#[tokio::test]
+async fn finalize_turn_closes_streamed_items_that_never_reached_the_pipeline() {
+    use crate::agent::runloop::unified::run_loop_context::StreamedToolCallItem;
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let harness_path = backing.enable_harness_emitter();
+
+    let history = vec![uni::Message::user("resume the request".to_string())];
+    let blocked = TurnLoopResult::Blocked {
+        reason: Some("blocked tool-call limit reached".to_string()),
+    };
+    {
+        let mut context = backing.turn_loop_context();
+        context.harness_state.remember_streamed_tool_call_items([(
+            "call_dangling".to_string(),
+            StreamedToolCallItem {
+                item_id: "turn-step-1-assistant-stream-1-tool-call-call_dangling".to_string(),
+                tool_name: "exec_command".to_string(),
+            },
+        )]);
+        finalize_turn(&mut context, &history, &blocked, &HarnessUsage::default()).await;
+    }
+
+    let harness = fs::read_to_string(harness_path).expect("read harness events");
+    let events = harness
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<VersionedThreadEvent>(line)
+                .expect("versioned harness event")
+                .into_event()
+        })
+        .collect::<Vec<_>>();
+
+    let mut invocation_closed = false;
+    let mut output_closed = false;
+    for event in &events {
+        let ThreadEvent::ItemCompleted(completed) = event else {
+            continue;
+        };
+        match &completed.item.details {
+            ThreadItemDetails::ToolInvocation(invocation) => {
+                assert_eq!(completed.item.id, "turn-step-1-assistant-stream-1-tool-call-call_dangling");
+                assert_eq!(invocation.tool_name, "exec_command");
+                assert_eq!(invocation.tool_call_id.as_deref(), Some("call_dangling"));
+                assert_eq!(invocation.status, ToolCallStatus::Failed);
+                invocation_closed = true;
+            }
+            ThreadItemDetails::ToolOutput(output) => {
+                assert_eq!(completed.item.id, "turn-step-1-assistant-stream-1-tool-call-call_dangling:output");
+                assert_eq!(output.tool_call_id.as_deref(), Some("call_dangling"));
+                assert_eq!(output.status, ToolCallStatus::Failed);
+                assert!(output.output.contains("ended when the turn finished"));
+                output_closed = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(invocation_closed, "dangling invocation must be closed with Failed status");
+    assert!(output_closed, "dangling invocation must get a terminal tool_output");
 }
 
 #[tokio::test]

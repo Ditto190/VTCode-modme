@@ -77,7 +77,16 @@ async fn runner_keeps_openai_requests_stateless_and_reuses_session_cache_key() {
     let requests = recorded.recorded_requests();
     assert!(requests.len() >= 2);
     assert_eq!(requests[0].previous_response_id, None);
-    assert_eq!(requests[0].prompt_cache_key.as_deref(), Some("vtcode:openai:thread-cache-lineage"));
+    // The key carries the session lineage plus the capability prefix hash
+    // suffix; both turns must share one stable key.
+    assert!(
+        requests[0]
+            .prompt_cache_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("vtcode:openai:thread-cache-lineage-")),
+        "unexpected cache key: {:?}",
+        requests[0].prompt_cache_key
+    );
     assert_eq!(requests[1].previous_response_id, None);
     assert!(requests[1].messages.starts_with(&requests[0].messages));
     assert_eq!(requests[1].prompt_cache_key, requests[0].prompt_cache_key);

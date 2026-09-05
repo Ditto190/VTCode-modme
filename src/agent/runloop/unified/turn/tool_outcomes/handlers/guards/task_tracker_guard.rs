@@ -34,6 +34,6 @@ pub(crate) fn enforce_duplicate_task_tracker_create_guard<'a>(
         "duplicate_task_tracker_create",
     )
     .to_string();
-    ctx.push_tool_response(tool_call_id, Some(canonical_tool_name), content);
+    ctx.push_rejected_tool_response(tool_call_id, Some(canonical_tool_name), Some(effective_args), content);
     Some(ValidationResult::Blocked)
 }

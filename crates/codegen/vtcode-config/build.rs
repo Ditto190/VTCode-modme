@@ -72,7 +72,7 @@ fn generate_placeholder_artifacts() {
     }
     if let Err(error) = fs::write(
         out_dir.join("model_capabilities.rs"),
-        "// Placeholder for docs.rs build\n#[derive(Clone, Copy)]\npub struct Pricing {\n    pub input: Option<f64>,\n    pub output: Option<f64>,\n    pub cache_read: Option<f64>,\n    pub cache_write: Option<f64>,\n}\n\n#[derive(Clone, Copy)]\npub struct Entry {\n    pub provider: &'static str,\n    pub id: &'static str,\n    pub display_name: &'static str,\n    pub description: &'static str,\n    pub context_window: usize,\n    pub max_output_tokens: Option<usize>,\n    pub reasoning: bool,\n    pub tool_call: bool,\n    pub vision: bool,\n    pub input_modalities: &'static [&'static str],\n    pub caching: bool,\n    pub structured_output: bool,\n    pub pricing: Pricing,\n}\n\npub const ENTRIES: &[Entry] = &[];\npub const PROVIDERS: &[&str] = &[];\n\npub fn metadata_for(_provider: &str, _id: &str) -> Option<Entry> { None }\npub fn models_for_provider(_provider: &str) -> Option<&'static [&'static str]> { None }\n",
+        "// Placeholder for docs.rs build\n#[derive(Clone, Copy)]\npub struct Pricing {\n    pub input: Option<f64>,\n    pub output: Option<f64>,\n    pub cache_read: Option<f64>,\n    pub cache_write: Option<f64>,\n}\n\n#[derive(Clone, Copy)]\npub struct Entry {\n    pub provider: &'static str,\n    pub id: &'static str,\n    pub display_name: &'static str,\n    pub description: &'static str,\n    pub context_window: usize,\n    pub max_output_tokens: Option<usize>,\n    pub reasoning_efforts: &'static [&'static str],\n    pub is_pro: bool,\n    pub lightweight_model: Option<&'static str>,\n    pub reasoning: bool,\n    pub tool_call: bool,\n    pub vision: bool,\n    pub input_modalities: &'static [&'static str],\n    pub caching: bool,\n    pub structured_output: bool,\n    pub pricing: Pricing,\n}\n\npub const ENTRIES: &[Entry] = &[];\npub const PROVIDERS: &[&str] = &[];\n\npub fn metadata_for(_provider: &str, _id: &str) -> Option<Entry> { None }\npub fn models_for_provider(_provider: &str) -> Option<&'static [&'static str]> { None }\n",
     ) {
         eprintln!("warning: failed to write capability metadata: {error}");
     }
@@ -296,6 +296,12 @@ struct CapabilityModelSpec {
     max_output_tokens: Option<usize>,
     #[serde(default)]
     reasoning: bool,
+    #[serde(default)]
+    reasoning_efforts: Vec<String>,
+    #[serde(default)]
+    is_pro: bool,
+    #[serde(default)]
+    lightweight_model: Option<String>,
     #[serde(default = "default_tool_call_true")]
     tool_call: bool,
     #[serde(default)]
@@ -342,6 +348,9 @@ struct CapabilityEntry {
     context_window: usize,
     max_output_tokens: Option<usize>,
     reasoning: bool,
+    reasoning_efforts: Vec<String>,
+    is_pro: bool,
+    lightweight_model: Option<String>,
     tool_call: bool,
     vision: bool,
     input_modalities: Vec<String>,
@@ -417,6 +426,9 @@ fn load_model_capability_entries(manifest_dir: &Path) -> Result<Vec<CapabilityEn
                 context_window: spec.context,
                 max_output_tokens: spec.max_output_tokens,
                 reasoning: spec.reasoning,
+                reasoning_efforts: spec.reasoning_efforts,
+                is_pro: spec.is_pro,
+                lightweight_model: spec.lightweight_model,
                 tool_call: spec.tool_call,
                 input_modalities: spec.modalities.input,
                 vision,

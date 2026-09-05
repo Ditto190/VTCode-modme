@@ -50,17 +50,24 @@ pub fn strip_ansi_bytes(input: &[u8]) -> Vec<u8>
 
 `crates/codegen/vtcode-core/src/utils/ansi_codes.rs` re-exports this shared implementation so downstream crates use one canonical source of escape sequences.
 
-### 3. ANSI Style Utilities (`crates/codegen/vtcode-core/src/utils/anstyle_utils.rs`)
+### 3. ANSI Style Bridging (`crates/codegen/vtcode-ui/src/design/`)
 
-**Purpose**: Convert ANSI styles to Ratatui styles for TUI rendering
+**Purpose**: Convert anstyle styles to Ratatui styles for TUI rendering
 
-**Key Functions**:
+**Key Functions** (crate-internal, `pub(crate)` — do not re-implement elsewhere):
 
 ```rust
-pub fn ansi_color_to_ratatui_color(color: &AnsiColorType) -> Color
-pub fn ansi_effects_to_ratatui_modifiers(effects: Effects) -> Modifier
-pub fn ansi_style_to_ratatui_style(style: AnsiStyle) -> Style
+// crates/codegen/vtcode-ui/src/design/color.rs
+pub(crate) fn anstyle_to_ratatui_color(color: AnstyleColor) -> Color
+// crates/codegen/vtcode-ui/src/design/style.rs
+pub(crate) fn anstyle_to_ratatui_style(style: AnstyleStyle) -> Style
 ```
+
+Thin wrappers over the same logic live in `tui/core_tui/style.rs`
+(`ratatui_color_from_ansi`, `ratatui_style_from_ansi`) and
+`tui/utils/diff_styles.rs`. The reverse direction
+(`ratatui -> anstyle`, lossy) is `ansi_from_ratatui_color` in
+`crates/codegen/vtcode-core/src/utils/ansi.rs`.
 
 **Color Support**:
 
@@ -198,7 +205,7 @@ BrightBlue=94    → Ratatui::LightBlue
 **256 Colors** (`ESC[38;5;{ID}m`):
 
 ```rust
-// Converted via ansi_color_to_ratatui_color()
+// Converted via anstyle_to_ratatui_color()
 // Supports full 256-color palette
 ```
 
@@ -236,14 +243,19 @@ let clean = strip_ansi(raw_output);
 
 ### 2. Converting ANSI to Ratatui Style
 
+Conversion is centralized in `vtcode-ui` (`design/color.rs` +
+`design/style.rs`, `pub(crate)`). Do not add new converters — delegate to
+the canonical functions:
+
 ```rust
-use vtcode_core::utils::anstyle_utils::ansi_style_to_ratatui_style;
-use anstyle::Style as AnsiStyle;
+// Inside vtcode-ui:
+use crate::design::color::anstyle_to_ratatui_color;
+use crate::design::style::anstyle_to_ratatui_style;
 
 let ansi_style = AnsiStyle::new()
     .fg_color(Some(AnsiColor::Red))
     .bold();
-let ratatui_style = ansi_style_to_ratatui_style(ansi_style);
+let ratatui_style = anstyle_to_ratatui_style(ansi_style);
 ```
 
 ### 3. Rendering Styled Text
@@ -282,13 +294,13 @@ fn test_strip_ansi_multiple() {
 
 ### Style Conversion Tests
 
-**Location**: `crates/codegen/vtcode-core/src/utils/anstyle_utils.rs`
+**Location**: `crates/codegen/vtcode-ui/src/design/color.rs` and `design/style.rs`
 
 ```rust
 #[test]
 fn test_ansi_color_conversion() {
     assert_eq!(
-        ansi_color_to_ratatui_color(&AnsiColorEnum::Ansi(AnsiColor::Red)),
+        anstyle_to_ratatui_color(AnsiColorEnum::Ansi(AnsiColor::Red)),
         Color::Red
     );
 }
@@ -299,7 +311,7 @@ fn test_ansi_style_to_ratatui_style() {
         .fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Green)))
         .bg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Blue)))
         .bold();
-    let ratatui_style = ansi_style_to_ratatui_style(ansi_style);
+    let ratatui_style = anstyle_to_ratatui_style(ansi_style);
     // Verify colors and modifiers
 }
 ```
@@ -441,7 +453,7 @@ For complete ANSI sequence reference, see:
 -   `crates/common/vtcode-commons/src/ansi_codes.rs` — Constants for all supported sequences
 -   `crates/codegen/vtcode-core/src/utils/ansi_codes.rs` — Backward-compatible re-export used by runtime callers
 -   `crates/common/vtcode-commons/src/ansi.rs` — ECMA-48 parser and stripper
--   `crates/codegen/vtcode-core/src/utils/anstyle_utils.rs` — Style conversion
+-   `crates/codegen/vtcode-ui/src/design/color.rs` + `design/style.rs` — Style conversion (crate-internal)
 -   `crates/codegen/vtcode-core/src/utils/ansi.rs` — Rendering utilities
 
 ## Future Enhancements

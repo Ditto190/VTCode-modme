@@ -260,6 +260,76 @@ impl<'a> TurnProcessingContext<'a> {
         }
     }
 
+    /// Emit the harness item events that make a rejected/blocked tool call
+    /// visible in the session log as a completed `tool_output` item carrying
+    /// the rejection text.
+    ///
+    /// Rejections decided before the pipeline (safety/policy guards, the
+    /// anti-blind-editing gate, the blocked-call fuse) never execute, so
+    /// without this the log shows either a dangling `item.started` (when the
+    /// LLM runtime streamed the call) or no item at all. Mirrors the
+    /// pipeline's item identity: complete the streamed item when one exists,
+    /// otherwise replay the started pair with the pipeline's fallback item id.
+    pub(crate) fn emit_rejected_tool_call_item(
+        &mut self,
+        tool_call_id: &str,
+        tool_name: Option<&str>,
+        args: Option<&serde_json::Value>,
+        rejection_text: &str,
+    ) {
+        use vtcode_core::core::agent::events::{
+            tool_invocation_completed_event, tool_output_completed_event, tool_output_started_event, tool_started_event,
+        };
+        use vtcode_core::exec::events::{ToolCallStatus, tool_outcome_from_status};
+
+        let Some(emitter) = self.harness_emitter else {
+            return;
+        };
+        let streamed = self.harness_state.take_streamed_tool_call_item_id(tool_call_id);
+        let streamed_item_id = streamed.as_ref().map(|item| item.item_id.clone());
+        let item_id = streamed_item_id.clone().unwrap_or_else(|| {
+            crate::agent::runloop::unified::tool_pipeline::resolve_harness_item_identity(tool_call_id).1
+        });
+        let raw_id = (!tool_call_id.trim().is_empty()).then_some(tool_call_id);
+        let failed = ToolCallStatus::Failed;
+        let tool_label = tool_name
+            .map(str::to_string)
+            .or_else(|| streamed.map(|item| item.tool_name))
+            .unwrap_or_default();
+        if streamed_item_id.is_none() {
+            let _ = emitter.emit(tool_started_event(item_id.clone(), &tool_label, args, raw_id));
+            let _ = emitter.emit(tool_output_started_event(item_id.clone(), raw_id));
+        }
+        let _ = emitter.emit(tool_invocation_completed_event(
+            item_id.clone(),
+            &tool_label,
+            args,
+            raw_id,
+            failed.clone(),
+            tool_outcome_from_status(&failed),
+        ));
+        let _ = emitter.emit(tool_output_completed_event(item_id, raw_id, failed, None, None, rejection_text));
+    }
+
+    /// Push a model-facing rejection response AND close the call's harness
+    /// item with that rejection text. Every pre-execution rejection (guards,
+    /// verification gate, blocked-call fuse, policy checks) must use this
+    /// instead of [`Self::push_tool_response`] so the session log never shows
+    /// a silent tool call: the completed `tool_output` item is the only
+    /// durable trace the call was received and refused.
+    pub(crate) fn push_rejected_tool_response<S>(
+        &mut self,
+        tool_call_id: S,
+        tool_name: Option<&str>,
+        args: Option<&serde_json::Value>,
+        content: String,
+    ) where
+        S: AsRef<str> + Into<String>,
+    {
+        self.emit_rejected_tool_call_item(tool_call_id.as_ref(), tool_name, args, &content);
+        self.push_tool_response(tool_call_id, tool_name, content);
+    }
+
     pub(crate) async fn record_recovery_error(
         &self,
         scope: &str,

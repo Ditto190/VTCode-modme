@@ -485,6 +485,16 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Google Gemini, OpenAI, Anthropic, GitHub Copilot, OpenRouter Marketplace
   - **User Questions**: "What can you tell me about Provider Guides?", "How does Google Gemini work?", "How does OpenAI work?"
 
+- **File**: `docs/providers/vercel-ai-gateway.md`
+  - **Content**: Vercel AI Gateway Integration
+  - **Topics**: Setup, Quick start, Curated models, Persisting configuration, Shared model IDs and provider precedence, Runtime behaviour, Troubleshooting
+  - **User Questions**: "What can you tell me about Vercel AI Gateway Integration?", "How does Setup work?", "How does Curated models work?"
+
+- **File**: `docs/providers/vercel-ai-gateway-quick-reference.md`
+  - **Content**: Vercel AI Gateway Quick Reference
+  - **Topics**: Minimal setup
+  - **User Questions**: "What can you tell me about Vercel AI Gateway Quick Reference?", "How does Minimal setup work?"
+
 - **File**: `docs/providers/llamacpp.md`
   - **Content**: llama.cpp Provider Guide
   - **Topics**: What VT Code manages, Manual server mode, Configuration, Notes

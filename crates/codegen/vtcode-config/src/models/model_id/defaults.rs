@@ -55,6 +55,7 @@ impl ModelId {
             Provider::XAI => ModelId::XaiGrok46,
             Provider::NVIDIA => ModelId::NvidiaNemotron3Ultra550bA55b,
             Provider::MergeGateway => ModelId::MergeGatewayDefaultRouting,
+            Provider::Vercel => ModelId::VercelAnthropicClaudeSonnet5,
         }
     }
 
@@ -87,6 +88,7 @@ impl ModelId {
             Provider::XAI => ModelId::XaiGrok46,
             Provider::NVIDIA => ModelId::NvidiaNemotron3Ultra550bA55b,
             Provider::MergeGateway => ModelId::MergeGatewayDefaultRouting,
+            Provider::Vercel => ModelId::VercelAnthropicClaudeSonnet5,
         }
     }
 }

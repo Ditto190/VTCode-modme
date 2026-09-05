@@ -1,8 +1,8 @@
 use super::*;
 use crate::agent::runloop::unified::plan_blocks::strip_plan_persistence_policy_line;
 use crate::agent::runloop::unified::planning_workflow::{
-    PlanArtifactError, ValidatedPlanArtifact, emit_plan_ready_events, persist_plan_draft, persisted_plan_is_ready,
-    plan_repair_directive_for_error, validate_plan_content,
+    PlanApprovalRoute, PlanArtifactError, ValidatedPlanArtifact, emit_plan_ready_events, persist_plan_draft,
+    persisted_plan_is_ready, plan_approval_route, plan_repair_directive_for_error, validate_plan_content,
 };
 use crate::agent::runloop::unified::turn::turn_processing::resolve_effective_request_model;
 use crate::agent::runloop::unified::ui_interaction_stream_helpers::render_compact_reasoning_block;
@@ -79,6 +79,29 @@ impl<'a> TurnProcessingContext<'a> {
         allow_repair: bool,
     ) -> anyhow::Result<TurnHandlerOutcome> {
         use vtcode_core::utils::ansi::MessageStyle;
+
+        // Execution-mode replans have no planning workflow behind them, so
+        // bounded planning-repair directives would be misleading. Surface the
+        // rejection and end the turn without scheduling a continuation.
+        if !self.is_planning_active() {
+            tracing::warn!(
+                target: "vtcode.planning_workflow",
+                error = %error,
+                "execution-mode plan revision rejected"
+            );
+            append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
+            self.renderer
+                .line(MessageStyle::Warning, &format!("Plan revision rejected: {error}"))?;
+            if !plan_text.trim().is_empty() {
+                self.renderer.line(MessageStyle::Info, "Rejected plan revision:")?;
+                self.renderer.line(MessageStyle::Response, plan_text)?;
+            }
+            self.renderer.line(
+                MessageStyle::Info,
+                "The proposed plan was rejected and discarded; no continuation turn was scheduled. Adjust the request or revise the plan to continue.",
+            )?;
+            return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false }));
+        }
 
         if self.recovery_is_tool_free() && self.is_planning_active() {
             return self.break_planning_recovery_with_handoff(
@@ -404,6 +427,27 @@ impl<'a> TurnProcessingContext<'a> {
                 last_user_requested_progressive_work: decision.last_user_requested_progressive_work,
                 is_relaxed_continuation: false,
             }
+        } else if proposed_plan.is_some() {
+            // A completed plan is terminal in every mode: it must reach the
+            // persist/approval handoff below instead of being continued away
+            // as interim progress. Evaluate continuation intent solely to
+            // populate diagnostic fields for the tracing log.
+            let decision = evaluate_interim_text_continuation(
+                self.full_auto,
+                self.is_planning_active(),
+                self.working_history,
+                &text,
+                consecutive_relaxed,
+            );
+            InterimTextContinuationDecision {
+                should_continue: false,
+                reason: "completed_plan_terminal",
+                is_interim_progress: decision.is_interim_progress,
+                last_user_follow_up: decision.last_user_follow_up,
+                recent_tool_activity: decision.recent_tool_activity,
+                last_user_requested_progressive_work: decision.last_user_requested_progressive_work,
+                is_relaxed_continuation: false,
+            }
         } else {
             evaluate_interim_text_continuation(
                 self.full_auto,
@@ -563,11 +607,20 @@ impl<'a> TurnProcessingContext<'a> {
         }
 
         if let Some(plan_text) = proposed_plan {
+            use vtcode_core::utils::ansi::MessageStyle;
+
             let planning_active = self.is_planning_active();
+            // A revision emitted while an approved-plan execution turn is in
+            // flight continues without a second confirmation gate: the user
+            // already approved implementing this goal, and the revision is a
+            // course correction inside that approval. Telemetry records the
+            // resolution as automatic so clients can reconstruct the flow.
+            let approved_execution_revision = !planning_active && self.harness_state.is_approved_plan_execution();
             tracing::info!(
                 target: "vtcode.planning_workflow",
                 plan_ready = true,
                 planning_active,
+                approved_execution_revision,
                 "completed plan reached approval handoff"
             );
             // Persist before publishing the approval request so consumers that
@@ -626,21 +679,26 @@ impl<'a> TurnProcessingContext<'a> {
                 supports_inline_ui = supports_inline,
                 "plan approval overlay condition check"
             );
-            let approval_route = crate::agent::runloop::unified::planning_workflow::plan_approval_route(
-                require_confirmation,
-                supports_inline,
-                self.skip_confirmations,
-                self.full_auto,
-            );
+            let approval_route = if approved_execution_revision {
+                PlanApprovalRoute::Automatic
+            } else {
+                plan_approval_route(require_confirmation, supports_inline, self.skip_confirmations, self.full_auto)
+            };
             tracing::info!(
                 target: "vtcode.planning_workflow",
                 ?approval_route,
                 "plan approval route selected"
             );
-            if approval_route == crate::agent::runloop::unified::planning_workflow::PlanApprovalRoute::Inline {
+            if approval_route == PlanApprovalRoute::Inline {
                 use crate::agent::runloop::unified::planning_workflow::{
                     PlanApprovalRequestContext, PlanApprovalTelemetryContext, execute_plan_approval,
                 };
+                if !planning_active {
+                    self.renderer.line(
+                        MessageStyle::Info,
+                        "The agent proposed a plan during execution; review it before approving.",
+                    )?;
+                }
                 return execute_plan_approval(
                     self.tool_registry,
                     self.plan_session,
@@ -672,10 +730,25 @@ impl<'a> TurnProcessingContext<'a> {
                 .await;
             }
 
-            use vtcode_core::utils::ansi::MessageStyle;
             self.renderer.line(MessageStyle::Info, "Plan ready for approval:")?;
-            self.renderer.line(MessageStyle::Response, &plan_text)?;
-            if approval_route == crate::agent::runloop::unified::planning_workflow::PlanApprovalRoute::Headless {
+            // The harness normalizes plan markdown before rendering so headings,
+            // lists, and formatting are preserved and raw `<proposed_plan>`
+            // wrappers never leak into the transcript. Any repair is surfaced
+            // explicitly so rendering issues are visible instead of silent.
+            let (display_markdown, display_warnings) =
+                crate::agent::runloop::unified::plan_blocks::prepare_plan_markdown_for_display(&plan_text);
+            if display_markdown.trim().is_empty() {
+                self.renderer.line(
+                    MessageStyle::Warning,
+                    "Plan content was empty after cleanup; see the persisted plan file for details.",
+                )?;
+            } else {
+                self.renderer.line(MessageStyle::Response, &display_markdown)?;
+            }
+            for warning in display_warnings {
+                self.renderer.line(MessageStyle::Warning, &warning)?;
+            }
+            if approval_route == PlanApprovalRoute::Headless {
                 self.renderer.line(
                     MessageStyle::Info,
                     "Plan is awaiting approval. Type `approve`, `implement`, or `yes` to begin execution, or `edit` to revise the plan.",
@@ -683,6 +756,40 @@ impl<'a> TurnProcessingContext<'a> {
                 return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed {
                     plan_approved_execution_pending: false,
                 }));
+            }
+
+            if !planning_active {
+                // Planning-inactive arrivals (revisions of an approved
+                // execution, or policy-automatic plans over a persisted draft)
+                // continue without the full handoff: `persist_plan_draft`
+                // already refreshed the tracker sidecar, and the planning→
+                // execution handoff — which recreates the task tracker behind
+                // an active planning gate — does not apply here. Resolve the
+                // approval automatically and schedule the continuation turn.
+                crate::agent::runloop::unified::planning_workflow::resolve_plan_approval(
+                    self.plan_session,
+                    self.harness_emitter,
+                    &self.harness_state.run_id.0,
+                    &self.harness_state.turn_id.0,
+                    vtcode_core::exec::events::PlanApprovalDecision::AutoAccept,
+                    true,
+                );
+                if approved_execution_revision {
+                    self.renderer.line(
+                        MessageStyle::Info,
+                        "The implementation agent proposed a revised plan; continuing the approved execution with it.",
+                    )?;
+                } else {
+                    self.renderer.line(
+                        MessageStyle::Info,
+                        "Plan approved by the active execution policy; starting implementation.",
+                    )?;
+                }
+                return Ok(TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    skip_confirmations: self.skip_confirmations,
+                    execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                });
             }
 
             self.renderer
@@ -917,6 +1024,126 @@ mod tests {
         assert!(
             matches!(outcome, TurnHandlerOutcome::Break(_)),
             "outside planning, text responses still end the turn (no new reprompt path)"
+        );
+    }
+
+    /// A valid revision of an already-approved plan, in the canonical section
+    /// shape the artifact validator requires.
+    const EXECUTION_REVISION_PLAN: &str = r#"# Revised plan
+
+## Summary
+Repairs the approved plan after the referenced paths moved.
+
+## Implementation Steps
+1. Update the module path -> files: [src/lib.rs] -> verify: [cargo check]
+
+## Test Cases and Validation
+1. Run cargo check --locked.
+
+## Assumptions and Defaults
+1. Keep the approved scope.
+"#;
+
+    #[tokio::test]
+    async fn approved_execution_replan_continues_without_second_confirmation() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.persist_approved_plan_for_test(EXECUTION_REVISION_PLAN).await;
+        backing.set_approved_plan_execution_for_test(true);
+        backing.set_skip_confirmations_for_test(false);
+        let mut ctx = backing.turn_processing_context();
+
+        let outcome = ctx
+            .handle_text_response(
+                "Replanning: the approved paths no longer exist.".to_string(),
+                Vec::new(),
+                None,
+                Some(EXECUTION_REVISION_PLAN.to_string()),
+                false,
+            )
+            .await
+            .expect("execution replan should route through the approval handoff");
+
+        assert!(
+            matches!(
+                outcome,
+                TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    skip_confirmations: false,
+                    ..
+                }
+            ),
+            "the revised plan must schedule the continuation turn while keeping the session confirmation policy"
+        );
+    }
+
+    #[tokio::test]
+    async fn full_auto_execution_replan_continues_without_second_confirmation() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.persist_approved_plan_for_test(EXECUTION_REVISION_PLAN).await;
+        backing.set_skip_confirmations_for_test(true);
+        let mut ctx = backing.turn_processing_context();
+
+        let outcome = ctx
+            .handle_text_response(
+                "Replanning: the approved paths no longer exist.".to_string(),
+                Vec::new(),
+                None,
+                Some(EXECUTION_REVISION_PLAN.to_string()),
+                false,
+            )
+            .await
+            .expect("full-auto replan should continue automatically");
+
+        assert!(
+            matches!(
+                outcome,
+                TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    skip_confirmations: true,
+                    ..
+                }
+            ),
+            "a policy-automatic replan must schedule the continuation turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_mode_replan_rejection_surfaces_feedback_without_repair_directive() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.set_approved_plan_execution_for_test(true);
+        let mut ctx = backing.turn_processing_context();
+
+        let outcome = ctx
+            .handle_text_response(
+                "Replanning: the approved plan is stale.".to_string(),
+                Vec::new(),
+                None,
+                Some("not a valid plan artifact".to_string()),
+                false,
+            )
+            .await
+            .expect("invalid replan should end the turn with feedback");
+
+        assert!(
+            matches!(
+                outcome,
+                TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
+            ),
+            "a rejected revision must not schedule an execution turn"
+        );
+        assert!(
+            !ctx.working_history
+                .iter()
+                .any(|message| message.role == uni::MessageRole::System
+                    && message.content.as_text().contains("Planning recovery")),
+            "execution-mode rejection must not push planning repair directives"
+        );
+        assert!(
+            ctx.working_history
+                .iter()
+                .any(|message| message.role == uni::MessageRole::Assistant
+                    && message.content.as_text().contains("not a valid plan artifact")),
+            "the rejected draft stays attached to history for inspection"
         );
     }
 

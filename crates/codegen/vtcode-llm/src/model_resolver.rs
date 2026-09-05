@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use crate::provider::Usage;
 use vtcode_config::api_keys::api_key_env_var;
 use vtcode_config::auth::AuthCredentialsStoreMode;
 use vtcode_config::models::{
@@ -283,23 +282,6 @@ impl ModelResolver {
         ModelAvailability::MissingCredential
     }
 
-    fn estimate_cost(pricing: ModelPricing, usage: &Usage) -> Option<f64> {
-        let input_cost = pricing.input?;
-        let output_cost = pricing.output?;
-
-        let mut total = (usage.prompt_tokens as f64 * input_cost) + (usage.completion_tokens as f64 * output_cost);
-
-        if let Some(cache_read_cost) = pricing.cache_read {
-            total += usage.cache_read_tokens_or_fallback() as f64 * cache_read_cost;
-        }
-
-        if let Some(cache_write_cost) = pricing.cache_write {
-            total += usage.cache_creation_tokens_or_zero() as f64 * cache_write_cost;
-        }
-
-        Some(total)
-    }
-
     fn resolve_for_provider(
         provider: Provider,
         model: &str,
@@ -432,6 +414,7 @@ fn provider_precedence(provider: Provider) -> usize {
         Provider::XAI => 23,
         Provider::NVIDIA => 24,
         Provider::MergeGateway => 25,
+        Provider::Vercel => 26,
     }
 }
 
@@ -570,7 +553,7 @@ mod tests {
     #[test]
     fn resolver_advertises_reasoning_only_for_known_merge_reasoning_routes() {
         let reasoning =
-            ModelResolver::resolve(Some("merge-gateway"), "openai/gpt-5.5", &[], None).expect("Merge route");
+            ModelResolver::resolve(Some("merge-gateway"), "openai/gpt-5.6-sol", &[], None).expect("Merge route");
         assert!(reasoning.known_model());
         assert!(reasoning.reasoning_supported());
 
@@ -627,27 +610,5 @@ mod tests {
 
         assert_eq!(resolved.api_key_env, "CORPORATE_OPENAI_KEY");
         assert_eq!(resolved.env_key(), "CORPORATE_OPENAI_KEY");
-    }
-
-    #[test]
-    fn estimate_cost_uses_usage_totals() {
-        let pricing = ModelPricing {
-            input: Some(0.001),
-            output: Some(0.002),
-            cache_read: Some(0.0001),
-            cache_write: Some(0.0002),
-        };
-        let usage = Usage {
-            prompt_tokens: 100,
-            completion_tokens: 50,
-            total_tokens: 150,
-            cached_prompt_tokens: Some(20),
-            cache_creation_tokens: Some(10),
-            cache_read_tokens: None,
-            iterations: None,
-        };
-
-        let total = ModelResolver::estimate_cost(pricing, &usage).expect("cost");
-        assert!(total > 0.0);
     }
 }

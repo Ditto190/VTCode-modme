@@ -1,5 +1,5 @@
 use super::{
-    CopilotRuntimeHost, auto_approve_builtin_permission, bounded_output_evidence,
+    CopilotRuntimeHost, append_session_limit_grant_guidance, auto_approve_builtin_permission, bounded_output_evidence,
     copilot_failure_response_with_diagnosis, copilot_tool_result_text, denied_tool_response, filter_copilot_tools,
     harness_call_item_id, map_builtin_permission_prompt_decision, map_copilot_finish_reason,
     normalize_copilot_reasoning_delta, summarize_permission_request,
@@ -191,6 +191,41 @@ fn interrupted_tool_permission_returns_failure_response() {
 }
 
 #[test]
+fn copilot_grant_guidance_is_appended_once_to_tool_response() {
+    let response = CopilotToolCallResponse::Success(vtcode_core::copilot::CopilotToolCallSuccess {
+        text_result_for_llm: "tool output".to_string(),
+    });
+
+    let guided = append_session_limit_grant_guidance(response, true);
+    let CopilotToolCallResponse::Success(guided) = guided else {
+        panic!("expected a success response");
+    };
+    assert!(guided.text_result_for_llm.starts_with("tool output\n\n"));
+    assert_eq!(
+        guided
+            .text_result_for_llm
+            .matches("Session tool-call limit increased by the user.")
+            .count(),
+        1
+    );
+
+    let unchanged = append_session_limit_grant_guidance(
+        CopilotToolCallResponse::Failure(vtcode_core::copilot::CopilotToolCallFailure {
+            text_result_for_llm: "denied".to_string(),
+            error: "denied".to_string(),
+        }),
+        false,
+    );
+    assert_eq!(
+        unchanged,
+        CopilotToolCallResponse::Failure(vtcode_core::copilot::CopilotToolCallFailure {
+            text_result_for_llm: "denied".to_string(),
+            error: "denied".to_string(),
+        })
+    );
+}
+
+#[test]
 fn copilot_failure_response_uses_bounded_untrusted_evidence() {
     let output = json!({
         "command": "cargo check",
@@ -336,6 +371,7 @@ async fn observed_tool_calls_emit_incremental_output_updates() {
         true,
         Some(&emitter),
         "turn-test-step-1".to_string(),
+        None,
     );
 
     runtime_host.handle_observed_tool_call(CopilotObservedToolCall {
@@ -445,6 +481,7 @@ async fn observed_shell_tool_calls_stream_into_inline_pty_ui() {
         true,
         None,
         "turn-test-step-1".to_string(),
+        None,
     );
 
     runtime_host.handle_observed_tool_call(CopilotObservedToolCall {
@@ -539,6 +576,7 @@ async fn copilot_terminal_sessions_bind_local_pty_output_and_release_cleanly() {
         true,
         Some(&emitter),
         "turn-test-step-1".to_string(),
+        None,
     );
     let response = runtime_host
         .handle_terminal_create(CopilotTerminalCreateRequest {
@@ -674,6 +712,7 @@ async fn vtcode_tool_calls_render_transcript_output_via_shared_pipeline() {
         true,
         None,
         "turn-test-step-1".to_string(),
+        None,
     );
     let response = runtime_host
         .handle_vtcode_tool_call(
@@ -789,6 +828,7 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
         true,
         None,
         "turn-test-step-1".to_string(),
+        None,
     );
     let response = runtime_host
         .handle_vtcode_tool_call(

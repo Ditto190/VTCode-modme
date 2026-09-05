@@ -158,6 +158,7 @@ pub trait LLMProvider: Send + Sync {
             "poolside" => BackendKind::Poolside,
             "nvidia" => BackendKind::Nvidia,
             "merge-gateway" => BackendKind::MergeGateway,
+            "vercel" => BackendKind::Vercel,
             _ => BackendKind::OpenAI,
         }
     }
@@ -180,6 +181,17 @@ pub trait LLMProvider: Send + Sync {
     /// Whether the provider accepts configurable reasoning effort for the model
     fn supports_reasoning_effort(&self, _model: &str) -> bool {
         false
+    }
+
+    /// Exact levels accepted by this route; providers may override catalog metadata.
+    fn supported_reasoning_efforts(&self, model: &str) -> &'static [&'static str] {
+        if !self.supports_reasoning_effort(model) {
+            return &[];
+        }
+        vtcode_config::models::model_catalog_entry(self.name(), model)
+            .map(|entry| entry.reasoning_efforts)
+            .filter(|levels| !levels.is_empty())
+            .unwrap_or(&["low", "medium", "high"])
     }
 
     /// Provider/model-specific sampling parameter overrides.

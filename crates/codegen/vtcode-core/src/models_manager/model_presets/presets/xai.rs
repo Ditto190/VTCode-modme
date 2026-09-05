@@ -26,7 +26,7 @@ pub(crate) fn xai_presets() -> Vec<ModelPreset> {
                 },
                 ReasoningEffortPreset {
                     effort: ReasoningEffortLevel::XHigh,
-                    description: "Maximum reasoning depth".to_string(),
+                    description: "Maximum reasoning depth (grok-4.6 and later)".to_string(),
                 },
             ],
             is_default: true,

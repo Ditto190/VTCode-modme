@@ -10,6 +10,7 @@ pub struct ModalOverlayRequest {
     pub(crate) title: String,
     pub(crate) lines: Vec<String>,
     pub(crate) secure_prompt: Option<SecurePromptConfig>,
+    pub(crate) is_help_modal: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +225,7 @@ impl From<ModalOverlayRequest> for crate::tui::core_tui::types::ModalOverlayRequ
             title: value.title,
             lines: value.lines,
             secure_prompt: value.secure_prompt,
+            is_help_modal: value.is_help_modal,
         }
     }
 }

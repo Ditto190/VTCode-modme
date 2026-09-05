@@ -52,6 +52,7 @@ const BUILTIN_PROVIDER_KEYS: &[&str] = &[
     "xai",
     "nvidia",
     "merge-gateway",
+    "vercel",
 ];
 
 /// LLM provider factory and registry
@@ -364,6 +365,7 @@ mod tests {
                 "poolside",
                 "qwen",
                 "stepfun",
+                "vercel",
                 "xai",
                 "zai",
             ]

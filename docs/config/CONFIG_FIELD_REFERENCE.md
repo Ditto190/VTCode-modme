@@ -128,7 +128,7 @@ python3 scripts/generate_config_field_reference.py
 | `agent.prompt_suggestions.model` | `string` | no | `""` | Lightweight model to use for suggestions. Leave empty to auto-select an efficient sibling of the main model. |
 | `agent.prompt_suggestions.show_cost_notice` | `boolean` | no | `true` | Whether VT Code should remind users that LLM-backed suggestions consume tokens. |
 | `agent.prompt_suggestions.temperature` | `number` | no | `0.3` | Temperature for inline prompt suggestion generation. |
-| `agent.provider` | `string` | no | `"openrouter"` | AI provider for single agent mode (gemini, openai, anthropic, meta, openrouter, zai) |
+| `agent.provider` | `string` | no | `"openrouter"` | AI provider for single agent mode (gemini, openai, anthropic, meta, openrouter, vercel, zai) |
 | `agent.reasoning_effort` | `string` | no | `"none"` | Reasoning effort level for models that support it (none, minimal, low, medium, high, xhigh, max) Applies to: Claude, GPT-5 family, Gemini, Qwen3, DeepSeek with reasoning capability |
 | `agent.refine_prompts_enabled` | `boolean` | no | `false` | Enable prompt refinement pass before sending to LLM |
 | `agent.refine_prompts_max_passes` | `integer` | no | `1` | Max refinement passes for prompt writing |
@@ -827,7 +827,7 @@ python3 scripts/generate_config_field_reference.py
 | `tui.show_tooltips` | `boolean \| null` | no | `null` | - |
 | `ui.allow_tool_ansi` | `boolean` | no | `false` | Allow ANSI escape sequences in tool output (enables colors but may cause layout issues) |
 | `ui.bold_is_bright` | `boolean` | no | `false` | Compatibility mode for legacy terminals that map bold to bright colors. When enabled, avoids using bold styling on text that would become bright colors, preventing visibility issues in terminals with "bold is bright" behavior. |
-| `ui.color_scheme_mode` | `string` | no | `"auto"` | Color scheme mode for automatic light/dark theme switching. - "auto": Detect from terminal (via OSC 11 or COLORFGBG env var) - "light": Force light mode theme selection - "dark": Force dark mode theme selection |
+| `ui.color_scheme_mode` | `string` | no | `"auto"` | Color scheme mode for automatic light/dark theme switching. - "auto": Detect from terminal (via the Contour dark/light query where supported, else OSC 11, or the COLORFGBG env var) and follow live palette changes - "light": Force light mode theme selection - "dark": Force dark mode theme selection |
 | `ui.dim_completed_todos` | `boolean` | no | `true` | Dim completed todo items (- \[x\]) in agent output |
 | `ui.display_mode` | `string` | no | `"minimal"` | UI display mode preset (full, minimal, focused) |
 | `ui.fullscreen.copy_on_select` | `boolean` | no | `true` | Copy selected transcript text immediately when the mouse selection ends. Can also be controlled via VTCODE_FULLSCREEN_COPY_ON_SELECT=0/1. |

@@ -282,6 +282,16 @@ define_provider_config!(
     ()
 );
 define_provider_config!(
+    /// Provider configuration for the Vercel AI Gateway.
+    VercelProviderConfig,
+    "vercel",
+    "Vercel AI Gateway",
+    crate::config::constants::models::vercel::DEFAULT_MODEL,
+    crate::config::constants::urls::VERCEL_AI_GATEWAY_API_BASE,
+    Some(crate::config::constants::env_vars::VERCEL_AI_GATEWAY_BASE_URL),
+    ()
+);
+define_provider_config!(
     /// Provider configuration for NVIDIA NIM.
     NvidiaProviderConfig,
     "nvidia",

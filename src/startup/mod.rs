@@ -1095,7 +1095,7 @@ mod validation_tests {
     fn missing_api_key_message_uses_codex_guidance() {
         let cfg = VTCodeConfig::default();
         let selection = RuntimeModelSelection {
-            model: "gpt-5-codex".to_string(),
+            model: vtcode_core::config::constants::models::openai::GPT_5_CODEX.to_string(),
             provider: "codex".to_string(),
             api_key_env: String::new(),
             model_source: vtcode_core::config::types::ModelSelectionSource::WorkspaceConfig,
@@ -1342,7 +1342,7 @@ mod validation_tests {
         let workspace = temp.path().to_path_buf();
         let mut config = VTCodeConfig::default();
         config.agent.provider = "codex".to_string();
-        config.agent.default_model = "gpt-5-codex".to_string();
+        config.agent.default_model = vtcode_core::config::constants::models::openai::GPT_5_CODEX.to_string();
         config.agent.codex_app_server.command = workspace.join("missing-codex").display().to_string();
         config.agent.credential_storage_mode = AuthCredentialsStoreMode::File;
         config.auth.openai.preferred_method = OpenAIPreferredMethod::ApiKey;
@@ -1358,16 +1358,16 @@ mod validation_tests {
             .expect("startup should fall back to openai");
 
         assert_eq!(ctx.agent_config.provider, "openai");
-        assert_eq!(ctx.agent_config.model, "gpt-5-codex");
+        assert_eq!(ctx.agent_config.model, vtcode_core::config::constants::models::openai::DEFAULT_MODEL);
         assert_eq!(ctx.config.agent.provider, "openai");
-        assert_eq!(ctx.config.agent.default_model, "gpt-5-codex");
+        assert_eq!(ctx.config.agent.default_model, vtcode_core::config::constants::models::openai::DEFAULT_MODEL);
 
         let persisted = ConfigManager::load_from_workspace(&workspace)
             .expect("reload persisted config")
             .config()
             .clone();
         assert_eq!(persisted.agent.provider, "openai");
-        assert_eq!(persisted.agent.default_model, "gpt-5-codex");
+        assert_eq!(persisted.agent.default_model, vtcode_core::config::constants::models::openai::DEFAULT_MODEL);
     }
 
     #[tokio::test]
@@ -1385,7 +1385,7 @@ mod validation_tests {
 
         let mut config = VTCodeConfig::default();
         config.agent.provider = "codex".to_string();
-        config.agent.default_model = "gpt-5-codex".to_string();
+        config.agent.default_model = vtcode_core::config::constants::models::openai::GPT_5_CODEX.to_string();
         config.agent.codex_app_server.command = workspace.join("missing-codex").display().to_string();
         config.agent.credential_storage_mode = AuthCredentialsStoreMode::File;
         config.auth.openai.preferred_method = OpenAIPreferredMethod::Chatgpt;
@@ -1418,7 +1418,7 @@ mod validation_tests {
 
         let mut config = VTCodeConfig::default();
         config.agent.provider = "codex".to_string();
-        config.agent.default_model = "gpt-5-codex".to_string();
+        config.agent.default_model = vtcode_core::config::constants::models::openai::GPT_5_CODEX.to_string();
         config.agent.codex_app_server.command = workspace.join("missing-codex").display().to_string();
         config.agent.credential_storage_mode = AuthCredentialsStoreMode::File;
         config.auth.openai.preferred_method = OpenAIPreferredMethod::Chatgpt;

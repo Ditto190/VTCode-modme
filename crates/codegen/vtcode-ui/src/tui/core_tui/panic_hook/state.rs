@@ -10,6 +10,11 @@ pub(crate) static TUI_INITIALIZED: AtomicBool = AtomicBool::new(false);
 /// runs that never touched the terminal stay clean.
 pub(crate) static TERMINAL_MODIFIED: AtomicBool = AtomicBool::new(false);
 pub(crate) static KEYBOARD_ENHANCEMENTS_PUSHED: AtomicBool = AtomicBool::new(false);
+/// Whether the TUI enabled Contour color-scheme change reports (`CSI ? 2031 h`).
+///
+/// The canonical restore path only emits the matching `CSI ? 2031 l` when this
+/// is set, mirroring [`KEYBOARD_ENHANCEMENTS_PUSHED`].
+pub(crate) static COLOR_SCHEME_REPORTS_ENABLED: AtomicBool = AtomicBool::new(false);
 /// Whether the TUI is currently running on the alternate screen buffer.
 ///
 /// Tracks `UiSurfacePreference::Alternate`/`Auto` sessions so the canonical
@@ -118,6 +123,10 @@ pub(crate) fn is_terminal_modified() -> bool {
 
 pub(crate) fn mark_keyboard_enhancements_pushed(pushed: bool) {
     KEYBOARD_ENHANCEMENTS_PUSHED.store(pushed, Ordering::SeqCst);
+}
+
+pub(crate) fn mark_color_scheme_reports_enabled(enabled: bool) {
+    COLOR_SCHEME_REPORTS_ENABLED.store(enabled, Ordering::SeqCst);
 }
 
 pub(crate) fn mark_alternate_screen_active(active: bool) {

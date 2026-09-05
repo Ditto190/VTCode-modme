@@ -17,6 +17,7 @@
 - Feature-gated emitters: `telemetry-log` (LogEmitter), `telemetry-tracing` (TracingEmitter), `schema-export` (JSON Schema), `serde-json` (JSON helpers).
 - `atif/` module exports ATIF (Agent Trace Interchange Format).
 - `trace/` module implements Agent Trace spec for AI code attribution.
+- **Keep `ThreadEvent` compact**: large sparse payloads must be `Box`ed (see `thread_event_stays_compact` size-guard test; ≤80 bytes). `Box<T>` is serde/schema transparent.
 
 ## Gotchas
 
@@ -27,4 +28,4 @@
   explanations use the existing `ReasoningItem` with stage `"diagnosis"`; do not add a parallel event variant.
 - `HarnessEventItem` uses `HarnessEventKind` enum — adding variants requires schema version bump.
 - Schema `0.12.0` adds blocked-handoff resolution metadata; keep legacy payloads readable and ATIF output stable.
-- Schema `0.13.0` adds `turn.blocked` plus `TurnBlocked`/`BlockedRecoveryStarted`/`BlockedRecoveryFinished` harness kinds; `turn.blocked` is emitted alongside `turn.failed` with fuse counters for UI subscribers.
+- Schema `0.14.0` adds `SessionToolLimitIncreased` and `ToolLoopLimitIncreased` harness kinds for same-turn limit grants; schema `0.13.0` added `turn.blocked` plus `TurnBlocked`/`BlockedRecoveryStarted`/`BlockedRecoveryFinished`, emitted alongside `turn.failed` with fuse counters for UI subscribers.

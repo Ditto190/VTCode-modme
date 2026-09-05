@@ -42,6 +42,15 @@ are closed with a terminal failed status, while partial streamed text remains
 partial and is not promoted to a successful final answer. Follow-up steering
 received during streaming is retained for the next turn.
 
+Request segment fingerprints include the provider route, model, context capacity,
+effective reasoning tag, tool/parallel/cache capabilities, and current tool catalog
+epoch. Repeated requests reuse immutable prompt and ordered tool bytes; capability
+changes invalidate the segment identity. Shell profile, environment, and harness
+limits belong to the frozen segment prefix. Provider cache routing keys include
+the fingerprint where the transport supports explicit keys. Local fingerprint
+reuse is not proof of a provider cache hit: use returned usage cache-hit metrics
+to measure that separately for each provider.
+
 The runtime keeps prompt additions small and cache-stable while preserving the
 newest working context. Automatic compaction uses a non-configurable continuity
 tail target of approximately 20,000 estimated tokens. It retains complete

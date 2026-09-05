@@ -10,7 +10,7 @@ pub(super) use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use crate::tui::core_tui::app::types::{
     CompactActivityMetadata, DiffOverlayRequest, DiffPreviewState, InlineCommand, InlineEvent, InlineMessageKind,
     InlineSegment, LocalAgentsTransientRequest, SlashCommandItem, TaskPanelMetadata, TaskPanelTransientRequest,
-    ToolOutputId, TransientRequest,
+    ToolOutputId, TransientActivitySignal, TransientRequest,
 };
 use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::Session as CoreSessionState;
@@ -50,6 +50,10 @@ use self::tool_output_viewer::ToolOutputViewerState;
 use self::transient::{TransientFocusPolicy, TransientHost, TransientSurface, TransientVisibilityChange};
 use crate::tui::options::FullscreenInteractionSettings;
 use agent_palette::AgentPalette;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToolOutputBlock {
@@ -106,6 +110,7 @@ pub struct AppSession {
     pub(crate) compact_activity_hit_regions: Vec<CompactActivityHitRegion>,
     diff_overlay_queue: VecDeque<DiffOverlayRequest>,
     transient_host: TransientHost,
+    transient_active_signal: Option<Arc<TransientActivitySignal>>,
     preview_callback: Option<crate::tui::core_tui::types::PreviewCallback>,
 }
 
@@ -146,6 +151,7 @@ impl AppSession {
             compact_activity_hit_regions: Vec::new(),
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
+            transient_active_signal: None,
             preview_callback: None,
         }
     }
@@ -193,6 +199,7 @@ impl AppSession {
             compact_activity_hit_regions: Vec::new(),
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
+            transient_active_signal: None,
             preview_callback: None,
         }
     }
@@ -207,6 +214,11 @@ impl AppSession {
 
     pub fn core_mut(&mut self) -> &mut CoreSessionState {
         &mut self.core
+    }
+
+    pub(crate) fn set_transient_activity_signal(&mut self, signal: Arc<TransientActivitySignal>) {
+        self.transient_active_signal = Some(signal);
+        self.sync_transient_activity_signal();
     }
 
     pub(crate) fn inline_lists_visible(&self) -> bool {
@@ -715,16 +727,18 @@ impl AppSession {
         self.core.mark_dirty();
     }
 
-    /// Show a help modal using the ratatui-cheese Help widget
+    /// Show a help modal using the ratatui-cheese Help widget.
+    ///
+    /// The help flag travels on the request so a queued help modal still
+    /// renders as help when it activates instead of clobbering the overlay
+    /// that is currently visible.
     fn show_help_modal(&mut self) {
         self.show_transient(TransientRequest::Modal(crate::tui::core_tui::app::types::ModalOverlayRequest {
             title: "Keyboard Shortcuts".to_string(),
             lines: Vec::new(),
             secure_prompt: None,
+            is_help_modal: true,
         }));
-        if let Some(state) = self.core.modal_state_mut() {
-            state.is_help_modal = true;
-        }
     }
 
     fn should_auto_open_local_agents(&self) -> bool {
@@ -791,6 +805,16 @@ impl AppSession {
         }
     }
 
+    fn sync_transient_activity_signal(&self) {
+        let Some(signal) = self.transient_active_signal.as_ref() else {
+            return;
+        };
+        let active = self
+            .visible_transient_surface()
+            .is_some_and(|surface| !matches!(surface, TransientSurface::TaskPanel));
+        signal.set_active(active);
+    }
+
     fn apply_transient_visibility_change(&mut self, change: TransientVisibilityChange) {
         if matches!(change.previous_visible, Some(TransientSurface::FilePalette | TransientSurface::AgentPalette))
             || matches!(change.current_visible, Some(TransientSurface::FilePalette | TransientSurface::AgentPalette))
@@ -800,6 +824,7 @@ impl AppSession {
         self.core
             .set_local_agents_drawer_visible(change.current_visible == Some(TransientSurface::LocalAgents));
         self.sync_transient_focus();
+        self.sync_transient_activity_signal();
     }
 
     pub fn handle_command(&mut self, command: InlineCommand) {
@@ -1010,6 +1035,7 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
             CoreCommand::SetTerminalTitleGitBranch { branch: branch.clone() }
         }
         InlineCommand::SetTheme { theme } => CoreCommand::SetTheme { theme: theme.clone() },
+        InlineCommand::SetColorSchemeAuto { enabled } => CoreCommand::SetColorSchemeAuto { enabled: *enabled },
         InlineCommand::SetAppearance { appearance } => CoreCommand::SetAppearance { appearance: appearance.clone() },
         InlineCommand::SetVimModeEnabled(enabled) => CoreCommand::SetVimModeEnabled(*enabled),
         InlineCommand::SetQueuedInputs { entries } => CoreCommand::SetQueuedInputs { entries: entries.clone() },
@@ -1143,7 +1169,7 @@ impl TuiSessionDriver for AppSession {
         self.core.show_logs = show;
     }
 
-    fn set_active_pty_sessions(&mut self, sessions: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>) {
+    fn set_active_pty_sessions(&mut self, sessions: Option<Arc<AtomicUsize>>) {
         self.core.active_pty_sessions = sessions;
     }
 

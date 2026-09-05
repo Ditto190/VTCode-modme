@@ -56,6 +56,8 @@ mod nvidia;
 pub(crate) use nvidia::nvidia_presets;
 mod merge_gateway;
 pub(crate) use merge_gateway::merge_gateway_presets;
+mod vercel;
+pub(crate) use vercel::vercel_presets;
 mod evolink;
 pub(crate) use evolink::evolink_presets;
 mod moonshot;

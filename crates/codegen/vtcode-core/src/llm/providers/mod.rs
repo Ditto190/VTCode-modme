@@ -14,7 +14,7 @@ pub use vtcode_llm::providers::{
     MiMoProvider, MinimaxProvider, MistralProvider, MoonshotProvider, NvidiaProvider, OllamaProvider, OpenAIProvider,
     OpenCodeGoProvider, OpenCodeZenProvider, OpenResponsesProvider, OpenRouterProvider, PoolsideProvider, QwenProvider,
     StepFunProvider, StreamingProgressBuilder, StreamingProgressCallback, StreamingProgressTracker, TagStreamSanitizer,
-    XAIProvider, ZAIProvider, clean_reasoning_text, reasoning,
+    VercelProvider, XAIProvider, ZAIProvider, clean_reasoning_text, reasoning,
 };
 
 // Re-export commonly used constants from vtcode-commons::tool_types
@@ -54,4 +54,5 @@ pub use vtcode_llm::providers::qwen;
 pub use vtcode_llm::providers::shared;
 pub use vtcode_llm::providers::stepfun;
 pub use vtcode_llm::providers::streaming_progress;
+pub use vtcode_llm::providers::vercel;
 pub use vtcode_llm::providers::zai;

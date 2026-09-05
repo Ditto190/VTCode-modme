@@ -656,12 +656,11 @@ impl ToolExecutionHistory {
             if record_path != query_path {
                 return None;
             }
-            // Read-shape check: only match if the cached result covers the
-            // query's extent and has the same raw/summarized mode.  A query
-            // asking for a larger limit, different offset, or raw content is
-            // a materially different read — the model genuinely needs fresh
-            // content, not a cached stub.
-            if !Self::read_extent_matches(&record.args, query_args) {
+            // `code_search` includes every effective search filter and its
+            // result limit in `extract_read_target`, so an equal target is
+            // already an exact read-shape match. Other read tools use the
+            // generic extent check below to allow cached supersets.
+            if tool_name != tools::CODE_SEARCH && !Self::read_extent_matches(&record.args, query_args) {
                 return None;
             }
             Some(())

@@ -24,6 +24,7 @@ pub fn supported_for(provider: &str) -> Option<&'static [&'static str]> {
         "xai" => Some(models::xai::SUPPORTED_MODELS),
         "nvidia" => Some(models::nvidia::SUPPORTED_MODELS),
         "merge-gateway" => Some(models::merge_gateway::SUPPORTED_MODELS),
+        "vercel" | "vercel-ai-gateway" | "ai-gateway" => Some(models::vercel::SUPPORTED_MODELS),
         "meta" | "meta-ai" => Some(models::meta::SUPPORTED_MODELS),
         _ => None,
     }
@@ -53,6 +54,7 @@ pub fn default_for(provider: &str) -> Option<&'static str> {
         "xai" => Some(models::xai::DEFAULT_MODEL),
         "nvidia" => Some(models::nvidia::DEFAULT_MODEL),
         "merge-gateway" => Some(models::merge_gateway::DEFAULT_MODEL),
+        "vercel" | "vercel-ai-gateway" | "ai-gateway" => Some(models::vercel::DEFAULT_MODEL),
         "meta" | "meta-ai" => Some(models::meta::DEFAULT_MODEL),
         _ => None,
     }

@@ -133,6 +133,10 @@ pub(super) fn capture_turn_request_snapshot(
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "Reasoning-effort wiring lands in a follow-up; keep resolver for that phase."
+)]
 pub(super) fn resolve_effective_reasoning_effort(
     cfg: Option<&vtcode_core::config::loader::VTCodeConfig>,
     turn_snapshot: &TurnRequestSnapshot,

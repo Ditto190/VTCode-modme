@@ -25,6 +25,8 @@ impl AgentRunner {
         event_recorder: &mut crate::core::agent::events::ExecEventRecorder,
         turn_model: &str,
         preserve_recent_turns: usize,
+        prompt_overhead_tokens: usize,
+        reserved_output_tokens: usize,
     ) {
         let mut engine_cfg = local_compaction_config(Some(self.config()), false);
         // Honor the existing `context.preserve_recent_turns` knob: keep at least
@@ -37,7 +39,8 @@ impl AgentRunner {
                 session_id: &self.session_id,
                 workspace_root: self._workspace.as_path(),
                 vt_cfg: Some(self.config()),
-                current_token_usage: session_state.total_tokens(),
+                current_token_usage: session_state.total_tokens().saturating_add(prompt_overhead_tokens),
+                reserved_output_tokens,
                 touched_files: &session_state.modified_files,
                 engine_cfg,
                 manual_options: crate::compaction::ManualCompactionOptions::default(),

@@ -24,6 +24,23 @@ pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "CRITICAL: Multiple edits 
 /// (many edits with no verifier attempt) stays blocked while fix-verify loops
 /// can make progress.
 pub(crate) const FAILED_VERIFICATION_FIX_ALLOWANCE: u8 = 2;
+/// Warning rendered when a pending gate's verifier result was lost (the exec
+/// session ended before the verifier's output was captured).
+pub(crate) const VERIFICATION_RESULT_LOST_WARNING: &str =
+    "[!] Verification result lost: the exec session ended before the verifier's output was captured.";
+/// Model-facing directive paired with [`VERIFICATION_RESULT_LOST_WARNING`]:
+/// a standalone verifier re-run is the only way to clear the pending gate.
+pub(crate) const VERIFICATION_RESULT_LOST_DIRECTIVE: &str = "Verification result lost: the exec session ended before the verifier's output was captured. Re-run the verification command standalone (no pipes/truncation) to confirm or reject the recent edits.";
+/// Warning rendered while the failed-verifier fix-up window is active. Distinct
+/// from [`ANTI_BLIND_EDITING_WARNING`] so the pending-verification block notice
+/// does not imply verification was never run when the verifier already failed.
+pub(crate) const FAILED_VERIFICATION_FIX_WARNING: &str =
+    "[!] Verification failed: bounded fix edits granted before the gate re-arms.";
+/// Model-facing directive paired with [`FAILED_VERIFICATION_FIX_WARNING`]:
+/// the verifier ran and reported failure, so text responses must repair the
+/// reported failure and re-run a standalone verifier instead of claiming
+/// completion.
+pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verification command ran and FAILED. A bounded fix window is active: apply fixes for the reported failure, then re-run the standalone verification command (no pipes/truncation). Verification success is still required before the work can be accepted.";
 
 /// Threshold: number of consecutive read/search operations before the Navigation
 /// Loop warning fires.
@@ -52,6 +69,11 @@ pub(crate) struct LoopTracker {
     pub verification_warning_emitted: bool,
     /// Prevent repeated inline block notices for a single verification checkpoint.
     pub verification_block_notice_emitted: bool,
+    /// Set when a pending gate's verifier result was lost (verifier-level
+    /// Failure/Timeout, or a lost exec session). Consumed once by the
+    /// tool-outcome handlers so the lost-result directive is surfaced after
+    /// the tool response lands.
+    pub verification_result_lost_notice_pending: bool,
     /// Counter for consecutive read/search operations without action or synthesis
     pub consecutive_navigations: usize,
     /// Number of times navigation-loop recovery has fired in this session.
@@ -80,6 +102,7 @@ impl LoopTracker {
             fix_edits_remaining: 0,
             verification_warning_emitted: false,
             verification_block_notice_emitted: false,
+            verification_result_lost_notice_pending: false,
             consecutive_navigations: 0,
             navigation_loop_recoveries: 0,
             consecutive_low_signal_navigations: 0,
@@ -178,7 +201,15 @@ impl LoopTracker {
         self.low_signal_attempts.clear();
         self.nav_signatures.clear();
         self.consecutive_mutations = 0;
+        // The mutation history is wiped, so a still-pending gate would demand
+        // verification for edits the tracker can no longer attribute — and
+        // with the fix window intact it stays empty. Resetting only the
+        // counters while keeping the gate left the turn deadlocked; clear the
+        // gate together with the history it was derived from.
+        self.verification_pending = false;
+        self.fix_edits_remaining = 0;
         self.verification_block_notice_emitted = false;
+        self.verification_result_lost_notice_pending = false;
         self.consecutive_navigations = 0;
         self.reset_low_signal_navigation_counters();
     }
@@ -197,6 +228,13 @@ impl LoopTracker {
 
     pub(crate) fn mark_verification_pending(&mut self) {
         self.verification_pending = true;
+    }
+
+    /// One-shot accessor for the lost-verification-result notice queued by
+    /// [`update_repetition_tracker`]. Handlers consume it after the tool
+    /// response lands so the directive never splits an assistant batch.
+    pub(crate) fn take_verification_result_lost_notice(&mut self) -> bool {
+        std::mem::take(&mut self.verification_result_lost_notice_pending)
     }
 
     /// Grant a bounded fix-up window after a failed verifier. The gate stays
@@ -528,6 +566,14 @@ fn error_is_missing_resource(error: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
+/// Detect the exec-session-loss error text emitted by the exec session
+/// manager ("exec session '<id>' not found. ..."), mirroring the phrasing in
+/// `vtcode-core` exec_session tool errors.
+fn error_text_indicates_lost_exec_session(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("exec session") && lower.contains("not found")
+}
+
 fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &str, args: &serde_json::Value) -> bool {
     match &outcome.status {
         ToolExecutionStatus::Success { output, command_success, .. } => {
@@ -823,14 +869,26 @@ pub(crate) fn mutation_blocked_until_verification(
 ///
 /// Count completed attempts for repetition detection, but only successful
 /// mutations contribute to anti-blind-editing verification pressure.
+///
+/// Returns `true` when this outcome freshly granted (or refreshed) the
+/// failed-verifier fix-up window. Callers must reset the assistant text-response
+/// streak so the model gets one diagnostic explanation before the
+/// pending-verification text cap re-applies; otherwise a failed build blocks
+/// the turn before the agent can describe the failure and use its fix-up edits.
+///
+/// A `true` return also covers *lost* verifier results: while the gate is
+/// pending, a verifier-level Failure/Timeout (or a `write_stdin` failure
+/// reporting a dead exec session) grants the same bounded window because the
+/// verifier never produced an observable verdict. In that case the tracker
+/// queues [`VERIFICATION_RESULT_LOST_DIRECTIVE`] for the handlers to surface.
 pub(crate) fn update_repetition_tracker(
     loop_tracker: &mut LoopTracker,
     outcome: &ToolPipelineOutcome,
     name: &str,
     args: &serde_json::Value,
-) {
+) -> bool {
     if matches!(&outcome.status, ToolExecutionStatus::Cancelled) {
-        return;
+        return false;
     }
 
     let canonical_name = canonical_tool_name(name);
@@ -842,6 +900,24 @@ pub(crate) fn update_repetition_tracker(
     let is_low_signal_navigation = low_signal_family.is_some();
     if let Some(low_signal_family) = low_signal_family.as_ref() {
         loop_tracker.record_low_signal(low_signal_family.clone());
+    }
+
+    // Lost verifier results via the exec-session stdin tool: a `write_stdin`
+    // failure that reports a missing session means the session (and its
+    // pending verifier output) died before the result was captured, so
+    // `write_stdin` never classifies as ShellActivity::Verification. While
+    // the gate is pending, treat it like a failed verifier so the model gets
+    // a bounded fix/diagnostic window instead of deadlocking behind a gate
+    // that can no longer observe a successful verifier.
+    if canonical_name == vtcode_core::config::constants::tools::WRITE_STDIN
+        && loop_tracker.verification_is_pending()
+        && let ToolExecutionStatus::Failure { error } = &outcome.status
+        && error_text_indicates_lost_exec_session(&error.message)
+    {
+        loop_tracker.verification_result_lost_notice_pending = true;
+        loop_tracker.record_failed_verification();
+        loop_tracker.reset_navigation_window(low_signal_family.is_none());
+        return true;
     }
 
     // Update NL2Repo-Bench metrics based on tool intent.
@@ -866,6 +942,27 @@ pub(crate) fn update_repetition_tracker(
                     // opens the fix-up window. Tool-level Failure/Timeout (never
                     // executed, e.g. argument errors) must not grant edits.
                     loop_tracker.record_failed_verification();
+                    loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                    return true;
+                } else if loop_tracker.verification_is_pending()
+                    && matches!(
+                        &outcome.status,
+                        ToolExecutionStatus::Failure { .. } | ToolExecutionStatus::Timeout { .. }
+                    )
+                {
+                    // While the gate is pending, a verifier-level
+                    // Failure/Timeout almost always means the result was lost
+                    // (e.g. the exec session ended before the verifier
+                    // finished) rather than a genuine non-zero exit: the
+                    // verifier never produced an observable verdict. A bounded
+                    // fix window that still requires a successful standalone
+                    // verifier to clear is strictly better than a permanent
+                    // stall. Without the gate pending this stays a no-grant
+                    // arg-error path.
+                    loop_tracker.verification_result_lost_notice_pending = true;
+                    loop_tracker.record_failed_verification();
+                    loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                    return true;
                 }
                 loop_tracker.reset_navigation_window(low_signal_family.is_none());
             }
@@ -883,6 +980,8 @@ pub(crate) fn update_repetition_tracker(
                         matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. });
                     if ran_and_failed {
                         loop_tracker.record_failed_verification();
+                        loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                        return true;
                     }
                     loop_tracker.reset_navigation_window(low_signal_family.is_none());
                 } else {
@@ -913,6 +1012,7 @@ pub(crate) fn update_repetition_tracker(
             loop_tracker.record_navigation_signal(is_low_signal_navigation);
         }
     }
+    false
 }
 
 fn mutation_was_applied(outcome: &ToolPipelineOutcome) -> bool {
@@ -1335,7 +1435,121 @@ mod tests {
     }
 
     #[test]
-    fn tool_level_verification_failure_grants_no_fix_window() {
+    fn pure_and_chained_verifiers_are_admitted_and_clear_gate() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        for command in [
+            "cargo fmt --all -- --check && cargo check --locked",
+            "cargo check --locked && cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked && cargo clippy --locked -p vtcode-ui -- -D warnings",
+        ] {
+            assert!(
+                !mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "pure && verifier chain must be admitted: {command}"
+            );
+        }
+
+        let chained_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &chained_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check && cargo check --locked"}),
+        ));
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.consecutive_mutations, 0);
+    }
+
+    #[test]
+    fn non_and_chained_verifiers_do_not_clear_gate() {
+        for command in [
+            "cargo check --locked; cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked || cargo nextest run --locked -p vtcode-ui",
+            "cargo check --locked | head -40",
+        ] {
+            let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+            tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+            let chained_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+                output: serde_json::json!({"exit_code": 0}),
+                stdout: None,
+                modified_files: vec![],
+                command_success: true,
+            });
+            update_repetition_tracker(&mut tracker, &chained_success, tools::EXEC_COMMAND, &json!({"cmd": command}));
+            assert!(tracker.verification_is_pending(), "`;`/`||`/`|` chains must not clear the gate: {command}");
+        }
+    }
+
+    #[test]
+    fn fmt_check_clears_gate_but_plain_fmt_does_not() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        assert!(!mutation_blocked_until_verification(
+            &tracker,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check"})
+        ));
+
+        let fmt_check_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        update_repetition_tracker(
+            &mut tracker,
+            &fmt_check_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check"}),
+        );
+        assert!(!tracker.verification_is_pending());
+
+        // Plain `cargo fmt` rewrites files: it stays a mutation and never
+        // clears the gate.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        assert!(mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": "cargo fmt"})));
+    }
+
+    #[test]
+    fn failed_verifier_reports_fix_window_for_text_streak_reset() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let failed_check = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 1}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &failed_check,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked"}),
+        ));
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+
+        let successful_check = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &successful_check,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked"}),
+        ));
+    }
+
+    #[test]
+    fn lost_verification_tool_failure_while_pending_grants_fix_window() {
         let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
         tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
         let tool_failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
@@ -1345,15 +1559,108 @@ mod tests {
                 "check could not start".to_string(),
             ),
         });
-        update_repetition_tracker(
+        assert!(update_repetition_tracker(
             &mut tracker,
             &tool_failure,
             tools::EXEC_COMMAND,
             &json!({"cmd": "cargo check --locked"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(
+            !mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})),
+            "the lost-result grant must open the bounded fix window"
         );
+        assert!(tracker.take_verification_result_lost_notice(), "the lost-result directive must be queued");
+        assert!(!tracker.take_verification_result_lost_notice(), "the notice is one-shot");
+    }
+
+    #[test]
+    fn lost_verification_tool_timeout_while_pending_grants_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let tool_timeout = ToolPipelineOutcome::from_status(ToolExecutionStatus::Timeout {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::EXEC_COMMAND.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::Timeout,
+                "verification command timed out".to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &tool_timeout,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo nextest run"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+    }
+
+    #[test]
+    fn verification_tool_failure_without_pending_gate_grants_no_fix_window() {
+        let mut tracker = LoopTracker::new();
+        let tool_failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::EXEC_COMMAND.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "check could not start".to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &tool_failure,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked"}),
+        ));
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn write_stdin_lost_exec_session_failure_while_pending_grants_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::WRITE_STDIN.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "exec session 'run-7' not found. Copy the exact `session_id` from the original run response"
+                    .to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::WRITE_STDIN,
+            &json!({"session_id": "run-7", "chars": ""}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(!mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+        assert!(tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn write_stdin_unrelated_failure_while_pending_grants_no_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let unrelated = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::WRITE_STDIN.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "session is not writable".to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &unrelated,
+            tools::WRITE_STDIN,
+            &json!({"session_id": "run-7", "chars": "q"}),
+        ));
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.fix_edits_remaining, 0);
-        assert!(mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+        assert!(!tracker.take_verification_result_lost_notice());
     }
 
     #[test]
@@ -1483,6 +1790,8 @@ mod tests {
         tracker.record("code_search:{\"query\":\"Widget\"}".to_string());
         tracker.record("code_search:{\"query\":\"Widget\"}".to_string());
         tracker.consecutive_mutations = 2;
+        tracker.verification_pending = true;
+        tracker.fix_edits_remaining = FAILED_VERIFICATION_FIX_ALLOWANCE;
         tracker.consecutive_navigations = 4;
         tracker.consecutive_low_signal_navigations = 3;
         tracker.total_low_signal_navigations = 7;
@@ -1494,6 +1803,12 @@ mod tests {
         assert_eq!(tracker.max_count_filtered(|_| false), 0);
         assert_eq!(tracker.max_low_signal_count(), 0);
         assert_eq!(tracker.consecutive_mutations, 0);
+        // The mutation history is wiped, so the pending gate must be cleared
+        // with it: an untracked pending gate has an empty fix window and
+        // deadlocks the turn.
+        assert!(!tracker.verification_pending);
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
         assert_eq!(tracker.consecutive_navigations, 0);
         assert_eq!(tracker.consecutive_low_signal_navigations, 0);
         assert_eq!(tracker.total_low_signal_navigations, 0);

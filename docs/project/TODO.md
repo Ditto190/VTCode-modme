@@ -1,7 +1,3 @@
-Out of curiosity, since I don't understand this too much. Since it is terminal coding, could this be ported to work on a vt520 terminal and just use the terminal as a chat bot?
-
-Right now I am running a python script and API key to run an AI bot on my vt520. It was a neat little project - I had help from Gemeni
-
 ===
 
 Areas that are complex
@@ -68,126 +64,160 @@ Evidence: Session replay can't show touched files
 
 ===
 
-improve coloring of grouped tool call commands and wording higlight
+====
 
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.09.57.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.09.55.png'
+You are improving VT Code itself (/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode, Cargo workspace ~30 crates, Rust 1.88, edition 2024).
 
----
+Bias to action: infer intent and carry to completion. Treat "can you...", "help me..." as do-it orders. Do concrete reviewable work before asking; approval is final step only for irreversible/destructive. Reversible/read-only/fixes need no permission.
 
-improve and fix UI '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 21.00.54.png'
+User instructions > AGENTS.md > SKILL.md. If a skill makes you pause/diverge, quote SKILL.md path + line and continue per user intent.
 
----
+Delegate in parallel whenever independent via collaboration tools. Messages to subagents must be legible.
 
-check and fix
+Do not over-test: no tests for reversible low-impact mirrors. Run: ./scripts/check-dev.sh, cargo nextest run -p <crate> (never cargo test), cargo check --locked with RUSTFLAGS="-D warnings".
 
-• The turn is blocked before success could be
-confirmed. The available history and outputs are
-retained; resume the request to continue.
------------------------- Info -------------------------
-Recovery tool-call limit reached after 3 blocked
-calls. Last blocked call: 'Run command'. Tools remain
-disabled while the recovery response is finalized.
-Blocked handoff:
-/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
-Blocked handoff:
-
-/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260902t14281-3z_732254-54385-20260902T144229Z.md
-
-note: i want you to fix and improve vtcode harness based on the session run log. The harness should be able to handle blocked calls more gracefully, provide better feedback to the user, and ensure that the session can resume smoothly after a blockage. Additionally, improve the UI to clearly indicate when a turn is blocked and what actions the user can take to resolve it. not do it yourself
-
----
-
-fix broken tool call rendering
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-02 at 22.40.46.png'
+Task: find top 5 self-improvements across agent-loop, tools, prompts, safety that reduce tokens + failures. Output table: problem|evidence file:line|fix|verify cmd. Then implement #1 surgically with Conventional Commits style, 4-space, anyhow::Result+with_context, CompactString for small strings, preserve vtcode-exec-events::ThreadEvent contract.
 
 ===
 
-===
-
-check /config listing some time can not scroll to last items, it get stuck even though the list is longer than the screen. The harness should ensure that the scrolling behavior in the /config listing is smooth and allows users to reach the last items without getting stuck. Additionally, provide visual indicators or feedback to inform users when they have reached the end of the list or if there are more items to scroll through.
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-03 at 16.58.38.png'
-
-===
-
-fix propose plan mode markdown is not rendering correctly, it should be able to render the markdown content properly and display it in a readable format. The harness should ensure that any markdown content is parsed and rendered accurately, preserving formatting, headings, lists, and other elements. Additionally, provide clear feedback to the user if there are any issues with rendering the markdown content.
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-04 at 10.54.05.png'
+In vtcode + gpt-6-astra (1.05M ctx / 922k max in / 128k out / $10 in / $50 out / reasoning.effort: low,medium,high,xhigh,max):
+Astra is built for exactly this: long multi-step coding, computer-use, multi-agent delegation, with fewer tokens/task than GPT-5.6 Sol. Gotchas for VT Code: >272k in = 2x in + 1.5x out, no temperature/top_p, use Responses API, and it over-asks + over-tests + over-obeys AGENTS.md/SKILL.md by default. 0. Wire it up (once)
 
 ---
 
-check plan mode: vtcode on user approval confirmation dialog -> accept and implement -> the agent use auto mode -> then later the agent switch to propose plan mode, but not implement it? User has to nudge `start implement` manually. The harness should ensure that when the agent switches to propose plan mode, it automatically implements the proposed plan without requiring additional user intervention. Additionally, provide clear feedback to the user about the current mode and any actions they need to take to ensure the plan is implemented correctly.
+# vtcode.toml
 
-log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260904T034530Z_179873-58689
+[agent.harness]
+max_parallel_tool_calls = 8 # let Astra parallelize
+
+[models]
+
+# via adding-llm-providers skill: ModelId::all_models() + builtin_model_presets()
+
+# model = "gpt-6-astra", reasoning.effort = "high" for code, "max" for harness/security
+
+# use prompt_cache_options.ttl="30m", keep prefix stable, change effort via configuration_update
+
+Run as: vtcode exec --dry-run "<prompt>" first, then real. Discover tools via vtcode schema tools.
 
 ===
 
-check and fix vtcode agent keep getting turn blocked. repeatedly. deep dive and fix.
+2. 1M-context architecture audit
+   reasoning.effort=xhigh. Use file_search + code_search, not full-file dumps.
 
-CRITICAL.
+Audit crates/codegen/vtcode-core/core/agent/, tools/, llm/, prompts/sections + guidelines.rs:22, runtime_guidance.rs:7 against docs/harness/ARCHITECTURAL_INVARIANTS.md, docs/guides/agent-loop-contract.md.
 
-====================================================== Warning ======================================================
-Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a successful build, test
-, lint, or compile command.
-=====================================================================================================================
+Find: duplicate types vs ThreadEvent, prompt bloat >256 tokens, spool/preview budget leaks, sync fs in async paths, policy bypasses. Return: 10 findings ranked by blast radius with file:line + minimal patch via apply_patch.
 
-• The turn is blocked because verification is still pending. Inspection-only checks do not clear the verification
-gate; run cargo check --locked or the relevant cargo nextest run command, then resume the request.
-------------------------------------------------------- Info --------------------------------------------------------
-Turn blocked after repeated unverified assistant responses; verification is still pending.
+===
 
-a non-zero exit status; the bounded output does not establish a more specific
-cause.
-Next action: Inspect the reported error and retry with corrected arguments or a narrower scope.
+3. Harness loop tuner for Astra behavior
+   VT Code prompts live in crates/codegen/vtcode-core/src/prompts/guidelines.rs + runtime_guidance.rs. Astra needs explicit autonomy/delegation/testing calibration.
 
-• Ran cargo check --locked
+Propose new RUNTIME_GUIDANCE_SECTION + Active Tools lines that: 1) force subagent parallelization, 2) forbid approval pauses for read-only/reversible, 3) limit verification to one verifier unless failed. Keep <256 tokens, deterministic, idempotent via ensure_runtime_guidance. Include golden/compactness test updates.
 
-log: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260904T034530Z_179873-58689
+===
 
----
+4. Sandbox / safety red-team (use Astra cyber strength, fenced)
+   reasoning.effort=max. You are defensive auditor only. No weaponization, no exfil.
 
-small details: on "/" splash command pallate suggestion, pressing "enter" should just accept the suggestion and populate into the chat input box, instead of executing the command immediately. This allows users to review and edit the suggestion before sending it, improving usability and reducing accidental command execution. Check how "tab" key is used for suggestion selection and ensure that the behavior is consistent with user expectations. Additionally, provide visual feedback to indicate that the suggestion has been accepted into the input box, and allow users to easily modify or cancel the input before sending it.
+Target: vtcode-bash-runner sandbox launch, vtcode-core/tools/registry/executors/, mcp/plugin_providers.rs ./-canonicalization, WebMCP edits, exec_policy vs command_safety layers.
 
----
+Try: command injection, path/symlink escape, env leakage, spool recursion (.vtcode/context/tool_outputs/ must use no_spool), fail-open on saturation. For each: PoC test in scripts/tests/ or Rust unit test, fail-closed fix, add adversarial regression. Verify: cargo nextest run -p vtcode-core -E 'binary(/pty_tests/)', -p vtcode-bash-runner -E 'binary(/pipe_tests/)'.
 
-## Plan: Resume After Tool-Call Limit Grant
+===
 
-Grant more tool calls must resume the **same Build turn**, not leave the harness blocked or leak into Duck. Session logs show a blocked turn with no final answer, then a new session that burned overlapping README searches and continued as Duck.
+5. Rust quality / perf sweep
+   reasoning.effort=medium. Follow AGENTS.md: surgical, preserve APIs, CompactString, Cow<'static,str>, Arc<Vec<Message>> via messages_mut(), tokio fs or spawn_blocking for scans, ast-grep for shape (not rg), hawk for dead code.
 
-**Steps**
+Run: cargo clippy -- -D warnings, ./scripts/hawk.sh --deny, ast-grep scan. Fix only main logic, no test churn. Verify with ./scripts/check-dev.sh --lints.
 
-1. Treat overlay Cancel/Esc as deny; keep waiting on leaked Tab/CyclePrimaryAgent; re-show on Deferred instead of mapping those to deny in `limit_prompts.rs`.
-2. After a grant, retry the pending tool call with the increased budget and emit a harness grant event — do not mark `SessionLimitNotIncreased` / Blocked.
-3. After a loop-limit grant, keep tools enabled and continue the same agent; do not arm tool-free recovery.
-4. Snapshot the write-capable agent at prompt time; restore Build if Duck/Plan leaked in during the grant.
-5. Lock Tab/mode switches for overlays, Building, Recovery, and Blocked — not only transient handoff states.
-6. Persist `primary_agent` on every switch and restore it on resume; do not drop to Duck via `/new` after a live blocked handoff.
-7. Clear Blocked UI after grant; do not convert a grant-in-flight turn into `COMPLETED_TURN_NO_RESPONSE_REASON`.
-8. Persist the granted session fuse across `set_limits` / `start_turn`.
-9. Cap same-file `code_search` reuse (README churn in session 2) and tell the model to use existing outputs after a grant.
-10. Show explicit user copy: current agent, grant vs deny, and what to do next.
+===
 
-**Relevant files**
+6. Docs/eval closer (VT Code definition of done)
+   Every major feature must update: docs/development/ guide + quick-ref row, prompts/guidelines.rs + vtcode-utility-tool-specs schema if tool surface changed, ThreadEvent if runtime contract changed. Check AGENTS.md links still resolve.
 
-- `limit_prompts.rs` — grant vs deny
-- `overlay_prompt.rs` — overlay wait
-- `turn_loop_helpers.rs` — loop-limit resume
-- `orchestration.rs` — blocked UI, agent persist, new session
-- `mode_switch_guard.rs` — Tab lock
-- `read_guard.rs` — same-path search cap
+Generate missing docs + vtcode-eval regression (pass@k, env-verified outcome) + nextest test. Plain language, no "delve/leverage/Bottom Line:", paragraphs over lists unless parallel/sequential.
 
-**Verification**
+===
 
-1. Overlay noise is not a deny; genuine Deny still synthesizes.
-2. Grant retries the pending call as Build.
-3. Tab is locked while Building/Blocked/overlay-active.
-4. Archive restore keeps Build; session fuse survives the next turn.
-5. Repeat `code_search` on one file reuses or stops after a small cap.
-6. `cargo nextest run` on limit-prompt, blocked-handoff, primary-agent, read-guard, and UI Tab-lock tests.
+7. Cheap long-runner pattern
+   Use low for edits, configuration_update to xhigh/max only for hard segments to preserve cache. Batch/Flex at 50% for sweeps. Chunk under 272k to avoid 2x pricing.
 
-**Decisions**
+=====
 
-- Restore the pre-grant write-capable agent **and** lock Tab during grant/blocked/active turn.
-- Idle Tab after a finished turn stays user-controlled.
-- Out of scope: raising default loop/session caps; rewriting Duck’s spec.
+More prompts (8-17) 8. Cache-stability + token-bloat fix:
+reasoning.effort=xhigh. Audit prompt caching: stable_system_prefix_hash in core/agent/hash_utils.rs:39-55 strips Active-Tools/Catalog/Context but not [Harness Limits] or ## Environment/Shell Profile. cache_key in prompts/system.rs:576-606 omits prompt_context. system_prompt_budget in system.rs:305-462 is warn-only trim-off by default, estimator len/4. Fix to keep PROMPT_CACHE hits, include digests in envelope instruction_digest, enable safe trim, add hit-rate assert via Usage.cache_hit_rate. Verify: cargo nextest run -p vtcode-core prompts::
+
+9. Compaction vs reset unification:
+   Compaction preserves+new segment (compaction_checkpoint.rs:25-130, compaction/mod.rs:21-43) vs context_reset.rs discards to .vtcode/tasks/current_context_reset.md. Session clear wipes all in session/mod.rs:487-505. Auto trigger 90% min(provider,session) in compaction/memory_envelope.rs:1338-1349. Unify to single manifest referencing ThreadCompactBoundary + ContextReset events, test stall->reset->orient roundtrip. Keep ThreadEvent schema 0.14.0 compatible.
+
+10. Parallel fan-out:
+    can_parallelize=readonly&&preflight in tool_batching.rs:81-83 over-serializes; duplicate exec_command forced sequential; guidance is one line in guidelines.rs:80-82. Widen parallel_safe_after_preflight for pure reads (read_file/batch.rs), add few-shot parallel example, surface fan-out in telemetry. Verify max_parallel_tool_calls honored in tool_exec.rs:417,750.
+
+11. Failure taxonomy collapse:
+    Unify harness_kernel.ExecutionFailure, cargo_failure_diagnostics, Reasoning stage diagnosis, ErrorRecoveryState+circuit, HarnessEventKind::ToolRetry/ErrorRecovered into ErrorCategory+ToolOutcome path. Always emit HarnessEventItem{attempt,error_category,duration_ms}. No new ThreadEvent variants.
+
+12. Spool hardening:
+    Spool 8192B in output_spooler.rs:34 vs 32KiB/turn budget vs OUTPUT_PREVIEW_CHARS_PER_TOKEN=4. Reducers only cover read_file/unified_exec. Anti-recursion depends on caller no_spool, is_tool_output_spool_path is substring match. Enforce no_spool at gateway via canonical containment, append-only+digest reads via SpooledOutputReference only, add recursion/poisoning tests.
+
+13. Shell injection + redirection blindspot:
+    reasoning.effort=max, defensive only. executor.rs:166-169 sh -c + shell_handler.rs:86-92 join(" ") + preflight skip(1) in sandbox_runtime.rs:674-729 misses > ~/.ssh/authorized_keys, python -c, $BIN/curl, sudo unwrap. Enforce argv-only exec unless validate_command_safety+redirection-aware preflight pass, deny > to sensitive, expand interpreter -c/-e list. Add regression tests, run pty_tests+pipe_tests.
+
+14. Env leakage + containment TOCTOU:
+    manager.rs:56-62 uses denylist filter_sensitive_env not allowlist build_sanitized_env; PYTHONPATH/NODE_PATH/RUSTFLAGS/NODE_OPTIONS/GIT_SSH_COMMAND leak. WorkspaceGuardPolicy lexical vs ensure_path_within_workspace_resolved, skill_additional_permissions normalize only. Switch restrictive to allowlist, scope PYTHONPATH to workspace, fail-closed canonicalize, add symlink-swap harness.
+
+15. Skill/MCP trust:
+    NETWORK_TOOLS misses exec/shell egress in skill_policy.rs:14-44, silent UseDefault->WithAdditional merge, SKILL.md unfenced, SkillToolScope checked once. MCP parse_mcp_tool verbatim no size/name cap. Treat shell as network unless BlockAll, require human approval for out-of-workspace paths, fence skill/MCP descriptions + injection probe, cap schema bytes, namespace names, rate-limit list_changed.
+
+16. Eval + memory fix:
+    metric.rs:13-25 fake pass@k, suite attempts:0 deserializes, executor sequential cost-blind, search_memory substring count, eviction truncates without summarize. Implement true pass@k/pass^k, attempts>=1 guard, parallel run_suite with cost_usd aggregation, wire eviction->grounded_facts summarizer, BM25+recency search. Add gpt-6-astra capability suite.
+
+17. Astra routing/cost/budget:
+    GPT6Astra exists in table.rs:109-115 + openai.rs:85 + merge_gateway.rs:21 but pricing None => estimate_session_costs returns None => max_budget_usd skipped in runner/execute.rs:761-799. Duplicate estimate in model_resolver.rs:286-301 vs usage_cost.rs:105-136. Unify on usage_cost, audit models.json for 3 Astra IDs, fail-closed on pricing None when budget set, document raw=enforcement vs effective=display.
+
+===
+
+1. tui/core*tui/session.rs:1-407 — state transitions / layout
+   Split across session/state.rs:1-958, impl_init.rs, impl_layout.rs, impl_render.rs, driver.rs, action.rs, config.rs. Gotcha: transcript_area is source of truth for scroll/hit-test, ActivityState is global busy/idle, bottom-half rect shared by overlays + clipping.
+   reasoning.effort=xhigh. Map Session lifecycle in tui/core_tui/session.rs + session/state.rs + session/driver.rs + session/action.rs.
+   Output: state table (field, mutated where, dirty/redraw path, modal/timeline interaction) + top 5 transition bugs (e.g. mark_dirty missed, overlay vs transcript_area clipping, ActivityState drift). Keep transcript_area as scroll source, no explicit rect to apply_view_rows. Patch surgically, verify with cargo nextest run -p vtcode-ui.
+   Decompose Session god-object: propose extract of init/layout/render/scroll/style from impl*\*.rs into small interfaces without breaking task_panel.rs helpers or SessionWidget in tui/ui/tui/widgets/. Keep 4-space, anyhow::Result+context. Show before/after file:line.
+2. Transcript rendering + cache
+   session/transcript.rs:1-585 (TranscriptReflowCache, revision, invalidate_message), reflow/blocks.rs|formatting.rs|helpers.rs, wrapping.rs, tool_renderer.rs, message_renderer.rs, widgets/transcript.rs. Gotchas: info/warning/error blocks invalidate from first line, each Info summary line is boundary, Alt+T must invalidate caches, PTY • prefix keeps explicit status color, blank line above/below tool blocks, hit regions rebuilt after reflow.
+   reasoning.effort=max. Audit TranscriptReflowCache: set_width/invalidate_content/needs_reflow/update_message in session/transcript.rs + reflow/ + wrapping.rs + text_utils.rs hanging-prefix.
+   Find: stale revision on grouped reflow, width-change over-invalidation, scroll-anchor loss, PTY live vs complete capture leak, compact review hint hit-region drift. Fix with bounded cache + targeted invalidate_message, add test in session/tests/transcript_rendering.rs + diff_overlay.rs. Measure large-transcript reflow time before/after.
+   Repro PTY/scroll bugs end-to-end: compact vs expanded PTY, Ctrl+T Transcript Review (rich/raw via r), drag_autoscroll, overlay_list scroll-through. Use computer-use to drive terminal resize + wheel outside modal_list_area (must pass to transcript). Output failing case as nextest + bounded live lines, complete captures behind viewer.
+3. Input ownership
+   session/input_manager.rs:1-1234 (TextArea wrapper, max_histories 50), input.rs, impl_input.rs, textarea_bridge.rs, modal/state.rs|render.rs|layout.rs, reverse_search.rs, queue.rs. Gotchas: bridge prompts = deferred-event queue prompt-only, transient overlays own input, slash parsing terminal-only, toggle_tool_display_mode Alt+T before legacy text-edit, Ctrl+C copy-swallow, fullscreen Ctrl+T dual meaning.
+   Build input-routing matrix for: normal, popup/modal, approval, reverse-search, fullscreen review, queue_inputs. Trace in input_manager.rs + impl_input.rs + modal/ + reverse_search.rs + queue.rs. Find focus leaks, key swallowing (Alt+T, Ctrl+C/T), mouse ownership outside modal_list_area. Unify to explicit owner enum + guard, add tests in tests/vim.rs,input_navigation.rs,queue_inputs.rs,overlay_list.rs.
+4. Async integration
+   runner/events.rs:1-278 (TerminalEvent::Tick/Crossterm, EventChannels pause/resume, last_input_elapsed_ms), runner/drive.rs|surface.rs|terminal_io.rs|signal.rs|terminal_modes.rs, session/events.rs|impl_events.rs, panic_hook/. Gotchas: terminal-op lock for render/finalize, alt-screen teardown clears before leave, panic-hook only after successful mutation, active-PTY counter = global loading observer with footer fallback in state.rs.
+   reasoning.effort=xhigh. Audit event fan-in: Tick adaptive rate via last_input_elapsed_ms, agent/PTY/redraw coordination in runner/drive.rs + runner/events.rs + session/impl_events.rs. Find: blocking recv, unbounded mpsc queue (clear_queue drain), missed pause/resume, signal teardown race, redraw starvation. Fix with bounded coalesced diagnostics, non-blocking handoff, terminal-operation lock proof. Verify with harness PTY tests: cargo nextest run -p vtcode-core -E 'binary(/pty_tests/)'.
+5. Theme + contrast
+   theme/registry.rs:52-923, scheme.rs, runtime.rs, color_math.rs, tests.rs:58-80. Requirement: all built-ins WCAG AA 4.5:1, cargo nextest run -p vtcode-ui -E 'test(theme)'. Catppuccin-latte special-case saturating_sub(32).
+   For every theme in all_theme_definitions: validate foreground/primary/secondary/user/response vs background via contrast_ratio in theme/tests.rs. Theme changes must propagate to normal/accent/syntax/status/overlay. Fix latte-style failures by darkening, not lightening bg. Add snapshot test in tui/core_tui/widgets/snapshots/ for tool success/failure/warning • prefix + syntax fallback when shell highlight yields no distinct tokens.
+   Run order: 1 -> 2 -> 3 -> 4 -> 5. Delegate 2+5 in parallel subagents — no shared files.
+
+===
+
+Engine: gpt-6-astra for execution quality. Target: whole vtcode harness, model-agnostic.
+Rules: No if model=="gpt-6-astra" branches. Use ResolvedModel capability (context_window/pricing/supports_reasoning_effort), Provider trait, ModelCatalogEntry. Test on >=3 families (OpenAI + Claude + Gemini/local). Preserve ThreadEvent contract, 4-space, anyhow::Result+context, CompactString, ./scripts/check-dev.sh --changed + cargo nextest run (never cargo test).
+User instructions > AGENTS.md > SKILL.md. Bias to reviewable action, delegate parallel subagents, one verifier unless failed.
+P1 — Capability-driven budgets, not 1M assumption:
+Replace hardcoded 160k cap + 90% compaction rule with effective_budget=min(ResolvedModel::context_window(), context.max_context_tokens, session safety). Fix in compaction/memory_envelope.rs + vtcode-config/src/context.rs + core/agent/runner/task_setup.rs. Log denominator per turn. Test with small (32k dynamic in model_resolver.rs:606) vs 1M models. Verify auto-compact triggers correctly for both.
+P2 — Reasoning-effort mapping without fidelity loss:
+Audit rig_adapter.rs:81-139 where XHigh/Max->high on some providers + provider_trait.rs:24 capability flag. Introduce central ReasoningEffortMapper: query supports_reasoning_effort, degrade explicitly (Max->XHigh->High) with TurnBlocked/harness diagnostic, never silent. Remove duplicate estimate_cost in model_resolver.rs:286 vs usage_cost.rs. Test matrix all ReasoningEffortLevel x OpenAI/Anthropic/Gemini.
+P3 — Prompt cache stable across models:
+In core/agent/hash_utils.rs + prompts/system.rs:576-606: prefix hash must include capability digest (model id, reasoning tag, tool catalog epoch) not model name string. Keep ShellProfile/Environment/Harness-Limits frozen per segment. Assert PROMPT_CACHE hit via Usage.cache_hit_rate. Must improve hits for all providers, not just Astra Responses caching.
+P4 — Tool guidelines per capability level:
+Extend prompts/guidelines.rs:22 generate_tool_guidelines(CapabilityLevel) to emit terse vs verbose variants based on ResolvedModel context + cost, not Astra verbosity. Small-context models get Minimal profile, large get Default. Parallel-call hint only if provider supports parallel tool calls. Snapshot test both.
+P5 — Cost + fallback unified:
+Unify model_resolver estimate + usage_cost raw=enforcement/effective=display. If pricing None + max_budget_usd set -> fail-closed or explicit allow-unpriced, not silent skip in runner/execute.rs. Fix manual is_pro_variant + hardcoded fallback in capabilities.rs:154 to catalog-driven. Aggregate cost_usd in vtcode-eval report. Test gpt-6-astra via 3 routes + missing-pricing case.
+P6 — Safety/sandbox + spool harness-wide:
+Defensive only. Fix sh -c join, redirection-blind preflight, env denylist->allowlist, lexical vs resolved TOCTOU, spool substring check, WebMCP CARGO_HOME trust, skill network miss, MCP schema verbatim — at SafetyGateway/registry layer so all models inherit. No model-specific bypass. Add adversarial nextest + pty_tests/pipe_tests.
+P7 — TUI complexity (session/transcript/input/async/theme):
+In vtcode-ui/src/tui/core_tui/session.rs + transcript.rs:28-62 + input_manager.rs + runner/events.rs + theme/tests.rs:58-80: fix transition table, reflow revision invalidation, input owner enum, Tick/PTY/redraw coalescing, WCAG 4.5:1 for all themes. Must work headless + all terminals, not Astra computer-use only. Verify cargo nextest run -p vtcode-ui -E 'test(theme)' + transcript_rendering + overlay_list tests.
+P8 — Eval/memory generalizer:
+Fix vtcode-eval/metric.rs true pass@k/pass^k, attempts>=1 guard, parallel run_suite with cost/latency join to trace_analyzer. Fix vtcode-memory eviction->summarize hook + BM25 search + LRU invalidate. Add cross-model regression suite (Astra executes, Claude/Gemini must also pass).
+Run order: P3 -> P1/P2/P5 -> P4 -> P6 -> P7 -> P8. Each PR must show check-dev.sh --changed + 3-model evidence.

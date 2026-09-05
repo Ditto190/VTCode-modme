@@ -34,7 +34,7 @@ Comprehensive reference covering:
 
 Detailed guide on how VT Code uses ANSI sequences:
 
--   Module overview (ansi_parser, anstyle_utils, ansi renderer)
+-   Module overview (ansi_parser, style bridging, ansi renderer)
 -   PTY output processing flow
 -   TUI rendering with Ratatui
 -   Color and style mapping
@@ -70,8 +70,8 @@ Quick lookup for common sequences:
 
 **Converting ANSI to Ratatui styles**:
 
--   Implementation: `crates/codegen/vtcode-core/src/utils/anstyle_utils.rs`
--   Guide: [ansi-in-vtcode.md#ansi-style-utilities](./ansi-in-vtcode.md#2-ansi-style-utilities-vtcode-coresrcutilsanstyle_utilsrs)
+-   Implementation: `crates/codegen/vtcode-ui/src/design/color.rs` + `design/style.rs` (crate-internal)
+-   Guide: [ansi-in-vtcode.md#ansi-style-bridging](./ansi-in-vtcode.md#3-ansi-style-bridging-vtcode-uisrcdesign)
 -   Quick ref: [ansi-quick-reference.md#vtcode-usage-examples](./ansi-quick-reference.md#vtcode-usage-examples)
 
 **Understanding ANSI sequences**:
@@ -100,7 +100,7 @@ Quick lookup for common sequences:
     → [ansi-escape-sequences.md#8-16-colors](./ansi-escape-sequences.md#8-16-colors)
 
 -   **Convert ANSI styles for TUI**
-    → [ansi-in-vtcode.md#ansi-style-utilities](./ansi-in-vtcode.md#2-ansi-style-utilities-vtcode-coresrcutilsanstyle_utilsrs)
+    → [ansi-in-vtcode.md#ansi-style-bridging](./ansi-in-vtcode.md#3-ansi-style-bridging-vtcode-uisrcdesign)
 
 -   **Debug ANSI-related issues**
     → [ansi-quick-reference.md#debugging-ansi-issues](./ansi-quick-reference.md#debugging-ansi-issues)
@@ -134,13 +134,18 @@ let clean = strip_ansi(pty_output);
 
 ### Convert ANSI to Ratatui style
 
+Style bridging is centralized in `vtcode-ui` (`design/color.rs` +
+`design/style.rs`, crate-internal) — delegate to it instead of adding new
+converters:
+
 ```rust
-use vtcode_core::utils::anstyle_utils::ansi_style_to_ratatui_style;
+// Inside vtcode-ui:
+use crate::design::style::anstyle_to_ratatui_style;
 
 let ansi_style = anstyle::Style::new()
     .fg_color(Some(AnsiColor::Red))
     .bold();
-let ratatui_style = ansi_style_to_ratatui_style(ansi_style);
+let ratatui_style = anstyle_to_ratatui_style(ansi_style);
 ```
 
 ### Render colored text
@@ -158,13 +163,13 @@ renderer.render("Success!", MessageStyle::Success);
 All ANSI-related code has comprehensive tests:
 
 -   **Parser tests**: `crates/codegen/vtcode-core/src/utils/ansi_parser.rs`
--   **Style conversion tests**: `crates/codegen/vtcode-core/src/utils/anstyle_utils.rs`
+-   **Style conversion tests**: `crates/codegen/vtcode-ui/src/design/color.rs` and `design/style.rs`
 -   **Integration tests**: `crates/codegen/vtcode-core/src/tools/registry/executors/`
 
 Run tests:
 
 ```bash
-cargo test --package vtcode-core ansi
+cargo nextest run -p vtcode-core ansi
 ```
 
 ## External Resources
@@ -181,7 +186,7 @@ When adding new ANSI-related features:
 1. **Check existing utilities** - Don't reinvent the wheel
 2. **Add tests** - All ANSI handling should be tested
 3. **Update docs** - Add examples to relevant guides
-4. **Follow patterns** - Use `strip_ansi()` for cleaning, `ansi_style_to_ratatui_style()` for conversion
+4. **Follow patterns** - Use `strip_ansi()` for cleaning, `anstyle_to_ratatui_style()` (in `vtcode-ui/src/design/`) for conversion
 
 ## Summary
 

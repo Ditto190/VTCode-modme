@@ -374,7 +374,7 @@ impl PipeSessionManager {
             let mut sessions = self.sessions.write().await;
             sessions
                 .remove(session_id)
-                .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))?
+                .ok_or_else(|| anyhow!("exec session '{session_id}' not found. Copy the exact `session_id` from the original run response `next_wait_args`/`next_continue_args`; do not invent or reuse an older session id. If the session already exited, re-run the command instead of waiting"))?
         };
 
         record.handle.terminate();
@@ -421,7 +421,7 @@ impl PipeSessionManager {
         sessions
             .get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))
+            .ok_or_else(|| anyhow!("exec session '{session_id}' not found. Copy the exact `session_id` from the original run response `next_wait_args`/`next_continue_args`; do not invent or reuse an older session id. If the session already exited, re-run the command instead of waiting"))
     }
 
     fn ensure_within_workspace(&self, candidate: &Path) -> Result<()> {
@@ -655,7 +655,7 @@ impl ExecSessionManager {
             let mut sessions = self.sessions.write().await;
             sessions
                 .remove(session_id)
-                .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))?
+                .ok_or_else(|| anyhow!("exec session '{session_id}' not found. Copy the exact `session_id` from the original run response `next_wait_args`/`next_continue_args`; do not invent or reuse an older session id. If the session already exited, re-run the command instead of waiting"))?
         };
 
         let metadata = match record.backend {
@@ -731,7 +731,7 @@ impl ExecSessionManager {
         sessions
             .get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow!("exec session '{session_id}' not found"))
+            .ok_or_else(|| anyhow!("exec session '{session_id}' not found. Copy the exact `session_id` from the original run response `next_wait_args`/`next_continue_args`; do not invent or reuse an older session id. If the session already exited, re-run the command instead of waiting"))
     }
 }
 

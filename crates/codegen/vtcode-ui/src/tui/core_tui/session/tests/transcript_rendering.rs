@@ -1132,7 +1132,7 @@ fn empty_agent_segments_dont_trigger_streaming_state() {
 #[test]
 fn tool_summary_details_are_tightly_grouped() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
-    session.push_line(InlineMessageKind::Info, vec![make_segment("• Search code Use Code search")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("• Search code for core agent loop")]);
     session.push_line(InlineMessageKind::Info, vec![make_segment("  └ File types: rs")]);
     session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Max results: 25")]);
     session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Path: crates/codegen/vtcode-core")]);
@@ -1146,7 +1146,7 @@ fn tool_summary_details_are_tightly_grouped() {
         .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
         .collect();
     assert!(texts[0].trim().is_empty()); // top
-    assert_eq!(texts[1], "• Search code Use Code search");
+    assert_eq!(texts[1], "• Search code for core agent loop");
     assert_eq!(texts[2], "  └ File types: rs");
     assert_eq!(texts[3], "  └ Max results: 25");
     assert_eq!(texts[4], "  └ Path: crates/codegen/vtcode-core");
@@ -1197,4 +1197,66 @@ fn agent_to_tool_has_single_gap() {
         revision: 0,
     };
     assert!(!should_add_tool_block_top_spacing_for_kinds(&agent_line, &tool_line));
+}
+
+// ---------------------------------------------------------------------------
+// Transcript eviction (bounded snapshot)
+// ---------------------------------------------------------------------------
+
+fn collapsed_json_payload() -> String {
+    let mut json = String::from("{\n");
+    let line_total = ui::INLINE_JSON_COLLAPSE_LINE_THRESHOLD + 5;
+    for idx in 0..line_total {
+        json.push_str(&format!("  \"key{idx}\": \"value{idx}\",\n"));
+    }
+    json.push_str("  \"end\": true\n}");
+    json
+}
+
+#[test]
+fn eviction_drops_pastes_inside_evicted_prefix_without_panicking() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+
+    // Register a collapsed paste near the transcript front so the first
+    // eviction chunk (the 1000 oldest lines) covers its line index.
+    let json = collapsed_json_payload();
+    let line_count = json.lines().count();
+    session.append_pasted_message(InlineMessageKind::Tool, json, line_count);
+    assert_eq!(session.collapsed_pastes.len(), 1);
+    assert!(session.collapsed_pastes[0].line_index < ui::TUI_TRANSCRIPT_EVICT_CHUNK);
+
+    for idx in 0..ui::TUI_TRANSCRIPT_MAX_MSGS {
+        session.push_line(InlineMessageKind::Info, vec![make_segment(&format!("filler-{idx}"))]);
+    }
+
+    assert_eq!(session.lines.len(), ui::TUI_TRANSCRIPT_MAX_MSGS + 1 - ui::TUI_TRANSCRIPT_EVICT_CHUNK);
+    // The placeholder line was evicted, so its paste record must be gone too.
+    assert!(session.collapsed_pastes.is_empty());
+}
+
+#[test]
+fn eviction_shifts_surviving_paste_indices() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+
+    let lines_before_paste = 1500usize;
+    for idx in 0..lines_before_paste {
+        session.push_line(InlineMessageKind::Info, vec![make_segment(&format!("filler-{idx}"))]);
+    }
+
+    let json = collapsed_json_payload();
+    let line_count = json.lines().count();
+    session.append_pasted_message(InlineMessageKind::Tool, json, line_count);
+    let original_index = session.collapsed_pastes[0].line_index;
+    assert_eq!(original_index, lines_before_paste);
+
+    let remaining = ui::TUI_TRANSCRIPT_MAX_MSGS + 1 - session.lines.len();
+    for idx in 0..remaining {
+        session.push_line(InlineMessageKind::Info, vec![make_segment(&format!("tail-{idx}"))]);
+    }
+
+    let shifted_index = session.collapsed_pastes[0].line_index;
+    assert_eq!(shifted_index, original_index - ui::TUI_TRANSCRIPT_EVICT_CHUNK);
+    let preview_line = session.lines.get(shifted_index).expect("paste placeholder survives");
+    let text: String = preview_line.segments.iter().map(|segment| segment.text.as_str()).collect();
+    assert!(text.contains("showing last"));
 }

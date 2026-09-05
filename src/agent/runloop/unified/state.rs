@@ -213,7 +213,7 @@ impl SessionStats {
         instruction_digest: u64,
         stable_prompt_hash: u64,
     ) -> SessionRequestEnvelope {
-        let prefix_hash = hash_value(&system_prompt);
+        let prefix_hash = hash_value(&(hash_value(&system_prompt), stable_prompt_hash));
         let source_matches = match (&self.request_envelope_source_tools, &tools) {
             (None, None) => true,
             (Some(previous), Some(current)) => Arc::ptr_eq(previous, current),
@@ -239,7 +239,8 @@ impl SessionStats {
             system_prompt,
             tools.as_ref().map_or_else(Vec::new, |tools| tools.as_ref().clone()),
             instruction_digest,
-        );
+        )
+        .with_capability_digest(stable_prompt_hash);
         let identity = RequestEnvelopeIdentity {
             model: model.to_string(),
             provider: provider.to_string(),
@@ -272,7 +273,8 @@ impl SessionStats {
             candidate.system_prompt(),
             candidate.ordered_tools().as_ref().clone(),
             instruction_digest,
-        );
+        )
+        .with_capability_digest(stable_prompt_hash);
         self.request_envelope_identity = Some(identity);
         self.request_envelope_source_tools = tools;
         self.request_envelope = Some(envelope.clone());
@@ -972,6 +974,18 @@ mod tests {
 
     fn function_tool(name: &str) -> ToolDefinition {
         ToolDefinition::function(name.to_string(), name.to_string(), serde_json::json!({"type": "object"}))
+    }
+
+    #[test]
+    fn capability_change_starts_segment_without_mutating_frozen_prompt() {
+        let mut stats = SessionStats::default();
+        let first = stats.request_envelope_shared("model", "provider", "build", "fixed".into(), None, 7, 11);
+        let same = stats.request_envelope_shared("model", "provider", "build", "fixed".into(), None, 7, 11);
+        assert_eq!(first.segment_id(), same.segment_id());
+        let changed = stats.request_envelope_shared("model", "provider", "build", "fixed".into(), None, 7, 12);
+        assert_ne!(first.segment_id(), changed.segment_id());
+        assert_ne!(first.prefix_hash(), changed.prefix_hash());
+        assert_eq!(first.system_prompt(), changed.system_prompt());
     }
 
     #[test]

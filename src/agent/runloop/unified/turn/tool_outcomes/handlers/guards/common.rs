@@ -13,8 +13,10 @@ use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 /// Push error and system messages for a guard failure.
 ///
 /// This is the standard pattern for all guard failures:
-/// 1. Push a tool response with the error content
-/// 2. Push a system message with the block reason
+/// 1. Close the call's harness item with the error content (guards reject
+///    before the pipeline runs, so this is the only item trail the call gets)
+/// 2. Push a tool response with the error content
+/// 3. Push a system message with the block reason
 #[cold]
 pub(crate) fn push_guard_failure_messages(
     ctx: &mut TurnProcessingContext<'_>,
@@ -23,7 +25,7 @@ pub(crate) fn push_guard_failure_messages(
     error_content: String,
     block_reason: &str,
 ) {
-    ctx.push_tool_response(tool_call_id, Some(tool_name), error_content);
+    ctx.push_rejected_tool_response(tool_call_id, Some(tool_name), None, error_content);
     ctx.push_system_message(block_reason.to_string());
 }
 

@@ -29,3 +29,4 @@ pub const EVOLINK_API_BASE: &str = "https://direct.evolink.ai/v1";
 pub const POOLSIDE_API_BASE: &str = "https://api.poolsi.de/openai/v1";
 pub const MERGE_GATEWAY_NATIVE_API_BASE: &str = "https://api-gateway.merge.dev/v1";
 pub const MERGE_GATEWAY_API_BASE: &str = "https://api-gateway.merge.dev/v1/openai";
+pub const VERCEL_AI_GATEWAY_API_BASE: &str = "https://ai-gateway.vercel.sh/v1";

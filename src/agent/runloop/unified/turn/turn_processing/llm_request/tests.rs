@@ -687,7 +687,8 @@ fn harness_streaming_bridge_tracks_streamed_tool_call_item_ids() {
 
     let item_ids = bridge.take_streamed_tool_call_items();
     assert_eq!(
-        item_ids.get("call_42").map(String::as_str),
+        item_ids.get("call_42").map(|(item_id, _)| item_id.as_str()),
         Some("turn_tool_map-step-5-assistant-stream-2-tool-call-call_42")
     );
+    assert_eq!(item_ids.get("call_42").map(|(_, name)| name.as_str()), Some("shell"));
 }

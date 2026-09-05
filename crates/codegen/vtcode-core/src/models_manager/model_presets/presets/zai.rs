@@ -13,15 +13,19 @@ pub(crate) fn zai_presets() -> Vec<ModelPreset> {
                 "Z.ai flagship coding model with frontier long-horizon agentic performance and 1M-token context"
                     .to_string(),
             provider: Provider::ZAI,
-            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            default_reasoning_effort: ReasoningEffortLevel::Max,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast, light reasoning".to_string(),
                 },
                 ReasoningEffortPreset {
                     effort: ReasoningEffortLevel::High,
                     description: "Deep thinking".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum deep reasoning (default)".to_string(),
                 },
             ],
             is_default: false,
@@ -38,19 +42,19 @@ pub(crate) fn zai_presets() -> Vec<ModelPreset> {
                 "Z.ai efficient multimodal model with hybrid sparse+linear attention (320B total / 18B active), 1M context and native vision"
                     .to_string(),
             provider: Provider::ZAI,
-            default_reasoning_effort: ReasoningEffortLevel::High,
+            default_reasoning_effort: ReasoningEffortLevel::Max,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast, light reasoning".to_string(),
                 },
                 ReasoningEffortPreset {
                     effort: ReasoningEffortLevel::High,
                     description: "Deep thinking".to_string(),
                 },
                 ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::XHigh,
-                    description: "Max reasoning".to_string(),
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum deep reasoning (default)".to_string(),
                 },
             ],
             is_default: true,
@@ -65,15 +69,19 @@ pub(crate) fn zai_presets() -> Vec<ModelPreset> {
             display_name: "GLM-5.2".to_string(),
             description: "Z.ai flagship model for long-horizon tasks with truly usable 1M-token context".to_string(),
             provider: Provider::ZAI,
-            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            default_reasoning_effort: ReasoningEffortLevel::Max,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast, light reasoning".to_string(),
                 },
                 ReasoningEffortPreset {
                     effort: ReasoningEffortLevel::High,
                     description: "Deep thinking".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum deep reasoning (default)".to_string(),
                 },
             ],
             is_default: false,

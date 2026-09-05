@@ -246,6 +246,15 @@ pub(crate) fn enforce_blocked_tool_call_guard(
     let fuse_trip = blocked_tool_call_fuse_trip(streak, blocked_total, limits)?;
     let display_tool = tool_action_label(tool_name, args);
     let recovery_active = ctx.is_recovery_active();
+    // Captured before arming/breaking so `finalize_turn` can populate the
+    // `TurnBlockedEvent` fields instead of `None`/zeros.
+    let telemetry = crate::agent::runloop::unified::run_loop_context::BlockedToolRecoveryTelemetry {
+        last_tool: display_tool.to_string(),
+        consecutive_cap: limits.consecutive_cap,
+        total_cap: limits.total_cap,
+        blocked_streak: streak,
+        blocked_total,
+    };
     let (block_reason, error_content) = blocked_tool_call_messages_detailed(
         fuse_trip,
         recovery_active,
@@ -266,9 +275,10 @@ pub(crate) fn enforce_blocked_tool_call_guard(
         // in the assistant batch. The recovery directive is appended only
         // after the caller drains those remaining calls.
         ctx.push_tool_response(tool_call_id, Some(tool_name), error_content);
-        ctx.harness_state.arm_blocked_tool_recovery(block_reason);
+        ctx.harness_state.arm_blocked_tool_recovery(block_reason, telemetry);
         Some(TurnHandlerOutcome::Continue)
     } else {
+        ctx.harness_state.record_blocked_tool_recovery_telemetry(telemetry);
         push_guard_failure_messages(ctx, tool_call_id, tool_name, error_content, &block_reason);
         Some(TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(block_reason) }))
     }

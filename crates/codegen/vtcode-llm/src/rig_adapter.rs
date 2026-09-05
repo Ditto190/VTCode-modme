@@ -85,19 +85,16 @@ impl RigProviderCapabilities {
                     Some(json!({ "reasoning_effort": "high" }))
                 }
             },
-            // DeepSeek only accepts `high` and `max` for reasoning_effort.
-            // Per DeepSeek docs: low/medium → high, xhigh → max.
+            // DeepSeek native levels are `low`, `high`, and `max`.
             Provider::DeepSeek => match effort {
                 ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => None,
-                ReasoningEffortLevel::Minimal
-                | ReasoningEffortLevel::Low
-                | ReasoningEffortLevel::Medium
-                | ReasoningEffortLevel::High => {
+                ReasoningEffortLevel::Minimal | ReasoningEffortLevel::Low => {
+                    Some(json!({"thinking": {"type": "enabled"}, "reasoning_effort": "low"}))
+                }
+                ReasoningEffortLevel::Medium | ReasoningEffortLevel::High | ReasoningEffortLevel::XHigh => {
                     Some(json!({"thinking": {"type": "enabled"}, "reasoning_effort": "high"}))
                 }
-                ReasoningEffortLevel::XHigh | ReasoningEffortLevel::Max => {
-                    Some(json!({"thinking": {"type": "enabled"}, "reasoning_effort": "max"}))
-                }
+                ReasoningEffortLevel::Max => Some(json!({"thinking": {"type": "enabled"}, "reasoning_effort": "max"})),
             },
             Provider::Meta => match effort {
                 ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => None,
@@ -110,23 +107,20 @@ impl RigProviderCapabilities {
             Provider::Minimax => None,
             Provider::Ollama => None,
             Provider::LlamaCpp => None,
+            // Z.AI native levels are `low`, `high`, and `max` (`xhigh` aliases to `max`).
             Provider::ZAI => match effort {
                 ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => None,
-                ReasoningEffortLevel::Minimal => Some(json!({
+                ReasoningEffortLevel::Minimal | ReasoningEffortLevel::Low => Some(json!({
                     "thinking": { "type": "enabled" },
-                    "thinking_effort": "minimal"
+                    "reasoning_effort": "low"
                 })),
-                ReasoningEffortLevel::Low => Some(json!({
+                ReasoningEffortLevel::Medium | ReasoningEffortLevel::High => Some(json!({
                     "thinking": { "type": "enabled" },
-                    "thinking_effort": "low"
+                    "reasoning_effort": "high"
                 })),
-                ReasoningEffortLevel::Medium => Some(json!({
+                ReasoningEffortLevel::XHigh | ReasoningEffortLevel::Max => Some(json!({
                     "thinking": { "type": "enabled" },
-                    "thinking_effort": "medium"
-                })),
-                ReasoningEffortLevel::High | ReasoningEffortLevel::XHigh | ReasoningEffortLevel::Max => Some(json!({
-                    "thinking": { "type": "enabled" },
-                    "thinking_effort": "high"
+                    "reasoning_effort": "max"
                 })),
             },
             Provider::StepFun => match effort {
@@ -167,7 +161,7 @@ mod tests {
             .expect("reasoning payload");
 
         assert_eq!(payload["thinking"]["type"], "enabled");
-        assert_eq!(payload["thinking_effort"], "medium");
+        assert_eq!(payload["reasoning_effort"], "high");
     }
 
     #[test]
@@ -213,12 +207,51 @@ mod tests {
         assert_eq!(high_payload["thinking"]["type"], "enabled");
         assert_eq!(high_payload["reasoning_effort"], "high");
 
-        let max_payload = RigProviderCapabilities::new(Provider::DeepSeek, "deepseek-chat")
+        let low_payload = RigProviderCapabilities::new(Provider::DeepSeek, "deepseek-chat")
+            .reasoning_parameters(ReasoningEffortLevel::Low)
+            .expect("reasoning payload");
+
+        assert_eq!(low_payload["thinking"]["type"], "enabled");
+        assert_eq!(low_payload["reasoning_effort"], "low");
+
+        // `xhigh` aliases to `high`; only `max` requests maximum reasoning.
+        let xhigh_payload = RigProviderCapabilities::new(Provider::DeepSeek, "deepseek-chat")
             .reasoning_parameters(ReasoningEffortLevel::XHigh)
+            .expect("reasoning payload");
+
+        assert_eq!(xhigh_payload["thinking"]["type"], "enabled");
+        assert_eq!(xhigh_payload["reasoning_effort"], "high");
+
+        let max_payload = RigProviderCapabilities::new(Provider::DeepSeek, "deepseek-chat")
+            .reasoning_parameters(ReasoningEffortLevel::Max)
             .expect("reasoning payload");
 
         assert_eq!(max_payload["thinking"]["type"], "enabled");
         assert_eq!(max_payload["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn rig_capabilities_map_zai_efforts_to_native_levels() {
+        let low_payload = RigProviderCapabilities::new(Provider::ZAI, "glm-5.3")
+            .reasoning_parameters(ReasoningEffortLevel::Low)
+            .expect("reasoning payload");
+
+        assert_eq!(low_payload["thinking"]["type"], "enabled");
+        assert_eq!(low_payload["reasoning_effort"], "low");
+
+        let max_payload = RigProviderCapabilities::new(Provider::ZAI, "glm-5.3")
+            .reasoning_parameters(ReasoningEffortLevel::Max)
+            .expect("reasoning payload");
+
+        assert_eq!(max_payload["thinking"]["type"], "enabled");
+        assert_eq!(max_payload["reasoning_effort"], "max");
+
+        // `xhigh` is a compatibility alias for the native `max` level.
+        let xhigh_payload = RigProviderCapabilities::new(Provider::ZAI, "glm-5.3")
+            .reasoning_parameters(ReasoningEffortLevel::XHigh)
+            .expect("reasoning payload");
+
+        assert_eq!(xhigh_payload["reasoning_effort"], "max");
     }
 
     #[test]

@@ -8,6 +8,19 @@ use unicode_width::UnicodeWidthStr;
 
 pub use vtcode_commons::ansi::strip_ansi_codes;
 
+/// Terminal display width of `text` in cells.
+///
+/// This is `unicode-width` plus the halfwidth-voiced-sound-mark correction
+/// that terminals apply: `U+FF9E` (dakuten) and `U+FF9F` (handakuten) report
+/// width 0 but occupy one cell each (same correction as
+/// `ratatui::buffer::CellWidth`). Without it, strings like `ｶﾞ` measure 1
+/// cell wide here but render 2 cells wide, breaking wrap and truncation math.
+///
+/// Prefer this over calling `unicode-width` directly on the wrapping path.
+pub(crate) fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text).saturating_add(text.chars().filter(|ch| matches!(ch, '\u{FF9E}' | '\u{FF9F}')).count())
+}
+
 /// Simplify tool call display text for better human readability
 pub fn simplify_tool_display(text: &str) -> String {
     // Common patterns to simplify for human readability
@@ -214,7 +227,7 @@ fn wrap_line_internal(
                 continue;
             }
 
-            let width = UnicodeWidthStr::width(grapheme);
+            let width = display_width(grapheme);
             if width == 0 {
                 ensure_continuation_prefix(current_spans, current_width, rows);
                 push_span(current_spans, style, grapheme);
@@ -299,7 +312,7 @@ fn wrap_line_internal(
                             continue;
                         }
 
-                        let token_width = UnicodeWidthStr::width(token);
+                        let token_width = display_width(token);
                         if token_width == 0 {
                             ensure_continuation_prefix(&mut current_spans, &mut current_width, &rows);
                             push_span(&mut current_spans, &style, token);
@@ -712,5 +725,29 @@ mod tests {
         );
         assert_eq!(pty_wrapped_continuation_prefix("  ", "• Ran cargo check -p vtcode"), "        ");
         assert_eq!(pty_wrapped_continuation_prefix("  ", "plain output"), "  ");
+    }
+
+    #[test]
+    fn test_display_width_counts_halfwidth_sound_marks() {
+        assert_eq!(display_width(""), 0);
+        assert_eq!(display_width("hello"), 5);
+        assert_eq!(display_width("日本"), 4);
+        // Halfwidth katakana with dakuten/handakuten: the sound mark reports
+        // width 0 to unicode-width but occupies one terminal cell.
+        assert_eq!(display_width("ｶﾞ"), 2);
+        assert_eq!(display_width("ﾊﾟ"), 2);
+        assert_eq!(display_width("\u{FF9E}"), 1);
+        assert_eq!(display_width("aｶﾞ"), 3);
+    }
+
+    #[test]
+    fn test_wrap_line_splits_halfwidth_katakana_with_dakuten() {
+        let wrapped = wrap_line(Line::from("aｶﾞ"), 2);
+        let rendered: String = wrapped
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.clone()))
+            .collect();
+        assert_eq!(rendered, "aｶﾞ", "wrapping must preserve all characters");
+        assert_eq!(wrapped.len(), 2, "dakuten occupies a cell, so width-3 content must wrap at width 2");
     }
 }

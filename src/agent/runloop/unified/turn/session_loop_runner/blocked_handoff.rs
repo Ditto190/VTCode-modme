@@ -13,6 +13,28 @@ use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter
 const NO_ARCHIVE_RESUME_EXPLANATION: &str = "Resume is unavailable because no session archive exists.";
 const UNVERIFIED_RESUME_EXPLANATION: &str = "Resume is unavailable because the session archive could not be verified.";
 
+/// Upper bound (in chars) for the block reason shown in transcript lines.
+/// Provider errors can flood the transcript, so the renderer shows a bounded
+/// prefix plus a pointer to the handoff file; the handoff markdown keeps the
+/// full reason unchanged.
+const TRANSCRIPT_BLOCK_REASON_LIMIT: usize = 600;
+
+/// Bound the block reason for transcript rendering. When the summary exceeds
+/// [`TRANSCRIPT_BLOCK_REASON_LIMIT`] chars it is truncated and suffixed with
+/// an ellipsis plus the handoff path that holds the full text.
+fn truncated_block_reason(summary: &str, full_reason_path: &str) -> String {
+    let suffix = format!("… — full reason: {full_reason_path}");
+    let suffix_len = suffix.chars().count();
+    let summary_len = summary.chars().count();
+    if summary_len + suffix_len <= TRANSCRIPT_BLOCK_REASON_LIMIT {
+        return summary.to_string();
+    }
+    let keep = TRANSCRIPT_BLOCK_REASON_LIMIT.saturating_sub(suffix_len);
+    let mut bounded: String = summary.chars().take(keep).collect();
+    bounded.push_str(&suffix);
+    bounded
+}
+
 #[derive(Debug)]
 enum ResumeAvailability {
     Available(VerifiedSessionArchiveIdentifier),
@@ -149,7 +171,9 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
         resume,
     ) {
         Ok(artifacts) => {
-            let _ = renderer.line(MessageStyle::Warning, &format!("Turn blocked: {blocker_summary}"));
+            let full_reason_path = artifacts.current_path.display().to_string();
+            let transcript_reason = truncated_block_reason(blocker_summary, &full_reason_path);
+            let _ = renderer.line(MessageStyle::Warning, &format!("Turn blocked: {transcript_reason}"));
             let _ = renderer.line(MessageStyle::Info, "What you can do:");
             let _ = renderer.line(
                 MessageStyle::Info,
@@ -170,10 +194,13 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
                 use vtcode_ui::tui::app::{InlineMessageKind, InlineSegment, InlineTextStyle};
                 let text_style = Arc::new(InlineTextStyle::default());
                 let line = |text: String| vec![InlineSegment { text, style: text_style.clone() }];
-                handle.append_line(InlineMessageKind::Warning, line(format!("Turn blocked: {blocker_summary}")));
+                handle.append_line(InlineMessageKind::Warning, line(format!("Turn blocked: {transcript_reason}")));
                 handle.append_line(
                     InlineMessageKind::Info,
-                    line("What you can do: Type 'continue' to resume, describe alternative instructions, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md".to_string()),
+                    line(format!(
+                        "What you can do: Type 'continue' to resume, describe alternative instructions, or run \
+                         `vtcode --resume {session_id}`; details: .vtcode/tasks/current_blocked.md"
+                    )),
                 );
                 handle.set_activity_state(vtcode_commons::ui_protocol::ActivityState::Blocked);
             }
@@ -199,5 +226,42 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             }
         }
         Err(err) => tracing::warn!(error = %err, "Failed to persist blocked handoff"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TRANSCRIPT_BLOCK_REASON_LIMIT, truncated_block_reason};
+
+    #[test]
+    fn short_block_reason_is_rendered_verbatim() {
+        assert_eq!(
+            truncated_block_reason("provider 429 rate limited", ".vtcode/tasks/current_blocked.md"),
+            "provider 429 rate limited"
+        );
+    }
+
+    #[test]
+    fn long_block_reason_is_truncated_with_full_reason_pointer() {
+        let path = ".vtcode/tasks/current_blocked.md";
+        let summary = "x".repeat(2000);
+        let truncated = truncated_block_reason(&summary, path);
+        assert!(
+            truncated.chars().count() <= TRANSCRIPT_BLOCK_REASON_LIMIT,
+            "transcript reason must stay bounded: {} chars",
+            truncated.chars().count()
+        );
+        assert!(truncated.ends_with(&format!("… — full reason: {path}")));
+        assert!(truncated.starts_with("xxx"), "truncation must keep the reason prefix");
+        assert!(truncated.contains("xxx…"), "the ellipsis must mark the elided middle");
+    }
+
+    #[test]
+    fn truncation_respects_multibyte_char_boundaries() {
+        let summary = "é".repeat(1500);
+        let truncated = truncated_block_reason(&summary, "h.md");
+        assert!(truncated.chars().count() <= TRANSCRIPT_BLOCK_REASON_LIMIT);
+        assert!(truncated.ends_with("full reason: h.md"));
+        assert!(truncated.contains('é'), "multi-byte chars must survive intact");
     }
 }

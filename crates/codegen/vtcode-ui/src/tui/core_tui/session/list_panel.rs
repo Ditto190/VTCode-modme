@@ -60,7 +60,10 @@ pub(crate) fn split_bottom_list_panel(area: Rect, fixed_rows: u16, desired_list_
     let panel_height = desired_height.min(max_panel_height);
     let [content_area, panel_area] = area
         .try_layout(&Layout::vertical([Constraint::Min(1), Constraint::Length(panel_height)]))
-        .unwrap_or([area; 2]);
+        // Unreachable: `panel_height <= max_panel_height = height - 1`, so the
+        // split always fits. Fail closed (empty panel) instead of letting both
+        // halves claim the full area and overdraw.
+        .unwrap_or([area, Rect::ZERO]);
     (content_area, Some(panel_area))
 }
 

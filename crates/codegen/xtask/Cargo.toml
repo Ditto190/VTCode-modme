@@ -4,6 +4,9 @@ version = "0.156.1"
 edition = "2024"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 vtcode-core = { path = "../vtcode-core" }
 clap = { workspace = true, features = ["derive"] }

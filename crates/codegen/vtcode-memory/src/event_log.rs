@@ -817,7 +817,7 @@ mod lifecycle_state_machine_tests {
             LifecycleKind::ThreadStarted
         );
         assert_eq!(
-            LifecycleKind::from_event(&ThreadEvent::ThreadCompleted(ThreadCompletedEvent {
+            LifecycleKind::from_event(&ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
                 thread_id: "x".to_string(),
                 session_id: "x".to_string(),
                 subtype: ThreadCompletionSubtype::Success,
@@ -827,7 +827,7 @@ mod lifecycle_state_machine_tests {
                 usage: Usage::default(),
                 total_cost_usd: None,
                 num_turns: 1,
-            })),
+            }))),
             LifecycleKind::ThreadCompleted
         );
         assert_eq!(LifecycleKind::from_kind("thread.started"), LifecycleKind::ThreadStarted);

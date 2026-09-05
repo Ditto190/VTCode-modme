@@ -12,6 +12,7 @@ pub use overlay::{
     TransientSelectionChange, TransientSubmission, WizardOverlayRequest,
 };
 pub use plan::{PlanContent, PlanPhase, PlanStep};
+pub(crate) use protocol::TransientActivitySignal;
 pub use protocol::{
     ArchivedPromptEntry, InlineCommand, InlineEvent, InlineEventCallback, InlineHandle, InlineSession, SubmittedInput,
 };

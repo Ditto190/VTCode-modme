@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::fs as async_fs;
 
-use vtcode_config::constants::context::DEFAULT_COMPACTION_TRIGGER_RATIO;
 use vtcode_config::context::default_max_context_tokens;
 use vtcode_config::loader::VTCodeConfig;
 
@@ -1270,56 +1269,40 @@ pub fn dedup_repeated_file_reads_for_local_compaction(history: &[Message]) -> Ve
 // Threshold resolution (shared by every compaction trigger)
 // ---------------------------------------------------------------------------
 
-#[allow(
-    clippy::cast_sign_loss,
-    reason = "Intentional compatibility, platform, or test-only suppression."
-)] // context_size is usize (non-negative), ratio is positive
-pub fn resolve_compaction_threshold(configured_threshold: Option<u64>, context_size: usize) -> Option<u64> {
-    let configured_threshold = configured_threshold.filter(|threshold| *threshold > 0);
-    let derived_threshold = if context_size > 0 {
-        Some(((context_size as f64) * DEFAULT_COMPACTION_TRIGGER_RATIO).round().max(0.0) as u64)
-    } else {
-        None
-    };
+/// Conservative output reservation when the request does not declare a limit.
+pub const DEFAULT_OUTPUT_RESERVE_TOKENS: usize = 4096;
 
-    configured_threshold.or(derived_threshold).map(|threshold| {
-        let mut threshold = threshold.max(1);
-        if context_size > 0 {
-            threshold = threshold.min(context_size as u64);
-        }
-        threshold
-    })
+/// Resolve a prompt threshold while preserving room for the next response.
+pub fn resolve_compaction_threshold(configured_threshold: Option<u64>, context_size: usize) -> Option<u64> {
+    resolve_compaction_threshold_with_reserve(configured_threshold, context_size, DEFAULT_OUTPUT_RESERVE_TOKENS)
 }
 
-/// Resolve the compaction boundary against both the provider capability and
-/// VT Code's session safety budget.
-///
-/// An explicit harness threshold is an opt-in escape hatch: it remains
-/// authoritative for the session, but can never exceed a known provider
-/// context capacity. When no explicit threshold is set, the session budget
-/// limits the provider capacity before the normal 90% trigger ratio is
-/// applied. A zero session budget preserves the legacy provider-only
-/// behavior because zero means that the setting is not configured.
+pub fn resolve_compaction_threshold_with_reserve(
+    configured_threshold: Option<u64>,
+    context_size: usize,
+    reserved_output_tokens: usize,
+) -> Option<u64> {
+    let configured = configured_threshold.filter(|value| *value > 0);
+    if context_size == 0 {
+        return configured;
+    }
+    let prompt_budget = context_size.saturating_sub(reserved_output_tokens).max(1) as u64;
+    Some(configured.map_or(prompt_budget, |value| value.min(prompt_budget)))
+}
+
+/// Explicit trigger overrides can reduce, but never bypass, the session ceiling.
 pub fn resolve_effective_compaction_threshold(
     configured_threshold: Option<u64>,
     provider_context_size: usize,
     session_context_budget: usize,
 ) -> Option<u64> {
-    if configured_threshold.is_some_and(|threshold| threshold > 0) {
-        return resolve_compaction_threshold(configured_threshold, provider_context_size);
-    }
-
-    let effective_context_size = effective_session_context_budget(provider_context_size, session_context_budget);
-    resolve_compaction_threshold(None, effective_context_size)
+    resolve_compaction_threshold(
+        configured_threshold,
+        effective_session_context_budget(provider_context_size, session_context_budget),
+    )
 }
 
-/// Resolve the hard context budget shared by preflight checks and runtime
-/// context accounting.
-///
-/// A configured session budget is a safety ceiling, while a positive provider
-/// value is a hard capability ceiling. Zero means that the corresponding
-/// source is unknown/unconfigured, so it must not turn a usable limit into an
-/// unusable zero budget.
+/// Zero means unknown/unconfigured; positive limits are intersected.
 #[must_use]
 pub fn effective_session_context_budget(provider_context_size: usize, session_context_budget: usize) -> usize {
     match (provider_context_size > 0, session_context_budget > 0) {
@@ -1330,14 +1313,41 @@ pub fn effective_session_context_budget(provider_context_size: usize, session_co
     }
 }
 
-/// Resolve the context budget used by runtime accounting and preflight checks.
-///
-/// Keeping the provider/model lookup beside the min-resolution rule prevents
-/// callers from accidentally reporting or enforcing a provider-only limit.
+/// Resolve catalog/dynamic model capacity and the provider's route-specific ceiling.
 #[must_use]
 pub fn effective_context_budget(vt_cfg: Option<&VTCodeConfig>, provider: &dyn LLMProvider, model: &str) -> usize {
-    let session_context_budget = vt_cfg.map_or_else(default_max_context_tokens, |cfg| cfg.context.max_context_tokens);
-    effective_session_context_budget(provider.effective_context_size(model), session_context_budget)
+    use crate::llm::model_resolver::{DynamicModelMeta, ModelResolver};
+    let provider_capacity = provider.effective_context_size(model);
+    let resolved = ModelResolver::resolve(
+        Some(provider.name()),
+        model,
+        &[],
+        Some(DynamicModelMeta {
+            display_name: model.to_owned(),
+            description: None,
+            context_window: (provider_capacity > 0).then_some(provider_capacity),
+        }),
+    );
+    let capacity = effective_session_context_budget(
+        resolved.as_ref().and_then(|model| model.context_window()).unwrap_or(0),
+        provider_capacity,
+    );
+    let session_budget = vt_cfg.map_or_else(default_max_context_tokens, |cfg| cfg.context.max_context_tokens);
+    effective_session_context_budget(capacity, session_budget)
+}
+
+pub fn effective_compaction_threshold_with_reserve(
+    vt_cfg: Option<&VTCodeConfig>,
+    provider: &dyn LLMProvider,
+    model: &str,
+    reserved_output_tokens: usize,
+) -> Option<usize> {
+    resolve_compaction_threshold_with_reserve(
+        vt_cfg.and_then(|cfg| cfg.agent.harness.auto_compaction_threshold_tokens),
+        effective_context_budget(vt_cfg, provider, model),
+        reserved_output_tokens,
+    )
+    .and_then(|value| usize::try_from(value).ok())
 }
 
 pub fn effective_compaction_threshold(
@@ -1345,10 +1355,9 @@ pub fn effective_compaction_threshold(
     provider: &dyn LLMProvider,
     model: &str,
 ) -> Option<usize> {
-    let provider_context_size = provider.effective_context_size(model);
-    let configured_threshold = vt_cfg.and_then(|cfg| cfg.agent.harness.auto_compaction_threshold_tokens);
-    let session_context_budget = vt_cfg.map_or_else(default_max_context_tokens, |cfg| cfg.context.max_context_tokens);
-
-    resolve_effective_compaction_threshold(configured_threshold, provider_context_size, session_context_budget)
-        .and_then(|threshold| usize::try_from(threshold).ok())
+    let reserve = provider
+        .sampling_overrides(model)
+        .max_tokens
+        .map_or(DEFAULT_OUTPUT_RESERVE_TOKENS, |value| value as usize);
+    effective_compaction_threshold_with_reserve(vt_cfg, provider, model, reserve)
 }

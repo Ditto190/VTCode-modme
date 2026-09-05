@@ -216,9 +216,10 @@ pub(crate) async fn enforce_spool_chunk_read_guard(
     // tell the model to use it instead of paginating the spool.
     if let Some(head) = read_spool_head_for_error_check(spool_path).await {
         if spool_content_looks_like_error(&head) {
-            ctx.push_tool_response(
+            ctx.push_rejected_tool_response(
                 tool_call_id,
                 Some(canonical_tool_name),
+                Some(args),
                 build_previous_turn_error_spool_content(spool_path, &head),
             );
             ctx.push_system_message(format!(

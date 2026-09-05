@@ -1,5 +1,6 @@
 use super::*;
 use ratatui::crossterm::event::KeyModifiers;
+use ratatui_cheese::input::InputState;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -11,6 +12,7 @@ use crate::tui::core_tui::app::types::InlineMessageKind;
 use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::action::{Action, is_readline_editing_key, normalize_terminal_control_event};
 use crate::tui::core_tui::session::clipboard_image::{ClipboardImageError, read_clipboard_image};
+use crate::tui::core_tui::session::modal;
 use crate::tui::core_tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::core_tui::session::reverse_search;
@@ -54,10 +56,6 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
     {
         viewer.insert_search_text(content);
         session.mark_dirty();
-    } else if session.core.input_enabled() {
-        session.insert_paste_text(content);
-        session.update_input_triggers();
-        session.mark_dirty();
     } else if session.history_picker_visible() {
         let history = input_history_entries(session);
         session.history_picker_state.search_query.push_str(content);
@@ -76,6 +74,29 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
         if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
             step.list.apply_search(&search.query);
         }
+        session.mark_dirty();
+    } else if let Some(wizard) = session.wizard_overlay_mut()
+        && let Some(step) = wizard.steps.get_mut(wizard.current_step)
+        && (step.notes_active || modal::inline_editor_for_step(step).is_some())
+    {
+        // Mirror typed input: pasted text lands in the custom-note editor when
+        // it is active (or when the custom-note item is selected).
+        step.notes_active = true;
+        let mut state = InputState::new();
+        state.set_value(step.notes.clone());
+        state.end();
+        for ch in content.chars().filter(|ch| !matches!(ch, '\n' | '\r')) {
+            state.insert_char(ch);
+        }
+        step.notes = state.value().to_owned();
+        session.mark_dirty();
+    } else if session.core.input_enabled()
+        && !session.visible_transient_surface().is_some_and(|surface| {
+            matches!(surface.focus_policy(), TransientFocusPolicy::Modal | TransientFocusPolicy::CapturedInput)
+        })
+    {
+        session.insert_paste_text(content);
+        session.update_input_triggers();
         session.mark_dirty();
     }
     None
@@ -779,8 +800,7 @@ pub(super) fn process_key_with_clipboard_image_reader(
         KeyCode::BackTab => {
             session.clear_inline_prompt_suggestion();
             session.mark_dirty();
-            if session.is_running_activity() {
-                push_mode_switch_busy_notice(session);
+            if !mode_switch_guard::try_cycle_primary_agent(session, &key) {
                 return None;
             }
             Some(InlineEvent::CyclePrimaryAgentPrevious)
@@ -1490,9 +1510,13 @@ fn handle_tool_output_viewer_key(
 }
 
 fn can_cycle_primary_agent(session: &Session, key: &KeyEvent) -> bool {
-    key.modifiers == KeyModifiers::NONE
-        && session.visible_transient_surface().is_none()
-        && !session.has_active_overlay()
+    let valid_modifiers = match key.code {
+        // Crossterm reports Shift+Tab as BackTab with the SHIFT bit set.
+        // Keep accepting the explicit bit while rejecting unrelated combos.
+        KeyCode::BackTab => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
+        _ => key.modifiers == KeyModifiers::NONE,
+    };
+    valid_modifiers && session.visible_transient_surface().is_none() && !session.has_active_overlay()
 }
 
 /// Notice shown when the user requests a mode switch (primary-agent cycle or
@@ -1513,6 +1537,10 @@ fn push_mode_switch_busy_notice(session: &mut Session) {
 impl mode_switch_guard::ModeSwitchGuardSession for Session {
     fn is_running_activity(&self) -> bool {
         TuiSessionDriver::is_running_activity(self)
+    }
+
+    fn is_mode_switch_locked(&self) -> bool {
+        self.core.activity_state.locks_mode_switch()
     }
 
     fn can_cycle_primary_agent(&self, key: &KeyEvent) -> bool {
@@ -1553,13 +1581,20 @@ fn handle_running_slash_command_block(session: &mut Session) -> bool {
 }
 
 fn handle_running_slash_command_block_for_input(session: &mut Session, input: &str) -> bool {
-    if !session.is_running_activity() {
-        return false;
-    }
-
     let Some(command_name) = extract_slash_command_name(input) else {
         return false;
     };
+
+    // Building, recovery, and blocked states keep the composer available for
+    // follow-up input, but they still own the primary-agent/planning boundary.
+    // Those states may not report a spinner, so check the authoritative lock
+    // before allowing an explicit mode command through.
+    let is_mode_switch = matches!(command_name, "mode" | "plan");
+    let command_is_locked =
+        session.is_running_activity() || (session.core.activity_state.locks_mode_switch() && is_mode_switch);
+    if !command_is_locked {
+        return false;
+    }
 
     // Read-only local commands are safe to defer: falling through lets the normal
     // queueing path run them right after the current turn instead of dropping them.
@@ -1569,7 +1604,7 @@ fn handle_running_slash_command_block_for_input(session: &mut Session, input: &s
 
     // Mode switches (agent selection, planning workflow) are locked while a turn
     // is processing; surface the dedicated notice for those commands.
-    let message = if matches!(command_name, "mode" | "plan") {
+    let message = if is_mode_switch {
         mode_switch_guard::MODE_SWITCH_BUSY_NOTICE.to_string()
     } else {
         format!(
@@ -1736,11 +1771,13 @@ fn handle_diff_preview_key(session: &mut Session, key: &KeyEvent) -> Option<Inli
 mod tests {
     use super::*;
     use crate::tui::core_tui::app::types::{
-        CompactActivityMetadata, InlineCommand, ModalOverlayRequest, TransientRequest,
+        CompactActivityMetadata, InlineCommand, LocalAgentsTransientRequest, ModalOverlayRequest,
+        TransientActivitySignal, TransientRequest,
     };
     use crate::tui::core_tui::session::action::BindingStore;
     use crate::tui::core_tui::types::{
-        InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, SecurePromptConfig,
+        InlineCommand as CoreInlineCommand, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme,
+        SecurePromptConfig,
     };
     use hashbrown::HashMap;
     use ratatui::Terminal;
@@ -1752,6 +1789,205 @@ mod tests {
         session.core.apply_transcript_rows(8);
         session.core.apply_transcript_width(60);
         session
+    }
+
+    #[test]
+    fn paste_routes_to_list_search_after_composer_is_reenabled() {
+        use crate::tui::core_tui::app::types::ListOverlayRequest;
+        use crate::tui::core_tui::types::{InlineListItem, InlineListSearchConfig, InlineListSelection};
+
+        for searchable in [false, true] {
+            let mut session = build_session();
+            session.core.input_manager.set_content("draft".to_string());
+            session.show_transient(TransientRequest::List(ListOverlayRequest {
+                title: "Choose".to_string(),
+                lines: Vec::new(),
+                footer_hint: None,
+                items: ["alpha", "beta"]
+                    .into_iter()
+                    .map(|title| InlineListItem {
+                        title: title.to_string(),
+                        subtitle: None,
+                        badge: None,
+                        indent: 0,
+                        selection: Some(InlineListSelection::SlashCommand(title.to_string())),
+                        search_value: Some(title.to_string()),
+                    })
+                    .collect(),
+                selected: None,
+                search: searchable.then(|| InlineListSearchConfig { label: "Filter".to_string(), placeholder: None }),
+                hotkeys: Vec::new(),
+            }));
+            session.core.set_input_enabled(true);
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+
+            session.handle_event(CrosstermEvent::Paste("beta".to_string()), &sender, None);
+
+            assert_eq!(session.core.input_manager.content(), "draft");
+            assert!(receiver.try_recv().is_err());
+            let modal = session.modal_state_mut().expect("overlay remains active");
+            if searchable {
+                assert_eq!(modal.search.as_ref().expect("search").query, "beta");
+                assert_eq!(modal.list.as_ref().expect("list").visible_indices, vec![1]);
+            }
+        }
+    }
+
+    #[test]
+    fn paste_routes_to_history_search_after_composer_is_reenabled() {
+        let mut session = build_session();
+        session.core.input_manager.set_content("draft".to_string());
+        session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(session.history_picker_visible());
+        session.core.set_input_enabled(true);
+        let draft = session.core.input_manager.content().to_string();
+        let query = session.history_picker_state.search_query.clone();
+
+        assert!(handle_paste(&mut session, "beta").is_none());
+
+        assert_eq!(session.core.input_manager.content(), draft);
+        assert_eq!(session.history_picker_state.search_query, format!("{query}beta"));
+    }
+
+    #[test]
+    fn paste_respects_visible_surface_focus_policy() {
+        for surface in [
+            TransientSurface::DiffPreview,
+            TransientSurface::ToolOutputViewer,
+            TransientSurface::LocalAgents,
+            TransientSurface::SlashPalette,
+            TransientSurface::AgentPalette,
+            TransientSurface::FilePalette,
+            TransientSurface::TaskPanel,
+        ] {
+            let mut session = build_session();
+            session.core.input_manager.set_content("draft".to_string());
+            session.show_transient_surface(surface);
+            session.core.set_input_enabled(true);
+
+            assert!(handle_paste(&mut session, "beta").is_none());
+
+            let expected = match surface.focus_policy() {
+                TransientFocusPolicy::Modal | TransientFocusPolicy::CapturedInput => "draft",
+                TransientFocusPolicy::SharedInput | TransientFocusPolicy::Passive => "draftbeta",
+            };
+            assert_eq!(session.core.input_manager.content(), expected, "{surface:?}");
+        }
+    }
+
+    #[test]
+    fn paste_does_not_reach_suspended_history_search() {
+        let mut session = build_session();
+        session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(session.history_picker_visible());
+        let query = session.history_picker_state.search_query.clone();
+        session.show_transient(TransientRequest::Modal(ModalOverlayRequest {
+            title: "Notice".to_string(),
+            lines: Vec::new(),
+            secure_prompt: None,
+            is_help_modal: false,
+        }));
+        session.core.set_input_enabled(true);
+        let draft = session.core.input_manager.content().to_string();
+
+        assert!(handle_paste(&mut session, "beta").is_none());
+
+        assert_eq!(session.history_picker_state.search_query, query);
+        assert_eq!(session.core.input_manager.content(), draft);
+        assert!(session.has_active_overlay());
+    }
+
+    #[test]
+    fn paste_routes_to_viewer_only_while_search_is_active() {
+        let mut session = build_session();
+        session.core.input_manager.set_content("draft".to_string());
+        session.tool_output_blocks.push(ToolOutputBlock {
+            lines: vec!["beta output".to_string()],
+            ..Default::default()
+        });
+        session.tool_output_revision = 1;
+        session.process_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert!(session.tool_output_viewer_state().is_some());
+        session.core.set_input_enabled(true);
+
+        assert!(handle_paste(&mut session, "ignored").is_none());
+        assert_eq!(session.core.input_manager.content(), "draft");
+
+        session.tool_output_viewer_state_mut().expect("viewer").start_search();
+        assert!(handle_paste(&mut session, "beta").is_none());
+        session.tool_output_viewer_state_mut().expect("viewer").commit_search(8);
+
+        assert_eq!(session.core.input_manager.content(), "draft");
+        assert!(
+            session
+                .tool_output_viewer_state()
+                .expect("viewer")
+                .status_label()
+                .contains("search 'beta'")
+        );
+    }
+
+    #[test]
+    fn transient_activity_signal_tracks_ui_owned_surface_lifecycle() {
+        let signal = Arc::new(TransientActivitySignal::default());
+        let mut session = build_session();
+        session.set_transient_activity_signal(signal.clone());
+
+        session.show_transient(TransientRequest::LocalAgents(LocalAgentsTransientRequest { visible: Some(true) }));
+        assert!(signal.is_active());
+
+        assert!(session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)).is_none());
+        assert!(!signal.is_active());
+
+        assert!(
+            session
+                .process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+                .is_none()
+        );
+        assert!(signal.is_active());
+        assert!(session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)).is_none());
+        assert!(!signal.is_active());
+    }
+
+    #[test]
+    fn transient_activity_signal_keeps_lower_captured_surface_after_nested_close() {
+        let signal = Arc::new(TransientActivitySignal::default());
+        let mut session = build_session();
+        session.set_transient_activity_signal(signal.clone());
+
+        session.show_transient(TransientRequest::LocalAgents(LocalAgentsTransientRequest { visible: Some(true) }));
+        session.show_transient(TransientRequest::Modal(ModalOverlayRequest {
+            title: "nested".to_string(),
+            lines: Vec::new(),
+            secure_prompt: None,
+            is_help_modal: false,
+        }));
+        assert!(signal.is_active());
+
+        session.close_transient();
+        assert!(signal.is_active(), "the lower captured surface still owns input");
+
+        session.close_transient();
+        assert!(!signal.is_active());
+    }
+
+    #[test]
+    fn locked_activity_blocks_explicit_mode_switch_commands() {
+        for state in [
+            vtcode_commons::ui_protocol::ActivityState::Building,
+            vtcode_commons::ui_protocol::ActivityState::Recovery,
+            vtcode_commons::ui_protocol::ActivityState::Blocked,
+        ] {
+            for input in ["/mode", "/mode build", "/plan", "/plan on"] {
+                let mut session = build_session();
+                session.core.handle_command(CoreInlineCommand::SetActivityState(state));
+
+                assert!(
+                    handle_running_slash_command_block_for_input(&mut session, input),
+                    "{input} must stay locked in {state:?}"
+                );
+            }
+        }
     }
 
     fn text_segment(text: impl Into<String>) -> InlineSegment {
@@ -2475,6 +2711,7 @@ mod tests {
                 placeholder: None,
                 mask_input: true,
             }),
+            is_help_modal: false,
         }));
         assert!(session.has_active_overlay(), "secure prompt modal should be open");
         session

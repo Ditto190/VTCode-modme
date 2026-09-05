@@ -191,12 +191,12 @@ fn test_tool_call_compliance() {
 
     let item = ThreadItem {
         id: "fc1".to_string(),
-        details: ThreadItemDetails::McpToolCall(McpToolCallItem {
+        details: ThreadItemDetails::McpToolCall(Box::new(McpToolCallItem {
             tool_name: "read_file".to_string(),
             arguments: Some(json!({"path": "README.md"})),
             result: None,
             status: Some(McpToolCallStatus::Completed),
-        }),
+        })),
     };
 
     builder.process_event(&ThreadEvent::ItemCompleted(ItemCompletedEvent { item }), &mut emitter);

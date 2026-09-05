@@ -486,6 +486,7 @@ pub fn validate_args(args: &serde_json::Value) -> Result<()> {
 
 pub use identity::normalised_identity;
 pub use identity::normalised_loop_identity;
+pub use identity::normalised_path;
 pub use identity::scope_contains_mutated_path;
 pub use ranking::DeclarationInventory;
 pub use scope::ResolvedSearchScope;
@@ -537,6 +538,36 @@ mod tests {
             "max_results": 100
         }));
         assert_eq!(one, hundred);
+    }
+
+    #[test]
+    fn search_identity_normalises_lexical_path_aliases() {
+        let plain = normalised_loop_identity(&serde_json::json!({
+            "query": "Widget",
+            "path": "README.md",
+        }));
+        let aliased = normalised_loop_identity(&serde_json::json!({
+            "query": "Widget",
+            "path": "./docs/../README.md",
+        }));
+
+        assert_eq!(plain, aliased);
+    }
+
+    #[test]
+    fn search_identity_preserves_escaping_parent_components() {
+        assert_eq!(normalised_path("./docs/../README.md"), "README.md");
+        assert_eq!(normalised_path("../README.md"), "../README.md");
+
+        let in_workspace = normalised_identity(&serde_json::json!({
+            "query": "Widget",
+            "path": "README.md",
+        }));
+        let escaping = normalised_identity(&serde_json::json!({
+            "query": "Widget",
+            "path": "../README.md",
+        }));
+        assert_ne!(in_workspace, escaping);
     }
 
     fn request(value: serde_json::Value) -> CodeSearchRequest {

@@ -39,7 +39,7 @@ impl ManPageGenerator {
                 roman("VT Code is an advanced coding agent with single-agent architecture and Decision Ledger that provides"),
                 roman(" intelligent code generation, analysis, and modification capabilities. It supports"),
                 roman(" multiple LLM providers including Gemini, OpenAI, Anthropic, DeepSeek, Meta AI, Z.AI,"),
-                roman(" Moonshot AI, OpenRouter, Merge Gateway, NVIDIA NIM, and Ollama, and includes LLM-native semantic code understanding."),
+                roman(" Moonshot AI, OpenRouter, Merge Gateway, NVIDIA NIM, Vercel AI Gateway, and Ollama, and includes LLM-native semantic code understanding."),
                 roman(" Rust, Python, JavaScript, TypeScript, Go, and Java."),
             ])
             .control("SH", ["OPTIONS"])
@@ -50,7 +50,7 @@ impl ManPageGenerator {
             .text([bold("-p"), roman(", "), bold("--provider"), roman(" "), italic("PROVIDER")])
             .text([
                 roman(
-                    "Specify the LLM provider (gemini, openai, anthropic, deepseek, meta, zai, moonshot, openrouter, merge-gateway, nvidia, ollama, lmstudio)",
+                    "Specify the LLM provider (gemini, openai, anthropic, deepseek, meta, zai, moonshot, openrouter, merge-gateway, nvidia, vercel, ollama, lmstudio)",
                 ),
             ])
             .control("TP", [])
@@ -194,6 +194,12 @@ impl ManPageGenerator {
             .control("TP", [])
             .text([bold("MERGE_GATEWAY_BASE_URL")])
             .text([roman("Optional Merge Gateway endpoint override; /v1/openai selects legacy compatibility")])
+            .control("TP", [])
+            .text([bold("AI_GATEWAY_API_KEY")])
+            .text([roman("API key for Vercel AI Gateway models")])
+            .control("TP", [])
+            .text([bold("VERCEL_AI_GATEWAY_BASE_URL")])
+            .text([roman("Optional Vercel AI Gateway endpoint override (default: https://ai-gateway.vercel.sh/v1)")])
             .control("SH", ["FILES"])
             .control("TP", [])
             .text([bold("vtcode.toml")])

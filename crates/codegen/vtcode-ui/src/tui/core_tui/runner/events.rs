@@ -95,34 +95,36 @@ impl ScrollAccumulator {
         }
     }
 
-    /// Try to accumulate a scroll event. Returns true if the event was a scroll event.
+    /// Returns false when the event must be dispatched after flushing pending scroll.
     /// Handles mouse scroll wheel events and PageUp/PageDown keyboard events.
     pub(super) fn try_accumulate(&mut self, event: &CrosstermEvent) -> bool {
-        match event {
+        let (line_delta, page_delta): (i32, i32) = match event {
             CrosstermEvent::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollDown => {
-                    self.line_delta += self.wheel_step;
-                    true
-                }
-                MouseEventKind::ScrollUp => {
-                    self.line_delta -= self.wheel_step;
-                    true
-                }
-                _ => false,
+                MouseEventKind::ScrollDown => (self.wheel_step, 0),
+                MouseEventKind::ScrollUp => (-self.wheel_step, 0),
+                _ => return false,
             },
             CrosstermEvent::Key(key) if matches!(key.kind, KeyEventKind::Press) => match key.code {
-                KeyCode::PageUp => {
-                    self.page_delta -= 1;
-                    true
-                }
-                KeyCode::PageDown => {
-                    self.page_delta += 1;
-                    true
-                }
-                _ => false,
+                KeyCode::PageUp => (0, -1),
+                KeyCode::PageDown => (0, 1),
+                _ => return false,
             },
-            _ => false,
+            _ => return false,
+        };
+        if self.has_scroll()
+            && (self.line_delta.signum() != line_delta.signum() || self.page_delta.signum() != page_delta.signum())
+        {
+            return false;
         }
+        let Some(next_line_delta) = self.line_delta.checked_add(line_delta) else {
+            return false;
+        };
+        let Some(next_page_delta) = self.page_delta.checked_add(page_delta) else {
+            return false;
+        };
+        self.line_delta = next_line_delta;
+        self.page_delta = next_page_delta;
+        true
     }
 
     /// Check if there are any accumulated scroll events
@@ -193,7 +195,7 @@ pub(super) async fn spawn_event_loop(
                     Some(Err(error)) => {
                         tracing::error!(%error, "terminal event stream error");
                     }
-                    None => {}
+                    None => break,
                 }
             }
             _ = tokio::time::sleep(sleep_duration) => {
@@ -205,5 +207,72 @@ pub(super) async fn spawn_event_loop(
         if event_tx.is_closed() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers, MouseEvent};
+
+    fn wheel(kind: MouseEventKind) -> CrosstermEvent {
+        CrosstermEvent::Mouse(MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn scroll_accumulator_keeps_reversals_separate_at_both_bounds() {
+        for (initial_offset, first_kind, second_kind, expected_offset) in [
+            (0, MouseEventKind::ScrollDown, MouseEventKind::ScrollUp, 3),
+            (10, MouseEventKind::ScrollUp, MouseEventKind::ScrollDown, 7),
+        ] {
+            let mut pending = ScrollAccumulator::new(3);
+            assert!(pending.try_accumulate(&wheel(first_kind)));
+            assert!(!pending.try_accumulate(&wheel(second_kind)));
+            let offset = (initial_offset - pending.line_delta).clamp(0, 10);
+            let mut next = ScrollAccumulator::new(3);
+            assert!(next.try_accumulate(&wheel(second_kind)));
+            assert_eq!((offset - next.line_delta).clamp(0, 10), expected_offset);
+        }
+    }
+
+    #[test]
+    fn scroll_accumulator_preserves_wheel_page_order() {
+        let mut pending = ScrollAccumulator::new(3);
+        assert!(pending.try_accumulate(&wheel(MouseEventKind::ScrollDown)));
+        let page_up = CrosstermEvent::Key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        assert!(!pending.try_accumulate(&page_up));
+        assert_eq!((pending.line_delta, pending.page_delta), (3, 0));
+    }
+
+    #[test]
+    fn scroll_accumulator_merges_same_direction_and_rejects_overflow() {
+        let mut pending = ScrollAccumulator::new(0);
+        let down = wheel(MouseEventKind::ScrollDown);
+        assert!(pending.try_accumulate(&down));
+        assert!(pending.try_accumulate(&down));
+        assert_eq!(pending.line_delta, 2);
+        pending.line_delta = i32::MAX;
+        assert!(!pending.try_accumulate(&down));
+        assert_eq!(pending.line_delta, i32::MAX);
+    }
+
+    #[test]
+    fn scroll_accumulator_preserves_page_reversal_and_release_dispatch() {
+        let mut pending = ScrollAccumulator::new(3);
+        let page_up = CrosstermEvent::Key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        let page_down = CrosstermEvent::Key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert!(pending.try_accumulate(&page_up));
+        assert!(!pending.try_accumulate(&page_down));
+        assert!(!pending.try_accumulate(&CrosstermEvent::Key(KeyEvent::new_with_kind(
+            KeyCode::PageUp,
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        ))));
+        assert_eq!(pending.page_delta, -1);
     }
 }

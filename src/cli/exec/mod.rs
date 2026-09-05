@@ -89,12 +89,12 @@ mod tests {
     #[test]
     fn tracked_last_message_prefers_agent_over_plan() {
         let mut processor = TestProcessor::new(false, false, None, None, None);
-        processor.process_event(&ThreadEvent::PlanDelta(PlanDeltaEvent {
+        processor.process_event(&ThreadEvent::PlanDelta(Box::new(PlanDeltaEvent {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "plan-1".to_string(),
             delta: "First plan".to_string(),
-        }));
+        })));
         assert_eq!(processor.final_message(), Some("First plan"));
 
         processor.process_event(&ThreadEvent::ItemCompleted(ItemCompletedEvent {
@@ -190,7 +190,7 @@ mod tests {
         let line = human_event_line(&ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "verify-1".to_string(),
-                details: ThreadItemDetails::Harness(HarnessEventItem {
+                details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                     event: HarnessEventKind::VerificationFailed,
                     message: Some("cargo check failed".to_string()),
                     command: Some("cargo check".to_string()),
@@ -199,7 +199,7 @@ mod tests {
                     attempt: None,
                     error_category: None,
                     duration_ms: None,
-                }),
+                })),
             },
         }))
         .expect("harness event should render");
@@ -213,7 +213,7 @@ mod tests {
         let line = human_event_line(&ThreadEvent::ItemCompleted(ItemCompletedEvent {
             item: ThreadItem {
                 id: "handoff-1".to_string(),
-                details: ThreadItemDetails::Harness(HarnessEventItem {
+                details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
                     event: HarnessEventKind::BlockedHandoffWritten,
                     message: Some("Blocked handoff written".to_string()),
                     command: None,
@@ -222,7 +222,7 @@ mod tests {
                     attempt: None,
                     error_category: None,
                     duration_ms: None,
-                }),
+                })),
             },
         }))
         .expect("harness event should render");

@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 use vtcode_commons::llm::Usage;
 use vtcode_core::compaction::ManualCompactionOptions;
 use vtcode_core::compaction::effective_session_context_budget;
+use vtcode_core::compaction::memory_envelope::DEFAULT_OUTPUT_RESERVE_TOKENS;
 use vtcode_core::config::constants::tools as tool_names;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::llm::provider::{
@@ -1445,9 +1446,9 @@ async fn auto_compaction_uses_the_effective_session_safety_ceiling() {
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
     context_manager.update_token_usage(&Some(Usage {
-        prompt_tokens: 145_000,
+        prompt_tokens: 496_000,
         completion_tokens: 10,
-        total_tokens: 145_010,
+        total_tokens: 496_010,
         ..Usage::default()
     }));
 
@@ -1466,10 +1467,10 @@ async fn auto_compaction_uses_the_effective_session_safety_ceiling() {
     )
     .await
     .expect("auto compaction succeeds")
-    .expect("145k prompt pressure must cross the 144k session boundary");
+    .expect("496k prompt pressure must cross the 495.9k provider boundary");
 
     assert!(outcome.compacted_len >= outcome.original_len);
-    assert!(context_manager.current_token_usage() <= 144_000);
+    assert!(context_manager.current_token_usage() <= 495_904);
 }
 
 #[tokio::test]
@@ -2057,13 +2058,15 @@ fn resolve_compaction_threshold_prefers_configured_value() {
 }
 
 #[test]
-fn resolve_compaction_threshold_uses_context_ratio_when_unset() {
-    assert_eq!(resolve_compaction_threshold(None, 200_000), Some(180_000));
+fn resolve_compaction_threshold_reserves_output_room_when_unset() {
+    let reserve = DEFAULT_OUTPUT_RESERVE_TOKENS as u64;
+    assert_eq!(resolve_compaction_threshold(None, 200_000), Some(200_000 - reserve));
 }
 
 #[test]
 fn resolve_compaction_threshold_clamps_to_context_size() {
-    assert_eq!(resolve_compaction_threshold(Some(300_000), 200_000), Some(200_000));
+    let reserve = DEFAULT_OUTPUT_RESERVE_TOKENS as u64;
+    assert_eq!(resolve_compaction_threshold(Some(300_000), 200_000), Some(200_000 - reserve));
 }
 
 #[test]
@@ -2072,8 +2075,9 @@ fn resolve_compaction_threshold_requires_context_or_override() {
 }
 
 #[test]
-fn effective_compaction_threshold_uses_default_session_budget_before_provider_capacity() {
-    // Arrange
+fn effective_compaction_threshold_follows_provider_capacity_when_session_budget_unset() {
+    // Arrange: the default session budget is 0 (unset), so the provider
+    // capacity drives the threshold and only the output reserve is subtracted.
     let provider = ContextSizedProvider { context_size: 500_000 };
     let config = VTCodeConfig::default();
 
@@ -2081,34 +2085,38 @@ fn effective_compaction_threshold_uses_default_session_budget_before_provider_ca
     let threshold = effective_compaction_threshold(Some(&config), &provider, "stub-model");
 
     // Assert
-    assert_eq!(threshold, Some(144_000));
+    assert_eq!(threshold, Some(500_000 - DEFAULT_OUTPUT_RESERVE_TOKENS));
 }
 
 #[test]
 fn effective_compaction_threshold_clamps_session_budget_to_provider_capacity() {
     // Arrange
     let provider = ContextSizedProvider { context_size: 100_000 };
-    let config = VTCodeConfig::default();
+    let mut config = VTCodeConfig::default();
+    config.context.max_context_tokens = 160_000;
 
     // Act
     let threshold = effective_compaction_threshold(Some(&config), &provider, "stub-model");
 
-    // Assert
-    assert_eq!(threshold, Some(90_000));
+    // Assert: the 160k session budget is clamped to the 100k provider capacity,
+    // and the output reserve is subtracted from the result.
+    assert_eq!(threshold, Some(100_000 - DEFAULT_OUTPUT_RESERVE_TOKENS));
 }
 
 #[test]
 fn effective_compaction_threshold_uses_default_session_budget_without_config() {
+    // A zero (unset) session budget defers to the provider capacity minus the
+    // output reserve.
     let threshold = effective_compaction_threshold(None, &ContextSizedProvider { context_size: 500_000 }, "stub-model");
 
-    assert_eq!(threshold, Some(144_000));
+    assert_eq!(threshold, Some(500_000 - DEFAULT_OUTPUT_RESERVE_TOKENS));
 }
 
 #[test]
 fn explicit_compaction_threshold_overrides_session_budget_but_not_provider_capacity() {
     // Arrange
     let mut config = VTCodeConfig::default();
-    config.context.max_context_tokens = 100_000;
+    config.context.max_context_tokens = 300_000;
     config.agent.harness.auto_compaction_threshold_tokens = Some(200_000);
 
     // Act
@@ -2119,7 +2127,7 @@ fn explicit_compaction_threshold_overrides_session_budget_but_not_provider_capac
 
     // Assert
     assert_eq!(session_override, Some(200_000));
-    assert_eq!(provider_cap, Some(150_000));
+    assert_eq!(provider_cap, Some(150_000 - DEFAULT_OUTPUT_RESERVE_TOKENS));
 }
 
 #[test]
@@ -2133,8 +2141,8 @@ fn zero_session_budget_preserves_provider_derived_threshold() {
         effective_compaction_threshold(Some(&config), &ContextSizedProvider { context_size: 200_000 }, "stub-model");
 
     // Assert
-    assert_eq!(threshold, Some(180_000));
-    assert_eq!(resolve_compaction_threshold(Some(0), 200_000), Some(180_000));
+    assert_eq!(threshold, Some(200_000 - DEFAULT_OUTPUT_RESERVE_TOKENS));
+    assert_eq!(resolve_compaction_threshold(Some(0), 200_000), Some(200_000 - DEFAULT_OUTPUT_RESERVE_TOKENS as u64));
 }
 
 #[test]
@@ -2149,7 +2157,7 @@ fn effective_session_context_budget_preserves_known_limit_when_other_side_is_zer
 #[test]
 fn build_server_compaction_context_management_creates_openai_payload() {
     assert_eq!(
-        build_server_compaction_context_management(Some(512), 2_000, 160_000),
+        build_server_compaction_context_management(Some(512), 2_000_000, 160_000),
         Some(json!([{
             "type": "compaction",
             "compact_threshold": 512,

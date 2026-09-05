@@ -22,8 +22,8 @@ pub mod constants {
     pub const LABEL_MEDIUM: &str = "Medium";
     pub const LABEL_HIGH: &str = "High";
     pub const DESCRIPTION_LOW: &str = "Fast responses with lightweight reasoning.";
-    pub const DESCRIPTION_MEDIUM: &str = "Balanced depth and speed for general tasks. (Note: May not be fully available for all models including Gemini 3 Pro)";
-    pub const DESCRIPTION_HIGH: &str = "Maximum reasoning depth for complex problems.";
+    pub const DESCRIPTION_MEDIUM: &str = "Balanced depth and speed. (Note: Mapped to high on some models)";
+    pub const DESCRIPTION_HIGH: &str = "Deep reasoning for complex problems.";
 }
 
 /// Supported reasoning effort levels configured via vtcode.toml
@@ -46,9 +46,11 @@ pub enum ReasoningEffortLevel {
     Medium,
     /// High reasoning effort - maps to high thinking level for Gemini 3 Pro
     High,
-    /// Extra high reasoning effort - for GPT-5.4-family and similar long-running tasks
+    /// Extra high reasoning effort - for GPT-5.6/6-Astra, Claude adaptive,
+    /// Grok-4.6+, and Muse Spark long-running tasks
     XHigh,
-    /// Maximum reasoning effort - for Claude Opus 4.7 adaptive thinking
+    /// Maximum reasoning effort - for GPT-5.6/6-Astra, Claude adaptive,
+    /// DeepSeek-V4, Kimi-K3, and GLM-5.x; aliased elsewhere
     Max,
     /// Forward-compatible catch-all for unrecognized effort level values
     Unknown,

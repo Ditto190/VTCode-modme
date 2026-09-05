@@ -134,6 +134,7 @@ pub mod cache;
 pub(crate) mod code_search;
 pub use code_search::normalised_identity as normalised_code_search_identity;
 pub use code_search::normalised_loop_identity as normalised_code_search_loop_identity;
+pub use code_search::normalised_path as normalised_code_search_path;
 pub use code_search::scope_contains_mutated_path as code_search_scope_contains_mutated_path;
 pub mod command;
 pub mod command_args;
