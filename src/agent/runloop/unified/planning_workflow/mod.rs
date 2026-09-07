@@ -147,9 +147,16 @@ pub(crate) fn build_plan_repair_directive(feedback: &str) -> String {
     format!(
         "Planning recovery: the proposed plan was rejected. Repair it in this bounded pass using concrete repository evidence. \
          {feedback}\n\n\
-         Re-emit only one compact `<proposed_plan>` block with Summary, numbered Implementation Steps in the canonical \
-         form, Test Cases and Validation, and Assumptions and Defaults. Resolve every open decision. Do not emit tool \
-         calls or ask for approval until the artifact is complete."
+         Re-emit only one compact `<proposed_plan>` block. Use these headings exactly and replace every example with \
+         evidence-backed content; do not copy placeholders:\n\
+         ## Summary\n\
+         ## Implementation Steps\n\
+         1. Action -> files: [path/to/file.rs] -> verify: [cargo check]\n\
+         ## Test Cases and Validation\n\
+         - concrete command or observable check\n\
+         ## Assumptions and Defaults\n\
+         - concrete default or scope boundary\n\n\
+         Resolve every open decision. Do not emit tool calls or ask for approval until the artifact is complete."
     )
 }
 

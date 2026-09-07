@@ -26,7 +26,7 @@ use tracing::warn;
 /// Shared Planning workflow header used by both static and incremental prompt builders.
 pub const PLANNING_WORKFLOW_READ_ONLY_HEADER: &str = "# PLANNING WORKFLOW (READ-ONLY)";
 /// Shared Planning workflow notice line describing strict read-only enforcement.
-pub const PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE: &str = "Mutating file edits are blocked, including `apply_patch`. Use `exec_command.cmd` only for read-only repository inspection with the active shell profile's syntax; keep `task_tracker` current.";
+pub const PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE: &str = "Mutating file edits are blocked, including `apply_patch`. Use `exec_command.cmd` only for read-only repository inspection with the active shell profile's syntax; keep `task_tracker` current. Keep discovery commands static: for `find`, use literal paths and quoted patterns only; never use `$()`, backticks, variable/brace expansion, or dynamically spliced options, and prefer `rg --files` when practical.";
 /// Shared Planning workflow instruction line for transitioning to implementation.
 pub const PLANNING_WORKFLOW_EXIT_INSTRUCTION_LINE: &str = "Only a validated plan persisted under `.vtcode/plans/` is ready for user approval. Mutating tools stay disabled until the user approves.";
 /// Canonical contract for model-authored plan output and runtime-owned persistence.

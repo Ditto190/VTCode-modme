@@ -27,6 +27,7 @@ Runner paths that do not create session archives also omit the resume command an
 Shell commands in plan mode are validated against a read-only allow-list. Allowed patterns include:
 
 - inspection base commands: `rg`, `ls`, `cat`, `sed`, `grep`, `find`, `head`, `tail`, `fd`, `tree`, `stat`, `file`, `which`, `jq`, and similar
+- discovery commands must remain static: use literal `find` paths with quoted patterns, or prefer `rg --files`; dynamic `find` option/predicate expansion such as `$()`, backticks, variables, or brace expansion is rejected by the command-safety gate
 - `cd` prefixes: `cd <dir> && <read-only command>` (changing directory mutates nothing)
 - read-only subcommands: `git status|log|diff|show|blame|ls-files|rev-parse|describe|shortlog|grep`, `cargo check|test|clippy|metadata|tree|nextest run`, `npm|pnpm|yarn test`
 - `&&` chains and `|` pipelines where every segment is itself read-only

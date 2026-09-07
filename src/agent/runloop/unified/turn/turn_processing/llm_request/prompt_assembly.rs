@@ -41,6 +41,37 @@ pub(super) struct PromptAssemblyOutput {
     pub(super) few_shot_context: Option<String>,
 }
 
+fn append_recovery_mode_prompt(system_prompt: &mut String, planning_active: bool, recovery_reason: Option<&str>) {
+    system_prompt.push_str("\n[Recovery Mode]\n");
+    system_prompt.push_str("- tools_disabled: true\n");
+    system_prompt.push_str("- do_not_request_more_tools: true\n");
+
+    if planning_active {
+        system_prompt.push_str(
+            "- answer_mode: emit one complete approval-ready plan from evidence already collected in this turn\n",
+        );
+        system_prompt.push_str("- required_output: exactly one `<proposed_plan>` block\n");
+        system_prompt.push_str(
+            "- required_headings: `## Summary`, `## Implementation Steps`, `## Test Cases and Validation`, `## Assumptions and Defaults`\n",
+        );
+        system_prompt.push_str(
+            "- step_format: `1. Action -> files: [concrete/path.rs] -> verify: [cargo check --locked]`; replace the examples with evidence-backed targets and one concrete command or observable check\n",
+        );
+        system_prompt.push_str(
+            "- if evidence is incomplete: state a concrete assumption inside the plan; do not omit a required heading\n",
+        );
+        system_prompt.push_str("- do_not_emit_prose_outside_plan: true\n");
+    } else {
+        system_prompt.push_str("- answer_mode: summarize only from evidence already collected in this turn\n");
+        system_prompt.push_str("- if evidence is incomplete, say so explicitly\n");
+        system_prompt.push_str("- keep_response_brief: true\n");
+    }
+
+    if let Some(reason) = recovery_reason {
+        let _ = writeln!(system_prompt, "- recovery_reason: {reason}");
+    }
+}
+
 #[cfg_attr(feature = "profiling", hotpath::measure)]
 pub(super) async fn assemble_prompt(
     ctx: &mut TurnProcessingContext<'_>,
@@ -99,13 +130,11 @@ async fn build_prompt_output(
 
     let tool_snapshot = {
         if input.turn.tool_free_recovery {
-            let _ = writeln!(
-                system_prompt,
-                "\n[Recovery Mode]\n- tools_disabled: true\n- answer_mode: summarize only from evidence already collected in this turn\n- if evidence is incomplete, say so explicitly\n- do_not_request_more_tools: true\n- keep_response_brief: true"
+            append_recovery_mode_prompt(
+                &mut system_prompt,
+                input.turn.planning_active,
+                input.turn.recovery_reason.as_deref(),
             );
-            if let Some(reason) = input.turn.recovery_reason.as_deref() {
-                let _ = writeln!(system_prompt, "- recovery_reason: {reason}");
-            }
             SessionToolCatalogSnapshot::new(
                 ctx.tool_catalog.current_version(),
                 ctx.tool_catalog.current_epoch(),
@@ -186,8 +215,8 @@ async fn build_prompt_output(
 
     // Section 18.3.3 of the agentic-AI guide: inject at most
     // DEFAULT_FEW_SHOT_BUDGET_TOKENS of relevant few-shot examples selected
-    // from `.vtcode/prompts/examples/`. Skip in recovery mode (the model is
-    // in "summarize only" mode and adding examples would distract).
+    // from `.vtcode/prompts/examples/`. Skip in recovery mode: that path has
+    // a dedicated output contract, and extra examples would distract from it.
     let few_shot_context = {
         if input.turn.tool_free_recovery {
             None
@@ -300,5 +329,29 @@ mod tests {
             .expect_err("stale runtime metadata should be rejected");
         assert!(err.should_rebuild_runtime_prompt());
         validate_prompt_output_alignment(&aligned_output, &turn).expect("aligned runtime metadata should pass");
+    }
+
+    #[test]
+    fn planning_recovery_prompt_requires_complete_plan_artifact() {
+        let mut prompt = String::new();
+        super::append_recovery_mode_prompt(&mut prompt, true, Some("per-file read cap"));
+
+        assert!(prompt.contains("exactly one `<proposed_plan>` block"));
+        assert!(prompt.contains("`## Summary`"));
+        assert!(prompt.contains("`## Implementation Steps`"));
+        assert!(prompt.contains("`## Test Cases and Validation`"));
+        assert!(prompt.contains("`## Assumptions and Defaults`"));
+        assert!(prompt.contains("Action -> files: [concrete/path.rs] -> verify: [cargo check --locked]"));
+        assert!(!prompt.contains("keep_response_brief"));
+    }
+
+    #[test]
+    fn execution_recovery_prompt_keeps_brief_summary_contract() {
+        let mut prompt = String::new();
+        super::append_recovery_mode_prompt(&mut prompt, false, Some("follow-up failure"));
+
+        assert!(prompt.contains("summarize only from evidence"));
+        assert!(prompt.contains("keep_response_brief: true"));
+        assert!(!prompt.contains("exactly one `<proposed_plan>` block"));
     }
 }

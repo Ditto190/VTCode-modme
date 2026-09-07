@@ -362,6 +362,7 @@ impl<'a> TurnProcessingContext<'a> {
         } else {
             crate::agent::runloop::unified::turn::provider_noise::strip_provider_noise(&text)
         };
+        let mut proposed_plan = proposed_plan;
         let text = if proposed_plan.is_some() {
             strip_plan_persistence_policy_line(&text)
         } else {
@@ -386,15 +387,19 @@ impl<'a> TurnProcessingContext<'a> {
         } else {
             text
         };
+        let recovery_plan_was_extracted = proposed_plan.is_some();
         if tool_free_recovery_pass && self.is_planning_active() {
             if proposed_plan.is_none() {
-                let rejected_plan = text
-                    .contains("<proposed_plan>")
-                    .then_some(text.as_str())
-                    .or_else(|| text.contains("<plan>").then_some(text.as_str()));
-                return self.break_planning_recovery_with_handoff(
-                    "the response did not contain exactly one completed <proposed_plan> block",
-                    rejected_plan,
+                if text.trim().is_empty() {
+                    return self.break_planning_recovery_with_handoff(
+                        "the response did not contain exactly one completed <proposed_plan> block",
+                        None,
+                    );
+                }
+                proposed_plan = Some(text.clone());
+                tracing::info!(
+                    target: "vtcode.planning_workflow",
+                    "treating unwrapped recovery text as a plan candidate for validation"
                 );
             }
             // Prose-tolerant recovery: models often add a one-line intro
@@ -403,7 +408,7 @@ impl<'a> TurnProcessingContext<'a> {
             // surrounding prose and validate the plan instead of ending
             // Blocked. The plan-approval flow renders the plan once; the
             // intro carries no approval state.
-            if !text.trim().is_empty() {
+            if recovery_plan_was_extracted && !text.trim().is_empty() {
                 tracing::info!(
                     target: "vtcode.planning_workflow",
                     prose_len = text.trim().len(),
@@ -1182,6 +1187,32 @@ Fix the read-cap recovery path from gathered evidence.
         assert!(
             matches!(second, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
             "exhausted repair budget must end with the resumable blocked handoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_free_unwrapped_plan_is_repaired_instead_of_blocking_immediately() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        backing.activate_tool_free_recovery_for_test("per-file read cap");
+        let mut ctx = backing.turn_processing_context();
+        assert!(ctx.consume_recovery_pass());
+
+        let outcome = ctx
+            .handle_text_response(RECOVERY_INVALID_PLAN.to_string(), Vec::new(), None, None, false)
+            .await
+            .expect("unwrapped recovery draft should be handled");
+
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Continue),
+            "an unwrapped invalid draft should use the bounded repair path"
+        );
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                message.role == uni::MessageRole::System
+                    && message.content.as_text().contains("Rewrite every implementation step")
+            }),
+            "the repair directive should be retained for the next synthesis pass"
         );
     }
 

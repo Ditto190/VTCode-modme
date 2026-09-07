@@ -687,6 +687,36 @@ async fn flush_preflight_circuit_recovery_is_idempotent_and_arms_tool_free_mode(
     assert_eq!(directive_count_final, 1, "directive must not be duplicated");
 }
 
+#[test]
+fn dynamic_find_preflight_feedback_names_safe_static_alternatives() {
+    let correction = preflight_schema_correction(
+        tool_names::EXEC_COMMAND,
+        "dynamic shell expansion in find commands is not allowed",
+    );
+
+    assert!(correction.contains("literal path and quoted pattern"));
+    assert!(correction.contains("rg --files"));
+    assert!(correction.contains("Do not use `$()`"));
+    assert!(correction.contains("Do not retry"));
+}
+
+#[tokio::test]
+async fn planning_preflight_recovery_requires_plan_artifact() {
+    let mut backing = TestContextBacking::new(4).await;
+    backing.tool_registry.enable_planning();
+    let mut ctx = backing.turn_processing_context();
+    ctx.harness_state.arm_preflight_circuit_recovery();
+
+    flush_preflight_circuit_recovery(&mut ctx);
+
+    assert!(ctx.working_history.iter().any(|message| {
+        let content = message.content.as_text();
+        message.role == uni::MessageRole::System
+            && content.contains("exactly one complete `<proposed_plan>`")
+            && content.contains("## Test Cases and Validation")
+    }));
+}
+
 #[tokio::test]
 async fn unified_validation_ignores_preseeded_legacy_loop_detector_state() {
     let mut backing = TestContextBacking::new(2).await;

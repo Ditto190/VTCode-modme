@@ -161,4 +161,21 @@ mod tests {
             assert!(prompt.contains("Planning uses a nonzero per-turn tool-call research floor of 120"));
         }
     }
+
+    #[test]
+    fn planning_workflow_warns_about_dynamic_find_expansion() {
+        let mut prompt = "Base prompt".to_string();
+
+        append_runtime_mode_sections(
+            &mut prompt,
+            RuntimePromptContract {
+                planning_active: true,
+                ..RuntimePromptContract::default()
+            },
+        );
+
+        assert!(prompt.contains("for `find`, use literal paths and quoted patterns only"));
+        assert!(prompt.contains("prefer `rg --files`"));
+        assert!(prompt.contains("never use `$()`"));
+    }
 }

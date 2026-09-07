@@ -76,8 +76,10 @@ pub(crate) fn handle_preflight_failure(
     let failure_count = ctx.record_preflight_failure();
     let max_failures = max_consecutive_blocked_tool_calls_per_turn(ctx);
     let circuit_tripped = failure_count >= max_failures;
-    let schema_correction = preflight_schema_correction(tool_name);
-    let next_action = if circuit_tripped {
+    let schema_correction = preflight_schema_correction(tool_name, error);
+    let next_action = if circuit_tripped && ctx.is_planning_active() {
+        "Stop retrying this malformed call. Tools are disabled for the next pass — synthesize exactly one complete <proposed_plan> from the evidence already gathered."
+    } else if circuit_tripped {
         "Stop retrying this malformed call. Tools are disabled for the next pass — synthesize a plain-text response reporting the failure to the user."
     } else {
         "Correct the arguments using schema_correction, then retry this tool once."
@@ -127,7 +129,13 @@ pub(crate) fn handle_preflight_failure(
     })
 }
 
-fn preflight_schema_correction(tool_name: &str) -> String {
+fn preflight_schema_correction(tool_name: &str, error: &str) -> String {
+    if matches!(tool_name, tool_names::EXEC_COMMAND | tool_names::UNIFIED_EXEC | "command_session")
+        && error.contains("dynamic shell expansion in find commands")
+    {
+        return "Do not retry the rejected dynamic find command. Use a literal path and quoted pattern, for example `find src -name '*.rs'`, or use `rg --files src | rg '\\.rs$'`. Do not use `$()`, backticks, variable/brace expansion, or dynamically spliced find options.".to_string();
+    }
+
     format!(
         "Provide a JSON object matching the declared schema for '{tool_name}'. Parse the arguments as JSON before retrying."
     )
@@ -151,8 +159,12 @@ pub(crate) fn drain_preflight_circuit_responses(
             "failure_kind": "preflight_circuit_breaker",
             "tool_name": tool_name,
             "failure_count": failure_count,
-            "schema_correction": preflight_schema_correction(tool_name),
-            "next_action": "Stop retrying this batch. Tools are disabled for the next pass — synthesize a plain-text response reporting the failure to the user.",
+            "schema_correction": preflight_schema_correction(tool_name, error),
+            "next_action": if ctx.is_planning_active() {
+                "Stop retrying this batch. Tools are disabled for the next pass — synthesize exactly one complete <proposed_plan> from the evidence already gathered."
+            } else {
+                "Stop retrying this batch. Tools are disabled for the next pass — synthesize a plain-text response reporting the failure to the user."
+            },
             "retryable": false,
         });
         let diagnosis = super::execution_result::deterministic_preflight_diagnosis(tool_name, error, true);
@@ -172,6 +184,7 @@ fn build_failure_error_content(error: String, failure_kind: &'static str) -> Str
 const INTERVIEW_DENIAL_RECOVERY_DIRECTIVE: &str = "Planning recovery: the interactive interview is unavailable in this runtime. Tools are disabled for the next pass. If you have a clarifying question, present it to the user in plain text and end your turn — the user's next message will answer it and you can continue planning. Otherwise, synthesize exactly one completed `<proposed_plan>` from the research already gathered. Do not emit tool calls or request approval until the plan is present.";
 
 const PREFLIGHT_CIRCUIT_RECOVERY_DIRECTIVE: &str = "Recovery: repeated tool preflight validation failures tripped the circuit breaker, so tools are disabled for this pass. Do not emit tool calls. Summarize what you were trying to do and the validation errors above, then tell the user in plain text what you need to proceed (e.g. re-state the request so the next turn retries with correct arguments). End your turn after this response.";
+const PLANNING_TOOL_FREE_RECOVERY_DIRECTIVE: &str = "Planning recovery: tools are disabled for this pass. Emit exactly one complete `<proposed_plan>` from the repository evidence already gathered. Include `## Summary`, `## Implementation Steps`, `## Test Cases and Validation`, and `## Assumptions and Defaults`; every numbered step must use `Action -> files: [concrete/path] -> verify: [command or observable check]`. Do not emit tool calls or approval language.";
 
 const BLOCKED_TOOL_RECOVERY_DIRECTIVE: &str = "Recovery: repeated tool calls were blocked by the active safety or permission policy, so tools are disabled for one bounded pass. Do not retry or re-emit blocked commands. Synthesize a plain-text response from the tool responses above, explain the blocked action and the safe next step, and end your turn.";
 
@@ -205,7 +218,12 @@ pub(crate) fn flush_preflight_circuit_recovery(ctx: &mut TurnProcessingContext<'
         return;
     }
 
-    ctx.push_system_message(PREFLIGHT_CIRCUIT_RECOVERY_DIRECTIVE);
+    let directive = if ctx.is_planning_active() {
+        PLANNING_TOOL_FREE_RECOVERY_DIRECTIVE
+    } else {
+        PREFLIGHT_CIRCUIT_RECOVERY_DIRECTIVE
+    };
+    ctx.push_system_message(directive);
     if ctx.harness_state.recovery_reason.is_none() {
         ctx.harness_state.recovery_reason = Some("preflight validation circuit breaker".to_string());
     }
@@ -229,6 +247,11 @@ pub(crate) fn flush_blocked_tool_recovery(ctx: &mut TurnProcessingContext<'_>) {
         .take_blocked_tool_recovery_reason()
         .map(|reason| format!("{BLOCKED_TOOL_RECOVERY_DIRECTIVE} Trigger: {reason}"))
         .unwrap_or_else(|| BLOCKED_TOOL_RECOVERY_DIRECTIVE.to_string());
+    let directive = if ctx.is_planning_active() {
+        format!("{PLANNING_TOOL_FREE_RECOVERY_DIRECTIVE} Trigger: {directive}")
+    } else {
+        directive
+    };
     ctx.push_system_message(directive);
     if ctx.harness_state.recovery_reason.is_none() {
         ctx.harness_state.recovery_reason = Some("blocked tool-call fuse tripped".to_string());
