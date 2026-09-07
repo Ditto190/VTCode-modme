@@ -260,7 +260,7 @@ pub fn hash_tool_definitions(tools: Option<&[ToolDefinition]>) -> Option<u64> {
 /// Strips runtime sections (tool catalog, context, active tools) so the hash
 /// remains stable across turns even as runtime context changes.
 ///
-/// Section boundaries share [`crate::prompts::sections::find_prompt_section_bounds`]
+/// Section boundaries share `find_prompt_section_bounds()`
 /// semantics with prompt construction (`BracketOrMarkdown`), so a renamed
 /// runtime header cannot silently change cache identity.
 ///

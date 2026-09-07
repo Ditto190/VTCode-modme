@@ -246,13 +246,11 @@ fn path_contains_components(path: &Path, needle: &[&str]) -> bool {
     if needle.is_empty() {
         return false;
     }
-    let components: Vec<String> = path
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect();
+    use std::ffi::OsStr;
+    let components: Vec<&OsStr> = path.components().map(|c| c.as_os_str()).collect();
     components
         .windows(needle.len())
-        .any(|window| window.iter().map(String::as_str).eq(needle.iter().copied()))
+        .any(|window| window.iter().zip(needle.iter()).all(|(hay, ndl)| *hay == OsStr::new(ndl)))
 }
 
 fn is_history_jsonl(path: &Path) -> bool {
