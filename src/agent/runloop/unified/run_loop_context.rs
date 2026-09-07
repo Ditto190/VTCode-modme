@@ -98,6 +98,17 @@ pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 /// seen by a model during a recovery-heavy turn.
 pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize =
     vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES;
+/// Preview credit granted per admitted spool-page read. Paged spool reads are
+/// already size-bounded per result and capped sequentially per turn by the
+/// spool-chunk guard; without credit the aggregate budget blinds mid-file
+/// paging (a single large file can exhaust it), defeating the designed
+/// spool-then-page workflow in every mode.
+pub(crate) const SPOOL_PAGE_PREVIEW_CREDIT_BYTES: usize = 16 * 1024;
+/// Cap on banked spool-page credit per turn so paging cannot grow the prompt
+/// without bound. Six sequential spool pages trip the spool-chunk guard into
+/// recovery, so this covers a full paging run with headroom for its recovery
+/// payload.
+const MAX_SPOOL_PAGE_PREVIEW_CREDIT_BYTES: usize = 96 * 1024;
 /// Model-facing guidance emitted after a user increases the per-turn tool
 /// budget. Keep this shared by the normal and out-of-band provider paths so a
 /// grant has the same continuation semantics regardless of transport.
@@ -374,6 +385,11 @@ pub(crate) struct HarnessTurnState {
     model_visible_tool_metadata_bytes: usize,
     model_visible_tool_preview_budget_exhausted: bool,
     suppressed_tool_previews: u32,
+    /// Remaining bytes of spool-page preview credit. Admitted spool-page reads
+    /// grant credit so the designed paged-reading workflow stays model-visible
+    /// even after the aggregate preview budget is exhausted. Capped per turn;
+    /// reset every turn with the rest of the harness state.
+    spool_page_preview_credit_bytes: usize,
     recovery_activations: u32,
     pub blocked_tool_calls: usize,
     pub consecutive_blocked_tool_calls: usize,
@@ -549,6 +565,7 @@ impl HarnessTurnState {
             model_visible_tool_metadata_bytes: 0,
             model_visible_tool_preview_budget_exhausted: false,
             suppressed_tool_previews: 0,
+            spool_page_preview_credit_bytes: 0,
             recovery_activations: 0,
             blocked_tool_calls: 0,
             consecutive_blocked_tool_calls: 0,
@@ -723,6 +740,15 @@ impl HarnessTurnState {
             return content;
         }
 
+        // Spool paging bypass: an admitted spool-page read banks credit that
+        // keeps exactly that page model-visible. Only fully covered responses
+        // are exempted; anything larger falls through to the normal budget
+        // path below so oversized pages cannot silently bypass the bound.
+        if content.len() <= self.spool_page_preview_credit_bytes {
+            self.spool_page_preview_credit_bytes -= content.len();
+            return content;
+        }
+
         let remaining = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES.saturating_sub(self.model_visible_tool_preview_bytes);
         if !self.model_visible_tool_preview_budget_exhausted && content.len() <= remaining {
             self.model_visible_tool_preview_bytes = self.model_visible_tool_preview_bytes.saturating_add(content.len());
@@ -754,6 +780,23 @@ impl HarnessTurnState {
             // for all fits-budget cases.
             generic_tool_preview_metadata(content.len())
         }
+    }
+
+    /// Whether the per-turn model-visible tool preview budget is exhausted.
+    /// Once exhausted, every further tool response is stored as a metadata
+    /// stub without body content, so additional research calls cannot surface
+    /// new evidence to the model. The turn balancer uses this to converge
+    /// planning turns toward synthesis instead of blind retries.
+    pub(crate) fn model_visible_preview_budget_exhausted(&self) -> bool {
+        self.model_visible_tool_preview_budget_exhausted
+    }
+
+    /// Bank preview credit for an admitted spool-page read. Only fully covered
+    /// responses are exempted, so credit never creates partial-visibility
+    /// states; unused credit simply expires with the turn.
+    pub(crate) fn grant_spool_page_preview_credit(&mut self, bytes: usize) {
+        self.spool_page_preview_credit_bytes =
+            MAX_SPOOL_PAGE_PREVIEW_CREDIT_BYTES.min(self.spool_page_preview_credit_bytes.saturating_add(bytes));
     }
 
     pub(crate) fn replace_model_visible_output_bytes(&mut self, previous_len: usize, new_len: usize) {
@@ -1868,6 +1911,50 @@ mod tests {
         }
         assert!(aggregate_metadata_bytes <= MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES + 100 * 64);
         assert_eq!(state.model_visible_tool_metadata_bytes, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn preview_budget_exhausted_getter_tracks_bound_flip() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        assert!(!state.model_visible_preview_budget_exhausted());
+        state.bound_model_visible_tool_preview(
+            Some("exec_command"),
+            "a".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
+        );
+        assert!(state.model_visible_preview_budget_exhausted());
+    }
+
+    #[test]
+    fn spool_page_credit_keeps_pages_visible_after_exhaustion() {
+        use super::SPOOL_PAGE_PREVIEW_CREDIT_BYTES;
+
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        state.bound_model_visible_tool_preview(
+            Some("exec_command"),
+            "a".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
+        );
+        assert!(state.model_visible_preview_budget_exhausted());
+
+        // Without credit the page is stubbed.
+        let page = "p".repeat(1024);
+        let stubbed = state.bound_model_visible_tool_preview(Some("read_file"), page.clone());
+        assert!(stubbed.contains("preview_budget_exhausted"));
+        assert!(!stubbed.contains(&page));
+
+        // A granted page passes through fully visible without touching the
+        // aggregate budget counters.
+        state.grant_spool_page_preview_credit(SPOOL_PAGE_PREVIEW_CREDIT_BYTES);
+        let preview_bytes_before = state.model_visible_tool_preview_bytes;
+        let visible = state.bound_model_visible_tool_preview(Some("read_file"), page.clone());
+        assert_eq!(visible, page);
+        assert_eq!(state.model_visible_tool_preview_bytes, preview_bytes_before);
+        assert_eq!(state.suppressed_tool_previews, 2);
+
+        // Oversized pages are not partially exempted: they take the normal
+        // budget path instead of creating partial-visibility states.
+        let huge = "h".repeat(SPOOL_PAGE_PREVIEW_CREDIT_BYTES + 1);
+        let huge_result = state.bound_model_visible_tool_preview(Some("read_file"), huge);
+        assert!(huge_result.contains("preview_budget_exhausted"));
     }
 
     #[test]

@@ -412,6 +412,17 @@ mutation, recovery, and a new turn reset both counts. Shell inspection such as
 `rg`, `find`, `cat`, and simple `sed -n` contributes to navigation accounting;
 compile, test, build, and clippy commands count as verification progress.
 
+Tool previews shown to the model share a bounded per-turn budget; once it is
+exhausted, further tool responses arrive as metadata stubs without body
+content. In planning mode this schedules the same single tool-free synthesis
+pass immediately — additional inspection cannot surface new evidence, so the
+turn converges on a plan from what was gathered before exhaustion instead of
+retrying blind calls. Paged spool reads keep working after exhaustion through
+a small per-page credit (bounded by the sequential spool-read cap), and
+non-spool inspections are rejected at admission while verification commands,
+the interview, task bookkeeping, session polling, and plan-draft re-reads
+stay open.
+
 ## Review Gate
 
 After a plan is ready, an interactive human-in-the-loop (HITL) confirmation popup presents a bounded, decision-ready synopsis

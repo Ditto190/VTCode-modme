@@ -324,7 +324,7 @@ pub fn contains_dynamic_shell_syntax(command: &str) -> bool {
 /// The returned slice starts at the executable that will actually run. Keep
 /// this helper shared by intent and activity classification so both paths
 /// inspect the same command shape.
-pub(crate) fn command_words_after_environment_prefix(words: &[String]) -> &[String] {
+pub fn command_words_after_environment_prefix(words: &[String]) -> &[String] {
     let mut start = 0;
     loop {
         if words.get(start).is_some_and(|word| word == "env") {

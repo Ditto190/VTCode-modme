@@ -1491,6 +1491,172 @@ async fn repeated_read_only_guard_dedups_plan_file_in_planning_mode() {
     }));
 }
 
+fn exhaust_preview_budget_for_test(ctx: &mut TurnProcessingContext<'_>) {
+    ctx.push_tool_response(
+        "call-exhaust-budget",
+        Some(tool_names::EXEC_COMMAND),
+        "x".repeat(crate::agent::runloop::unified::run_loop_context::MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
+    );
+    assert!(ctx.harness_state.model_visible_preview_budget_exhausted());
+}
+
+#[tokio::test]
+async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channels_open() {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::ValidationResult;
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
+
+    let mut backing = TestContextBacking::new(8).await;
+    let mut ctx = backing.turn_processing_context();
+
+    // Fresh budget: everything passes through.
+    let fresh = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-fresh",
+        tool_names::READ_FILE,
+        &json!({"path": "src/main.rs"}),
+        true,
+    );
+    assert!(fresh.is_none(), "gate must not fire before exhaustion");
+
+    exhaust_preview_budget_for_test(&mut ctx);
+
+    // Ordinary inspection is blocked with actionable guidance.
+    let blocked = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-blind-read",
+        tool_names::READ_FILE,
+        &json!({"path": "src/main.rs"}),
+        true,
+    );
+    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    assert!(
+        ctx.working_history
+            .iter()
+            .any(|message| { message.content.as_text().contains("preview budget") })
+    );
+
+    let blocked_search = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-blind-search",
+        tool_names::CODE_SEARCH,
+        &json!({"query": "fn main"}),
+        true,
+    );
+    assert!(matches!(blocked_search, Some(ValidationResult::Blocked)));
+
+    let blocked_grep = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-blind-grep",
+        tool_names::EXEC_COMMAND,
+        &json!({"cmd": "rg -n 'fn run' src/main.rs"}),
+        true,
+    );
+    assert!(matches!(blocked_grep, Some(ValidationResult::Blocked)));
+
+    // Verification verdicts survive in stub metadata: checks keep running.
+    let check = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-check",
+        tool_names::EXEC_COMMAND,
+        &json!({"cmd": "cargo check --locked"}),
+        true,
+    );
+    assert!(check.is_none(), "verification must stay open after exhaustion");
+
+    // Bookkeeping, interview, and session polling stay open.
+    for (id, name, args) in [
+        ("call-tracker", tool_names::TASK_TRACKER, json!({})),
+        (
+            "call-interview",
+            tool_names::REQUEST_USER_INPUT,
+            json!({"questions": [{"id": "q1", "header": "Q1", "question": "Go?"}]}),
+        ),
+        ("call-poll", tool_names::WRITE_STDIN, json!({"session_id": "1"})),
+    ] {
+        let outcome = enforce_preview_exhaustion_inspection_gate(&mut ctx, id, name, &args, true);
+        assert!(outcome.is_none(), "{name} must stay open after exhaustion");
+    }
+
+    // Spool paging stays visible through preview credit: let it through.
+    let spool = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-spool",
+        tool_names::READ_FILE,
+        &json!({"path": ".vtcode/context/tool_outputs/write_stdin_run-abc123.txt"}),
+        true,
+    );
+    assert!(spool.is_none(), "spool paging must stay open after exhaustion");
+
+    // Non-readonly calls never reach this gate.
+    let edit = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-edit",
+        tool_names::EDIT_FILE,
+        &json!({"path": "src/main.rs"}),
+        false,
+    );
+    assert!(edit.is_none());
+}
+
+#[tokio::test]
+async fn preview_exhaustion_gate_directs_planning_toward_synthesis() {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::ValidationResult;
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
+
+    let mut backing = TestContextBacking::new(8).await;
+    backing.tool_registry.enable_planning();
+    let mut ctx = backing.turn_processing_context();
+    exhaust_preview_budget_for_test(&mut ctx);
+
+    let blocked = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-plan-read",
+        tool_names::READ_FILE,
+        &json!({"path": "src/main.rs"}),
+        true,
+    );
+    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    assert!(
+        ctx.working_history
+            .iter()
+            .any(|message| { message.content.as_text().contains("<proposed_plan>") })
+    );
+}
+
+#[tokio::test]
+async fn spool_guard_pass_banks_preview_credit_for_the_page() {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::spool_guard::enforce_spool_chunk_read_guard;
+
+    let mut backing = TestContextBacking::new(8).await;
+    let mut ctx = backing.turn_processing_context();
+    exhaust_preview_budget_for_test(&mut ctx);
+
+    // An admitted spool-page read banks credit: the page pushed right after
+    // stays model-visible despite the exhausted aggregate budget.
+    let passed = enforce_spool_chunk_read_guard(
+        &mut ctx,
+        "call-spool-page",
+        tool_names::READ_FILE,
+        &json!({"path": ".vtcode/context/tool_outputs/write_stdin_run-abc123.txt"}),
+    )
+    .await;
+    assert!(passed.is_none(), "first spool page must pass the guard");
+
+    let page = "visible page content ".repeat(64);
+    ctx.push_tool_response("call-page", Some(tool_names::READ_FILE), page.clone());
+    let stored = ctx
+        .working_history
+        .iter()
+        .rev()
+        .find(|message| message.role == uni::MessageRole::Tool)
+        .expect("paged response must be stored")
+        .content
+        .as_text()
+        .into_owned();
+    assert!(stored.contains(&page), "credited spool page must stay visible");
+    assert!(!stored.contains("preview_budget_exhausted"));
+}
+
 #[tokio::test]
 async fn planning_mode_allows_request_user_input_blocked_through_to_failure() {
     let mut backing = TestContextBacking::new(4).await;

@@ -369,6 +369,33 @@ pub(crate) async fn handle_turn_balancer(
         return apply_balancer_recovery(repeated_tool_attempts);
     }
 
+    // Planning preview blindness: once the per-turn model-visible preview
+    // budget is exhausted, every further tool response is stored as a metadata
+    // stub without body content (spool pointers aside, the model cannot see
+    // new evidence). Blind retries only inflate the request — observed as a
+    // ~360k-token turn of contentless grep stubs ending in an empty synthesis.
+    // Converge on the same single tool-free synthesis pass instead, while the
+    // evidence gathered before exhaustion is still fresh. Execution mode is
+    // untouched: verifier exit codes survive in stub metadata, so builds and
+    // checks remain meaningful after exhaustion.
+    if ctx.is_planning_active()
+        && !repeated_tool_attempts.planning_low_signal_synthesis_triggered
+        && ctx.harness_state.model_visible_preview_budget_exhausted()
+    {
+        repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+        let recovery_reason = "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass; synthesize the plan from collected evidence."
+            .to_string();
+        ctx.activate_recovery(recovery_reason.clone());
+        ctx.renderer
+            .line(
+                MessageStyle::Info,
+                "[!] Planning recovery: tool preview budget exhausted; synthesizing plan from collected evidence.",
+            )
+            .unwrap_or(());
+        ctx.working_history.push(uni::Message::system(recovery_reason));
+        return apply_balancer_recovery(repeated_tool_attempts);
+    }
+
     // NL2Repo-Bench: Navigation Loop Detection
     // Only trigger when there are actual repeated navigations (not just diverse exploration).
     // Reading 15 different files is exploration; re-reading the same 3 files 5x each is a loop.
@@ -696,6 +723,66 @@ mod tests {
         assert!(matches!(second, TurnHandlerOutcome::Continue));
         assert_eq!(tracker.consecutive_low_signal_navigations, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD);
         assert_eq!(tracker.total_low_signal_navigations, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD);
+    }
+
+    #[tokio::test]
+    async fn planning_preview_exhaustion_schedules_synthesis_once() {
+        use crate::agent::runloop::unified::run_loop_context::MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+        use vtcode_core::llm::provider as uni;
+
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        // Blind the model: one over-budget response flips the per-turn
+        // preview budget, so every later inspection is a contentless stub.
+        ctx.push_tool_response(
+            "call-blind",
+            Some("exec_command"),
+            "x".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
+        );
+        assert!(ctx.harness_state.model_visible_preview_budget_exhausted());
+
+        let mut tracker = LoopTracker::new();
+        let first = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(first, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert!(tracker.planning_low_signal_synthesis_triggered);
+
+        // Even with low-signal counters also at threshold, the shared
+        // once-per-turn flag must prevent a second recovery scheduling.
+        tracker.consecutive_low_signal_navigations = PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD;
+        tracker.total_low_signal_navigations = PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD;
+        let second = super::handle_turn_balancer(&mut ctx, 12, &mut tracker, 120, usize::MAX).await;
+        assert!(matches!(second, TurnHandlerOutcome::Continue));
+        let synthesis_messages = ctx
+            .working_history
+            .iter()
+            .filter(|message| {
+                message.role == uni::MessageRole::System && message.content.as_text().contains("preview budget")
+            })
+            .count();
+        assert_eq!(synthesis_messages, 1, "preview-exhaustion synthesis must fire exactly once per turn");
+        assert_eq!(tracker.consecutive_low_signal_navigations, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD);
+        assert_eq!(tracker.total_low_signal_navigations, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD);
+    }
+
+    #[tokio::test]
+    async fn preview_exhaustion_does_not_trigger_synthesis_outside_planning() {
+        use crate::agent::runloop::unified::run_loop_context::MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.push_tool_response(
+            "call-blind",
+            Some("exec_command"),
+            "x".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
+        );
+        assert!(ctx.harness_state.model_visible_preview_budget_exhausted());
+
+        let mut tracker = LoopTracker::new();
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
     }
 
     #[tokio::test]

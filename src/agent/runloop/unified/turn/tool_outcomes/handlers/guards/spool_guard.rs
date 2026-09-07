@@ -15,9 +15,11 @@ use vtcode_core::config::constants::tools as tool_names;
 use vtcode_core::tools::registry::labels::tool_action_label;
 
 use super::super::ValidationResult;
-use super::super::looping::spool_chunk_read_path;
 use super::common::push_guard_failure_messages;
-use crate::agent::runloop::unified::tool_reads::{read_spool_head_for_error_check, spool_content_looks_like_error};
+use crate::agent::runloop::unified::run_loop_context::SPOOL_PAGE_PREVIEW_CREDIT_BYTES;
+use crate::agent::runloop::unified::tool_reads::{
+    read_spool_head_for_error_check, spool_content_looks_like_error, spool_page_source_path,
+};
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 
 const SPOOL_CHUNK_GREP_PATTERN: &str = "warning|error|TODO";
@@ -225,10 +227,15 @@ pub(crate) async fn enforce_spool_chunk_read_guard(
     canonical_tool_name: &str,
     args: &Value,
 ) -> Option<ValidationResult> {
-    let Some(spool_path) = spool_chunk_read_path(canonical_tool_name, args) else {
+    // Spool paging across both read channels (read-file-style and shell
+    // paged reads such as `sed -n`/`rg` on a spool path) shares one
+    // sequential cap: without this, paging through the exec channel evades
+    // the cap while paging through read-file does not.
+    let Some(spool_path) = spool_page_source_path(canonical_tool_name, args) else {
         ctx.harness_state.reset_spool_chunk_read_streak();
         return None;
     };
+    let spool_path = spool_path.as_str();
 
     // Short-circuit: if the spool file's first bytes look like an error
     // payload, the agent already has the error in its conversation history
@@ -255,6 +262,12 @@ pub(crate) async fn enforce_spool_chunk_read_guard(
     let max_reads_per_turn = max_sequential_spool_chunk_reads_per_turn(ctx);
     let streak = ctx.harness_state.record_spool_chunk_read();
     if streak <= max_reads_per_turn {
+        // Bank preview credit so this page stays model-visible even after the
+        // aggregate preview budget is exhausted. Paging is already bounded per
+        // result and capped sequentially here, so credit cannot grow the
+        // prompt without bound.
+        ctx.harness_state
+            .grant_spool_page_preview_credit(SPOOL_PAGE_PREVIEW_CREDIT_BYTES);
         return None;
     }
 
