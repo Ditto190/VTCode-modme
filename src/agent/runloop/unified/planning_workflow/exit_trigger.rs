@@ -301,6 +301,10 @@ pub(crate) async fn maybe_handle_planning_exit_trigger(
                 PlanApprovalDecision::Cancel,
                 false,
             );
+            let removed = super::clear_stale_recovery_directives_for_execution(working_history);
+            if removed > 0 {
+                tracing::info!(removed, "Cleared stale recovery directives when planning was cancelled");
+            }
             finish_planning_workflow(tool_registry, plan_session, handle, PlanningFinishReason::Cancelled).await?;
             PlanningTransition::CancelPlanning
         }

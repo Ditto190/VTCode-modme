@@ -67,6 +67,12 @@ pub(crate) async fn handle_toggle_planning_workflow(
             vtcode_core::exec::events::PlanApprovalDecision::Cancel,
             false,
         );
+        let removed = crate::agent::runloop::unified::planning_workflow::clear_stale_recovery_directives_for_execution(
+            ctx.conversation_history,
+        );
+        if removed > 0 {
+            tracing::info!(removed, "Cleared stale recovery directives when planning workflow was disabled");
+        }
         crate::agent::runloop::unified::planning_workflow::finish_planning_workflow(
             ctx.tool_registry,
             ctx.plan_session,

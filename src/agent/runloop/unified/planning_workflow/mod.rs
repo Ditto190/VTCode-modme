@@ -35,6 +35,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use thiserror::Error;
+use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::registry::ToolRegistry;
 use vtcode_ui::tui::app::InlineHandle;
 
@@ -94,6 +95,44 @@ pub(crate) use plan_approval::{
 };
 pub(crate) use recovery::maybe_condense_truncated_plan;
 pub(crate) use task_tracker::{TaskTrackerHandoff, create_task_tracker_from_active_plan};
+
+const EXECUTION_MODE_RECOVERY_RESET_DIRECTIVE: &str = "Execution mode is active. Any earlier planning-only recovery, plan-synthesis, or tool-disabled instruction belongs to the completed planning transition and is stale. Tools are available again; continue the user's request with the selected execution agent. Do not emit a planning-only synthesis response.";
+
+/// Remove turn-scoped recovery instructions before leaving planning for an
+/// execution agent.
+///
+/// Recovery directives are intentionally stored in conversation history so the
+/// next model pass can follow them. They must not survive a mode transition,
+/// however: a later `auto`/`build` pass would otherwise inherit "tools are
+/// disabled" or "synthesize the plan" instructions even though planning has
+/// already been closed. Return the number removed so callers can include a
+/// useful diagnostic without rendering extra user-facing noise.
+pub(crate) fn clear_stale_recovery_directives_for_execution(history: &mut Vec<uni::Message>) -> usize {
+    let history_len_before = history.len();
+    history.retain(|message| !is_stale_recovery_directive(message));
+    let removed = history_len_before.saturating_sub(history.len());
+    if removed > 0 {
+        history.push(uni::Message::system(EXECUTION_MODE_RECOVERY_RESET_DIRECTIVE.to_string()));
+    }
+    removed
+}
+
+fn is_stale_recovery_directive(message: &uni::Message) -> bool {
+    if message.role != uni::MessageRole::System {
+        return false;
+    }
+
+    let text = message.content.as_text().trim().to_ascii_lowercase();
+    text.starts_with("planning recovery:")
+        || text.starts_with("planning tool preview budget exhausted")
+        || text.starts_with("planning navigation produced")
+        || text.starts_with("planning research completed")
+        || text.starts_with("navigation loop detected")
+        || text.starts_with("repeated low-signal navigation calls")
+        || text.starts_with("turn balancer detected repeated low-signal tool churn")
+        || text.starts_with("your previous `<proposed_plan>` was cut off")
+        || text.starts_with("recovery:")
+}
 
 /// Build a bounded repair directive from validator-owned feedback. The
 /// feedback (produced by `PlanValidationReport::repair_feedback()`) is bounded
@@ -362,6 +401,50 @@ Improve launch time.
             "directive must NOT echo raw plan step prose: {directive}"
         );
         assert!(!directive.contains("Make startup lazy"), "directive must NOT echo raw plan step prose: {directive}");
+    }
+
+    #[test]
+    fn clear_stale_recovery_directives_resets_execution_mode() {
+        let mut history = vec![
+            uni::Message::user("make a plan".to_string()),
+            uni::Message::system(
+                "Planning tool preview budget exhausted the model-visible allowance; tools are disabled on the next pass; synthesize the plan."
+                    .to_string(),
+            ),
+            uni::Message::system("Recovery: tools are disabled, so respond with plain text only.".to_string()),
+            uni::Message::system("Keep this ordinary context note.".to_string()),
+            uni::Message::assistant("The planning pass ended.".to_string()),
+        ];
+
+        assert_eq!(clear_stale_recovery_directives_for_execution(&mut history), 2);
+        assert_eq!(history.len(), 4);
+        assert!(history.iter().any(|message| {
+            message.role == uni::MessageRole::System && message.content.as_text() == "Keep this ordinary context note."
+        }));
+        assert!(history.iter().any(|message| {
+            message.role == uni::MessageRole::System
+                && message.content.as_text() == EXECUTION_MODE_RECOVERY_RESET_DIRECTIVE
+        }));
+        assert!(!history.iter().any(|message| {
+            message.role == uni::MessageRole::System && message.content.as_text().contains("tools are disabled")
+        }));
+        assert_eq!(clear_stale_recovery_directives_for_execution(&mut history), 0);
+        assert_eq!(history.len(), 4);
+    }
+
+    #[test]
+    fn clear_stale_recovery_directives_preserves_non_system_messages() {
+        let mut history = vec![
+            uni::Message::assistant(
+                "A user-facing recovery explanation: tools are disabled for this pass.".to_string(),
+            ),
+            uni::Message::system("Recovery: summarize the failed tool call.".to_string()),
+        ];
+
+        assert_eq!(clear_stale_recovery_directives_for_execution(&mut history), 1);
+        assert!(history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant && message.content.as_text().contains("tools are disabled")
+        }));
     }
 
     // --- ValidatedPlanArtifact::from_validated tests ---

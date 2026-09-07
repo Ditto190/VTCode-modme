@@ -941,6 +941,10 @@ pub(crate) async fn handle_select_primary_agent(
             .reset_to_default_from_specs(&specs)
             .display_name
             .clone();
+        let is_plan_agent = ctx.active_primary_agent.active().name().eq_ignore_ascii_case("plan");
+        if !is_plan_agent {
+            leave_planning_for_execution(ctx).await?;
+        }
         sync_primary_agent_runtime(ctx, state).await?;
         set_primary_agent_display(ctx, display_name);
         return Ok(());
@@ -973,22 +977,8 @@ pub(crate) async fn handle_select_primary_agent(
             // Resolve and close the planning gate before any runtime
             // reconfiguration can fail, so switching away cannot leave a
             // dangling approval request.
-            if !is_plan_agent && ctx.tool_registry.is_planning_active() {
-                crate::agent::runloop::unified::planning_workflow::resolve_plan_approval(
-                    ctx.plan_session,
-                    ctx.harness_emitter,
-                    ctx.thread_id,
-                    ctx.thread_id,
-                    vtcode_core::exec::events::PlanApprovalDecision::Cancel,
-                    false,
-                );
-                crate::agent::runloop::unified::planning_workflow::finish_planning_workflow(
-                    ctx.tool_registry,
-                    ctx.plan_session,
-                    ctx.handle,
-                    PlanningFinishReason::Cancelled,
-                )
-                .await?;
+            if !is_plan_agent {
+                leave_planning_for_execution(ctx).await?;
             }
             // Apply per-agent tool policy overrides before refreshing the tool snapshot
             for (tool_name, policy) in &policy_overrides {
@@ -1021,6 +1011,36 @@ pub(crate) async fn handle_select_primary_agent(
         }
     }
 
+    Ok(())
+}
+
+async fn leave_planning_for_execution(ctx: &mut InteractionLoopContext<'_>) -> Result<()> {
+    let removed = crate::agent::runloop::unified::planning_workflow::clear_stale_recovery_directives_for_execution(
+        ctx.conversation_history,
+    );
+    if removed > 0 {
+        tracing::info!(removed, "Cleared stale recovery directives during execution-agent switch");
+    }
+
+    if !ctx.tool_registry.is_planning_active() {
+        return Ok(());
+    }
+
+    crate::agent::runloop::unified::planning_workflow::resolve_plan_approval(
+        ctx.plan_session,
+        ctx.harness_emitter,
+        ctx.thread_id,
+        ctx.thread_id,
+        vtcode_core::exec::events::PlanApprovalDecision::Cancel,
+        false,
+    );
+    crate::agent::runloop::unified::planning_workflow::finish_planning_workflow(
+        ctx.tool_registry,
+        ctx.plan_session,
+        ctx.handle,
+        PlanningFinishReason::Cancelled,
+    )
+    .await?;
     Ok(())
 }
 
