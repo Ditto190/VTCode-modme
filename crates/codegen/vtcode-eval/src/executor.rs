@@ -66,7 +66,7 @@ pub async fn run_suite_with_options(
     suite: &EvalSuite,
     options: EvalRunOptions,
 ) -> Result<EvalReport> {
-    anyhow::ensure!(suite.attempts >= 1, "evaluation suite attempts must be at least one");
+    suite.validate()?;
     let metric_k = options.metric_k.unwrap_or(suite.attempts);
     anyhow::ensure!(metric_k >= 1 && metric_k <= suite.attempts, "evaluation metric k must be between 1 and attempts");
     let concurrency = options.concurrency.max(1);

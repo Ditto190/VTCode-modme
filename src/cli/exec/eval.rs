@@ -41,9 +41,7 @@ pub(crate) async fn handle_eval_command(
     let suite: EvalSuite = serde_json::from_str(&suite_json)
         .with_context(|| format!("parse eval suite JSON from {}", suite_path.display()))?;
 
-    if suite.attempts < 1 {
-        bail!("eval suite requires attempts >= 1");
-    }
+    suite.validate()?;
 
     eprintln!("Running eval suite: {} ({} tasks, {} attempts each)", suite.name, suite.tasks.len(), suite.attempts);
 

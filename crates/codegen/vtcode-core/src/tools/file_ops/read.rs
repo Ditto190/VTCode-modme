@@ -240,19 +240,32 @@ fn apply_spool_chunk_defaults(handler_args_json: &mut Value, raw_args: &Value) -
     SpoolChunkPlan { offset, limit }
 }
 
+fn path_contains_components(path: &Path, needle: &[&str]) -> bool {
+    // Fail closed on empty needle: vacuous-true would mark every path as
+    // privileged, and `windows(0)` would panic without this guard.
+    if needle.is_empty() {
+        return false;
+    }
+    let components: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    components
+        .windows(needle.len())
+        .any(|window| window.iter().map(String::as_str).eq(needle.iter().copied()))
+}
+
 fn is_history_jsonl(path: &Path) -> bool {
     // Fast path: avoid component iteration if extension doesn't match
-    if !path.to_string_lossy().ends_with(".jsonl") {
+    if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
         return false;
     }
 
-    let s = path.to_string_lossy();
-    s.contains(".vtcode") && s.contains("/history/")
+    path_contains_components(path, &[".vtcode", "history"])
 }
 
 fn is_tool_output_spool_path(path: &Path) -> bool {
-    let s = path.to_string_lossy();
-    s.contains(".vtcode") && s.contains("/context/tool_outputs/")
+    path_contains_components(path, &[".vtcode", "context", "tool_outputs"])
 }
 
 fn pty_session_id_from_tool_output_path(path: &Path) -> Option<String> {
@@ -700,6 +713,8 @@ mod read_tests {
         assert!(is_history_jsonl(Path::new("/tmp/.vtcode/history/test.jsonl")));
         assert!(!is_history_jsonl(Path::new("/tmp/.vtcode/history/test.txt")));
         assert!(!is_history_jsonl(Path::new("/tmp/history/test.jsonl")));
+        assert!(!is_history_jsonl(Path::new("/tmp/.vtcode_evil/history/test.jsonl")));
+        assert!(!is_history_jsonl(Path::new("/tmp/.vtcode/history_evil/test.jsonl")));
     }
 
     #[test]
@@ -707,6 +722,9 @@ mod read_tests {
         assert!(is_tool_output_spool_path(Path::new(".vtcode/context/tool_outputs/run-123.txt")));
         assert!(is_tool_output_spool_path(Path::new("/tmp/work/.vtcode/context/tool_outputs/run-123.txt")));
         assert!(!is_tool_output_spool_path(Path::new(".vtcode/history/session.jsonl")));
+        assert!(!is_tool_output_spool_path(Path::new(".vtcode_evil/context/tool_outputs/run-123.txt")));
+        assert!(!is_tool_output_spool_path(Path::new(".vtcode/context/tool_outputs_evil/run-123.txt")));
+        assert!(!is_tool_output_spool_path(Path::new("/tmp/.vtcode/context/tool_outputs_malicious/run-123.txt")));
     }
 
     #[test]

@@ -9,6 +9,17 @@ pub struct EvalSuite {
     pub attempts: u32,
 }
 
+impl EvalSuite {
+    /// Validate suite invariants shared by CLI and programmatic callers.
+    ///
+    /// Serde intentionally still accepts `attempts: 0` so persisted fixtures
+    /// fail with this explicit error instead of a schema break.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(self.attempts >= 1, "evaluation suite attempts must be at least one");
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,10 +50,13 @@ mod tests {
 
     #[test]
     fn suite_rejects_zero_attempts_via_validation() {
-        // The runner enforces attempts >= 1; serde itself allows 0, so the
-        // guardrail lives in the CLI entrypoint (see eval.rs M3).
+        // Serde itself allows 0; `validate()` is the shared guardrail called
+        // by both the CLI entrypoint and `run_suite_with_options`.
         let suite: EvalSuite = serde_json::from_str(r#"{"id":"s","name":"n","tasks":[],"attempts":0}"#).unwrap();
         assert_eq!(suite.attempts, 0);
+        assert!(suite.validate().is_err());
+        let valid: EvalSuite = serde_json::from_str(r#"{"id":"s","name":"n","tasks":[],"attempts":1}"#).unwrap();
+        assert!(valid.validate().is_ok());
     }
 
     #[test]
