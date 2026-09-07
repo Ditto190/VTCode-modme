@@ -2,6 +2,14 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.158.2 - 2026-09-07
+
+### Highlights
+#### Bug Fixes
+
+- Prevent local interrupt escalation (c803ce17) 
+- Restore Ctrl+C exit handling (aca0fa03) 
+### Other Changes
 ## 0.158.1 - 2026-09-07
 
 ### Highlights
