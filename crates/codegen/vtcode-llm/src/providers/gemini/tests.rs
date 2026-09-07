@@ -490,6 +490,38 @@ fn convert_from_interaction_response_prefers_thought_summaries() {
 }
 
 #[test]
+fn convert_from_interaction_response_hides_raw_thought_text() {
+    let response = Interaction {
+        id: "interaction_raw_thought".to_string(),
+        model: models::google::GEMINI_3_FLASH_PREVIEW.to_string(),
+        status: Some("completed".to_string()),
+        outputs: vec![InteractionOutput {
+            output_type: "thought".to_string(),
+            text: Some("Private chain of thought.".to_string()),
+            summary: None,
+            id: None,
+            name: None,
+            arguments: None,
+            signature: Some("thought_sig_raw".to_string()),
+            function_call: None,
+        }],
+        usage: None,
+    };
+
+    let llm_response =
+        GeminiProvider::convert_from_interaction_response(response, models::google::GEMINI_3_FLASH_PREVIEW.to_string())
+            .expect("interaction response should parse");
+
+    assert!(llm_response.reasoning.is_none());
+    assert!(
+        llm_response
+            .reasoning_details
+            .as_ref()
+            .is_some_and(|details| details.iter().any(|detail| detail.contains("Private chain of thought.")))
+    );
+}
+
+#[test]
 fn interaction_stream_payload_reconstructs_text_reasoning_and_tool_calls() {
     let mut state = InteractionStreamState::default();
 
@@ -518,6 +550,20 @@ fn interaction_stream_payload_reconstructs_text_reasoning_and_tool_calls() {
     )
     .expect("thought start should parse");
     assert!(events.is_empty());
+
+    let events = GeminiProvider::apply_interaction_stream_payload(
+        &mut state,
+        &json!({
+            "event_type": "content.delta",
+            "index": 0,
+            "delta": {
+                "type": "thought",
+                "thought": "Private provider reasoning."
+            }
+        }),
+    )
+    .expect("private thought delta should parse");
+    assert!(events.is_empty(), "raw thought content must not become a public reasoning event");
 
     let events = GeminiProvider::apply_interaction_stream_payload(
         &mut state,
@@ -640,6 +686,12 @@ fn interaction_stream_payload_reconstructs_text_reasoning_and_tool_calls() {
     assert_eq!(llm_response.request_id.as_deref(), Some("interaction_stream_1"));
     assert_eq!(llm_response.content.as_deref(), Some("Looking it up."));
     assert_eq!(llm_response.reasoning.as_deref(), Some("Looked up the city first."));
+    assert!(
+        llm_response
+            .reasoning_details
+            .as_ref()
+            .is_some_and(|details| details.iter().any(|detail| detail.contains("Private provider reasoning.")))
+    );
     assert_eq!(llm_response.finish_reason, FinishReason::ToolCalls);
     assert_eq!(llm_response.usage.as_ref().map(|u| u.total_tokens), Some(20));
     let tool_calls = llm_response.tool_calls.expect("tool call should exist");

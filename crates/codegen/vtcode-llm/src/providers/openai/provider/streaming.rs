@@ -11,8 +11,6 @@ use crate::provider::LLMProvider;
 use crate::provider::{self, LLMNormalizedStream};
 use crate::providers::error_handling::{is_rate_limit_error, parse_api_error};
 use crate::providers::shared::{ResponsesNormalizedStreamOptions, create_responses_normalized_stream};
-use async_stream::try_stream;
-use futures::StreamExt;
 use serde_json::{Value, json};
 
 // Retained custom streaming boundary.
@@ -223,12 +221,28 @@ impl OpenAIProvider {
         request: &provider::LLMRequest,
     ) -> Result<provider::LLMStream, provider::LLMError> {
         let model = request.model.clone();
+        let response = self.send_chat_completions_stream(request).await?;
+        Ok(stream_decoder::create_chat_stream(response, model))
+    }
+
+    async fn stream_chat_completions_normalized(
+        &self,
+        request: &provider::LLMRequest,
+    ) -> Result<LLMNormalizedStream, provider::LLMError> {
+        let model = request.model.clone();
+        let response = self.send_chat_completions_stream(request).await?;
+        Ok(stream_decoder::create_chat_normalized_stream(response, model))
+    }
+
+    async fn send_chat_completions_stream(
+        &self,
+        request: &provider::LLMRequest,
+    ) -> Result<reqwest::Response, provider::LLMError> {
         let mut openai_request = self.convert_to_openai_format(request)?;
         openai_request["stream"] = Value::Bool(true);
         // Request usage stats in the stream (compatible with newer OpenAI models)
         // Note: Some proxies do not support stream_options and will return 400.
-        let is_native_openai = self.is_native_openai_api();
-        if is_native_openai {
+        if self.is_native_openai_api() {
             openai_request["stream_options"] = json!({ "include_usage": true });
         }
         let url = &self.chat_completions_url[..];
@@ -263,23 +277,7 @@ impl OpenAIProvider {
             return Err(provider::LLMError::Provider { message: formatted_error, metadata: None });
         }
 
-        Ok(stream_decoder::create_chat_stream(response, model))
-    }
-
-    async fn stream_chat_completions_normalized(
-        &self,
-        request: &provider::LLMRequest,
-    ) -> Result<LLMNormalizedStream, provider::LLMError> {
-        let mut legacy_stream = self.stream_chat_completions(request).await?;
-        let stream = try_stream! {
-            while let Some(event) = legacy_stream.next().await {
-                for normalized in event?.into_normalized() {
-                    yield normalized;
-                }
-            }
-        };
-
-        Ok(Box::pin(stream))
+        Ok(response)
     }
 }
 

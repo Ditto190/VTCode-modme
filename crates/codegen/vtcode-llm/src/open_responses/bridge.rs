@@ -280,7 +280,7 @@ impl ResponseBuilder {
                 self.append_message_delta(&item_id, output_index, delta);
                 emitter.output_text_delta(&self.response.id, &item_id, output_index, 0, delta);
             }
-            NormalizedStreamEvent::ReasoningDelta { delta } => {
+            NormalizedStreamEvent::ReasoningDelta { delta, source } if source.is_public_summary() => {
                 self.ensure_normalized_response_started(emitter);
                 if delta.is_empty() {
                     return;
@@ -290,6 +290,7 @@ impl ResponseBuilder {
                 self.append_reasoning_delta(&item_id, output_index, delta);
                 emitter.reasoning_delta(&self.response.id, &item_id, output_index, delta);
             }
+            NormalizedStreamEvent::ReasoningDelta { .. } => {}
             NormalizedStreamEvent::ReasoningStage { .. } => {
                 // Open Responses has no portable stage field. The VT Code
                 // runtime lifecycle receives this event separately.
@@ -921,7 +922,10 @@ impl ResponseBuilder {
             self.complete_normalized_message_item(&text, emitter);
         }
 
-        let reasoning_text = response.reasoning.clone().or_else(|| self.current_reasoning_text());
+        // The completed response may retain raw/continuation reasoning for the
+        // next provider request. Only the normalized public-summary deltas are
+        // safe to expose as an Open Responses reasoning item.
+        let reasoning_text = self.current_reasoning_text();
         if let Some(text) = reasoning_text
             && !text.is_empty()
         {
@@ -1213,7 +1217,7 @@ impl<E: StreamEventEmitter> DualEventEmitter<E> {
 mod tests {
     use super::*;
     use crate::open_responses::{ResponseStreamEvent, events::VecStreamEmitter};
-    use crate::provider::{FinishReason, LLMResponse, NormalizedStreamEvent, ToolCall};
+    use crate::provider::{FinishReason, LLMResponse, NormalizedStreamEvent, ReasoningSource, ToolCall};
     use serde_json::json;
     use vtcode_exec_events::{
         AgentMessageItem, CommandExecutionItem, CommandExecutionStatus, ItemCompletedEvent, ItemStartedEvent,
@@ -1829,7 +1833,10 @@ mod tests {
 
         for event in [
             NormalizedStreamEvent::TextDelta { delta: "Hello ".to_string() },
-            NormalizedStreamEvent::ReasoningDelta { delta: "Thinking".to_string() },
+            NormalizedStreamEvent::ReasoningDelta {
+                delta: "Thinking".to_string(),
+                source: ReasoningSource::ProviderSummary,
+            },
             NormalizedStreamEvent::ToolCallStart {
                 call_id: "call_1".to_string(),
                 name: Some("code_search".to_string()),
@@ -1898,6 +1905,45 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, ResponseStreamEvent::ResponseCompleted { .. }))
+        );
+    }
+
+    #[test]
+    fn normalized_bridge_does_not_expose_completed_raw_reasoning() {
+        let mut builder = ResponseBuilder::new("gpt-5");
+        let mut emitter = VecStreamEmitter::new();
+
+        builder.process_normalized_event(
+            &NormalizedStreamEvent::ReasoningDelta {
+                delta: "private continuation".to_string(),
+                source: ReasoningSource::Continuation,
+            },
+            &mut emitter,
+        );
+        builder.process_normalized_event(
+            &NormalizedStreamEvent::Done {
+                response: Box::new(LLMResponse {
+                    model: "gpt-5".to_string(),
+                    finish_reason: FinishReason::Stop,
+                    reasoning: Some("private continuation".to_string()),
+                    ..Default::default()
+                }),
+            },
+            &mut emitter,
+        );
+
+        assert!(
+            !builder
+                .response()
+                .output
+                .iter()
+                .any(|item| matches!(item, OutputItem::Reasoning(_)))
+        );
+        assert!(
+            !emitter
+                .into_events()
+                .iter()
+                .any(|event| matches!(event, ResponseStreamEvent::ReasoningDelta { .. }))
         );
     }
 

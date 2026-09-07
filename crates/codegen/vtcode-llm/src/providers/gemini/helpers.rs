@@ -544,15 +544,15 @@ impl GeminiProvider {
                     }
                 }
                 "thought" => {
-                    let summary = output.summary.or(output.text).unwrap_or_default();
-                    if !summary.trim().is_empty() {
-                        thought_summaries.push(summary.clone());
+                    if let Some(summary) = output.summary.as_deref().filter(|summary| !summary.trim().is_empty()) {
+                        thought_summaries.push(summary.to_string());
                     }
                     thought_details.push(
                         json!({
                             "type": "thought",
                             "signature": output.signature,
-                            "summary": summary,
+                            "summary": output.summary,
+                            "text": output.text,
                         })
                         .to_string(),
                     );
@@ -1368,8 +1368,10 @@ fn apply_interaction_delta(
                 .and_then(Value::as_str)
                 .or_else(|| delta.get("text").and_then(Value::as_str))
             {
-                builder.summary.push_str(text);
-                events.push(LLMStreamEvent::Reasoning { delta: text.to_string() });
+                // `thought` is provider-private reasoning. Keep it in the
+                // completed response for continuation, but do not turn it
+                // into a public reasoning event.
+                builder.text.push_str(text);
             }
         }
         "thought_summary" => {

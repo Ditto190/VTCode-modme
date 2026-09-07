@@ -1412,7 +1412,7 @@ impl LLMProvider for MergeGatewayProvider {
             while let Some(event) = normalized.next().await {
                 match event? {
                     NormalizedStreamEvent::TextDelta { delta } => yield LLMStreamEvent::Token { delta },
-                    NormalizedStreamEvent::ReasoningDelta { delta } => yield LLMStreamEvent::Reasoning { delta },
+                    NormalizedStreamEvent::ReasoningDelta { delta, .. } => yield LLMStreamEvent::Reasoning { delta },
                     NormalizedStreamEvent::ReasoningStage { stage } => yield LLMStreamEvent::ReasoningStage { stage },
                     NormalizedStreamEvent::ToolCallStart { .. }
                     | NormalizedStreamEvent::ToolCallDelta { .. }

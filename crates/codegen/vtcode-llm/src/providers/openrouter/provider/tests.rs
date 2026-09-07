@@ -346,6 +346,50 @@ data: [DONE]\n\n",
 }
 
 #[tokio::test]
+async fn stream_normalized_falls_back_to_raw_reasoning_when_continuation_field_is_empty() {
+    let Some(server) = start_mock_server_or_skip().await else {
+        return;
+    };
+    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"\",\"reasoning\":\"raw reasoning\"}}]}\n\n\
+data: [DONE]\n\n",
+                ),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut stream = provider
+        .stream_normalized(LLMRequest {
+            model: models::openrouter::OPENAI_GPT_5.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        })
+        .await
+        .expect("normalized stream should succeed");
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event.expect("stream event should parse"));
+    }
+
+    assert!(matches!(
+        events.as_slice(),
+        [
+            NormalizedStreamEvent::ReasoningDelta { delta, source },
+            NormalizedStreamEvent::Done { .. }
+        ] if delta == "raw reasoning" && *source == crate::provider::ReasoningSource::Raw
+    ));
+}
+
+#[tokio::test]
 async fn stream_normalized_fabricates_and_reuses_id_when_provider_omits_it() {
     let Some(server) = start_mock_server_or_skip().await else {
         return;

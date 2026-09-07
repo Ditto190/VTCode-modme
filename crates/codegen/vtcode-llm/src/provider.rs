@@ -78,7 +78,7 @@ pub use request::{
 };
 pub use response::{
     BorrowedLLMStream, FinishReason, LLMNormalizedStream, LLMResponse, LLMStream, LLMStreamEvent,
-    NormalizedStreamEvent, Usage,
+    NormalizedStreamEvent, ReasoningSource, Usage,
 };
 pub use responses_continuation::{
     PreparedResponsesRequest, ResponsesContinuationState, prepare_openai_responses_request,

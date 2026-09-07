@@ -62,6 +62,8 @@ pub enum RuntimeModelProgress {
     ReasoningDelta(String),
     /// The active reasoning stage label changed.
     ReasoningStage(String),
+    /// The provider produced progress that is intentionally not user-visible.
+    ProviderActivity,
     /// A new tool call began streaming.
     ToolCallStarted {
         /// Identifier of the tool call.
@@ -128,6 +130,7 @@ impl RuntimeModelAdapter for ProviderRuntimeModelAdapter<'_> {
 
         let mut final_usage = ProviderUsage::default();
         let mut completed_response: Option<LLMResponse> = None;
+        let mut provider_activity_reported = false;
         while let Some(event_result) = stream.next().await {
             if matches!(self.steering.poll_turn_control().await, RuntimeControl::StopRequested) {
                 tracing::info!(model = %request_model, elapsed_ms = started_at.elapsed().as_millis() as u64, "model stream cancelled");
@@ -149,8 +152,14 @@ impl RuntimeModelAdapter for ProviderRuntimeModelAdapter<'_> {
                 NormalizedStreamEvent::TextDelta { delta } => {
                     on_progress(RuntimeModelProgress::OutputDelta(delta));
                 }
-                NormalizedStreamEvent::ReasoningDelta { delta } => {
+                NormalizedStreamEvent::ReasoningDelta { delta, source } if source.is_public_summary() => {
                     on_progress(RuntimeModelProgress::ReasoningDelta(delta));
+                }
+                NormalizedStreamEvent::ReasoningDelta { .. } => {
+                    if !provider_activity_reported {
+                        provider_activity_reported = true;
+                        on_progress(RuntimeModelProgress::ProviderActivity);
+                    }
                 }
                 NormalizedStreamEvent::ReasoningStage { stage } => {
                     on_progress(RuntimeModelProgress::ReasoningStage(stage));
@@ -508,6 +517,7 @@ impl StreamingLifecycleBridge {
             RuntimeModelProgress::OutputDelta(delta) => self.push_assistant_delta(&delta),
             RuntimeModelProgress::ReasoningDelta(delta) => self.push_reasoning_delta(&delta),
             RuntimeModelProgress::ReasoningStage(stage) => self.update_reasoning_stage(stage),
+            RuntimeModelProgress::ProviderActivity => {}
             RuntimeModelProgress::ToolCallStarted { call_id, name } => {
                 self.start_tool_call(call_id, name);
             }
@@ -893,6 +903,7 @@ impl AgentRuntime {
                     self.emit_pending_lifecycle_events();
                 }
             }
+            RuntimeModelProgress::ProviderActivity => {}
             RuntimeModelProgress::ToolCallStarted { call_id, name } => {
                 let _ = self.lifecycle.start_tool_call(&call_id, name, None);
                 self.emit_pending_lifecycle_events();
@@ -928,7 +939,7 @@ impl AgentRuntime {
         };
 
         merge_stream_and_completed_text(&mut full_text, response.content.as_deref());
-        merge_stream_and_completed_text(&mut full_reasoning, response.reasoning.as_deref());
+        let provider_reasoning = response.reasoning.clone();
 
         let finish_reason = match response.finish_reason.clone() {
             FinishReason::Stop => "stop".to_string(),
@@ -955,10 +966,13 @@ impl AgentRuntime {
         aggregated_tool_calls = aggregated_tool_calls.filter(|calls| !calls.is_empty());
 
         let mut assistant_message = crate::llm::provider::Message::assistant(full_text.clone());
-        if !full_reasoning.is_empty() {
-            assistant_message = assistant_message.with_reasoning(Some(full_reasoning.clone()));
+        if let Some(reasoning) = provider_reasoning
+            .clone()
+            .or_else(|| (!full_reasoning.is_empty()).then(|| full_reasoning.clone()))
+        {
+            assistant_message = assistant_message.with_reasoning(Some(reasoning));
         }
-        if let Some(details) = response.reasoning_details.take() {
+        if let Some(details) = response.reasoning_details.clone() {
             let values: Vec<serde_json::Value> = details.into_iter().map(serde_json::Value::String).collect();
             assistant_message = assistant_message.with_reasoning_details(Some(values));
         }
@@ -987,11 +1001,9 @@ impl AgentRuntime {
             response.model = request_model;
         }
         response.content = Some(full_text.clone());
-        response.reasoning = if full_reasoning.is_empty() {
-            None
-        } else {
-            Some(full_reasoning.clone())
-        };
+        if response.reasoning.is_none() && !full_reasoning.is_empty() {
+            response.reasoning = Some(full_reasoning.clone());
+        }
         response.tool_calls = aggregated_tool_calls;
         response.usage = Some(final_usage);
         response.finish_reason = if finish_reason == "tool_calls" {
@@ -1045,7 +1057,9 @@ mod tests {
     use async_trait::async_trait;
     use futures::stream;
 
-    use crate::llm::provider::{LLMError, LLMNormalizedStream, LLMStream, LLMStreamEvent, NormalizedStreamEvent};
+    use crate::llm::provider::{
+        LLMError, LLMNormalizedStream, LLMStream, LLMStreamEvent, NormalizedStreamEvent, ReasoningSource,
+    };
 
     #[derive(Clone)]
     struct CompletedOnlyStreamProvider {
@@ -1057,6 +1071,8 @@ mod tests {
         response: LLMResponse,
         text_delta: String,
         reasoning_delta: String,
+        reasoning_source: ReasoningSource,
+        tool_call_start: bool,
     }
 
     #[async_trait]
@@ -1115,11 +1131,21 @@ mod tests {
         }
 
         async fn stream_normalized(&self, _request: LLMRequest) -> Result<LLMNormalizedStream, LLMError> {
-            Ok(Box::pin(stream::iter(vec![
-                Ok(NormalizedStreamEvent::ReasoningDelta { delta: self.reasoning_delta.clone() }),
+            let mut events = vec![Ok(NormalizedStreamEvent::ReasoningDelta {
+                delta: self.reasoning_delta.clone(),
+                source: self.reasoning_source,
+            })];
+            if self.tool_call_start {
+                events.push(Ok(NormalizedStreamEvent::ToolCallStart {
+                    call_id: "call_test".to_string(),
+                    name: Some("read_file".to_string()),
+                }));
+            }
+            events.extend([
                 Ok(NormalizedStreamEvent::TextDelta { delta: self.text_delta.clone() }),
                 Ok(NormalizedStreamEvent::Done { response: Box::new(self.response.clone()) }),
-            ])))
+            ]);
+            Ok(Box::pin(stream::iter(events)))
         }
 
         fn supported_models(&self) -> Vec<String> {
@@ -1293,6 +1319,7 @@ mod tests {
             model: "test-model".to_string(),
             finish_reason: FinishReason::Stop,
             reasoning: Some("**why** this works".to_string()),
+            reasoning_details: Some(vec!["continuation detail".to_string()]),
             ..Default::default()
         };
         let provider = CompletedOnlyStreamProvider { response: response.clone() };
@@ -1310,9 +1337,10 @@ mod tests {
             .expect("run_turn_once should succeed");
 
         assert_eq!(turn.content, "### Header\n- item");
-        assert_eq!(turn.reasoning.as_deref(), Some("**why** this works"));
+        assert_eq!(turn.reasoning, None);
         assert_eq!(turn.response.content.as_deref(), Some("### Header\n- item"));
         assert_eq!(turn.response.reasoning.as_deref(), Some("**why** this works"));
+        assert_eq!(turn.response.reasoning_details.as_deref(), Some(["continuation detail".to_string()].as_slice()));
     }
 
     #[tokio::test]
@@ -1328,6 +1356,8 @@ mod tests {
             response,
             text_delta: "hello world".to_string(),
             reasoning_delta: "trace".to_string(),
+            reasoning_source: ReasoningSource::ProviderSummary,
+            tool_call_start: false,
         };
         let mut steering = RuntimeSteering::default();
         let mut provider_box: Box<dyn LLMProvider> = Box::new(provider);
@@ -1353,6 +1383,77 @@ mod tests {
                 RuntimeModelProgress::OutputDelta("hello world".to_string()),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn adapter_hides_unclassified_reasoning_but_keeps_text_and_metadata() {
+        let response = LLMResponse {
+            content: Some("hello".to_string()),
+            model: "test-model".to_string(),
+            finish_reason: FinishReason::Stop,
+            reasoning: Some("private trace".to_string()),
+            reasoning_details: Some(vec!["continuation detail".to_string()]),
+            ..Default::default()
+        };
+        let provider = DeltaStreamProvider {
+            response,
+            text_delta: "hello".to_string(),
+            reasoning_delta: "private trace".to_string(),
+            reasoning_source: ReasoningSource::Unknown,
+            tool_call_start: false,
+        };
+        let mut steering = RuntimeSteering::default();
+        let mut provider_box: Box<dyn LLMProvider> = Box::new(provider);
+        let mut seen_progress = Vec::new();
+        let mut callback = |event| seen_progress.push(event);
+        let output = ProviderRuntimeModelAdapter::new(&mut provider_box, &mut steering)
+            .execute(LLMRequest::default(), None, &mut callback)
+            .await
+            .expect("adapter execution should succeed");
+
+        assert_eq!(output.response.reasoning.as_deref(), Some("private trace"));
+        assert_eq!(output.response.reasoning_details.as_deref(), Some(["continuation detail".to_string()].as_slice()));
+        assert_eq!(
+            seen_progress,
+            vec![
+                RuntimeModelProgress::ProviderActivity,
+                RuntimeModelProgress::OutputDelta("hello".to_string())
+            ]
+        );
+        assert!(
+            !seen_progress
+                .iter()
+                .any(|event| matches!(event, RuntimeModelProgress::ToolCallStarted { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn adapter_emits_structured_tool_call_status_without_textual_trigger() {
+        let provider = DeltaStreamProvider {
+            response: LLMResponse {
+                model: "test-model".to_string(),
+                finish_reason: FinishReason::ToolCalls,
+                ..Default::default()
+            },
+            text_delta: String::new(),
+            reasoning_delta: String::new(),
+            reasoning_source: ReasoningSource::Unknown,
+            tool_call_start: true,
+        };
+        let mut steering = RuntimeSteering::default();
+        let mut provider_box: Box<dyn LLMProvider> = Box::new(provider);
+        let mut seen_progress = Vec::new();
+        let mut callback = |event| seen_progress.push(event);
+        ProviderRuntimeModelAdapter::new(&mut provider_box, &mut steering)
+            .execute(LLMRequest::default(), None, &mut callback)
+            .await
+            .expect("adapter execution should succeed");
+
+        assert!(seen_progress.iter().any(|event| matches!(
+            event,
+            RuntimeModelProgress::ToolCallStarted { call_id, name }
+                if call_id == "call_test" && name.as_deref() == Some("read_file")
+        )));
     }
 
     #[test]

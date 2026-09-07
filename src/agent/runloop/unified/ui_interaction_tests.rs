@@ -121,6 +121,18 @@ impl uni::LLMProvider for ReasoningThenContentProvider {
         ])))
     }
 
+    async fn stream_normalized(&self, request: uni::LLMRequest) -> Result<uni::LLMNormalizedStream, uni::LLMError> {
+        let response = self.generate(request).await?;
+        Ok(Box::pin(stream::iter(vec![
+            Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: self.reasoning.clone(),
+                source: uni::ReasoningSource::ProviderSummary,
+            }),
+            Ok(uni::NormalizedStreamEvent::TextDelta { delta: self.content.clone() }),
+            Ok(uni::NormalizedStreamEvent::Done { response: Box::new(response) }),
+        ])))
+    }
+
     fn supported_models(&self) -> Vec<String> {
         vec!["test-model".to_string()]
     }
@@ -163,6 +175,19 @@ impl uni::LLMProvider for StagedReasoningProvider {
             Ok(uni::LLMStreamEvent::Reasoning { delta: self.reasoning.clone() }),
             Ok(uni::LLMStreamEvent::Token { delta: self.content.clone() }),
             Ok(uni::LLMStreamEvent::Completed { response: Box::new(response) }),
+        ])))
+    }
+
+    async fn stream_normalized(&self, request: uni::LLMRequest) -> Result<uni::LLMNormalizedStream, uni::LLMError> {
+        let response = self.generate(request).await?;
+        Ok(Box::pin(stream::iter(vec![
+            Ok(uni::NormalizedStreamEvent::ReasoningStage { stage: self.stage.clone() }),
+            Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: self.reasoning.clone(),
+                source: uni::ReasoningSource::ProviderSummary,
+            }),
+            Ok(uni::NormalizedStreamEvent::TextDelta { delta: self.content.clone() }),
+            Ok(uni::NormalizedStreamEvent::Done { response: Box::new(response) }),
         ])))
     }
 
@@ -211,6 +236,22 @@ impl uni::LLMProvider for ReasoningThenChunkedContentProvider {
             events.push(Ok(uni::LLMStreamEvent::Token { delta: chunk.clone() }));
         }
         events.push(Ok(uni::LLMStreamEvent::Completed { response: Box::new(response) }));
+        Ok(Box::pin(stream::iter(events)))
+    }
+
+    async fn stream_normalized(&self, request: uni::LLMRequest) -> Result<uni::LLMNormalizedStream, uni::LLMError> {
+        let response = self.generate(request).await?;
+        let mut events = Vec::with_capacity(self.reasoning_chunks.len() + self.chunks.len() + 1);
+        for chunk in &self.reasoning_chunks {
+            events.push(Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: chunk.clone(),
+                source: uni::ReasoningSource::ProviderSummary,
+            }));
+        }
+        for chunk in &self.chunks {
+            events.push(Ok(uni::NormalizedStreamEvent::TextDelta { delta: chunk.clone() }));
+        }
+        events.push(Ok(uni::NormalizedStreamEvent::Done { response: Box::new(response) }));
         Ok(Box::pin(stream::iter(events)))
     }
 
@@ -453,7 +494,7 @@ async fn renders_completed_only_content() {
 }
 
 #[tokio::test]
-async fn renders_reasoning_when_no_content() {
+async fn hides_unclassified_completed_reasoning_when_no_content() {
     let provider = CompletedOnlyProvider {
         content: None,
         reasoning: Some("because reason".to_string()),
@@ -475,7 +516,7 @@ async fn renders_reasoning_when_no_content() {
     .await
     .expect("stream should succeed");
 
-    assert!(emitted, "should mark emitted tokens when reasoning is rendered");
+    assert!(!emitted, "unclassified completed reasoning must not be rendered");
     assert!(resp.content.is_none(), "content should remain none");
 }
 

@@ -170,7 +170,10 @@ where
                             events.push(NormalizedStreamEvent::TextDelta { delta });
                         }
                         crate::provider::LLMStreamEvent::Reasoning { delta } if self.options.emit_reasoning => {
-                            events.push(NormalizedStreamEvent::ReasoningDelta { delta });
+                            events.push(NormalizedStreamEvent::ReasoningDelta {
+                                delta,
+                                source: crate::provider::ReasoningSource::Unknown,
+                            });
                         }
                         _ => {}
                     }
@@ -182,11 +185,14 @@ where
                     events.push(NormalizedStreamEvent::TextDelta { delta });
                 }
             }
-            ResponsesStreamEvent::ReasoningDelta { delta } => {
-                if self.options.emit_reasoning
-                    && let Some(delta) = self.aggregator.handle_reasoning(&delta)
-                {
-                    events.push(NormalizedStreamEvent::ReasoningDelta { delta });
+            ResponsesStreamEvent::ReasoningDelta { delta, source } => {
+                // Always retain provider reasoning before applying the public
+                // emission policy. Continuation details may be required on a
+                // later request even when this route must not render them.
+                if let Some(delta) = self.aggregator.handle_reasoning(&delta) {
+                    if self.options.emit_reasoning {
+                        events.push(NormalizedStreamEvent::ReasoningDelta { delta, source });
+                    }
                 }
             }
             ResponsesStreamEvent::FunctionCallNameDelta { call_id, item_id, name, output_index } => {
@@ -504,7 +510,7 @@ fn provider_error(provider_name: &str, message: impl Into<String>) -> LLMError {
 #[cfg(test)]
 mod tests {
     use super::{ResponsesNormalizedStreamOptions, ResponsesNormalizedStreamProcessor, provider_error};
-    use crate::provider::{FinishReason, LLMResponse, NormalizedStreamEvent, ToolCall};
+    use crate::provider::{FinishReason, LLMResponse, NormalizedStreamEvent, ReasoningSource, ToolCall};
     use serde_json::{Value, json};
 
     fn options() -> ResponsesNormalizedStreamOptions {
@@ -577,6 +583,69 @@ mod tests {
             "sequence_number": 1,
             "delta": delta
         })
+    }
+
+    #[test]
+    fn reasoning_events_preserve_public_summary_classification() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
+
+        let summary_events = processor
+            .handle_payload(json!({
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "output_index": 0,
+                "summary_index": 0,
+                "sequence_number": 1,
+                "delta": "public summary"
+            }))
+            .expect("summary event should parse");
+        assert!(matches!(
+            summary_events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "public summary" && *source == ReasoningSource::ProviderSummary
+        ));
+
+        let continuation_events = processor
+            .handle_payload(json!({
+                "type": "response.reasoning_text.delta",
+                "item_id": "rs_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 2,
+                "delta": "continuation detail"
+            }))
+            .expect("continuation event should parse");
+        assert!(matches!(
+            continuation_events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "continuation detail" && *source == ReasoningSource::Continuation
+        ));
+    }
+
+    #[test]
+    fn hidden_reasoning_is_retained_when_public_emission_is_disabled() {
+        let mut options = options();
+        options.emit_reasoning = false;
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options, parse_response);
+
+        let events = processor
+            .handle_payload(json!({
+                "type": "response.reasoning_text.delta",
+                "item_id": "rs_1",
+                "output_index": 0,
+                "content_index": 0,
+                "sequence_number": 1,
+                "delta": "continuation detail"
+            }))
+            .expect("continuation event should parse");
+        assert!(events.is_empty(), "continuation details must remain hidden");
+
+        let finished = processor.finish().expect("processor should retain hidden reasoning");
+        assert!(matches!(
+            finished.as_slice(),
+            [NormalizedStreamEvent::Done { response }]
+                if response.reasoning.as_deref() == Some("continuation detail")
+        ));
     }
 
     #[test]

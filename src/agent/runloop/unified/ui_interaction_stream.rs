@@ -17,7 +17,6 @@ use vtcode_commons::formatting::compact_reasoning_text;
 use vtcode_core::copilot::CopilotRuntimeRequest;
 use vtcode_core::llm::error_display;
 use vtcode_core::llm::provider::{self as uni, LLMStreamEvent, NormalizedStreamEvent};
-use vtcode_core::llm::providers::clean_reasoning_text;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::state::CtrlCState;
@@ -275,14 +274,21 @@ fn normalized_to_legacy_stream(
     let (progress_tx, progress_rx) = mpsc::channel(256);
     let stream = try_stream! {
         let mut pending_usage = None;
+        let mut provider_activity_reported = false;
 
         while let Some(event) = stream.next().await {
             match event? {
                 NormalizedStreamEvent::TextDelta { delta } => {
                     yield LLMStreamEvent::Token { delta };
                 }
-                NormalizedStreamEvent::ReasoningDelta { delta } => {
+                NormalizedStreamEvent::ReasoningDelta { delta, source } if source.is_public_summary() => {
                     yield LLMStreamEvent::Reasoning { delta };
+                }
+                NormalizedStreamEvent::ReasoningDelta { .. } => {
+                    if !provider_activity_reported {
+                        provider_activity_reported = true;
+                        let _ = progress_tx.send(StreamProgressEvent::ProviderActivity).await;
+                    }
                 }
                 NormalizedStreamEvent::ReasoningStage { stage } => {
                     yield LLMStreamEvent::ReasoningStage { stage };
@@ -661,6 +667,10 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
                         first_progress_timeout = None;
                         continue;
                     }
+                    Some(StreamProgressEvent::ProviderActivity) => {
+                        first_progress_timeout = None;
+                        continue;
+                    }
                     None => {
                         progress_events = None;
                         continue;
@@ -914,7 +924,7 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
     }
 
     if !pending_content.is_empty() && !content_suppressed {
-        let reasoning_for_compare = response.reasoning.as_deref().unwrap_or(reasoning_accumulated.as_str());
+        let reasoning_for_compare = reasoning_accumulated.as_str();
         if !reasoning_for_compare.trim().is_empty()
             && reasoning_matches_content(reasoning_for_compare, &pending_content)
         {
@@ -969,11 +979,7 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
     if !content_suppressed && let Some(content) = content_for_render.as_deref() {
         let content_trimmed = content.trim();
         if !content_trimmed.is_empty() {
-            let reasoning_dupes_content = response
-                .reasoning
-                .as_deref()
-                .map(|reasoning| reasoning_matches_content(reasoning, content))
-                .unwrap_or(false);
+            let reasoning_dupes_content = reasoning_matches_content(reasoning_accumulated.as_str(), content);
 
             if reasoning_dupes_content {
                 suppress_reasoning_due_to_duplication = true;
@@ -987,7 +993,7 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
             reasoning_state
                 .finalize(
                     renderer,
-                    response.reasoning.as_deref(),
+                    Some(reasoning_accumulated.as_str()),
                     reasoning_emitted,
                     suppress_reasoning_due_to_duplication,
                 )
@@ -1012,32 +1018,11 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
         }
     }
 
-    let rendered_reasoning_before = reasoning_state.rendered_reasoning();
     if !has_renderable_content || aggregated.trim().is_empty() || suppress_reasoning_due_to_duplication {
         let suppress_reasoning = suppress_reasoning_due_to_duplication;
         reasoning_state
-            .finalize(renderer, response.reasoning.as_deref(), reasoning_emitted, suppress_reasoning)
+            .finalize(renderer, Some(reasoning_accumulated.as_str()), reasoning_emitted, suppress_reasoning)
             .map_err(|err| map_render_error(provider_name, err))?;
-    }
-
-    if !emitted_tokens
-        && aggregated.trim().is_empty()
-        && !has_renderable_content
-        && !rendered_reasoning_before
-        && renderer.reasoning_visible()
-        && let Some(reasoning) = response.reasoning.as_deref()
-    {
-        let reasoning_trimmed = clean_reasoning_text(reasoning.trim());
-        if !reasoning_trimmed.is_empty() {
-            if supports_streaming_markdown {
-                let _ = stream_markdown_with_provider_error(provider_name, renderer, &reasoning_trimmed, 0)?;
-            } else {
-                renderer
-                    .line(MessageStyle::Response, &reasoning_trimmed)
-                    .map_err(|err| map_render_error(provider_name, err))?;
-            }
-            emitted_tokens = true;
-        }
     }
 
     let response_rendered = emitted_tokens || reasoning_emitted || reasoning_state.rendered_reasoning();
@@ -1049,20 +1034,20 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
 mod tests {
     use super::{
         CopilotRuntimeRequestHandler, FirstProgressTimeout, merge_streamed_plan_into_response,
-        render_stream_with_options_and_copilot_runtime_impl,
+        normalized_to_legacy_stream, render_stream_with_options_and_copilot_runtime_impl,
     };
     use crate::agent::runloop::unified::state::CtrlCState;
     use crate::agent::runloop::unified::ui_interaction::{
         PlaceholderSpinner, StreamProgressEvent, StreamSpinnerOptions,
     };
     use async_trait::async_trait;
-    use futures::stream;
+    use futures::{StreamExt, stream};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tokio::sync::{Notify, mpsc};
     use vtcode_core::copilot::{CopilotObservedToolCall, CopilotObservedToolCallStatus, CopilotRuntimeRequest};
-    use vtcode_core::llm::provider::{self as uni, FinishReason, LLMResponse, LLMStreamEvent};
+    use vtcode_core::llm::provider::{self as uni, FinishReason, LLMResponse, LLMStreamEvent, ReasoningSource};
     use vtcode_core::utils::ansi::AnsiRenderer;
     use vtcode_ui::tui::app::{InlineCommand, InlineHandle};
 
@@ -1134,6 +1119,75 @@ mod tests {
             tool_references: vec![],
             compaction: None,
         }
+    }
+
+    #[tokio::test]
+    async fn normalized_ui_stream_forwards_only_public_reasoning_summaries() {
+        let normalized: uni::LLMNormalizedStream = Box::pin(stream::iter(vec![
+            Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: "raw reasoning".to_string(),
+                source: ReasoningSource::Raw,
+            }),
+            Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: "public summary".to_string(),
+                source: ReasoningSource::ProviderSummary,
+            }),
+            Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: "continuation detail".to_string(),
+                source: ReasoningSource::Continuation,
+            }),
+            Ok(uni::NormalizedStreamEvent::Done {
+                response: Box::new(completed_response_with_content(None)),
+            }),
+        ]));
+        let (mut legacy, _progress) = normalized_to_legacy_stream(normalized);
+        let mut events = Vec::new();
+        while let Some(event) = legacy.next().await {
+            events.push(event.expect("normalized event should convert"));
+        }
+
+        assert!(matches!(
+            events.as_slice(),
+            [LLMStreamEvent::Reasoning { delta }, LLMStreamEvent::Completed { .. }]
+                if delta == "public summary"
+        ));
+    }
+
+    #[tokio::test]
+    async fn hidden_reasoning_counts_as_first_progress_without_being_rendered() {
+        let normalized: uni::LLMNormalizedStream = Box::pin(async_stream::stream! {
+            yield Ok(uni::NormalizedStreamEvent::ReasoningDelta {
+                delta: "private trace".to_string(),
+                source: ReasoningSource::Raw,
+            });
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            yield Ok(uni::NormalizedStreamEvent::Done {
+                response: Box::new(completed_response_with_content(Some("answer"))),
+            });
+        });
+        let (mut legacy, mut progress) = normalized_to_legacy_stream(normalized);
+        let spinner = build_spinner();
+        let mut renderer = AnsiRenderer::stdout();
+        let ctrl_c_state = Arc::new(CtrlCState::new());
+        let ctrl_c_notify = Arc::new(Notify::new());
+
+        let result = render_stream_with_options_and_copilot_runtime_impl(
+            "mock",
+            &mut legacy,
+            Some(&mut progress),
+            None,
+            None,
+            Some(FirstProgressTimeout::starting_now(Duration::from_millis(5))),
+            &spinner,
+            &mut renderer,
+            &ctrl_c_state,
+            &ctrl_c_notify,
+            StreamSpinnerOptions::default(),
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "hidden provider progress should clear the first-progress timeout");
     }
 
     fn completed_response(content: &str) -> LLMResponse {

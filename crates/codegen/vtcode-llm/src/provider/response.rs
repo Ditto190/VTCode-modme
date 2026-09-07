@@ -2,6 +2,30 @@ use std::pin::Pin;
 
 pub use vtcode_commons::llm::{FinishReason, LLMError, LLMResponse, Usage};
 
+/// Provider-side classification for streamed reasoning text.
+///
+/// Only an explicit provider summary is safe to expose in the user interface.
+/// Raw and continuation-only reasoning remains available on the response for
+/// providers that require it on the next request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningSource {
+    /// The provider explicitly marked this text as a public reasoning summary.
+    ProviderSummary,
+    /// The provider returned reasoning text without a public-summary marker.
+    Raw,
+    /// The provider returned reasoning metadata needed to continue a request.
+    Continuation,
+    /// The source was not classified by the provider adapter.
+    Unknown,
+}
+
+impl ReasoningSource {
+    #[must_use]
+    pub const fn is_public_summary(self) -> bool {
+        matches!(self, Self::ProviderSummary)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum LLMStreamEvent {
     Token { delta: String },
@@ -18,6 +42,7 @@ pub enum NormalizedStreamEvent {
     },
     ReasoningDelta {
         delta: String,
+        source: ReasoningSource,
     },
     /// A provider-native reasoning stage transition.
     ReasoningStage {
@@ -47,7 +72,9 @@ impl LLMStreamEvent {
     pub(crate) fn into_normalized(self) -> Vec<NormalizedStreamEvent> {
         match self {
             Self::Token { delta } => vec![NormalizedStreamEvent::TextDelta { delta }],
-            Self::Reasoning { delta } => vec![NormalizedStreamEvent::ReasoningDelta { delta }],
+            Self::Reasoning { delta } => {
+                vec![NormalizedStreamEvent::ReasoningDelta { delta, source: ReasoningSource::Unknown }]
+            }
             Self::ReasoningSignature { .. } => Vec::new(),
             Self::ReasoningStage { stage } => vec![NormalizedStreamEvent::ReasoningStage { stage }],
             Self::Completed { response } => {
@@ -64,7 +91,7 @@ impl LLMStreamEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::{FinishReason, LLMResponse, LLMStreamEvent, NormalizedStreamEvent, Usage};
+    use super::{FinishReason, LLMResponse, LLMStreamEvent, NormalizedStreamEvent, ReasoningSource, Usage};
 
     #[test]
     fn completed_event_emits_usage_before_done() {
@@ -114,6 +141,17 @@ mod tests {
         assert!(matches!(
             events.as_slice(),
             [NormalizedStreamEvent::ReasoningStage { stage }] if stage == "analysis"
+        ));
+    }
+
+    #[test]
+    fn legacy_reasoning_events_are_unknown_and_not_public_summaries() {
+        let events = LLMStreamEvent::Reasoning { delta: "private".to_string() }.into_normalized();
+
+        assert!(matches!(
+            events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "private" && *source == ReasoningSource::Unknown && !source.is_public_summary()
         ));
     }
 }

@@ -1,7 +1,7 @@
 use super::super::OpenRouterProvider;
 use crate::provider::{
     LLMError, LLMNormalizedStream, LLMProvider, LLMRequest, LLMResponse, LLMStream, LLMStreamEvent,
-    NormalizedStreamEvent,
+    NormalizedStreamEvent, ReasoningSource,
 };
 use crate::providers::error_handling::{format_network_error, format_parse_error};
 use crate::providers::shared::Utf8StreamDecoder;
@@ -195,14 +195,22 @@ impl LLMProvider for OpenRouterProvider {
                             if let Some(choices) = payload.get("choices").and_then(|v| v.as_array()) {
                                 if let Some(choice) = choices.first() {
                                     if let Some(delta) = choice.get("delta") {
-                                        if let Some(reasoning) = delta
+                                        let reasoning = delta
                                             .get("reasoning_content")
-                                            .or_else(|| delta.get("reasoning"))
-                                            .and_then(|v| v.as_str())
+                                            .and_then(Value::as_str)
+                                            .filter(|value| !value.is_empty())
+                                            .map(|value| (value, ReasoningSource::Continuation))
+                                            .or_else(|| {
+                                                delta
+                                                    .get("reasoning")
+                                                    .and_then(Value::as_str)
+                                                    .filter(|value| !value.is_empty())
+                                                    .map(|value| (value, ReasoningSource::Raw))
+                                            });
+                                        if let Some((reasoning, source)) = reasoning
+                                            && let Some(delta) = aggregator.handle_reasoning(reasoning)
                                         {
-                                            if let Some(delta) = aggregator.handle_reasoning(reasoning) {
-                                                yield NormalizedStreamEvent::ReasoningDelta { delta };
-                                            }
+                                            yield NormalizedStreamEvent::ReasoningDelta { delta, source };
                                         }
 
                                         if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
@@ -210,7 +218,10 @@ impl LLMProvider for OpenRouterProvider {
                                                 if let LLMStreamEvent::Token { delta } = ev {
                                                     yield NormalizedStreamEvent::TextDelta { delta };
                                                 } else if let LLMStreamEvent::Reasoning { delta } = ev {
-                                                    yield NormalizedStreamEvent::ReasoningDelta { delta };
+                                                    yield NormalizedStreamEvent::ReasoningDelta {
+                                                        delta,
+                                                        source: ReasoningSource::Unknown,
+                                                    };
                                                 }
                                             }
                                         }
@@ -228,7 +239,10 @@ impl LLMProvider for OpenRouterProvider {
                                                 if new_reasoning.len() > prev_reasoning_len {
                                                     let delta = new_reasoning[prev_reasoning_len..].to_string();
                                                     if !delta.trim().is_empty() {
-                                                        yield NormalizedStreamEvent::ReasoningDelta { delta };
+                                                        yield NormalizedStreamEvent::ReasoningDelta {
+                                                            delta,
+                                                            source: ReasoningSource::Continuation,
+                                                        };
                                                     }
                                                 }
                                             }

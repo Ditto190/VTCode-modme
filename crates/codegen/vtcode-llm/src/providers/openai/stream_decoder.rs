@@ -18,7 +18,7 @@ use crate::providers::shared::{
 };
 use async_stream::try_stream;
 use futures::StreamExt;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use serde_json::{Value, json};
 use std::time::Instant;
 use vtcode_commons::model_family::find_family_for_model;
@@ -224,13 +224,119 @@ impl ResponsesToolCallState {
     }
 }
 
-pub(crate) fn create_chat_stream(response: reqwest::Response, model: String) -> provider::LLMStream {
+enum ChatStreamEvent {
+    TextDelta {
+        delta: String,
+    },
+    ReasoningDelta {
+        delta: String,
+        source: provider::ReasoningSource,
+    },
+    ReasoningStage {
+        stage: String,
+    },
+    ToolCallStart {
+        call_id: String,
+        name: Option<String>,
+    },
+    ToolCallDelta {
+        call_id: String,
+        delta: String,
+    },
+    Completed {
+        response: Box<provider::LLMResponse>,
+    },
+}
+
+#[derive(Default)]
+struct ChatToolCallState {
+    call_ids_by_index: HashMap<usize, String>,
+    started_call_ids: HashSet<String>,
+}
+
+impl ChatToolCallState {
+    fn handle_deltas(
+        &mut self,
+        aggregator: &mut crate::providers::shared::StreamAggregator,
+        tool_deltas: &[Value],
+    ) -> Vec<ChatStreamEvent> {
+        let mut events = Vec::new();
+
+        for (position, tool_delta) in tool_deltas.iter().enumerate() {
+            let Some(tool_delta_object) = tool_delta.as_object() else {
+                continue;
+            };
+            let index = tool_delta_object
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize)
+                .unwrap_or(position);
+            let provider_call_id = tool_delta_object
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty());
+            let call_id = if let Some(call_id) = self.call_ids_by_index.get(&index) {
+                call_id.clone()
+            } else {
+                let call_id = provider_call_id
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(crate::providers::shared::generate_tool_call_id);
+                self.call_ids_by_index.insert(index, call_id.clone());
+                call_id
+            };
+
+            // Keep the aggregator's final id aligned with the id emitted in
+            // normalized lifecycle events, including id-less provider chunks.
+            let mut patched_tool_delta = tool_delta.clone();
+            if let Some(object) = patched_tool_delta.as_object_mut() {
+                object.insert("index".to_string(), Value::from(index as u64));
+                object.insert("id".to_string(), Value::String(call_id.clone()));
+            }
+            aggregator.handle_tool_calls(std::slice::from_ref(&patched_tool_delta));
+
+            let name = tool_delta_object
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned);
+            if self.started_call_ids.insert(call_id.clone()) {
+                events.push(ChatStreamEvent::ToolCallStart { call_id: call_id.clone(), name });
+            }
+
+            if let Some(arguments) = tool_delta_object
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("arguments"))
+                .and_then(tool_argument_delta)
+            {
+                events.push(ChatStreamEvent::ToolCallDelta { call_id, delta: arguments });
+            }
+        }
+
+        events
+    }
+}
+
+fn tool_argument_delta(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) if !value.is_empty() => Some(value.clone()),
+        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn create_chat_event_stream(
+    response: reqwest::Response,
+    model: String,
+) -> impl futures::Stream<Item = Result<ChatStreamEvent, provider::LLMError>> + Send {
     let stream = try_stream! {
         let mut body_stream = response.bytes_stream();
         let mut buf: Vec<u8> = Vec::new();
         let mut offset = 0usize;
-        let retain_reasoning_summaries = find_family_for_model(&model).supports_reasoning_summaries;
         let mut aggregator = crate::providers::shared::StreamAggregator::new(model.clone());
+        let mut tool_call_state = ChatToolCallState::default();
         let telemetry = OpenAIStreamTelemetry;
 
         while let Some(chunk_result) = body_stream.next().await {
@@ -270,19 +376,38 @@ pub(crate) fn create_chat_stream(response: reqwest::Response, model: String) -> 
                                 if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
                                     telemetry.on_content_delta(content);
                                     for event in aggregator.handle_content(content) {
-                                        yield event;
+                                        match event {
+                                            provider::LLMStreamEvent::Token { delta } => {
+                                                yield ChatStreamEvent::TextDelta { delta };
+                                            }
+                                            provider::LLMStreamEvent::Reasoning { delta } => {
+                                                yield ChatStreamEvent::ReasoningDelta {
+                                                    delta,
+                                                    source: provider::ReasoningSource::Unknown,
+                                                };
+                                            }
+                                            provider::LLMStreamEvent::ReasoningStage { stage } => {
+                                                yield ChatStreamEvent::ReasoningStage { stage };
+                                            }
+                                            provider::LLMStreamEvent::ReasoningSignature { .. }
+                                            | provider::LLMStreamEvent::Completed { .. } => {}
+                                        }
                                     }
                                 }
 
-                                if retain_reasoning_summaries
-                                    && let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str())
+                                if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str())
                                     && let Some(delta) = aggregator.handle_reasoning(reasoning) {
                                         telemetry.on_reasoning_delta(&delta);
-                                        yield provider::LLMStreamEvent::Reasoning { delta };
+                                        yield ChatStreamEvent::ReasoningDelta {
+                                            delta,
+                                            source: provider::ReasoningSource::Unknown,
+                                        };
                                     }
 
                                 if let Some(tool_deltas) = delta.get("tool_calls").and_then(|v| v.as_array()) {
-                                    aggregator.handle_tool_calls(tool_deltas);
+                                    for event in tool_call_state.handle_deltas(&mut aggregator, tool_deltas) {
+                                        yield event;
+                                    }
                                     telemetry.on_tool_call_delta();
                                 }
                             }
@@ -310,7 +435,70 @@ pub(crate) fn create_chat_stream(response: reqwest::Response, model: String) -> 
 
         let response = aggregator.finalize();
         let response = strip_reasoning_for_model(&model, response);
-        yield provider::LLMStreamEvent::Completed { response: Box::new(response) };
+        yield ChatStreamEvent::Completed { response: Box::new(response) };
+    };
+
+    stream
+}
+
+fn chat_event_to_legacy(event: ChatStreamEvent) -> Option<provider::LLMStreamEvent> {
+    match event {
+        ChatStreamEvent::TextDelta { delta } => Some(provider::LLMStreamEvent::Token { delta }),
+        ChatStreamEvent::ReasoningDelta { delta, .. } => Some(provider::LLMStreamEvent::Reasoning { delta }),
+        ChatStreamEvent::ReasoningStage { stage } => Some(provider::LLMStreamEvent::ReasoningStage { stage }),
+        ChatStreamEvent::ToolCallStart { .. } | ChatStreamEvent::ToolCallDelta { .. } => None,
+        ChatStreamEvent::Completed { response } => Some(provider::LLMStreamEvent::Completed { response }),
+    }
+}
+
+fn chat_event_to_normalized(event: ChatStreamEvent) -> Vec<provider::NormalizedStreamEvent> {
+    match event {
+        ChatStreamEvent::TextDelta { delta } => vec![provider::NormalizedStreamEvent::TextDelta { delta }],
+        ChatStreamEvent::ReasoningDelta { delta, source } => {
+            vec![provider::NormalizedStreamEvent::ReasoningDelta { delta, source }]
+        }
+        ChatStreamEvent::ReasoningStage { stage } => vec![provider::NormalizedStreamEvent::ReasoningStage { stage }],
+        ChatStreamEvent::ToolCallStart { call_id, name } => {
+            vec![provider::NormalizedStreamEvent::ToolCallStart { call_id, name }]
+        }
+        ChatStreamEvent::ToolCallDelta { call_id, delta } => {
+            vec![provider::NormalizedStreamEvent::ToolCallDelta { call_id, delta }]
+        }
+        ChatStreamEvent::Completed { response } => {
+            let mut events = Vec::new();
+            if let Some(usage) = response.usage.clone() {
+                events.push(provider::NormalizedStreamEvent::Usage { usage });
+            }
+            events.push(provider::NormalizedStreamEvent::Done { response });
+            events
+        }
+    }
+}
+
+pub(crate) fn create_chat_stream(response: reqwest::Response, model: String) -> provider::LLMStream {
+    let mut decoded = Box::pin(create_chat_event_stream(response, model));
+    let stream = try_stream! {
+        while let Some(event) = decoded.next().await {
+            if let Some(event) = chat_event_to_legacy(event?) {
+                yield event;
+            }
+        }
+    };
+
+    Box::pin(stream)
+}
+
+pub(crate) fn create_chat_normalized_stream(
+    response: reqwest::Response,
+    model: String,
+) -> provider::LLMNormalizedStream {
+    let mut decoded = Box::pin(create_chat_event_stream(response, model));
+    let stream = try_stream! {
+        while let Some(event) = decoded.next().await {
+            for normalized in chat_event_to_normalized(event?) {
+                yield normalized;
+            }
+        }
     };
 
     Box::pin(stream)
@@ -599,10 +787,10 @@ fn optional_string_field(payload: &Value, field: &'static str) -> Result<Option<
 #[cfg(test)]
 mod tests {
     use super::{
-        ResponsesToolCallState, final_response_output_is_empty, merge_final_response_metadata,
-        streamed_response_is_usable,
+        ChatStreamEvent, ChatToolCallState, ResponsesToolCallState, chat_event_to_normalized,
+        final_response_output_is_empty, merge_final_response_metadata, streamed_response_is_usable,
     };
-    use crate::provider::{LLMResponse, ToolCall};
+    use crate::provider::{LLMResponse, NormalizedStreamEvent, ReasoningSource, ToolCall};
     use crate::providers::shared::StreamAggregator;
     use serde_json::json;
 
@@ -646,6 +834,97 @@ mod tests {
 
         assert!(final_response_output_is_empty(&json!({"output": []})));
         assert!(streamed_response_is_usable(&response));
+    }
+
+    #[test]
+    fn chat_normalization_preserves_reasoning_source() {
+        let raw_events = chat_event_to_normalized(ChatStreamEvent::ReasoningDelta {
+            delta: "tagged trace".to_string(),
+            source: ReasoningSource::Unknown,
+        });
+        assert!(matches!(
+            raw_events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "tagged trace" && *source == ReasoningSource::Unknown
+        ));
+
+        let summary_events = chat_event_to_normalized(ChatStreamEvent::ReasoningDelta {
+            delta: "provider summary".to_string(),
+            source: ReasoningSource::ProviderSummary,
+        });
+        assert!(matches!(
+            summary_events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "provider summary" && *source == ReasoningSource::ProviderSummary
+        ));
+    }
+
+    #[test]
+    fn chat_normalization_preserves_completed_usage_before_done() {
+        let events = chat_event_to_normalized(ChatStreamEvent::Completed {
+            response: Box::new(LLMResponse {
+                usage: Some(crate::provider::Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        });
+
+        assert!(matches!(
+            events.as_slice(),
+            [NormalizedStreamEvent::Usage { .. }, NormalizedStreamEvent::Done { .. }]
+        ));
+    }
+
+    #[test]
+    fn chat_tool_deltas_emit_structured_events_and_reuse_the_final_id() {
+        let mut aggregator = StreamAggregator::new("gpt-5".to_string());
+        let mut tool_call_state = ChatToolCallState::default();
+
+        let first = tool_call_state.handle_deltas(
+            &mut aggregator,
+            &[json!({
+                "index": 0,
+                "id": "call_1",
+                "function": {
+                    "name": "search_workspace",
+                    "arguments": "{\"query\":\"vt"
+                }
+            })],
+        );
+        assert!(matches!(
+            first.as_slice(),
+            [
+                ChatStreamEvent::ToolCallStart { call_id, name },
+                ChatStreamEvent::ToolCallDelta { call_id: delta_call_id, delta }
+            ] if call_id == "call_1"
+                && delta_call_id == "call_1"
+                && name.as_deref() == Some("search_workspace")
+                && delta == "{\"query\":\"vt"
+        ));
+
+        let second = tool_call_state.handle_deltas(
+            &mut aggregator,
+            &[json!({
+                "index": 0,
+                "function": {
+                    "arguments": "code\"}"
+                }
+            })],
+        );
+        assert!(matches!(
+            second.as_slice(),
+            [ChatStreamEvent::ToolCallDelta { call_id, delta }]
+                if call_id == "call_1" && delta == "code\"}"
+        ));
+
+        let calls = aggregator.finalize().tool_calls.expect("tool call expected");
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].tool_name(), Some("search_workspace"));
+        assert_eq!(calls[0].raw_input(), Some("{\"query\":\"vtcode\"}"));
     }
 
     #[test]

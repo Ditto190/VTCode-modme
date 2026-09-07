@@ -2,6 +2,39 @@ use super::helpers::InteractionStreamState;
 use super::*;
 use crate::providers::shared::{StreamAssemblyError, extract_data_payload, find_sse_boundary_bytes};
 
+fn normalize_stream_event(event: LLMStreamEvent, interaction_reasoning: bool) -> Vec<NormalizedStreamEvent> {
+    match event {
+        LLMStreamEvent::Reasoning { delta } if interaction_reasoning => {
+            vec![NormalizedStreamEvent::ReasoningDelta { delta, source: ReasoningSource::ProviderSummary }]
+        }
+        LLMStreamEvent::Completed { response } => normalize_completed_event(response),
+        event => event.into_normalized(),
+    }
+}
+
+fn normalize_completed_event(response: Box<LLMResponse>) -> Vec<NormalizedStreamEvent> {
+    let mut events = Vec::new();
+    if let Some(tool_calls) = response.tool_calls.as_ref() {
+        for tool_call in tool_calls {
+            events.push(NormalizedStreamEvent::ToolCallStart {
+                call_id: tool_call.id.clone(),
+                name: tool_call.tool_name().map(ToOwned::to_owned),
+            });
+            if let Some(arguments) = tool_call
+                .raw_input()
+                .filter(|arguments| !arguments.trim().is_empty() && arguments.trim() != "{}")
+            {
+                events.push(NormalizedStreamEvent::ToolCallDelta {
+                    call_id: tool_call.id.clone(),
+                    delta: arguments.to_string(),
+                });
+            }
+        }
+    }
+    events.extend(LLMStreamEvent::Completed { response }.into_normalized());
+    events
+}
+
 #[async_trait]
 impl LLMProvider for GeminiProvider {
     fn name(&self) -> &str {
@@ -294,6 +327,20 @@ impl LLMProvider for GeminiProvider {
         Ok(Box::pin(stream))
     }
 
+    async fn stream_normalized(&self, request: LLMRequest) -> Result<LLMNormalizedStream, LLMError> {
+        let interaction_reasoning = self.should_use_interactions(&request);
+        let mut legacy_stream = self.stream(request).await?;
+        let stream = try_stream! {
+            while let Some(event) = legacy_stream.next().await {
+                for normalized in normalize_stream_event(event?, interaction_reasoning) {
+                    yield normalized;
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
     fn supported_models(&self) -> Vec<String> {
         models::google::SUPPORTED_MODELS.iter().map(|s| s.to_string()).collect()
     }
@@ -341,5 +388,62 @@ impl LLMProvider for GeminiProvider {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LLMStreamEvent, NormalizedStreamEvent, ReasoningSource, normalize_stream_event};
+    use crate::provider::{LLMResponse, ToolCall};
+
+    #[test]
+    fn interaction_reasoning_is_marked_as_public_summary() {
+        let events = normalize_stream_event(LLMStreamEvent::Reasoning { delta: "summary".to_string() }, true);
+
+        assert!(matches!(
+            events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "summary" && *source == ReasoningSource::ProviderSummary
+        ));
+    }
+
+    #[test]
+    fn standard_reasoning_remains_unclassified() {
+        let events = normalize_stream_event(LLMStreamEvent::Reasoning { delta: "trace".to_string() }, false);
+
+        assert!(matches!(
+            events.as_slice(),
+            [NormalizedStreamEvent::ReasoningDelta { delta, source }]
+                if delta == "trace" && *source == ReasoningSource::Unknown
+        ));
+    }
+
+    #[test]
+    fn completed_tool_calls_become_structured_events() {
+        let events = normalize_stream_event(
+            LLMStreamEvent::Completed {
+                response: Box::new(LLMResponse {
+                    tool_calls: Some(vec![ToolCall::function(
+                        "call_1".to_string(),
+                        "search_workspace".to_string(),
+                        "{\"query\":\"vtcode\"}".to_string(),
+                    )]),
+                    ..Default::default()
+                }),
+            },
+            false,
+        );
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                NormalizedStreamEvent::ToolCallStart { call_id, name },
+                NormalizedStreamEvent::ToolCallDelta { call_id: delta_call_id, delta },
+                NormalizedStreamEvent::Done { .. }
+            ] if call_id == "call_1"
+                && delta_call_id == "call_1"
+                && name.as_deref() == Some("search_workspace")
+                && delta == "{\"query\":\"vtcode\"}"
+        ));
     }
 }

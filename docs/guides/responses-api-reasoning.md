@@ -9,7 +9,7 @@ VT Code's default OpenAI profile keeps `gpt-5.5` on a compact execution contract
 | Concept                 | Description                                                                                                                                               |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Reasoning items**     | Internal chain-of-thought tokens exposed as IDs in the Responses API output. Reusing them keeps tool-enabled turns coherent and helps downstream caching. |
-| **Reasoning summaries** | Short, user-visible explanations of what the model computed. VT Code requests summaries automatically for OpenAI Responses reasoning models and folds returned text into normal reasoning output. |
+| **Reasoning summaries** | Short, user-visible explanations of what the model computed. VT Code requests summaries automatically for OpenAI Responses reasoning models and exposes only provider-marked summary text in normal reasoning output. |
 | **Encrypted reasoning** | A stateless, compliance-friendly variant where the API returns encrypted tokens that your sidecar can return verbatim without persisting data.            |
 
 ## VT Code configuration guidance
@@ -20,7 +20,7 @@ VT Code's default OpenAI profile keeps `gpt-5.5` on a compact execution contract
     reasoning_effort = "none"
     ```
 
-2. **Surface reasoning summaries**: VT Code automatically requests `reasoning.summary = "auto"` for OpenAI reasoning models. Returned summary text is folded into the agent’s normal reasoning output and logs, so no extra toggle is required.
+2. **Surface reasoning summaries**: VT Code automatically requests `reasoning.summary = "auto"` for OpenAI reasoning models. Returned provider-marked summary text is folded into the agent’s normal reasoning output and logs; raw and continuation-only reasoning remains internal, so no extra toggle is required.
 
 3. **Preserve reasoning items across API calls**: VT Code keeps continuity in two ways. It stores `previous_response_id` for OpenAI, OpenAI-compatible Responses sessions, and OpenResponses sessions, and it also preserves structured reasoning items in assistant `reasoning_details` so tool loops can replay them when the next request is built. That matches OpenAI’s guidance to pass `previous_response_id` or reinsert reasoning items explicitly.
 
@@ -56,7 +56,7 @@ VT Code's default OpenAI profile keeps `gpt-5.5` on a compact execution contract
 
 8. **OpenAI-only non-image file inputs**: VT Code upgrades local non-image file refs such as `@report.pdf` and `@"Quarterly Deck.pptx"` into structured file attachments only for native OpenAI Responses sessions on `api.openai.com`. Remote external document URLs such as `@https://example.com/letter.pdf` are elevated to structured `file_url` inputs on that same path only. ChatGPT subscription sessions, OpenAI-compatible endpoints, and other providers keep non-image `@file` refs as plain text plus file-reference metadata so the agent can resolve the path and read it with tools.
 
-9. **Assistant phase continuity**: VT Code preserves assistant phase metadata on official OpenAI Responses replays, including native `api.openai.com` requests and ChatGPT-backed manual history replays, when the target GPT model supports it. Interim preambles and progress updates are sent as `commentary`; completed answers are sent as `final_answer`. The field is omitted for Chat Completions, tool/user items, and non-native OpenAI-compatible endpoints.
+9. **Assistant phase continuity**: VT Code preserves assistant phase metadata on official OpenAI Responses replays, including native `api.openai.com` requests and ChatGPT-backed manual history replays, when the target GPT model supports it. Tool-oriented turns are sent as `commentary`; completed answers are sent as `final_answer`. This protocol metadata does not require a natural-language pre-tool announcement. The field is omitted for Chat Completions, tool/user items, and non-native OpenAI-compatible endpoints.
 
 10. **Reasoning visibility**: When troubleshooting, inspect `.vtcode/logs/trajectory.jsonl` for `reasoning` entries and correlate them with the configured `reasoning_effort`.
 

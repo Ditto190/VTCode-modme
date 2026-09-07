@@ -3,7 +3,8 @@ use serde_json::{Value, json};
 use crate::error_display;
 use crate::provider::{LLMError, LLMProvider, LLMRequest, MessageRole};
 use crate::providers::common::{
-    assistant_interleaved_history_text, normalize_reasoning_detail_objects, serialize_message_content_openai_for_role,
+    assistant_interleaved_history_text, collect_history_system_directives, merge_system_prompt_with_history_directives,
+    normalize_reasoning_detail_objects, serialize_message_content_openai_for_role,
 };
 use crate::rig_adapter::RigProviderCapabilities;
 use vtcode_config::models::Provider;
@@ -15,14 +16,20 @@ impl OpenRouterProvider {
         let resolved_model = self.resolve_model(request);
         let mut messages = Vec::new();
 
-        if let Some(system_prompt) = &request.system_prompt {
+        let history_system_directives = collect_history_system_directives(request);
+        let system_prompt = merge_system_prompt_with_history_directives(
+            request.system_prompt.as_deref(),
+            &history_system_directives,
+            "[History Directives]",
+        );
+        if let Some(system_prompt) = system_prompt {
             messages.push(json!({
                 "role": vtcode_config::constants::message_roles::SYSTEM,
                 "content": system_prompt
             }));
         }
 
-        for msg in request.messages.iter() {
+        for msg in request.messages.iter().filter(|msg| msg.role != MessageRole::System) {
             let role = msg.role.as_openai_str();
             let content_value = assistant_interleaved_history_text(msg, resolved_model)
                 .map(Value::String)
@@ -152,6 +159,7 @@ mod tests {
     use crate::provider::{LLMRequest, Message};
     use crate::providers::common::{is_minimax_m2_model, normalize_reasoning_detail_object};
     use serde_json::json;
+    use std::sync::Arc;
 
     #[test]
     fn openrouter_minimax_model_detection_handles_variants() {
@@ -187,6 +195,36 @@ mod tests {
         let messages = payload["messages"].as_array().expect("messages should be present");
 
         assert_eq!(messages[0]["content"], json!("<think>trace</think>done"));
+    }
+
+    #[test]
+    fn openrouter_payload_hoists_history_system_directives_before_user_history() {
+        let provider = OpenRouterProvider::new("test-key".to_string());
+        let request = LLMRequest {
+            system_prompt: Some(Arc::from("base instructions")),
+            messages: vec![
+                Message::user("first".to_string()),
+                Message::turn_scoped_system("Only you see the latest output".to_string()),
+                Message::user("second".to_string()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+
+        let payload = provider
+            .convert_to_openrouter_format(&request)
+            .expect("payload should serialize");
+        let messages = payload["messages"].as_array().expect("messages should be present");
+
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(
+            messages[0]["content"],
+            "base instructions\n[History Directives]\n- Only you see the latest output\n"
+        );
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "first");
+        assert_eq!(messages[2]["content"], "second");
+        assert!(messages.iter().skip(1).all(|message| message["role"] != "system"));
     }
 
     #[test]

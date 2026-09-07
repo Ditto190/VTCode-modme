@@ -15,12 +15,12 @@ policy, schemas, tests, or lints.
 
 ## User-facing progress contract
 
-For non-trivial or tool-using work, the compiled guidance asks the model to
-announce the next phase in one brief line before its first tool call. During
-long or multi-step work it should post one or two concise sentences only when
-the phase or next action changes, then close with a standalone recap of what it
-found, changed, and verified, plus what comes next. These are user-facing
-status updates, not a transcript of every call or hidden chain-of-thought.
+For non-trivial or tool-using work, the compiled guidance allows concise
+model-authored progress updates when they materially help. The model can post
+one or two sentences when the phase or next action changes, then close with a
+standalone recap of what it found, changed, and verified, plus what comes next.
+Structured tool-call events remain the authoritative status signal. These are
+user-facing updates, not a transcript of every call or hidden chain-of-thought.
 
 Compact transcript mode may collapse successful command bodies while retaining
 complete output in Transcript Review. The model must not rerun commands merely

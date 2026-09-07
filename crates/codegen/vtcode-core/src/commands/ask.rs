@@ -113,7 +113,7 @@ mod tests {
     use crate::llm::collect_single_response;
     use crate::llm::provider::{
         FinishReason, LLMError, LLMNormalizedStream, LLMProvider, LLMResponse, LLMStream, LLMStreamEvent,
-        NormalizedStreamEvent, Usage,
+        NormalizedStreamEvent, ReasoningSource, Usage,
     };
     use async_trait::async_trait;
     use futures::stream;
@@ -214,7 +214,10 @@ mod tests {
         async fn stream_normalized(&self, _request: LLMRequest) -> Result<LLMNormalizedStream, LLMError> {
             Ok(Box::pin(stream::iter(vec![
                 Ok(NormalizedStreamEvent::TextDelta { delta: "hello ".to_string() }),
-                Ok(NormalizedStreamEvent::ReasoningDelta { delta: "thinking ".to_string() }),
+                Ok(NormalizedStreamEvent::ReasoningDelta {
+                    delta: "thinking ".to_string(),
+                    source: ReasoningSource::ProviderSummary,
+                }),
                 Ok(NormalizedStreamEvent::Usage {
                     usage: Usage {
                         prompt_tokens: 10,

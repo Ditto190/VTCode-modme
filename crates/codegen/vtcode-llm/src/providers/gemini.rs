@@ -14,8 +14,8 @@ use self::wire::{FunctionCallingConfig, FunctionResponse};
 use crate::client::LLMClient;
 use crate::error_display;
 use crate::provider::{
-    FinishReason, FunctionCall, LLMError, LLMProvider, LLMRequest, LLMResponse, LLMStream, LLMStreamEvent, Message,
-    MessageRole, ToolCall, ToolChoice,
+    FinishReason, FunctionCall, LLMError, LLMNormalizedStream, LLMProvider, LLMRequest, LLMResponse, LLMStream,
+    LLMStreamEvent, Message, MessageRole, NormalizedStreamEvent, ReasoningSource, ToolCall, ToolChoice,
 };
 use async_stream::try_stream;
 use async_trait::async_trait;

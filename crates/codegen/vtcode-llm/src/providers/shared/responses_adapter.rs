@@ -5,7 +5,7 @@
 //! the native OpenAI provider. Request construction, HTTP clients, replay, and
 //! ChatGPT-specific policy live in `vtcode-llm::providers::openai`.
 
-use crate::provider::LLMError;
+use crate::provider::{LLMError, ReasoningSource};
 use crate::providers::shared::StreamAssemblyError;
 use rig::providers::openai::responses_api::Output as RigResponsesOutput;
 use rig::providers::openai::responses_api::streaming::{
@@ -28,6 +28,7 @@ pub(crate) enum ResponsesStreamEvent {
     },
     ReasoningDelta {
         delta: String,
+        source: ReasoningSource,
     },
     FunctionCallNameDelta {
         call_id: String,
@@ -182,11 +183,15 @@ impl ResponsesStreamAdapter {
                         Ok(ResponsesStreamEvent::RefusalDelta { delta: delta.delta })
                     }
                     RigResponsesItemChunkKind::ReasoningSummaryTextDelta(delta) => {
-                        Ok(ResponsesStreamEvent::ReasoningDelta { delta: delta.delta })
+                        Ok(ResponsesStreamEvent::ReasoningDelta {
+                            delta: delta.delta,
+                            source: ReasoningSource::ProviderSummary,
+                        })
                     }
-                    RigResponsesItemChunkKind::ReasoningTextDelta(delta) => {
-                        Ok(ResponsesStreamEvent::ReasoningDelta { delta: delta.delta })
-                    }
+                    RigResponsesItemChunkKind::ReasoningTextDelta(delta) => Ok(ResponsesStreamEvent::ReasoningDelta {
+                        delta: delta.delta,
+                        source: ReasoningSource::Continuation,
+                    }),
                     RigResponsesItemChunkKind::OutputItemAdded(output) => {
                         adapt_output_item(provider_name, output.item, output_index, true, raw_data)
                     }
@@ -398,13 +403,14 @@ fn adapt_overlay_conversion(provider_name: &str, payload: &Value) -> Result<Resp
         Some("response.reasoning_text.delta") | Some("response.reasoning_content.delta") => {
             Ok(ResponsesStreamEvent::ReasoningDelta {
                 delta: required_string_field(provider_name, payload, "delta")?,
+                source: ReasoningSource::Continuation,
             })
         }
         Some("response.reasoning_text.done") => {
             let text = optional_string_field(provider_name, payload, "text")?;
             let delta = optional_string_field(provider_name, payload, "delta")?;
             if let Some(text) = text.or(delta) {
-                Ok(ResponsesStreamEvent::ReasoningDelta { delta: text })
+                Ok(ResponsesStreamEvent::ReasoningDelta { delta: text, source: ReasoningSource::Continuation })
             } else {
                 Ok(ResponsesStreamEvent::Unknown)
             }
@@ -523,6 +529,7 @@ fn response_error_message(payload: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{ResponsesLifecycleEvent, ResponsesStreamAdapter, ResponsesStreamEvent};
+    use crate::provider::ReasoningSource;
     use serde_json::{Value, json};
 
     fn event_fixture(payload: Value) -> ResponsesStreamEvent {
@@ -1111,7 +1118,10 @@ mod tests {
                 "output_index": 0,
                 "delta": "private chain summary"
             })),
-            ResponsesStreamEvent::ReasoningDelta { delta: "private chain summary".to_string() }
+            ResponsesStreamEvent::ReasoningDelta {
+                delta: "private chain summary".to_string(),
+                source: ReasoningSource::Continuation,
+            }
         );
 
         assert_eq!(
@@ -1122,7 +1132,10 @@ mod tests {
                 "output_index": 0,
                 "delta": "provider reasoning content"
             })),
-            ResponsesStreamEvent::ReasoningDelta { delta: "provider reasoning content".to_string() }
+            ResponsesStreamEvent::ReasoningDelta {
+                delta: "provider reasoning content".to_string(),
+                source: ReasoningSource::Continuation,
+            }
         );
 
         assert_eq!(
@@ -1143,7 +1156,10 @@ mod tests {
                 "output_index": 0,
                 "text": "final reasoning text"
             })),
-            ResponsesStreamEvent::ReasoningDelta { delta: "final reasoning text".to_string() }
+            ResponsesStreamEvent::ReasoningDelta {
+                delta: "final reasoning text".to_string(),
+                source: ReasoningSource::Continuation,
+            }
         );
     }
 
@@ -1230,7 +1246,10 @@ mod tests {
                 "sequence_number": 3,
                 "delta": "thinking"
             })),
-            ResponsesStreamEvent::ReasoningDelta { delta: "thinking".to_string() }
+            ResponsesStreamEvent::ReasoningDelta {
+                delta: "thinking".to_string(),
+                source: ReasoningSource::ProviderSummary,
+            }
         );
 
         let completed = event_fixture(json!({

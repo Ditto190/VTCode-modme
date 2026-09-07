@@ -90,6 +90,20 @@ fn test_all_themes_have_readable_foreground_and_accents() {
 }
 
 #[test]
+fn reasoning_style_is_dimmed_and_italicized() {
+    let accessibility = ColorAccessibilityConfig::default();
+    for definition in all_theme_definitions().values() {
+        let effects = definition
+            .palette
+            .build_styles_with_accessibility(&accessibility)
+            .reasoning
+            .get_effects();
+        assert!(effects.contains(anstyle::Effects::DIMMED), "theme={} reasoning should be dimmed", definition.id);
+        assert!(effects.contains(anstyle::Effects::ITALIC), "theme={} reasoning should be italic", definition.id);
+    }
+}
+
+#[test]
 fn test_all_themes_error_accent_meets_contrast() {
     // The error/alert token backs the Blocked header badge and error copy, so
     // it must meet the WCAG AA contrast floor against the background in every

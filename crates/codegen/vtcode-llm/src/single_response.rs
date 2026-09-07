@@ -28,7 +28,10 @@ pub async fn collect_single_response(
     while let Some(event) = stream.next().await {
         match event? {
             NormalizedStreamEvent::TextDelta { delta } => streamed_content.push_str(&delta),
-            NormalizedStreamEvent::ReasoningDelta { delta } => streamed_reasoning.push_str(&delta),
+            NormalizedStreamEvent::ReasoningDelta { delta, source } if source.is_public_summary() => {
+                streamed_reasoning.push_str(&delta)
+            }
+            NormalizedStreamEvent::ReasoningDelta { .. } => {}
             NormalizedStreamEvent::ReasoningStage { .. } => {}
             NormalizedStreamEvent::ToolCallStart { .. } | NormalizedStreamEvent::ToolCallDelta { .. } => {}
             NormalizedStreamEvent::Usage { usage } => streamed_usage = Some(usage),
