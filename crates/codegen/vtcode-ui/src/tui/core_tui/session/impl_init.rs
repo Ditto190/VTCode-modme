@@ -113,7 +113,6 @@ impl Session {
             evicted_message_count: 0,
             pending_new_messages: 0,
             should_exit: false,
-            last_interrupt_press: None,
             scroll_cursor_steady_until: None,
             last_shimmer_active: false,
             view_rows: resolved_rows,
@@ -204,9 +203,6 @@ impl Session {
 
             // --- Streaming State ---
             is_streaming_final_answer: false,
-
-            // --- Double-Esc Detection ---
-            last_esc_press: None,
         };
         session.ensure_prompt_style_color();
         session

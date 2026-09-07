@@ -4,12 +4,13 @@ use tokio::sync::Notify;
 
 use crate::agent::runloop::unified::state::{CtrlCSignal, CtrlCState};
 
-/// Request a local stop by setting the Ctrl+C state and notifying waiters.
+/// Request a stop through the Ctrl+C state machine and notify waiters.
 ///
 /// # Priority Guarantee
 ///
-/// This function is called from both the signal handler (SIGINT) and the TUI
-/// interrupt handler (Ctrl+C key in raw mode). It ensures that:
+/// This function is used by OS signal handling and explicit stop commands
+/// whose double-press exit semantics are intentional. TUI key callbacks must
+/// use [`request_local_cancel`] instead. It ensures that:
 ///
 /// 1. The CtrlCState is atomically set to CancelRequested or ExitRequested
 /// 2. At least one waiter is notified (using notify_one to store a permit)
@@ -31,4 +32,10 @@ pub(crate) fn request_local_stop(ctrl_c_state: &Arc<CtrlCState>, ctrl_c_notify: 
     // This ensures the notification is not lost when no task is waiting.
     ctrl_c_notify.notify_one();
     signal
+}
+
+/// Request cancellation from a TUI key without enabling double-press exit.
+pub(crate) fn request_local_cancel(ctrl_c_state: &Arc<CtrlCState>, ctrl_c_notify: &Arc<Notify>) {
+    ctrl_c_state.request_local_cancel();
+    ctrl_c_notify.notify_one();
 }

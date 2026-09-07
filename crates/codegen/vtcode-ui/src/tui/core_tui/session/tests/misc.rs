@@ -364,6 +364,8 @@ fn blocked_state_persists_status_for_direct_left_status_readers() {
     session.handle_command(InlineCommand::SetActivityState(ActivityState::Blocked));
 
     assert!(session.input_enabled(), "blocked state must keep input enabled");
+    assert!(!session.is_running_activity(), "blocked state must not look like an active turn");
+    assert!(!session.has_status_spinner(), "blocked state must not animate as active work");
     let left = session
         .input_status_left
         .as_deref()

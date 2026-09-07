@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::agent::runloop::model_picker::ModelPickerState;
 use crate::agent::runloop::slash_commands::ThemePaletteMode;
@@ -811,7 +810,7 @@ async fn single_ctrl_c_returns_continue_from_tui() {
     let mut prefer_latest_once = false;
     let mut queue = InlineQueueState::new(&handle, &mut queued_inputs, &mut prefer_latest_once);
 
-    // Single Ctrl+C: request_local_stop() sets CancelRequested.
+    // A TUI interrupt uses the cancellation-only local path.
     // handle_interrupt() returns Continue (cancel, not exit).
     let action = context
         .process_event(InlineEvent::Interrupt, &mut queue)
@@ -822,7 +821,7 @@ async fn single_ctrl_c_returns_continue_from_tui() {
 }
 
 #[tokio::test]
-async fn double_ctrl_c_returns_exit_from_tui() {
+async fn repeated_tui_interrupts_only_cancel_the_current_turn() {
     let (handle, mut renderer) = renderer_with_handle();
     let (ctrl_c_state, ctrl_c_notify) = ctrl_c_handles();
     let interrupts = InlineInterruptCoordinator::new(ctrl_c_state.as_ref());
@@ -864,19 +863,19 @@ async fn double_ctrl_c_returns_exit_from_tui() {
     let mut prefer_latest_once = false;
     let mut queue = InlineQueueState::new(&handle, &mut queued_inputs, &mut prefer_latest_once);
 
-    // First Ctrl+C: sets CancelRequested.
-    let _ = ctrl_c_state.register_signal();
-    // Simulate the turn loop handling the cancel (CancelRequested -> ExitArmed).
-    ctrl_c_state.mark_cancel_handled();
-    std::thread::sleep(Duration::from_millis(250));
-
-    // Second Ctrl+C: register_signal() escalates to ExitRequested.
-    // handle_interrupt() detects is_exit_requested() and returns Exit.
-    let action = context
+    let first_action = context
         .process_event(InlineEvent::Interrupt, &mut queue)
         .await
-        .expect("process interrupt");
-    assert!(matches!(action, InlineLoopAction::Exit(_)));
+        .expect("process first interrupt");
+    let second_action = context
+        .process_event(InlineEvent::Interrupt, &mut queue)
+        .await
+        .expect("process second interrupt");
+
+    assert!(matches!(first_action, InlineLoopAction::Continue));
+    assert!(matches!(second_action, InlineLoopAction::Continue));
+    assert!(ctrl_c_state.is_cancel_requested());
+    assert!(!ctrl_c_state.is_exit_requested());
 }
 
 #[tokio::test]

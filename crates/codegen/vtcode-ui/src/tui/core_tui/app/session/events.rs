@@ -2,7 +2,6 @@ use super::*;
 use ratatui::crossterm::event::KeyModifiers;
 use ratatui_cheese::input::InputState;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::super::types::{
     ContentPart, DiffPreviewMode, InlineTextStyle, TransientEvent, TransientSelectionChange, TransientSubmission,
@@ -638,18 +637,6 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
-            let now = Instant::now();
-            if session
-                .core
-                .last_interrupt_press
-                .is_some_and(|last| now.duration_since(last).as_millis() < 1_000)
-            {
-                session.core.last_interrupt_press = None;
-                session.request_exit();
-                session.mark_dirty();
-                return Some(InlineEvent::Exit);
-            }
-            session.core.last_interrupt_press = Some(now);
             if session.has_active_overlay() {
                 session.close_overlay();
             }
@@ -662,18 +649,6 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
-            let now = Instant::now();
-            if session
-                .core
-                .last_interrupt_press
-                .is_some_and(|last| now.duration_since(last).as_millis() < 1_000)
-            {
-                session.core.last_interrupt_press = None;
-                session.request_exit();
-                session.mark_dirty();
-                return Some(InlineEvent::Exit);
-            }
-            session.core.last_interrupt_press = Some(now);
             if session.has_active_overlay() {
                 session.close_overlay();
             }
@@ -807,37 +782,21 @@ pub(super) fn process_key_with_clipboard_image_reader(
         }
         KeyCode::Esc => {
             if session.has_active_overlay() {
-                session.core.last_esc_press = None;
                 session.close_overlay();
                 None
             } else if session.is_running_activity() || session.active_pty_session_count() > 0 {
-                session.core.last_esc_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Interrupt)
             } else if !session.core.input_manager.content().is_empty() {
                 // Escape with content: clear input
-                session.core.last_esc_press = None;
                 session
                     .core
                     .handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
                 session.mark_dirty();
                 None
             } else {
-                // Escape with no content: detect double-Esc for rewind
-                let now = Instant::now();
-                let is_double_esc = session
-                    .core
-                    .last_esc_press
-                    .is_some_and(|last| now.duration_since(last).as_millis() < 500);
-                if is_double_esc {
-                    session.core.last_esc_press = None;
-                    session.mark_dirty();
-                    Some(InlineEvent::Submit("/rewind".into()))
-                } else {
-                    session.core.last_esc_press = Some(now);
-                    session.mark_dirty();
-                    Some(InlineEvent::Cancel)
-                }
+                session.mark_dirty();
+                Some(InlineEvent::Cancel)
             }
         }
         KeyCode::PageUp => {
@@ -1585,13 +1544,14 @@ fn handle_running_slash_command_block_for_input(session: &mut Session, input: &s
         return false;
     };
 
-    // Building, recovery, and blocked states keep the composer available for
-    // follow-up input, but they still own the primary-agent/planning boundary.
-    // Those states may not report a spinner, so check the authoritative lock
-    // before allowing an explicit mode command through.
+    // Building and recovery keep the composer available for follow-up input,
+    // but they still own the primary-agent/planning boundary. A blocked turn
+    // is quiescent, so every explicit slash command remains available for
+    // recovery or user-directed changes.
+    let is_blocked = matches!(session.core.activity_state, vtcode_commons::ui_protocol::ActivityState::Blocked);
     let is_mode_switch = matches!(command_name, "mode" | "plan");
-    let command_is_locked =
-        session.is_running_activity() || (session.core.activity_state.locks_mode_switch() && is_mode_switch);
+    let command_is_locked = !is_blocked
+        && (session.is_running_activity() || (session.core.activity_state.locks_mode_switch() && is_mode_switch));
     if !command_is_locked {
         return false;
     }
@@ -1976,7 +1936,6 @@ mod tests {
         for state in [
             vtcode_commons::ui_protocol::ActivityState::Building,
             vtcode_commons::ui_protocol::ActivityState::Recovery,
-            vtcode_commons::ui_protocol::ActivityState::Blocked,
         ] {
             for input in ["/mode", "/mode build", "/plan", "/plan on"] {
                 let mut session = build_session();
@@ -1987,6 +1946,29 @@ mod tests {
                     "{input} must stay locked in {state:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn blocked_activity_allows_explicit_slash_commands() {
+        for input in [
+            "/mode",
+            "/mode build",
+            "/plan",
+            "/status",
+            "/effort high",
+            "/clear",
+            "/exit",
+        ] {
+            let mut session = build_session();
+            session.core.handle_command(CoreInlineCommand::SetActivityState(
+                vtcode_commons::ui_protocol::ActivityState::Blocked,
+            ));
+
+            assert!(
+                !handle_running_slash_command_block_for_input(&mut session, input),
+                "{input} must be accepted while the turn is blocked"
+            );
         }
     }
 
@@ -2211,6 +2193,30 @@ mod tests {
             session.process_key(KeyEvent::new(KeyCode::Char('\u{4}'), KeyModifiers::NONE)),
             Some(InlineEvent::Exit)
         ));
+    }
+
+    #[test]
+    fn repeated_tui_interrupts_do_not_exit_the_app_session() {
+        let mut session = build_session();
+
+        for key in [
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('\u{3}'), KeyModifiers::NONE),
+        ] {
+            assert!(matches!(session.process_key(key), Some(InlineEvent::Interrupt)));
+        }
+    }
+
+    #[test]
+    fn repeated_idle_escape_only_cancels_in_the_app_session() {
+        let mut session = build_session();
+
+        for _ in 0..3 {
+            assert!(matches!(
+                session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                Some(InlineEvent::Cancel)
+            ));
+        }
     }
 
     #[test]

@@ -190,18 +190,6 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
                 .line(MessageStyle::Info, &format!("  • Blocker details: {}", artifacts.current_path.display()));
 
             if let Some(handle) = handle {
-                use std::sync::Arc;
-                use vtcode_ui::tui::app::{InlineMessageKind, InlineSegment, InlineTextStyle};
-                let text_style = Arc::new(InlineTextStyle::default());
-                let line = |text: String| vec![InlineSegment { text, style: text_style.clone() }];
-                handle.append_line(InlineMessageKind::Warning, line(format!("Turn blocked: {transcript_reason}")));
-                handle.append_line(
-                    InlineMessageKind::Info,
-                    line(format!(
-                        "What you can do: Type 'continue' to resume, describe alternative instructions, or run \
-                         `vtcode --resume {session_id}`; details: .vtcode/tasks/current_blocked.md"
-                    )),
-                );
                 handle.set_activity_state(vtcode_commons::ui_protocol::ActivityState::Blocked);
             }
 

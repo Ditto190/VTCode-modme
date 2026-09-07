@@ -956,6 +956,15 @@ impl CtrlCState {
         CtrlCSignal::Cancel
     }
 
+    /// Request cancellation from the local TUI without arming the emergency
+    /// double-signal exit path used by the OS signal handler.
+    pub(crate) fn request_local_cancel(&self) {
+        if !matches!(self.phase(), CtrlCPhase::ExitRequested) {
+            self.set_phase(CtrlCPhase::CancelRequested);
+        }
+        self.last_signal_time.store(0, Ordering::SeqCst);
+    }
+
     pub(crate) fn reset(&self) {
         self.set_phase(CtrlCPhase::Idle);
         self.last_signal_time.store(0, Ordering::SeqCst);
@@ -1569,6 +1578,18 @@ mod tests {
         // Next Ctrl+C should exit
         assert!(matches!(state.register_signal(), CtrlCSignal::Exit));
         assert!(state.is_exit_requested());
+    }
+
+    #[test]
+    fn ctrl_c_state_local_cancel_does_not_arm_exit_window() {
+        let state = CtrlCState::new();
+
+        assert!(matches!(state.register_signal(), CtrlCSignal::Cancel));
+        state.mark_cancel_handled();
+        state.request_local_cancel();
+
+        assert!(state.is_cancel_requested());
+        assert!(!state.is_exit_requested());
     }
 
     #[test]

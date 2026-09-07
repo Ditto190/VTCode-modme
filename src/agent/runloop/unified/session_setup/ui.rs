@@ -19,7 +19,7 @@ use crate::agent::runloop::ResumeSession;
 use crate::agent::runloop::unified::reasoning::{model_supports_reasoning, resolve_reasoning_visibility};
 use crate::agent::runloop::unified::session_setup::ide_context::IdeContextBridge;
 use crate::agent::runloop::unified::session_setup::spawn_editor_open_coordinator;
-use crate::agent::runloop::unified::stop_requests::request_local_stop;
+use crate::agent::runloop::unified::stop_requests::request_local_cancel;
 use crate::agent::runloop::unified::turn::utils::{append_additional_context, render_hook_messages};
 use crate::agent::runloop::unified::{context_manager, state};
 use anyhow::{Context, Result};
@@ -84,6 +84,39 @@ pub(crate) struct SessionUiLaunchOptions {
     pub full_auto: bool,
     pub skip_confirmations: bool,
     pub steering_sender: Option<UnboundedSender<SteeringMessage>>,
+}
+
+fn build_session_event_callback(
+    state: Arc<state::CtrlCState>,
+    notify: Arc<Notify>,
+    steering_sender: Option<UnboundedSender<SteeringMessage>>,
+) -> InlineEventCallback {
+    Arc::new(move |event: &InlineEvent| match event {
+        InlineEvent::Interrupt => {
+            // Esc / Ctrl+C from the TUI must cancel the current turn without
+            // entering the emergency double-signal exit state machine used by
+            // the OS signal handler.
+            request_local_cancel(&state, &notify);
+        }
+        InlineEvent::Pause => {
+            if let Some(sender) = steering_sender.as_ref() {
+                let _ = sender.send(SteeringMessage::Pause);
+            }
+        }
+        InlineEvent::Resume => {
+            if let Some(sender) = steering_sender.as_ref() {
+                let _ = sender.send(SteeringMessage::Resume);
+            }
+        }
+        InlineEvent::Steer(input) => {
+            if !input.has_attachments()
+                && let Some(sender) = steering_sender.as_ref()
+            {
+                let _ = sender.send(SteeringMessage::FollowUpInput(input.text.clone()));
+            }
+        }
+        _ => {}
+    })
 }
 
 pub(crate) async fn initialize_session_ui(
@@ -157,39 +190,7 @@ pub(crate) async fn initialize_session_ui(
     let ctrl_c_state = Arc::new(state::CtrlCState::new());
     let ctrl_c_notify = Arc::new(Notify::new());
     let input_activity_counter = Arc::new(AtomicU64::new(0));
-    let interrupt_callback: InlineEventCallback = {
-        let state = ctrl_c_state.clone();
-        let notify = ctrl_c_notify.clone();
-        let steering_sender = steering_sender.clone();
-        Arc::new(move |event: &InlineEvent| match event {
-            InlineEvent::Interrupt => {
-                // Esc / Ctrl+C from the TUI cancels the current turn via
-                // `request_local_stop()`.  Do NOT call `state.reset()` first;
-                // `register_signal()` manages the Idle -> CancelRequested ->
-                // ExitArmed -> ExitRequested progression and the 200ms debounce
-                // prevents accidental double-tap escalation.
-                let _ = request_local_stop(&state, &notify);
-            }
-            InlineEvent::Pause => {
-                if let Some(sender) = steering_sender.as_ref() {
-                    let _ = sender.send(SteeringMessage::Pause);
-                }
-            }
-            InlineEvent::Resume => {
-                if let Some(sender) = steering_sender.as_ref() {
-                    let _ = sender.send(SteeringMessage::Resume);
-                }
-            }
-            InlineEvent::Steer(input) => {
-                if !input.has_attachments()
-                    && let Some(sender) = steering_sender.as_ref()
-                {
-                    let _ = sender.send(SteeringMessage::FollowUpInput(input.text.clone()));
-                }
-            }
-            _ => {}
-        })
-    };
+    let interrupt_callback = build_session_event_callback(ctrl_c_state.clone(), ctrl_c_notify.clone(), steering_sender);
     let focus_callback: FocusChangeCallback = Arc::new(set_global_terminal_focused);
 
     let pty_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));

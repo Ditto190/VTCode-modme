@@ -32,7 +32,7 @@ impl<'a, 'state> InlineControlProcessor<'a, 'state> {
         self.state.reset_interrupt_state();
         self.state
             .renderer()
-            .line(MessageStyle::Status, "⚠ Force-cancelling active PTY session (double-escape detected)")?;
+            .line(MessageStyle::Status, "Force-cancelling active PTY session.")?;
         Ok(InlineLoopAction::Continue)
     }
 }

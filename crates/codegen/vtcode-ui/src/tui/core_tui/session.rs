@@ -248,7 +248,6 @@ pub struct Session {
     /// away from the live bottom edge.
     pub(crate) pending_new_messages: usize,
     should_exit: bool,
-    pub(crate) last_interrupt_press: Option<Instant>,
     scroll_cursor_steady_until: Option<Instant>,
     last_shimmer_active: bool,
     view_rows: u16,
@@ -352,10 +351,6 @@ pub struct Session {
     /// When true, user input should be queued instead of submitted immediately
     /// to prevent race conditions with turn completion (see GitHub #12569).
     is_streaming_final_answer: bool,
-
-    // --- Double-Esc Detection ---
-    /// Timestamp of the last Escape key press for double-Esc detection.
-    pub(crate) last_esc_press: Option<Instant>,
 }
 
 /// Per-session index of thinking/reasoning (`Policy`) runs.

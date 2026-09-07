@@ -15,8 +15,8 @@ use ratatui::layout::Rect;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::super::types::{
-    InlineEvent, InlineListSelection, ListOverlayRequest, LocalAgentEntry, LocalAgentKind, ModalOverlayRequest,
-    OverlayRequest, WizardOverlayRequest,
+    ActivityState, InlineEvent, InlineListSelection, ListOverlayRequest, LocalAgentEntry, LocalAgentKind,
+    ModalOverlayRequest, OverlayRequest, WizardOverlayRequest,
 };
 use super::mouse_selection::MouseSelectionState;
 use super::reflow::is_info_box_line;
@@ -439,6 +439,11 @@ impl Session {
         if self.activity_state.is_busy() {
             return true;
         }
+        // Blocked keeps a persistent status label containing "blocked", but
+        // it is waiting for user input rather than running a turn.
+        if matches!(self.activity_state, ActivityState::Blocked) {
+            return false;
+        }
         let running_status =
             self.appearance.should_animate_progress_status() && status_requires_shimmer(self.animation_status_text());
         let active_pty = self.active_pty_session_count() > 0;
@@ -459,6 +464,11 @@ impl Session {
     pub(crate) fn has_status_spinner(&self) -> bool {
         if self.activity_state.is_busy() {
             return true;
+        }
+        // Do not let the persistent blocked label trigger the generic shimmer
+        // detector; a blocked turn is quiescent and commandable.
+        if matches!(self.activity_state, ActivityState::Blocked) {
+            return false;
         }
         if !self.appearance.should_animate_progress_status() {
             return false;

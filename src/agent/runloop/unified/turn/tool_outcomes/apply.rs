@@ -38,7 +38,7 @@ pub(crate) async fn apply_turn_outcome(outcome: TurnLoopOutcome, ctx: TurnOutcom
             }
             ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
             ctx.renderer
-                .line(MessageStyle::Info, "Interrupted current task. Press Esc, Ctrl+C, or /stop again to exit.")?;
+                .line(MessageStyle::Info, "Interrupted current task. Use /exit or Ctrl+D to quit.")?;
             reset_inline_input(
                 ctx.handle,
                 Some(vtcode_config::constants::ui::CHAT_INPUT_PLACEHOLDER_INTERRUPTED.to_owned()),

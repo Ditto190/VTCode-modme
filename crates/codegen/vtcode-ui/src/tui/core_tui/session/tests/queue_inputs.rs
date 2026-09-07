@@ -231,6 +231,16 @@ fn busy_escape_interrupts() {
 }
 
 #[test]
+fn repeated_idle_escape_only_cancels_without_rewind() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+
+    for _ in 0..3 {
+        let event = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(event, Some(InlineEvent::Cancel)));
+    }
+}
+
+#[test]
 fn busy_stop_command_interrupts_immediately() {
     let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
     set_app_session_busy_status(&mut session);

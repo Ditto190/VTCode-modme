@@ -1,5 +1,9 @@
 use super::*;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use tokio::sync::Notify;
 use vtcode_core::persistent_memory::MemoryCleanupStatus;
 
 fn sample_memory_status() -> PersistentMemoryStatus {
@@ -22,6 +26,21 @@ fn sample_memory_status() -> PersistentMemoryStatus {
             suspicious_summary_lines: 0,
         },
     }
+}
+
+#[test]
+fn session_tui_interrupt_callback_only_cancels_after_cancel_is_handled() {
+    let state = Arc::new(state::CtrlCState::new());
+    let notify = Arc::new(Notify::new());
+    let callback = build_session_event_callback(state.clone(), notify, None);
+
+    callback(&InlineEvent::Interrupt);
+    state.mark_cancel_handled();
+    thread::sleep(Duration::from_millis(250));
+    callback(&InlineEvent::Interrupt);
+
+    assert!(state.is_cancel_requested());
+    assert!(!state.is_exit_requested());
 }
 
 #[test]

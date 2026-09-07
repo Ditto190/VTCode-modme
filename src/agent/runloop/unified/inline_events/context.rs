@@ -283,20 +283,11 @@ impl<'a> InlineEventContext<'a> {
 
     fn handle_interrupt(&mut self) -> InlineLoopAction {
         let _ = self.modal.handle_cancel(self.state.renderer());
-        // Esc / Ctrl+C from the TUI.  In raw mode crossterm clears ISIG so
-        // Ctrl+C is a key event, not SIGINT -- the OS signal handler never
-        // fires.  We must call `request_local_stop()` so the turn loop
-        // detects the interruption.
-        //
-        // Single Ctrl+C -> CancelRequested -> cancel the current turn.
-        // Double Ctrl+C -> ExitRequested  -> exit the program.
-        //
-        // `register_signal()` applies a 200ms debounce so an accidental
-        // double-tap cannot escalate past CancelRequested.
-        crate::agent::runloop::unified::stop_requests::request_local_stop(self.ctrl_c_state, self.ctrl_c_notify);
-        if self.ctrl_c_state.is_exit_requested() {
-            return InlineLoopAction::Exit(vtcode_core::hooks::SessionEndReason::Exit);
-        }
+        // Esc / Ctrl+C from the TUI is a local cancellation request. In raw
+        // mode crossterm delivers Ctrl+C as a key event, so route it through a
+        // cancellation-only path and reserve emergency double-signal exit for
+        // the OS signal handler.
+        crate::agent::runloop::unified::stop_requests::request_local_cancel(self.ctrl_c_state, self.ctrl_c_notify);
         InlineLoopAction::Continue
     }
 

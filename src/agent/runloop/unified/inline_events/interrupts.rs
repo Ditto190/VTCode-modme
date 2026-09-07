@@ -60,10 +60,7 @@ impl<'a> InlineInterruptCoordinator<'a> {
         queue: &mut InlineQueueState<'_>,
     ) -> Result<()> {
         renderer.line_if_not_empty(MessageStyle::Output)?;
-        renderer.line(
-            MessageStyle::Info,
-            "Interrupt received. Stopping task... (Press Esc, Ctrl+C, or /stop again within 1s to exit)",
-        )?;
+        renderer.line(MessageStyle::Info, "Interrupt received. Stopping task...")?;
         reset_inline_input(handle, Some(vtcode_config::constants::ui::CHAT_INPUT_PLACEHOLDER_INTERRUPTED.to_owned()));
         queue.clear();
         Ok(())

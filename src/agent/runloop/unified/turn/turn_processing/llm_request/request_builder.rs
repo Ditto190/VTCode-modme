@@ -140,15 +140,14 @@ pub(super) async fn build_turn_request(
         None
     };
     let reasoning_effort = reasoning_effort
-        .map(|requested| {
-            vtcode_core::llm::reasoning_effort::ReasoningEffortMapper::resolve(
+        .and_then(|requested| {
+            vtcode_core::llm::reasoning_effort::ReasoningEffortMapper::resolve_or_omit(
                 ctx.provider_client.as_ref(),
                 request_model,
                 requested,
                 ctx.vt_cfg.is_some_and(|cfg| cfg.agent.allow_reasoning_effort_downgrade),
             )
         })
-        .transpose()?
         .map(|mapping| {
             if mapping.degraded() {
                 tracing::warn!(requested = %mapping.requested, effective = %mapping.effective,
@@ -561,6 +560,33 @@ mod tests {
         assert!(system_prompt.contains("do_not_request_more_tools: true"));
         assert!(system_prompt.contains("recovery_reason: loop detector"));
         assert!(!system_prompt.contains("<budget:token_budget>"));
+    }
+
+    #[tokio::test]
+    async fn request_builder_omits_stale_effort_for_unsupported_route() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.set_provider(Box::new(vtcode_core::llm::providers::MinimaxProvider::from_config(
+            Some("offline-fixture".to_string()),
+            Some("MiniMax-M3".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )));
+
+        let mut config = VTCodeConfig::default();
+        config.agent.reasoning_effort = ReasoningEffortLevel::High;
+        let mut ctx = backing.turn_processing_context();
+        ctx.vt_cfg = Some(&config);
+        ctx.working_history.push(uni::Message::user("hello".to_string()));
+
+        let snapshot = capture_turn_request_snapshot(&mut ctx, "MiniMax-M3", false);
+        let built = build_turn_request(&mut ctx, 1, "MiniMax-M3", &snapshot, Some(320), None, false)
+            .await
+            .expect("unsupported persisted effort must not block request assembly");
+
+        assert!(built.request.reasoning_effort.is_none());
     }
 
     #[tokio::test]

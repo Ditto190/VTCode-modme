@@ -55,6 +55,49 @@ impl ReasoningEffortMapper {
         Self::map(requested, supported, allow_downgrade)
     }
 
+    /// Best-effort counterpart to [`Self::resolve`] for session-persistent
+    /// configuration.
+    ///
+    /// A configured effort can outlive the provider/model route that created
+    /// it. Omit an incompatible value for this request so the provider can use
+    /// its own default instead of blocking every subsequent turn.
+    #[must_use]
+    pub fn resolve_or_omit(
+        provider: &dyn LLMProvider,
+        model: &str,
+        requested: ReasoningEffortLevel,
+        allow_downgrade: bool,
+    ) -> Option<ReasoningEffortMapping> {
+        let supported = if let Some(levels) = crate::provider::catalog_reasoning_efforts(provider.name(), model) {
+            levels
+        } else if provider.supports_reasoning_effort(model) {
+            provider.supported_reasoning_efforts(model)
+        } else {
+            &[]
+        };
+        Self::map_or_omit(requested, supported, allow_downgrade)
+    }
+
+    /// Route-free variant for callers that already hold the supported levels.
+    #[must_use]
+    pub(crate) fn map_or_omit(
+        requested: ReasoningEffortLevel,
+        supported: &[&str],
+        allow_downgrade: bool,
+    ) -> Option<ReasoningEffortMapping> {
+        match Self::map(requested, supported, allow_downgrade) {
+            Ok(mapping) => Some(mapping),
+            Err(error) => {
+                tracing::warn!(
+                    requested = %requested,
+                    error = %error,
+                    "Configured reasoning effort is unsupported on this route; omitting it for this request"
+                );
+                None
+            }
+        }
+    }
+
     pub fn map(
         requested: ReasoningEffortLevel,
         supported: &[&str],
@@ -159,6 +202,11 @@ mod tests {
             ReasoningEffortMapper::resolve(&provider, "MiniMax-M3", ReasoningEffortLevel::High, false).is_err(),
             "structured reasoning without catalog effort levels must block configurable effort"
         );
+        assert_eq!(
+            ReasoningEffortMapper::resolve_or_omit(&provider, "MiniMax-M3", ReasoningEffortLevel::High, false),
+            None,
+            "session-persistent effort should be omitted instead of blocking the turn"
+        );
     }
 
     #[test]
@@ -232,5 +280,16 @@ mod tests {
             ReasoningEffortLevel::High
         );
         assert!(ReasoningEffortMapper::map(ReasoningEffortLevel::Unknown, &["high"], true).is_err());
+    }
+
+    #[test]
+    fn lenient_resolution_omits_unsupported_effort_instead_of_failing() {
+        assert_eq!(ReasoningEffortMapper::map_or_omit(ReasoningEffortLevel::Max, &[], false), None);
+        assert_eq!(ReasoningEffortMapper::map_or_omit(ReasoningEffortLevel::Unknown, &["low", "high"], false), None);
+        assert_eq!(
+            ReasoningEffortMapper::map_or_omit(ReasoningEffortLevel::High, &["low", "high"], false)
+                .map(|mapping| mapping.effective),
+            Some(ReasoningEffortLevel::High)
+        );
     }
 }

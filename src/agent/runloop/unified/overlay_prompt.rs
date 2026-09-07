@@ -92,7 +92,7 @@ where
                     target: "vtcode.planning_workflow",
                     "wait_for_overlay_submission: interrupt event"
                 );
-                crate::agent::runloop::unified::stop_requests::request_local_stop(ctrl_c_state, ctrl_c_notify);
+                crate::agent::runloop::unified::stop_requests::request_local_cancel(ctrl_c_state, ctrl_c_notify);
                 close_overlay(handle).await;
                 return Ok(OverlayWaitOutcome::Interrupted);
             }
