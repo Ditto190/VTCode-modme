@@ -248,6 +248,8 @@ pub struct Session {
     /// away from the live bottom edge.
     pub(crate) pending_new_messages: usize,
     should_exit: bool,
+    /// Timestamp of the last Ctrl+C press for double-press exit detection.
+    pub(crate) last_interrupt_press: Option<Instant>,
     scroll_cursor_steady_until: Option<Instant>,
     last_shimmer_active: bool,
     view_rows: u16,

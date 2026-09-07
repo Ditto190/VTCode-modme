@@ -231,6 +231,17 @@ fn busy_escape_interrupts() {
 }
 
 #[test]
+fn repeated_control_c_exits_without_double_escape() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+
+    let first = session.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(matches!(first, Some(InlineEvent::Interrupt)));
+
+    let second = session.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(matches!(second, Some(InlineEvent::Exit)));
+}
+
+#[test]
 fn repeated_idle_escape_only_cancels_without_rewind() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
 

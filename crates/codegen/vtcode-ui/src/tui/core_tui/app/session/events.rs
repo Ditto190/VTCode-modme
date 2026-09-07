@@ -2,6 +2,7 @@ use super::*;
 use ratatui::crossterm::event::KeyModifiers;
 use ratatui_cheese::input::InputState;
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::super::types::{
     ContentPart, DiffPreviewMode, InlineTextStyle, TransientEvent, TransientSelectionChange, TransientSubmission,
@@ -637,6 +638,18 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
+            let now = Instant::now();
+            if session
+                .core
+                .last_interrupt_press
+                .is_some_and(|last| now.duration_since(last).as_millis() < 1_000)
+            {
+                session.core.last_interrupt_press = None;
+                session.request_exit();
+                session.mark_dirty();
+                return Some(InlineEvent::Exit);
+            }
+            session.core.last_interrupt_press = Some(now);
             if session.has_active_overlay() {
                 session.close_overlay();
             }
@@ -649,6 +662,18 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
+            let now = Instant::now();
+            if session
+                .core
+                .last_interrupt_press
+                .is_some_and(|last| now.duration_since(last).as_millis() < 1_000)
+            {
+                session.core.last_interrupt_press = None;
+                session.request_exit();
+                session.mark_dirty();
+                return Some(InlineEvent::Exit);
+            }
+            session.core.last_interrupt_press = Some(now);
             if session.has_active_overlay() {
                 session.close_overlay();
             }
@@ -2196,15 +2221,23 @@ mod tests {
     }
 
     #[test]
-    fn repeated_tui_interrupts_do_not_exit_the_app_session() {
+    fn repeated_tui_ctrl_c_exits_through_the_event_path() {
         let mut session = build_session();
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
 
-        for key in [
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            KeyEvent::new(KeyCode::Char('\u{3}'), KeyModifiers::NONE),
-        ] {
-            assert!(matches!(session.process_key(key), Some(InlineEvent::Interrupt)));
-        }
+        session.handle_event(
+            CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            &events,
+            None,
+        );
+        session.handle_event(
+            CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('\u{3}'), KeyModifiers::NONE)),
+            &events,
+            None,
+        );
+
+        assert!(matches!(received.try_recv(), Ok(InlineEvent::Interrupt)));
+        assert!(matches!(received.try_recv(), Ok(InlineEvent::Exit)));
     }
 
     #[test]
