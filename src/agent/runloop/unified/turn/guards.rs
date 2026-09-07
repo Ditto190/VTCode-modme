@@ -323,7 +323,8 @@ pub(crate) async fn handle_turn_balancer(
 
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
         ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, NAVIGATION_LOOP_THRESHOLD,
-        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
+        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD,
+        PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
     };
 
     // NL2Repo-Bench checks run on every step (no backoff) since they
@@ -390,6 +391,34 @@ pub(crate) async fn handle_turn_balancer(
             .line(
                 MessageStyle::Info,
                 "[!] Planning recovery: tool preview budget exhausted; synthesizing plan from collected evidence.",
+            )
+            .unwrap_or(());
+        ctx.working_history.push(uni::Message::system(recovery_reason));
+        return apply_balancer_recovery(repeated_tool_attempts);
+    }
+
+    // A successful inspection can still be part of a loop: payload-based
+    // low-signal detection quite reasonably treats each non-empty file read as
+    // useful, while the model keeps narrowing into the same area. Planning
+    // gets one bounded convergence checkpoint when that pattern contains even
+    // one repeated request. Diverse research remains below this guard, and the
+    // ordinary navigation-loop guard still handles execution-mode turns.
+    if ctx.is_planning_active()
+        && !repeated_tool_attempts.planning_low_signal_synthesis_triggered
+        && repeated_tool_attempts.consecutive_navigations >= PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD
+        && repeated_tool_attempts.repeated_navigation_count() >= 1
+    {
+        repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+        let recovery_reason = format!(
+            "Planning research reached {} consecutive read/search steps with {} repeated navigation request(s). Tools are disabled on the next pass; synthesize the plan from the evidence already gathered.",
+            repeated_tool_attempts.consecutive_navigations,
+            repeated_tool_attempts.repeated_navigation_count(),
+        );
+        ctx.activate_recovery(recovery_reason.clone());
+        ctx.renderer
+            .line(
+                MessageStyle::Info,
+                "[!] Planning recovery: repeated inspection reached the bounded synthesis checkpoint.",
             )
             .unwrap_or(());
         ctx.working_history.push(uni::Message::system(recovery_reason));
@@ -529,7 +558,7 @@ mod tests {
     use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
         BLIND_EDITING_THRESHOLD, LoopTracker, NAVIGATION_LOOP_THRESHOLD, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD,
-        PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD, update_repetition_tracker,
+        PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD, update_repetition_tracker,
     };
     use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
 
@@ -764,6 +793,104 @@ mod tests {
         assert_eq!(synthesis_messages, 1, "preview-exhaustion synthesis must fire exactly once per turn");
         assert_eq!(tracker.consecutive_low_signal_navigations, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD);
         assert_eq!(tracker.total_low_signal_navigations, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD);
+    }
+
+    #[tokio::test]
+    async fn planning_repeated_successful_inspection_reaches_synthesis_checkpoint() {
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"stdout":"useful source"}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        let calls = [
+            ("ls -la src", None),
+            ("cat src/main.rs", None),
+            ("sed -n '80,140p' src/lib.rs", None),
+            ("cat src/startup.rs", None),
+            ("ls -la src/startup", None),
+            ("find src -name 'startup*' -o -name 'main_helpers*'", None),
+            ("rg -n 'resolve_startup_context' src/", None),
+            ("sed -n '100,220p' src/main_helpers/bootstrap.rs", None),
+            ("rg -n 'from_cli_args' src/startup/mod.rs", None),
+            ("sed -n '278,420p' src/startup/mod.rs", None),
+            ("sed -n '278,340p' src/startup/mod.rs", None),
+            ("sed -n '278,420p' src/startup/mod.rs", Some(8000)),
+        ];
+
+        for (command, max_output_tokens) in calls {
+            let mut args = json!({"cmd": command, "command": command, "action": "run"});
+            if let Some(max_output_tokens) = max_output_tokens {
+                args["max_output_tokens"] = json!(max_output_tokens);
+            }
+            update_repetition_tracker(&mut tracker, &success, tool_names::EXEC_COMMAND, &args);
+        }
+
+        assert_eq!(tracker.consecutive_navigations, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD);
+        assert_eq!(tracker.repeated_navigation_count(), 1);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 12, &mut tracker, 120, 3).await;
+
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert_eq!(tracker.consecutive_navigations, 0);
+        assert!(tracker.planning_low_signal_synthesis_triggered);
+        assert!(
+            ctx.working_history
+                .iter()
+                .any(|message| { message.content.as_text().contains("repeated navigation request") })
+        );
+    }
+
+    #[tokio::test]
+    async fn planning_diverse_inspection_stays_below_synthesis_checkpoint() {
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"stdout":"useful source"}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        let commands = [
+            "ls -la src",
+            "cat src/main.rs",
+            "sed -n '80,140p' src/lib.rs",
+            "cat src/startup.rs",
+            "ls -la src/startup",
+            "find src -name 'startup*' -o -name 'main_helpers*'",
+            "rg -n 'resolve_startup_context' src/",
+            "sed -n '100,220p' src/main_helpers/bootstrap.rs",
+            "rg -n 'from_cli_args' src/startup/mod.rs",
+            "sed -n '278,420p' src/startup/mod.rs",
+            "sed -n '278,340p' src/startup/mod.rs",
+            "cat src/startup/mod.rs",
+        ];
+
+        for command in commands {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tool_names::EXEC_COMMAND,
+                &json!({"cmd": command, "command": command, "action": "run"}),
+            );
+        }
+
+        assert_eq!(tracker.consecutive_navigations, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD);
+        assert_eq!(tracker.repeated_navigation_count(), 0);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 12, &mut tracker, 120, 3).await;
+
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
+        assert_eq!(tracker.consecutive_navigations, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD);
     }
 
     #[tokio::test]

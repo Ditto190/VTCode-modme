@@ -11,6 +11,10 @@ const DENIED_INTERVIEW_PLAN_SYNTHESIS_RETRY_DIRECTIVE: &str = "Planning recovery
 
 const PLAN_PSEUDO_TOOL_CALL_REPROMPT_DIRECTIVE: &str = "Planning: the previous response contained tool-call markup that was not executed — XML tool-call text is not a tool call. If you need more repository evidence, invoke tools through the tool-call channel now. Otherwise present the completed plan as one compact `<proposed_plan>` (Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, short Assumptions). Do not emit XML tool-call markup as text.";
 
+const EXECUTION_PLAN_REJECTION_NOTICE: &str = "The proposed plan was rejected and discarded; no continuation turn was scheduled. Adjust the request or revise the plan to continue.";
+const PLAN_APPROVAL_WAITING_NOTICE: &str = "Plan is awaiting approval. Type `approve`, `implement`, or `yes` to begin execution, or `edit` to revise the plan.";
+const PLAN_APPROVAL_DISMISSED_NOTICE: &str = "Plan review ended without starting implementation. The plan remains available for revision or approval in a later turn.";
+
 /// Detect whether a planning-mode text response is a clarifying question
 /// posed to the user rather than a plan or research prose. The deterministic
 /// interview-denial recovery must NOT force plan synthesis when the model is
@@ -89,17 +93,24 @@ impl<'a> TurnProcessingContext<'a> {
                 error = %error,
                 "execution-mode plan revision rejected"
             );
-            append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
             self.renderer
                 .line(MessageStyle::Warning, &format!("Plan revision rejected: {error}"))?;
             if !plan_text.trim().is_empty() {
                 self.renderer.line(MessageStyle::Info, "Rejected plan revision:")?;
                 self.renderer.line(MessageStyle::Response, plan_text)?;
             }
-            self.renderer.line(
-                MessageStyle::Info,
-                "The proposed plan was rejected and discarded; no continuation turn was scheduled. Adjust the request or revise the plan to continue.",
+            // The rejection is a terminal, user-visible outcome. Publish it
+            // through the assistant-response path as well as the renderer so
+            // finalization does not mistake this completed control-flow turn
+            // for a turn that never produced a final response.
+            self.handle_assistant_response(
+                EXECUTION_PLAN_REJECTION_NOTICE.to_string(),
+                Vec::new(),
+                None,
+                false,
+                Some(uni::AssistantPhase::FinalAnswer),
             )?;
+            append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
             return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false }));
         }
 
@@ -156,7 +167,6 @@ impl<'a> TurnProcessingContext<'a> {
         let message = format!("Plan is not ready for approval: {error}");
         self.renderer.line(MessageStyle::Warning, &message)?;
         tracing::warn!(target: "vtcode.planning_workflow", error = %error, "plan artifact rejected before approval");
-        append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
         // Terminal rejection: the draft is never persisted or shown by the
         // approval flow, so render it here — otherwise the user cannot see
         // what was rejected or revise it manually (checkpoint turn_912).
@@ -168,6 +178,16 @@ impl<'a> TurnProcessingContext<'a> {
             MessageStyle::Warning,
             crate::agent::runloop::unified::planning_workflow_state::PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT,
         )?;
+        self.handle_assistant_response(
+            format!(
+                "The proposed plan was rejected and discarded; no continuation turn was scheduled. Revise the plan or restate the request to continue ({error})."
+            ),
+            Vec::new(),
+            None,
+            false,
+            Some(uni::AssistantPhase::FinalAnswer),
+        )?;
+        append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
         Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false }))
     }
 
@@ -731,7 +751,7 @@ impl<'a> TurnProcessingContext<'a> {
                         "The agent proposed a plan during execution; review it before approving.",
                     )?;
                 }
-                return execute_plan_approval(
+                let outcome = execute_plan_approval(
                     self.tool_registry,
                     self.plan_session,
                     self.handle,
@@ -759,7 +779,20 @@ impl<'a> TurnProcessingContext<'a> {
                         turn_id: &self.harness_state.turn_id.0,
                     },
                 )
-                .await;
+                .await?;
+                if matches!(
+                    &outcome,
+                    TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
+                ) {
+                    self.handle_assistant_response(
+                        PLAN_APPROVAL_DISMISSED_NOTICE.to_string(),
+                        Vec::new(),
+                        None,
+                        false,
+                        Some(uni::AssistantPhase::FinalAnswer),
+                    )?;
+                }
+                return Ok(outcome);
             }
 
             self.renderer.line(MessageStyle::Info, "Plan ready for approval:")?;
@@ -781,9 +814,12 @@ impl<'a> TurnProcessingContext<'a> {
                 self.renderer.line(MessageStyle::Warning, &warning)?;
             }
             if approval_route == PlanApprovalRoute::Headless {
-                self.renderer.line(
-                    MessageStyle::Info,
-                    "Plan is awaiting approval. Type `approve`, `implement`, or `yes` to begin execution, or `edit` to revise the plan.",
+                self.handle_assistant_response(
+                    PLAN_APPROVAL_WAITING_NOTICE.to_string(),
+                    Vec::new(),
+                    None,
+                    false,
+                    Some(uni::AssistantPhase::FinalAnswer),
                 )?;
                 return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed {
                     plan_approved_execution_pending: false,
@@ -1266,6 +1302,50 @@ Repairs the approved plan after the referenced paths moved.
                 .any(|message| message.role == uni::MessageRole::Assistant
                     && message.content.as_text().contains("not a valid plan artifact")),
             "the rejected draft stays attached to history for inspection"
+        );
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                message.role == uni::MessageRole::Assistant
+                    && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                    && message.content.as_text().contains(EXECUTION_PLAN_REJECTION_NOTICE)
+            }),
+            "a rejected revision must publish a harness-visible final response"
+        );
+        assert!(
+            ctx.harness_state.final_response_rendered(),
+            "a rejected revision must count as a rendered final response"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_only_execution_rejection_still_publishes_final_response() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.set_approved_plan_execution_for_test(true);
+        let mut ctx = backing.turn_processing_context();
+
+        let outcome = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some("not a valid plan artifact".to_string()), false)
+            .await
+            .expect("plan-only invalid replan should end the turn with feedback");
+
+        assert!(matches!(
+            outcome,
+            TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
+        ));
+        assert!(ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant
+                && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                && message.content.as_text().contains(EXECUTION_PLAN_REJECTION_NOTICE)
+        }));
+        assert!(!ctx.working_history.iter().any(|message| {
+            message
+                .content
+                .as_text()
+                .contains("The turn stopped before a final assistant response")
+        }));
+        assert!(
+            ctx.harness_state.final_response_event_emitted(),
+            "a plan-only rejection must publish the final assistant event"
         );
     }
 

@@ -51,6 +51,11 @@ pub(crate) const NAVIGATION_LOOP_THRESHOLD: usize = 15;
 /// tool-free synthesis pass while the evidence is still useful.
 pub(crate) const PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD: u8 = 6;
 pub(crate) const PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD: u8 = 10;
+/// Consecutive planning inspections are allowed to be productive, but a
+/// repeated request after this bounded research window means the model should
+/// synthesize before it narrows the search indefinitely. This catches
+/// successful reads that are not low-signal by payload shape.
+pub(crate) const PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD: usize = 12;
 
 /// Optimized loop detection with bounded signature keys and exponential backoff.
 pub(crate) struct LoopTracker {
@@ -88,8 +93,9 @@ pub(crate) struct LoopTracker {
     pub low_signal_tool_calls: u32,
     /// At most one adaptive planning synthesis pass is scheduled per turn.
     pub planning_low_signal_synthesis_triggered: bool,
-    /// Unique navigation signatures in the current consecutive window.
-    /// Used to distinguish legitimate exploration (all unique) from actual looping (many repeats).
+    /// Unique normalized navigation signatures in the current consecutive
+    /// window. Non-semantic output controls (for example, a preview budget)
+    /// must not make the same inspection look like a new request.
     nav_signatures: FxHashSet<String>,
 }
 
@@ -159,7 +165,8 @@ impl LoopTracker {
     }
 
     /// Number of redundant navigations (total - unique) in the current window.
-    /// At least 3 before the navigation loop guard considers firing.
+    /// The generic navigation-loop guard requires at least 3; planning's
+    /// bounded convergence checkpoint also uses a single repeated request.
     pub(crate) fn repeated_navigation_count(&self) -> usize {
         self.consecutive_navigations.saturating_sub(self.nav_signatures.len())
     }
@@ -929,9 +936,14 @@ pub(crate) fn update_repetition_tracker(
     let canonical_name = canonical_tool_name(name);
     let signature_key = signature_key_for(canonical_name, args);
     loop_tracker.record(signature_key.clone());
-    let low_signal_family =
-        crate::agent::runloop::unified::turn::tool_outcomes::handlers::low_signal_family_key(canonical_name, args)
-            .filter(|_| is_low_signal_outcome(outcome, canonical_name, args));
+    let navigation_family =
+        crate::agent::runloop::unified::turn::tool_outcomes::handlers::low_signal_family_key(canonical_name, args);
+    let low_signal_family = navigation_family
+        .clone()
+        .filter(|_| is_low_signal_outcome(outcome, canonical_name, args));
+    let navigation_signature_key = navigation_family
+        .map(|family| format!("navigation::{family}"))
+        .unwrap_or_else(|| signature_key.clone());
     // Successful but redundant scans (e.g. three overlapping `find` calls)
     // never match the exact family key. Track a coarse inspection family so
     // the third repeat still surfaces in diagnostics without changing
@@ -986,7 +998,7 @@ pub(crate) fn update_repetition_tracker(
         match classify_shell_activity(canonical_name, args) {
             ShellActivity::Inspection => {
                 loop_tracker.consecutive_navigations = loop_tracker.consecutive_navigations.saturating_add(1);
-                loop_tracker.nav_signatures.insert(signature_key);
+                loop_tracker.nav_signatures.insert(navigation_signature_key);
                 loop_tracker.record_navigation_signal(is_low_signal_navigation);
             }
             ShellActivity::Verification => {
@@ -1063,7 +1075,7 @@ pub(crate) fn update_repetition_tracker(
         } else {
             // Read-only / navigation tool
             loop_tracker.consecutive_navigations += 1;
-            loop_tracker.nav_signatures.insert(signature_key);
+            loop_tracker.nav_signatures.insert(navigation_signature_key);
             loop_tracker.record_navigation_signal(is_low_signal_navigation);
         }
     }
@@ -1942,6 +1954,40 @@ mod tests {
         }
 
         assert_eq!(tracker.consecutive_navigations, 4);
+    }
+
+    #[test]
+    fn navigation_tracking_ignores_nonsemantic_preview_controls() {
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"stdout":"useful source"}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        let command = "sed -n '278,420p' src/startup/mod.rs";
+
+        update_repetition_tracker(
+            &mut tracker,
+            &success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": command, "command": command, "action": "run"}),
+        );
+        update_repetition_tracker(
+            &mut tracker,
+            &success,
+            tools::EXEC_COMMAND,
+            &json!({
+                "cmd": command,
+                "command": command,
+                "max_output_tokens": 8000,
+                "action": "run"
+            }),
+        );
+
+        assert_eq!(tracker.consecutive_navigations, 2);
+        assert_eq!(tracker.repeated_navigation_count(), 1);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 0);
     }
 
     #[test]

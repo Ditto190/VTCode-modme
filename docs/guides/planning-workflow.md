@@ -411,6 +411,11 @@ productive navigation resets only the consecutive count. Verification,
 mutation, recovery, and a new turn reset both counts. Shell inspection such as
 `rg`, `find`, `cat`, and simple `sed -n` contributes to navigation accounting;
 compile, test, build, and clippy commands count as verification progress.
+Successful reads can still drift into a loop, so twelve consecutive planning
+inspections containing even one repeated semantic request schedule the same
+synthesis pass. Output controls such as `max_output_tokens` do not make an
+otherwise identical inspection count as new research; twelve genuinely
+distinct inspections remain eligible for continued research.
 
 Tool previews shown to the model share a bounded per-turn budget; once it is
 exhausted, further tool responses arrive as metadata stubs without body
