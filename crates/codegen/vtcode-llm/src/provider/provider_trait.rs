@@ -419,6 +419,13 @@ pub trait LLMProvider: Send + Sync {
 
 /// Provider-local context capacity discovered for the selected model.
 /// All transport and capability behavior remains delegated to the underlying provider.
+///
+/// The `Box<dyn LLMProvider>` layer here is intentional: unlike
+/// `LlamaCppProvider`/`LmStudioProvider` (which always wrap `OpenAIProvider`
+/// and therefore store it concretely), the wrapped provider behind this type
+/// is selected at runtime and genuinely heterogeneous, so dynamic dispatch is
+/// required. `wrap` passes the box through untouched when no override applies,
+/// avoiding a second vtable layer.
 pub struct ContextWindowProvider {
     inner: Box<dyn LLMProvider>,
     model: CompactStr,

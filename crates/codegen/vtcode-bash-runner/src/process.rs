@@ -64,15 +64,38 @@ pub trait ChildTerminator: Send + Sync {
     fn kill(&mut self) -> io::Result<()>;
 }
 
+/// Keep-alive guard for PTY master/slave handles.
+///
+/// This is a marker trait for opaque OS handles (e.g. `portable-pty` pair
+/// halves) whose only contract is ownership: dropping the handle releases the
+/// underlying resource. It exists so `PtyHandles` can name its vtable instead
+/// of erasing to bare `dyn Send` (which carries an empty vtable and documents
+/// no intent).
+///
+/// Memory layout note: `Box<dyn PtyHandle>` is a wide pointer (data pointer +
+/// vtable pointer, 16 bytes on 64-bit). There is one vtable per concrete
+/// handle type, emitted as external static data and paired with the object at
+/// the construction site — Rust chooses dynamic dispatch at the call site, so
+/// storing the concrete handle type directly (instead of boxing) would use
+/// static dispatch. Boxing is justified here only because PTY backends are
+/// selected at runtime and their handle types are heterogeneous.
+///
+/// The blanket implementation covers every `Send` handle, so existing backends
+/// can wrap their concrete handle with `Box::new(handle) as Box<dyn PtyHandle>`
+/// without additional work.
+pub trait PtyHandle: Send {}
+
+impl<T: Send> PtyHandle for T {}
+
 /// Optional PTY-specific handles that must be preserved.
 ///
 /// For PTY processes, the slave handle must be kept alive because the process
 /// will receive SIGHUP if it's closed.
 pub struct PtyHandles {
     /// The slave PTY handle (kept alive to prevent SIGHUP).
-    pub _slave: Option<Box<dyn Send>>,
+    pub _slave: Option<Box<dyn PtyHandle>>,
     /// The master PTY handle.
-    pub _master: Box<dyn Send>,
+    pub _master: Box<dyn PtyHandle>,
 }
 
 impl fmt::Debug for PtyHandles {

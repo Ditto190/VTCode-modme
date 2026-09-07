@@ -75,7 +75,7 @@ pub use pipe::{
 
 // Process handle types (unified interface for PTY and pipe)
 pub use process::{
-    ChildTerminator, ExecCommandSession, ProcessHandle, PtyHandles, SpawnedProcess, SpawnedPty,
+    ChildTerminator, ExecCommandSession, ProcessHandle, PtyHandle, PtyHandles, SpawnedProcess, SpawnedPty,
     collect_output_until_exit,
 };
 

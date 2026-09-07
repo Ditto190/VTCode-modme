@@ -11,7 +11,15 @@ use vtcode_commons::serde_helpers::json_to_string_pretty;
 use crate::tool_policy::ToolPolicy;
 use crate::tools::result::ToolResult as SplitToolResult;
 
-/// Core trait for all agent tools
+/// Core trait for all agent tools.
+///
+/// Dispatch note: tools live behind `Arc<dyn Tool>` in the registry, caches,
+/// and CGP facades because the tool set is heterogeneous and resolved at
+/// runtime — dynamic dispatch is required there. Where the concrete tool type
+/// is known at the call site (e.g. inside a tool's own module), call it
+/// directly so the compiler can use static dispatch instead of a vtable
+/// lookup. Do not add further `Box<dyn Tool>`/`Arc<dyn Tool>` layers around an
+/// already-boxed tool.
 #[async_trait]
 pub trait Tool: Send + Sync {
     /// Execute the tool with given arguments

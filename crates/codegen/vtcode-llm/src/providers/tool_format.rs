@@ -77,6 +77,7 @@ pub trait ProviderToolFormatter: Send + Sync {
 
 /// Anthropic formatter — extracts logic from
 /// `crates/codegen/vtcode-llm/src/providers/anthropic/request_builder/tools.rs::build_tools`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnthropicFormatter;
 
 impl ProviderToolFormatter for AnthropicFormatter {
@@ -115,6 +116,7 @@ impl ProviderToolFormatter for AnthropicFormatter {
 
 /// OpenAI Chat Completions formatter — extracts logic from
 /// `crates/codegen/vtcode-llm/src/providers/common.rs::serialize_tools_openai_format`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpenAIChatFormatter;
 
 impl ProviderToolFormatter for OpenAIChatFormatter {
@@ -136,6 +138,7 @@ impl ProviderToolFormatter for OpenAIChatFormatter {
 }
 
 /// OpenAI Responses API formatter — model-aware, preserves `defer_loading`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpenAIResponsesFormatter;
 
 impl ProviderToolFormatter for OpenAIResponsesFormatter {
@@ -170,6 +173,7 @@ impl ProviderToolFormatter for OpenAIResponsesFormatter {
 }
 
 /// Gemini formatter — uses `function_declarations` plus native hosted tool shapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeminiFormatter;
 
 impl ProviderToolFormatter for GeminiFormatter {
@@ -204,6 +208,7 @@ impl ProviderToolFormatter for GeminiFormatter {
 /// Generic OpenAI-compatible formatter. Unlike `OpenAIChatFormatter`, this one is
 /// intentionally conservative: it only emits function-shaped tools and silently drops
 /// hosted / native tool types because most compatible providers don't support them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OpenAICompatibleFormatter;
 
 impl ProviderToolFormatter for OpenAICompatibleFormatter {
@@ -224,16 +229,98 @@ impl ProviderToolFormatter for OpenAICompatibleFormatter {
     }
 }
 
+/// Static-dispatch formatter covering every provider family.
+///
+/// All formatter implementations are stateless zero-sized types, so heap-boxing
+/// one behind `Box<dyn ProviderToolFormatter>` buys nothing: the `Box` still
+/// allocates and every call pays a vtable lookup, while the wide pointer
+/// itself is 16 bytes (data + vtable). This enum holds the same ZSTs inline —
+/// one discriminant byte, no allocation — and its `ProviderToolFormatter` impl
+/// matches on the variant, giving the compiler a static call target per family.
+///
+/// Prefer [`formatter`] (which returns this enum) in new code. The
+/// `Box<dyn ProviderToolFormatter>` constructors below are kept for API
+/// compatibility and delegate to this enum internally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProviderFormatter {
+    /// OpenAI Chat Completions API shape.
+    OpenAIChat(OpenAIChatFormatter),
+    /// OpenAI Responses API shape.
+    OpenAIResponses(OpenAIResponsesFormatter),
+    /// Anthropic Messages API shape.
+    Anthropic(AnthropicFormatter),
+    /// Google Gemini `generateContent` API shape.
+    Gemini(GeminiFormatter),
+    /// Generic OpenAI-compatible Chat Completions shape.
+    OpenAICompatible(OpenAICompatibleFormatter),
+}
+
+impl ProviderToolFormatter for ProviderFormatter {
+    fn family(&self) -> ProviderFamily {
+        match self {
+            Self::OpenAIChat(_) => ProviderFamily::OpenAIChat,
+            Self::OpenAIResponses(_) => ProviderFamily::OpenAIResponses,
+            Self::Anthropic(_) => ProviderFamily::Anthropic,
+            Self::Gemini(_) => ProviderFamily::Gemini,
+            Self::OpenAICompatible(_) => ProviderFamily::OpenAICompatible,
+        }
+    }
+
+    fn supported_extensions(&self) -> &'static [&'static str] {
+        match self {
+            Self::OpenAIChat(f) => f.supported_extensions(),
+            Self::OpenAIResponses(f) => f.supported_extensions(),
+            Self::Anthropic(f) => f.supported_extensions(),
+            Self::Gemini(f) => f.supported_extensions(),
+            Self::OpenAICompatible(f) => f.supported_extensions(),
+        }
+    }
+
+    fn supports(&self, tool: &ToolDefinition) -> bool {
+        match self {
+            Self::OpenAIChat(f) => f.supports(tool),
+            Self::OpenAIResponses(f) => f.supports(tool),
+            Self::Anthropic(f) => f.supports(tool),
+            Self::Gemini(f) => f.supports(tool),
+            Self::OpenAICompatible(f) => f.supports(tool),
+        }
+    }
+
+    fn format_tools(&self, tools: &[ToolDefinition], model: &str) -> Result<Option<Value>, LLMError> {
+        match self {
+            Self::OpenAIChat(f) => f.format_tools(tools, model),
+            Self::OpenAIResponses(f) => f.format_tools(tools, model),
+            Self::Anthropic(f) => f.format_tools(tools, model),
+            Self::Gemini(f) => f.format_tools(tools, model),
+            Self::OpenAICompatible(f) => f.format_tools(tools, model),
+        }
+    }
+}
+
+/// Build a formatter for a given provider family without heap allocation or
+/// dynamic dispatch.
+///
+/// This is the preferred constructor: it returns [`ProviderFormatter`] by
+/// value (one byte) instead of a 16-byte `Box<dyn>` wide pointer.
+#[must_use]
+pub fn formatter(family: ProviderFamily) -> ProviderFormatter {
+    match family {
+        ProviderFamily::OpenAIChat => ProviderFormatter::OpenAIChat(OpenAIChatFormatter),
+        ProviderFamily::OpenAIResponses => ProviderFormatter::OpenAIResponses(OpenAIResponsesFormatter),
+        ProviderFamily::Anthropic => ProviderFormatter::Anthropic(AnthropicFormatter),
+        ProviderFamily::Gemini => ProviderFormatter::Gemini(GeminiFormatter),
+        ProviderFamily::OpenAICompatible => ProviderFormatter::OpenAICompatible(OpenAICompatibleFormatter),
+    }
+}
+
 /// Build a formatter for a given provider family.
+///
+/// Compatibility shim over [`formatter`]: boxes the static-dispatch enum for
+/// callers that need a trait object. New code should call [`formatter`]
+/// directly to avoid the heap allocation and vtable lookup.
 #[must_use]
 fn formatter_for_family(family: ProviderFamily) -> Box<dyn ProviderToolFormatter> {
-    match family {
-        ProviderFamily::OpenAIChat => Box::new(OpenAIChatFormatter),
-        ProviderFamily::OpenAIResponses => Box::new(OpenAIResponsesFormatter),
-        ProviderFamily::Anthropic => Box::new(AnthropicFormatter),
-        ProviderFamily::Gemini => Box::new(GeminiFormatter),
-        ProviderFamily::OpenAICompatible => Box::new(OpenAICompatibleFormatter),
-    }
+    Box::new(formatter(family))
 }
 
 /// Convenience: resolve a formatter from a provider identifier. This is the entry
@@ -346,6 +433,34 @@ mod tests {
         let serialized = value.expect("non-empty tool should serialize").to_string();
         assert!(serialized.contains("strict"), "anthropic wire payload missing strict: {serialized}");
         assert!(serialized.contains("input_examples"), "anthropic wire payload missing input_examples: {serialized}");
+    }
+
+    #[test]
+    fn static_formatter_matches_boxed_formatter_for_every_family() {
+        // The static-dispatch enum must agree with the boxed trait-object path
+        // on family identity and supported extensions.
+        for family in [
+            ProviderFamily::OpenAIChat,
+            ProviderFamily::OpenAIResponses,
+            ProviderFamily::Anthropic,
+            ProviderFamily::Gemini,
+            ProviderFamily::OpenAICompatible,
+        ] {
+            let statically = formatter(family);
+            let boxed = formatter_for_family(family);
+            assert_eq!(statically.family(), family);
+            assert_eq!(statically.family(), boxed.family());
+            assert_eq!(statically.supported_extensions(), boxed.supported_extensions());
+        }
+    }
+
+    #[test]
+    fn static_formatter_has_no_wide_pointer_overhead() {
+        // `Box<dyn ProviderToolFormatter>` is a wide pointer: 16 bytes on
+        // 64-bit (data + vtable). The enum holds ZSTs inline, so it must stay
+        // a single discriminant byte with no heap allocation.
+        assert_eq!(size_of::<ProviderFormatter>(), 1);
+        assert_eq!(size_of::<Box<dyn ProviderToolFormatter>>(), 2 * size_of::<usize>());
     }
 
     #[test]

@@ -12,6 +12,15 @@ use vtcode_llm::providers::openai::CustomProviderAuthHandle;
 // The struct was consolidated here to eliminate the duplicate definition.
 pub use vtcode_llm::provider_config_types::ProviderConfig;
 
+/// Factory closure producing a boxed provider from config.
+///
+/// Two dynamic-dispatch layers are intentional here, not accidental: the outer
+/// `Box<dyn Fn>` lets the registry hold heterogeneous constructors selected at
+/// runtime, and the returned `Box<dyn LLMProvider>` is the single vtable layer
+/// for the heterogeneous provider collection. Provider wrappers below this
+/// point must NOT add further `Box<dyn LLMProvider>` layers — embed the
+/// concrete inner provider instead (see `LlamaCppProvider`/`LmStudioProvider`)
+/// so each call pays at most one vtable lookup.
 type ProviderFactory = Box<dyn Fn(ProviderConfig) -> Box<dyn LLMProvider> + Send + Sync>;
 
 fn resolve_custom_provider_api_key(

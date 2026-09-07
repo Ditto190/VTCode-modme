@@ -22,6 +22,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 
+use super::OpenAIProvider;
 use super::common::resolve_model;
 use crate::client::LLMClient;
 use crate::error_display;
@@ -35,7 +36,16 @@ use vtcode_config::core::{AnthropicConfig, ModelConfig, PromptCachingConfig};
 const LLAMACPP_CONNECTION_ERROR: &str = "llama.cpp is not responding. Install from https://llama.app and either start `llama-server -m /path/to/model.gguf --port 8080` yourself or set LLAMACPP_MODEL_PATH so VT Code can manage startup.";
 
 pub struct LlamaCppProvider {
-    inner: Box<dyn LLMProvider>,
+    /// Concrete OpenAI-compatible inner provider.
+    ///
+    /// Stored without a `Box<dyn LLMProvider>` layer on purpose: the inner
+    /// type is always `OpenAIProvider`, so keeping it concrete lets the
+    /// compiler use static dispatch (monomorphization) for every delegated
+    /// capability call instead of a vtable lookup. Only the outer
+    /// `LlamaCppProvider` itself is boxed as `Box<dyn LLMProvider>` by the
+    /// factory, where dynamic dispatch is genuinely required for the
+    /// heterogeneous provider collection.
+    inner: OpenAIProvider,
     api_key: Option<String>,
     configured_model: Option<String>,
     model_id: String,
@@ -59,10 +69,10 @@ impl LlamaCppProvider {
         timeouts: Option<TimeoutsConfig>,
         anthropic: Option<AnthropicConfig>,
         model_behavior: Option<ModelConfig>,
-    ) -> (Box<dyn LLMProvider>, String) {
+    ) -> (OpenAIProvider, String) {
         let resolved_model = resolve_model(model, models::llamacpp::DEFAULT_MODEL);
         let resolved_base = Self::resolve_base_url(base_url);
-        let inner = Box::new(crate::providers::OpenAIProvider::from_config(
+        let inner = OpenAIProvider::from_config(
             api_key,
             None,
             Some(resolved_model.clone()),
@@ -72,7 +82,7 @@ impl LlamaCppProvider {
             anthropic,
             None,
             model_behavior,
-        ));
+        );
         (inner, resolved_model)
     }
 
@@ -101,7 +111,7 @@ impl LlamaCppProvider {
         }
     }
 
-    fn build_request_provider(&self, model: String) -> Box<dyn LLMProvider> {
+    fn build_request_provider(&self, model: String) -> OpenAIProvider {
         Self::build_inner(
             self.api_key.clone(),
             Some(model),
@@ -114,7 +124,7 @@ impl LlamaCppProvider {
         .0
     }
 
-    async fn prepare_request(&self, mut request: LLMRequest) -> Result<(Box<dyn LLMProvider>, LLMRequest), LLMError> {
+    async fn prepare_request(&self, mut request: LLMRequest) -> Result<(OpenAIProvider, LLMRequest), LLMError> {
         let discovered_model = managed::ensure_server_ready(&self.base_url, self.configured_model.as_deref()).await?;
         let discovered_models = vec![discovered_model.clone()];
 

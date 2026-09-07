@@ -6,6 +6,7 @@
 //!
 //! [openai/codex]: https://github.com/openai/codex
 
+use super::OpenAIProvider;
 use super::common::resolve_model;
 use super::local_readiness::resolve_local_model;
 use super::local_server::LocalProvider;
@@ -114,7 +115,10 @@ pub async fn fetch_lmstudio_models(base_url: Option<String>) -> Result<Vec<Strin
 }
 
 pub struct LmStudioProvider {
-    inner: Box<dyn LLMProvider>,
+    /// Concrete OpenAI-compatible inner provider (see `LlamaCppProvider` for
+    /// why this is stored concretely: static dispatch for delegated calls,
+    /// one `Box<dyn LLMProvider>` layer instead of two).
+    inner: OpenAIProvider,
     model_id: String,
 }
 
@@ -131,10 +135,10 @@ impl LmStudioProvider {
         timeouts: Option<TimeoutsConfig>,
         anthropic: Option<AnthropicConfig>,
         model_behavior: Option<ModelConfig>,
-    ) -> (Box<dyn LLMProvider>, String) {
+    ) -> (OpenAIProvider, String) {
         let resolved_model = resolve_model(model, models::lmstudio::DEFAULT_MODEL);
         let resolved_base = Self::resolve_base_url(base_url);
-        let inner = Box::new(crate::providers::OpenAIProvider::from_config(
+        let inner = OpenAIProvider::from_config(
             api_key,
             None,
             Some(resolved_model.clone()),
@@ -144,7 +148,7 @@ impl LmStudioProvider {
             anthropic,
             None,
             model_behavior,
-        ));
+        );
         (inner, resolved_model)
     }
 
@@ -162,14 +166,14 @@ impl LmStudioProvider {
         base_url: String,
         timeouts: TimeoutsConfig,
     ) -> Self {
-        let inner = Box::new(crate::providers::OpenAIProvider::new_with_client(
+        let inner = OpenAIProvider::new_with_client(
             "lm-studio".to_string(), // Dummy API key
             None,
             model.clone(),
             http_client,
             base_url,
             timeouts,
-        ));
+        );
         Self { inner, model_id: model }
     }
 
