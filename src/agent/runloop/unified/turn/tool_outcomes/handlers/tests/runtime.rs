@@ -1445,9 +1445,10 @@ async fn repeated_read_only_guard_dedups_plan_file_in_planning_mode() {
     let mut backing = TestContextBacking::new(4).await;
     backing.select_build_primary_agent();
 
-    // Create a plan file inside the temporary workspace.
+    // Create a runtime-owned plan file inside the temporary workspace so the
+    // plan-artifact fast path (`.vtcode/plans/`) is exercised.
     let workspace = backing.sample_file.parent().unwrap().to_path_buf();
-    let plans_dir = workspace.join("plans");
+    let plans_dir = workspace.join(".vtcode").join("plans");
     std::fs::create_dir_all(&plans_dir).expect("create plans dir");
     let plan_path = plans_dir.join("modular-dreaming-pixel.md");
     let plan_content = "# Plan\n\n1. Fix planning-mode clarity\n2. Throttle memory envelopes\n";
@@ -1480,6 +1481,13 @@ async fn repeated_read_only_guard_dedups_plan_file_in_planning_mode() {
 
     assert!(outcome_ctx.ctx.working_history.iter().any(|message| {
         message.role == uni::MessageRole::Tool && message.content.as_text().contains("\"reused_recent_result\":true")
+    }));
+    assert!(outcome_ctx.ctx.working_history.iter().any(|message| {
+        message.role == uni::MessageRole::Tool
+            && message
+                .content
+                .as_text()
+                .contains("was already read. Stop re-reading and finalize the plan.")
     }));
 }
 

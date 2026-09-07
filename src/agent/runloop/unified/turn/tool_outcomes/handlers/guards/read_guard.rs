@@ -28,6 +28,26 @@ const MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS: usize = 4;
 /// re-reads (8+ reads of the same file with different offsets).
 const MAX_SAME_FILE_PATH_READ_CALLS: usize = 6;
 
+/// Planning doubles both read caps, mirroring the generous planning research
+/// budget (120 calls/turn floor) and the wider blocked-call fuse in plan mode.
+/// Execution mode keeps the strict caps so genuine loops still converge.
+pub(crate) fn effective_read_family_cap(planning_active: bool) -> usize {
+    if planning_active {
+        MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS.saturating_mul(2)
+    } else {
+        MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS
+    }
+}
+
+/// Planning-aware per-file-path cap. See [`effective_read_family_cap`].
+pub(crate) fn effective_read_path_cap(planning_active: bool) -> usize {
+    if planning_active {
+        MAX_SAME_FILE_PATH_READ_CALLS.saturating_mul(2)
+    } else {
+        MAX_SAME_FILE_PATH_READ_CALLS
+    }
+}
+
 /// Decision returned by `check_read_family_cap`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReadFamilyCapDecision {
@@ -236,15 +256,20 @@ fn build_repeated_file_read_family_error_content(target: &str) -> String {
     .to_string()
 }
 
-/// Returns the path if this is a read of a planning artifact (a plan file or
-/// directory) while planning mode is active.
+/// Returns the path if this is a read of a planning artifact (a runtime-owned
+/// plan file or tracker) while planning mode is active.
+///
+/// Scoped to `.vtcode/plans/` and `.vtcode/tasks/` so ordinary markdown docs
+/// and paths that merely contain `plan` (for example `planning_workflow`)
+/// do not receive plan-specific reuse guidance.
 fn is_plan_artifact_read(canonical_tool_name: &str, args: &Value) -> Option<String> {
     if !is_read_action(canonical_tool_name, args) {
         return None;
     }
     let path = extract_read_path(args)?;
-    let lower = path.to_ascii_lowercase();
-    if lower.contains("plan") || lower.ends_with(".md") {
+    let normalized = path.replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    if lower.contains(".vtcode/plans/") || lower.contains(".vtcode/tasks/") || lower.ends_with(".tasks.md") {
         Some(path)
     } else {
         None
@@ -309,17 +334,63 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
         return None;
     }
 
+    // Planning doubles the read caps, mirroring the generous planning research
+    // budget (120 calls/turn floor) and the wider blocked-call fuse in plan mode.
+    // Execution mode keeps the strict caps so genuine loops still converge.
+    let planning_active = ctx.tool_registry.is_planning_active();
+    let family_cap = effective_read_family_cap(planning_active);
+    let path_cap = effective_read_path_cap(planning_active);
+    let signature = signature_key_for(canonical_tool_name, effective_args);
+
+    // Plan-artifact fast path: serve runtime-owned plan/tracker re-reads
+    // WITHOUT advancing the family/path counters. Planning synthesis
+    // legitimately re-reads its own draft, so counting those toward loop caps
+    // starves synthesis. This stays scoped to `.vtcode/plans/`,
+    // `.vtcode/tasks/`, and `*.tasks.md` so ordinary docs never bypass caps.
+    // All other reads fall through to the caps below first, so identical-slice
+    // retry loops still trip instead of looping forever on cache hits.
+    let plan_path = planning_active
+        .then(|| is_plan_artifact_read(canonical_tool_name, effective_args))
+        .flatten();
+    let plan_lookup_done = plan_path.is_some();
+    if let Some(plan_path) = plan_path.as_deref() {
+        if let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
+            canonical_tool_name,
+            effective_args,
+            ctx.harness_state.max_tool_wall_clock,
+        ) {
+            if let Some(obj) = reused_value.as_object_mut() {
+                super::super::apply_reused_read_only_loop_metadata(obj);
+                // Overwrite with planning-specific guidance AFTER the generic
+                // metadata is applied, since apply_reused_read_only_loop_metadata
+                // sets its own loop_detected_note.
+                obj.insert(
+                    "loop_detected_note".to_string(),
+                    json!(format!(
+                        "Planning mode: plan file '{}' was already read. Stop re-reading and finalize the plan.",
+                        plan_path
+                    )),
+                );
+            }
+            ctx.push_tool_response(
+                tool_call_id,
+                Some(canonical_tool_name),
+                maybe_inline_spooled(canonical_tool_name, &reused_value),
+            );
+            ctx.harness_state.record_successful_readonly_signature(signature);
+            ctx.harness_state.record_reused_result();
+            return Some(ValidationResult::Handled);
+        }
+    }
+
     if let Some(family_key) = repeated_file_read_family_key(canonical_tool_name, effective_args) {
         // The streak mutation is stateful and stays here; the cap *decision*
         // is delegated to the pure `check_read_family_cap` helper so it can be
         // tested without the full TurnProcessingContext harness.
         let streak = ctx.harness_state.record_file_read_family_call(family_key);
-        if let ReadFamilyCapDecision::Tripped { target: _, block_reason, error_content } = check_read_family_cap(
-            canonical_tool_name,
-            effective_args,
-            streak,
-            MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
-        ) {
+        if let ReadFamilyCapDecision::Tripped { target: _, block_reason, error_content } =
+            check_read_family_cap(canonical_tool_name, effective_args, streak, family_cap)
+        {
             ctx.activate_recovery(block_reason.clone());
             push_guard_failure_messages(ctx, tool_call_id, canonical_tool_name, error_content, &block_reason);
             return Some(ValidationResult::Blocked);
@@ -331,9 +402,9 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
     // at different offsets each get a different family key and never collide).
     if let Some(path) = repeated_read_path(canonical_tool_name, effective_args) {
         let path_count = ctx.harness_state.record_file_read_path_call(path.clone());
-        if path_count > MAX_SAME_FILE_PATH_READ_CALLS {
+        if path_count > path_cap {
             let block_reason = format!(
-                "Repeated reads of '{path}' hit the per-file-path cap ({MAX_SAME_FILE_PATH_READ_CALLS}). \
+                "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}). \
                  Read the file in full once and reuse the output."
             );
             let error_content = build_repeated_file_read_family_error_content(&path);
@@ -343,66 +414,39 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
         }
     }
 
-    let signature = signature_key_for(canonical_tool_name, effective_args);
-    if ctx.harness_state.has_successful_readonly_signature(signature.as_str()) {
-        // Same-turn duplicate: use the registry's cached output (has TTL)
-        if let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_output(
+    // Cap-first: exact duplicates, cross-turn TTL matches, and history
+    // duplicates are served only after the counters above have advanced. This
+    // preserves the identical-slice loop guard: serving a cached hit must not
+    // hide a retry loop that should force tool-free recovery.
+    if ctx.harness_state.has_successful_readonly_signature(signature.as_str())
+        && let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_output(
             canonical_tool_name,
             effective_args,
             ctx.harness_state.max_tool_wall_clock,
-        ) {
-            if let Some(obj) = reused_value.as_object_mut() {
-                super::super::apply_reused_read_only_loop_metadata(obj);
-            }
-            ctx.push_tool_response(
-                tool_call_id,
-                Some(canonical_tool_name),
-                maybe_inline_spooled(canonical_tool_name, &reused_value),
-            );
-            ctx.harness_state.record_reused_result();
-            return Some(ValidationResult::Handled);
+        )
+    {
+        if let Some(obj) = reused_value.as_object_mut() {
+            super::super::apply_reused_read_only_loop_metadata(obj);
         }
+        ctx.push_tool_response(
+            tool_call_id,
+            Some(canonical_tool_name),
+            maybe_inline_spooled(canonical_tool_name, &reused_value),
+        );
+        ctx.harness_state.record_reused_result();
+        return Some(ValidationResult::Handled);
     }
 
-    // Planning-mode-specific guard: repeated plan-file reads across turns.
-    if ctx.tool_registry.is_planning_active() {
-        if let Some(plan_path) = is_plan_artifact_read(canonical_tool_name, effective_args) {
-            if let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
-                canonical_tool_name,
-                effective_args,
-                ctx.harness_state.max_tool_wall_clock,
-            ) {
-                if let Some(obj) = reused_value.as_object_mut() {
-                    super::super::apply_reused_read_only_loop_metadata(obj);
-                    // Overwrite with planning-specific guidance AFTER the generic
-                    // metadata is applied, since apply_reused_read_only_loop_metadata
-                    // sets its own loop_detected_note.
-                    obj.insert(
-                        "loop_detected_note".to_string(),
-                        json!(format!(
-                            "Planning mode: plan file '{}' was already read. Stop re-reading and finalize the plan.",
-                            plan_path
-                        )),
-                    );
-                }
-                ctx.push_tool_response(
-                    tool_call_id,
-                    Some(canonical_tool_name),
-                    maybe_inline_spooled(canonical_tool_name, &reused_value),
-                );
-                ctx.harness_state.record_successful_readonly_signature(signature);
-                ctx.harness_state.record_reused_result();
-                return Some(ValidationResult::Handled);
-            }
-        }
-    }
-
-    // Cross-turn TTL-bounded cache.
-    if let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
-        canonical_tool_name,
-        effective_args,
-        ctx.harness_state.max_tool_wall_clock,
-    ) {
+    // Cross-turn TTL-bounded cache (covers same-path different-offset supersets
+    // via `read_extent_matches`). Plan artifacts already looked this up before
+    // the caps above, so skip the duplicate lookup for them.
+    if !plan_lookup_done
+        && let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
+            canonical_tool_name,
+            effective_args,
+            ctx.harness_state.max_tool_wall_clock,
+        )
+    {
         if let Some(obj) = reused_value.as_object_mut() {
             super::super::apply_reused_read_only_loop_metadata(obj);
         }
@@ -664,5 +708,31 @@ mod tests {
             "per-file-path cap must be >= family cap"
         );
         const _: () = assert!(MAX_SAME_FILE_PATH_READ_CALLS < 10, "per-file-path cap must catch excessive reads");
+    }
+
+    #[test]
+    fn planning_doubles_both_read_caps() {
+        assert_eq!(effective_read_family_cap(false), MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS);
+        assert_eq!(effective_read_path_cap(false), MAX_SAME_FILE_PATH_READ_CALLS);
+        assert_eq!(effective_read_family_cap(true), MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS.saturating_mul(2));
+        assert_eq!(effective_read_path_cap(true), MAX_SAME_FILE_PATH_READ_CALLS.saturating_mul(2));
+    }
+
+    #[test]
+    fn plan_artifact_read_is_scoped_to_runtime_owned_paths() {
+        let plan_file = serde_json::json!({"action": "read", "path": ".vtcode/plans/session-123.md"});
+        assert!(is_plan_artifact_read(tool_names::UNIFIED_FILE, &plan_file).is_some());
+
+        let tracker = serde_json::json!({"action": "read", "path": ".vtcode/tasks/current_task.md"});
+        assert!(is_plan_artifact_read(tool_names::UNIFIED_FILE, &tracker).is_some());
+
+        // Ordinary markdown docs must not receive plan-specific guidance.
+        let doc = serde_json::json!({"action": "read", "path": "docs/guides/planning-workflow.md"});
+        assert!(is_plan_artifact_read(tool_names::UNIFIED_FILE, &doc).is_none());
+
+        // Paths that merely contain `plan` are not plan artifacts.
+        let code =
+            serde_json::json!({"action": "read", "path": "src/agent/runloop/unified/planning_workflow_state.rs"});
+        assert!(is_plan_artifact_read(tool_names::UNIFIED_FILE, &code).is_none());
     }
 }

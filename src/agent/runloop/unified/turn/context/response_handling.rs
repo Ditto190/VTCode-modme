@@ -104,6 +104,30 @@ impl<'a> TurnProcessingContext<'a> {
         }
 
         if self.recovery_is_tool_free() && self.is_planning_active() {
+            // Bounded repair inside tool-free recovery: give one validation
+            // failure a single text-only retry via the existing repair budget
+            // (`MAX_PLAN_VALIDATION_REPAIR_REPROMPTS`, turn-scoped) and the
+            // existing recovery retry (`retry_recovery_pass`, which re-arms a
+            // Pending pass without re-enabling tools). Without this, any
+            // invalid draft ends Blocked even though the evidence is present.
+            // The terminal invariant holds: at most 2 repairs per turn, then
+            // the resumable blocked handoff below.
+            if self.plan_session.plan_validation_repair_allowed() {
+                self.plan_session.mark_plan_validation_repair_used();
+                tracing::warn!(
+                    target: "vtcode.planning_workflow",
+                    error = %error,
+                    repair_scheduled = true,
+                    tool_free = true,
+                    "plan artifact rejected in tool-free recovery; scheduling bounded repair"
+                );
+                append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
+                let directive = plan_repair_directive_for_error(&error);
+                self.push_system_message(directive);
+                if self.retry_recovery_pass() {
+                    return Ok(TurnHandlerOutcome::Continue);
+                }
+            }
             return self.break_planning_recovery_with_handoff(
                 &format!("the synthesized draft failed validation: {error}"),
                 Some(plan_text),
@@ -335,7 +359,7 @@ impl<'a> TurnProcessingContext<'a> {
             && !tool_free_recovery_pass
             && proposed_plan.is_none()
             && crate::agent::runloop::text_tools::contains_pseudo_tool_call_markers(&text);
-        let text = if pseudo_tool_call_markup_detected {
+        let mut text = if pseudo_tool_call_markup_detected {
             crate::agent::runloop::text_tools::strip_textual_tool_call_regions(&text)
                 .trim()
                 .to_string()
@@ -353,11 +377,19 @@ impl<'a> TurnProcessingContext<'a> {
                     rejected_plan,
                 );
             }
+            // Prose-tolerant recovery: models often add a one-line intro
+            // ("Here is the plan:") around an otherwise valid block. The
+            // extractor already split `proposed_plan` from `text`, so drop the
+            // surrounding prose and validate the plan instead of ending
+            // Blocked. The plan-approval flow renders the plan once; the
+            // intro carries no approval state.
             if !text.trim().is_empty() {
-                return self.break_planning_recovery_with_handoff(
-                    "the response included prose outside the required <proposed_plan> block",
-                    proposed_plan.as_deref(),
+                tracing::info!(
+                    target: "vtcode.planning_workflow",
+                    prose_len = text.trim().len(),
+                    "dropping bounded surrounding prose around valid recovery plan block"
                 );
+                text.clear();
             }
         }
         let denied_interview_plan_retry = self.is_planning_active()
@@ -1024,6 +1056,96 @@ mod tests {
         assert!(
             matches!(outcome, TurnHandlerOutcome::Break(_)),
             "outside planning, text responses still end the turn (no new reprompt path)"
+        );
+    }
+
+    const RECOVERY_VALID_PLAN: &str = r#"# Recovery plan
+
+## Summary
+Fix the read-cap recovery path from gathered evidence.
+
+## Implementation Steps
+1. Reorder the guard -> files: [src/agent/runloop/unified/turn/tool_outcomes/handlers/guards/read_guard.rs] -> verify: [cargo check --locked]
+
+## Test Cases and Validation
+1. Run cargo check --locked.
+
+## Assumptions and Defaults
+1. Keep execution-mode caps strict.
+"#;
+
+    const RECOVERY_INVALID_PLAN: &str = r#"# Recovery plan
+
+## Summary
+Fix the read-cap recovery path from gathered evidence.
+
+## Implementation Steps
+1. Reorder the guard
+
+## Test Cases and Validation
+1. Run the focused test.
+
+## Assumptions and Defaults
+1. Keep existing behavior.
+"#;
+
+    #[tokio::test]
+    async fn tool_free_recovery_tolerates_intro_prose_around_valid_plan() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        backing.activate_tool_free_recovery_for_test("per-file read cap");
+        let mut ctx = backing.turn_processing_context();
+        assert!(ctx.consume_recovery_pass());
+
+        let outcome = ctx
+            .handle_text_response(
+                "Here is the plan from the gathered evidence.".to_string(),
+                Vec::new(),
+                None,
+                Some(RECOVERY_VALID_PLAN.to_string()),
+                false,
+            )
+            .await
+            .expect("recovery response should be handled");
+
+        // The old gate ended Blocked with "prose outside the required block".
+        // Prose-tolerant recovery must persist the plan instead.
+        assert!(
+            !matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
+            "intro prose around a valid plan must not end Blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_free_invalid_plan_schedules_one_bounded_repair_then_blocks() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        backing.activate_tool_free_recovery_for_test("per-file read cap");
+        let mut ctx = backing.turn_processing_context();
+        assert!(ctx.consume_recovery_pass());
+
+        // First invalid draft: repair budget is fresh, so the turn continues
+        // with a validator-owned repair directive instead of ending Blocked.
+        let first = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some(RECOVERY_INVALID_PLAN.to_string()), false)
+            .await
+            .expect("first invalid draft should be handled");
+        assert!(
+            matches!(first, TurnHandlerOutcome::Continue),
+            "first invalid recovery draft must schedule bounded repair"
+        );
+
+        // Exhaust the turn-scoped repair budget and re-enter the pass:
+        // the next invalid draft must take the resumable blocked handoff.
+        ctx.plan_session.mark_plan_validation_repair_used();
+        assert!(ctx.consume_recovery_pass());
+        let second = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some(RECOVERY_INVALID_PLAN.to_string()), false)
+            .await
+            .expect("second invalid draft should be handled");
+        assert!(
+            matches!(second, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
+            "exhausted repair budget must end with the resumable blocked handoff"
         );
     }
 
