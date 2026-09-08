@@ -13,6 +13,7 @@ fn reasoning_efforts() -> Vec<ReasoningEffortPreset> {
         (ReasoningEffortLevel::Medium, "Balanced reasoning"),
         (ReasoningEffortLevel::High, "Deep reasoning"),
         (ReasoningEffortLevel::XHigh, "Maximum supported reasoning"),
+        (ReasoningEffortLevel::Max, "Max reasoning"),
     ]
     .into_iter()
     .map(|(effort, description)| reasoning_preset(effort, description))

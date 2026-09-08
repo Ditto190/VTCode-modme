@@ -18,7 +18,8 @@ fn reasoning_effort_value(effort: ReasoningEffortLevel) -> Option<&'static str> 
         ReasoningEffortLevel::Low => Some("low"),
         ReasoningEffortLevel::Medium => Some("medium"),
         ReasoningEffortLevel::High => Some("high"),
-        ReasoningEffortLevel::XHigh | ReasoningEffortLevel::Max => Some("xhigh"),
+        ReasoningEffortLevel::XHigh => Some("xhigh"),
+        ReasoningEffortLevel::Max => Some("max"),
     }
 }
 
@@ -202,7 +203,7 @@ mod tests {
             (ReasoningEffortLevel::Medium, "medium"),
             (ReasoningEffortLevel::High, "high"),
             (ReasoningEffortLevel::XHigh, "xhigh"),
-            (ReasoningEffortLevel::Max, "xhigh"),
+            (ReasoningEffortLevel::Max, "max"),
         ] {
             let mut request = request();
             request.reasoning_effort = Some(effort);
