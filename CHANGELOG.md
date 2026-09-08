@@ -2,6 +2,34 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.159.0 - 2026-09-08
+
+### Highlights
+#### Bug Fixes
+
+- Match spool/history paths by components to block spoofing (cd2fc84c) 
+- Make announcements and reasoning provider-aware (f4db69b3) 
+- Bounded repair and prose tolerance in tool-free recovery (a3c3704b) 
+- Block post-exhaustion inspections and preserve spool-page visibility (80575a29) 
+- Clear stale recovery directives on planning cancellation (416a31c1) 
+- Prevent planning recovery loops (3da3675c) 
+- Instruct plan-format synthesis in all preview recovery paths (d3e9b6c9) 
+#### Documentation
+
+- Fix private intra-doc links; use OsStr in path check (9d6a31ec) 
+#### Features
+
+- Enforce static discovery commands and precise plan repair (5f1a6b0d) 
+- Map Max reasoning effort to "max" for Muse Spark (c4c04e2e) 
+### Other Changes
+#### Other
+
+- Update TODO (5477cf90) 
+- Update TODO (aafe6a61) 
+- Update README (3a9ada3e) 
+#### Refactors
+
+- Favor static dispatch over nested dyn layers (27915d4e) 
 ## 0.158.2 - 2026-09-07
 
 ### Highlights
