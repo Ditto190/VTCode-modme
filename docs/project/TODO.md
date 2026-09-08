@@ -22,36 +22,6 @@ The most intricate parts are likely:
 
 =====
 
-More prompts (8-17) 8. Cache-stability + token-bloat fix:
-reasoning.effort=xhigh. Audit prompt caching: stable_system_prefix_hash in core/agent/hash_utils.rs:39-55 strips Active-Tools/Catalog/Context but not [Harness Limits] or ## Environment/Shell Profile. cache_key in prompts/system.rs:576-606 omits prompt_context. system_prompt_budget in system.rs:305-462 is warn-only trim-off by default, estimator len/4. Fix to keep PROMPT_CACHE hits, include digests in envelope instruction_digest, enable safe trim, add hit-rate assert via Usage.cache_hit_rate. Verify: cargo nextest run -p vtcode-core prompts::
-
-1. Compaction vs reset unification:
-   Compaction preserves+new segment (compaction_checkpoint.rs:25-130, compaction/mod.rs:21-43) vs context_reset.rs discards to .vtcode/tasks/current_context_reset.md. Session clear wipes all in session/mod.rs:487-505. Auto trigger 90% min(provider,session) in compaction/memory_envelope.rs:1338-1349. Unify to single manifest referencing ThreadCompactBoundary + ContextReset events, test stall->reset->orient roundtrip. Keep ThreadEvent schema 0.14.0 compatible.
-
-2. Parallel fan-out:
-   can_parallelize=readonly&&preflight in tool_batching.rs:81-83 over-serializes; duplicate exec_command forced sequential; guidance is one line in guidelines.rs:80-82. Widen parallel_safe_after_preflight for pure reads (read_file/batch.rs), add few-shot parallel example, surface fan-out in telemetry. Verify max_parallel_tool_calls honored in tool_exec.rs:417,750.
-
-3. Failure taxonomy collapse:
-   Unify harness_kernel.ExecutionFailure, cargo_failure_diagnostics, Reasoning stage diagnosis, ErrorRecoveryState+circuit, HarnessEventKind::ToolRetry/ErrorRecovered into ErrorCategory+ToolOutcome path. Always emit HarnessEventItem{attempt,error_category,duration_ms}. No new ThreadEvent variants.
-
-4. Spool hardening:
-   Spool 8192B in output_spooler.rs:34 vs 32KiB/turn budget vs OUTPUT_PREVIEW_CHARS_PER_TOKEN=4. Reducers only cover read_file/unified_exec. Anti-recursion depends on caller no_spool, is_tool_output_spool_path is substring match. Enforce no_spool at gateway via canonical containment, append-only+digest reads via SpooledOutputReference only, add recursion/poisoning tests.
-
-5. Shell injection + redirection blindspot:
-   reasoning.effort=max, defensive only. executor.rs:166-169 sh -c + shell_handler.rs:86-92 join(" ") + preflight skip(1) in sandbox_runtime.rs:674-729 misses > ~/.ssh/authorized_keys, python -c, $BIN/curl, sudo unwrap. Enforce argv-only exec unless validate_command_safety+redirection-aware preflight pass, deny > to sensitive, expand interpreter -c/-e list. Add regression tests, run pty_tests+pipe_tests.
-
-6. Env leakage + containment TOCTOU:
-   manager.rs:56-62 uses denylist filter_sensitive_env not allowlist build_sanitized_env; PYTHONPATH/NODE_PATH/RUSTFLAGS/NODE_OPTIONS/GIT_SSH_COMMAND leak. WorkspaceGuardPolicy lexical vs ensure_path_within_workspace_resolved, skill_additional_permissions normalize only. Switch restrictive to allowlist, scope PYTHONPATH to workspace, fail-closed canonicalize, add symlink-swap harness.
-
-7. Skill/MCP trust:
-   NETWORK_TOOLS misses exec/shell egress in skill_policy.rs:14-44, silent UseDefault->WithAdditional merge, SKILL.md unfenced, SkillToolScope checked once. MCP parse_mcp_tool verbatim no size/name cap. Treat shell as network unless BlockAll, require human approval for out-of-workspace paths, fence skill/MCP descriptions + injection probe, cap schema bytes, namespace names, rate-limit list_changed.
-
-8. Eval + memory fix:
-   metric.rs:13-25 fake pass@k, suite attempts:0 deserializes, executor sequential cost-blind, search_memory substring count, eviction truncates without summarize. Implement true pass@k/pass^k, attempts>=1 guard, parallel run_suite with cost_usd aggregation, wire eviction->grounded_facts summarizer, BM25+recency search. Add gpt-6-astra capability suite.
-
-9. Astra routing/cost/budget:
-   GPT6Astra exists in table.rs:109-115 + openai.rs:85 + merge_gateway.rs:21 but pricing None => estimate_session_costs returns None => max_budget_usd skipped in runner/execute.rs:761-799. Duplicate estimate in model_resolver.rs:286-301 vs usage_cost.rs:105-136. Unify on usage_cost, audit models.json for 3 Astra IDs, fail-closed on pricing None when budget set, document raw=enforcement vs effective=display.
-
 ===
 
 1. tui/core*tui/session.rs:1-407 — state transitions / layout
@@ -128,3 +98,33 @@ check and fix vtcode plan mode failure and eventually being blocked and can not 
 
 check log: session-vtcode-20260907T082849Z_404084-21129
 Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+
+---
+
+fix plan mode error and failure to produce a proposal plan for approval. The following are the reasons for the failure:
+
+```
+Turn blocked: Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task
+state were retained.
+
+Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were
+retained.
+
+Planning workflow remains active: no approval-ready plan was produced. Keep planning and describe what to revise.
+
+Rejected plan draft:
+
+Plan is not ready for approval: invalid plan artifact: invalid implementation steps: step 1: verification item 1 must
+be a concrete command or check; step 3: verification item 1 must be a concrete command or check; step 4: must name a
+concrete file, symbol, or behavior target; step 5: must name a concrete file, symbol, or behavior target; step 6: must
+name a concrete file, symbol, or behavior target
+
+What you can do:
+  • In this session: Type 'continue' to resume, or describe alternative instructions
+  • From terminal: Run `vtcode --resume session-vtcode-20260908T075936Z_287150-21843`
+  • Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+```
+
+log:
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/checkpoints/turn_1075.json
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/checkpoints/turn_1074.json
