@@ -60,7 +60,7 @@ impl<'a> TurnProcessingContext<'a> {
             detail.to_string()
         };
         let message = format!(
-            "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan ({detail}). The latest request and bounded evidence are preserved. Re-state the planning request or type `keep planning` to try again; no changes were applied."
+            "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan ({detail}). The latest request and bounded evidence are preserved. Do NOT re-read files already read this turn; reuse the tool outputs above and emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Re-state the planning request or type `keep planning` to try again; no changes were applied."
         );
 
         self.harness_state.mark_final_response_fallback();

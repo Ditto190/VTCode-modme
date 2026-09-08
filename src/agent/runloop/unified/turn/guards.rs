@@ -302,6 +302,15 @@ fn normalize_turn_balancer_tool_name(name: &str) -> Cow<'_, str> {
     }
 }
 
+/// Shared plan-format suffix for planning synthesis recovery reasons.
+///
+/// All three planning convergence guards (low-signal, preview-budget,
+/// repeated-navigation) schedule the same single tool-free synthesis pass, so
+/// they must instruct the same `<proposed_plan>` contract. Without the format
+/// the model emits research prose that fails validation and the turn ends
+/// `Blocked` even though the evidence was present.
+const PLANNING_SYNTHESIS_FORMAT_HINT: &str = "Synthesize exactly one complete `<proposed_plan>` NOW from the evidence already gathered: include Summary, numbered steps as `Action -> files: [path] -> verify: [command]`, Validation, and Assumptions. Do not emit tool calls or tool-call markup.";
+
 fn navigation_loop_guidance(planning_active: bool, repetition: usize) -> &'static str {
     if repetition >= 2 {
         "CRITICAL: You have triggered the navigation-loop guard repeatedly. STOP all read/search operations immediately. DO NOT browse or explore further. Provide a direct synthesis with the next action or ask one blocking question, and nothing else."
@@ -355,7 +364,7 @@ pub(crate) async fn handle_turn_balancer(
     {
         repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         let recovery_reason = format!(
-            "Planning navigation produced {} consecutive and {} total low-signal results. Tools are disabled on the next pass; synthesize the plan from collected evidence.",
+            "Planning navigation produced {} consecutive and {} total low-signal results. Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}",
             repeated_tool_attempts.consecutive_low_signal_navigations,
             repeated_tool_attempts.total_low_signal_navigations
         );
@@ -384,8 +393,9 @@ pub(crate) async fn handle_turn_balancer(
         && ctx.harness_state.model_visible_preview_budget_exhausted()
     {
         repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
-        let recovery_reason = "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass; synthesize the plan from collected evidence."
-            .to_string();
+        let recovery_reason = format!(
+            "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass. Trust preserved outcome metadata (tool, spool_path, byte_count, completion_state), do NOT re-read or repeat exhausted calls. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+        );
         ctx.activate_recovery(recovery_reason.clone());
         ctx.renderer
             .line(
@@ -410,7 +420,7 @@ pub(crate) async fn handle_turn_balancer(
     {
         repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         let recovery_reason = format!(
-            "Planning research reached {} consecutive read/search steps with {} repeated navigation request(s). Tools are disabled on the next pass; synthesize the plan from the evidence already gathered.",
+            "Planning research reached {} consecutive read/search steps with {} repeated navigation request(s). Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}",
             repeated_tool_attempts.consecutive_navigations,
             repeated_tool_attempts.repeated_navigation_count(),
         );
@@ -681,6 +691,7 @@ mod tests {
         assert!(ctx.working_history.iter().any(|message| {
             message.content.as_text().contains("adaptive synthesis threshold")
                 || message.content.as_text().contains("synthesize the plan")
+                || message.content.as_text().contains("<proposed_plan>")
         }));
     }
 
@@ -745,6 +756,13 @@ mod tests {
         let first = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
         assert!(matches!(first, TurnHandlerOutcome::Continue));
         assert!(tracker.planning_low_signal_synthesis_triggered);
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                let text = message.content.as_text();
+                text.contains("<proposed_plan>") && text.contains("Action -> files")
+            }),
+            "low-signal recovery must instruct plan-format synthesis"
+        );
 
         tracker.consecutive_low_signal_navigations = PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD;
         tracker.total_low_signal_navigations = PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD;
@@ -791,6 +809,14 @@ mod tests {
             })
             .count();
         assert_eq!(synthesis_messages, 1, "preview-exhaustion synthesis must fire exactly once per turn");
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                message.role == uni::MessageRole::System
+                    && message.content.as_text().contains("<proposed_plan>")
+                    && message.content.as_text().contains("Action -> files")
+            }),
+            "preview-exhaustion recovery must instruct plan-format synthesis from preserved metadata"
+        );
         assert_eq!(tracker.consecutive_low_signal_navigations, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD);
         assert_eq!(tracker.total_low_signal_navigations, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD);
     }
@@ -844,6 +870,13 @@ mod tests {
             ctx.working_history
                 .iter()
                 .any(|message| { message.content.as_text().contains("repeated navigation request") })
+        );
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                let text = message.content.as_text();
+                text.contains("<proposed_plan>") && text.contains("Action -> files")
+            }),
+            "repeated-navigation recovery must instruct plan-format synthesis"
         );
     }
 

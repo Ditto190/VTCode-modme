@@ -217,10 +217,17 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     renderer.line(MessageStyle::Info, &summary)?;
     renderer.line(MessageStyle::Info, &format!("Follow-up error category: {}", err_cat.user_label()))?;
     if !err_cat.is_retryable() {
-        renderer.line(
-            MessageStyle::Info,
-            "Tip: rerun with a narrower prompt or switch provider/model for the follow-up.",
-        )?;
+        if planning_active {
+            renderer.line(
+                MessageStyle::Info,
+                "Tip: planning evidence is preserved; the harness synthesizes the plan from collected tool outputs, and the next `keep planning` turn reuses that evidence without re-reading. If the failure repeats, switch provider/model for the follow-up.",
+            )?;
+        } else {
+            renderer.line(
+                MessageStyle::Info,
+                "Tip: rerun with a narrower prompt or switch provider/model for the follow-up.",
+            )?;
+        }
     }
     let should_retry_tool_enabled = allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
     let should_retry_tool_free =
@@ -1094,6 +1101,37 @@ mod tests {
             working_history
                 .iter()
                 .any(|message| { message.content.as_text().contains("required write or verification tools") })
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_error_in_plan_mode_selects_tool_free_plan_synthesis() {
+        let mut renderer = AnsiRenderer::stdout();
+        let mut working_history = vec![uni::Message::tool_response(
+            "call-1".to_string(),
+            "{\"ok\":true}".to_string(),
+        )];
+        let err = anyhow::anyhow!("simulated follow-up execution failure");
+        assert_eq!(vtcode_commons::classify_anyhow_error(&err), ErrorCategory::ExecutionError);
+
+        let recovery = maybe_recover_after_post_tool_llm_failure(
+            &mut renderer,
+            &mut working_history,
+            &err,
+            1,
+            0,
+            "test",
+            true,
+            false,
+            true,
+        )
+        .expect("plan-mode execution failure should resolve");
+
+        assert_eq!(recovery, PostToolFailureRecovery::RetryToolFree);
+        assert!(
+            working_history
+                .iter()
+                .any(|message| { message.content.as_text().contains("<proposed_plan>") })
         );
     }
 
