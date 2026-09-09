@@ -41,7 +41,7 @@ use crate::agent::runloop::unified::inline_events::harness::{
 use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState;
 use crate::agent::runloop::unified::progress::{ProgressReporter, ProgressUpdateGuard, spawn_elapsed_time_updater};
 use crate::agent::runloop::unified::run_loop_context::{
-    HarnessTurnState, RunLoopContext, SESSION_LIMIT_GRANT_DIRECTIVE,
+    HarnessTurnState, RunLoopContext, SESSION_LIMIT_GRANT_DIRECTIVE, full_auto_loop_grants_enabled,
 };
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::state::SessionStats;
@@ -87,6 +87,7 @@ pub(super) struct CopilotRuntimeHost<'a> {
     approval_policy: AskForApproval,
     hitl_notification_bell: bool,
     skip_confirmations: bool,
+    full_auto: bool,
     vt_cfg: Option<&'a vtcode_config::loader::VTCodeConfig>,
     traj: &'a TrajectoryLogger,
     harness_state: &'a mut HarnessTurnState,
@@ -133,6 +134,7 @@ impl<'a> CopilotRuntimeHost<'a> {
         suppress_output_signal: Option<Arc<AtomicBool>>,
         available_tools: Option<&Arc<Vec<ToolDefinition>>>,
         skip_confirmations: bool,
+        full_auto: bool,
         harness_emitter: Option<&'a HarnessEventEmitter>,
         harness_item_prefix: String,
         agent_name: Option<String>,
@@ -177,6 +179,7 @@ impl<'a> CopilotRuntimeHost<'a> {
             approval_policy,
             hitl_notification_bell: hitl_bell,
             skip_confirmations,
+            full_auto,
             vt_cfg,
             traj,
             harness_state,
@@ -196,6 +199,10 @@ impl<'a> CopilotRuntimeHost<'a> {
 
     pub(super) fn exposed_tools(&self) -> &[ToolDefinition] {
         &self.exposed_tools
+    }
+
+    fn session_limit_auto_grant(&self) -> bool {
+        full_auto_loop_grants_enabled(self.full_auto, self.vt_cfg)
     }
 
     async fn handle_builtin_permission(
@@ -524,6 +531,7 @@ impl<'a> CopilotRuntimeHost<'a> {
 
         let invocation_id = invocation_id_from_call_id(tool_call_id);
         let safety_args = rewritten_arguments.as_ref().unwrap_or(arguments);
+        let session_limit_auto_grant = self.session_limit_auto_grant();
         let safety_approval_justification = match validate_tool_call_with_limit_prompt(
             self.safety_validator,
             self.handle,
@@ -536,6 +544,7 @@ impl<'a> CopilotRuntimeHost<'a> {
             Some(self.harness_state),
             self.harness_emitter,
             self.agent_name.as_deref(),
+            session_limit_auto_grant,
         )
         .await
         {
@@ -595,6 +604,7 @@ impl<'a> CopilotRuntimeHost<'a> {
                             Some(self.harness_state),
                             self.harness_emitter,
                             self.agent_name.as_deref(),
+                            session_limit_auto_grant,
                         )
                         .await
                         {

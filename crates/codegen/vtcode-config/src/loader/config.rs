@@ -1093,6 +1093,9 @@ allowed_tools = [
 # Require profile acknowledgment before using full auto
 require_profile_ack = true
 
+# Grant tool-loop and session tool-call limit increases without prompting
+auto_grant_tool_limits = true
+
 # Path to full auto profile configuration
 profile_path = "automation/full_auto_profile.toml"
 

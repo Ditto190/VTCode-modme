@@ -271,6 +271,8 @@ full_auto = false
 enabled = false
 # List of tools that are allowed in full automation mode
 allowed_tools = ["read_file", "web_search", "shell_exec"]
+# Grant tool-loop and session tool-call limit increases without prompting (same increments and caps as manual approvals)
+auto_grant_tool_limits = true
 ```
 
 ## Participant system

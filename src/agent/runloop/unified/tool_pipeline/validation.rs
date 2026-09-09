@@ -8,7 +8,7 @@ use vtcode_core::tools::ToolInvocationId;
 use vtcode_ui::tui::app::InlineHandle;
 
 use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter, harness_event};
-use crate::agent::runloop::unified::run_loop_context::HarnessTurnState;
+use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, SESSION_LIMIT_AUTO_GRANT_INCREMENT};
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::tool_call_safety::{SafetyError, ToolCallSafetyValidator};
 use crate::agent::runloop::unified::tool_routing::prompt_session_limit_increase;
@@ -43,6 +43,7 @@ pub(crate) async fn validate_tool_call_with_limit_prompt<S: UiSession + ?Sized>(
     mut harness_state: Option<&mut HarnessTurnState>,
     harness_emitter: Option<&HarnessEventEmitter>,
     agent_name: Option<&str>,
+    auto_grant: bool,
 ) -> Result<(), SafetyValidationFailure> {
     let mut limit_increase_attempts = 0u32;
     loop {
@@ -61,31 +62,32 @@ pub(crate) async fn validate_tool_call_with_limit_prompt<S: UiSession + ?Sized>(
                     );
                     return Err(SafetyValidationFailure::SessionLimitNotIncreased);
                 }
+                if auto_grant {
+                    record_session_limit_grant(
+                        safety_validator,
+                        harness_state.as_deref_mut(),
+                        harness_emitter,
+                        agent_name,
+                        tool_name,
+                        SESSION_LIMIT_AUTO_GRANT_INCREMENT,
+                        limit_increase_attempts,
+                        true,
+                    );
+                    continue;
+                }
                 match prompt_session_limit_increase(handle, session, ctrl_c_state, ctrl_c_notify, max, agent_name).await
                 {
                     Ok(Some(increment)) => {
-                        safety_validator.increase_session_limit(increment);
-                        let new_limit = safety_validator.max_per_session();
-                        if let Some(state) = harness_state.as_deref_mut() {
-                            state.record_session_limit_grant();
-                        }
-                        if let Some(emitter) = harness_emitter
-                            && let Err(error) = emitter.emit(harness_event(
-                                vtcode_core::exec::events::HarnessEventKind::SessionToolLimitIncreased,
-                                Some(format!(
-                                    "Current agent {} granted +{} session tool calls (limit {}); retrying the pending {} call in this turn. Reuse existing tool outputs for subsequent calls.",
-                                    agent_name.unwrap_or("unknown"),
-                                    increment,
-                                    new_limit,
-                                    tool_name,
-                                )),
-                                None,
-                                Some(limit_increase_attempts),
-                                None,
-                            ))
-                        {
-                            tracing::debug!(error = %error, "Failed to emit session tool-limit grant event");
-                        }
+                        record_session_limit_grant(
+                            safety_validator,
+                            harness_state.as_deref_mut(),
+                            harness_emitter,
+                            agent_name,
+                            tool_name,
+                            increment,
+                            limit_increase_attempts,
+                            false,
+                        );
                     }
                     Ok(None) => {
                         return Err(SafetyValidationFailure::SessionLimitNotIncreased);
@@ -100,5 +102,62 @@ pub(crate) async fn validate_tool_call_with_limit_prompt<S: UiSession + ?Sized>(
             }
             Err(error) => return Err(SafetyValidationFailure::Validation(error)),
         }
+    }
+}
+
+/// Apply one session tool-call limit increase and emit the shared grant
+/// telemetry. Used by both the full-auto grant path and the manual prompt
+/// path so the two converge on one event shape; only the message prefix
+/// records whether a human approved the increase.
+fn record_session_limit_grant(
+    safety_validator: &ToolCallSafetyValidator,
+    harness_state: Option<&mut HarnessTurnState>,
+    harness_emitter: Option<&HarnessEventEmitter>,
+    agent_name: Option<&str>,
+    tool_name: &str,
+    increment: usize,
+    limit_increase_attempts: u32,
+    auto_granted: bool,
+) {
+    safety_validator.increase_session_limit(increment);
+    let new_limit = safety_validator.max_per_session();
+    if let Some(state) = harness_state {
+        state.record_session_limit_grant();
+    }
+    let message = if auto_granted {
+        format!(
+            "Full-auto auto-granted +{} session tool calls to current agent {} (limit {}); retrying the pending {} call in this turn. Reuse existing tool outputs for subsequent calls.",
+            increment,
+            agent_name.unwrap_or("unknown"),
+            new_limit,
+            tool_name,
+        )
+    } else {
+        format!(
+            "Current agent {} granted +{} session tool calls (limit {}); retrying the pending {} call in this turn. Reuse existing tool outputs for subsequent calls.",
+            agent_name.unwrap_or("unknown"),
+            increment,
+            new_limit,
+            tool_name,
+        )
+    };
+    if auto_granted {
+        tracing::info!(
+            tool = %tool_name,
+            increment,
+            new_limit,
+            "Full-auto granted a session tool-call limit increase without prompting",
+        );
+    }
+    if let Some(emitter) = harness_emitter
+        && let Err(error) = emitter.emit(harness_event(
+            vtcode_core::exec::events::HarnessEventKind::SessionToolLimitIncreased,
+            Some(message),
+            None,
+            Some(limit_increase_attempts),
+            None,
+        ))
+    {
+        tracing::debug!(error = %error, "Failed to emit session tool-limit grant event");
     }
 }

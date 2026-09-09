@@ -18,7 +18,7 @@ use vtcode_core::tools::tool_intent;
 use crate::agent::runloop::git::confirm_changes_with_git_diff;
 use crate::agent::runloop::unified::async_mcp_manager::approval_policy_from_human_in_the_loop;
 use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter, tool_started_event};
-use crate::agent::runloop::unified::run_loop_context::RunLoopContext;
+use crate::agent::runloop::unified::run_loop_context::{RunLoopContext, full_auto_loop_grants_enabled};
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::tool_call_safety::invocation_id_from_call_id;
 use crate::agent::runloop::unified::tool_routing::{
@@ -270,6 +270,7 @@ pub(crate) async fn run_tool_call_with_args(
             safety_invocation_id,
             ctrl_c_state,
             ctrl_c_notify,
+            full_auto_loop_grants_enabled(ctx.full_auto, vt_cfg),
         )
         .await
         {
@@ -324,6 +325,7 @@ pub(crate) async fn run_tool_call_with_args(
                         safety_invocation_id,
                         ctrl_c_state,
                         ctrl_c_notify,
+                        full_auto_loop_grants_enabled(ctx.full_auto, vt_cfg),
                     )
                     .await
                 {
@@ -558,6 +560,7 @@ async fn check_tool_safety(
     invocation_id: ToolInvocationId,
     ctrl_c_state: &Arc<CtrlCState>,
     ctrl_c_notify: &Arc<Notify>,
+    auto_grant: bool,
 ) -> Result<Option<String>, ToolExecutionStatus> {
     let Some(safety_validator) = ctx.safety_validator else {
         return Ok(None);
@@ -575,6 +578,7 @@ async fn check_tool_safety(
         Some(ctx.harness_state),
         ctx.harness_emitter,
         ctx.agent_name.as_deref(),
+        auto_grant,
     )
     .await
     {

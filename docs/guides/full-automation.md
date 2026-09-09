@@ -34,6 +34,7 @@ Primary-agent selection still works normally. If you explicitly select or config
 - Full-auto does not grant tools outside `[automation.full_auto].allowed_tools`.
 - Explicit denies and policy blocks are honoured before full-auto review.
 - Promptable allow-listed actions are reviewed automatically instead of interrupting for user input.
+- Tool-loop and session tool-call limit increases are granted automatically (same increments and hard caps as manual approvals) instead of showing an interactive prompt. Set `auto_grant_tool_limits = false` to restore the prompts.
 - Non allow-listed tools are rejected before execution, and their attempts are logged.
 - If the acknowledgement profile is missing while required, the CLI aborts before launching.
 
@@ -44,6 +45,7 @@ Primary-agent selection still works normally. If you explicitly select or config
 enabled = true
 require_profile_ack = true
 profile_path = "automation/full_auto_profile.toml"
+auto_grant_tool_limits = true
 allowed_tools = [
     "exec_command",
     "write_stdin",

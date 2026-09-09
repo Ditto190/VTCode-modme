@@ -34,6 +34,30 @@ pub const PLANNING_WORKFLOW_TOOL_LOOP_CAP_MULTIPLIER: usize = 6;
 /// Maximum planning tool-loop extension accepted from one prompt.
 pub const PLANNING_WORKFLOW_MAX_TOOL_LOOP_INCREMENT_PER_PROMPT: usize = 80;
 
+/// Absolute ceiling for per-turn tool-loop extensions derived from a
+/// configured base limit. Values at or above the absolute cap are returned
+/// unchanged so an already-generous configuration is never shrunk.
+pub const fn tool_loop_hard_cap(base_limit: usize, planning_active: bool) -> usize {
+    if planning_active {
+        if base_limit >= PLANNING_WORKFLOW_MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP {
+            return base_limit;
+        }
+        let scaled = base_limit.saturating_mul(PLANNING_WORKFLOW_TOOL_LOOP_CAP_MULTIPLIER);
+        if scaled > PLANNING_WORKFLOW_MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP {
+            return PLANNING_WORKFLOW_MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP;
+        }
+        return scaled;
+    }
+    if base_limit >= MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP {
+        return base_limit;
+    }
+    let scaled = base_limit.saturating_mul(MAX_TOOL_LOOP_CAP_MULTIPLIER);
+    if scaled > MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP {
+        return MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP;
+    }
+    scaled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +78,17 @@ mod tests {
         assert_eq!(MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP, 120);
         assert_eq!(PLANNING_WORKFLOW_MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP, 240);
         assert_eq!(APPROVED_PLAN_TOOL_LOOP_INCREMENT, 50);
+    }
+
+    #[test]
+    fn tool_loop_hard_cap_scales_and_bounds() {
+        assert_eq!(tool_loop_hard_cap(20, false), 60);
+        assert_eq!(tool_loop_hard_cap(40, false), 120);
+        assert_eq!(tool_loop_hard_cap(120, false), 120);
+        assert_eq!(tool_loop_hard_cap(200, false), 200);
+        assert_eq!(tool_loop_hard_cap(0, false), 0);
+        assert_eq!(tool_loop_hard_cap(40, true), 240);
+        assert_eq!(tool_loop_hard_cap(120, true), 240);
+        assert_eq!(tool_loop_hard_cap(300, true), 300);
     }
 }

@@ -190,6 +190,7 @@ python3 scripts/generate_config_field_reference.py
 | `auth.openrouter.flow_timeout_secs` | `integer` | no | `300` | Timeout in seconds for completing the OAuth browser flow. |
 | `auth.openrouter.use_oauth` | `boolean` | no | `false` | Whether to use OAuth instead of API key |
 | `automation.full_auto.allowed_tools` | `array` | no | `["exec_command", "write_stdin", "apply_patch", "code_search"]` | Allow-list of tools that may execute automatically. |
+| `automation.full_auto.auto_grant_tool_limits` | `boolean` | no | `true` | Automatically grant tool-loop and session tool-call limit increases during full-auto runs instead of prompting. Grants reuse the manual increments and hard caps. Set to `false` to restore the interactive prompts. |
 | `automation.full_auto.allowed_tools[]` | `string` | no | `-` | - |
 | `automation.full_auto.enabled` | `boolean` | no | `false` | Enable the runtime flag once the workspace is configured for autonomous runs. |
 | `automation.full_auto.max_turns` | `integer` | no | `100` | Maximum number of autonomous agent turns before the exec runner pauses. |

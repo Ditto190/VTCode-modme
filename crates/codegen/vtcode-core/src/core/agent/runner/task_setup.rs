@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::task::spawn_blocking;
 
+use crate::config::VTCodeConfig;
 use crate::core::agent::events::{ExecEventRecorder, SessionStoreSinkHandle};
 use crate::core::agent::progress_monitor::ProgressMonitor;
 use crate::core::agent::runner::continuation::ContinuationController;
@@ -125,7 +126,7 @@ impl AgentRunner {
 
         let conversation_messages = crate::core::agent::conversation::build_messages_from_conversation(&conversation);
 
-        let max_tool_loops = self.config().tools.max_tool_loops;
+        let max_tool_loops = full_auto_tool_loop_budget(self.config(), full_auto_active);
         let preserve_recent_turns = self.config().context.preserve_recent_turns;
         let max_context_tokens = crate::compaction::effective_context_budget(
             Some(self.config()),
@@ -253,5 +254,60 @@ impl AgentRunner {
         // Consume the manifest so it only triggers once.
         crate::core::agent::context_reset::consume_manifest_async(&self._workspace).await?;
         Ok(())
+    }
+}
+
+/// Tool-loop budget for an exec run. Full-auto runs start at the hard cap
+/// because no operator is present to answer a mid-run grant prompt; the cap
+/// itself remains the runaway bound. Ordinary runs keep the configured base
+/// limit, and `0` stays unlimited in every mode.
+fn full_auto_tool_loop_budget(config: &VTCodeConfig, full_auto_active: bool) -> usize {
+    let configured = config.tools.max_tool_loops;
+    let grants_enabled = full_auto_active && config.automation.full_auto.enabled;
+    if !grants_enabled || configured == 0 || !config.automation.full_auto.auto_grant_tool_limits {
+        return configured;
+    }
+    let capped = crate::config::constants::tool_limits::tool_loop_hard_cap(configured, false);
+    if capped != configured {
+        tracing::info!(
+            configured,
+            capped,
+            "Full-auto granted the maximum tool-loop budget upfront instead of prompting mid-run"
+        );
+    }
+    capped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn full_auto_config(max_tool_loops: usize, auto_grant_tool_limits: bool) -> VTCodeConfig {
+        let mut config = VTCodeConfig::default();
+        config.tools.max_tool_loops = max_tool_loops;
+        config.automation.full_auto.enabled = true;
+        config.automation.full_auto.auto_grant_tool_limits = auto_grant_tool_limits;
+        config
+    }
+
+    #[test]
+    fn full_auto_exec_starts_at_the_hard_cap() {
+        assert_eq!(full_auto_tool_loop_budget(&full_auto_config(20, true), true), 60);
+        assert_eq!(full_auto_tool_loop_budget(&full_auto_config(40, true), true), 120);
+    }
+
+    #[test]
+    fn exec_budget_keeps_base_limit_without_grants() {
+        assert_eq!(full_auto_tool_loop_budget(&full_auto_config(40, true), false), 40);
+        assert_eq!(full_auto_tool_loop_budget(&full_auto_config(40, false), true), 40);
+        let mut disabled = VTCodeConfig::default();
+        disabled.tools.max_tool_loops = 40;
+        assert_eq!(full_auto_tool_loop_budget(&disabled, true), 40);
+    }
+
+    #[test]
+    fn exec_budget_never_shrinks_generous_or_unlimited_limits() {
+        assert_eq!(full_auto_tool_loop_budget(&full_auto_config(0, true), true), 0);
+        assert_eq!(full_auto_tool_loop_budget(&full_auto_config(200, true), true), 200);
     }
 }

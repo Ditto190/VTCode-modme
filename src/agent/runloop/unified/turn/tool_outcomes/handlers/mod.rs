@@ -11,6 +11,7 @@ use vtcode_core::utils::ansi::MessageStyle;
 use super::error_handling::tool_denial_diagnostic;
 use super::helpers::{FAILED_VERIFICATION_FIX_ALLOWANCE, check_is_argument_error, mutation_blocked_until_verification};
 use crate::agent::runloop::unified::async_mcp_manager::approval_policy_from_human_in_the_loop;
+use crate::agent::runloop::unified::run_loop_context::full_auto_loop_grants_enabled;
 use crate::agent::runloop::unified::tool_call_safety::invocation_id_from_call_id;
 use crate::agent::runloop::unified::tool_pipeline::validation::{
     SafetyValidationFailure, validate_tool_call_with_limit_prompt,
@@ -434,6 +435,7 @@ async fn run_safety_validation_loop(
         Some(ctx.harness_state),
         ctx.harness_emitter,
         Some(ctx.active_primary_agent.active().name()),
+        full_auto_loop_grants_enabled(ctx.full_auto, ctx.vt_cfg),
     )
     .await
     {

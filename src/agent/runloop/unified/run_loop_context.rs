@@ -113,6 +113,22 @@ const MAX_SPOOL_PAGE_PREVIEW_CREDIT_BYTES: usize = 96 * 1024;
 /// budget. Keep this shared by the normal and out-of-band provider paths so a
 /// grant has the same continuation semantics regardless of transport.
 pub(crate) const SESSION_LIMIT_GRANT_DIRECTIVE: &str = "Session tool-call limit increased by the user. Continue this same turn with the current agent, retry the pending call, and reuse existing tool outputs instead of repeating exploration.";
+/// Session tool-call increase applied without prompting while full-auto
+/// auto-grant is active. Matches the overlay default so automatic and manual
+/// grants converge on the same budget.
+pub(crate) const SESSION_LIMIT_AUTO_GRANT_INCREMENT: usize = 100;
+
+/// Whether tool-loop and session tool-call limit increases may be granted
+/// without an interactive prompt. Requires all three: the turn runs under
+/// full-auto policy, `[automation.full_auto]` is enabled, and the opt-out
+/// `auto_grant_tool_limits` flag is still on. Live config reloads can disable
+/// `enabled` mid-session while the runtime bool stays true, so both sides
+/// of the gate are checked.
+#[inline]
+pub(crate) fn full_auto_loop_grants_enabled(full_auto: bool, vt_cfg: Option<&VTCodeConfig>) -> bool {
+    full_auto
+        && vt_cfg.is_some_and(|cfg| cfg.automation.full_auto.enabled && cfg.automation.full_auto.auto_grant_tool_limits)
+}
 const MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES: usize = 16 * 1024;
 const TOOL_PREVIEW_METADATA_MAX_DEPTH: usize = 8;
 
@@ -1826,10 +1842,12 @@ mod tests {
 
     use super::{
         CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES,
-        MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode, TOOL_BUDGET_WARNING_THRESHOLD,
-        TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES, ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning,
-        ToolWallClockExhaustion, ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId,
+        MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode, SESSION_LIMIT_AUTO_GRANT_INCREMENT,
+        TOOL_BUDGET_WARNING_THRESHOLD, TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES, ToolBudgetExhaustion,
+        ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion, ToolWallClockExhaustionNotice,
+        TurnExecutionPhase, TurnId, TurnPhase, TurnRunId, full_auto_loop_grants_enabled,
     };
+    use vtcode_core::config::loader::VTCodeConfig;
 
     #[test]
     fn model_visible_tool_preview_budget_returns_bounded_metadata_after_exhaustion() {
@@ -2709,5 +2727,29 @@ mod tests {
         let warning = tracker.seal_turn(&sigs_b, &written, None, false);
         assert!(warning.is_some());
         assert!(warning.unwrap().contains("Cross-turn loop detected"));
+    }
+
+    #[test]
+    fn full_auto_loop_grants_require_runtime_and_config_and_opt_in() {
+        assert_eq!(SESSION_LIMIT_AUTO_GRANT_INCREMENT, 100);
+
+        // No config at all: interactive sessions keep prompting.
+        assert!(!full_auto_loop_grants_enabled(true, None));
+        assert!(!full_auto_loop_grants_enabled(false, None));
+
+        let mut cfg = VTCodeConfig::default();
+        // Default config has full-auto disabled: no auto-grant either way.
+        assert!(!full_auto_loop_grants_enabled(true, Some(&cfg)));
+        assert!(!full_auto_loop_grants_enabled(false, Some(&cfg)));
+
+        // Full-auto runtime + enabled config grants by default (opt-out flag on).
+        cfg.automation.full_auto.enabled = true;
+        assert!(full_auto_loop_grants_enabled(true, Some(&cfg)));
+        // Ordinary runtime never grants, even with full-auto configured.
+        assert!(!full_auto_loop_grants_enabled(false, Some(&cfg)));
+
+        // Explicit opt-out restores prompting in full-auto runs.
+        cfg.automation.full_auto.auto_grant_tool_limits = false;
+        assert!(!full_auto_loop_grants_enabled(true, Some(&cfg)));
     }
 }
