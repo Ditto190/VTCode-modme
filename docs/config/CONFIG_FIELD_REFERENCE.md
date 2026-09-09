@@ -816,7 +816,7 @@ python3 scripts/generate_config_field_reference.py
 | `tools.web_search.cache_ttl_secs` | `integer` | no | `300` | How long successful search results are cached before a fresh request is made, in seconds. Defaults to 300s (5 min). |
 | `tools.web_search.cooldown_ms` | `integer` | no | `3000` | Minimum gap between consecutive live requests, in milliseconds. Defaults to 3000ms (3s). |
 | `tools.web_search.max_results` | `integer` | no | `8` | Default cap on the number of results returned per call. Hard-capped at 20 by the runtime to keep responses inline-friendly. |
-| `tools.web_search.provider` | `string` | no | `"auto"` | Provider selection. Currently the only supported backend is DuckDuckGo; this field is kept for future extension. |
+| `tools.web_search.provider` | `string` | no | `"auto"` | Provider selection. `"auto"`/`"duckduckgo"` use the keyless DuckDuckGo HTML endpoint (default); `"youcom"` routes through the You.com Search API (requires the `YDC_API_KEY` environment variable). |
 | `tools.web_search.session_max_requests` | `integer` | no | `12` | Hard cap on outbound network requests per tool instance. Defaults to 12 to stay well below DDG's soft session quotas. |
 | `tools.web_search.timeout_secs` | `integer` | no | `20` | Per-request timeout in seconds. Capped at 60s by the runtime. |
 | `tui.alternate_screen` | `TuiAlternateScreen \| null` | no | `null` | - |

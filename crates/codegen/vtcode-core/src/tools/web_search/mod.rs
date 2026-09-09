@@ -1,11 +1,12 @@
 //! WebSearch tool: query -> ranked web results (title, url, snippet).
 //!
-//! Lightweight, keyless, single-provider. We only target DuckDuckGo's HTML
-//! endpoint (`https://html.duckduckgo.com/html/?q=...`), which is the only
-//! path that returns real web results without an API key. This keeps the
-//! tool simple and avoids any API-key plumbing.
+//! Two providers, selected in `vtcode.toml` via `[tools.web_search] provider`:
+//! - `duckduckgo` (default): keyless HTML scraping of
+//!   `https://html.duckduckgo.com/html/`. Best-effort; may be rate-limited.
+//! - `youcom`: the You.com Search API (`https://ydc-index.io/v1/search`),
+//!   opt-in, requires the `YDC_API_KEY` environment variable.
 //!
-//! Safety/rate-limit guard rails:
+//! Safety/rate-limit guard rails (shared by both providers):
 //! - A **cooldown** between consecutive network requests (default 3s) prevents
 //!   hammering DDG and triggering anti-bot challenges.
 //! - A short **result cache** (default 5min TTL) means repeated identical
@@ -27,7 +28,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use url::Url;
-use vtcode_config::WebSearchConfig;
+use vtcode_config::{WebSearchConfig, WebSearchProvider};
 
 const MAX_TIMEOUT_SECS: u64 = 60;
 const MAX_RESULTS_CAP: usize = 20;
@@ -39,7 +40,7 @@ const MAX_SNIPPET_CHARS: usize = 400;
 const BROWSER_USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-pub(crate) const WEB_SEARCH_DESCRIPTION: &str = "Searches the web for a query and returns a ranked list of results (title, url, snippet) inline. Accepts: { query: string, max_results?: number }. Uses the keyless DuckDuckGo HTML endpoint (best-effort, may be rate-limited). Results are cached for a few minutes to avoid repeat hits. Use web_fetch on the most promising result URL to read full content. Returns { query, provider: \"duckduckgo\", count, cached, results: [{ title, url, snippet }] }.";
+pub(crate) const WEB_SEARCH_DESCRIPTION: &str = "Searches the web for a query and returns a ranked list of results (title, url, snippet) inline. Accepts: { query: string, max_results?: number }. Provider is set in vtcode.toml ([tools.web_search] provider): \"duckduckgo\" (default; keyless HTML endpoint, best-effort, may be rate-limited) or \"youcom\" (You.com Search API; requires YDC_API_KEY). Results are cached for a few minutes to avoid repeat hits. Use web_fetch on the most promising result URL to read full content. Returns { query, provider, count, cached, results: [{ title, url, snippet }] }.";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -187,7 +188,16 @@ impl WebSearchTool {
             }
         }
 
-        let results = duckduckgo_search(&query, max_results, snapshot.timeout_secs).await;
+        let results = match snapshot.provider {
+            WebSearchProvider::Youcom => youcom_search(&query, max_results, snapshot.timeout_secs).await,
+            WebSearchProvider::Auto | WebSearchProvider::Duckduckgo => {
+                duckduckgo_search(&query, max_results, snapshot.timeout_secs).await
+            }
+        };
+        let provider_name = match snapshot.provider {
+            WebSearchProvider::Youcom => "youcom",
+            WebSearchProvider::Auto | WebSearchProvider::Duckduckgo => "duckduckgo",
+        };
 
         // By this point we have either short-circuited above (cache / cap /
         // cooldown) or attempted a real network call. Record the request so
@@ -201,10 +211,14 @@ impl WebSearchTool {
             Ok(results) if results.is_empty() => {
                 let payload = json!({
                     "query": query,
-                    "provider": "duckduckgo",
+                    "provider": provider_name,
                     "count": 0,
                     "results": [],
-                    "warning": "No results were returned. DuckDuckGo may have rate-limited the request or matched nothing. Try a different query, or wait a few seconds and try again."
+                    "warning": if provider_name == "youcom" {
+                        "No results were returned. The query may have matched nothing; try a different query."
+                    } else {
+                        "No results were returned. DuckDuckGo may have rate-limited the request or matched nothing. Try a different query, or wait a few seconds and try again."
+                    }
                 });
                 self.cache_put(&cache_key, &payload);
                 Ok(payload)
@@ -212,7 +226,7 @@ impl WebSearchTool {
             Ok(results) => {
                 let payload = json!({
                     "query": query,
-                    "provider": "duckduckgo",
+                    "provider": provider_name,
                     "count": results.len(),
                     "results": results
                         .into_iter()
@@ -223,16 +237,14 @@ impl WebSearchTool {
                 Ok(payload)
             }
             Err(e) => {
-                // Categorize the DDG error so the agent can act on it. Common
-                // cases:
-                //   - HTTP 202 / anti-bot challenge  -> network/IP-level block
-                //     from DDG; the agent should not retry this turn.
-                //   - Any other reqwest error         -> likely transient; retry.
+                // Categorize the error so the agent can act on it. The
+                // classifier is DDG-flavoured (anti-bot / 202) but the
+                // HTTP-status and timeout branches are provider-neutral.
                 let (error_type, next_action) = classify_search_error(&e.to_string());
                 Ok(json!({
                     "error": format!("web_search failed: {e}"),
                     "query": query,
-                    "provider": "duckduckgo",
+                    "provider": provider_name,
                     "error_type": error_type,
                     "next_action": next_action,
                 }))
@@ -290,7 +302,6 @@ fn cooldown_response(query: &str, wait: Duration) -> Value {
     json!({
         "error": "web_search cooldown active",
         "query": query,
-        "provider": "duckduckgo",
         "retry_after_ms": wait.as_millis() as u64,
         "next_action": format!("Wait at least {} ms before the next web search to avoid being rate-limited.", wait.as_millis())
     })
@@ -300,7 +311,6 @@ fn session_cap_reached_response(query: &str, cap: u32) -> Value {
     json!({
         "error": "web_search session request cap reached",
         "query": query,
-        "provider": "duckduckgo",
         "session_max_requests": cap,
         "next_action": format!("This session has used its {cap} web searches. Use web_fetch on a known URL or restart the session to search again.")
     })
@@ -414,6 +424,114 @@ fn validate_result_url(url: &str) -> Option<String> {
         return None;
     }
     Some(url.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// You.com Search API (opt-in, requires YDC_API_KEY)
+// ---------------------------------------------------------------------------
+
+/// Environment variable holding the You.com API key.
+const YOUCOM_API_KEY_ENV: &str = "YDC_API_KEY";
+
+/// You.com Search API endpoint (the search service host used by the
+/// official You.com SDKs; see https://you.com/docs/api-reference/search).
+const YOUCOM_SEARCH_URL: &str = "https://ydc-index.io/v1/search";
+
+#[derive(Debug, Deserialize)]
+struct YoucomSearchResponse {
+    #[serde(default)]
+    results: Option<YoucomResults>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YoucomResults {
+    #[serde(default)]
+    web: Option<Vec<YoucomWebResult>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YoucomWebResult {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    /// Flat description field (the API's short summary).
+    #[serde(default)]
+    description: Option<String>,
+    /// Alternative snippet list used by some response shapes.
+    #[serde(default)]
+    snippets: Option<Vec<String>>,
+}
+
+/// Search via the You.com Search API. The API key is read from the
+/// `YDC_API_KEY` environment variable at request time and sent as the
+/// `X-API-Key` header; it is never included in error messages or logs.
+async fn youcom_search(query: &str, max_results: usize, timeout_secs: u64) -> Result<Vec<SearchResult>> {
+    let api_key = std::env::var(YOUCOM_API_KEY_ENV).map_err(|source| {
+        anyhow!(
+            "You.com provider selected but {YOUCOM_API_KEY_ENV} is not set ({source}). Set it to a key from https://you.com/platform/api-keys, or switch [tools.web_search] provider back to \"duckduckgo\"."
+        )
+    })?;
+
+    let client = build_client(timeout_secs)?;
+    let response = client
+        .post(YOUCOM_SEARCH_URL)
+        .header("X-API-Key", &api_key)
+        .json(&serde_json::json!({ "query": query }))
+        .send()
+        .await
+        .context("You.com request failed")?;
+
+    let status = response.status();
+    if !status.is_success() {
+        // Do not include the API key or response body in the error.
+        return Err(anyhow!(
+            "You.com declined the request (HTTP {status}). Check that {YOUCOM_API_KEY_ENV} is valid, then retry."
+        ));
+    }
+
+    let body = response.text().await.context("failed to read You.com response body")?;
+    let parsed: YoucomSearchResponse =
+        serde_json::from_str(&body).with_context(|| "failed to parse You.com search response")?;
+
+    Ok(parse_youcom_results(parsed, max_results))
+}
+
+/// Map the You.com response into the tool's shared `SearchResult` shape.
+/// Pure function so it can be exercised in unit tests against a local
+/// fixture (no live network).
+fn parse_youcom_results(response: YoucomSearchResponse, max_results: usize) -> Vec<SearchResult> {
+    let mut results = Vec::new();
+    for hit in parsed_web_hits(response) {
+        if results.len() >= max_results {
+            break;
+        }
+        let Some(url) = hit.url.as_deref().and_then(validate_result_url) else {
+            continue;
+        };
+        let title = hit.title.as_deref().unwrap_or_default().trim();
+        if title.is_empty() {
+            continue;
+        }
+        // Prefer the flat description; fall back to the first snippet.
+        let snippet = hit
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| hit.snippets.as_deref().and_then(|s| s.first()).map(|s| s.trim()))
+            .unwrap_or_default();
+        results.push(SearchResult {
+            title: truncate_chars(title, MAX_TITLE_CHARS),
+            url,
+            snippet: truncate_chars(snippet, MAX_SNIPPET_CHARS),
+        });
+    }
+    results
+}
+
+fn parsed_web_hits(response: YoucomSearchResponse) -> impl Iterator<Item = YoucomWebResult> {
+    response.results.into_iter().flat_map(|r| r.web.into_iter()).flatten()
 }
 
 // ---------------------------------------------------------------------------
@@ -673,5 +791,124 @@ mod tests {
             action.contains("retry") || action.contains("web_fetch"),
             "action should suggest retry or web_fetch; got: {action}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // You.com provider
+    // -----------------------------------------------------------------------
+
+    /// A fixture matching the You.com Search API `results.web[]` shape.
+    fn youcom_fixture() -> YoucomSearchResponse {
+        serde_json::from_str(
+            r#"{
+              "results": {
+                "web": [
+                  {
+                    "title": "Rust Programming Language",
+                    "url": "https://www.rust-lang.org/",
+                    "description": "A language empowering everyone to build reliable software."
+                  },
+                  {
+                    "title": "Snippet-only hit",
+                    "url": "https://example.com/snips",
+                    "snippets": ["First snippet line."]
+                  },
+                  {
+                    "title": "No URL hit",
+                    "description": "Skipped because the URL is missing."
+                  },
+                  {
+                    "title": "javascript:alert(1)",
+                    "url": "javascript:alert(1)",
+                    "description": "Skipped by scheme validation."
+                  }
+                ]
+              }
+            }"#,
+        )
+        .expect("fixture should parse")
+    }
+
+    #[test]
+    fn parse_youcom_results_maps_web_hits() {
+        let results = parse_youcom_results(youcom_fixture(), 10);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Rust Programming Language");
+        assert_eq!(results[0].url, "https://www.rust-lang.org/");
+        assert!(results[0].snippet.contains("reliable software"));
+        // Snippet fallback: flat description missing, first snippet used.
+        assert_eq!(results[1].snippet, "First snippet line.");
+    }
+
+    #[test]
+    fn parse_youcom_results_respects_max_results() {
+        let results = parse_youcom_results(youcom_fixture(), 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://www.rust-lang.org/");
+    }
+
+    #[test]
+    fn parse_youcom_results_handles_missing_results_block() {
+        let response: YoucomSearchResponse =
+            serde_json::from_str(r#"{"metadata": {}}"#).expect("empty envelope should parse");
+        assert!(parse_youcom_results(response, 10).is_empty());
+    }
+
+    #[test]
+    fn youcom_provider_without_key_errors_before_network() {
+        // With provider = youcom and no YDC_API_KEY, the tool must surface a
+        // structured setup error rather than attempting a network call.
+        // NOTE: env-var races are avoided by using a unique key absence only
+        // when the var is unset in this process; guard with a lock-free check.
+        if std::env::var(YOUCOM_API_KEY_ENV).is_ok() {
+            return; // key present in this environment; skip to avoid a live call
+        }
+        let config = WebSearchConfig {
+            provider: WebSearchProvider::Youcom,
+            max_results: 5,
+            timeout_secs: 20,
+            cooldown_ms: 0,
+            cache_ttl_secs: 300,
+            session_max_requests: 100,
+        };
+        let tool = WebSearchTool::with_config(config);
+        let payload = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(tool.run(json!({ "query": "rust" })))
+            .expect("missing key should be a structured JSON, not a panic");
+        assert!(payload["error"].as_str().unwrap().contains("YDC_API_KEY"));
+    }
+
+    #[test]
+    fn youcom_provider_payload_reports_youcom_provider() {
+        // Cache-path check: a cached payload for provider youcom reports
+        // provider "youcom" once served. Seed the cache directly to avoid
+        // the network.
+        let config = WebSearchConfig {
+            provider: WebSearchProvider::Youcom,
+            max_results: 5,
+            ..WebSearchConfig::default()
+        };
+        let tool = WebSearchTool::with_config(config);
+        let cached_payload = json!({
+            "query": "rust",
+            "provider": "youcom",
+            "count": 1,
+            "results": [{
+                "title": "Cached You.com Result",
+                "url": "https://example.com/you",
+                "snippet": "from cache"
+            }]
+        });
+        {
+            let mut state = tool.state.lock().unwrap();
+            state.cache_put("5::rust".to_string(), cached_payload);
+        }
+        let payload = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(tool.run(json!({ "query": "rust" })))
+            .expect("cache hit must not error");
+        assert_eq!(payload["provider"], json!("youcom"));
+        assert_eq!(payload["results"][0]["title"], "Cached You.com Result");
     }
 }

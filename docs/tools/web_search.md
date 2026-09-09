@@ -1,6 +1,9 @@
 # Web Search Tool
 
-The `web_search` tool performs web searches and returns ranked results (title, URL, snippet) inline. It uses DuckDuckGo's HTML endpoint keylessly — no API key required.
+The `web_search` tool performs web searches and returns ranked results (title, URL, snippet) inline. Two providers are supported, selected in `vtcode.toml`:
+
+- **`duckduckgo`** (default) — keyless DuckDuckGo HTML endpoint, no API key required. Best-effort; may be rate-limited or anti-bot challenged.
+- **`youcom`** — the [You.com Search API](https://you.com/docs). Opt-in; requires a `YDC_API_KEY` environment variable.
 
 ## Usage
 
@@ -33,13 +36,15 @@ Optional parameters:
 }
 ```
 
+The `provider` field reports which backend served the query (`"duckduckgo"` or `"youcom"`).
+
 ## Configuration
 
 Configure via `vtcode.toml` under `[tools.web_search]`:
 
 ```toml
 [tools.web_search]
-# Provider (currently only "duckduckgo" is supported)
+# Provider: "duckduckgo" (default, keyless) or "youcom" (requires YDC_API_KEY)
 provider = "duckduckgo"
 
 # Default results per call (hard cap: 20)
@@ -57,6 +62,25 @@ cache_ttl_secs = 300
 # Session-wide request cap (default: 12)
 session_max_requests = 12
 ```
+
+### You.com provider
+
+Set `provider = "youcom"` to route `web_search` through the You.com Search API (`POST https://ydc-index.io/v1/search`, the search service host used by the official You.com SDKs):
+
+```toml
+[tools.web_search]
+provider = "youcom"
+```
+
+Then export your API key (get one at [you.com/platform/api-keys](https://you.com/platform/api-keys)):
+
+```bash
+export YDC_API_KEY="***"
+```
+
+The key is read at request time and sent as the `X-API-Key` header; it is never written to logs or error messages. If the key is missing or rejected, the tool returns a structured error telling the agent how to fix the setup — no silent fallback, no crash.
+
+Result shape is identical to the DuckDuckGo provider, so downstream tool usage (`web_fetch` on a promising URL) works the same either way.
 
 ## Guard Rails
 
