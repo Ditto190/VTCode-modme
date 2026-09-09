@@ -1683,8 +1683,28 @@ pub(crate) async fn run_turn_loop(
     if completed_turn_requires_final_response(&result) {
         if final_response_was_fallback {
             let reason = completed_fallback_reason(ctx.is_planning_active());
+            // Diagnostic for false-Blocked reports (e.g. simple requests ending
+            // with COMPLETED_TURN_FALLBACK_REASON despite a visible answer):
+            // records whether a final was present in this turn's slice and on
+            // which surfaces it was published, so the next recurrence is
+            // triaged from logs instead of checkpoint archaeology.
+            tracing::warn!(
+                turn_history_start_len,
+                working_history_len = working_history.len(),
+                rendered = ctx.harness_state.final_response_rendered(),
+                event_emitted = ctx.harness_state.final_response_event_emitted(),
+                planning_active = ctx.is_planning_active(),
+                "Completed turn had fallback final response; converting to Blocked"
+            );
             result = TurnLoopResult::Blocked { reason: Some(reason.to_string()) };
         } else if !ctx.harness_state.final_response_rendered() || !ctx.harness_state.final_response_event_emitted() {
+            tracing::warn!(
+                turn_history_start_len,
+                working_history_len = working_history.len(),
+                rendered = ctx.harness_state.final_response_rendered(),
+                event_emitted = ctx.harness_state.final_response_event_emitted(),
+                "Completed turn lacked a published final response; converting to Blocked"
+            );
             result = TurnLoopResult::Blocked {
                 reason: Some(COMPLETED_TURN_NO_RESPONSE_REASON.to_string()),
             };
