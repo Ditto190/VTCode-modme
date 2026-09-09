@@ -380,6 +380,15 @@ fn ensure_blocked_turn_response(
 /// Ensure a completed turn has crossed both user-visible response surfaces.
 /// Recovery helpers may already have appended a fallback to history; this
 /// publishes that existing text instead of appending a second answer.
+///
+/// A found final answer is treated as a genuine model synthesis, even when the
+/// render flag was missed (e.g. streamed output). Recovery fallbacks mark
+/// `final_response_was_fallback` explicitly at creation, so this helper must
+/// not infer fallback from `!rendered` — that heuristic converts valid
+/// single-step text turns into generic `Blocked` (observed as simple requests
+/// ending with `COMPLETED_TURN_FALLBACK_REASON`). Unpublished valid answers
+/// are still caught by the outer `!rendered || !event_emitted` guard with the
+/// distinct `NO_RESPONSE` reason.
 fn ensure_completed_turn_response(
     ctx: &mut TurnLoopContext<'_>,
     working_history: &mut Vec<uni::Message>,
@@ -398,9 +407,6 @@ fn ensure_completed_turn_response(
         fallback
     };
 
-    if !ctx.harness_state.final_response_rendered() {
-        response_was_fallback = true;
-    }
     let _ = publish_final_assistant_response(ctx, &final_text)?;
 
     if response_was_fallback {
@@ -1256,6 +1262,7 @@ pub(crate) async fn run_turn_loop(
                                 Some(turn_processing_ctx.plan_session),
                                 Some(&plan_state),
                                 Some(event_context),
+                                Some(&mut *turn_processing_ctx.harness_state),
                             )
                             .await;
                             let _ = turn_processing_ctx.renderer.line(
@@ -1647,6 +1654,7 @@ pub(crate) async fn run_turn_loop(
                     plan_session_opt,
                     plan_state_opt,
                     Some(event_context),
+                    Some(&mut *ctx.harness_state),
                 )
                 .await;
                 break;

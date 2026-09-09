@@ -465,6 +465,7 @@ pub(super) async fn complete_turn_after_failed_tool_free_recovery(
         plan_session,
         plan_state,
         None,
+        None,
     )
     .await
 }
@@ -477,7 +478,17 @@ pub(super) async fn complete_turn_after_failed_tool_free_recovery_with_events(
     plan_session: Option<&mut PlanningWorkflowSessionState>,
     plan_state: Option<&PlanningWorkflowState>,
     events: Option<PlanRecoveryEventContext<'_>>,
+    mut harness_state: Option<&mut HarnessTurnState>,
 ) -> TurnLoopResult {
+    // This helper always concludes with a deterministic fallback answer, never
+    // a confirmed model synthesis. Mark the fallback flag explicitly so the
+    // outer turn loop converts the `Completed` into a resumable `Blocked`
+    // without relying on the `!rendered` heuristic in
+    // `ensure_completed_turn_response` (which mislabels valid streamed model
+    // answers that simply missed the render flag as fallbacks).
+    if let Some(state) = harness_state.as_mut() {
+        state.mark_final_response_fallback();
+    }
     // In plan mode, the recovery salvage (the inline `<proposed_plan>` the model
     // produced) must be persisted to the session plan file even though tools
     // were disabled during the tool-free recovery pass. Otherwise the plan
@@ -651,6 +662,7 @@ pub(super) async fn normalize_tool_free_recovery_break_outcome(
         plan_session,
         plan_state,
         None,
+        None,
     )
     .await
 }
@@ -663,6 +675,7 @@ pub(super) async fn normalize_tool_free_recovery_break_outcome_with_events(
     plan_session: Option<&mut PlanningWorkflowSessionState>,
     plan_state: Option<&PlanningWorkflowState>,
     events: Option<PlanRecoveryEventContext<'_>>,
+    harness_state: Option<&mut HarnessTurnState>,
 ) -> TurnLoopResult {
     let should_fallback = tool_free_recovery
         && matches!(
@@ -681,6 +694,7 @@ pub(super) async fn normalize_tool_free_recovery_break_outcome_with_events(
             plan_session,
             plan_state,
             events,
+            harness_state,
         )
         .await;
     }
@@ -729,6 +743,7 @@ async fn complete_turn_with_salvage(
     plan_session: Option<&mut PlanningWorkflowSessionState>,
     plan_state: Option<&PlanningWorkflowState>,
     event_context: PlanRecoveryEventContext<'_>,
+    harness_state: Option<&mut HarnessTurnState>,
 ) -> TurnLoopResult {
     let composite_stage = concat_compact(stage, stage_suffix);
     complete_turn_after_failed_tool_free_recovery_with_events(
@@ -739,6 +754,7 @@ async fn complete_turn_with_salvage(
         plan_session,
         plan_state,
         Some(event_context),
+        harness_state,
     )
     .await
 }
@@ -837,6 +853,7 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
                     plan_session,
                     plan_state,
                     event_context,
+                    Some(&mut *harness_state),
                 )
                 .await;
                 Ok(PostToolFailureAction::Break(result))
@@ -885,6 +902,7 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
                 plan_session,
                 plan_state,
                 Some(event_context),
+                Some(&mut *harness_state),
             )
             .await
             {
@@ -917,6 +935,7 @@ pub(super) async fn dispatch_post_tool_failure(ctx: PostToolRecoveryContext<'_>)
                     plan_session,
                     plan_state,
                     event_context,
+                    Some(&mut *harness_state),
                 )
                 .await
             } else {
@@ -950,6 +969,7 @@ async fn check_recovery_cycle_cap(
     mut plan_session: Option<&mut PlanningWorkflowSessionState>,
     plan_state: Option<&PlanningWorkflowState>,
     events: Option<PlanRecoveryEventContext<'_>>,
+    harness_state: Option<&mut HarnessTurnState>,
 ) -> Option<TurnLoopResult> {
     if cycles >= MAX_POST_TOOL_RECOVERY_CYCLES {
         tracing::warn!(
@@ -974,6 +994,7 @@ async fn check_recovery_cycle_cap(
                 plan_session,
                 plan_state,
                 events,
+                harness_state,
             )
             .await,
         );
@@ -1816,6 +1837,67 @@ Offer the preserved-plan notice when recovery is exhausted with a persisted draf
         assert!(
             !text.contains("did not produce an approval-ready plan"),
             "the no-draft notice must NOT appear when a draft exists: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_fallback_marks_explicit_fallback_flag() {
+        use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, TurnId, TurnRunId};
+
+        let mut working_history = vec![uni::Message::user("summarize".to_string())];
+        let mut harness_state =
+            HarnessTurnState::new(TurnRunId("test-run".to_string()), TurnId("test-turn".to_string()), 4, 600, 0);
+        assert!(!harness_state.final_response_was_fallback());
+
+        let result = complete_turn_after_failed_tool_free_recovery_with_events(
+            &mut working_history,
+            "test.stage",
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&mut harness_state),
+        )
+        .await;
+
+        assert!(matches!(result, TurnLoopResult::Completed { .. }));
+        assert!(
+            harness_state.final_response_was_fallback(),
+            "recovery fallback must mark the explicit flag so ensure_completed does not rely on !rendered"
+        );
+        assert!(
+            working_history.iter().any(|message| {
+                message.role == uni::MessageRole::Assistant
+                    && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                    && !message.content.as_text().trim().is_empty()
+            }),
+            "recovery fallback must push a final answer"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_fallback_without_harness_state_still_pushes_final() {
+        let mut working_history = vec![uni::Message::user("summarize".to_string())];
+
+        let result = complete_turn_after_failed_tool_free_recovery_with_events(
+            &mut working_history,
+            "test.stage",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(matches!(result, TurnLoopResult::Completed { .. }));
+        assert!(
+            working_history.iter().any(|message| {
+                message.role == uni::MessageRole::Assistant && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+            }),
+            "None harness_state must remain test-compatible and still push a final"
         );
     }
 }

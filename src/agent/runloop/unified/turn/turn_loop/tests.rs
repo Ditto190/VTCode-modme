@@ -8,8 +8,8 @@ use super::{
     POST_TOOL_RESUME_DIRECTIVE, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE, PostToolFailureRecovery,
     RECOVERY_CONTRACT_VIOLATION_REASON, RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER, accumulate_turn_usage,
     blocked_turn_final_response, completed_turn_requires_final_response, current_turn_preserve_index,
-    ensure_blocked_turn_response, finalize_turn, has_turn_usage, maybe_recover_after_post_tool_llm_failure,
-    normalize_tool_free_recovery_break_outcome, run_turn_loop,
+    ensure_blocked_turn_response, ensure_completed_turn_response, finalize_turn, has_turn_usage,
+    maybe_recover_after_post_tool_llm_failure, normalize_tool_free_recovery_break_outcome, run_turn_loop,
 };
 use std::fs;
 use std::path::Path;
@@ -2760,4 +2760,151 @@ async fn approval_input_without_plan_synthesizes_before_approval() {
             .iter()
             .any(|message| { message.content.as_text().contains("no completed plan draft exists yet") })
     );
+}
+
+#[tokio::test]
+async fn single_tool_free_text_answer_completes_without_fallback() {
+    #[derive(Clone)]
+    struct LongAnswerProvider {
+        requests: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for LongAnswerProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            let body = "VT Code stands out through its focus on being a secure, extensible, terminal-native coding agent. \
+                It splits functionality into focused crates for providers, configuration, UI, indexing, memory, safety, MCP, ACP, plugins, and evaluation. \
+                Command execution is treated as an adversarial boundary with workspace checks and fail-closed behavior. \
+                The runtime uses a structured ThreadEvent contract for replay and observability. \
+                The terminal remains the core experience while supporting Zed, MCP, browser bridges, skills, and plugins. \
+                All set. Summary complete.";
+            Ok(uni::LLMResponse {
+                content: Some(body.to_string()),
+                model: request.model,
+                tool_calls: None,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    backing.set_provider(Box::new(LongAnswerProvider { requests: requests.clone() }));
+
+    let mut history = vec![uni::Message::user("tell me about this project".to_string())];
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("single text answer should complete");
+
+    assert!(
+        matches!(outcome.result, TurnLoopResult::Completed { plan_approved_execution_pending: false }),
+        "simple Q&A must stay Completed, got {:?}",
+        outcome.result
+    );
+    assert!(!outcome.final_response_was_fallback, "valid model answer must not be labeled fallback");
+    assert_eq!(requests.load(Ordering::SeqCst), 1, "simple answer needs exactly one request");
+    assert!(
+        !history
+            .iter()
+            .any(|message| { message.content.as_text().contains(COMPLETED_TURN_FALLBACK_RESPONSE) }),
+        "must not inject the generic fallback for a valid answer"
+    );
+    assert!(
+        history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant
+                && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                && message.content.as_text().contains("VT Code stands out")
+        }),
+        "final answer must be retained as FinalAnswer"
+    );
+}
+
+#[tokio::test]
+async fn ensure_completed_reuses_found_final_without_requiring_prior_render() {
+    // Regression for simple requests ending Blocked with
+    // COMPLETED_TURN_FALLBACK_REASON: a valid FinalAnswer already in history
+    // (e.g. streamed output that missed the render flag) must publish and
+    // succeed, not synthesize the generic fallback.
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut history = vec![
+        uni::Message::user("tell me about this project".to_string()),
+        uni::Message::assistant("VT Code stands out as a secure terminal agent.".to_string())
+            .with_phase(Some(uni::AssistantPhase::FinalAnswer)),
+    ];
+    let history_len_before = history.len();
+    let mut ctx = backing.turn_loop_context();
+    assert!(!ctx.harness_state.final_response_rendered());
+    assert!(!ctx.harness_state.final_response_was_fallback());
+
+    let was_fallback = ensure_completed_turn_response(&mut ctx, &mut history, 0).expect("publish must succeed");
+
+    assert!(!was_fallback, "found model answer must not be labeled fallback");
+    assert_eq!(history.len(), history_len_before, "must not inject a second fallback answer");
+    assert!(!ctx.harness_state.final_response_was_fallback());
+    assert!(ctx.harness_state.final_response_rendered());
+    assert!(ctx.harness_state.final_response_event_emitted());
+}
+
+#[tokio::test]
+async fn ensure_completed_synthesizes_fallback_when_no_final_exists() {
+    // Asymmetric counterpart: with no FinalAnswer in the turn slice, the
+    // helper must synthesize COMPLETED_TURN_FALLBACK_RESPONSE and report fallback.
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut history = vec![uni::Message::user("do work".to_string())];
+    let mut ctx = backing.turn_loop_context();
+
+    let was_fallback = ensure_completed_turn_response(&mut ctx, &mut history, 0).expect("fallback must succeed");
+
+    assert!(was_fallback, "missing final must be reported as fallback");
+    assert!(ctx.harness_state.final_response_was_fallback());
+    assert!(
+        history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant
+                && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                && message.content.as_text().contains(COMPLETED_TURN_FALLBACK_RESPONSE)
+        }),
+        "must push the generic fallback as FinalAnswer"
+    );
+}
+
+#[tokio::test]
+async fn ensure_completed_preserves_explicit_recovery_flag() {
+    // Recovery fallbacks mark the flag at creation; a found final with the
+    // flag set must stay fallback so the outer loop still blocks resumably.
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut history = vec![
+        uni::Message::user("summarize".to_string()),
+        uni::Message::assistant("recovery synthesis output".to_string())
+            .with_phase(Some(uni::AssistantPhase::FinalAnswer)),
+    ];
+    let mut ctx = backing.turn_loop_context();
+    ctx.harness_state.mark_final_response_fallback();
+
+    let was_fallback = ensure_completed_turn_response(&mut ctx, &mut history, 0).expect("publish must succeed");
+
+    assert!(was_fallback, "explicit recovery flag must survive even with a found final");
 }
