@@ -250,6 +250,25 @@ fn approved_plan_handoff_bypasses_final_response_guard() {
     assert!(completed_turn_requires_final_response(&ordinary_completion));
 }
 
+#[test]
+fn completed_fallback_reason_preserves_planning_specificity() {
+    use super::completed_fallback_reason;
+
+    let planning = completed_fallback_reason(true);
+    assert!(
+        planning.contains("planning remains active"),
+        "planning fallback must name planning state: {planning}"
+    );
+    assert!(
+        planning.contains("approval-ready plan"),
+        "planning fallback must name approval readiness: {planning}"
+    );
+
+    let generic = completed_fallback_reason(false);
+    assert!(generic.contains("recovery fallback"), "non-planning fallback must keep generic reason: {generic}");
+    assert_ne!(planning, generic);
+}
+
 #[tokio::test]
 async fn approved_plan_handoff_without_assistant_response_stays_completed() {
     let mut backing = TestTurnProcessingBacking::new(4).await;

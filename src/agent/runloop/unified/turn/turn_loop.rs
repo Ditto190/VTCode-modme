@@ -209,6 +209,24 @@ pub(super) const RECOVERY_CONTRACT_VIOLATION_REASON: &str =
     "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls.";
 pub(crate) const COMPLETED_TURN_FALLBACK_RESPONSE: &str = "The turn stopped before a final assistant response was produced. No final outcome was confirmed; please retry the request.";
 const COMPLETED_TURN_FALLBACK_REASON: &str = "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained.";
+/// Planning-specific variant of [`COMPLETED_TURN_FALLBACK_REASON`]. When a
+/// plan-mode turn ends via the generic fallback path, the generic reason hides
+/// that planning remains active. Preserve the planning reason code (not full
+/// fallback prose) so `Blocked` telemetry and resume handoffs stay actionable.
+/// Worded as "without confirming" rather than "did not produce" because this
+/// call site only knows planning was active, not whether a ready draft was
+/// already persisted.
+const PLANNING_COMPLETED_TURN_FALLBACK_REASON: &str = "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active. The current plan and task state were retained.";
+/// Pure selection of the Completed-to-Blocked fallback reason so the planning
+/// specificity is unit-testable without harness state. Returns the planning
+/// reason code (not full fallback prose) when planning is active.
+pub(crate) fn completed_fallback_reason(planning_active: bool) -> &'static str {
+    if planning_active {
+        PLANNING_COMPLETED_TURN_FALLBACK_REASON
+    } else {
+        COMPLETED_TURN_FALLBACK_REASON
+    }
+}
 const COMPLETED_TURN_NO_RESPONSE_REASON: &str =
     "Turn ended without a harness-visible final assistant response, so successful completion could not be confirmed.";
 const PLAN_RECOVERY_EXHAUSTED_REASON: &str = "Approved-plan execution stopped after recovery was exhausted. The approved plan and task checklist were retained; retry from the pending step.";
@@ -1656,9 +1674,8 @@ pub(crate) async fn run_turn_loop(
     };
     if completed_turn_requires_final_response(&result) {
         if final_response_was_fallback {
-            result = TurnLoopResult::Blocked {
-                reason: Some(COMPLETED_TURN_FALLBACK_REASON.to_string()),
-            };
+            let reason = completed_fallback_reason(ctx.is_planning_active());
+            result = TurnLoopResult::Blocked { reason: Some(reason.to_string()) };
         } else if !ctx.harness_state.final_response_rendered() || !ctx.harness_state.final_response_event_emitted() {
             result = TurnLoopResult::Blocked {
                 reason: Some(COMPLETED_TURN_NO_RESPONSE_REASON.to_string()),

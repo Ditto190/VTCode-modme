@@ -45,8 +45,8 @@ use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSes
 // modules should depend on these re-exports instead of reaching through the
 // core tool-handler path directly.
 pub(crate) use vtcode_core::tools::handlers::planning_workflow::{
-    PlanValidationReport, PlanningWorkflowState, merge_plan_content, persist_plan_draft, tracker_file_for_plan_file,
-    validate_plan_content,
+    CANONICAL_STEP_FORMAT, PlanValidationReport, PlanningWorkflowState, merge_plan_content, persist_plan_draft,
+    tracker_file_for_plan_file, validate_plan_content,
 };
 
 pub(crate) async fn persisted_plan_is_ready(state: &PlanningWorkflowState) -> bool {
@@ -151,12 +151,13 @@ pub(crate) fn build_plan_repair_directive(feedback: &str) -> String {
          evidence-backed content; do not copy placeholders:\n\
          ## Summary\n\
          ## Implementation Steps\n\
-         1. Action -> files: [path/to/file.rs] -> verify: [cargo check]\n\
+         {canonical}\n\
          ## Test Cases and Validation\n\
          - concrete command or observable check\n\
          ## Assumptions and Defaults\n\
          - concrete default or scope boundary\n\n\
-         Resolve every open decision. Do not emit tool calls or ask for approval until the artifact is complete."
+         Resolve every open decision. Do not emit tool calls or ask for approval until the artifact is complete.",
+        canonical = CANONICAL_STEP_FORMAT
     )
 }
 
@@ -489,5 +490,14 @@ Improve launch time.
         let non_ready = validate_plan_content(INVALID_PROSE_PLAN);
         assert!(!non_ready.is_ready());
         let _ = ValidatedPlanArtifact::from_validated(PathBuf::from("/tmp/plan.md"), "unused".to_string(), non_ready);
+    }
+
+    #[test]
+    fn repair_directive_reuses_canonical_step_format_constant() {
+        // DRY guardrail: the repair directive must embed the single
+        // `CANONICAL_STEP_FORMAT` constant so prompt guidance can never drift
+        // from validator and tracker generation.
+        let directive = build_plan_repair_directive("feedback");
+        assert!(directive.contains(CANONICAL_STEP_FORMAT), "directive must reuse CANONICAL_STEP_FORMAT: {directive}");
     }
 }

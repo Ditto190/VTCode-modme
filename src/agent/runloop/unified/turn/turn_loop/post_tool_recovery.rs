@@ -314,11 +314,13 @@ fn plan_mode_recovery_fallback(
     working_history: &[uni::Message],
 ) -> String {
     if let Some(text) = salvaged_text
-        && ready_plan_text(&text).is_some()
+        && let Some(clean) = ready_plan_text(&text)
     {
-        // Trim only the outer whitespace so a plan salvaged with stray
-        // blank lines isn't injected with that garbage framing intact.
-        text.trim().to_string()
+        // Return the validated extracted plan text (not the raw salvage) so
+        // surrounding recovery prose or blank-line framing is never injected
+        // as the user-visible plan. `ready_plan_text` already enforces the
+        // same readiness gate used by approval.
+        clean
     } else {
         build_recovery_fallback(working_history, structured_message)
     }
@@ -420,7 +422,7 @@ async fn persist_salvaged_plan(
     {
         match persist_plan_draft(state, &plan_text).await {
             Ok(persisted) if persisted.validation.is_ready() && persisted_plan_is_ready(state).await => {
-                persisted_salvage = Some(salvaged.to_string());
+                persisted_salvage = Some(plan_text.clone());
                 recovered_plan_text = Some(plan_text);
             }
             Ok(_) => {
@@ -1725,6 +1727,28 @@ Offer the approval prompt when a real draft was persisted despite the denial.
             !text.contains("did not produce an approval-ready plan"),
             "the no-draft notice must NOT appear when a draft exists: {text}"
         );
+    }
+
+    #[test]
+    fn plan_mode_recovery_fallback_returns_extracted_plan_without_framing() {
+        let valid_inner = "# Plan\n\n## Summary\nClean.\n\n## Implementation Steps\n1. Do it -> files: [src/lib.rs] -> verify: [cargo check]\n\n## Test Cases and Validation\n1. Run cargo check.\n\n## Assumptions and Defaults\n1. Keep existing behavior.\n";
+        let salvaged = format!("Here is the plan:\n\n<proposed_plan>\n{valid_inner}\n</proposed_plan>\n\nLet me know.");
+        let fallback = plan_mode_recovery_fallback(Some(salvaged), "structured", &[]);
+        assert!(
+            !fallback.contains("Here is the plan"),
+            "framing prose must not leak into the user-visible plan: {fallback}"
+        );
+        assert!(fallback.contains("## Summary"), "extracted plan must be returned: {fallback}");
+    }
+
+    #[test]
+    fn plan_mode_recovery_fallback_rejects_garbage_salvage() {
+        let fallback = plan_mode_recovery_fallback(
+            Some("rambling monologue with no plan block".to_string()),
+            "structured message",
+            &[],
+        );
+        assert_eq!(fallback, "structured message");
     }
 
     #[tokio::test]

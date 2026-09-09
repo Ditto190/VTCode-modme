@@ -1041,4 +1041,37 @@ A valid plan.
             "canonical format should always be present"
         );
     }
+
+    #[test]
+    fn validate_startup_behavior_terms_are_concrete() {
+        // Startup optimization plans use domain terms like initialization,
+        // launch, and measure. These must count as concrete behavior targets
+        // so simple startup plans are not rejected as vague, while generic
+        // filler like `relevant code` must still fail.
+        let plan = "# Plan\n\n## Summary\nImprove startup.\n\n## Implementation Steps\n1. Measure startup latency baseline -> files: [startup timing report] -> verify: [cargo check -p vtcode]\n\n## Test Cases and Validation\n1. Run cargo check.\n\n## Assumptions and Defaults\n1. Keep existing behavior.\n";
+        let report = validate_plan_content(plan);
+        assert!(
+            report.invalid_implementation_steps.is_empty(),
+            "startup behavior terms must validate: {:?}",
+            report.reasons()
+        );
+
+        let generic = "# Plan\n\n## Summary\nImprove startup.\n\n## Implementation Steps\n1. Do the work -> files: [relevant code] -> verify: [cargo check -p vtcode]\n\n## Test Cases and Validation\n1. Run cargo check.\n\n## Assumptions and Defaults\n1. Keep existing behavior.\n";
+        let generic_report = validate_plan_content(generic);
+        assert!(!generic_report.invalid_implementation_steps.is_empty(), "generic targets must still be rejected");
+    }
+
+    #[test]
+    fn validate_startup_latency_evidence_counts_for_manual_check() {
+        // `measure latency baseline before/after` pairs a cue (measure) with
+        // non-temporal evidence (latency, baseline) so startup timing checks
+        // validate without weakening the command-or-observable gate.
+        let plan = "# Plan\n\n## Summary\nImprove startup.\n\n## Implementation Steps\n1. Instrument startup -> files: [src/startup/mod.rs] -> verify: [measure latency baseline before after]\n\n## Test Cases and Validation\n1. Run cargo check.\n\n## Assumptions and Defaults\n1. Keep existing behavior.\n";
+        let report = validate_plan_content(plan);
+        assert!(
+            report.invalid_implementation_steps.is_empty(),
+            "latency/baseline evidence must validate: {:?}",
+            report.reasons()
+        );
+    }
 }
