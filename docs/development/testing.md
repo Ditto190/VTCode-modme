@@ -547,6 +547,22 @@ fn test_with_debug_output() {
 ./scripts/perf/compare.sh
 ```
 
+## **Agentic Testing (risk-first)**
+
+Based on Dan Luu `agentic-testing`: naming a technique alone does not help.
+Prefer small behavior nudges over large tutorial skills.
+
+| Quick reference | Rule |
+|---|---|
+| Risk-first | List risky areas + likely mistakes before implementing; check asymmetric/boundary both sides (`[a,b]` vs `[b,a]`, never `[a,a]` vs `[a,a]`) |
+| Fresh context | Re-derive high-risk results without reusing production helpers; plan steps accept `verify: independent-rederive <target> (fresh context, no helper reuse)` |
+| Structured PBT | Use `prop_oneof` / `prop_compose` / `Just` toward interesting paths with shrinking; see `crates/codegen/vtcode-core/tests/core_fuzz_props.rs` order-sensitive examples |
+| Oracle required | Every test needs `assert*` / `prop_assert*` / `insta::*`; panic-only tests are a smell |
+| Avoid | Red-green TDD encoding current output, fully random bytes for structured parsers, identical/palindromic fixtures |
+
+Triage with `vtcode_eval::analyze_test_source` (`TestQualitySummary::meets_agentic_testing_bar`: panic-only <=50%, asymmetric >=20%).
+Lazy skill: `.agents/skills/agentic-testing/SKILL.md`.
+
 ## **Testing Checklist**
 
 -   [ ] Unit tests for all public functions

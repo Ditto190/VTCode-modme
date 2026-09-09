@@ -890,6 +890,25 @@ fn contains_actual_command_invocation(value: &str) -> bool {
         .any(|span| contains_actual_command_invocation(span.trim()))
 }
 
+/// Luu agentic-testing: fresh-context independent re-derivation counts as verification.
+/// Accepts `independent-rederive <target> (fresh context, no helper reuse)`
+/// so high-risk steps can require an oracle independent of production helpers.
+fn is_independent_rederivation(value: &str) -> bool {
+    let lowered = value.to_ascii_lowercase();
+    let fresh = lowered.contains("fresh") || lowered.contains("independent");
+    let rederive = lowered.contains("re-derive") || lowered.contains("rederive") || lowered.contains("re derive");
+    let no_reuse = lowered.contains("without reusing")
+        || lowered.contains("no helper reuse")
+        || lowered.contains("no reuse")
+        || lowered.contains("fresh context");
+    if !(fresh && rederive && no_reuse) {
+        return false;
+    }
+    // Require a concrete target beyond the keywords so vacuous
+    // `independent rederive fresh context` cannot pass as verification.
+    verification_words(value).len() >= 4
+}
+
 fn is_observable_manual_verification(value: &str) -> bool {
     let words = verification_words(value);
     if words.len() < 2 {
@@ -1054,6 +1073,10 @@ fn validate_concrete_verification(value: &str) -> Result<(), VerificationValidat
             && (words.len() > 2 || words.get(1).is_some_and(|word| is_pathlike_command_token(word))))
         || contains_actual_command_invocation(value)
     {
+        return Ok(());
+    }
+
+    if is_independent_rederivation(value) {
         return Ok(());
     }
 
@@ -1378,4 +1401,30 @@ pub fn generate_tracker_markdown_from_plan(plan_markdown: &str) -> Option<String
     }
 
     Some(format!("# {}\n\n## Plan of Work\n\n{}", title, items.concat().trim_end()))
+}
+
+#[cfg(test)]
+mod agentic_testing_tests {
+    use super::{is_independent_rederivation, validate_concrete_verification};
+
+    #[test]
+    fn independent_rederivation_counts_as_concrete_verification() {
+        let verify = "independent-rederive bitstream order (fresh context, no helper reuse)";
+        assert!(is_independent_rederivation(verify));
+        assert!(validate_concrete_verification(verify).is_ok());
+    }
+
+    #[test]
+    fn vague_verify_without_fresh_rederivation_still_rejected() {
+        assert!(!is_independent_rederivation("verify later"));
+        assert!(validate_concrete_verification("verify later").is_err());
+    }
+
+    #[test]
+    fn vacuous_independent_compare_without_rederive_still_rejected() {
+        // `compare` alone is manual verification (needs evidence), not an
+        // independent re-derivation oracle.
+        assert!(!is_independent_rederivation("independent compare fresh context"));
+        assert!(!is_independent_rederivation("independent rederive fresh"));
+    }
 }

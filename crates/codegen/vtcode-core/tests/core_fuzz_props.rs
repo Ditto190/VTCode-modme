@@ -164,6 +164,51 @@ proptest! {
     }
 }
 
+proptest! {
+    /// Asymmetric: `PrefixRule` matching is order-sensitive, not palindromic.
+    /// Pattern [a, b] matches [a, b, c] but transposed [b, a, c] and
+    /// identical [a, a, a] must not match when a != b.
+    #[test]
+    fn prop_prefix_rule_order_sensitive_asymmetric(
+        first in "[a-z]{1,4}",
+        second in "[a-z]{1,4}",
+        tail in "[a-z]{1,4}",
+    ) {
+        prop_assume!(first != second);
+        let rule = PrefixRule::new(
+            vec![first.clone(), second.clone()],
+            Decision::Allow,
+        );
+        let ordered = vec![first.clone(), second.clone(), tail.clone()];
+        let transposed = vec![second.clone(), first.clone(), tail.clone()];
+        let identical = vec![first.clone(), first.clone(), first.clone()];
+        prop_assert!(rule.matches(&ordered));
+        prop_assert!(!rule.matches(&transposed));
+        prop_assert!(!rule.matches(&identical));
+    }
+}
+
+proptest! {
+    /// Asymmetric/boundary: shell sequencing preserves order across both sides.
+    /// `echo {left} && echo {right}` must parse in order; the transposed
+    /// script must parse reversed, never equal when left != right.
+    #[test]
+    fn prop_shell_sequence_order_asymmetric(
+        left in "[a-z]{1,6}",
+        right in "[a-z]{1,6}",
+    ) {
+        prop_assume!(left != right);
+        let script = format!("echo {left} && echo {right}");
+        let swapped = format!("echo {right} && echo {left}");
+        let parsed = parse_shell_commands(&script).expect("structured script parses");
+        let parsed_swapped = parse_shell_commands(&swapped).expect("swapped script parses");
+        prop_assert_eq!(parsed.len(), 2);
+        prop_assert_eq!(parsed[0].last().map(String::as_str), Some(left.as_str()));
+        prop_assert_eq!(parsed[1].last().map(String::as_str), Some(right.as_str()));
+        prop_assert_ne!(parsed, parsed_swapped);
+    }
+}
+
 /// Invariant: `command_might_be_dangerous` with empty command is always safe
 #[test]
 fn fuzz_empty_command_is_safe() {
