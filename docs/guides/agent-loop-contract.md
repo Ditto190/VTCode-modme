@@ -265,8 +265,9 @@ reused when it was already published, so the assistant item is never duplicated.
 
 A lost verification result must not deadlock the anti-blind gate. While the
 checkpoint is pending, a verifier-level `Failure`/`Timeout` (for example, the
-exec session ended before the verifier's output was captured, reported by
-`write_stdin` as a missing session) grants the same bounded fix-up window as a
+exec session ended before the verifier's output was captured, reported by a
+`write_stdin` or non-run `unified_exec` session follow-up as a missing session)
+grants the same bounded fix-up window as a
 genuine failed verifier and surfaces a "Verification result lost" directive; the
 gate still only clears on a successful standalone verifier re-run. The
 `turn.blocked` event also populates `last_tool`, `consecutive_cap`, and

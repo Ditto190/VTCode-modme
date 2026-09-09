@@ -584,6 +584,31 @@ fn error_text_indicates_lost_exec_session(error: &str) -> bool {
     lower.contains("exec session") && lower.contains("not found")
 }
 
+/// Return whether `(canonical_name, args)` is a follow-up on an existing
+/// exec session rather than a fresh command run.
+///
+/// `canonical_name` must already be canonicalized (see [`canonical_tool_name`]).
+/// Any non-`run` `unified_exec` action counts as a follow-up
+/// (poll/wait/inspect/continue/input, plus list/code/write/close): session
+/// follow-ups carry a `session_id`, not command text, so they never classify
+/// as [`ShellActivity::Verification`]. A missing-session failure on one of
+/// them therefore needs its own lost-result branch in
+/// [`update_repetition_tracker`]: the verifier output it was waiting on died
+/// with the session. Fresh `run` calls are excluded: a run creates its
+/// session, so it cannot lose a prior verifier's result.
+fn is_exec_session_follow_up(canonical_name: &str, args: &serde_json::Value) -> bool {
+    use vtcode_core::config::constants::tools;
+    if canonical_name == tools::WRITE_STDIN {
+        return true;
+    }
+    if canonical_name == tools::UNIFIED_EXEC
+        && !vtcode_core::tools::tool_intent::is_command_run_tool_call(canonical_name, args)
+    {
+        return true;
+    }
+    false
+}
+
 fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &str, args: &serde_json::Value) -> bool {
     match &outcome.status {
         ToolExecutionStatus::Success { output, command_success, .. } => {
@@ -919,10 +944,11 @@ pub(crate) fn mutation_blocked_until_verification(
 /// the turn before the agent can describe the failure and use its fix-up edits.
 ///
 /// A `true` return also covers *lost* verifier results: while the gate is
-/// pending, a verifier-level Failure/Timeout (or a `write_stdin` failure
-/// reporting a dead exec session) grants the same bounded window because the
-/// verifier never produced an observable verdict. In that case the tracker
-/// queues [`VERIFICATION_RESULT_LOST_DIRECTIVE`] for the handlers to surface.
+/// pending, a verifier-level Failure/Timeout (or a session follow-up
+/// failure — `write_stdin` or a non-run `unified_exec` action — reporting a
+/// dead exec session) grants the same bounded window because the verifier
+/// never produced an observable verdict. In that case the tracker queues
+/// [`VERIFICATION_RESULT_LOST_DIRECTIVE`] for the handlers to surface.
 pub(crate) fn update_repetition_tracker(
     loop_tracker: &mut LoopTracker,
     outcome: &ToolPipelineOutcome,
@@ -969,14 +995,15 @@ pub(crate) fn update_repetition_tracker(
         loop_tracker.record_low_signal(low_signal_family.clone());
     }
 
-    // Lost verifier results via the exec-session stdin tool: a `write_stdin`
-    // failure that reports a missing session means the session (and its
-    // pending verifier output) died before the result was captured, so
-    // `write_stdin` never classifies as ShellActivity::Verification. While
-    // the gate is pending, treat it like a failed verifier so the model gets
-    // a bounded fix/diagnostic window instead of deadlocking behind a gate
-    // that can no longer observe a successful verifier.
-    if canonical_name == vtcode_core::config::constants::tools::WRITE_STDIN
+    // Lost verifier results via exec-session follow-ups: a `write_stdin` or
+    // `unified_exec` poll/wait/inspect/continue failure that reports a
+    // missing session means the session (and its pending verifier output)
+    // died before the result was captured, so the follow-up never classifies
+    // as ShellActivity::Verification. While the gate is pending, treat it
+    // like a failed verifier so the model gets a bounded fix/diagnostic
+    // window instead of deadlocking behind a gate that can no longer observe
+    // a successful verifier.
+    if is_exec_session_follow_up(canonical_name, args)
         && loop_tracker.verification_is_pending()
         && let ToolExecutionStatus::Failure { error } = &outcome.status
         && error_text_indicates_lost_exec_session(&error.message)
@@ -1724,6 +1751,151 @@ mod tests {
             &unrelated,
             tools::WRITE_STDIN,
             &json!({"session_id": "run-7", "chars": "q"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn unified_exec_wait_on_lost_session_while_pending_grants_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::UNIFIED_EXEC.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "exec session 'run-7' not found. Copy the exact `session_id` from the original run response"
+                    .to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::UNIFIED_EXEC,
+            &json!({"action": "wait", "session_id": "run-7"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(!mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+        assert!(tracker.take_verification_result_lost_notice());
+        assert!(!tracker.take_verification_result_lost_notice(), "the notice is one-shot");
+    }
+
+    #[test]
+    fn unified_exec_poll_on_lost_session_while_pending_grants_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::UNIFIED_EXEC.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "exec session 'run-7' not found. Copy the exact `session_id` from the original run response"
+                    .to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::UNIFIED_EXEC,
+            &json!({"action": "poll", "session_id": "run-7"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn unified_exec_inferred_poll_on_lost_session_while_pending_grants_fix_window() {
+        // No explicit `action`: a bare `session_id` infers a poll follow-up,
+        // so the lost-session branch must still fire.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::UNIFIED_EXEC.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "exec session 'run-7' not found. Copy the exact `session_id` from the original run response"
+                    .to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::UNIFIED_EXEC,
+            &json!({"session_id": "run-7"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn unified_exec_wait_unrelated_failure_while_pending_grants_no_fix_window() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let unrelated = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::UNIFIED_EXEC.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "session_id is required for command session wait".to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &unrelated,
+            tools::UNIFIED_EXEC,
+            &json!({"action": "wait"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn unified_exec_wait_lost_session_without_pending_gate_grants_nothing() {
+        let mut tracker = LoopTracker::new();
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::UNIFIED_EXEC.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "exec session 'run-7' not found. Copy the exact `session_id` from the original run response"
+                    .to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::UNIFIED_EXEC,
+            &json!({"action": "wait", "session_id": "run-7"}),
+        ));
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn unified_exec_run_action_with_lost_session_text_takes_no_follow_up_path() {
+        // A fresh `run` creates its session, so it is not a follow-up: the
+        // error text alone must not open the lost-result window. (A run whose
+        // command classifies as Verification still takes the generic
+        // verifier-loss branch; `echo` classifies as Inspection, so nothing
+        // is granted here.)
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::UNIFIED_EXEC.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "exec session 'run-7' not found. Copy the exact `session_id` from the original run response"
+                    .to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &failure,
+            tools::UNIFIED_EXEC,
+            &json!({"action": "run", "command": "echo hi"}),
         ));
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.fix_edits_remaining, 0);
