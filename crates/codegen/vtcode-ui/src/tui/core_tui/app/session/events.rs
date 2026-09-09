@@ -16,7 +16,6 @@ use crate::tui::core_tui::session::modal;
 use crate::tui::core_tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::core_tui::session::reverse_search;
-use crate::tui::core_tui::style::theme_from_styles;
 use crate::tui::core_tui::types::InlineSegment;
 use crate::tui::core_tui::types::{
     InlineEvent as CoreInlineEvent, OverlayEvent, OverlaySelectionChange, SubmittedInput,
@@ -422,10 +421,7 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 {
                     let _ = cb(Some(selection));
                     if theme::has_preview_theme() {
-                        let styles = theme::active_styles();
-                        let inline_theme = theme_from_styles(&styles);
-                        session.core.theme = inline_theme;
-                        session.core.styles.set_theme(session.core.theme.clone());
+                        session.sync_theme_from_runtime();
                     }
                 }
                 return Some(event.into());
@@ -433,7 +429,12 @@ pub(super) fn process_key_with_clipboard_image_reader(
             ModalListKeyResult::HandledNoRedraw => {
                 return None;
             }
-            ModalListKeyResult::Submit(event) | ModalListKeyResult::Cancel(event) => {
+            ModalListKeyResult::Submit(event) => {
+                session.close_overlay();
+                return Some(event.into());
+            }
+            ModalListKeyResult::Cancel(event) => {
+                session.cancel_theme_preview();
                 session.close_overlay();
                 return Some(event.into());
             }
@@ -1766,7 +1767,10 @@ mod tests {
     };
     use hashbrown::HashMap;
     use ratatui::Terminal;
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     fn build_session() -> Session {
         let mut session = Session::new(InlineTheme::default(), None, 24);
@@ -1774,6 +1778,49 @@ mod tests {
         session.core.apply_transcript_rows(8);
         session.core.apply_transcript_width(60);
         session
+    }
+
+    #[test]
+    #[serial_test::serial(theme_runtime)]
+    fn cancelling_a_list_modal_notifies_the_preview_owner() {
+        use crate::tui::core_tui::app::types::ListOverlayRequest;
+        use crate::tui::core_tui::types::{InlineListItem, InlineListSelection};
+
+        let original_theme = crate::theme::active_theme_id();
+        crate::theme::set_active_theme("ciapre").expect("built-in committed theme");
+        crate::theme::set_preview_theme("mono").expect("built-in preview theme");
+        let mut session = build_session();
+        let cancellation_count = Arc::new(AtomicUsize::new(0));
+        let callback_count = Arc::clone(&cancellation_count);
+        session.preview_callback = Some(Arc::new(move |selection| {
+            if selection.is_none() {
+                callback_count.fetch_add(1, Ordering::Relaxed);
+            }
+            Ok(())
+        }));
+        session.show_transient(TransientRequest::List(ListOverlayRequest {
+            title: "Theme".to_string(),
+            lines: Vec::new(),
+            footer_hint: None,
+            items: vec![InlineListItem {
+                title: "Ciapre".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::Theme("ciapre".to_string())),
+                search_value: None,
+            }],
+            selected: Some(InlineListSelection::Theme("ciapre".to_string())),
+            search: None,
+            hotkeys: Vec::new(),
+        }));
+
+        let event = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(matches!(event, Some(InlineEvent::Transient(TransientEvent::Cancelled))));
+        assert_eq!(cancellation_count.load(Ordering::Relaxed), 1, "cancel should notify the preview owner once");
+        assert!(!crate::theme::has_preview_theme(), "the runtime fallback must clear a stale preview");
+        crate::theme::set_active_theme(&original_theme).expect("restore original theme after test");
     }
 
     #[test]
@@ -2399,6 +2446,61 @@ mod tests {
         });
 
         assert_eq!(session.tool_output_blocks[0].anchor_line, Some(0));
+    }
+
+    #[test]
+    fn wrapped_pty_capture_anchors_to_the_folded_live_header() {
+        let mut session = build_session();
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Pty,
+            segments: vec![text_segment("• Ran cargo nextest run -p vtcode-ui --profile")],
+        });
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Pty,
+            segments: vec![text_segment("  │ quick --no-fail-fast")],
+        });
+        session.handle_command(InlineCommand::RecordToolOutput {
+            id: 48,
+            lines: vec![
+                "• Ran cargo nextest run -p vtcode-ui --profile quick --no-fail-fast".to_string(),
+                "  └ captured output".to_string(),
+            ],
+        });
+
+        assert_eq!(session.tool_output_blocks[0].anchor_line, Some(0));
+    }
+
+    #[test]
+    fn transcript_eviction_shifts_app_level_review_anchors() {
+        use crate::tui::config::constants::ui;
+
+        let mut session = build_session();
+        for index in 0..1_500 {
+            session.handle_command(InlineCommand::AppendLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![text_segment(format!("prefix-{index}"))],
+            });
+        }
+        add_compact_activity(&mut session, 49, "printf retained");
+        let original_line = session.compact_activity_entries[0].line_index;
+        assert_eq!(session.tool_output_blocks[0].anchor_line, Some(original_line));
+        session
+            .compact_activity_hit_regions
+            .push(CompactActivityHitRegion { area: Rect::new(1, 1, 1, 1), review_anchor: 49 });
+
+        let append_count = ui::TUI_TRANSCRIPT_MAX_MSGS + 1 - session.core.lines.len();
+        for index in 0..append_count {
+            session.handle_command(InlineCommand::AppendLine {
+                kind: InlineMessageKind::Agent,
+                segments: vec![text_segment(format!("tail-{index}"))],
+            });
+        }
+
+        let shifted_line = original_line - ui::TUI_TRANSCRIPT_EVICT_CHUNK;
+        assert_eq!(session.compact_activity_entries[0].line_index, shifted_line);
+        assert_eq!(session.tool_output_blocks[0].anchor_line, Some(shifted_line));
+        assert!(session.compact_activity_hit_regions.is_empty());
+        assert!(session.compact_activity_for_line(shifted_line).is_some());
     }
 
     #[test]

@@ -587,7 +587,7 @@ impl super::Session {
 
     pub(crate) fn set_bindings(&mut self, bindings: BindingStore) {
         self.bindings = bindings;
-        self.needs_redraw = true;
+        self.mark_visual_dirty();
     }
 
     pub(crate) fn transcript_review_hints_visible(&self) -> bool {

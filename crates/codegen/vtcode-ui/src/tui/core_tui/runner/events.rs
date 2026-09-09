@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use futures::{FutureExt, StreamExt};
 use ratatui::crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEventKind, MouseEventKind};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
+use tokio::sync::mpsc::{Receiver, Sender, error::TryRecvError, error::TrySendError};
 use tokio_util::sync::CancellationToken;
 
 use super::TuiSessionDriver;
@@ -16,21 +16,32 @@ pub(crate) enum TerminalEvent {
     Crossterm(CrosstermEvent),
 }
 
+/// Bounds terminal-input buffering while leaving enough room for key-repeat
+/// and mouse bursts. Producers asynchronously yield when the queue is full;
+/// redraw ticks remain lossy and coalesced.
+const TERMINAL_EVENT_CAPACITY: usize = 256;
+
 /// Retain all input events while allowing only one pending redraw tick.
 #[derive(Clone)]
 pub(super) struct EventSender {
-    sender: UnboundedSender<TerminalEvent>,
+    sender: Sender<TerminalEvent>,
     tick_pending: Arc<AtomicBool>,
 }
 
 impl EventSender {
-    pub(super) fn send(&self, event: TerminalEvent) -> Result<(), tokio::sync::mpsc::error::SendError<TerminalEvent>> {
-        let is_tick = matches!(event, TerminalEvent::Tick);
-        if is_tick && self.tick_pending.swap(true, Ordering::AcqRel) {
+    async fn send_crossterm(
+        &self,
+        event: CrosstermEvent,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<TerminalEvent>> {
+        self.sender.send(TerminalEvent::Crossterm(event)).await
+    }
+
+    fn send_tick(&self) -> Result<(), TrySendError<TerminalEvent>> {
+        if self.tick_pending.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        let result = self.sender.send(event);
-        if is_tick && result.is_err() {
+        let result = self.sender.try_send(TerminalEvent::Tick);
+        if result.is_err() {
             self.tick_pending.store(false, Ordering::Release);
         }
         result
@@ -78,13 +89,13 @@ impl EventChannels {
 }
 
 pub(super) struct EventListener {
-    receiver: UnboundedReceiver<TerminalEvent>,
+    receiver: Receiver<TerminalEvent>,
     tick_pending: Arc<AtomicBool>,
 }
 
 impl EventListener {
     pub(super) fn new() -> (Self, EventChannels) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(TERMINAL_EVENT_CAPACITY);
         let tick_pending = Arc::new(AtomicBool::new(false));
         let channels = EventChannels::new(EventSender {
             sender: tx,
@@ -229,7 +240,14 @@ pub(super) async fn spawn_event_loop(
                     // Only send if not paused. When paused (e.g., during external editor launch),
                     // skip sending to prevent processing input while the editor is active.
                     Some(Ok(evt)) if !rx_paused.load(Ordering::Acquire) => {
-                        let _ = event_tx.send(TerminalEvent::Crossterm(evt));
+                        tokio::select! {
+                            _ = cancellation_token.cancelled() => break,
+                            result = event_tx.send_crossterm(evt) => {
+                                if result.is_err() {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     Some(Ok(_)) => {}
                     Some(Err(error)) => {
@@ -239,7 +257,7 @@ pub(super) async fn spawn_event_loop(
                 }
             }
             _ = tokio::time::sleep(sleep_duration) => {
-                let _ = event_tx.send(TerminalEvent::Tick);
+                let _ = event_tx.send_tick();
                 last_tick = Instant::now();
             }
         }
@@ -255,20 +273,22 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyModifiers, MouseEvent};
 
-    #[test]
-    fn pending_ticks_coalesce_without_dropping_or_reordering_keys() {
+    #[tokio::test]
+    async fn pending_ticks_coalesce_without_dropping_or_reordering_keys() {
         let (mut listener, channels) = EventListener::new();
-        channels.tx.send(TerminalEvent::Tick).expect("tick");
+        channels.tx.send_tick().expect("tick");
         channels
             .tx
-            .send(TerminalEvent::Crossterm(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))))
+            .send_crossterm(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)))
+            .await
             .expect("key a");
         for _ in 0..1000 {
-            channels.tx.send(TerminalEvent::Tick).expect("tick");
+            channels.tx.send_tick().expect("tick");
         }
         channels
             .tx
-            .send(TerminalEvent::Crossterm(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))))
+            .send_crossterm(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)))
+            .await
             .expect("key b");
         assert!(matches!(listener.try_recv(), Ok(TerminalEvent::Tick)));
         for expected in ['a', 'b'] {
@@ -277,10 +297,35 @@ mod tests {
             );
         }
         assert!(listener.try_recv().is_err());
-        channels.tx.send(TerminalEvent::Tick).expect("new tick");
+        channels.tx.send_tick().expect("new tick");
         listener.clear_queue();
-        channels.tx.send(TerminalEvent::Tick).expect("tick after clear");
+        channels.tx.send_tick().expect("tick after clear");
         assert!(matches!(listener.try_recv(), Ok(TerminalEvent::Tick)));
+    }
+
+    #[tokio::test]
+    async fn bounded_queue_backpressures_without_reordering_keys() {
+        let (mut listener, channels) = EventListener::new();
+        for index in 0..TERMINAL_EVENT_CAPACITY {
+            let key = char::from_u32(u32::from(b'a') + (index % 26) as u32).expect("ascii key");
+            channels
+                .tx
+                .send_crossterm(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)))
+                .await
+                .expect("queue accepts capacity");
+        }
+
+        let blocked = channels
+            .tx
+            .send_crossterm(CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('!'), KeyModifiers::NONE)));
+        assert!(tokio::time::timeout(Duration::from_millis(10), blocked).await.is_err());
+
+        for index in 0..TERMINAL_EVENT_CAPACITY {
+            let expected = char::from_u32(u32::from(b'a') + (index % 26) as u32).expect("ascii key");
+            assert!(
+                matches!(listener.try_recv(), Ok(TerminalEvent::Crossterm(CrosstermEvent::Key(key))) if key.code == KeyCode::Char(expected))
+            );
+        }
     }
 
     fn wheel(kind: MouseEventKind) -> CrosstermEvent {

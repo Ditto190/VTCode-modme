@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::{Session, message::TranscriptLine};
 
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct TranscriptScrollAnchor {
     message_index: usize,
     row_in_message: usize,
@@ -229,13 +230,22 @@ impl Session {
             cache.messages.push(CachedMessage::default());
         }
 
-        // Process any dirty messages (those that need reflow)
-        // Use the hint from session if available to avoid O(N) scan
+        // Process any dirty messages (those that need reflow). A message's
+        // trailing spacing and a Tool/Pty block's boundary also depend on its
+        // immediate successor, so include one cached predecessor when a
+        // mutation has a dirty hint. This keeps incremental reflow targeted
+        // while preventing a stale gap when a block grows or is replaced.
+        let dirty_hint = self.first_dirty_line.map(|index| index.min(self.lines.len()));
         let mut first_dirty = if width_changed {
             0
         } else {
-            self.first_dirty_line.unwrap_or(self.lines.len())
+            dirty_hint.unwrap_or(self.lines.len())
         };
+        if !width_changed && let Some(first_dirty_hint) = dirty_hint.filter(|&index| index > 0) {
+            let predecessor = first_dirty_hint - 1;
+            cache.invalidate_message(predecessor);
+            first_dirty = predecessor;
+        }
 
         // Verify and find the actual first dirty message
         // We scan from the hint downwards to be safe, but usually it's accurate

@@ -9,6 +9,7 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
+use std::time::Duration;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use ratatui::{
@@ -30,9 +31,13 @@ use vtcode_ui::tui::{
 };
 
 const VIEWPORT: Rect = Rect { x: 0, y: 0, width: 100, height: 24 };
+const NARROW_VIEWPORT: Rect = Rect { x: 0, y: 0, width: 48, height: 24 };
 const APP_WIDTH: u16 = 100;
 const APP_HEIGHT: u16 = 30;
 const MESSAGE_COUNT: usize = 500;
+// Stay below the bounded live transcript capacity so an append measures
+// incremental reflow rather than eviction work.
+const LARGE_MESSAGE_COUNT: usize = 4_000;
 
 fn segment(text: impl Into<String>) -> InlineSegment {
     InlineSegment {
@@ -109,6 +114,50 @@ fn transcript_widget_benchmark(c: &mut Criterion) {
             );
         });
     }
+
+    group.finish();
+}
+
+fn transcript_reflow_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("transcript_reflow");
+    group.sample_size(20);
+    group.measurement_time(Duration::from_secs(6));
+
+    group.bench_function("large_append_tool_boundary", |b| {
+        b.iter_batched(
+            || {
+                let mut session = build_core_session(LARGE_MESSAGE_COUNT, false);
+                let mut warmup = Buffer::empty(VIEWPORT);
+                TranscriptWidget::new(&mut session).render(VIEWPORT, &mut warmup);
+                (session, Buffer::empty(VIEWPORT))
+            },
+            |(mut session, mut buffer)| {
+                session.handle_command(CoreInlineCommand::AppendLine {
+                    kind: InlineMessageKind::Tool,
+                    segments: vec![segment("• Ran cargo nextest run -p vtcode-ui")],
+                });
+                TranscriptWidget::new(&mut session).render(VIEWPORT, &mut buffer);
+                black_box((&session, &buffer));
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.bench_function("large_width_change", |b| {
+        b.iter_batched(
+            || {
+                let mut session = build_core_session(LARGE_MESSAGE_COUNT, true);
+                let mut warmup = Buffer::empty(VIEWPORT);
+                TranscriptWidget::new(&mut session).render(VIEWPORT, &mut warmup);
+                (session, Buffer::empty(NARROW_VIEWPORT))
+            },
+            |(mut session, mut buffer)| {
+                TranscriptWidget::new(&mut session).render(NARROW_VIEWPORT, &mut buffer);
+                black_box((&session, &buffer));
+            },
+            BatchSize::LargeInput,
+        );
+    });
 
     group.finish();
 }
@@ -197,5 +246,5 @@ fn transcript_review_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, transcript_widget_benchmark, transcript_review_benchmark);
+criterion_group!(benches, transcript_widget_benchmark, transcript_reflow_benchmark, transcript_review_benchmark);
 criterion_main!(benches);

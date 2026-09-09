@@ -700,6 +700,28 @@ fn header_blocked_badge_uses_theme_error_style() {
 }
 
 #[test]
+fn cached_header_tracks_activity_and_status_transitions() {
+    let mut session = fresh_session();
+    let initial = header_line_text(&mut session);
+    assert!(!initial.contains("Blocked"));
+
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Blocked));
+    assert!(header_line_text(&mut session).contains("Blocked"));
+
+    session.handle_command(InlineCommand::SetActivityState(ActivityState::Idle));
+    assert!(!header_line_text(&mut session).contains("Blocked"));
+
+    session.handle_command(InlineCommand::SetInputStatus {
+        left: None,
+        right: Some("[BLOCKED] waiting for approval".to_string()),
+    });
+    assert!(header_line_text(&mut session).contains("Blocked"));
+
+    session.handle_command(InlineCommand::SetInputStatus { left: None, right: None });
+    assert!(!header_line_text(&mut session).contains("Blocked"));
+}
+
+#[test]
 fn header_shows_blocked_badge_from_blocked_status_needle() {
     let mut session = fresh_session();
     session.handle_command(InlineCommand::SetInputStatus {

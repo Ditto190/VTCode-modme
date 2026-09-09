@@ -39,6 +39,38 @@ pub(super) fn is_info_box_line(message: &MessageLine) -> bool {
 }
 
 impl Session {
+    /// Revisions for review sources, aggregating each diagnostic group once.
+    /// The grouped block is cached under its head line; member rows retain
+    /// their local revisions because they render as empty source rows.
+    pub(crate) fn review_message_revisions(&self) -> Vec<u64> {
+        let mut revisions = Vec::with_capacity(self.lines.len());
+        let mut index = 0;
+        while index < self.lines.len() {
+            let message = &self.lines[index];
+            if !is_info_box_line(message) {
+                revisions.push(message.revision);
+                index += 1;
+                continue;
+            }
+
+            let group_start = index;
+            let group_kind = message.kind;
+            let mut group_revision = message.revision;
+            index += 1;
+            while let Some(line) = self.lines.get(index)
+                && line.kind == group_kind
+                && is_info_box_line(line)
+            {
+                group_revision = group_revision.max(line.revision);
+                index += 1;
+            }
+
+            revisions.push(group_revision);
+            revisions.extend(self.lines[group_start + 1..index].iter().map(|line| line.revision));
+        }
+        revisions
+    }
+
     /// Reflow message lines for a given width (test-only method)
     #[cfg(test)]
     pub(super) fn reflow_transcript_lines(&self, width: u16) -> Vec<Line<'static>> {

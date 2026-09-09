@@ -138,7 +138,7 @@ fn dragging_back_into_the_middle_disarms_edge_auto_scroll() {
 #[test]
 fn zero_height_transcript_area_never_arms_auto_scroll() {
     let mut session = content_session();
-    session.transcript_area = Some(Rect::new(0, 0, 80, 0));
+    session.set_transcript_area(Some(Rect::new(0, 0, 80, 0)));
 
     session.update_drag_auto_scroll(10, 0);
     assert!(session.drag_auto_scroll.is_none(), "zero-height area must not arm auto-scroll");

@@ -89,6 +89,63 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 
 ---
 
+fix vtcode harness: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/logs/trajectory.jsonl
+
+-------------------------------------------------------- Info --------------------------------------------------------
+[!] Turn balancer: repeated low-signal navigation detected; scheduling an early recovery pass.
+Tool execution completed, but the model follow-up failed. Output above is valid.
+Follow-up error category: Execution failed
+Tip: planning evidence is preserved; the harness synthesizes the plan from collected tool outputs, and the next `keep
+planning` turn reuses that evidence without re-reading. If the failure repeats, switch provider/model for the follow-
+up.
+
+---
+
+• Planning research completed, but final synthesis failed to produce an approval-ready plan. The gathered context is
+preserved, no implementation has been approved, and the next planning turn will reuse this research.
+Planning workflow remains active: no approval-ready plan was produced. Keep planning and describe what to revise.
+-------------------------------------------------------- Info --------------------------------------------------------
+Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active. The
+current plan and task state were retained.
+
+---
+
+====================================================== Warning =======================================================
+Turn blocked: Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains
+active. The current plan and task state were retained.
+======================================================================================================================
+-------------------------------------------------------- Info --------------------------------------------------------
+What you can do:
+• In this session: Type 'continue' to resume, or describe alternative instructions
+• From terminal: Run `vtcode --resume session-vtcode-20260909T064105Z_730123-52316`
+• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+
+---
+
+┏Logs╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
+╏[2026-09-09T06:41:09Z] INFO vtcode_core::tools::registry::tool_catalog_facade tool catalog cache epoch bumped ╏
+╏cache_epoch=5 version=5 reason=planning_workflow_enabled pending_refreshes={} ╏
+╏[2026-09-09T06:41:24Z] INFO vtcode::agent::runloop::unified::turn::turn_loop Resolved per-turn context budget ╏
+╏denominator model=openai/gpt-5.6-luna context_budget=1100000 prompt_tokens=0 ╏
+╏[2026-09-09T06:41:24Z] WARN vtcode_llm::reasoning_effort Configured reasoning effort is unsupported on this route; ╏
+╏omitting it for this request requested=high error=Requested reasoning effort `high` is unsupported by this route ╏
+╏(supported: ). Select a supported effort or explicitly enable agent.allow_reasoning_effort_downgrade ╏
+╏[2026-09-09T06:41:24Z] INFO vtcode.turn.metrics turn metric metric=tool_catalog_cache ╏
+╏run_id=session-vtcode-20260909T064105Z_730123-52316 turn_id=c009db09-30c5-40fe-a228-fc70a7187afa turn=1 ╏
+╏model=openai/gpt-5.6-luna cache_hit=false planning_workflow=true request_user_input_enabled=true available_tools=3 ╏
+╏stable_prefix_hash=17282414671234288240 tool_catalog_hash=10073322524028838740 prefix_change_reason=model ╏
+╏ordered_wire_tool_names=Some(["exec_command", "code_search", "request_user_input"]) catalog_tool_count=3 ╏
+╏wire_tool_count=3 deferred_tool_count=0 active_loaded_skill_names=Some([]) ╏
+╏[2026-09-09T06:41:24Z] INFO vtcode.turn.metrics turn metric metric=token_budget_breakdown ╏
+╏run_id=session-vtcode-20260909T064105Z_730123-52316 turn_id=c009db09-30c5-40fe-a228-fc70a7187afa turn=1 ╏
+┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+====
+
+change vtcode TUI common UI for warning/error/info to remove the border and style it with simpler formatting. ref: '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-09 at 13.46.27.png'
+
+---
+
 idea: thinking about auto grant max tool turns loop when VT Code harness is running and hit limit. No need to manual human intervention to continue the loop.
 
 ------------------------------------------------------- Info --------------------------------------------------------

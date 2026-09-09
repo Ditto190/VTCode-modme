@@ -1054,7 +1054,7 @@ fn mouse_wheel_navigates_modal_list_instead_of_transcript() {
         .and_then(|list| list.current_selection());
 
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
-    let modal_area = session.modal_list_area.expect("modal list area");
+    let modal_area = session.modal_list_area().expect("modal list area");
     session.handle_event(
         CrosstermEvent::Mouse(MouseEvent {
             kind: MouseEventKind::ScrollDown,
@@ -1201,7 +1201,7 @@ fn clicking_input_moves_cursor_to_clicked_position() {
     session.set_cursor(session.input_manager.content().len());
 
     let _ = rendered_session_lines(&mut session, 20);
-    let input_area = session.input_area.expect("input area");
+    let input_area = session.input_area().expect("input area");
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     session.handle_event(
         CrosstermEvent::Mouse(MouseEvent {
@@ -1223,7 +1223,7 @@ fn clicking_input_does_not_start_transcript_selection() {
     session.set_input("hello world".to_string());
     let _ = rendered_session_lines(&mut session, 20);
 
-    let input_area = session.input_area.expect("input area");
+    let input_area = session.input_area().expect("input area");
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     session.handle_event(
         CrosstermEvent::Mouse(MouseEvent {
@@ -1248,7 +1248,7 @@ fn dragging_in_input_creates_input_selection_without_transcript_selection() {
     session.set_cursor(0);
     let _ = rendered_session_lines(&mut session, 20);
 
-    let input_area = session.input_area.expect("input area");
+    let input_area = session.input_area().expect("input area");
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     session.handle_event(
         CrosstermEvent::Mouse(MouseEvent {

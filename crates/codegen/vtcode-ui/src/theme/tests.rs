@@ -90,6 +90,34 @@ fn test_all_themes_have_readable_foreground_and_accents() {
 }
 
 #[test]
+#[serial_test::serial(theme_runtime)]
+fn committed_and_cancelled_theme_changes_do_not_leave_a_preview() {
+    let original_theme = active_theme_id();
+    let committed_theme = if original_theme == "ciapre" { "mono" } else { "ciapre" };
+    let preview_theme = if committed_theme == "mono" {
+        "ciapre-blue"
+    } else {
+        "mono"
+    };
+
+    set_active_theme(committed_theme).expect("built-in committed theme");
+    set_preview_theme(preview_theme).expect("built-in preview theme");
+    assert!(has_preview_theme(), "selection movement should install a temporary preview");
+
+    set_active_theme(preview_theme).expect("built-in committed preview theme");
+    assert_eq!(active_theme_id(), preview_theme);
+    assert!(!has_preview_theme(), "committing a theme must clear its temporary preview");
+
+    set_preview_theme(committed_theme).expect("built-in cancelled preview theme");
+    assert!(has_preview_theme(), "cancel setup needs an active preview");
+    clear_preview_theme();
+    assert_eq!(active_theme_id(), preview_theme, "cancelling must retain the last committed theme");
+    assert!(!has_preview_theme(), "cancelling must clear the temporary preview");
+
+    set_active_theme(&original_theme).expect("restore original theme after test");
+}
+
+#[test]
 fn reasoning_style_is_dimmed_and_italicized() {
     let accessibility = ColorAccessibilityConfig::default();
     for definition in all_theme_definitions().values() {

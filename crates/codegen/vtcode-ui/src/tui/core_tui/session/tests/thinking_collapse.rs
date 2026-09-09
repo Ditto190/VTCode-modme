@@ -139,7 +139,7 @@ fn toggle_updates_reflow_cache() {
 fn click_on_summary_expands_via_event_handler() {
     use crossterm::event::MouseButton::Left;
     let mut session = Session::new(InlineTheme::default(), None, 24);
-    session.transcript_area = Some(Rect::new(0, 0, 100, 24));
+    session.set_transcript_area(Some(Rect::new(0, 0, 100, 24)));
     session.transcript_width = 100;
     session.transcript_rows = 24;
     push_policy_lines(&mut session, &["reasoning step one", "reasoning step two"]);

@@ -250,13 +250,28 @@ fn bash_segments(text: &str, styles: &ShellLineStyles, expect_command: bool) -> 
 }
 
 pub fn shell_syntax_segments(text: &str, styles: &ShellLineStyles, expect_command: bool) -> Vec<InlineSegment> {
-    let semantic = bash_segments(text, styles, expect_command);
-    let Some(highlighted) = syntax_highlight::highlight_line_to_anstyle_segments(
+    let highlighted = syntax_highlight::highlight_line_to_anstyle_segments(
         text,
         Some("bash"),
         syntax_highlight::get_active_syntax_theme(),
         true,
-    ) else {
+    );
+    shell_syntax_segments_with_highlighted(text, styles, expect_command, highlighted)
+}
+
+/// Prefer shell syntax highlighting only when it keeps token colors distinct.
+///
+/// A handful of syntax themes return one foreground color for a shell line.
+/// In that case the semantic tokenizer provides more useful command, option,
+/// and argument styling than accepting the uniform highlighter result.
+pub(crate) fn shell_syntax_segments_with_highlighted(
+    text: &str,
+    styles: &ShellLineStyles,
+    expect_command: bool,
+    highlighted: Option<Vec<(AnsiStyle, String)>>,
+) -> Vec<InlineSegment> {
+    let semantic = bash_segments(text, styles, expect_command);
+    let Some(highlighted) = highlighted else {
         return semantic;
     };
 
@@ -419,5 +434,24 @@ mod tests {
         assert_eq!(option.style.color, styles.option.color);
         assert_eq!(separator.style.color, styles.separator.color);
         assert!(separator.style.effects.contains(Effects::DIMMED));
+    }
+
+    #[test]
+    fn uniform_syntax_highlighting_uses_semantic_fallback() {
+        let styles = ShellLineStyles::new();
+        let highlighted_style = AnsiStyle::new().fg_color(Some(AnsiColorEnum::Ansi(AnsiColor::Cyan)));
+        let highlighted = ["cargo", " ", "check", " ", "-p", " ", "vtcode"]
+            .into_iter()
+            .map(|text| (highlighted_style, text.to_string()))
+            .collect();
+
+        let segments =
+            shell_syntax_segments_with_highlighted("cargo check -p vtcode", &styles, true, Some(highlighted));
+        let command = segments.iter().find(|segment| segment.text == "cargo").expect("command token");
+        let option = segments.iter().find(|segment| segment.text == "-p").expect("option token");
+
+        assert_eq!(command.style.color, styles.command.color);
+        assert_eq!(option.style.color, styles.option.color);
+        assert_ne!(command.style.color, option.style.color);
     }
 }

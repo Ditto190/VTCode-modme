@@ -234,12 +234,16 @@ pub(crate) async fn initialize_session_ui(
     // side before rendering, eliminating the one-frame lag between cursor
     // movement and theme preview update. The render function picks up the
     // preview from the global `PREVIEW` state.
-    let preview_callback: PreviewCallback = Arc::new(move |selection| {
-        let Some(InlineListSelection::Theme(theme_id)) = selection else {
-            return Ok(());
-        };
-        theme::set_preview_theme(theme_id)?;
-        Ok(())
+    let preview_callback: PreviewCallback = Arc::new(move |selection| match selection {
+        Some(InlineListSelection::Theme(theme_id)) => theme::set_preview_theme(theme_id),
+        // The AppSession sends `None` when the palette is cancelled. Keep the
+        // preview lifecycle explicit so a dismissed palette cannot continue
+        // overriding the committed runtime theme.
+        None => {
+            theme::clear_preview_theme();
+            Ok(())
+        }
+        Some(_) => Ok(()),
     });
 
     let mut session = spawn_session_with_options(

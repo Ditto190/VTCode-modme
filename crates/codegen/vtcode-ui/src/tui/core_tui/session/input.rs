@@ -661,7 +661,7 @@ impl Session {
     }
 
     pub(crate) fn cursor_index_for_input_point(&self, column: u16, row: u16) -> Option<usize> {
-        let area = self.input_area?;
+        let area = self.input_area()?;
         if row < area.y
             || row >= area.y.saturating_add(area.height)
             || column < area.x

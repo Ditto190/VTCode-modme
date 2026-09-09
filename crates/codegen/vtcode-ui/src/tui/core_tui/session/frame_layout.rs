@@ -23,9 +23,8 @@ impl Session {
             return None;
         }
 
-        if self.needs_full_clear {
+        if self.render_state.take_full_clear() {
             frame.render_widget(Clear, viewport);
-            self.needs_full_clear = false;
         }
 
         Some(viewport)

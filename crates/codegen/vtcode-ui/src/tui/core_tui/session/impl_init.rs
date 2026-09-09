@@ -107,8 +107,7 @@ impl Session {
             activity_state: ActivityState::Idle,
             image_input_enabled: false,
             cursor_visible: true,
-            needs_redraw: true,
-            needs_full_clear: false,
+            render_state: RenderState::new(),
             transcript_clear_required: true,
             evicted_message_count: 0,
             pending_new_messages: 0,
@@ -121,11 +120,7 @@ impl Session {
             transcript_rows: initial_transcript_rows,
             transcript_width: 0,
             transcript_view_top: 0,
-            transcript_area: None,
-            input_area: None,
-            bottom_panel_area: None,
-            modal_list_area: None,
-            modal_text_areas: Vec::new(),
+            areas: SessionAreas::default(),
             transcript_file_link_targets: Vec::new(),
             modal_link_targets: Vec::new(),
             hovered_transcript_file_link: None,
@@ -217,7 +212,7 @@ impl Session {
         ) && self.thinking_spinner.is_active
         {
             self.thinking_spinner.stop();
-            self.needs_redraw = true;
+            self.mark_visual_dirty();
         }
     }
 }

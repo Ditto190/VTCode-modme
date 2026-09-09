@@ -22,6 +22,65 @@ fn contains_preserved_token(text: &str) -> bool {
     PRESERVED_TOKEN_PATTERN.is_match(text)
 }
 
+#[derive(Clone, Copy)]
+struct SourceSpan {
+    start: usize,
+    end: usize,
+    style: Style,
+}
+
+fn source_spans(line: &Line<'_>) -> Vec<SourceSpan> {
+    let mut start = 0usize;
+    let mut source_spans = Vec::with_capacity(line.spans.len());
+    for span in &line.spans {
+        let end = start.saturating_add(span.content.len());
+        if start != end {
+            source_spans.push(SourceSpan { start, end, style: span.style });
+        }
+        start = end;
+    }
+    source_spans
+}
+
+fn push_styled_span(spans: &mut Vec<Span<'static>>, text: &str, style: Style) {
+    if text.is_empty() {
+        return;
+    }
+
+    if let Some(last) = spans.last_mut().filter(|last| last.style == style) {
+        last.content.to_mut().push_str(text);
+    } else {
+        spans.push(Span::styled(text.to_owned(), style));
+    }
+}
+
+fn push_source_range(
+    spans: &mut Vec<Span<'static>>,
+    source_spans: &[SourceSpan],
+    text: &str,
+    start: usize,
+    end: usize,
+    fallback_style: Style,
+) {
+    let mut matched_source = false;
+    let first_source = source_spans.partition_point(|source| source.end <= start);
+    for source in source_spans.iter().skip(first_source) {
+        if source.start >= end {
+            break;
+        }
+        let fragment_start = start.max(source.start);
+        let fragment_end = end.min(source.end);
+        if fragment_start < fragment_end {
+            push_styled_span(spans, &text[fragment_start..fragment_end], source.style);
+            matched_source = true;
+        }
+    }
+
+    if !matched_source {
+        push_styled_span(spans, &text[start..end], fallback_style);
+    }
+}
+
 /// Wrap a line, preserving URLs as atomic units.
 ///
 /// - Lines without URLs: delegated to standard wrapping
@@ -90,6 +149,8 @@ fn wrap_mixed_content(
     let mut current_line: Vec<Span<'static>> = Vec::new();
     let mut current_width = 0usize;
     let mut text_pos = 0usize;
+    let source_spans = source_spans(&line);
+    let fallback_style = line.spans.first().map(|span| span.style).unwrap_or_default();
 
     fn trim_trailing_wrap_whitespace(spans: &mut Vec<Span<'static>>) {
         while let Some(last) = spans.last_mut() {
@@ -115,51 +176,58 @@ fn wrap_mixed_content(
         }
     };
 
-    // Merge spans into a single style for simplicity when dealing with URLs
-    let default_style = line.spans.first().map(|s| s.style).unwrap_or_default();
-
     let push_wrapped_token = |token: &str,
+                              token_start: usize,
                               current_line: &mut Vec<Span<'static>>,
                               current_width: &mut usize,
                               result: &mut Vec<Line<'static>>| {
-        for grapheme in UnicodeSegmentation::graphemes(token, true) {
+        for (offset, grapheme) in UnicodeSegmentation::grapheme_indices(token, true) {
             let grapheme_width = super::text_utils::display_width(grapheme);
+            let grapheme_start = token_start + offset;
+            let grapheme_end = grapheme_start + grapheme.len();
             if grapheme_width == 0 {
-                current_line.push(Span::styled(grapheme.to_string(), default_style));
+                push_source_range(current_line, &source_spans, text, grapheme_start, grapheme_end, fallback_style);
                 continue;
             }
             if *current_width + grapheme_width > max_width && *current_width > 0 {
                 flush_line(current_line, result);
                 *current_width = 0;
             }
-            current_line.push(Span::styled(grapheme.to_string(), default_style));
+            push_source_range(current_line, &source_spans, text, grapheme_start, grapheme_end, fallback_style);
             *current_width += grapheme_width;
         }
     };
 
     let push_wrapped_text = |segment: &str,
+                             segment_start: usize,
                              current_line: &mut Vec<Span<'static>>,
                              current_width: &mut usize,
                              result: &mut Vec<Line<'static>>| {
+        let mut piece_offset = 0usize;
         for piece in segment.split_inclusive('\n') {
-            let mut text = piece;
+            let mut piece_text = piece;
             let mut had_newline = false;
-            if let Some(stripped) = text.strip_suffix('\n') {
-                text = stripped;
+            if let Some(stripped) = piece_text.strip_suffix('\n') {
+                piece_text = stripped;
                 had_newline = true;
-                if let Some(without_carriage) = text.strip_suffix('\r') {
-                    text = without_carriage;
+                if let Some(without_carriage) = piece_text.strip_suffix('\r') {
+                    piece_text = without_carriage;
                 }
             }
 
-            for token in UnicodeSegmentation::split_word_bounds(text) {
+            let piece_start = segment_start + piece_offset;
+            let mut token_offset = 0usize;
+            for token in UnicodeSegmentation::split_word_bounds(piece_text) {
                 if token.is_empty() {
                     continue;
                 }
 
                 let token_width = super::text_utils::display_width(token);
+                let token_start = piece_start + token_offset;
+                let token_end = token_start + token.len();
+                token_offset += token.len();
                 if token_width == 0 {
-                    current_line.push(Span::styled(token.to_string(), default_style));
+                    push_source_range(current_line, &source_spans, text, token_start, token_end, fallback_style);
                     continue;
                 }
 
@@ -171,7 +239,7 @@ fn wrap_mixed_content(
                 }
 
                 if *current_width + token_width <= max_width {
-                    current_line.push(Span::styled(token.to_string(), default_style));
+                    push_source_range(current_line, &source_spans, text, token_start, token_end, fallback_style);
                     *current_width += token_width;
                     continue;
                 }
@@ -189,25 +257,32 @@ fn wrap_mixed_content(
                         flush_line(current_line, result);
                         *current_width = 0;
                     }
-                    current_line.push(Span::styled(token.to_string(), default_style));
+                    push_source_range(current_line, &source_spans, text, token_start, token_end, fallback_style);
                     *current_width += token_width;
                     continue;
                 }
 
-                push_wrapped_token(token, current_line, current_width, result);
+                push_wrapped_token(token, token_start, current_line, current_width, result);
             }
 
             if had_newline {
                 flush_line(current_line, result);
                 *current_width = 0;
             }
+            piece_offset += piece.len();
         }
     };
 
     for (url_start, url_end, url_text) in urls {
         // Process text before this URL
         if *url_start > text_pos {
-            push_wrapped_text(&text[text_pos..*url_start], &mut current_line, &mut current_width, &mut result);
+            push_wrapped_text(
+                &text[text_pos..*url_start],
+                text_pos,
+                &mut current_line,
+                &mut current_width,
+                &mut result,
+            );
         }
 
         // Add URL — keep atomic if it fits, otherwise break it across lines
@@ -217,7 +292,7 @@ fn wrap_mixed_content(
                 flush_line(&mut current_line, &mut result);
                 current_width = 0;
             }
-            current_line.push(Span::styled(url_text.to_string(), default_style));
+            push_source_range(&mut current_line, &source_spans, text, *url_start, *url_end, fallback_style);
             current_width += url_width;
         } else {
             // URL is wider than max_width — break it grapheme-by-grapheme
@@ -225,7 +300,7 @@ fn wrap_mixed_content(
                 flush_line(&mut current_line, &mut result);
                 current_width = 0;
             }
-            push_wrapped_token(url_text, &mut current_line, &mut current_width, &mut result);
+            push_wrapped_token(url_text, *url_start, &mut current_line, &mut current_width, &mut result);
         }
 
         text_pos = *url_end;
@@ -233,7 +308,7 @@ fn wrap_mixed_content(
 
     // Process remaining text after last URL
     if text_pos < text.len() {
-        push_wrapped_text(&text[text_pos..], &mut current_line, &mut current_width, &mut result);
+        push_wrapped_text(&text[text_pos..], text_pos, &mut current_line, &mut current_width, &mut result);
     }
 
     flush_line(&mut current_line, &mut result);
@@ -265,6 +340,7 @@ pub fn calculate_wrapped_height(text: &str, width: u16) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     #[test]
     fn test_url_detection() {
@@ -351,6 +427,36 @@ mod tests {
                 "alpha".to_string(),
                 "https://x.io".to_string(),
                 "beta gamma".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_url_wrapping_preserves_each_source_span_style() {
+        let before_style = Style::default().fg(Color::Red);
+        let url_scheme_style = Style::default().fg(Color::Blue);
+        let url_path_style = Style::default().fg(Color::Green);
+        let after_style = Style::default().fg(Color::Yellow);
+        let line = Line::from(vec![
+            Span::styled("open ", before_style),
+            Span::styled("https://example.", url_scheme_style),
+            Span::styled("com/path", url_path_style),
+            Span::styled(" now", after_style),
+        ]);
+
+        let wrapped = wrap_line_preserving_urls(line, 80);
+        assert_eq!(wrapped.len(), 1);
+        assert_eq!(
+            wrapped[0]
+                .spans
+                .iter()
+                .map(|span| (span.content.as_ref(), span.style))
+                .collect::<Vec<_>>(),
+            vec![
+                ("open ", before_style),
+                ("https://example.", url_scheme_style),
+                ("com/path", url_path_style),
+                (" now", after_style),
             ]
         );
     }

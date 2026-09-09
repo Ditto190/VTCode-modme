@@ -103,7 +103,9 @@ impl Session {
                 if self.thinking_spinner.is_active {
                     self.thinking_spinner.stop();
                 }
-                self.needs_redraw = true;
+                // The blocked/recovery badge is part of the cached header and
+                // can be derived from either status field.
+                self.invalidate_header_cache();
             }
             InlineCommand::SetActivityState(state) => {
                 self.activity_state = state;
@@ -114,12 +116,14 @@ impl Session {
                     overlay.restore_cursor = enabled;
                 }
                 self.cursor_visible = enabled && !self.has_active_overlay();
-                self.needs_redraw = true;
+                // ActivityState contributes the cached header badge as well as
+                // the uncached footer/status presentation.
+                self.invalidate_header_cache();
             }
             InlineCommand::SetTerminalTitleItems { items } => {
                 if self.terminal_title_items != items {
                     self.terminal_title_items = items;
-                    self.needs_redraw = true;
+                    self.mark_visual_dirty();
                 } else {
                     command_needs_redraw = false;
                 }
@@ -128,7 +132,7 @@ impl Session {
                 let label = label.filter(|value| !value.trim().is_empty());
                 if self.terminal_title_thread_label != label {
                     self.terminal_title_thread_label = label;
-                    self.needs_redraw = true;
+                    self.mark_visual_dirty();
                 } else {
                     command_needs_redraw = false;
                 }
@@ -137,7 +141,7 @@ impl Session {
                 let branch = branch.filter(|value| !value.trim().is_empty());
                 if self.terminal_title_git_branch != branch {
                     self.terminal_title_git_branch = branch;
-                    self.needs_redraw = true;
+                    self.mark_visual_dirty();
                 } else {
                     command_needs_redraw = false;
                 }
@@ -148,6 +152,7 @@ impl Session {
                 self.styles.set_theme(theme);
                 self.retint_lines_for_theme_change(&previous_theme);
                 self.ensure_prompt_style_color();
+                self.invalidate_header_cache();
                 self.invalidate_transcript_cache();
             }
             InlineCommand::SetColorSchemeAuto { enabled } => {
@@ -162,7 +167,7 @@ impl Session {
             }
             InlineCommand::SetVimModeEnabled(enabled) => {
                 self.vim_state.set_enabled(enabled);
-                self.needs_redraw = true;
+                self.mark_visual_dirty();
             }
             InlineCommand::SetQueuedInputs { entries } => {
                 self.set_queued_inputs_entries(entries);
@@ -262,7 +267,7 @@ impl Session {
             }
         }
         if command_needs_redraw {
-            self.needs_redraw = true;
+            self.mark_visual_dirty();
         }
     }
 

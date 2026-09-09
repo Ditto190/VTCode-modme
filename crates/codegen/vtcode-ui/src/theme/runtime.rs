@@ -55,14 +55,19 @@ pub fn is_safe_colors_only() -> bool {
 }
 
 /// Activate a built-in theme by identifier.
+///
+/// A committed selection supersedes any temporary palette preview. Leaving a
+/// preview in place here would make [`active_styles`] return stale preview
+/// colors after the caller has changed the committed theme.
 pub fn set_active_theme(theme_id: &str) -> Result<()> {
     let id_lc = theme_id.trim().to_lowercase();
     let theme = theme_definition(id_lc.as_str()).ok_or_else(|| anyhow!("Unknown theme '{theme_id}'"))?;
 
     let styles = theme.palette.build_styles_with_accessibility(&current_color_config());
-    let mut guard = ACTIVE.write();
-    guard.definition = theme;
-    guard.styles = styles;
+    *PREVIEW.write() = None;
+    let mut active = ACTIVE.write();
+    active.definition = theme;
+    active.styles = styles;
     Ok(())
 }
 

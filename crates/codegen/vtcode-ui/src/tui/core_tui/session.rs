@@ -40,6 +40,7 @@ mod impl_style;
 pub(crate) mod inline_list;
 mod input;
 pub(crate) mod input_manager;
+mod layout_state;
 pub(crate) mod list_navigator;
 pub(crate) mod list_panel;
 mod message;
@@ -48,6 +49,7 @@ pub mod mouse_selection;
 mod navigation;
 mod queue;
 pub(crate) mod render;
+mod render_state;
 mod scroll;
 pub mod styling;
 pub(crate) mod text_utils;
@@ -81,6 +83,7 @@ mod transcript_links;
 mod vim;
 
 use self::input_manager::InputManager;
+use self::layout_state::SessionAreas;
 pub(crate) use self::message::TranscriptLine;
 use self::message::{MessageLabels, MessageLine};
 use self::modal::{ModalState, WizardModalState};
@@ -90,6 +93,7 @@ use self::config::AppearanceConfig;
 pub(crate) use self::input::status_requires_shimmer;
 use self::mouse_selection::{DragAutoScroll, DragAutoScrollDirection, MouseSelectionState};
 use self::queue::QueueOverlay;
+use self::render_state::RenderState;
 use self::scroll::ScrollManager;
 pub(crate) use self::spinner::pulse_spinner_frame_for_phase;
 use self::spinner::{ShimmerState, ThinkingSpinner};
@@ -238,8 +242,7 @@ pub struct Session {
     pub(crate) activity_state: ActivityState,
     image_input_enabled: bool,
     cursor_visible: bool,
-    needs_redraw: bool,
-    pub(crate) needs_full_clear: bool,
+    render_state: RenderState,
     /// Track whether the transcript viewport must be cleared before repainting.
     pub(crate) transcript_clear_required: bool,
     /// Total number of message lines removed by transcript eviction.
@@ -257,11 +260,7 @@ pub struct Session {
     pub(crate) transcript_rows: u16,
     pub(crate) transcript_width: u16,
     pub(crate) transcript_view_top: usize,
-    transcript_area: Option<Rect>,
-    input_area: Option<Rect>,
-    bottom_panel_area: Option<Rect>,
-    modal_list_area: Option<Rect>,
-    modal_text_areas: Vec<Rect>,
+    areas: SessionAreas,
     transcript_file_link_targets: Vec<TranscriptFileLinkTarget>,
     modal_link_targets: Vec<TranscriptFileLinkTarget>,
     hovered_transcript_file_link: Option<usize>,

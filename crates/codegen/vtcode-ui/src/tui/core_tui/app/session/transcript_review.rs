@@ -619,6 +619,7 @@ fn collect_review_sources(session: &Session) -> Vec<ReviewSource> {
         .enumerate()
         .map(|(index, _)| rendered_message_text(session, index))
         .collect::<Vec<_>>();
+    let review_revisions = session.core.review_message_revisions();
     let mut anchored_blocks = HashMap::<usize, Vec<usize>>::new();
     let mut positioned_orphans = Vec::<(usize, usize)>::new();
 
@@ -669,7 +670,7 @@ fn collect_review_sources(session: &Session) -> Vec<ReviewSource> {
         } else {
             sources.push(ReviewSource {
                 key: ReviewBlockKey::Core(index),
-                revision: session.core.lines[index].revision,
+                revision: review_revisions[index],
                 kind: ReviewSourceKind::Core(index),
             });
             index += 1;
@@ -1092,6 +1093,63 @@ mod tests {
         assert_eq!(viewer.messages[0].revision, original_first);
         assert_eq!(viewer.messages.len(), 3);
         assert!(viewer.export_text().contains("gamma"));
+    }
+
+    #[test]
+    fn refresh_rebuilds_grouped_info_head_after_detail_append() {
+        let mut session = test_session();
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Info,
+            segments: vec![text_segment("first diagnostic detail")],
+        });
+        let mut viewer = ToolOutputViewerState::open(&session, 60, 10);
+        assert!(
+            viewer.messages[0]
+                .lines
+                .iter()
+                .any(|line| line.contains("first diagnostic detail"))
+        );
+
+        session.handle_command(InlineCommand::AppendLine {
+            kind: InlineMessageKind::Info,
+            segments: vec![text_segment("second diagnostic detail")],
+        });
+        viewer.refresh(&session, 60, 10);
+
+        assert!(
+            viewer.messages[0]
+                .lines
+                .iter()
+                .any(|line| line.contains("second diagnostic detail"))
+        );
+        assert!(
+            viewer.messages[0]
+                .rich_lines
+                .iter()
+                .map(line_text)
+                .any(|line| line.contains("second diagnostic detail"))
+        );
+    }
+
+    #[test]
+    fn grouped_review_revision_aggregates_only_the_group_head() {
+        let mut session = test_session();
+        for detail in ["first detail", "second detail", "third detail"] {
+            session.handle_command(InlineCommand::AppendLine {
+                kind: InlineMessageKind::Info,
+                segments: vec![text_segment(detail)],
+            });
+        }
+
+        let sources = collect_review_sources(&session);
+        let revisions = sources
+            .into_iter()
+            .filter_map(|source| match source.kind {
+                ReviewSourceKind::Core(index) if index < 3 => Some(source.revision),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(revisions, vec![3, 2, 3]);
     }
 
     #[test]

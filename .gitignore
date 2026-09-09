@@ -770,6 +770,9 @@ build_artifacts/
 snapshots/
 !vtcode-tui/src/core_tui/widgets/snapshots/
 !vtcode-tui/src/core_tui/widgets/snapshots/*.snap
+!crates/codegen/vtcode-ui/src/tui/core_tui/widgets/snapshots/
+crates/codegen/vtcode-ui/src/tui/core_tui/widgets/snapshots/*
+!crates/codegen/vtcode-ui/src/tui/core_tui/widgets/snapshots/vtcode_ui__tui__core_tui__widgets__theme_snapshot__tool_status_bullets_and_uniform_shell_fallback.snap
 TODO2.md
 
 # START Ruler Generated Files

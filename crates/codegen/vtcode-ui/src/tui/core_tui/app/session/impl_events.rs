@@ -4,7 +4,6 @@ use crate::tui::core_tui::app::types::InlineEvent;
 use crate::tui::core_tui::session::MouseDragTarget;
 use crate::tui::core_tui::session::render::modal_render_styles;
 use crate::tui::core_tui::session::{TranscriptLinkClickAction, inline_list, list_panel, modal};
-use crate::tui::core_tui::style::theme_from_styles;
 use crate::tui::core_tui::types::{InlineEvent as CoreInlineEvent, OverlayEvent, OverlaySelectionChange};
 use crate::tui::ui::theme;
 use std::time::Instant;
@@ -94,17 +93,22 @@ impl Session {
                 {
                     let _ = cb(Some(selection));
                     if theme::has_preview_theme() {
-                        let styles = theme::active_styles();
-                        let inline_theme = theme_from_styles(&styles);
-                        self.core.theme = inline_theme;
-                        self.core.styles.set_theme(self.core.theme.clone());
+                        self.sync_theme_from_runtime();
                     }
                 }
                 let outbound: InlineEvent = event.into();
                 events::emit_inline_event(&outbound, events, callback);
                 true
             }
-            modal::ModalListKeyResult::Submit(event) | modal::ModalListKeyResult::Cancel(event) => {
+            modal::ModalListKeyResult::Submit(event) => {
+                self.close_overlay();
+                self.mark_dirty();
+                let outbound: InlineEvent = event.into();
+                events::emit_inline_event(&outbound, events, callback);
+                true
+            }
+            modal::ModalListKeyResult::Cancel(event) => {
+                self.cancel_theme_preview();
                 self.close_overlay();
                 self.mark_dirty();
                 let outbound: InlineEvent = event.into();

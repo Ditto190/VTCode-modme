@@ -30,6 +30,9 @@ pub mod session;
 pub mod sidebar;
 pub mod transcript;
 
+#[cfg(test)]
+mod theme_snapshot;
+
 pub use footer::{FooterWidget, hints as footer_hints};
 pub(crate) use header::HeaderWidget;
 pub(crate) use input::InputWidget;

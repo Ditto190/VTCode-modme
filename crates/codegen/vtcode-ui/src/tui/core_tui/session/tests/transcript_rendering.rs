@@ -419,6 +419,89 @@ fn tool_block_has_top_and_bottom_spacing() {
 }
 
 #[test]
+fn cached_reflow_refreshes_tool_and_pty_block_boundaries() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("I will run the check.")]);
+    let _ = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Ran cargo check")]);
+    let rendered = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+    let agent = rendered
+        .iter()
+        .position(|line| line.contains("I will run the check."))
+        .expect("agent line");
+    let tool = rendered
+        .iter()
+        .position(|line| line.contains("Ran cargo check"))
+        .expect("tool header");
+    assert_eq!(tool, agent + 2, "agent-to-tool boundary needs exactly one blank row: {rendered:?}");
+    assert!(rendered[agent + 1].trim().is_empty(), "tool gap must be blank: {rendered:?}");
+
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::User, vec![make_segment("Run the check.")]);
+    let _ = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Ran cargo check")]);
+    let rendered = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+    let user = rendered
+        .iter()
+        .position(|line| line.contains("Run the check."))
+        .expect("user line");
+    let tool = rendered
+        .iter()
+        .position(|line| line.contains("Ran cargo check"))
+        .expect("tool header");
+    assert_eq!(tool, user + 2, "user-to-tool boundary needs exactly one blank row: {rendered:?}");
+    assert!(rendered[user + 1].trim().is_empty(), "tool gap must be blank: {rendered:?}");
+
+    for kind in [InlineMessageKind::Tool, InlineMessageKind::Pty] {
+        let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+        session.push_line(kind, vec![make_segment("• Ran first-command")]);
+        let _ = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+
+        session.push_line(kind, vec![make_segment("  └ second output")]);
+        let rendered = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+        let first = rendered
+            .iter()
+            .position(|line| line.contains("first-command"))
+            .expect("first command");
+        let second = rendered
+            .iter()
+            .position(|line| line.contains("second output"))
+            .expect("second output");
+        assert_eq!(
+            second,
+            first + 1,
+            "{kind:?} block must not keep stale trailing spacing after an appended line: {rendered:?}"
+        );
+    }
+}
+
+#[test]
+fn cached_reflow_drops_replaced_info_group_details() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("First info detail")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("Removed info detail")]);
+    let _ = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+
+    session.replace_last(1, InlineMessageKind::Agent, vec![vec![make_segment("Replacement answer")]], None);
+    let rendered = rendered_transcript_widget_lines(&mut session, VIEW_WIDTH, VIEW_ROWS);
+
+    assert!(
+        rendered.iter().any(|line| line.contains("First info detail")),
+        "remaining detail is missing: {rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("Replacement answer")),
+        "replacement is missing: {rendered:?}"
+    );
+    assert!(
+        rendered.iter().all(|line| !line.contains("Removed info detail")),
+        "cached info-box head retained a replaced detail: {rendered:?}"
+    );
+}
+
+#[test]
 fn agent_followed_by_user_has_single_blank_before_divider() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(InlineMessageKind::Agent, vec![make_segment("the answer")]);

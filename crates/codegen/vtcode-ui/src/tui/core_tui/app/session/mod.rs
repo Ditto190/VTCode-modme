@@ -48,7 +48,9 @@ use self::local_agents::LocalAgentsState;
 use self::slash_palette::SlashPalette;
 use self::tool_output_viewer::ToolOutputViewerState;
 use self::transient::{TransientFocusPolicy, TransientHost, TransientSurface, TransientVisibilityChange};
+use crate::tui::core_tui::style::theme_from_styles;
 use crate::tui::options::FullscreenInteractionSettings;
+use crate::tui::ui::theme;
 use agent_palette::AgentPalette;
 use std::sync::{
     Arc,
@@ -365,6 +367,31 @@ impl AppSession {
         }
     }
 
+    /// Apply the process-global theme styles to this session after a palette
+    /// preview changes or is dismissed.
+    fn sync_theme_from_runtime(&mut self) {
+        let inline_theme = theme_from_styles(&theme::active_styles());
+        self.core.theme = inline_theme;
+        self.core.styles.set_theme(self.core.theme.clone());
+    }
+
+    /// End a live theme preview when a list modal is cancelled.
+    ///
+    /// The callback owns application-specific preview state, while the
+    /// runtime fallback guarantees that a stale global preview cannot survive
+    /// a dismissed palette if that callback is absent or fails.
+    fn cancel_theme_preview(&mut self) {
+        if !theme::has_preview_theme() {
+            return;
+        }
+
+        if let Some(callback) = self.preview_callback.as_ref() {
+            let _ = callback(None);
+        }
+        theme::clear_preview_theme();
+        self.sync_theme_from_runtime();
+    }
+
     pub(crate) fn diff_preview_state(&self) -> Option<&DiffPreviewState> {
         self.transient_host
             .is_visible(TransientSurface::DiffPreview)
@@ -483,7 +510,7 @@ impl AppSession {
             if line.kind != InlineMessageKind::Pty {
                 break;
             }
-            if rendered_core_line_text(&self.core, line_index).trim_end() == header.trim_end() {
+            if folded_pty_header(&self.core, line_index).trim_end() == header.trim_end() {
                 return Some(line_index);
             }
             index = line_index;
@@ -491,9 +518,32 @@ impl AppSession {
         None
     }
 
+    fn handle_core_command(&mut self, command: crate::tui::core_tui::types::InlineCommand) {
+        let evicted_before = self.core.evicted_message_count;
+        self.core.handle_command(command);
+        let evicted = self.core.evicted_message_count.saturating_sub(evicted_before);
+        if evicted == 0 {
+            return;
+        }
+
+        self.compact_activity_entries.retain_mut(|entry| {
+            if entry.line_index < evicted {
+                return false;
+            }
+            entry.line_index -= evicted;
+            true
+        });
+        for block in &mut self.tool_output_blocks {
+            block.anchor_line = block.anchor_line.filter(|&line| line >= evicted).map(|line| line - evicted);
+            block.anchor_search_start = block.anchor_search_start.saturating_sub(evicted);
+            block.recorded_at_line = block.recorded_at_line.map(|line| line.saturating_sub(evicted));
+        }
+        self.compact_activity_hit_regions.clear();
+        self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
+    }
+
     fn append_tool_output_line(&mut self, id: ToolOutputId, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
-        self.core
-            .handle_command(crate::tui::core_tui::types::InlineCommand::AppendLine { kind, segments });
+        self.handle_core_command(crate::tui::core_tui::types::InlineCommand::AppendLine { kind, segments });
         let line_index = self.core.lines.len().saturating_sub(1);
         if let Some(block) = self.tool_output_blocks.iter_mut().find(|block| block.id == id)
             && block.anchor_line.is_none()
@@ -544,11 +594,10 @@ impl AppSession {
 
     fn append_compact_activity(&mut self, metadata: CompactActivityMetadata) {
         let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
-        self.core
-            .handle_command(crate::tui::core_tui::types::InlineCommand::AppendLine {
-                kind: InlineMessageKind::Info,
-                segments,
-            });
+        self.handle_core_command(crate::tui::core_tui::types::InlineCommand::AppendLine {
+            kind: InlineMessageKind::Info,
+            segments,
+        });
         let line_index = self.core.lines.len().saturating_sub(1);
         self.compact_activity_entries
             .push(CompactActivityEntry { line_index, metadata: metadata.clone() });
@@ -566,13 +615,12 @@ impl AppSession {
         }
 
         let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
-        self.core
-            .handle_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
-                count: 1,
-                kind: InlineMessageKind::Info,
-                lines: vec![segments],
-                link_ranges: None,
-            });
+        self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
+            count: 1,
+            kind: InlineMessageKind::Info,
+            lines: vec![segments],
+            link_ranges: None,
+        });
         if let Some(entry) = self.compact_activity_entries.last_mut() {
             entry.metadata = metadata.clone();
             entry.line_index = self.core.lines.len().saturating_sub(1);
@@ -601,13 +649,12 @@ impl AppSession {
         let remove_count = pty_count + usize::from(preceding_activity);
         let first_removed = self.core.lines.len().saturating_sub(remove_count);
         let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
-        self.core
-            .handle_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
-                count: remove_count,
-                kind: InlineMessageKind::Info,
-                lines: vec![segments],
-                link_ranges: None,
-            });
+        self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
+            count: remove_count,
+            kind: InlineMessageKind::Info,
+            lines: vec![segments],
+            link_ranges: None,
+        });
         self.compact_activity_entries.retain(|entry| entry.line_index < first_removed);
         let line_index = self.core.lines.len().saturating_sub(1);
         self.compact_activity_entries
@@ -819,7 +866,7 @@ impl AppSession {
         if matches!(change.previous_visible, Some(TransientSurface::FilePalette | TransientSurface::AgentPalette))
             || matches!(change.current_visible, Some(TransientSurface::FilePalette | TransientSurface::AgentPalette))
         {
-            self.core.needs_full_clear = true;
+            self.core.request_full_clear();
         }
         self.core
             .set_local_agents_drawer_visible(change.current_visible == Some(TransientSurface::LocalAgents));
@@ -867,35 +914,30 @@ impl AppSession {
                 self.core.mark_dirty();
             }
             InlineCommand::SetInput(value) => {
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::SetInput(value));
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::SetInput(value));
                 self.update_input_triggers();
             }
             InlineCommand::RestoreInputDraft(input) => {
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::RestoreInputDraft(input));
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::RestoreInputDraft(input));
                 self.update_input_triggers();
             }
             InlineCommand::ApplySuggestedPrompt(value) => {
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::ApplySuggestedPrompt(value));
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ApplySuggestedPrompt(value));
                 self.update_input_triggers();
             }
             InlineCommand::SetInlinePromptSuggestion { suggestion, llm_generated } => {
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::SetInlinePromptSuggestion {
-                        suggestion,
-                        llm_generated,
-                    });
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::SetInlinePromptSuggestion {
+                    suggestion,
+                    llm_generated,
+                });
                 self.update_input_triggers();
             }
             InlineCommand::ClearInlinePromptSuggestion => {
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::ClearInlinePromptSuggestion);
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ClearInlinePromptSuggestion);
                 self.update_input_triggers();
             }
             InlineCommand::ClearInput => {
-                self.core.handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
                 self.update_input_triggers();
             }
             InlineCommand::RecordToolOutput { id, lines } => {
@@ -918,29 +960,26 @@ impl AppSession {
                 self.refresh_compact_activity_presentations();
             }
             InlineCommand::SetAppearance { appearance } => {
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::SetAppearance { appearance });
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::SetAppearance { appearance });
                 self.refresh_compact_activity_presentations();
             }
             InlineCommand::ReplaceLast { count, kind, lines, link_ranges } => {
                 let remove_count = count.min(self.core.lines.len());
                 let first_removed = self.core.lines.len().saturating_sub(remove_count);
                 self.compact_activity_entries.retain(|entry| entry.line_index < first_removed);
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
-                        count,
-                        kind,
-                        lines,
-                        link_ranges,
-                    });
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ReplaceLast {
+                    count,
+                    kind,
+                    lines,
+                    link_ranges,
+                });
             }
             InlineCommand::ClearScreen => {
                 self.tool_output_blocks.clear();
                 self.compact_activity_entries.clear();
                 self.compact_activity_hit_regions.clear();
                 self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
-                self.core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::ClearScreen);
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ClearScreen);
             }
             InlineCommand::CloseTransient => self.close_transient(),
             InlineCommand::ShowTransient { request } => self.show_transient(*request),
@@ -951,7 +990,7 @@ impl AppSession {
             }
             _ => {
                 if let Some(core_cmd) = to_core_command(&command) {
-                    self.core.handle_command(core_cmd);
+                    self.handle_core_command(core_cmd);
                 }
             }
         }
@@ -972,6 +1011,29 @@ fn rendered_core_line_text(core: &CoreSessionState, line_index: usize) -> String
         .into_iter()
         .map(|span| crate::tui::core_tui::session::text_utils::strip_ansi_codes(span.content.as_ref()).into_owned())
         .collect()
+}
+
+fn folded_pty_header(core: &CoreSessionState, line_index: usize) -> String {
+    let first = rendered_core_line_text(core, line_index);
+    if !first.trim_start().starts_with('•') {
+        return first;
+    }
+
+    let mut folded = first.trim_end().to_owned();
+    let mut continuation_index = line_index + 1;
+    while let Some(line) = core.lines.get(continuation_index) {
+        if line.kind != InlineMessageKind::Pty {
+            break;
+        }
+        let continuation = rendered_core_line_text(core, continuation_index);
+        let Some(fragment) = continuation.trim_start().strip_prefix('│') else {
+            break;
+        };
+        folded.push(' ');
+        folded.push_str(fragment.trim());
+        continuation_index += 1;
+    }
+    folded
 }
 
 impl std::ops::Deref for AppSession {

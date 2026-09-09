@@ -53,6 +53,12 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) {
 }
 
 fn copy_selected_input_if_requested(session: &mut Session, key: &KeyEvent, has_command: bool) -> bool {
+    // Composer selection must not pre-empt the active modal's Ctrl+C handling.
+    // Transcript mouse selection is handled separately by `handle_interrupt`.
+    if !session.input_enabled() {
+        return false;
+    }
+
     let is_copy_shortcut = if has_command {
         matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
     } else {
@@ -200,10 +206,8 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
     let has_command = has_super || raw_meta;
     let has_alt = raw_alt && !has_command;
 
-    // Allow copy-to-clipboard even when a modal is active so users can
-    // copy selected transcript text without dismissing the overlay first.
-    // The modal's own key handler below will still consume Ctrl+C/Esc to
-    // close the overlay when no text is selected.
+    // Only the composer owner may consume Ctrl+C as an input-selection copy.
+    // Active modal and runtime owners route the same key below.
     if copy_selected_input_if_requested(session, &key, has_command) {
         return None;
     }

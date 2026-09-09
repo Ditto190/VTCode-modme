@@ -162,3 +162,40 @@ fn diff_preview_suspends_task_panel_and_restores_it_on_close() {
         "task panel should resume after closing diff preview"
     );
 }
+
+#[test]
+fn diff_overlay_resize_preserves_the_transcript_scroll_anchor() {
+    let mut session = AppSession::new(InlineTheme::default(), None, 30);
+    for index in 0..80 {
+        session.core.push_line(
+            InlineMessageKind::Agent,
+            vec![make_segment(&format!(
+                "history-{index} with enough text to wrap differently when the terminal becomes narrow"
+            ))],
+        );
+    }
+
+    let backend = TestBackend::new(80, 30);
+    let mut terminal = Terminal::new(backend).expect("wide test terminal");
+    terminal.draw(|frame| session.render(frame)).expect("render wide transcript");
+    session.core.scroll_page_up();
+    session.core.scroll_page_up();
+    let before = session.core.transcript_scroll_anchor().expect("history anchor before overlay");
+
+    show_diff_overlay(&mut session, app_types::DiffPreviewMode::ReadonlyReview);
+    let backend = TestBackend::new(56, 20);
+    let mut terminal = Terminal::new(backend).expect("narrow test terminal");
+    terminal
+        .draw(|frame| session.render(frame))
+        .expect("render narrow diff overlay");
+    session.close_diff_overlay();
+
+    let backend = TestBackend::new(80, 30);
+    let mut terminal = Terminal::new(backend).expect("restored test terminal");
+    terminal
+        .draw(|frame| session.render(frame))
+        .expect("render restored transcript");
+    let after = session.core.transcript_scroll_anchor().expect("history anchor after overlay");
+
+    assert_eq!(after, before);
+}

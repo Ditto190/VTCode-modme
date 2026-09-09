@@ -65,9 +65,8 @@ arboard          = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-
-[package.metadata.cargo-machete]
-ignored = ["insta"]
+insta = "1.39"
+serial_test = { workspace = true }
 
 [[bench]]
 name = "markdown_render"

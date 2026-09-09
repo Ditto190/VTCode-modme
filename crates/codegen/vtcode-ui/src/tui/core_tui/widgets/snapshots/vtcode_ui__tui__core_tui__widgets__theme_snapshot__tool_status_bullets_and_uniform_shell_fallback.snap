@@ -1,0 +1,12 @@
+---
+source: crates/codegen/vtcode-ui/src/tui/core_tui/widgets/theme_snapshot.rs
+assertion_line: 102
+expression: rendered
+---
+success • prefix: Green
+failure • prefix: Red
+warning • prefix: Yellow
+uniform shell highlight fallback:
+  command cargo: Green
+  option -p: Red
+  semantic colors distinct: true

@@ -105,12 +105,7 @@ impl Session {
     ///
     /// Returns true if a redraw was needed
     pub(crate) fn take_redraw(&mut self) -> bool {
-        if self.needs_redraw {
-            self.needs_redraw = false;
-            true
-        } else {
-            false
-        }
+        self.render_state.take_redraw()
     }
 
     /// Mark the session as needing a redraw (visual-only, no cache invalidation)
@@ -118,7 +113,11 @@ impl Session {
     /// Use this for changes that only affect the visual output without changing
     /// content data: cursor movement, scroll position, hover state, mouse selection.
     pub(crate) fn mark_visual_dirty(&mut self) {
-        self.needs_redraw = true;
+        self.render_state.request_redraw();
+    }
+
+    pub(crate) fn request_full_clear(&mut self) {
+        self.render_state.request_full_clear();
     }
 
     /// Mark the session as needing a redraw with full cache invalidation
@@ -126,7 +125,7 @@ impl Session {
     /// Use this for changes that affect content data: new messages, text changes,
     /// config changes, queue updates. Clears header, sidebar, and subprocess caches.
     pub(crate) fn mark_dirty(&mut self) {
-        self.needs_redraw = true;
+        self.render_state.request_redraw();
         self.header_lines_cache = None;
         self.header_height_cache.clear();
         self.queued_inputs_preview_cache = None;
@@ -142,7 +141,7 @@ impl Session {
             Some(current) => Some(current.min(index)),
             None => Some(index),
         };
-        self.needs_redraw = true;
+        self.render_state.request_redraw();
         self.invalidate_transcript_viewport();
     }
 
@@ -150,14 +149,14 @@ impl Session {
     pub(crate) fn invalidate_header_cache(&mut self) {
         self.header_lines_cache = None;
         self.header_height_cache.clear();
-        self.needs_redraw = true;
+        self.render_state.request_redraw();
     }
 
     /// Invalidate only the sidebar cache (e.g. when queue changes)
     pub(crate) fn invalidate_sidebar_cache(&mut self) {
         self.queued_inputs_preview_cache = None;
         self.subprocess_entries_preview_cache = None;
-        self.needs_redraw = true;
+        self.render_state.request_redraw();
     }
 
     pub(crate) fn set_local_agents(&mut self, entries: Vec<LocalAgentEntry>) {
@@ -179,43 +178,43 @@ impl Session {
     }
 
     pub(crate) fn set_transcript_area(&mut self, area: Option<Rect>) {
-        self.transcript_area = area;
+        self.areas.set_transcript(area);
     }
 
     pub(crate) fn transcript_area(&self) -> Option<Rect> {
-        self.transcript_area
+        self.areas.transcript()
     }
 
     pub(crate) fn set_input_area(&mut self, area: Option<Rect>) {
-        self.input_area = area;
+        self.areas.set_input(area);
     }
 
     pub(crate) fn input_area(&self) -> Option<Rect> {
-        self.input_area
+        self.areas.input()
     }
 
     pub(crate) fn set_bottom_panel_area(&mut self, area: Option<Rect>) {
-        self.bottom_panel_area = area;
+        self.areas.set_bottom_panel(area);
     }
 
     pub(crate) fn bottom_panel_area(&self) -> Option<Rect> {
-        self.bottom_panel_area
+        self.areas.bottom_panel()
     }
 
     pub(crate) fn set_modal_list_area(&mut self, area: Option<Rect>) {
-        self.modal_list_area = area;
+        self.areas.set_modal_list(area);
     }
 
     pub(crate) fn modal_list_area(&self) -> Option<Rect> {
-        self.modal_list_area
+        self.areas.modal_list()
     }
 
     pub(crate) fn set_modal_text_areas(&mut self, areas: Vec<Rect>) {
-        self.modal_text_areas = areas;
+        self.areas.set_modal_text(areas);
     }
 
     pub(crate) fn modal_text_areas(&self) -> &[Rect] {
-        &self.modal_text_areas
+        self.areas.modal_text()
     }
 
     pub(crate) fn set_modal_link_targets(&mut self, targets: Vec<super::TranscriptFileLinkTarget>) {
@@ -311,20 +310,20 @@ impl Session {
             && Instant::now() >= until
         {
             self.scroll_cursor_steady_until = None;
-            self.needs_redraw = true;
+            self.render_state.request_redraw();
         }
         if let Some(until) = self.copy_notification_until
             && Instant::now() >= until
         {
             self.copy_notification_until = None;
-            self.needs_redraw = true;
+            self.render_state.request_redraw();
         }
         if self.last_shimmer_active && !shimmer_active {
-            self.needs_redraw = true;
+            self.render_state.request_redraw();
         }
         self.last_shimmer_active = shimmer_active;
         if animation_updated {
-            self.needs_redraw = true;
+            self.render_state.request_redraw();
         }
     }
 
@@ -339,7 +338,7 @@ impl Session {
     fn show_copy_result_notification(&mut self, failed: bool) {
         self.copy_notification_until = Some(Instant::now() + COPY_NOTIFICATION_DURATION);
         self.copy_notification_failed = failed;
-        self.needs_redraw = true;
+        self.render_state.request_redraw();
     }
 
     pub(crate) fn copy_notification_text(&self) -> Option<&'static str> {
@@ -551,7 +550,7 @@ impl Session {
         self.scroll_manager.set_offset(0);
         self.invalidate_transcript_cache();
         self.invalidate_scroll_metrics();
-        self.needs_full_clear = true;
+        self.render_state.request_full_clear();
         self.mark_dirty();
     }
 
@@ -654,8 +653,7 @@ impl Session {
             return;
         };
 
-        self.modal_list_area = None;
-        self.modal_text_areas.clear();
+        self.areas.clear_modal_areas();
         self.modal_link_targets.clear();
         self.cache_last_overlay_list_state(&state);
         self.input_enabled = state.restore_input() && !self.activity_state.is_busy();

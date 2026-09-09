@@ -75,6 +75,38 @@ fn overlay_owns_paste_after_input_is_reenabled() {
 }
 
 #[test]
+fn modal_ctrl_c_is_not_swallowed_by_stale_composer_selection() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.input_manager.set_content("selected draft".to_string());
+    session.input_manager.set_cursor(0);
+    session.input_manager.set_cursor_with_selection("selected draft".len());
+    session.handle_command(InlineCommand::ShowOverlay {
+        request: Box::new(OverlayRequest::List(ListOverlayRequest {
+            title: "Choose".to_string(),
+            lines: Vec::new(),
+            footer_hint: None,
+            items: vec![InlineListItem {
+                title: "alpha".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::SlashCommand("alpha".to_string())),
+                search_value: Some("alpha".to_string()),
+            }],
+            selected: None,
+            search: None,
+            hotkeys: Vec::new(),
+        })),
+    });
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert!(!session.has_active_overlay());
+    assert!(matches!(event, Some(InlineEvent::Interrupt)));
+    assert_eq!(session.input_manager.content(), "selected draft");
+}
+
+#[test]
 fn move_left_word_from_end_moves_to_word_start() {
     let text = "hello world";
     let mut session = session_with_input(text, text.len());

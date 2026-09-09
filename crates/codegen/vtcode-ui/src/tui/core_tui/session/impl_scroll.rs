@@ -10,7 +10,7 @@ impl Session {
     /// Tracks pointer edges during a transcript drag so `step_drag_auto_scroll`
     /// can keep revealing content while the mouse rests at the top/bottom edge.
     pub(crate) fn update_drag_auto_scroll(&mut self, column: u16, row: u16) {
-        let Some(area) = self.transcript_area else {
+        let Some(area) = self.transcript_area() else {
             self.drag_auto_scroll = None;
             return;
         };
@@ -82,7 +82,7 @@ impl Session {
         };
         // A zero-height transcript cannot scroll; drop the pending auto-scroll
         // state (mirrors the guard in update_drag_auto_scroll).
-        if self.transcript_area.is_some_and(|area| area.height == 0) {
+        if self.transcript_area().is_some_and(|area| area.height == 0) {
             self.drag_auto_scroll = None;
             return;
         }

@@ -4,7 +4,7 @@ use std::time::Instant;
 
 impl Session {
     fn input_area_contains(&self, column: u16, row: u16) -> bool {
-        self.input_area.is_some_and(|area| {
+        self.input_area().is_some_and(|area| {
             row >= area.y
                 && row < area.y.saturating_add(area.height)
                 && column >= area.x
@@ -68,7 +68,7 @@ impl Session {
     }
 
     fn modal_visible_index_at(&self, row: u16) -> Option<usize> {
-        let area = self.modal_list_area?;
+        let area = self.modal_list_area()?;
         let styles = render::modal_render_styles(self);
         if let Some(wizard) = self.wizard_overlay() {
             let step = wizard.steps.get(wizard.current_step)?;
@@ -85,7 +85,7 @@ impl Session {
     }
 
     fn mouse_in_modal_area(&self, column: u16, row: u16) -> bool {
-        self.modal_list_area.is_some_and(|area| {
+        self.modal_list_area().is_some_and(|area| {
             row >= area.y
                 && row < area.y.saturating_add(area.height)
                 && column >= area.x
@@ -394,7 +394,7 @@ impl Session {
             return false;
         }
 
-        let Some(area) = self.transcript_area else {
+        let Some(area) = self.transcript_area() else {
             return false;
         };
 
@@ -436,7 +436,7 @@ impl Session {
     }
 
     fn transcript_word_selection_range(&mut self, column: u16, row: u16) -> Option<((u16, u16), (u16, u16))> {
-        let area = self.transcript_area?;
+        let area = self.transcript_area()?;
         if row < area.y
             || row >= area.y.saturating_add(area.height)
             || column < area.x
