@@ -86,3 +86,15 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 
 - P7: keep facade (session.rs:30-80 + 20 submodules); fix transition table (activity.rs:4-60), reflow invalidation (transcript.rs:28-311, state.rs:139-147,477-512), introduce InputOwner enum (replace input_enabled bools), keep Tick/PTY coalescing (events.rs:12-211, drive.rs:199-512), WCAG 4.5:1 (theme/tests.rs:58-125). Verify nextest -p vtcode-ui -E 'test(theme)' + transcript_rendering + overlay_list.
 - P8: true pass@k=1-C(n-c,k)/C(n,k), pass^k=(c/n)^k + attempts>=1 guard in suite.rs; keep executor.rs:33-44 sequential, parallelize at caller with cost/latency join to trace_analyzer/; eviction→summarize hook, BM25 replace substring (query.rs:141-227), LRU invalidate (query.rs:11-14); cross-model regression suite (Astra executes, Claude/Gemini pass).
+
+---
+
+idea: thinking about auto grant max tool turns loop when VT Code harness is running and hit limit. No need to manual human intervention to continue the loop.
+
+------------------------------------------------------- Info --------------------------------------------------------
+Reached maximum tool loops (20)
+Tool loop limit increased to 60 (+40, cap 60)
+
+---
+
+reduce and make the modal header more compact and consistent, it currently too many lines and noisy. '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-09 at 16.33.36.png'
