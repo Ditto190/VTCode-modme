@@ -6,6 +6,8 @@
 
 **Secure, open, universal terminal coding agent in Rust.**
 
+[![License](https://img.shields.io/badge/License-MIT_OR_Apache--2.0-30363D?style=flat-square)](#license)
+[![MSRV](https://img.shields.io/badge/MSRV-1.93.0-30363D?style=flat-square)](./docs/development/DEVELOPMENT_SETUP.md)
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-BFB38F?style=flat-square)](https://agentskills.io/)
 [![Agent Client Protocol](https://img.shields.io/badge/Agent_Client_Protocol-383B73?style=flat-square&logo=zedindustries&logoColor=white)](./docs/guides/zed-acp.md)
 [![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-A63333?style=flat-square&logo=modelcontextprotocol&logoColor=white)](./docs/guides/mcp-integration.md)
@@ -90,7 +92,8 @@ the terminal.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
-# or: brew install vinhnx/tap/vtcode | cargo install vtcode
+# or: brew install vinhnx/tap/vtcode
+# or: cargo install vtcode
 ```
 
 ### 2. Configure
@@ -272,6 +275,6 @@ Third-party code keeps its original licenses: see [THIRD-PARTY-NOTICES](THIRD-PA
 
 <div align="right">
 
-[Back to top](#contents)
+[Back to top](#readme)
 
 </div>
