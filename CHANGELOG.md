@@ -2,6 +2,43 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.159.1 - 2026-09-09
+
+### Highlights
+#### Bug Fixes
+
+- Report clipboard copy failures and bound native helper writes (8102d3ab) 
+- Resolve merge conflicts with main (433c444e) 
+- Stop read-cap false trips and validator false rejections blocking plan approval (6d6d0818) 
+- Preserve planning fallback reason and harden recovery salvage gate (6f222f01) 
+- Stop mislabeling valid final answers as recovery fallback (4218e56b) 
+- Log fallback-conversion diagnostics for false-Blocked triage (ed691ef9) 
+- Route untagged plan-like text to bounded repair (523270ad) 
+- Forward reasoning effort on zai routes and fill catalog efforts (978da64d) 
+- Treat unified_exec follow-ups as lost verifier results (e8dc81f8) 
+#### Features
+
+- Batch consecutive ctrl+enter messages into one turn (ce56e0b0) 
+- Auto-scroll transcript drag, utf-8-safe editing, paste-block delete (b5ee500d) 
+- Add untrusted description boundary and parallel read example (6004fb58) 
+- Add risk-first agentic testing signal and guidance (b4a04480) 
+- Add footer hint support to list modals (3319f60e) 
+- Add dedicated warning token to theme styles (1ed0dc3d) 
+- Add auto_grant_tool_limits flag and tool-loop hard cap (95173009) 
+### Other Changes
+#### Other
+
+- Update TODO (112ff8d9) 
+- Update README (8c5df0f1) 
+- Update TODO (1f007873) 
+#### Refactors
+
+- Apply clippy fixes to path and process hardening (305ba6bb) 
+- Extract list_cursor helper for selection gutter (3eef0adc) 
+#### Tests
+
+- Raise default prompt budget for risk-first guidance line (8c1354b7) 
+- Add theme snapshot tests for tool status bullets (d8002d11) 
 ## 0.159.0 - 2026-09-08
 
 ### Highlights
