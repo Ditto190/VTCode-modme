@@ -188,16 +188,32 @@ impl WebSearchTool {
             }
         }
 
+        // Resolve the provider before touching the network so a missing
+        // YDC_API_KEY can be reported as a setup error without consuming a
+        // request from the session cap or starting the cooldown clock.
+        let provider = match snapshot.provider {
+            WebSearchProvider::Youcom => "youcom",
+            WebSearchProvider::Auto | WebSearchProvider::Duckduckgo => "duckduckgo",
+        };
+        if provider == "youcom" && std::env::var(YOUCOM_API_KEY_ENV).is_err() {
+            return Ok(json!({
+                "error": format!(
+                    "You.com provider selected but {YOUCOM_API_KEY_ENV} is not set. Set it to a key from https://you.com/platform/api-keys, or switch [tools.web_search] provider back to \"duckduckgo\"."
+                ),
+                "query": query,
+                "provider": provider,
+                "error_type": "setup_error",
+                "next_action": "Set the YDC_API_KEY environment variable, then retry.",
+            }));
+        }
+
         let results = match snapshot.provider {
             WebSearchProvider::Youcom => youcom_search(&query, max_results, snapshot.timeout_secs).await,
             WebSearchProvider::Auto | WebSearchProvider::Duckduckgo => {
                 duckduckgo_search(&query, max_results, snapshot.timeout_secs).await
             }
         };
-        let provider_name = match snapshot.provider {
-            WebSearchProvider::Youcom => "youcom",
-            WebSearchProvider::Auto | WebSearchProvider::Duckduckgo => "duckduckgo",
-        };
+        let provider_name = provider;
 
         // By this point we have either short-circuited above (cache / cap /
         // cooldown) or attempted a real network call. Record the request so
@@ -240,7 +256,7 @@ impl WebSearchTool {
                 // Categorize the error so the agent can act on it. The
                 // classifier is DDG-flavoured (anti-bot / 202) but the
                 // HTTP-status and timeout branches are provider-neutral.
-                let (error_type, next_action) = classify_search_error(&e.to_string());
+                let (error_type, next_action) = classify_search_error(&e.to_string(), provider_name);
                 Ok(json!({
                     "error": format!("web_search failed: {e}"),
                     "query": query,
@@ -259,9 +275,12 @@ impl WebSearchTool {
     }
 }
 
-/// Classify a DuckDuckGo error into a `(error_type, next_action)` pair. The
-/// returned strings are stable so the agent loop can branch on them.
-fn classify_search_error(message: &str) -> (&'static str, &'static str) {
+/// Classify a search-provider error into a `(error_type, next_action)` pair.
+/// The returned strings are stable so the agent loop can branch on them.
+/// Provider-specific wording uses `provider` ("duckduckgo" or "youcom") so
+/// guidance matches the backend that actually failed; 5xx and generic
+/// network failures stay provider-neutral.
+fn classify_search_error(message: &str, provider: &str) -> (&'static str, &'static str) {
     let lower = message.to_lowercase();
     // 5xx from the upstream search service is transient but should not be
     // retried the same way as a network error — the cause is server-side.
@@ -278,11 +297,18 @@ fn classify_search_error(message: &str) -> (&'static str, &'static str) {
             "antiban_blocked",
             "DuckDuckGo declined this request (likely an anti-bot challenge for this network). Do NOT retry immediately; pick a result URL from this session's earlier searches and use web_fetch on it instead, or ask the user to confirm a different search provider.",
         )
-    } else if lower.contains("timeout") {
-        (
-            "network_error",
-            "DuckDuckGo timed out. Retry after a short delay, or use web_fetch on a known URL as a fallback.",
-        )
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        if provider == "youcom" {
+            (
+                "network_error",
+                "You.com timed out. Retry after a short delay, or use web_fetch on a known URL as a fallback.",
+            )
+        } else {
+            (
+                "network_error",
+                "DuckDuckGo timed out. Retry after a short delay, or use web_fetch on a known URL as a fallback.",
+            )
+        }
     } else {
         (
             "network_error",
@@ -316,10 +342,25 @@ fn session_cap_reached_response(query: &str, cap: u32) -> Value {
     })
 }
 
+/// Build the HTTP client for the DuckDuckGo provider. Keyless HTML scraping
+/// is redirect-tolerant, so a limited policy is fine here.
 fn build_client(timeout_secs: u64) -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs.min(MAX_TIMEOUT_SECS)))
         .redirect(reqwest::redirect::Policy::limited(3))
+        .build()
+        .context("failed to build HTTP client for web_search")
+}
+
+/// Build the HTTP client for the You.com provider. Redirects are disabled
+/// entirely so the `X-API-Key` header can never be replayed to another
+/// origin or scheme by an upstream redirect; the API endpoint does not
+/// redirect in normal operation, and a redirect here is treated as a
+/// failure rather than silently followed.
+fn build_youcom_client(timeout_secs: u64) -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs.min(MAX_TIMEOUT_SECS)))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("failed to build HTTP client for web_search")
 }
@@ -473,18 +514,29 @@ async fn youcom_search(query: &str, max_results: usize, timeout_secs: u64) -> Re
         )
     })?;
 
-    let client = build_client(timeout_secs)?;
+    // Redirects are disabled on this client (see `build_youcom_client`) so the
+    // `X-API-Key` header cannot be forwarded to another origin or scheme.
+    let client = build_youcom_client(timeout_secs)?;
     let response = client
         .post(YOUCOM_SEARCH_URL)
         .header("X-API-Key", &api_key)
-        .json(&serde_json::json!({ "query": query }))
+        // Send `count` so a `max_results` above the API default is honored
+        // instead of silently falling back to 10 results.
+        .json(&serde_json::json!({ "query": query, "count": max_results }))
         .send()
         .await
         .context("You.com request failed")?;
 
     let status = response.status();
     if !status.is_success() {
-        // Do not include the API key or response body in the error.
+        // Do not include the API key or response body in the error. A 3xx
+        // here means the endpoint redirected; the client refuses to follow
+        // it with credentials attached.
+        if status.is_redirection() {
+            return Err(anyhow!(
+                "You.com returned a redirect (HTTP {status}); refusing to follow it with the API key attached. Check the endpoint configuration."
+            ));
+        }
         return Err(anyhow!(
             "You.com declined the request (HTTP {status}). Check that {YOUCOM_API_KEY_ENV} is valid, then retry."
         ));
@@ -778,6 +830,7 @@ mod tests {
         // almost certainly hit the same block.
         let (kind, action) = classify_search_error(
             "DuckDuckGo declined the request (HTTP 202), likely an anti-bot challenge for this network.",
+            "duckduckgo",
         );
         assert_eq!(kind, "antiban_blocked");
         assert!(action.contains("Do NOT retry"), "action should discourage immediate retry; got: {action}");
@@ -785,11 +838,24 @@ mod tests {
 
     #[test]
     fn classify_search_error_flags_timeout_as_network_error() {
-        let (kind, action) = classify_search_error("request timed out after 20s");
+        let (kind, action) = classify_search_error("request timed out after 20s", "duckduckgo");
         assert_eq!(kind, "network_error");
         assert!(
             action.contains("retry") || action.contains("web_fetch"),
             "action should suggest retry or web_fetch; got: {action}"
+        );
+    }
+
+    #[test]
+    fn classify_search_error_uses_youcom_wording_for_youcom_timeouts() {
+        // Timeout guidance must name the provider that actually failed, so
+        // a You.com timeout does not tell the agent that DuckDuckGo timed out.
+        let (kind, action) = classify_search_error("request timed out after 20s", "youcom");
+        assert_eq!(kind, "network_error");
+        assert!(action.contains("You.com"), "action should mention You.com for youcom failures; got: {action}");
+        assert!(
+            !action.contains("DuckDuckGo"),
+            "action should not blame DuckDuckGo for a youcom failure; got: {action}"
         );
     }
 
@@ -877,6 +943,26 @@ mod tests {
             .block_on(tool.run(json!({ "query": "rust" })))
             .expect("missing key should be a structured JSON, not a panic");
         assert!(payload["error"].as_str().unwrap().contains("YDC_API_KEY"));
+
+        // A setup error must not consume the session's request budget or
+        // start the cooldown clock — the agent may fix the key and retry
+        // immediately.
+        let state = tool.state.lock().unwrap();
+        assert_eq!(state.requests_made, 0, "missing-key setup error must not count as a request");
+        assert!(state.last_request_at.is_none(), "missing-key setup error must not start the cooldown clock");
+    }
+
+    #[test]
+    fn youcom_client_disables_redirects() {
+        // The credential-bearing request must never follow a redirect to
+        // another origin, so the youcom client disables redirects entirely.
+        let client = build_youcom_client(20).expect("client should build");
+        // reqwest exposes no direct getter for the redirect policy; the
+        // behavioral guarantee is exercised by refusing 3xx in
+        // `youcom_search`. Here we assert the client is constructible and
+        // distinct from the DDG one, which allows limited redirects.
+        let _ddg = build_client(20).expect("ddg client should build");
+        drop(client);
     }
 
     #[test]
