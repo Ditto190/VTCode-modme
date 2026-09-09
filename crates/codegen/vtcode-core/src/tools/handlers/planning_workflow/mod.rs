@@ -731,6 +731,27 @@ Preserve concise test-result checks.
     }
 
     #[test]
+    fn validate_plan_content_accepts_startup_time_manual_verification() {
+        // Regression for startup-plan blocks: `verify startup time` was
+        // rejected with "verification marker must include a concrete command
+        // or check" because `time`/`speed`/`improve` were missing from the
+        // manual-verification evidence list while `startup` alone only counts
+        // once toward the two-evidence minimum.
+        let report = validate_plan_content(
+            "# Startup plan\n\n## Summary\nVerify startup stays fast.\n\n## Steps\n1. Instrument the resolve path -> files: [src/main_helpers/bootstrap.rs] -> verify: [Verify startup time improves]\n\n## Validation\n1. Run cargo check.\n\n## Assumptions\n1. Keep the current workflow.\n",
+        );
+
+        assert!(report.is_ready(), "startup-time verification should validate: {:?}", report.reasons());
+
+        // Asymmetric counterpart: a lone evidence word is still vague.
+        let vague = validate_plan_content(
+            "# Startup plan\n\n## Summary\nVerify startup stays fast.\n\n## Steps\n1. Instrument the resolve path -> files: [src/main_helpers/bootstrap.rs] -> verify: [Verify improvement]\n\n## Validation\n1. Run cargo check.\n\n## Assumptions\n1. Keep the current workflow.\n",
+        );
+
+        assert!(!vague.is_ready(), "single-evidence verification must still be rejected: {:?}", vague.reasons());
+    }
+
+    #[test]
     fn validate_plan_content_rejects_arbitrary_verification_prose() {
         let report = validate_plan_content(
             "# Verification plan\n\n## Summary\nReject arbitrary checks.\n\n## Steps\n1. Update -> src/main.rs -> verify: run banana\n\n## Validation\n1. Run cargo check.\n\n## Assumptions\n1. Keep the current workflow.\n",

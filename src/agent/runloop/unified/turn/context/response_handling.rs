@@ -34,6 +34,111 @@ pub(super) fn looks_like_clarifying_question(text: &str) -> bool {
         .is_some_and(|last_line| last_line.trim().ends_with('?'))
 }
 
+/// Detect whether a planning-mode text response is an attempted plan emitted
+/// without the required `<proposed_plan>` tags (checkpoint turn_1075: a
+/// `## Simple plan` markdown answer with seven numbered steps but no tags,
+/// no `files:` targets, and no `verify:` checks). Without this check the
+/// turn ends with only the generic "no approval-ready plan" hint and the
+/// model never learns the canonical step contract, so it repeats the same
+/// tagless shape every turn.
+///
+/// Heuristic (conservative by design): the text has a markdown heading naming
+/// an implementation section (`## Implementation Steps`, or `## Goal`
+/// together with `## Plan`) or contains at least two numbered-step lines
+/// (`1. ...`, `1) ...`). Single numbered lines in research prose do not
+/// trigger; clarifying questions are excluded by the caller, not here, so
+/// this stays a pure shape check.
+pub(super) fn looks_like_attempted_plan(text: &str) -> bool {
+    fn heading_rest(line: &str) -> Option<&str> {
+        let trimmed = line.trim().trim_start_matches('>').trim_start();
+        let without_hashes = trimmed.trim_start_matches('#');
+        if without_hashes.len() == trimmed.len() {
+            return None;
+        }
+        Some(without_hashes.trim_start().trim_start_matches(['*', '_', '`']).trim_start())
+    }
+
+    fn is_heading_name(line: &str, name: &str) -> bool {
+        let Some(rest) = heading_rest(line) else {
+            return false;
+        };
+        if rest.len() < name.len() || !rest[..name.len()].eq_ignore_ascii_case(name) {
+            return false;
+        }
+        // Word boundary: `## Planning` must not match a `## Plan` heading,
+        // and `## Goals` must not match `## Goal`.
+        rest[name.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| !next.is_ascii_alphanumeric())
+    }
+
+    let mut has_implementation_heading = false;
+    let mut has_plan_heading = false;
+    let mut has_goal_heading = false;
+    for line in text.lines() {
+        if !has_implementation_heading && is_heading_name(line, "implementation steps") {
+            has_implementation_heading = true;
+        }
+        if !has_plan_heading && is_heading_name(line, "plan") {
+            has_plan_heading = true;
+        }
+        if !has_goal_heading && is_heading_name(line, "goal") {
+            has_goal_heading = true;
+        }
+        if has_implementation_heading || (has_plan_heading && has_goal_heading) {
+            break;
+        }
+    }
+    if has_implementation_heading {
+        return true;
+    }
+    if has_plan_heading && has_goal_heading {
+        return true;
+    }
+
+    let mut numbered_steps = 0usize;
+    for line in text.lines() {
+        let trimmed = line.trim().trim_start_matches('>').trim_start();
+        // Tolerate a `Step ` prefix (`Step 1: ...`), mirroring
+        // `numbered_line_parts` in planning_workflow/artifacts.rs: only strip
+        // when a digit follows so `stepwise` is never mistaken for a step.
+        let trimmed = trimmed
+            .get(..4)
+            .filter(|prefix| prefix.eq_ignore_ascii_case("step"))
+            .map(|_| trimmed[4..].trim_start())
+            .filter(|rest| rest.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+            .unwrap_or(trimmed);
+        let mut digits_len = 0usize;
+        for ch in trimmed.chars() {
+            if ch.is_ascii_digit() {
+                digits_len += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if digits_len == 0 {
+            continue;
+        }
+        let rest = trimmed[digits_len..].trim_start();
+        let mut chars = rest.chars();
+        // Accept the same step punctuation as the artifact validator
+        // (`numbered_line_parts` in planning_workflow/artifacts.rs).
+        match chars.next() {
+            Some('.') | Some(')') | Some(':') => {
+                if chars.next().is_some_and(|next| next.is_whitespace()) {
+                    numbered_steps += 1;
+                    if numbered_steps >= 2 {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 impl<'a> TurnProcessingContext<'a> {
     /// End a failed plan-mode recovery pass with an explicit resumable
     /// handoff. This path intentionally emits a `Blocked` outcome: no plan
@@ -613,6 +718,58 @@ impl<'a> TurnProcessingContext<'a> {
             return Ok(TurnHandlerOutcome::Continue);
         }
 
+        // Untagged plan-like text in normal planning mode (checkpoint
+        // turn_1075): the model emitted a markdown plan without
+        // `<proposed_plan>` tags, so extraction produced no candidate and the
+        // turn would end with only the generic no-ready-plan hint. Route it
+        // through the same bounded validation-repair path as tagged drafts
+        // so the model learns the canonical step contract instead of
+        // repeating the tagless shape every turn. Tool-free recovery keeps
+        // its own salvage path above; clarifying questions still end the
+        // turn for user input.
+        //
+        // A tagless draft that already validates promotes to a plan candidate
+        // (mirroring the tool-free salvage above) so a complete plan is not
+        // discarded with a planless hint just for missing tags. The interim
+        // continuation and planless-hint branches below are skipped once a
+        // candidate exists.
+        if self.is_planning_active()
+            && !tool_free_recovery_pass
+            && proposed_plan.is_none()
+            && !final_text.trim().is_empty()
+            && !looks_like_clarifying_question(&final_text)
+            && looks_like_attempted_plan(&final_text)
+        {
+            let validation = validate_plan_content(&final_text);
+            if !validation.is_ready() {
+                let error = PlanArtifactError::Invalid {
+                    reasons: validation.reasons().join("; "),
+                    report: Box::new(validation),
+                };
+                if self.plan_session.plan_validation_repair_allowed() {
+                    self.plan_session.mark_plan_validation_repair_used();
+                    tracing::warn!(
+                        target: "vtcode.planning_workflow",
+                        error = %error,
+                        repair_scheduled = true,
+                        untagged = true,
+                        "untagged plan-like text in planning mode; scheduling bounded repair"
+                    );
+                    append_rejected_plan_draft_to_last_assistant(self.working_history, &final_text);
+                    let directive = plan_repair_directive_for_error(&error);
+                    self.push_system_message(directive);
+                    return Ok(TurnHandlerOutcome::Continue);
+                }
+                return self.reject_plan_artifact(error, &final_text, false);
+            }
+            tracing::info!(
+                target: "vtcode.planning_workflow",
+                untagged = true,
+                "untagged plan-like text validated; promoting to plan candidate"
+            );
+            proposed_plan = Some(final_text.clone());
+        }
+
         tracing::info!(
             target: "vtcode.turn.metrics",
             metric = "text_response_decision",
@@ -633,7 +790,7 @@ impl<'a> TurnProcessingContext<'a> {
             "turn metric"
         );
 
-        if continuation_decision.should_continue {
+        if continuation_decision.should_continue && proposed_plan.is_none() {
             push_system_directive_once(self.working_history, AUTONOMOUS_CONTINUE_DIRECTIVE);
             return Ok(TurnHandlerOutcome::Continue);
         }
@@ -654,8 +811,10 @@ impl<'a> TurnProcessingContext<'a> {
         // returned above, so the turn is ending. Now surface the deferred
         // no-approval-ready hint — rendered for the user AND appended to the
         // stored assistant message so it survives in history, ATIF, and
-        // harness logs. A turn that continued never stores the hint.
-        if defer_no_ready_plan_hint {
+        // harness logs. A turn that continued never stores the hint. A
+        // promoted untagged candidate skips the hint: it reaches the
+        // persist/approval handoff below.
+        if defer_no_ready_plan_hint && proposed_plan.is_none() {
             use vtcode_core::utils::ansi::MessageStyle;
             let hint =
                 crate::agent::runloop::unified::planning_workflow_state::PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT;
@@ -1216,6 +1375,86 @@ Fix the read-cap recovery path from gathered evidence.
         );
     }
 
+    /// Tagless markdown plan in the turn_1075 shape: numbered steps but no
+    /// `<proposed_plan>` tags, no `files:` targets, and no `verify:` checks.
+    const UNTAGGED_PLANLIKE_TEXT: &str = "## Simple plan to improve startup\n\n1. Measure the current startup path\n2. Identify the slowest steps\n3. Defer non-critical work\n";
+
+    #[tokio::test]
+    async fn untagged_planlike_text_schedules_bounded_repair_instead_of_generic_hint() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+
+        let outcome = ctx
+            .handle_text_response(UNTAGGED_PLANLIKE_TEXT.to_string(), Vec::new(), None, None, false)
+            .await
+            .expect("untagged plan-like text should be handled");
+
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Continue),
+            "untagged plan-like text must schedule bounded repair, not end the turn"
+        );
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                message.role == uni::MessageRole::System
+                    && message.content.as_text().contains("Rewrite every implementation step")
+            }),
+            "the repair directive should teach the canonical step contract"
+        );
+    }
+
+    #[tokio::test]
+    async fn untagged_planlike_text_with_exhausted_budget_rejects_with_specific_reasons() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        ctx.plan_session.mark_plan_validation_repair_used();
+        ctx.plan_session.mark_plan_validation_repair_used();
+
+        let outcome = ctx
+            .handle_text_response(UNTAGGED_PLANLIKE_TEXT.to_string(), Vec::new(), None, None, false)
+            .await
+            .expect("untagged plan-like text should be handled");
+
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })),
+            "exhausted repair budget must end the turn with the specific rejection, not a silent hint"
+        );
+    }
+
+    #[tokio::test]
+    async fn untagged_valid_plan_promotes_to_approval_handoff() {
+        // A tagless draft that already validates must not end with the generic
+        // planless hint; it promotes to a plan candidate and reaches the same
+        // persist/approval handoff as a tagged draft.
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+
+        let outcome = ctx
+            .handle_text_response(EXECUTION_REVISION_PLAN.to_string(), Vec::new(), None, None, false)
+            .await
+            .expect("valid untagged plan should be handled");
+
+        assert!(
+            matches!(
+                outcome,
+                TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    ..
+                }
+            ),
+            "valid untagged plan must reach the approval handoff"
+        );
+        assert!(
+            !ctx.working_history.iter().any(|message| {
+                message.role == uni::MessageRole::Assistant
+                    && message.content.as_text().contains("no approval-ready plan was produced")
+            }),
+            "a promoted plan must not store the planless hint"
+        );
+    }
+
     /// A valid revision of an already-approved plan, in the canonical section
     /// shape the artifact validator requires.
     const EXECUTION_REVISION_PLAN: &str = r#"# Revised plan
@@ -1605,6 +1844,52 @@ Repairs the approved plan after the referenced paths moved.
         assert!(should_render_no_ready_plan_hint(false, "Here is a research summary."));
         assert!(!should_render_no_ready_plan_hint(true, "Here is a research summary."));
         assert!(!should_render_no_ready_plan_hint(false, "Which approach should I take?"));
+    }
+
+    #[test]
+    fn attempted_plan_detection_catches_untagged_turn_1075_shape() {
+        // Regression for checkpoint turn_1075: a markdown plan with numbered
+        // steps but no `<proposed_plan>` tags must route to bounded repair,
+        // not end with only the generic no-ready-plan hint.
+        let tagless = "## Simple plan to improve startup\n\n1. Measure the current startup path\n2. Identify the slowest steps\n3. Defer non-critical work\n";
+        assert!(looks_like_attempted_plan(tagless));
+
+        // Asymmetric counterpart: a single numbered line in research prose
+        // is not an attempted plan.
+        assert!(!looks_like_attempted_plan("Found one candidate:\n1. src/main.rs looks relevant."));
+        assert!(!looks_like_attempted_plan("Here is a quick update: I searched the codebase."));
+        assert!(!looks_like_attempted_plan(""));
+    }
+
+    #[test]
+    fn attempted_plan_detection_catches_goal_plus_plan_headings() {
+        // Checkpoint turn_1074 used `## Goal` / `## Plan` instead of the
+        // canonical headings; that shape must also route to repair.
+        let goal_plan = "## Goal\nImprove startup.\n\n## Plan\n1. Measure timing\n2. Defer work\n";
+        assert!(looks_like_attempted_plan(goal_plan));
+
+        let implementation = "## Implementation Steps\n1. Measure timing\n";
+        assert!(looks_like_attempted_plan(implementation));
+    }
+
+    #[test]
+    fn attempted_plan_detection_rejects_prose_and_non_plan_headings() {
+        // Prose mentioning the phrase is research, not an attempted plan.
+        assert!(!looks_like_attempted_plan("The implementation steps are unclear; need to research more."));
+        // `## Planning` is not a `## Plan` heading (word boundary).
+        assert!(!looks_like_attempted_plan(
+            "## Planning status\nGoal is to improve startup.\n1. Found one candidate.\n"
+        ));
+        // A single goal heading without a plan heading is not an attempt.
+        assert!(!looks_like_attempted_plan("## Goal\nImprove startup.\n"));
+    }
+
+    #[test]
+    fn attempted_plan_detection_catches_step_prefixed_numbering() {
+        // Mirrors `numbered_line_parts`: `Step 1:` counts as a numbered step.
+        let stepped = "Step 1: Measure timing\nStep 2: Defer work\n";
+        assert!(looks_like_attempted_plan(stepped));
+        assert!(!looks_like_attempted_plan("Stepwise refinement is needed."));
     }
 
     #[test]
