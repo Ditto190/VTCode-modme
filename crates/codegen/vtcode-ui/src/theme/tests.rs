@@ -67,6 +67,7 @@ fn test_all_themes_have_readable_foreground_and_accents() {
             ("response", style_rgb(styles.response)),
             ("info", style_rgb(styles.info)),
             ("error", style_rgb(styles.error)),
+            ("warning", style_rgb(styles.warning)),
             ("reasoning", style_rgb(styles.reasoning)),
             ("tool", style_rgb(styles.tool)),
             ("tool_detail", style_rgb(styles.tool_detail)),
@@ -146,6 +147,27 @@ fn test_all_themes_error_accent_meets_contrast() {
         assert!(
             ratio >= min_contrast,
             "theme={} error accent contrast {:.2} < {:.1}",
+            definition.id,
+            ratio,
+            min_contrast
+        );
+    }
+}
+
+#[test]
+fn test_all_themes_warning_accent_meets_contrast() {
+    // The warning token backs warning transcript copy, so it must meet the
+    // WCAG AA contrast floor against the background in every built-in theme.
+    let accessibility = ColorAccessibilityConfig::default();
+    let min_contrast = accessibility.minimum_contrast;
+    for definition in all_theme_definitions().values() {
+        let styles = definition.palette.build_styles_with_accessibility(&accessibility);
+        let color =
+            style_rgb(styles.warning).unwrap_or_else(|| panic!("warning token missing fg for {}", definition.id));
+        let ratio = contrast_ratio(color, definition.palette.background);
+        assert!(
+            ratio >= min_contrast,
+            "theme={} warning accent contrast {:.2} < {:.1}",
             definition.id,
             ratio,
             min_contrast

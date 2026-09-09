@@ -1,7 +1,7 @@
 use anstyle::{Color, Effects, RgbColor, Style};
 use vtcode_config::constants::{defaults, ui};
 
-use crate::theme::color_math::{balance_text_luminance, ensure_contrast, lighten, mix};
+use crate::theme::color_math::{balance_text_luminance, ensure_contrast, lighten, mix, relative_luminance};
 
 /// Identifier for the default theme.
 pub const DEFAULT_THEME_ID: &str = defaults::DEFAULT_THEME;
@@ -174,6 +174,31 @@ impl ColorContext {
         )
     }
 
+    /// 9b. Warning color: dedicated amber semantics (not the per-theme brand
+    /// accent — `logo_accent` is white on `mono` and green on `nord`, both
+    /// wrong hues for a warning). The candidate is picked by background
+    /// scheme (bright amber on dark, dark amber on light) and contrast is
+    /// enforced via the shared guaranteed-text pipeline.
+    fn compute_warning_color(&self, logo_accent: RgbColor, text_color: RgbColor) -> RgbColor {
+        const AMBER: RgbColor = RgbColor(0xD9, 0x9A, 0x4E);
+        const DARK_AMBER: RgbColor = RgbColor(0x98, 0x63, 0x11);
+        let (candidate, alternate) = if relative_luminance(self.background) < 0.5 {
+            (AMBER, DARK_AMBER)
+        } else {
+            (DARK_AMBER, AMBER)
+        };
+        self.guaranteed_text_color(
+            candidate,
+            &[
+                alternate,
+                lighten(candidate, ui::THEME_LUMINANCE_LIGHTEN_RATIO),
+                logo_accent,
+                self.fallback_light,
+                text_color,
+            ],
+        )
+    }
+
     /// 10. Primary accent (for UI chrome, not body text).
     fn compute_primary_color(&self, primary: RgbColor, text_color: RgbColor) -> RgbColor {
         self.guaranteed_text_color(
@@ -247,6 +272,7 @@ impl ThemePalette {
         ThemeStyles {
             info: Self::style_from(info, true, bold_is_bright),
             error: Self::style_from(ctx.compute_alert_color(self.alert, text), true, bold_is_bright),
+            warning: Self::style_from(ctx.compute_warning_color(self.logo_accent, text), true, bold_is_bright),
             output: Self::style_from(text, false, bold_is_bright),
             response: Self::style_from(ctx.compute_response_color(text), false, bold_is_bright),
             reasoning: Self::style_from(ctx.compute_reasoning_color(text), false, bold_is_bright)
@@ -271,6 +297,7 @@ impl ThemePalette {
 pub struct ThemeStyles {
     pub info: Style,
     pub error: Style,
+    pub warning: Style,
     pub output: Style,
     pub response: Style,
     pub reasoning: Style,

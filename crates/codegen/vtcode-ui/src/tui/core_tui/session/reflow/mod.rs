@@ -17,7 +17,7 @@ use super::wrapping;
 use super::{
     Session,
     message::{MessageLine, TranscriptLine},
-    render, terminal_capabilities, text_utils, transcript_links,
+    render, text_utils, transcript_links,
 };
 use crate::tui::config::constants::ui;
 
@@ -29,8 +29,7 @@ mod thinking;
 pub(super) use helpers::parse_tool_call_prefix;
 use helpers::{
     agent_code_continuation_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text,
-    next_is_tool_block, push_spacing_blanks, push_spacing_transcript_lines, rule_fill,
-    trim_trailing_blank_transcript_lines,
+    next_is_tool_block, push_spacing_blanks, push_spacing_transcript_lines, trim_trailing_blank_transcript_lines,
 };
 
 pub(super) fn is_info_box_line(message: &MessageLine) -> bool {
@@ -301,23 +300,32 @@ impl Session {
         into_transcript_lines(wrapped, self.workspace_root.as_deref())
     }
 
-    /// Reflow error, warning, and info messages with a bordered block.
+    /// Reflow error, warning, and info messages as plain colored lines.
+    ///
+    /// Consecutive same-kind lines stay grouped (head owns the reflow so
+    /// transcript caches invalidate from the first line), but render without
+    /// borders or labels: semantic text color only (Error red, Warning amber,
+    /// Info dimmed foreground), normal wrapping, single trailing gap.
     fn reflow_error_warning_lines(&self, index: usize, width: u16) -> Vec<TranscriptLine> {
         let Some(line) = self.lines.get(index) else {
             return vec![TranscriptLine::default()];
         };
+        let kind = line.kind;
 
         let max_width = if width == 0 { usize::MAX } else { width as usize };
 
         let mut grouped_lines = Vec::new();
         let mut cursor = index;
         while let Some(current) = self.lines.get(cursor) {
-            if current.kind != line.kind || !is_info_box_line(current) {
+            if current.kind != kind || !is_info_box_line(current) {
                 break;
             }
             let mut spans = render::render_message_spans(self, cursor);
             for span in &mut spans {
                 span.style = span.style.remove_modifier(Modifier::BOLD);
+                if kind == InlineMessageKind::Info {
+                    span.style = span.style.add_modifier(Modifier::DIM);
+                }
             }
             let line_text: String = spans.iter().map(|span| &*span.content).collect();
             if !line_text.trim().is_empty() {
@@ -334,73 +342,20 @@ impl Session {
             return into_transcript_lines(grouped_lines, self.workspace_root.as_deref());
         }
 
-        let border_style = self.styles.dimmed_border_style(true);
-
-        let border_type = terminal_capabilities::get_border_type();
-        let dash = rule_fill(line.kind, border_type);
-        let label = match line.kind {
-            InlineMessageKind::Error => "Error",
-            InlineMessageKind::Warning => "Warning",
-            InlineMessageKind::Info => "Info",
-            _ => "",
-        };
-
-        // Render as a ratatui-cheese Fieldset: a center-aligned label on a
-        // horizontal rule, content with no vertical sides, and a closing rule.
-        // The fill pattern is chosen per message kind (Error → Slash, Info →
-        // Dash, Warning → Thick) and respects terminal Unicode capabilities.
-        let rule_indent = "";
-        let rule_indent_width = UnicodeWidthStr::width(rule_indent);
-        let content_indent = "";
-        let content_indent_width = UnicodeWidthStr::width(content_indent);
-        let rule_width = max_width.saturating_sub(rule_indent_width);
-        let content_width = max_width.saturating_sub(content_indent_width);
-
-        if rule_width == 0 || content_width == 0 {
-            return into_transcript_lines(grouped_lines, self.workspace_root.as_deref());
-        }
-
-        // Top rule with a center-aligned label, e.g. `──── Info ─────`.
-        let top = if label.is_empty() {
-            format!("{}{}", rule_indent, dash.repeat(rule_width))
-        } else {
-            let label_segment = format!(" {label} ");
-            let label_width = UnicodeWidthStr::width(label_segment.as_str());
-            if label_width + 2 >= rule_width {
-                format!("{}{}", rule_indent, dash.repeat(rule_width))
-            } else {
-                let side = rule_width.saturating_sub(label_width);
-                let left = side / 2;
-                let right = side - left;
-                format!("{}{}{}{}", rule_indent, dash.repeat(left), label_segment, dash.repeat(right))
-            }
-        };
-        let bottom = format!("{}{}", rule_indent, dash.repeat(rule_width));
-
         let mut lines = Vec::new();
-        lines.push(Line::styled(top, border_style));
-        let mut wrapped = Vec::new();
         for line in grouped_lines {
-            let line_wrapped = self.wrap_line(line, content_width);
-            for wrapped_line in line_wrapped {
+            for wrapped_line in self.wrap_line(line, max_width) {
                 let text: String = wrapped_line.spans.iter().map(|span| &*span.content).collect();
                 if !text.trim().is_empty() {
-                    wrapped.push(wrapped_line);
+                    lines.push(wrapped_line);
                 }
             }
         }
-        if wrapped.is_empty() {
+        if lines.is_empty() {
             return Vec::new();
         }
-        for line in &mut wrapped {
-            let mut new_spans = vec![Span::styled(content_indent.to_owned(), Style::default())];
-            new_spans.append(&mut line.spans);
-            line.spans = new_spans;
-        }
-        lines.extend(wrapped);
-        lines.push(Line::styled(bottom, border_style));
 
-        // A tool block owns its own top gap (min 1 guaranteed), so a fieldset
+        // A tool block owns its own top gap (min 1 guaranteed), so a group
         // directly before one must not emit trailing spacing as well.
         if !next_is_tool_block(self.lines.get(cursor)) {
             let spacing = self.appearance.message_block_spacing.min(2) as usize;

@@ -2,39 +2,8 @@ use anstyle::Effects;
 use ratatui::prelude::*;
 use unicode_width::UnicodeWidthStr;
 
-use crate::tui::config::constants::ui;
-
 use super::super::message::{MessageLine, TranscriptLine};
 use crate::tui::core_tui::types::InlineMessageKind;
-
-/// Rule fill pattern for Fieldset-style info/warning/error blocks.
-///
-/// Mirrors `ratatui_cheese::fieldset::FieldsetFill`, mapping each message kind
-/// to a distinct fill: Error → `Slash`, Info → `Dash`, Warning → `Thick`. The
-/// Unicode glyphs fall back to ASCII on terminals without Unicode support.
-pub(super) fn rule_fill(kind: InlineMessageKind, border_type: ratatui::widgets::BorderType) -> &'static str {
-    let unicode = matches!(border_type, ratatui::widgets::BorderType::Rounded);
-    match kind {
-        // Slash fill (`/`) — already ASCII-safe.
-        InlineMessageKind::Error => "/",
-        // Thick fill (`━`) with an ASCII fallback.
-        InlineMessageKind::Warning => {
-            if unicode {
-                "━"
-            } else {
-                "="
-            }
-        }
-        // Dash fill (`─`) with an ASCII fallback.
-        _ => {
-            if unicode {
-                ui::INLINE_BLOCK_HORIZONTAL
-            } else {
-                "-"
-            }
-        }
-    }
-}
 
 /// Check if trimmed, ANSI-stripped text starts with a tool summary prefix.
 ///

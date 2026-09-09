@@ -278,18 +278,13 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
                 ui::INLINE_FILE_PICKER_TREE_INDENT.to_owned()
             };
 
-            let depth_indent = if palette.is_search_mode() && !entry.is_parent {
-                let depth = entry.relative_path.chars().filter(|&c| c == '/').count();
-                ui::INLINE_FILE_PICKER_TREE_INDENT.repeat(depth)
-            } else {
-                String::new()
-            };
-
+            // Search mode shows full relative paths, so every row starts at the
+            // same column. Depth-proportional indent would staircase deeper
+            // files to the right; browse mode already shows basenames only.
             let spans = vec![
                 Span::styled(cursor, cursor_style),
                 Span::styled(" ", cursor_style),
                 Span::styled(tree_prefix, cursor_style),
-                Span::styled(depth_indent, cursor_style),
                 Span::styled(entry.display_name.clone(), name_style),
             ];
             (InlineListRow::single(Line::from(spans), dim_style), 1_u16)

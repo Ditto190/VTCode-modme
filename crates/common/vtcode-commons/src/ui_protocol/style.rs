@@ -121,6 +121,8 @@ pub struct InlineTheme {
     pub tool_accent: Option<AnsiColorEnum>,
     pub tool_body: Option<AnsiColorEnum>,
     pub pty_body: Option<AnsiColorEnum>,
+    pub error: Option<AnsiColorEnum>,
+    pub warning: Option<AnsiColorEnum>,
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +249,8 @@ pub fn theme_from_color_fields(
     tool: AnsiStyle,
     tool_detail: AnsiStyle,
     pty_output: AnsiStyle,
+    error: AnsiStyle,
+    warning: AnsiStyle,
 ) -> InlineTheme {
     InlineTheme {
         foreground: convert_ansi_color(foreground),
@@ -256,5 +260,7 @@ pub fn theme_from_color_fields(
         tool_accent: convert_style_color(&tool),
         tool_body: convert_style_color(&tool_detail),
         pty_body: convert_style_color(&pty_output),
+        error: convert_style_color(&error),
+        warning: convert_style_color(&warning),
     }
 }

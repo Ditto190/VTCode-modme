@@ -140,10 +140,6 @@ What you can do:
 ╏run_id=session-vtcode-20260909T064105Z_730123-52316 turn_id=c009db09-30c5-40fe-a228-fc70a7187afa turn=1 ╏
 ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
 
-====
-
-change vtcode TUI common UI for warning/error/info to remove the border and style it with simpler formatting. ref: '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-09 at 13.46.27.png'
-
 ---
 
 idea: thinking about auto grant max tool turns loop when VT Code harness is running and hit limit. No need to manual human intervention to continue the loop.
@@ -151,7 +147,3 @@ idea: thinking about auto grant max tool turns loop when VT Code harness is runn
 ------------------------------------------------------- Info --------------------------------------------------------
 Reached maximum tool loops (20)
 Tool loop limit increased to 60 (+40, cap 60)
-
----
-
-reduce and make the modal header more compact and consistent, it currently too many lines and noisy. '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-09 at 16.33.36.png'

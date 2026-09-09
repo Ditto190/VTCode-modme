@@ -303,6 +303,8 @@ mod headless {
             styles.tool,
             styles.tool_detail,
             styles.pty_output,
+            styles.error,
+            styles.warning,
         )
     }
 }

@@ -73,6 +73,8 @@ pub fn inline_theme_from_core_styles(styles: &ThemeStyles) -> InlineTheme {
         styles.tool,
         styles.tool_detail,
         styles.pty_output,
+        styles.error,
+        styles.warning,
     )
 }
 
@@ -82,6 +84,7 @@ pub fn tui_theme_styles_from_core(styles: &ThemeStyles) -> TuiThemeStyles {
     TuiThemeStyles {
         info: styles.info,
         error: styles.error,
+        warning: styles.warning,
         output: styles.output,
         response: styles.response,
         reasoning: styles.reasoning,

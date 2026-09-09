@@ -147,7 +147,7 @@ impl SessionStyles {
 
     /// Get a border style with configurable boldness.
     /// When `suppress_bold` is true, the BOLD modifier is removed — useful for
-    /// info/error/warning block borders that should appear subtle.
+    /// subtle block borders that should appear dimmed.
     pub(crate) fn dimmed_border_style(&self, suppress_bold: bool) -> Style {
         let mut style =
             ratatui_style_from_inline(&self.border_inline_style(), self.theme.foreground).add_modifier(Modifier::DIM);
@@ -190,10 +190,13 @@ impl SessionStyles {
             InlineMessageKind::Agent => self.theme.foreground.or(self.theme.primary),
             InlineMessageKind::Policy => self.theme.primary.or(self.theme.foreground),
             InlineMessageKind::User => self.theme.secondary.or(self.theme.foreground),
-            InlineMessageKind::Tool | InlineMessageKind::Error => self.theme.primary.or(self.theme.foreground),
+            InlineMessageKind::Tool => self.theme.primary.or(self.theme.foreground),
+            InlineMessageKind::Error => self.theme.error.or(Some(AnsiColor::Red.into())).or(self.theme.foreground),
+            InlineMessageKind::Warning => {
+                self.theme.warning.or(Some(AnsiColor::Yellow.into())).or(self.theme.foreground)
+            }
             InlineMessageKind::Pty => self.theme.pty_body.or(self.theme.tool_body).or(self.theme.foreground),
             InlineMessageKind::Info => self.theme.foreground,
-            InlineMessageKind::Warning => Some(AnsiColor::Red.into()),
         }
     }
 

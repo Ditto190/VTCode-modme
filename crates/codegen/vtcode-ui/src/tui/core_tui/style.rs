@@ -18,6 +18,8 @@ pub fn theme_from_styles(styles: &theme::ThemeStyles) -> InlineTheme {
         styles.tool,
         styles.tool_detail,
         styles.pty_output,
+        styles.error,
+        styles.warning,
     )
 }
 
