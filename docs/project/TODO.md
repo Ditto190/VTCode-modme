@@ -139,11 +139,3 @@ What you can do:
 ╏[2026-09-09T06:41:24Z] INFO vtcode.turn.metrics turn metric metric=token_budget_breakdown ╏
 ╏run_id=session-vtcode-20260909T064105Z_730123-52316 turn_id=c009db09-30c5-40fe-a228-fc70a7187afa turn=1 ╏
 ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
-
----
-
-idea: thinking about auto grant max tool turns loop when VT Code harness is running and hit limit. No need to manual human intervention to continue the loop.
-
-------------------------------------------------------- Info --------------------------------------------------------
-Reached maximum tool loops (20)
-Tool loop limit increased to 60 (+40, cap 60)

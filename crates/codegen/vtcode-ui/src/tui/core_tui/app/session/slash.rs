@@ -3,7 +3,7 @@ use ratatui::{prelude::*, widgets::Clear};
 
 use crate::tui::config::constants::ui;
 use crate::tui::core_tui::app::session::transient::TransientSurface;
-use crate::tui::core_tui::session::inline_list::{InlineListRow, selection_padding};
+use crate::tui::core_tui::session::inline_list::{InlineListRow, list_cursor};
 use crate::tui::core_tui::session::list_panel::{
     ListPanelLayout, SharedListPanelSections, SharedListPanelStyles, SharedSearchField, StaticRowsListPanelModel,
     fixed_section_rows_with_divider, input_styles_from_theme, render_shared_list_panel, rows_to_u16,
@@ -54,7 +54,6 @@ pub(crate) fn render_slash_palette(session: &mut Session, frame: &mut Frame<'_>,
     let highlight_style = slash_highlight_style(session);
     let name_style = slash_name_style(session);
     let description_style = slash_description_style(session);
-    let blank_gutter = selection_padding();
 
     let selected = session.slash_palette.selected_index().filter(|index| *index < item_count);
 
@@ -63,11 +62,7 @@ pub(crate) fn render_slash_palette(session: &mut Session, frame: &mut Frame<'_>,
         .enumerate()
         .map(|(idx, row)| {
             let is_selected = selected == Some(idx);
-            let cursor = if is_selected {
-                format!("{} ", ui::MODAL_LIST_HIGHLIGHT_SYMBOL)
-            } else {
-                blank_gutter.clone()
-            };
+            let cursor = list_cursor(is_selected);
             let cursor_style = if is_selected { highlight_style } else { dim_style };
             let row_name_style = if is_selected {
                 highlight_style

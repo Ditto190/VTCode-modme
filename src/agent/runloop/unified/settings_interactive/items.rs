@@ -43,7 +43,7 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
     items.push(action_item(
         "Reload from disk",
         "Reload effective values from current configuration files",
-        Some("Action"),
+        None,
         super::ACTION_RELOAD,
     ));
 
@@ -51,7 +51,7 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
         items.push(action_item(
             "Back to sections",
             "Return to the top-level settings sections",
-            Some("Nav"),
+            None,
             super::ACTION_OPEN_ROOT,
         ));
 
@@ -65,14 +65,14 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
         items.push(action_item(
             "Reset configuration",
             &format!("Clear every setting in {} (confirmation required)", state.source_path.display()),
-            Some("Action"),
+            None,
             ACTION_RESET,
         ));
         items.push(section_item("Quick Access"));
         items.push(action_item(
             "Model Config",
             "Edit the active provider and default model in one focused view",
-            Some("Section"),
+            None,
             &format!("{ACTION_PREFIX_OPEN}{SETTINGS_MODEL_CONFIG_PATH}"),
         ));
         items.push(action_item(
@@ -84,13 +84,13 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
         items.push(action_item(
             "Editor Mode",
             "Toggle Vim-style prompt editing (ui.vim_mode)",
-            Some("Section"),
+            None,
             &format!("{ACTION_PREFIX_OPEN}ui"),
         ));
         items.push(action_item(
             "Codex App Server",
             "Review the local Codex sidecar command, startup timeout, and experimental switches",
-            Some("Section"),
+            None,
             &format!("{ACTION_PREFIX_OPEN}agent.codex_app_server"),
         ));
         append_table_items(&mut items, table, None, None, draft);
@@ -113,13 +113,13 @@ fn append_node_items(
             items.push(action_item(
                 "Add item",
                 "Append a new default item to this array",
-                Some("Array"),
+                None,
                 &format!("{ACTION_PREFIX_ARRAY_ADD}{path}"),
             ));
             items.push(action_item(
                 "Remove last item",
                 "Remove the final array entry",
-                Some("Array"),
+                None,
                 &format!("{ACTION_PREFIX_ARRAY_POP}{path}"),
             ));
 
@@ -148,7 +148,7 @@ fn append_synthetic_model_config_items(
             items.push(action_item(
                 "Main Model",
                 "Provider and default model for the active conversation model",
-                Some("Section"),
+                None,
                 &format!("{ACTION_PREFIX_OPEN}{SETTINGS_MODEL_CONFIG_MAIN_PATH}"),
             ));
             Ok(true)
@@ -311,7 +311,7 @@ fn item_for_value(label: &str, path: &str, value: &TomlValue, draft_root: &TomlV
         TomlValue::Table(_) => InlineListItem {
             title,
             subtitle: Some(section_subtitle(path, value)),
-            badge: Some("Section".to_string()),
+            badge: None,
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{ACTION_PREFIX_OPEN}{path}"))),
             search_value: Some(search_value),

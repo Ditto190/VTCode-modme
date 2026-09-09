@@ -52,6 +52,15 @@ pub(crate) fn selection_padding() -> String {
     " ".repeat(selection_padding_width())
 }
 
+#[inline]
+pub(crate) fn list_cursor(is_selected: bool) -> String {
+    if is_selected {
+        ui::MODAL_LIST_HIGHLIGHT_FULL.to_owned()
+    } else {
+        selection_padding()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct InlineListRenderOptions {
     pub base_style: Style,

@@ -6,7 +6,7 @@ use crate::tui::core_tui::session::list_panel::{
     input_styles_from_theme, render_shared_list_panel, rows_to_u16,
 };
 use crate::tui::core_tui::session::{
-    inline_list::{InlineListRow, selection_padding},
+    inline_list::{InlineListRow, list_cursor},
     list_panel::SharedListWidgetModel,
 };
 use crate::tui::core_tui::style::ratatui_color_from_ansi;
@@ -40,7 +40,6 @@ impl SharedListWidgetModel for LocalAgentsPanelModel {
         }
 
         let dim_style = self.base_style.add_modifier(Modifier::DIM);
-        let blank_gutter = selection_padding();
         let max_chars = width.saturating_sub(3) as usize;
         self.entries
             .iter()
@@ -51,11 +50,7 @@ impl SharedListWidgetModel for LocalAgentsPanelModel {
                     format!("{} · {} · {}", entry.display_label, entry.kind.as_str(), entry.status),
                     max_chars,
                 );
-                let cursor = if is_selected {
-                    format!("{} ", ui::MODAL_LIST_HIGHLIGHT_SYMBOL)
-                } else {
-                    blank_gutter.clone()
-                };
+                let cursor = list_cursor(is_selected);
                 let cursor_style = if is_selected { self.highlight_style } else { dim_style };
                 let text_style = if is_selected { self.highlight_style } else { dim_style };
                 (

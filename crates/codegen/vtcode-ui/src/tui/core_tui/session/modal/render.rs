@@ -1,7 +1,7 @@
 use crate::tui::config::constants::ui;
 use crate::tui::ui::markdown::render_markdown;
 use crate::tui::ui::tui::session::inline_list::{
-    InlineListRow, row_height, selection_padding, selection_padding_width,
+    InlineListRow, list_cursor, row_height, selection_padding, selection_padding_width,
 };
 use crate::tui::ui::tui::session::list_panel::{
     SharedListPanelSections, SharedListPanelStyles, SharedListWidgetModel, render_shared_list_panel,
@@ -952,7 +952,7 @@ pub(super) fn highlight_segments(
 
 pub fn modal_list_item_lines(
     list: &ModalListState,
-    _visible_index: usize,
+    visible_index: usize,
     item_index: usize,
     styles: &ModalRenderStyles,
     content_width: usize,
@@ -984,11 +984,7 @@ pub fn modal_list_item_lines(
     let indent = "  ".repeat(item.indent as usize);
     let gutter_width = selection_padding_width();
     let blank_gutter = selection_padding();
-    let cursor_indicator = if is_selected {
-        format!("{} ", ui::MODAL_LIST_HIGHLIGHT_SYMBOL)
-    } else {
-        blank_gutter.clone()
-    };
+    let cursor_indicator = list_cursor(is_selected);
 
     let cursor_style = if is_selected {
         styles.highlight
@@ -1023,7 +1019,14 @@ pub fn modal_list_item_lines(
     let title_spans = highlight_segments(item.title.as_str(), title_style, styles.search_match, list.highlight_terms());
     primary_spans.extend(title_spans);
 
-    let mut lines = vec![Line::from(primary_spans)];
+    // Group spacing without per-item cost: headers (Actions, Quick Access,
+    // Sections, Settings) get one blank row above so dense subtitle lists
+    // stay scannable within the multiline row cap.
+    let mut lines = Vec::new();
+    if item.is_header() && visible_index > 0 {
+        lines.push(Line::default());
+    }
+    lines.push(Line::from(primary_spans));
 
     if let Some(subtitle) = &item.subtitle {
         let indent_width = item.indent as usize * 2;

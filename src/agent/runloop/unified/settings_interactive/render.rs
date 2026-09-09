@@ -5,6 +5,9 @@ use crate::agent::runloop::unified::config_section_headings::{heading_for_path, 
 
 use super::docs::FieldDoc;
 use vtcode_commons::formatting::truncate_middle;
+
+const SETTINGS_SUBTITLE_MAX_LEN: usize = 90;
+
 pub(super) fn display_title(label: &str, path: &str, value: &TomlValue) -> String {
     if label.starts_with('[') {
         return format!("Item {label}");
@@ -21,7 +24,7 @@ pub(super) fn section_subtitle(path: &str, value: &TomlValue) -> String {
     let count = count_leaf_entries(value);
     let mut parts = Vec::new();
     if !heading.summary.is_empty() {
-        parts.push(heading.summary.into_owned());
+        parts.push(truncate_middle(heading.summary.as_ref(), SETTINGS_SUBTITLE_MAX_LEN));
     }
     parts.push(format!("{} setting{}", count, if count == 1 { "" } else { "s" }));
     parts.join(" • ")
@@ -35,7 +38,7 @@ pub(super) fn setting_subtitle(summary: &str, description: &str, adjustable: boo
     };
     let mut parts = vec![value_display];
     if !description.is_empty() {
-        parts.push(description.to_string());
+        parts.push(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN));
     }
     parts.join(" • ")
 }
@@ -43,7 +46,7 @@ pub(super) fn setting_subtitle(summary: &str, description: &str, adjustable: boo
 pub(super) fn collection_subtitle(summary: String, description: &str) -> String {
     let mut parts = vec![summary];
     if !description.is_empty() {
-        parts.push(description.to_string());
+        parts.push(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN));
     }
     parts.join(" • ")
 }

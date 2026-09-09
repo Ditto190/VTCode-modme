@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::config::constants::ui;
-use crate::tui::core_tui::session::inline_list::{InlineListRow, selection_padding};
+use crate::tui::core_tui::session::inline_list::{InlineListRow, list_cursor};
 use crate::tui::core_tui::session::list_panel::{
     ListPanelLayout, SharedListPanelSections, SharedListPanelStyles, SharedListWidgetModel, SharedSearchField,
     fixed_section_rows, input_styles_from_theme, render_shared_list_panel, rows_to_u16,
@@ -32,7 +32,6 @@ impl SharedListWidgetModel for HistoryPickerPanelModel {
         }
 
         let dim_style = self.base_style.add_modifier(Modifier::DIM);
-        let blank_gutter = selection_padding();
 
         self.entries
             .iter()
@@ -56,11 +55,7 @@ impl SharedListWidgetModel for HistoryPickerPanelModel {
                 } else {
                     display_text
                 };
-                let cursor = if is_selected {
-                    format!("{} ", ui::MODAL_LIST_HIGHLIGHT_SYMBOL)
-                } else {
-                    blank_gutter.clone()
-                };
+                let cursor = list_cursor(is_selected);
                 let cursor_style = if is_selected { self.highlight_style } else { dim_style };
                 let text_style = if is_selected { self.highlight_style } else { dim_style };
                 (
