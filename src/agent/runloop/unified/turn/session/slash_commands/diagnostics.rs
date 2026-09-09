@@ -301,10 +301,7 @@ fn show_checkup_actions_modal(ctx: &mut SlashCommandContext<'_>) {
 
     ctx.renderer.show_list_modal(
         "Checkup",
-        vec![
-            "Choose how to run the VT Code checkup.".to_string(),
-            "Use Enter to run an action, Esc to close.".to_string(),
-        ],
+        vec!["Choose how to run the VT Code checkup.".to_string()],
         items,
         Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}full"))),
         None,

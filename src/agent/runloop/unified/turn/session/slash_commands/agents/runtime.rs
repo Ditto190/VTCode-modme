@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 use std::time::Duration;
+use vtcode_commons::modal_hints::truncate_modal_text;
 use vtcode_core::subagents::{BackgroundSubprocessEntry, SubagentStatusEntry};
 use vtcode_core::utils::ansi::MessageStyle;
 #[cfg(test)]
@@ -87,15 +88,11 @@ pub(super) async fn show_threads_modal(mut ctx: SlashCommandContext<'_>) -> Resu
         let selected = items.first().and_then(|item| item.selection.clone());
         ctx.handle.show_transient(TransientRequest::List(ListOverlayRequest {
             title: "Delegated agents".to_string(),
-            lines: vec![
-                format!("Main session stays on {}.", ctx.active_thread_label),
-                if active_count > 0 {
-                    format!("{active_count} active. Recent completed runs remain inspectable here.")
-                } else {
-                    "No active delegated agents right now. Recent runs remain inspectable here.".to_string()
-                },
-                "Select an agent for transcript or lifecycle actions. Live preview stays in the sidebar.".to_string(),
-            ],
+            lines: vec![if active_count > 0 {
+                format!("{active_count} active • main stays on {}.", ctx.active_thread_label)
+            } else {
+                format!("No active agents • main stays on {}.", ctx.active_thread_label)
+            }],
             footer_hint: Some("enter inspect · ctrl-r reload · ctrl-k close selected agent · esc close".to_string()),
             items,
             selected: selected.clone(),
@@ -267,37 +264,27 @@ pub(super) async fn show_active_agent_inspector(
         ctx.handle
             .show_transient(TransientRequest::List(ListOverlayRequest {
                 title: format!("Agent {}", current_entry.display_label),
-                lines: vec![
-                    format!("Status: {}", current_entry.status.as_str()),
-                    format!(
-                        "Turn active: {}",
-                        if snapshot.snapshot.turn_in_flight {
-                            "yes"
-                        } else {
-                            "no"
-                        }
-                    ),
-                    format!(
-                        "Mode: {}",
-                        if current_entry.background {
-                            "background"
-                        } else {
-                            "foreground"
-                        }
-                    ),
-                    format!("Source: {}", current_entry.source),
-                    format!("Session: {}", current_entry.session_id),
-                    format!("Started: {}", format_datetime(current_entry.created_at)),
-                    format!("Updated: {}", format_datetime(current_entry.updated_at)),
-                    format!("Summary: {}", summary),
-                    format!("Live updates: {}", inspector_live_updates_label(refresh_after)),
-                    "Live preview: sidebar panel".to_string(),
+                lines: {
+                    let mode = if current_entry.background { "background" } else { "foreground" };
+                    let mut inspector_lines = vec![format!(
+                        "{} • {} • {}",
+                        current_entry.status.as_str(),
+                        mode,
+                        current_entry.source
+                    )];
+                    let mut detail = truncate_modal_text(&summary, 120);
                     if let Some(error) = current_entry.error.as_deref() {
-                        format!("Error: {error}")
-                    } else {
-                        "Error: none".to_string()
-                    },
-                ],
+                        if !detail.is_empty() {
+                            detail.push_str(" • ");
+                        }
+                        detail.push_str("Error: ");
+                        detail.push_str(&truncate_modal_text(error, 80));
+                    }
+                    if !detail.is_empty() {
+                        inspector_lines.push(detail);
+                    }
+                    inspector_lines
+                },
                 footer_hint: Some(
                     if refresh_after.is_some() {
                         "live preview in sidebar · auto-refresh status · enter open action · ctrl-r reload · ctrl-k close agent · esc close"
@@ -397,42 +384,28 @@ pub(super) async fn show_background_subprocess_inspector(
         ctx.handle
             .show_transient(TransientRequest::List(ListOverlayRequest {
                 title: format!("Subprocess {}", current_entry.display_label),
-                lines: vec![
-                    format!("Status: {}", current_entry.status.as_str()),
-                    format!(
-                        "PID: {}",
-                        current_entry
-                            .pid
-                            .map(|pid| pid.to_string())
-                            .unwrap_or_else(|| "-".to_string())
-                    ),
-                    format!("Source: {}", current_entry.source),
-                    format!("Session: {}", current_entry.session_id),
-                    format!("Exec session: {}", current_entry.exec_session_id),
-                    format!(
-                        "Started: {}",
-                        format_optional_datetime(current_entry.started_at)
-                    ),
-                    format!(
-                        "Uptime: {}",
-                        format_uptime(current_entry.started_at.unwrap_or(current_entry.created_at))
-                    ),
-                    format!("Summary: {}", background_subprocess_summary(current_entry)),
-                    format!("Live updates: {}", inspector_live_updates_label(refresh_after)),
+                lines: {
+                    let pid = current_entry.pid.map(|pid| pid.to_string()).unwrap_or_else(|| "-".to_string());
+                    let mut subprocess_lines = vec![format!(
+                        "{} • pid {} • {}",
+                        current_entry.status.as_str(),
+                        pid,
+                        current_entry.source
+                    )];
+                    let mut detail =
+                        truncate_modal_text(&background_subprocess_summary(current_entry), 120);
                     if let Some(error) = current_entry.error.as_deref() {
-                        format!("Error: {error}")
-                    } else {
-                        "Error: none".to_string()
-                    },
-                    format!(
-                        "Preview:\n{}",
-                        if snapshot.preview.trim().is_empty() {
-                            background_subprocess_preview_placeholder(current_entry)
-                        } else {
-                            snapshot.preview.clone()
+                        if !detail.is_empty() {
+                            detail.push_str(" • ");
                         }
-                    ),
-                ],
+                        detail.push_str("Error: ");
+                        detail.push_str(&truncate_modal_text(error, 80));
+                    }
+                    if !detail.is_empty() {
+                        subprocess_lines.push(detail);
+                    }
+                    subprocess_lines
+                },
                 footer_hint: Some(
                     if refresh_after.is_some() {
                         "auto-refresh while active · enter open action · ctrl-r reload · ctrl-k graceful stop · ctrl-x force cancel"
@@ -544,10 +517,6 @@ fn background_subprocess_refresh_after(
             | vtcode_core::subagents::BackgroundSubprocessStatus::Running
     )
     .then_some(Duration::from_millis(refresh_interval_ms.max(250)))
-}
-
-fn inspector_live_updates_label(refresh_after: Option<Duration>) -> String {
-    refresh_after.map_or_else(|| "manual (Ctrl+R)".to_string(), |delay| format!("auto every {} ms", delay.as_millis()))
 }
 
 fn active_agent_summary(
@@ -970,27 +939,6 @@ pub(super) async fn handle_list_subprocesses_text(ctx: &mut SlashCommandContext<
 
 async fn launch_editor_path(ctx: &mut SlashCommandContext<'_>, path: String) -> Result<SlashCommandControl> {
     super::super::apps::launch_editor_from_context(ctx, Some(path)).await
-}
-
-fn format_datetime(timestamp: chrono::DateTime<chrono::Utc>) -> String {
-    timestamp.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-fn format_optional_datetime(timestamp: Option<chrono::DateTime<chrono::Utc>>) -> String {
-    timestamp.map(format_datetime).unwrap_or_else(|| "unknown".to_string())
-}
-
-fn format_uptime(started_at: chrono::DateTime<chrono::Utc>) -> String {
-    let elapsed = chrono::Utc::now().signed_duration_since(started_at);
-    let total_seconds = elapsed.num_seconds().max(0);
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
-    if hours > 0 {
-        format!("{hours:02}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes:02}:{seconds:02}")
-    }
 }
 
 pub(super) async fn handle_list_threads_text(ctx: &mut SlashCommandContext<'_>) -> Result<SlashCommandControl> {

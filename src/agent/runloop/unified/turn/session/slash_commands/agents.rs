@@ -169,10 +169,7 @@ fn render_missing_subagent_controller(ctx: &mut SlashCommandContext<'_>) -> Resu
 async fn show_agents_manager(mut ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
     ctx.handle.show_list_modal(
         "Agents".to_string(),
-        vec![
-            "Manage agent definitions, subagent runs, and custom definitions.".to_string(),
-            "Use Enter to inspect, create, edit, or delete definitions.".to_string(),
-        ],
+        vec!["Manage agent definitions, subagent runs, and custom definitions.".to_string()],
         vec![
             action_item(
                 "Browse agents",
@@ -293,10 +290,11 @@ async fn show_agent_catalog(mut ctx: SlashCommandContext<'_>) -> Result<SlashCom
     let selected = items.iter().find_map(|item| item.selection.clone());
     ctx.handle.show_list_modal(
         "Loaded agents".to_string(),
-        vec![
-            format!("{} effective definition(s), {} shadowed definition(s).", specs.len(), shadowed.len()),
-            "Select an effective definition to inspect details.".to_string(),
-        ],
+        vec![format!(
+            "{} effective definition(s), {} shadowed definition(s).",
+            specs.len(),
+            shadowed.len()
+        )],
         items,
         selected,
         Some(InlineListSearchConfig {

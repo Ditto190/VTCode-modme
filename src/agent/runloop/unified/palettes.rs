@@ -24,7 +24,6 @@ use super::display::{persist_theme_preference, sync_runtime_theme_selection};
 
 const THEME_PALETTE_TITLE: &str = "Theme";
 const THEME_ACTIVE_BADGE: &str = "Active";
-const THEME_SELECT_HINT: &str = "↑/↓ choose • Enter apply • Esc cancel";
 const THEME_SEARCH_PLACEHOLDER: &str = "name, id, or appearance";
 const SESSION_FORK_PALETTE_TITLE: &str = "Fork session";
 const SESSION_FORK_MODE_PALETTE_TITLE: &str = "Fork mode";
@@ -32,7 +31,6 @@ const SESSION_RESUME_PALETTE_TITLE: &str = "Resume session";
 const SESSIONS_LATEST_BADGE: &str = "Latest";
 const SESSIONS_SEARCH_PLACEHOLDER: &str = "workspace, provider, model, date";
 const MODE_PALETTE_TITLE: &str = "Agent mode";
-const MODE_SELECT_HINT: &str = "↑/↓ choose • Enter select • Esc cancel";
 const MODE_SEARCH_PLACEHOLDER: &str = "name or description";
 pub(crate) const MODE_ACTION_PREFIX: &str = "mode:";
 
@@ -69,9 +67,6 @@ pub(crate) fn show_theme_palette(renderer: &mut AnsiRenderer, mode: ThemePalette
     let title = match mode {
         ThemePaletteMode::Select => THEME_PALETTE_TITLE,
     };
-    let hint = match mode {
-        ThemePaletteMode::Select => THEME_SELECT_HINT,
-    };
 
     let current_id = theme::active_theme_id();
     let current_label = theme::active_theme_label().to_string();
@@ -100,7 +95,7 @@ pub(crate) fn show_theme_palette(renderer: &mut AnsiRenderer, mode: ThemePalette
         return Ok(false);
     }
 
-    let lines = vec![format!("Active theme: {}", current_label), hint.to_string()];
+    let lines = vec![format!("The active theme is {current_label}.")];
     renderer.show_list_modal(
         title,
         lines,
@@ -156,10 +151,7 @@ pub(crate) fn show_mode_palette(
 
     renderer.show_list_modal(
         MODE_PALETTE_TITLE,
-        vec![
-            format!("Current agent: {}", canonical_current),
-            MODE_SELECT_HINT.to_string(),
-        ],
+        vec![format!("The current agent is {canonical_current}.")],
         items,
         Some(InlineListSelection::ConfigAction(format!("{MODE_ACTION_PREFIX}{canonical_current}"))),
         Some(InlineListSearchConfig {
@@ -244,12 +236,12 @@ pub(crate) fn show_sessions_palette(
         SessionPaletteMode::Fork => SESSION_FORK_PALETTE_TITLE,
     };
 
-    let action = match mode {
-        SessionPaletteMode::Resume => "resume",
-        SessionPaletteMode::Fork => "fork",
+    let action_noun = match mode {
+        SessionPaletteMode::Resume => "resumed",
+        SessionPaletteMode::Fork => "forked",
     };
     let lines = vec![format!(
-        "{} archived sessions • ↑↓ browse • Enter {action} • Esc close",
+        "{} archived sessions are available. Select one to have it {action_noun}.",
         listings.len()
     )];
     let selected = listings
@@ -294,7 +286,7 @@ pub(crate) fn show_fork_mode_palette(renderer: &mut AnsiRenderer, session_id: &s
         },
     ];
 
-    let lines = vec![format!("Fork session {} • Enter confirm • Esc back", session_id)];
+    let lines = vec![format!("This fork starts from session {session_id}.")];
 
     renderer.show_list_modal(
         SESSION_FORK_MODE_PALETTE_TITLE,

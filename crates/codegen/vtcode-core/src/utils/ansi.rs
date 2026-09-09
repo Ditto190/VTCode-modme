@@ -441,6 +441,20 @@ impl AnsiRenderer {
         }
     }
 
+    pub fn show_list_modal_with_footer(
+        &mut self,
+        title: &str,
+        lines: Vec<String>,
+        items: Vec<InlineListItem>,
+        selected: Option<InlineListSelection>,
+        search: Option<InlineListSearchConfig>,
+        footer_hint: Option<String>,
+    ) {
+        if let Some(sink) = &self.sink {
+            sink.show_list_modal_with_footer(title.into(), lines, items, selected, search, footer_hint);
+        }
+    }
+
     pub fn show_secure_prompt_modal(&mut self, title: &str, lines: Vec<String>, prompt_label: String) {
         if let Some(sink) = &self.sink {
             sink.show_secure_prompt_modal(title.into(), lines, prompt_label);
@@ -1283,6 +1297,19 @@ impl InlineSink {
         search: Option<InlineListSearchConfig>,
     ) {
         self.handle.show_list_modal(title, lines, items, selected, search);
+    }
+
+    fn show_list_modal_with_footer(
+        &self,
+        title: String,
+        lines: Vec<String>,
+        items: Vec<InlineListItem>,
+        selected: Option<InlineListSelection>,
+        search: Option<InlineListSearchConfig>,
+        footer_hint: Option<String>,
+    ) {
+        self.handle
+            .show_list_modal_with_footer(title, lines, items, selected, search, footer_hint);
     }
 
     fn show_secure_prompt_modal(&self, title: String, lines: Vec<String>, prompt_label: String) {

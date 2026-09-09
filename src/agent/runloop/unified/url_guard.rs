@@ -56,41 +56,24 @@ impl UrlGuardPrompt {
     }
 
     pub(crate) fn lines(&self) -> Vec<String> {
-        let mut lines =
-            vec!["This link may be unsafe. VT Code requires approval before opening external URLs.".to_string()];
+        let mut lines = vec!["This link may be unsafe and needs approval before opening.".to_string()];
 
         if self.insecure_transport {
-            lines.push(
-                "Plain HTTP is insecure. Traffic can be intercepted or modified before it reaches your browser."
-                    .to_string(),
-            );
+            lines.push("Plain HTTP can be intercepted or modified.".to_string());
         } else if self.local_or_private {
-            lines.push(
-                "This destination is a local or private address. Opening it may interact with services on this machine or network."
-                    .to_string(),
-            );
+            lines.push("Local/private address; may interact with this machine or network.".to_string());
         } else if self.trusted_host {
-            lines.push(
-                "Destination matches VT Code's small built-in trusted host list, but approval is still required."
-                    .to_string(),
-            );
+            lines.push("Trusted host, but approval is still required.".to_string());
         } else {
-            lines.push(
-                "Destination is not in VT Code's small built-in trusted host list. Review it carefully before proceeding."
-                    .to_string(),
-            );
+            lines.push("Untrusted host; review carefully before proceeding.".to_string());
         }
 
         if self.insecure_transport && self.local_or_private {
-            lines.push(
-                "This URL is both plain HTTP and local/private. Only continue if you expected this exact destination."
-                    .to_string(),
-            );
+            lines.push("Plain HTTP and local/private; continue only if expected.".to_string());
         }
 
         lines.push(format!("Host: {}", self.host_label));
         lines.push(format!("URL: {}", self.url));
-        lines.push("Choose Open to continue or Cancel to stay in VT Code.".to_string());
 
         lines
     }
@@ -215,7 +198,7 @@ mod tests {
         let prompt = UrlGuardPrompt::parse("http://example.com/docs".to_string()).expect("http prompt");
 
         let lines = prompt.lines();
-        assert!(lines.iter().any(|line| line.contains("Plain HTTP is insecure")));
+        assert!(lines.iter().any(|line| line.contains("Plain HTTP")));
     }
 
     #[test]
@@ -224,7 +207,7 @@ mod tests {
             UrlGuardPrompt::parse("https://auth.openai.com/oauth/authorize".to_string()).expect("trusted host");
 
         let lines = prompt.lines();
-        assert!(lines.iter().any(|line| line.contains("built-in trusted host list")));
+        assert!(lines.iter().any(|line| line.contains("Trusted host")));
     }
 
     #[test]
@@ -233,7 +216,22 @@ mod tests {
             UrlGuardPrompt::parse("https://localhost:1455/auth/callback".to_string()).expect("localhost prompt");
 
         let lines = prompt.lines();
-        assert!(lines.iter().any(|line| line.contains("local or private address")));
+        assert!(lines.iter().any(|line| line.contains("Local/private")));
+    }
+
+    #[test]
+    fn parse_http_local_url_keeps_both_transport_and_local_warnings() {
+        let prompt =
+            UrlGuardPrompt::parse("http://localhost:1455/auth/callback".to_string()).expect("http localhost prompt");
+
+        let lines = prompt.lines();
+        assert!(lines.iter().any(|line| line.contains("Plain HTTP can be intercepted")));
+        assert!(
+            lines.iter().any(|line| line.contains("local/private")),
+            "combined HTTP+local warning must survive compacting: {lines:?}"
+        );
+        assert!(lines.iter().any(|line| line.starts_with("Host: ")));
+        assert!(lines.iter().any(|line| line.starts_with("URL: ")));
     }
 
     #[test]

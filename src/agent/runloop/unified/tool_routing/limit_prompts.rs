@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::Notify;
+use vtcode_commons::modal_hints::{APPROVAL_NAVIGATE_DENY, APPROVAL_NAVIGATE_STOP};
 use vtcode_core::core::interfaces::ui::UiSession;
 use vtcode_ui::tui::app::{InlineHandle, ListOverlayRequest, TransientRequest, TransientSubmission};
 
@@ -23,8 +24,6 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
         format!("Current agent: {}", agent_name.unwrap_or("unknown")),
         "Grant an increase to retry the pending tool call in this turn.".to_string(),
         "Deny stops the call; reuse the outputs already gathered for the next response.".to_string(),
-        "".to_string(),
-        "Use ↑↓ or Tab to navigate • Enter to select • Esc to deny".to_string(),
     ];
 
     let options = vec![
@@ -71,6 +70,7 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
         description_lines,
         options,
         100,
+        APPROVAL_NAVIGATE_DENY,
     )
     .await
 }
@@ -90,8 +90,6 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
         format!("Current agent: {}", agent_name.unwrap_or("unknown")),
         "Grant more loops to continue this turn with the current agent.".to_string(),
         "Stop synthesizes from the outputs already gathered.".to_string(),
-        "".to_string(),
-        "Use ↑↓ or Tab to navigate • Enter to select • Esc to stop".to_string(),
     ];
 
     let options = vec![
@@ -146,6 +144,7 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
         description_lines,
         options,
         20,
+        APPROVAL_NAVIGATE_STOP,
     )
     .await
 }
@@ -159,6 +158,7 @@ async fn prompt_limit_increase_modal<S: UiSession + ?Sized>(
     description_lines: Vec<String>,
     options: Vec<vtcode_ui::tui::app::InlineListItem>,
     default_increment: usize,
+    footer_hint: &'static str,
 ) -> Result<Option<usize>> {
     use vtcode_ui::tui::app::InlineListSelection;
 
@@ -172,7 +172,7 @@ async fn prompt_limit_increase_modal<S: UiSession + ?Sized>(
             TransientRequest::List(ListOverlayRequest {
                 title: title.clone(),
                 lines: description_lines.clone(),
-                footer_hint: None,
+                footer_hint: Some(footer_hint.to_string()),
                 items: options.clone(),
                 selected: Some(InlineListSelection::SessionLimitIncrease(default_increment)),
                 search: None,

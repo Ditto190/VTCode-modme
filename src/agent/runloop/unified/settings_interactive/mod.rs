@@ -4,7 +4,6 @@ mod mutations;
 mod path;
 mod render;
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -33,7 +32,6 @@ pub(crate) use path::parent_view_path;
 use path::{PathToken, parse_path_tokens};
 
 const SETTINGS_TITLE: &str = "VT Code Settings";
-const SETTINGS_HINT: &str = "Enter open/apply • ←/→ adjust • Esc back";
 const SETTINGS_SEARCH_PLACEHOLDER: &str = "section, setting, or value";
 pub(crate) const ACTION_RELOAD: &str = "settings:reload";
 pub(crate) const ACTION_OPEN_ROOT: &str = "settings:open_root";
@@ -126,26 +124,7 @@ pub(crate) fn show_settings_palette(
 ) -> Result<bool> {
     let draft_value = TomlValue::try_from(state.draft.clone()).context("Failed to serialize draft configuration")?;
 
-    let mut lines = Vec::new();
-    lines.push(state.source_label.clone());
-    lines.push(format!("Target file: {}", state.source_path.display()));
-    if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
-        lines.push("Reset configuration? This clears every setting in the target layer.".to_string());
-        lines.push("Credentials and lower-precedence configuration layers are preserved.".to_string());
-    } else if let Some(view_path) = state.view_path.as_deref() {
-        let heading = heading_for_path(view_path);
-        lines.push(format!("Settings / {} ({})", heading.title, display_settings_view_path(view_path)));
-        if !heading.summary.is_empty() {
-            lines.push(heading.summary.into_owned());
-        }
-        if view_path == "permissions" {
-            lines.push(format_permission_summary(&state.draft));
-        }
-    } else {
-        lines.push("Settings / Sections".to_string());
-        lines.push("Choose a category to edit. Each entry shows its effective value and available action.".to_string());
-    }
-    lines.push(SETTINGS_HINT.to_string());
+    let lines = settings_header_lines(state);
 
     let items = build_settings_items(state, &draft_value)?;
     if items.is_empty() {
@@ -186,11 +165,39 @@ fn preferred_settings_selection(
 
 fn format_permission_summary(config: &VTCodeConfig) -> String {
     format!(
-        "Rules: deny: {} | ask: {} | allow: {}",
+        "Rules • deny {} • ask {} • allow {}.",
         config.permissions.deny.len(),
         config.permissions.ask.len(),
         config.permissions.allow.len()
     )
+}
+
+fn settings_header_lines(state: &SettingsPaletteState) -> Vec<String> {
+    if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
+        return vec![
+            "Settings section: Reset.".to_string(),
+            "This clears every setting in the target layer. Credentials are preserved.".to_string(),
+        ];
+    }
+    if let Some(view_path) = state.view_path.as_deref() {
+        let heading = heading_for_path(view_path);
+        let mut lines = vec![format!("Settings section: {}.", heading.title)];
+        let mut detail = heading.summary.into_owned();
+        if view_path == "permissions" {
+            let counts = format_permission_summary(&state.draft);
+            if detail.is_empty() {
+                detail = counts;
+            } else {
+                detail.push(' ');
+                detail.push_str(&counts);
+            }
+        }
+        if !detail.is_empty() {
+            lines.push(detail);
+        }
+        return lines;
+    }
+    vec!["Choose a settings section to edit.".to_string()]
 }
 
 pub(crate) fn apply_settings_action(state: &mut SettingsPaletteState, action: &str) -> Result<SettingsApplyOutcome> {
@@ -290,14 +297,6 @@ pub(crate) fn resolve_settings_view_path(path: &str) -> String {
         "model.main" => SETTINGS_MODEL_CONFIG_MAIN_PATH.to_string(),
         "codex" | "codex_app_server" | "codex.app_server" | "app_server" => "agent.codex_app_server".to_string(),
         other => other.to_string(),
-    }
-}
-
-pub(crate) fn display_settings_view_path(path: &str) -> Cow<'_, str> {
-    match path {
-        SETTINGS_MODEL_CONFIG_PATH => Cow::Borrowed("model"),
-        SETTINGS_MODEL_CONFIG_MAIN_PATH => Cow::Borrowed("model.main"),
-        other => Cow::Borrowed(other),
     }
 }
 
@@ -1159,9 +1158,43 @@ api_key_env = "TRUSTED_API_KEY"
         config.permissions.deny = vec!["Edit".to_string()];
 
         let summary = format_permission_summary(&config);
-        assert!(summary.contains("Rules:"));
-        assert!(summary.contains("deny: 1"));
-        assert!(summary.contains("ask: 2"));
-        assert!(summary.contains("allow: 1"));
+        assert!(summary.contains("Rules"));
+        assert!(summary.contains("deny 1"));
+        assert!(summary.contains("ask 2"));
+        assert!(summary.contains("allow 1"));
+    }
+
+    fn header_test_state(view_path: Option<&str>) -> SettingsPaletteState {
+        SettingsPaletteState {
+            workspace: PathBuf::from("."),
+            source_path: PathBuf::from("vtcode.toml"),
+            source_label: "test".to_string(),
+            draft: VTCodeConfig::default(),
+            view_path: view_path.map(ToString::to_string),
+            last_selection: None,
+            selection_by_view: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn settings_header_stays_compact_without_paths() {
+        for view in [None, Some("agent"), Some("permissions"), Some(RESET_CONFIRMATION_VIEW)] {
+            let state = header_test_state(view);
+            let lines = settings_header_lines(&state);
+            assert!(lines.len() <= 2, "view {view:?} produced {} lines", lines.len());
+            assert!(
+                lines
+                    .iter()
+                    .all(|line| !line.contains("Configuration source") && !line.contains("Target file")),
+                "view {view:?} leaks path labels: {lines:?}"
+            );
+            assert!(
+                lines.iter().all(|line| !line.contains("Enter") && !line.contains("Esc")),
+                "view {view:?} leaks key hints into header lines: {lines:?}"
+            );
+            assert!(lines.iter().all(|line| line.ends_with('.')), "view {view:?} is not full-sentence copy: {lines:?}");
+        }
+        let root = settings_header_lines(&header_test_state(None));
+        assert_eq!(root, vec!["Choose a settings section to edit.".to_string()]);
     }
 }

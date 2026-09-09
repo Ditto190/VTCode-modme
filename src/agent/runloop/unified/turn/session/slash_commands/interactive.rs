@@ -38,10 +38,7 @@ pub(crate) async fn handle_trigger_prompt_suggestions(mut ctx: SlashCommandConte
     let selected = items.first().and_then(|item| item.selection.clone());
     ctx.handle.show_list_modal(
         "Prompt suggestions".to_string(),
-        vec![
-            "Suggestions are derived from your recent VT Code session state.".to_string(),
-            "Enter inserts the selected prompt into the composer.".to_string(),
-        ],
+        vec!["Suggestions are derived from your recent VT Code session state.".to_string()],
         items,
         selected,
         Some(InlineListSearchConfig {
@@ -98,10 +95,7 @@ pub(crate) async fn handle_show_jobs_panel(mut ctx: SlashCommandContext<'_>) -> 
     let selected = items.first().and_then(|item| item.selection.clone());
     ctx.handle.show_transient(TransientRequest::List(ListOverlayRequest {
         title: "Jobs".to_string(),
-        lines: vec![
-            "Active/background command sessions.".to_string(),
-            "Enter or Ctrl+R focuses the selected job output. Ctrl+P previews. Ctrl+X interrupts.".to_string(),
-        ],
+        lines: vec!["Active/background command sessions.".to_string()],
         footer_hint: Some("ctrl-r focus output · ctrl-p preview snapshot · ctrl-x interrupt selected job".to_string()),
         items,
         selected: selected.clone(),

@@ -789,10 +789,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
 
     ctx.renderer.show_list_modal(
         "Skills Manager",
-        vec![
-            "Configure skills interactively.".to_string(),
-            "Use Enter to run an action, Esc to close.".to_string(),
-        ],
+        vec!["Configure skills interactively.".to_string()],
         items,
         Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}browse"))),
         None,
@@ -827,15 +824,12 @@ fn show_skills_list_modal(ctx: &mut SlashCommandContext<'_>, entries: &[Interact
 
     ctx.renderer.show_list_modal(
         "Skills Manager",
-        vec![
-            "Browse and manage discovered skills.".to_string(),
-            "Browse skills and press Enter for actions.".to_string(),
-        ],
+        vec!["Browse and manage discovered skills.".to_string()],
         items,
         selected,
         Some(InlineListSearchConfig {
             label: String::new(),
-            placeholder: Some("Type skill name or description".to_string()),
+            placeholder: Some("skill name or description".to_string()),
         }),
     );
 }
@@ -878,7 +872,7 @@ fn show_skill_picker_modal(
         selected,
         Some(InlineListSearchConfig {
             label: String::new(),
-            placeholder: Some("Type skill name or description".to_string()),
+            placeholder: Some("skill name or description".to_string()),
         }),
     );
 }

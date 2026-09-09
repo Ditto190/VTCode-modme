@@ -400,7 +400,7 @@ async fn open_http_url_guard_modal_includes_insecure_transport_warning() {
     match command {
         InlineCommand::ShowTransient { request } => match *request {
             TransientRequest::List(request) => {
-                assert!(request.lines.iter().any(|line| line.contains("Plain HTTP is insecure")));
+                assert!(request.lines.iter().any(|line| line.contains("Plain HTTP")));
             }
             other => panic!("expected list transient, got {other:?}"),
         },

@@ -228,13 +228,10 @@ impl ModalState {
 
         let previous_selection = list.current_selection();
         match key.code {
-            KeyCode::Char('d') | KeyCode::Char('D') if modifiers.alt => {
-                if !list.supports_density_toggle() {
-                    return ModalListKeyResult::HandledNoRedraw;
-                }
-                list.toggle_row_density();
-                ModalListKeyResult::Redraw
-            }
+            // Row density is fixed at construction (compact for subtitle lists);
+            // swallow the legacy toggle chord so it never leaks into the
+            // composer behind the modal.
+            KeyCode::Char('d') | KeyCode::Char('D') if modifiers.alt => ModalListKeyResult::HandledNoRedraw,
             KeyCode::Up => {
                 if modifiers.command {
                     list.select_first();
@@ -539,12 +536,13 @@ impl ModalListState {
             })
             .collect();
         let total_selectable = converted.iter().filter(|item| item.selection.is_some()).count();
-        let has_two_line_items = converted
+        // Compact single-spacing is the default for subtitle lists: title plus
+        // dimmed subtitle with no blank separator row. Single-line lists render
+        // identically either way.
+        let compact_rows = converted
             .iter()
             .any(|item| item.subtitle.as_ref().is_some_and(|subtitle| !subtitle.trim().is_empty()));
         let density_behavior = Self::density_behavior_for_items(&converted);
-        let is_model_picker_list = Self::is_model_picker_list(&converted);
-        let compact_rows = Self::initial_compact_rows(density_behavior, has_two_line_items, is_model_picker_list);
         let mut modal_state = Self {
             visible_indices: (0..converted.len()).collect(),
             items: converted,
@@ -569,42 +567,6 @@ impl ModalListState {
         } else {
             ModalListDensityBehavior::Adjustable
         }
-    }
-
-    fn initial_compact_rows(
-        density_behavior: ModalListDensityBehavior,
-        has_two_line_items: bool,
-        is_model_picker_list: bool,
-    ) -> bool {
-        if is_model_picker_list {
-            return false;
-        }
-        match density_behavior {
-            ModalListDensityBehavior::FixedComfortable => false,
-            ModalListDensityBehavior::Adjustable => has_two_line_items,
-        }
-    }
-
-    fn is_model_picker_list(items: &[ModalListItem]) -> bool {
-        let mut has_model_selection = false;
-        for item in items {
-            let Some(selection) = item.selection.as_ref() else {
-                continue;
-            };
-            match selection {
-                InlineListSelection::Model(_)
-                | InlineListSelection::DynamicModel(_)
-                | InlineListSelection::CustomProvider(_)
-                | InlineListSelection::RefreshDynamicModels
-                | InlineListSelection::Reasoning(_)
-                | InlineListSelection::DisableReasoning
-                | InlineListSelection::CustomModel => {
-                    has_model_selection = true;
-                }
-                _ => return false,
-            }
-        }
-        has_model_selection
     }
 
     pub(crate) fn current_selection(&self) -> Option<InlineListSelection> {
@@ -952,10 +914,6 @@ impl ModalListState {
         self.compact_rows
     }
 
-    pub(super) fn supports_density_toggle(&self) -> bool {
-        matches!(self.density_behavior, ModalListDensityBehavior::Adjustable)
-    }
-
     pub(super) fn non_filter_summary_text(&self, footer_hint: Option<&str>) -> Option<String> {
         if !self.has_non_filter_summary(footer_hint) {
             return None;
@@ -979,10 +937,6 @@ impl ModalListState {
             ModalListDensityBehavior::FixedComfortable => true,
             ModalListDensityBehavior::Adjustable => footer_hint.is_some_and(|hint| !hint.is_empty()),
         }
-    }
-
-    fn toggle_row_density(&mut self) {
-        self.compact_rows = !self.compact_rows;
     }
 
     fn page_step(&self) -> usize {

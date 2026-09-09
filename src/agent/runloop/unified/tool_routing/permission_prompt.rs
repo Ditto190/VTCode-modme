@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::Value;
 use tokio::sync::Notify;
+use vtcode_commons::modal_hints::{APPROVAL_NAVIGATE_CANCEL, APPROVAL_NAVIGATE_DENY, choose_handling_line};
 use vtcode_core::core::interfaces::ui::UiSession;
 use vtcode_core::notifications::{NotificationEvent, send_global_notification};
 use vtcode_core::sandboxing::{AdditionalPermissions, SandboxPermissions as CoreSandboxPermissions};
@@ -573,16 +574,15 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     }
 
     description_lines.push(String::new());
-    description_lines.push("Choose how to handle this tool execution:".to_string());
+    description_lines.push(choose_handling_line("this tool execution"));
     let mut navigation_hint = if prompt_kind == ToolPermissionPromptKind::Mcp {
-        "Use ↑↓ or Tab to navigate • Enter to select • Esc to cancel".to_string()
+        APPROVAL_NAVIGATE_CANCEL.to_string()
     } else {
-        "Use ↑↓ or Tab to navigate • Enter to select • Esc to deny".to_string()
+        APPROVAL_NAVIGATE_DENY.to_string()
     };
     if source_thread_label.is_some() {
         navigation_hint.push_str(" • o inspect source thread");
     }
-    description_lines.push(navigation_hint);
 
     let options = build_tool_permission_options(prompt_kind, persistent_approval_target);
     let hotkeys = source_thread_label
@@ -612,7 +612,7 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
         TransientRequest::List(ListOverlayRequest {
             title: "Tool Permission Required".to_string(),
             lines: description_lines,
-            footer_hint: None,
+            footer_hint: Some(navigation_hint),
             items: options,
             selected: Some(default_selection),
             search: None,
@@ -696,7 +696,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
     }
 
     description_lines.push(String::new());
-    description_lines.push("Choose how to handle this tool:".to_string());
+    description_lines.push(choose_handling_line("this tool"));
 
     let options = vec![
         InlineListItem {
@@ -725,7 +725,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
         },
     ];
 
-    let navigation_hint = "Use ↑↓ or Tab to navigate • Enter to select • Esc to deny".to_string();
+    let navigation_hint = APPROVAL_NAVIGATE_DENY.to_string();
 
     let request = ListOverlayRequest {
         title: format!("Tool Policy: {tool_name}"),

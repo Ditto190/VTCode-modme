@@ -146,23 +146,16 @@ pub(super) fn show_memory_actions_modal(
     };
 
     let mut lines = if config_mode {
-        vec![
-            "Focused settings for persistent memory and instruction imports.".to_string(),
-            format!(
-                "Startup budgets: {} lines, {} bytes | import depth: {}",
-                agent_config.persistent_memory.startup_line_limit,
-                agent_config.persistent_memory.startup_byte_limit,
-                agent_config.instruction_import_max_depth,
-            ),
-        ]
+        vec!["Focused settings for persistent memory and instruction imports.".to_string()]
     } else {
-        vec![
-            format!("Loaded AGENTS.md sources: {}", format_path_list(agents)),
-            format!("Matched rules: {}", format_path_list(matched_rules)),
-        ]
+        vec![format!(
+            "{} source(s) • {} matched rule(s).",
+            agents.len(),
+            matched_rules.len()
+        )]
     };
     lines.push(format!(
-        "Memory {} • auto-write {} • triage {} • pending rollouts {} • cleanup {}",
+        "Memory {} • auto-write {} • triage {} • pending {} • cleanup {}",
         if memory_status.enabled { "on" } else { "off" },
         if memory_status.auto_write { "on" } else { "off" },
         lightweight_route.configured_label,
@@ -173,10 +166,6 @@ pub(super) fn show_memory_actions_modal(
             "clean"
         },
     ));
-    lines.push(format!("Effective memory route: {}", lightweight_route.effective_label));
-    if let Some(warning) = &lightweight_route.warning {
-        lines.push(format!("Route warning: {warning}"));
-    }
 
     let mut items = vec![];
     items.push(InlineListItem {
@@ -208,7 +197,17 @@ pub(super) fn show_memory_actions_modal(
     });
     items.push(InlineListItem {
         title: format!("Memory Triage Model ({})", lightweight_route.configured_label),
-        subtitle: Some(format!("Effective route: {}", lightweight_route.effective_label)),
+        subtitle: Some({
+            let mut subtitle = format!("Effective route: {}", lightweight_route.effective_label);
+            if let Some(warning) = lightweight_route.warning.as_deref() {
+                let warning = warning.trim();
+                if !warning.is_empty() {
+                    subtitle.push_str(" • ");
+                    subtitle.push_str(warning);
+                }
+            }
+            subtitle
+        }),
         badge: Some("Pick".to_string()),
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!(

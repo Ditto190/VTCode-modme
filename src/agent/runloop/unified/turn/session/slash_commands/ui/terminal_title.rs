@@ -103,8 +103,7 @@ pub(crate) async fn handle_start_terminal_title_setup(mut ctx: SlashCommandConte
             "Terminal title setup".to_string(),
             vec![
                 "Choose the ordered items VT Code should manage in the terminal title.".to_string(),
-                format!("Current items: {current_items}"),
-                format!("Preview: {preview}"),
+                format!("Current: {current_items} • Preview: {preview}"),
             ],
             build_terminal_title_setup_items(&draft_items),
             Some(InlineListSelection::ConfigAction("title:save".to_string())),

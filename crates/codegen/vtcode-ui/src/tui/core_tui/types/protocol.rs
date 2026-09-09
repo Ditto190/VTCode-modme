@@ -440,13 +440,25 @@ impl InlineHandle {
         selected: Option<InlineListSelection>,
         search: Option<InlineListSearchConfig>,
     ) {
+        self.show_list_modal_with_footer(title, lines, items, selected, search, None);
+    }
+
+    pub fn show_list_modal_with_footer(
+        &self,
+        title: String,
+        lines: Vec<String>,
+        items: Vec<InlineListItem>,
+        selected: Option<InlineListSelection>,
+        search: Option<InlineListSearchConfig>,
+        footer_hint: Option<String>,
+    ) {
         self.show_overlay(OverlayRequest::List(ListOverlayRequest {
             title,
             lines,
             items,
             selected,
             search,
-            footer_hint: None,
+            footer_hint,
             hotkeys: Vec::new(),
         }));
     }

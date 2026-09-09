@@ -327,10 +327,7 @@ async fn select_subagent_reasoning(
 
     handle.show_list_modal(
         "Subagent reasoning".to_string(),
-        vec![format!(
-            "Choose the reasoning override for `{}`. Esc cancels the picker.",
-            target.model()
-        )],
+        vec![format!("Choose the reasoning override for `{}`.", target.model())],
         items,
         Some(InlineListSelection::ConfigAction(format!("{SUBAGENT_REASONING_ACTION_PREFIX}keep"))),
         Some(InlineListSearchConfig {

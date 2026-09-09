@@ -46,6 +46,7 @@ pub mod llm;
 pub mod lr_map;
 pub mod memory;
 pub mod message_metadata;
+pub mod modal_hints;
 pub mod model_family;
 pub mod paths;
 pub mod preview;
@@ -90,6 +91,9 @@ pub(crate) use interjection::{
     drain_formatted, format_interjection, user_query,
 };
 pub use interner::{StringId, StringInterner};
+pub use modal_hints::{
+    APPROVAL_NAVIGATE_CANCEL, APPROVAL_NAVIGATE_DENY, APPROVAL_NAVIGATE_STOP, choose_handling_line, truncate_modal_text,
+};
 pub use paths::{
     PathExt, PathResolver, PathScope, StrPathExt, WorkspacePaths, canonicalize, canonicalize_async,
     file_name_from_path, is_safe_relative_path, normalize_ascii_identifier, resolve_workspace_path,

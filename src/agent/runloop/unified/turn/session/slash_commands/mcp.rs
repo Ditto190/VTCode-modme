@@ -231,10 +231,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
 
     ctx.renderer.show_list_modal(
         "MCP",
-        vec![
-            "Manage MCP providers and tools interactively.".to_string(),
-            "Use Enter to run an action, Esc to close.".to_string(),
-        ],
+        vec!["Manage MCP providers and tools interactively.".to_string()],
         items,
         Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}status"))),
         None,

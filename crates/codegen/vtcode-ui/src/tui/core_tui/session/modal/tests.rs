@@ -749,7 +749,7 @@ fn list_modal_space_no_longer_submits_config_action() {
 }
 
 #[test]
-fn list_modal_alt_d_does_not_toggle_density_for_config_actions() {
+fn list_modal_alt_d_is_swallowed_without_changing_density() {
     let mut modal = ModalState {
         title: "Config".to_owned(),
         lines: vec![],
@@ -773,7 +773,7 @@ fn list_modal_alt_d_does_not_toggle_density_for_config_actions() {
         is_help_modal: false,
     };
 
-    assert!(!modal.list.as_ref().expect("config list should exist").compact_rows());
+    assert!(modal.list.as_ref().expect("config list should exist").compact_rows());
 
     let result = modal.handle_list_key_event(
         &KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
@@ -781,11 +781,11 @@ fn list_modal_alt_d_does_not_toggle_density_for_config_actions() {
     );
 
     assert!(matches!(result, ModalListKeyResult::HandledNoRedraw));
-    assert!(!modal.list.as_ref().expect("config list should exist").compact_rows());
+    assert!(modal.list.as_ref().expect("config list should exist").compact_rows());
 }
 
 #[test]
-fn model_list_defaults_to_comfortable_density() {
+fn subtitle_lists_default_to_compact_density() {
     let list = ModalListState::new(
         vec![InlineListItem {
             title: "gpt-5".to_owned(),
@@ -798,8 +798,24 @@ fn model_list_defaults_to_comfortable_density() {
         None,
     );
 
-    assert!(!list.compact_rows(), "model picker should default to comfortable row density");
-    assert!(list.supports_density_toggle(), "model picker density should remain adjustable");
+    assert!(list.compact_rows(), "subtitle lists should default to compact row density");
+}
+
+#[test]
+fn single_line_lists_keep_compact_flag_cleared() {
+    let list = ModalListState::new(
+        vec![InlineListItem {
+            title: "Approve".to_owned(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::ToolApproval(true)),
+            search_value: None,
+        }],
+        None,
+    );
+
+    assert!(!list.compact_rows(), "single-line lists need no compact flag");
 }
 
 #[test]

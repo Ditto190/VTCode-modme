@@ -267,7 +267,7 @@ async fn pick_installed_plugin(
             .map(|entry| InlineListSelection::ConfigAction(format!("{}{}", PLUGIN_PICK_PREFIX, entry.name))),
         Some(InlineListSearchConfig {
             label: String::new(),
-            placeholder: Some("Type plugin name".to_string()),
+            placeholder: Some("plugin name".to_string()),
         }),
     );
 
@@ -345,10 +345,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
 
     ctx.renderer.show_list_modal(
         "Plugin Manager",
-        vec![
-            "Manage portable Agent Plugins interactively.".to_string(),
-            "Use Enter to run an action, Esc to close.".to_string(),
-        ],
+        vec!["Manage portable Agent Plugins interactively.".to_string()],
         items,
         Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}list"))),
         None,

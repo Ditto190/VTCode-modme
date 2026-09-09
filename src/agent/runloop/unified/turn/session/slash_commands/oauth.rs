@@ -608,8 +608,7 @@ fn oauth_modal_lines(action: OAuthProviderAction) -> Vec<String> {
     match action {
         OAuthProviderAction::Login => vec![
             "Choose a provider to connect.".to_string(),
-            "VT Code stores OpenAI/OpenRouter credentials securely and uses the official `copilot` CLI for GitHub Copilot.".to_string(),
-            "If you have Codex CLI installed, VT Code automatically uses its auth.json as a fallback for ChatGPT.".to_string(),
+            "Credentials stay in secure storage; GitHub Copilot uses the official CLI.".to_string(),
         ],
         OAuthProviderAction::Logout => vec![
             "Choose a provider to disconnect.".to_string(),
@@ -617,7 +616,8 @@ fn oauth_modal_lines(action: OAuthProviderAction) -> Vec<String> {
         ],
         OAuthProviderAction::Refresh => vec![
             "Choose a provider to refresh.".to_string(),
-            "OpenAI refreshes the stored ChatGPT session; OpenRouter and GitHub Copilot require a new login.".to_string(),
+            "OpenAI refreshes the stored ChatGPT session; OpenRouter and GitHub Copilot require a new login."
+                .to_string(),
         ],
     }
 }

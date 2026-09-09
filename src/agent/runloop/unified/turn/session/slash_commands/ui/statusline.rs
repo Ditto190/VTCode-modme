@@ -8,6 +8,7 @@ mod persistence;
 mod preview;
 
 use anyhow::{Context, Result};
+use vtcode_commons::modal_hints::truncate_modal_text;
 use vtcode_core::config::StatusLineMode;
 use vtcode_core::config::loader::ConfigManager;
 use vtcode_core::utils::ansi::MessageStyle;
@@ -84,18 +85,15 @@ pub(crate) async fn handle_start_statusline_setup(
             .unwrap_or_else(|| "(unset)".to_string());
         let mode_label = statusline_mode_id(&draft.mode);
         let clock_label = if draft.show_clock { "on" } else { "off" };
-        let script_state = if script_exists { "present" } else { "missing" };
 
         ctx.handle.show_list_modal(
             "Status line setup".to_string(),
             vec![
                 format!("Configure [ui.status_line] in the {config_label} config layer."),
                 format!(
-                    "Mode: {mode_label} | clock: {clock_label} | command: {command_label} | refresh: {}ms | timeout: {}ms",
-                    draft.refresh_interval_ms, draft.command_timeout_ms
+                    "Mode: {mode_label} • clock: {clock_label} • {command_label} • {preview}",
+                    preview = truncate_modal_text(&preview, 48),
                 ),
-                format!("Script: {} ({script_state})", script_path.display()),
-                format!("Preview: {preview}"),
             ],
             build_statusline_setup_items(&draft, script_exists),
             Some(InlineListSelection::ConfigAction("statusline:save".to_string())),

@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::Notify;
+use vtcode_commons::modal_hints::{APPROVAL_NAVIGATE_DENY, choose_handling_line};
 use vtcode_core::core::interfaces::ui::UiSession;
 use vtcode_core::hooks::LifecycleHookCommandPreview;
 use vtcode_ui::tui::app::{
@@ -55,8 +56,7 @@ pub(crate) async fn prompt_workspace_hook_approval<S: UiSession + ?Sized>(
         lines.push(format!("  [{event}/{matcher}] {command}", event = command.event, command = command.command));
     }
     lines.push(String::new());
-    lines.push("Choose how to handle workspace lifecycle hooks:".to_string());
-    lines.push("Use ↑↓ or Tab to navigate • Enter to select • Esc to deny".to_string());
+    lines.push(choose_handling_line("workspace lifecycle hooks"));
 
     let items = vec![
         InlineListItem {
@@ -85,7 +85,7 @@ pub(crate) async fn prompt_workspace_hook_approval<S: UiSession + ?Sized>(
         TransientRequest::List(ListOverlayRequest {
             title: "Workspace Lifecycle Hooks".to_string(),
             lines,
-            footer_hint: None,
+            footer_hint: Some(APPROVAL_NAVIGATE_DENY.to_string()),
             items,
             selected: Some(InlineListSelection::ToolApproval(false)),
             search: None,
