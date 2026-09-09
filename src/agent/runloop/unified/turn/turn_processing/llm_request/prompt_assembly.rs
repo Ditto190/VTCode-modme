@@ -55,7 +55,7 @@ fn append_recovery_mode_prompt(system_prompt: &mut String, planning_active: bool
             "- required_headings: `## Summary`, `## Implementation Steps`, `## Test Cases and Validation`, `## Assumptions and Defaults`\n",
         );
         system_prompt.push_str(
-            "- step_format: `1. Action -> files: [concrete/path.rs] -> verify: [cargo check --locked]`; replace the examples with evidence-backed targets and one concrete command or observable check\n",
+            "- step_format: `1. Action -> files: [concrete/path.rs] -> verify: [cargo check --locked]`; replace the examples with evidence-backed targets and one concrete command or observable check; every step must name a concrete file, symbol, or behavior target and generic targets or vague checks are rejected\n",
         );
         system_prompt.push_str(
             "- if evidence is incomplete: state a concrete assumption inside the plan; do not omit a required heading\n",

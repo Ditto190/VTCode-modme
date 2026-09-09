@@ -109,6 +109,7 @@ pub(crate) fn check_read_family_cap(
     effective_args: &Value,
     streak: usize,
     cap: usize,
+    planning_active: bool,
 ) -> ReadFamilyCapDecision {
     let Some(family_key) = repeated_file_read_family_key(canonical_tool_name, effective_args) else {
         return ReadFamilyCapDecision::BelowCap;
@@ -121,10 +122,16 @@ pub(crate) fn check_read_family_cap(
     } else {
         read_family_target(&family_key)
     };
-    let block_reason = format!(
-        "Repeated read-only exploration of '{target}' hit the per-turn family cap ({cap}). Scheduling a final recovery pass without more tools."
-    );
-    let error_content = build_repeated_file_read_family_error_content(&target);
+    let block_reason = if planning_active {
+        format!(
+            "Repeated read-only exploration of '{target}' hit the per-turn family cap ({cap}). Scheduling a final recovery pass without more tools; synthesize the `<proposed_plan>` from evidence already gathered."
+        )
+    } else {
+        format!(
+            "Repeated read-only exploration of '{target}' hit the per-turn family cap ({cap}). Scheduling a final recovery pass without more tools."
+        )
+    };
+    let error_content = build_repeated_file_read_family_error_content_for_mode(&target, planning_active);
     ReadFamilyCapDecision::Tripped { target, block_reason, error_content }
 }
 
@@ -226,9 +233,14 @@ fn repeated_read_path(canonical_tool_name: &str, effective_args: &Value) -> Opti
     }
 
     if canonical_tool_name == tool_names::CODE_SEARCH {
-        // A search without an explicit path is scoped to the workspace root;
-        // count that scope too so query churn cannot evade the path cap.
-        return normalised_code_search_path(effective_args);
+        // Distinct `code_search` queries scoped to the same path are diverse
+        // research, not paginated re-reads: the family cap already guards
+        // identical searches via the query-aware loop identity
+        // (`normalised_code_search_loop_identity`), whose streak resets on a
+        // new query. Counting every distinct query toward the per-path total
+        // tripped the cap after a handful of legitimate planning queries on
+        // one file (e.g. seven distinct queries on `benches/startup.rs`).
+        return None;
     }
 
     None
@@ -244,18 +256,22 @@ fn normalised_code_search_path(effective_args: &Value) -> Option<String> {
     Some(vtcode_core::tools::normalised_code_search_path(path))
 }
 
-/// Build the error content for a repeated file read family guard trip.
+/// Planning-aware variant: in plan mode the model must finalize the
+/// `<proposed_plan>` from evidence already gathered instead of starting more
+/// research, otherwise the tool-free recovery synthesis emits prose and the
+/// turn blocks with no approval-ready draft.
 #[cold]
-fn build_repeated_file_read_family_error_content(target: &str) -> String {
-    super::super::super::execution_result::build_error_content(
+fn build_repeated_file_read_family_error_content_for_mode(target: &str, planning_active: bool) -> String {
+    let guidance = if planning_active {
+        format!(
+            "Repeated exploration of the same file or path ('{target}') exceeded the per-turn cap. Synthesize the `<proposed_plan>` now from the output already gathered; do NOT re-read files already read this turn."
+        )
+    } else {
         format!(
             "Repeated exploration of the same file or path ('{target}') exceeded the per-turn cap. Reuse the output already gathered or try a different approach."
-        ),
-        None,
-        None,
-        "repeated_read_family",
-    )
-    .to_string()
+        )
+    };
+    super::super::super::execution_result::build_error_content(guidance, None, None, "repeated_read_family").to_string()
 }
 
 /// Returns the path if this is a read of a planning artifact (a runtime-owned
@@ -501,7 +517,7 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
         // tested without the full TurnProcessingContext harness.
         let streak = ctx.harness_state.record_file_read_family_call(family_key);
         if let ReadFamilyCapDecision::Tripped { target: _, block_reason, error_content } =
-            check_read_family_cap(canonical_tool_name, effective_args, streak, family_cap)
+            check_read_family_cap(canonical_tool_name, effective_args, streak, family_cap, planning_active)
         {
             ctx.activate_recovery(block_reason.clone());
             push_guard_failure_messages(ctx, tool_call_id, canonical_tool_name, error_content, &block_reason);
@@ -512,14 +528,24 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
     // Per-file-path cap: catches paginated reads of the same file that the
     // slice-aware family key lets through (e.g., 8 reads of anthropic_types.rs
     // at different offsets each get a different family key and never collide).
+    // `code_search` is excluded from this cap (see `repeated_read_path`):
+    // distinct queries on one path are diverse research guarded by the
+    // query-aware family cap above, not pagination.
     if let Some(path) = repeated_read_path(canonical_tool_name, effective_args) {
         let path_count = ctx.harness_state.record_file_read_path_call(path.clone());
         if path_count > path_cap {
-            let block_reason = format!(
-                "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}). \
-                 Read the file in full once and reuse the output."
-            );
-            let error_content = build_repeated_file_read_family_error_content(&path);
+            let block_reason = if planning_active {
+                format!(
+                    "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}). \
+                     Synthesize the `<proposed_plan>` now from the output already gathered; do NOT re-read files already read this turn."
+                )
+            } else {
+                format!(
+                    "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}). \
+                     Read the file in full once and reuse the output."
+                )
+            };
+            let error_content = build_repeated_file_read_family_error_content_for_mode(&path, planning_active);
             ctx.activate_recovery(block_reason.clone());
             push_guard_failure_messages(ctx, tool_call_id, canonical_tool_name, error_content, &block_reason);
             return Some(ValidationResult::Blocked);
@@ -677,25 +703,23 @@ mod tests {
     }
 
     #[test]
-    fn repeated_read_path_tracks_code_search_scope_and_workspace_default() {
+    fn repeated_read_path_excludes_code_search_distinct_queries() {
+        // Distinct `code_search` queries scoped to one path are diverse
+        // research, not pagination: the query-aware family cap guards
+        // identical searches, so the per-path total must not count them.
+        // This is the `benches/startup.rs` regression: seven distinct queries
+        // tripped the per-turn cap and blocked planning with no draft.
         assert_eq!(
             repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn", "path": "README.md"})),
-            Some("README.md".to_string())
+            None
         );
-        assert_eq!(
-            repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn"})),
-            Some(".".to_string())
-        );
+        assert_eq!(repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn"})), None);
         assert_eq!(
             repeated_read_path(
                 tool_names::CODE_SEARCH,
                 &serde_json::json!({"query": "fn", "path": "./docs/../README.md"})
             ),
-            Some("README.md".to_string())
-        );
-        assert_eq!(
-            repeated_read_path(tool_names::CODE_SEARCH, &serde_json::json!({"query": "fn", "path": "../README.md"})),
-            Some("../README.md".to_string())
+            None
         );
     }
 
@@ -707,6 +731,7 @@ mod tests {
             &args,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            false,
         );
 
         let ReadFamilyCapDecision::Tripped { target, block_reason, .. } = decision else {
@@ -724,6 +749,7 @@ mod tests {
             &serde_json::json!({"command": "ls -la"}),
             99,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            false,
         );
         assert_eq!(decision, ReadFamilyCapDecision::BelowCap);
     }
@@ -735,6 +761,7 @@ mod tests {
             &serde_json::json!({"action": "read", "path": "src/lib.rs", "offset": 0, "limit": 100}),
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS - 1,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            false,
         );
         assert_eq!(decision, ReadFamilyCapDecision::BelowCap);
     }
@@ -746,12 +773,31 @@ mod tests {
             &serde_json::json!({"action": "read", "path": "src/lib.rs", "offset": 0, "limit": 100}),
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            false,
         );
         match decision {
             ReadFamilyCapDecision::Tripped { target, block_reason, error_content } => {
                 assert_eq!(target, "src/lib.rs");
                 assert!(block_reason.contains("per-turn family cap"));
                 assert!(error_content.contains("repeated_read_family"));
+            }
+            ReadFamilyCapDecision::BelowCap => panic!("expected Tripped at cap"),
+        }
+    }
+
+    #[test]
+    fn read_family_cap_planning_guidance_directs_plan_synthesis() {
+        let decision = check_read_family_cap(
+            tool_names::UNIFIED_FILE,
+            &serde_json::json!({"action": "read", "path": "src/lib.rs"}),
+            MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            true,
+        );
+        match decision {
+            ReadFamilyCapDecision::Tripped { block_reason, error_content, .. } => {
+                assert!(block_reason.contains("<proposed_plan>"));
+                assert!(error_content.contains("<proposed_plan>"));
             }
             ReadFamilyCapDecision::BelowCap => panic!("expected Tripped at cap"),
         }
@@ -774,6 +820,7 @@ mod tests {
             &serde_json::json!({"path": "src/main.rs"}),
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS + 5,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            false,
         );
         assert!(matches!(decision, ReadFamilyCapDecision::Tripped { .. }));
     }
@@ -785,6 +832,7 @@ mod tests {
             &serde_json::json!({"action": "read", "path": "src/cli/update.rs"}),
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
             MAX_CONSECUTIVE_SAME_FILE_READ_FAMILY_CALLS,
+            false,
         );
         match decision {
             ReadFamilyCapDecision::Tripped { target, .. } => {

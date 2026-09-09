@@ -706,6 +706,31 @@ Preserve concise test-result checks.
     }
 
     #[test]
+    fn validate_plan_content_accepts_startup_domain_behavior_targets() {
+        // Regression for the plan-mode block on `benches/startup.rs`: behavior
+        // steps about timing reports and benchmark milestones were rejected
+        // with "must name a concrete file, symbol, or behavior target" because
+        // the domain vocabulary was missing from the behavior word list.
+        let report = validate_plan_content(
+            "# Startup plan\n\n## Summary\nMeasure startup phases.\n\n## Steps\n1. Record per-phase durations in resolve_startup_context -> behavior: [startup timing report] -> verify: [cargo check --locked]\n2. Extend the release benchmark coverage -> behavior: [benchmark milestone measurements] -> verify: [cargo nextest run -p vtcode]\n\n## Validation\n1. Run cargo check.\n\n## Assumptions\n1. Keep the current workflow.\n",
+        );
+
+        assert!(report.is_ready(), "startup-domain behavior targets should validate: {:?}", report.reasons());
+    }
+
+    #[test]
+    fn validate_plan_content_accepts_review_cue_manual_verification() {
+        // `review`/`check` are legitimate manual-verification cues; without
+        // them, steps verified by reviewing trace output were rejected with
+        // "verification marker must include a concrete command or check".
+        let report = validate_plan_content(
+            "# Review plan\n\n## Summary\nVerify via trace review.\n\n## Steps\n1. Instrument the resolve path -> files: [src/main_helpers/bootstrap.rs] -> verify: [Review startup trace output]\n\n## Validation\n1. Run cargo check.\n\n## Assumptions\n1. Keep the current workflow.\n",
+        );
+
+        assert!(report.is_ready(), "review-cue verification should validate: {:?}", report.reasons());
+    }
+
+    #[test]
     fn validate_plan_content_rejects_arbitrary_verification_prose() {
         let report = validate_plan_content(
             "# Verification plan\n\n## Summary\nReject arbitrary checks.\n\n## Steps\n1. Update -> src/main.rs -> verify: run banana\n\n## Validation\n1. Run cargo check.\n\n## Assumptions\n1. Keep the current workflow.\n",
