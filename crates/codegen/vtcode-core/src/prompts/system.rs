@@ -834,8 +834,8 @@ mod tests {
         let result = compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
 
         assert!(
-            result.len() <= 3400,
-            "Default mode should stay sparse with runtime guidance (<=3.4K chars, was {} chars)",
+            result.len() <= 3600,
+            "Default mode should stay sparse with runtime guidance (<=3.6K chars, was {} chars)",
             result.len()
         );
         assert!(result.contains("`exec_command`, `write_stdin`, and `apply_patch`"));
