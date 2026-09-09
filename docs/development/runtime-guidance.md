@@ -60,7 +60,8 @@ capability. Both profiles preserve inspection, verification, and terminal-owned
 WebMCP permission guidance.
 
 The runtime keeps prompt additions small and cache-stable while preserving the
-newest working context. Automatic compaction uses a non-configurable continuity
+newest working context. Automatic compaction applies the shared configured
+trigger ratio (90% by default) to the effective provider/session budget and uses a continuity
 tail target of approximately 20,000 estimated tokens. It retains complete
 user/assistant/tool protocol groups verbatim, removes an incomplete trailing tool
 call, and summarizes only the older prefix. Unless an explicit harness threshold
@@ -81,8 +82,11 @@ returns a bounded in-progress result without killing the process, so the model
 does not need to spend repeated turns issuing 30-second polls. Full command
 output is written to the tool-output spool; responses expose only a bounded
 preview and its spool metadata. A spool reference is emitted only after its
-file is open and has not reported a write failure; `spool_complete` distinguishes
-an active readable partial snapshot from a fully drained output stream. Exited
+file is open and has not reported a write failure. Completed references include
+`spool_state`, the exact byte count, and a SHA-256 digest and are reopened only
+after descriptor-relative containment, regular-file identity, length, and digest
+validation. Pending live references permit only bounded, explicitly unverified
+reads. Exited
 sessions with an unfinished spool retain the session and defer the reference
 until a later wait can safely observe the complete file.
 

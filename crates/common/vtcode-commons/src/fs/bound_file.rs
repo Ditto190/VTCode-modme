@@ -150,9 +150,16 @@ pub fn validate_directory_beneath(root: &Path, relative: &Path) -> io::Result<()
 /// replaced.
 #[cfg(unix)]
 pub fn write_file_beneath(root: &Path, relative: &Path, contents: &[u8]) -> io::Result<()> {
-    let mut file = open_new_file_beneath(root, relative)?;
+    let mut file = create_file_beneath(root, relative)?;
     file.write_all(contents)?;
     file.sync_all()
+}
+
+/// Create a new private file beneath a trusted root and return its bound
+/// handle. Existing paths are never opened or replaced.
+#[cfg(unix)]
+pub fn create_file_beneath(root: &Path, relative: &Path) -> io::Result<File> {
+    open_new_file_beneath(root, relative)
 }
 
 /// Copy a regular file between two trusted roots without resolving a path
@@ -453,6 +460,14 @@ fn c_string(name: &std::ffi::OsString) -> io::Result<std::ffi::CString> {
 #[cfg(not(unix))]
 pub fn open_file_beneath(_root: &Path, _relative: &Path) -> io::Result<File> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "bound no-follow reads are unavailable on this platform"))
+}
+
+#[cfg(not(unix))]
+pub fn create_file_beneath(_root: &Path, _relative: &Path) -> io::Result<File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "bound no-follow file creation is unavailable on this platform",
+    ))
 }
 
 #[cfg(all(test, unix))]

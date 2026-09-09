@@ -1,11 +1,9 @@
-use std::path::Path;
-
 use crate::tools::command_args::{
     command_words_after_environment_prefix, has_unsafe_readonly_options, raw_command_text,
 };
+use crate::tools::output_spooler::SpooledOutputReference;
 use serde_json::Value;
-
-const TOOL_OUTPUT_SPOOL_DIRECTORY: &str = ".vtcode/context/tool_outputs";
+use std::path::Path;
 
 /// Conservative allow-list of read-only inspection commands used by
 /// `command_session`. Any command that could write, move, or delete must be
@@ -135,6 +133,39 @@ pub(crate) fn command_words_are_readonly(words: &[String]) -> bool {
         )
 }
 
+/// Return whether one command is a side-effect-free inspection suitable for
+/// concurrent execution. Build and test commands remain read-only for policy
+/// purposes, but are excluded here because they write caches, lockfiles, or
+/// build artifacts and contend on shared package-manager state.
+fn command_words_are_parallel_safe(words: &[String]) -> bool {
+    let command_words = command_words_after_environment_prefix(words);
+    let Some(first) = command_words
+        .first()
+        .and_then(|word| Path::new(word).file_name())
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+    else {
+        return false;
+    };
+    if has_unsafe_readonly_options(words) {
+        return false;
+    }
+
+    if is_readonly_base_command(&first) {
+        return true;
+    }
+    if first != "git" {
+        return false;
+    }
+
+    let subcommand = command_words
+        .iter()
+        .skip(1)
+        .find(|word| !word.starts_with('-') && !word.contains('='))
+        .map(|word| word.to_ascii_lowercase());
+    is_readonly_subcommand("git", subcommand.as_deref(), None)
+}
+
 fn is_known_readonly_dry_run(words: &[String], program: &str) -> bool {
     if !matches!(program, "npm" | "pnpm" | "yarn") {
         return false;
@@ -234,6 +265,27 @@ pub fn is_readonly_command_session_command(args: &Value) -> bool {
         .is_some_and(|commands| commands.iter().all(|words| command_words_are_readonly(words)))
 }
 
+/// A stricter read-only command shape that may run concurrently after hooks,
+/// command admission, and preflight have all succeeded.
+pub(crate) fn is_parallel_safe_command_session_command(args: &Value) -> bool {
+    if args.get("session_id").is_some()
+        || args.get("chars").is_some()
+        || args.get("input").is_some()
+        || args.get("tty").and_then(Value::as_bool) == Some(true)
+        || args
+            .get("sandbox_permissions")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value != "use_default")
+    {
+        return false;
+    }
+    let Some(raw) = raw_command_text(args) else {
+        return false;
+    };
+    static_shell_command_words(&raw)
+        .is_some_and(|commands| commands.len() == 1 && command_words_are_parallel_safe(&commands[0]))
+}
+
 /// Returns `true` when a safe shell inspection command reads the internal tool
 /// output spool directory. Such reads must stay inline: spooling their output
 /// again would create a recursive chain of spool references.
@@ -246,7 +298,14 @@ pub fn is_spool_file_read_command(tool_name: &str, args: &Value) -> bool {
         return false;
     }
 
-    raw_command_text(args).is_some_and(|command| command.replace('\\', "/").contains(TOOL_OUTPUT_SPOOL_DIRECTORY))
+    raw_command_text(args)
+        .and_then(|command| static_shell_command_words(&command))
+        .is_some_and(|commands| {
+            commands
+                .iter()
+                .flatten()
+                .any(|word| SpooledOutputReference::recognizes_path(Path::new(word)))
+        })
 }
 
 #[cfg(test)]
@@ -387,6 +446,27 @@ mod tests {
     }
 
     #[test]
+    fn parallel_commands_are_limited_to_side_effect_free_inspection() {
+        for command in ["rg -n TODO src", "cat Cargo.toml", "git status --short"] {
+            assert!(is_parallel_safe_command_session_command(&run_cmd(command)), "expected parallel-safe: {command}");
+        }
+        for command in [
+            "cargo check",
+            "cargo test",
+            "cargo nextest run",
+            "cargo clippy",
+            "npm test",
+            "pnpm run test",
+            "git diff | head -20",
+        ] {
+            assert!(
+                !is_parallel_safe_command_session_command(&run_cmd(command)),
+                "command can touch shared state or crosses a sequential boundary: {command}"
+            );
+        }
+    }
+
+    #[test]
     fn stderr_merge_is_not_a_write_redirection() {
         assert!(is_readonly_command_session_command(&run_cmd("cargo check 2>&1 | head -c 4000")));
         // A real file redirection is still rejected.
@@ -419,6 +499,8 @@ mod tests {
             "rm .vtcode/context/tool_outputs/run-1.txt",
             "cat \"$VTCODE_SPOOL\"",
             "cat .vtcode/context/tool_outputs/run-1.txt |",
+            "cat notes-.vtcode/context/tool_outputs/run-1.txt",
+            "cat .vtcode/context/tool_outputs-extra/run-1.txt",
         ] {
             assert!(!is_spool_file_read_command("exec_command", &run_cmd(command)), "unexpected spool read: {command}");
         }

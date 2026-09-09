@@ -50,16 +50,33 @@ pub enum ShellKind {
 pub struct CommandInvocation {
     shell: ShellKind,
     pub command: String,
+    form: CommandForm,
     pub(crate) category: CommandCategory,
     pub(crate) working_dir: PathBuf,
     pub(crate) touched_paths: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone)]
+enum CommandForm {
+    DirectArgv(Vec<String>),
+    ValidatedShellScript(String),
+    Invalid(String),
+}
+
 impl CommandInvocation {
     pub(crate) fn new(shell: ShellKind, command: String, category: CommandCategory, working_dir: PathBuf) -> Self {
+        let form = match shell {
+            ShellKind::Unix => match shell_words::split(&command) {
+                Ok(argv) if !argv.is_empty() => CommandForm::DirectArgv(argv),
+                Ok(_) => CommandForm::Invalid("direct command is empty".to_owned()),
+                Err(error) => CommandForm::Invalid(format!("direct command is not valid argv: {error}")),
+            },
+            ShellKind::Windows => CommandForm::ValidatedShellScript(command.clone()),
+        };
         Self {
             shell,
             command,
+            form,
             category,
             working_dir,
             touched_paths: Vec::new(),
@@ -161,31 +178,43 @@ impl CommandExecutor for ProcessCommandExecutor {
     fn execute(&self, invocation: &CommandInvocation) -> Result<CommandOutput> {
         use std::process::Command;
 
-        let mut cmd = match invocation.shell {
-            ShellKind::Unix => {
-                let mut command = Command::new("sh");
-                command.arg("-c").arg(&invocation.command);
+        let mut cmd = match &invocation.form {
+            CommandForm::DirectArgv(argv) => {
+                let (program, args) = argv.split_first().context("direct command is missing executable")?;
+                let mut command = Command::new(program);
+                command.args(args);
                 command
             }
-            ShellKind::Windows => {
+            CommandForm::ValidatedShellScript(script) if invocation.shell == ShellKind::Unix => {
+                let mut command = Command::new("sh");
+                command.arg("-c").arg(script);
+                command
+            }
+            CommandForm::ValidatedShellScript(script) => {
                 #[cfg(not(feature = "powershell-process"))]
                 {
                     bail!("powershell-process feature disabled; enable it to execute Windows commands");
                 }
                 #[cfg(feature = "powershell-process")]
                 let mut command = Command::new("powershell");
-                command
-                    .arg("-NoProfile")
-                    .arg("-NonInteractive")
-                    .arg("-Command")
-                    .arg(&invocation.command);
+                command.arg("-NoProfile").arg("-NonInteractive").arg("-Command").arg(script);
                 #[cfg(feature = "powershell-process")]
                 {
                     command
                 }
             }
+            CommandForm::Invalid(message) => return Err(anyhow::Error::msg(message.clone())),
         };
 
+        #[cfg(unix)]
+        {
+            let directory = vtcode_commons::fs::bound_file::open_directory_handle(&invocation.working_dir)
+                .with_context(|| format!("bind command working directory {}", invocation.working_dir.display()))?;
+            vtcode_commons::fs::bound_file::set_command_working_directory(&mut cmd, &directory)
+                .context("confine command working directory")?;
+            cmd.current_dir(&invocation.working_dir);
+        }
+        #[cfg(not(unix))]
         cmd.current_dir(&invocation.working_dir);
         let output = cmd
             .output()

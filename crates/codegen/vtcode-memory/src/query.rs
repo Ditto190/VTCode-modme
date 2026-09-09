@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use chrono::{DateTime, Utc};
 use lru::LruCache;
 
 use crate::error::SessionStoreError;
@@ -211,8 +212,8 @@ pub fn search_memory(
         let memory_path = memory.to_string_lossy().into_owned();
         let created_at = value
             .get("created_at")
-            .and_then(|v| v.as_i64())
-            .or_else(|| value.get("updated_at").and_then(|v| v.as_i64()));
+            .and_then(parse_timestamp)
+            .or_else(|| value.get("updated_at").and_then(parse_timestamp));
 
         if let Some(arr) = value.get("grounded_facts").and_then(|v| v.as_array()) {
             for (idx, item) in arr.iter().enumerate() {
@@ -247,6 +248,7 @@ pub fn search_memory(
     }
     let k1 = 1.2;
     let b = 0.75;
+    let now = Utc::now();
     for (chunk_id, path, fact, terms, created_at) in documents {
         let length = terms.len() as f64;
         let mut term_frequency = HashMap::<&str, usize>::new();
@@ -268,7 +270,15 @@ pub fn search_memory(
             let denominator = frequency as f64 + k1 * (1.0 - b + b * length / average_length.max(1.0));
             score += idf * (frequency as f64 * (k1 + 1.0)) / denominator;
         }
-        if score <= 0.0 || score < min_score {
+        if score <= 0.0 {
+            continue;
+        }
+        // A mild recency preference helps current session facts win close BM25
+        // matches without allowing recency to create a result that did not
+        // match the query. Missing or malformed timestamps deliberately keep
+        // the neutral multiplier of 1.0.
+        score *= recency_multiplier(created_at, now);
+        if score < min_score {
             continue;
         }
         results.push(MemorySearchResult {
@@ -291,6 +301,25 @@ pub fn search_memory(
     });
     results.truncate(max_results);
     Ok(results)
+}
+
+fn parse_timestamp(value: &serde_json::Value) -> Option<i64> {
+    if let Some(timestamp) = value.as_i64() {
+        return DateTime::<Utc>::from_timestamp(timestamp, 0).map(|_| timestamp);
+    }
+    let text = value.as_str()?.trim();
+    if let Ok(timestamp) = text.parse::<i64>() {
+        return DateTime::<Utc>::from_timestamp(timestamp, 0).map(|_| timestamp);
+    }
+    DateTime::parse_from_rfc3339(text).ok().map(|timestamp| timestamp.timestamp())
+}
+
+fn recency_multiplier(created_at: Option<i64>, now: DateTime<Utc>) -> f64 {
+    let Some(created_at) = created_at.and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0)) else {
+        return 1.0;
+    };
+    let age_days = (now - created_at).num_seconds().max(0) as f64 / 86_400.0;
+    1.0 + 0.15 * 0.5_f64.powf(age_days / 30.0)
 }
 
 /// Return the configured default for `max_results` in search queries.
@@ -456,6 +485,67 @@ mod tests {
         let results = search_memory(dir.path(), "rust cargo", 10, 0.0).expect("search");
         assert_eq!(results.first().map(|result| result.chunk_id.as_str()), Some("s1:0"));
         assert!(results[0].score > results[1].score);
+    }
+
+    #[test]
+    fn search_memory_applies_recency_to_valid_rfc3339_timestamps() {
+        let dir = TempDir::new().expect("tempdir");
+        for (session_id, timestamp) in [("old", "2020-01-01T00:00:00Z"), ("new", "2099-01-01T00:00:00Z")] {
+            let session = crate::session_dir(dir.path(), session_id);
+            std::fs::create_dir_all(session.join(crate::DERIVED_DIR)).expect("mkdir");
+            let memory = serde_json::json!({
+                "created_at": timestamp,
+                "grounded_facts": [{"fact": "shared search fact"}]
+            });
+            std::fs::write(
+                session.join(crate::DERIVED_DIR).join("memory.json"),
+                serde_json::to_vec(&memory).expect("serialize"),
+            )
+            .expect("write");
+        }
+
+        let results = search_memory(dir.path(), "shared", 10, 0.0).expect("search");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].chunk_id, "new:0");
+        assert!(results[0].score > results[1].score);
+    }
+
+    #[test]
+    fn search_memory_does_not_boost_missing_or_invalid_timestamps() {
+        let dir = TempDir::new().expect("tempdir");
+        for (session_id, timestamp) in [
+            ("missing", serde_json::Value::Null),
+            ("invalid", serde_json::json!("not-a-date")),
+        ] {
+            let session = crate::session_dir(dir.path(), session_id);
+            std::fs::create_dir_all(session.join(crate::DERIVED_DIR)).expect("mkdir");
+            let mut memory = serde_json::json!({"grounded_facts": [{"fact": "neutral search fact"}]});
+            if !timestamp.is_null() {
+                memory["created_at"] = timestamp;
+            }
+            std::fs::write(
+                session.join(crate::DERIVED_DIR).join("memory.json"),
+                serde_json::to_vec(&memory).expect("serialize"),
+            )
+            .expect("write");
+        }
+
+        let results = search_memory(dir.path(), "neutral", 10, 0.0).expect("search");
+        assert_eq!(results.len(), 2);
+        assert!((results[0].score - results[1].score).abs() < f64::EPSILON);
+        assert_eq!(results[0].created_at, None);
+        assert_eq!(results[1].created_at, None);
+    }
+
+    #[test]
+    fn recency_multiplier_matches_thirty_day_half_life() {
+        let now = DateTime::parse_from_rfc3339("2026-01-31T00:00:00Z")
+            .expect("timestamp")
+            .with_timezone(&Utc);
+        let thirty_days_ago = now - chrono::Duration::days(30);
+        let multiplier = recency_multiplier(Some(thirty_days_ago.timestamp()), now);
+        assert!((multiplier - 1.075).abs() < 1e-12);
+        assert!((recency_multiplier(None, now) - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

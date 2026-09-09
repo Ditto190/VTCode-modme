@@ -547,9 +547,9 @@ pub(crate) fn compact_boundary_event(
         previous_segment_id: segment_transition.and_then(|transition| transition.previous_segment_id.clone()),
         new_segment_id: segment_transition.map(|transition| transition.new_segment_id.clone()),
         previous_prefix_hash: segment_transition.and_then(|transition| transition.previous_prefix_hash.clone()),
-        new_prefix_hash: None,
+        new_prefix_hash: segment_transition.and_then(|transition| transition.previous_prefix_hash.clone()),
         previous_catalog_hash: segment_transition.and_then(|transition| transition.previous_catalog_hash.clone()),
-        new_catalog_hash: None,
+        new_catalog_hash: segment_transition.and_then(|transition| transition.previous_catalog_hash.clone()),
     }))
 }
 
@@ -559,6 +559,33 @@ pub(crate) fn harness_event(
     path: Option<String>,
     attempt: Option<u32>,
     error_category: Option<String>,
+) -> ThreadEvent {
+    harness_event_with_duration(event, message, path, attempt, error_category, None)
+}
+
+pub(crate) fn tool_outcome_observation_event(
+    tool_name: &str,
+    attempts: u32,
+    duration_ms: u64,
+    error_category: Option<String>,
+) -> ThreadEvent {
+    harness_event_with_duration(
+        HarnessEventKind::ToolLatencyRecorded,
+        Some(format!("{tool_name} completed in {duration_ms}ms")),
+        None,
+        Some(attempts.max(1)),
+        error_category,
+        Some(duration_ms),
+    )
+}
+
+fn harness_event_with_duration(
+    event: HarnessEventKind,
+    message: Option<String>,
+    path: Option<String>,
+    attempt: Option<u32>,
+    error_category: Option<String>,
+    duration_ms: Option<u64>,
 ) -> ThreadEvent {
     ThreadEvent::ItemCompleted(ItemCompletedEvent {
         item: ThreadItem {
@@ -571,7 +598,7 @@ pub(crate) fn harness_event(
                 exit_code: None,
                 attempt,
                 error_category,
-                duration_ms: None,
+                duration_ms,
             })),
         },
     })
@@ -596,6 +623,21 @@ mod tests {
         let file_name = resolved.file_name().and_then(|name| name.to_str()).expect("file name");
         assert!(file_name.starts_with("harness-run-123-"));
         assert!(file_name.ends_with(".jsonl"));
+    }
+
+    #[test]
+    fn tool_outcome_observation_carries_attempt_duration_and_category() {
+        let event = tool_outcome_observation_event("read_file", 2, 37, Some("Network".to_string()));
+        let ThreadEvent::ItemCompleted(completed) = event else {
+            panic!("expected completed harness item");
+        };
+        let ThreadItemDetails::Harness(item) = completed.item.details else {
+            panic!("expected harness details");
+        };
+        assert_eq!(item.event, HarnessEventKind::ToolLatencyRecorded);
+        assert_eq!(item.attempt, Some(2));
+        assert_eq!(item.duration_ms, Some(37));
+        assert_eq!(item.error_category.as_deref(), Some("Network"));
     }
 
     #[test]

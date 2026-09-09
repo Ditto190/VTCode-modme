@@ -1,6 +1,8 @@
 use anstyle::Color;
 use serde_json::Value;
 use std::fmt::Write;
+use std::time::Duration;
+use vtcode_commons::ErrorCategory;
 use vtcode_core::tools::registry::ToolExecutionError;
 use vtcode_core::utils::style_helpers::ColorPalette;
 
@@ -113,6 +115,9 @@ impl ToolExecutionStatus {
 pub(crate) struct ToolPipelineOutcome {
     pub status: ToolExecutionStatus,
     pub command_success: bool,
+    pub attempts: u32,
+    pub total_duration: Duration,
+    pub last_error_category: Option<ErrorCategory>,
     /// When set, the interaction loop should switch the active primary agent to
     /// this name after the tool completes. Used by the plan-mode "switch to
     /// build/auto agent" decision at the plan-ready gate.
@@ -124,14 +129,18 @@ pub(crate) struct ToolPipelineOutcome {
 }
 
 impl ToolPipelineOutcome {
-    pub(crate) fn from_status(status: ToolExecutionStatus) -> Self {
+    pub(crate) fn from_status(mut status: ToolExecutionStatus) -> Self {
         let command_success = match &status {
             ToolExecutionStatus::Success { command_success, .. } => *command_success,
             _ => false,
         };
+        let (attempts, total_duration, last_error_category) = execution_metadata(&mut status, command_success);
         ToolPipelineOutcome {
             status,
             command_success,
+            attempts,
+            total_duration,
+            last_error_category,
             pending_primary_agent: None,
             stop_after_tool: false,
         }
@@ -156,6 +165,58 @@ impl ToolPipelineOutcome {
         if let ToolExecutionStatus::Success { command_success: status_success, .. } = &mut self.status {
             *status_success = command_success;
         }
+    }
+}
+
+pub(crate) const TOOL_EXECUTION_METADATA_FIELD: &str = "_vtcode_execution_observation";
+const TOOL_EXECUTION_DURATION_METADATA_KEY: &str = "total_duration_ms";
+
+fn execution_metadata(
+    status: &mut ToolExecutionStatus,
+    command_success: bool,
+) -> (u32, Duration, Option<ErrorCategory>) {
+    match status {
+        ToolExecutionStatus::Success { output, .. } => {
+            let metadata = output
+                .as_object_mut()
+                .and_then(|object| object.remove(TOOL_EXECUTION_METADATA_FIELD));
+            let attempts = metadata
+                .as_ref()
+                .and_then(|value| value.get("attempts"))
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(1);
+            let duration_ms = metadata
+                .as_ref()
+                .and_then(|value| value.get("total_duration_ms"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let recovered_category = metadata
+                .and_then(|value| value.get("last_error_category").cloned())
+                .and_then(|value| serde_json::from_value(value).ok());
+            let category = if command_success {
+                recovered_category
+            } else {
+                recovered_category.or(Some(ErrorCategory::ExecutionError))
+            };
+            (attempts.max(1), Duration::from_millis(duration_ms), category)
+        }
+        ToolExecutionStatus::Failure { error } | ToolExecutionStatus::Timeout { error } => {
+            let attempts = error.attempts_made().unwrap_or(1).max(1);
+            let duration_ms = error
+                .debug_context
+                .as_ref()
+                .and_then(|context| {
+                    context
+                        .metadata
+                        .iter()
+                        .find(|(key, _)| key == TOOL_EXECUTION_DURATION_METADATA_KEY)
+                })
+                .and_then(|(_, value)| value.parse::<u64>().ok())
+                .unwrap_or(0);
+            (attempts, Duration::from_millis(duration_ms), Some(error.category))
+        }
+        ToolExecutionStatus::Cancelled => (1, Duration::ZERO, None),
     }
 }
 
@@ -317,6 +378,31 @@ mod tests {
 
         assert!(!outcome.stop_after_tool);
         assert!(outcome.pending_primary_agent.is_none());
+    }
+
+    #[test]
+    fn pipeline_outcome_extracts_canonical_registry_observation() {
+        let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({
+                "success": true,
+                TOOL_EXECUTION_METADATA_FIELD: {
+                    "attempts": 2,
+                    "total_duration_ms": 42,
+                    "last_error_category": "Network",
+                }
+            }),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        assert_eq!(outcome.attempts, 2);
+        assert_eq!(outcome.total_duration, Duration::from_millis(42));
+        assert_eq!(outcome.last_error_category, Some(ErrorCategory::Network));
+        let ToolExecutionStatus::Success { output, .. } = outcome.status else {
+            panic!("expected success");
+        };
+        assert!(output.get(TOOL_EXECUTION_METADATA_FIELD).is_none());
     }
 
     #[test]

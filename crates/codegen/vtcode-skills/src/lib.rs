@@ -36,6 +36,7 @@ pub mod prompt_integration;
 pub mod render;
 pub mod system;
 pub mod templates;
+pub mod trust;
 pub mod types;
 pub mod validation_report;
 pub mod versioning;

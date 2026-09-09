@@ -46,10 +46,9 @@ pub struct AgentConfig {
     #[serde(default = "default_system_prompt_budget_warning")]
     pub system_prompt_budget_warning: bool,
 
-    /// Trim low-priority system prompt sections when over budget. Opt-in:
-    /// silently dropping instructions changes agent behavior, so the default
-    /// only warns.
-    #[serde(default)]
+    /// Trim low-priority advisory system prompt sections when over budget.
+    /// Base, shell-safety, and active-tool contracts are never trimmed.
+    #[serde(default = "default_trim_system_prompt")]
     pub trim_system_prompt: bool,
 
     /// Tool documentation mode controlling token overhead for tool definitions
@@ -958,7 +957,7 @@ impl Default for AgentConfig {
             system_prompt_mode: SystemPromptMode::default(),
             max_system_prompt_tokens: default_max_system_prompt_tokens(),
             system_prompt_budget_warning: default_system_prompt_budget_warning(),
-            trim_system_prompt: false,
+            trim_system_prompt: default_trim_system_prompt(),
             tool_documentation_mode: ToolDocumentationMode::default(),
             shell_prompt_profile: ShellPromptProfile::default(),
             enable_split_tool_results: default_enable_split_tool_results(),
@@ -1129,6 +1128,11 @@ const fn default_max_system_prompt_tokens() -> u64 {
 
 #[inline]
 const fn default_system_prompt_budget_warning() -> bool {
+    true
+}
+
+#[inline]
+const fn default_trim_system_prompt() -> bool {
     true
 }
 
@@ -1941,7 +1945,7 @@ mod tests {
         let config = AgentConfig::default();
         assert_eq!(config.max_system_prompt_tokens, prompt_budget::DEFAULT_MAX_SYSTEM_PROMPT_TOKENS);
         assert!(config.system_prompt_budget_warning);
-        assert!(!config.trim_system_prompt);
+        assert!(config.trim_system_prompt);
 
         let parsed: AgentConfig = toml::from_str(
             r#"

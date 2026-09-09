@@ -39,7 +39,7 @@ use tracing::{debug, warn};
 
 pub(super) struct RuntimePromptBundle {
     prompt_policy_hash: u64,
-    request_envelope: crate::core::agent::request_envelope::SessionRequestEnvelope,
+    pub(super) request_envelope: crate::core::agent::request_envelope::SessionRequestEnvelope,
     tool_snapshot: SessionToolCatalogSnapshot,
     /// Estimated token overhead of `request_tools`, computed once per
     /// snapshot (see [`crate::llm::usage_cost::estimate_tool_definition_tokens`]).
@@ -162,7 +162,16 @@ impl AgentRunner {
             .record_sdk_tool_definition_tokens(tool_def_tokens);
         debug!(tool_def_tokens, tool_count, "tool definition overhead");
 
-        let system_instruction_prefix_hash = stable_system_prefix_hash(&system_prompt);
+        let instruction_digest = stable_system_prefix_hash(&system_prompt);
+        let capability_digest = crate::core::agent::hash_utils::PromptCapabilityIdentity::resolve(
+            self.provider_client.as_ref(),
+            &self.get_selected_model(),
+            self.reasoning_effort,
+            tool_snapshot.epoch,
+        )
+        .digest();
+        let system_instruction_prefix_hash =
+            crate::core::agent::hash_utils::hash_value(&(instruction_digest, capability_digest));
         system_prompt_report.token_estimate = crate::prompts::system::estimate_token_count(&system_prompt);
         system_prompt_report.over_budget =
             system_prompt_report.token_estimate > self.config().agent.max_system_prompt_tokens;
@@ -170,7 +179,7 @@ impl AgentRunner {
             format!("{}-catalog-{}-{}", self.session_id, tool_snapshot.version, tool_snapshot.epoch),
             system_prompt,
             request_tools.as_deref().map_or_else(Vec::new, |tools| tools.clone()),
-            system_instruction_prefix_hash,
+            instruction_digest,
             system_instruction_prefix_hash,
         );
         Ok(RuntimePromptBundle {
@@ -604,6 +613,7 @@ impl AgentRunner {
                     preserve_recent_turns,
                     prompt_overhead_tokens,
                     reserved_output_tokens,
+                    &mut prompt_bundle.request_envelope,
                 )
                 .await;
                 let (fits, estimated, budget) = runtime.state.preflight_token_check(
@@ -1223,10 +1233,15 @@ impl AgentRunner {
                 }
 
                 // --- Emit tool latency events ---
-                if !runtime.state.turn_tool_latencies.is_empty() {
-                    let latencies = std::mem::take(&mut runtime.state.turn_tool_latencies);
-                    for (tool_name, duration_ms) in &latencies {
-                        event_recorder.record_tool_latency(tool_name, *duration_ms);
+                if !runtime.state.turn_tool_observations.is_empty() {
+                    let observations = std::mem::take(&mut runtime.state.turn_tool_observations);
+                    for observation in &observations {
+                        event_recorder.record_tool_outcome(
+                            &observation.tool_name,
+                            observation.attempts,
+                            observation.duration_ms,
+                            observation.error_category.as_ref().map(vtcode_commons::ErrorCategory::as_str),
+                        );
                     }
                 }
 

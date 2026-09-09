@@ -123,9 +123,14 @@ async fn duplicate_parallel_tool_names_are_split_into_safe_batches() {
     assert!(tool_outputs.iter().any(|(id, output)| {
         *id == "call-echo-a" && output["success"].as_bool() == Some(true) && output["output"].as_str() == Some("hello")
     }));
-    assert!(tool_outputs.iter().any(|(id, output)| {
-        *id == "call-echo-b" && output["success"].as_bool() == Some(true) && output["output"].as_str() == Some("world")
-    }));
+    assert!(
+        tool_outputs.iter().any(|(id, output)| {
+            *id == "call-echo-b"
+                && output["success"].as_bool() == Some(true)
+                && output["output"].as_str() == Some("world")
+        }),
+        "unexpected tool outputs: {tool_outputs:?}"
+    );
 }
 
 #[tokio::test]

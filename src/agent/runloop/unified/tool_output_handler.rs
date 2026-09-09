@@ -5,7 +5,6 @@ use anyhow::Result;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
-use vtcode_commons::paths::ensure_path_within_workspace_resolved;
 use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
@@ -636,32 +635,39 @@ fn canonical_pipe_streams(output: &serde_json::Value) -> Vec<CanonicalOutputStre
 }
 
 async fn load_complete_output(output: &serde_json::Value, workspace_root: Option<&Path>) -> Option<String> {
-    if output.get("spool_path").is_some() {
-        let spool_path = output
-            .get("spool_path")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|path| !path.is_empty())?;
+    // A present but malformed spool marker is still a spool reference. Never
+    // reinterpret its inline preview as a trustworthy complete capture.
+    if output.get("spool_path").is_some() && vtcode_core::tools::SpooledOutputReference::from_value(output).is_none() {
+        return None;
+    }
+    if let Some(reference) = vtcode_core::tools::SpooledOutputReference::from_value(output) {
         let root = workspace_root?;
-        let candidate = if Path::new(spool_path).is_absolute() {
-            PathBuf::from(spool_path)
-        } else {
-            root.join(spool_path)
-        };
-        let resolved = match ensure_path_within_workspace_resolved(&candidate, root).await {
-            Ok(path) => path,
-            Err(error) => {
-                tracing::warn!(path = %candidate.display(), %error, "Rejected tool output spool path");
-                return None;
+        let owned = reference.spool_path.to_string();
+        let root = root.to_path_buf();
+        let state = reference.state;
+        let byte_count = reference.original_bytes;
+        let digest = reference.sha256.map(str::to_string);
+        return tokio::task::spawn_blocking(move || {
+            let value = serde_json::json!({
+                "spool_path": owned,
+                "spooled_bytes": byte_count,
+                "spool_sha256": digest,
+                "spool_state": match state {
+                    vtcode_core::tools::SpoolState::Pending => "pending",
+                    vtcode_core::tools::SpoolState::Completed => "completed",
+                    vtcode_core::tools::SpoolState::Unknown => "unknown",
+                },
+            });
+            let reference = vtcode_core::tools::SpooledOutputReference::from_value(&value)?;
+            match state {
+                vtcode_core::tools::SpoolState::Completed => reference.read_verified_completed(&root).ok(),
+                vtcode_core::tools::SpoolState::Pending => reference.read_pending_bounded(&root, 64 * 1024).ok(),
+                vtcode_core::tools::SpoolState::Unknown => None,
             }
-        };
-        return match tokio::fs::read_to_string(&resolved).await {
-            Ok(content) => Some(content),
-            Err(error) => {
-                tracing::warn!(path = %resolved.display(), %error, "Failed to read tool output spool");
-                None
-            }
-        };
+        })
+        .await
+        .ok()
+        .flatten();
     }
 
     if output_text(output, "output").is_none()
@@ -1960,12 +1966,14 @@ mod tests {
         tokio::fs::create_dir_all(spool_path.parent().expect("spool parent"))
             .await
             .expect("create spool parent");
-        tokio::fs::write(&spool_path, "first complete line\nsecond complete line\n")
-            .await
-            .expect("write spool");
+        let complete_output = "first complete line\nsecond complete line\n";
+        tokio::fs::write(&spool_path, complete_output).await.expect("write spool");
 
         let output = serde_json::json!({
             "spool_path": ".vtcode/context/tool_outputs/pty.txt",
+            "spooled_bytes": complete_output.len(),
+            "spool_sha256": vtcode_commons::utils::calculate_sha256(complete_output.as_bytes()),
+            "spool_state": "completed",
             "output": "first preview line"
         });
 
@@ -2097,9 +2105,8 @@ mod tests {
         tokio::fs::create_dir_all(spool_path.parent().expect("spool parent"))
             .await
             .expect("create spool parent");
-        tokio::fs::write(&spool_path, "first complete line\nsecond complete line\n")
-            .await
-            .expect("write spool");
+        let complete_output = "first complete line\nsecond complete line\n";
+        tokio::fs::write(&spool_path, complete_output).await.expect("write spool");
 
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
@@ -2112,6 +2119,9 @@ mod tests {
             output: serde_json::json!({
                 "output": "preview line",
                 "spool_path": ".vtcode/context/tool_outputs/exec_command_1.txt",
+                "spooled_bytes": complete_output.len(),
+                "spool_sha256": vtcode_commons::utils::calculate_sha256(complete_output.as_bytes()),
+                "spool_state": "completed",
                 "exit_code": 0,
                 "is_exited": true
             }),

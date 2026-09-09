@@ -89,6 +89,13 @@ remains visible when native reasoning is hidden. Provider-native reasoning
 continues to follow its existing capability and display settings, and raw
 chain-of-thought is never exposed.
 
+`ToolInvocationItem.outcome` remains the authoritative invocation result. Each
+runloop additionally emits exactly one terminal `ToolLatencyRecorded` harness
+observation per executed invocation, carrying total duration, attempt count,
+and the canonical error category when the invocation failed or recovered.
+Legacy retry/recovered event variants remain readable, but new executions do
+not emit redundant per-retry terminal observations.
+
 When the product collapses or bounds a tool result, every provider/model
 receives the fixed disclosure after the tool-result user message: `Only you
 see that command's output — the user's terminal shows at most a few lines of
@@ -298,7 +305,20 @@ cap the model-visible preview at the smaller of the requested budget and 6 KiB.
 Inspection commands preserve head and tail context; verification and mutation
 commands preserve the tail. The complete spool, byte counts, reference
 metadata, and failure or recovery diagnostics remain available without
-reopening the spool while the response is constructed.
+reopening the spool while the response is constructed. Completed references
+carry `spool_state = "completed"`, `spooled_bytes`, and `spool_sha256`; consumers
+validate all three against a descriptor-relative, no-follow open before replay.
+Pending live spools are append-only and may be read only through the bounded,
+explicitly unverified pending path. Legacy references without integrity metadata
+remain deserializable but are not replayable as completed output.
+
+Independent read-only calls may fan out after hook rewrites, argument-aware
+intent classification, command hardening, and preflight all succeed. Direct
+file/search reads and simple allow-listed inspection commands are eligible.
+Identical semantic calls, mutations, compound or dynamic shell commands,
+PTY/session actions, polling, and stdin writes remain sequential. Both runloops
+honor `max_parallel_tool_calls` and trace the configured limit, admitted calls,
+group count, parallel-group count, and maximum group size.
 
 Across a turn, provider-visible tool previews are capped at 32 KiB. The
 budget is enforced twice: at the tool-registry output boundary (which charges
@@ -419,12 +439,21 @@ Configured via `agent.harness.context_reset_mode`:
 
 When a reset triggers:
 
-1. A `ContextResetManifest` is written to `.vtcode/tasks/current_context_reset.md`
-   recording the trigger reason, stall count, and timestamp.
+1. A versioned private transition manifest is atomically written to
+   `.vtcode/tasks/current_transition.json`. It records thread/turn identity,
+   transition kind, local trigger metadata, checkpoint paths, and references to
+   the existing compaction/reset events. Legacy `current_context_reset.md` files
+   remain readable and are migrated in memory.
 2. The next session starts with **only** `OrientationContext` — no conversation
    history is carried forward.
 3. The orient phase reads the manifest and prepends a `### Context Reset` banner:
    "This session starts from a clean context. Reorient from the artifacts below."
+4. The manifest is consumed only after orientation and reset application both
+   succeed. Parse or orientation failure leaves it intact for retry.
+
+The public `context.reset` event keeps its existing schema. Stall/compaction
+resets use the public `Unknown` trigger while the real local trigger remains in
+the private manifest; compaction and reset therefore retain distinct semantics.
 
 ### Artifacts That Survive a Reset
 

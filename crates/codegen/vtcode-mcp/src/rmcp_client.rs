@@ -23,8 +23,8 @@ use rmcp_reqwest::header::HeaderMap;
 use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
@@ -35,6 +35,8 @@ use vtcode_commons::sanitizer::sanitize_provider_diagnostic;
 
 const MCP_PROGRESS_TOKEN_META_KEY: &str = "progressToken";
 const MCP_STDERR_MAX_BYTES: usize = 8 * 1024;
+const LIST_CHANGED_BUCKET_CAPACITY: u8 = 4;
+const LIST_CHANGED_REFILL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// High level MCP client responsible for managing multiple providers and
 /// enforcing VT Code specific policies like tool allow lists.
@@ -66,36 +68,151 @@ enum PendingTransport {
     StreamableHttp(StreamableHttpClientTransport<rmcp_reqwest::Client>),
 }
 
-#[derive(Default)]
 struct ListChangedState {
     tools: AtomicBool,
     resources: AtomicBool,
     prompts: AtomicBool,
+    tools_dirty: AtomicBool,
+    resources_dirty: AtomicBool,
+    prompts_dirty: AtomicBool,
+    limiter: StdMutex<ListChangedLimiter>,
+}
+
+#[derive(Clone, Copy)]
+enum ListChangedNamespace {
+    Tools,
+    Resources,
+    Prompts,
+}
+
+#[derive(Default)]
+struct ListChangedLimiter {
+    tools: TokenBucket,
+    resources: TokenBucket,
+    prompts: TokenBucket,
+}
+
+struct TokenBucket {
+    tokens: u8,
+    last_refill: std::time::Instant,
+}
+
+impl Default for ListChangedState {
+    fn default() -> Self {
+        Self {
+            tools: AtomicBool::new(false),
+            resources: AtomicBool::new(false),
+            prompts: AtomicBool::new(false),
+            tools_dirty: AtomicBool::new(false),
+            resources_dirty: AtomicBool::new(false),
+            prompts_dirty: AtomicBool::new(false),
+            limiter: StdMutex::new(ListChangedLimiter::default()),
+        }
+    }
+}
+
+impl Default for TokenBucket {
+    fn default() -> Self {
+        Self {
+            tokens: LIST_CHANGED_BUCKET_CAPACITY,
+            last_refill: std::time::Instant::now(),
+        }
+    }
+}
+
+impl TokenBucket {
+    fn try_take_at(&mut self, now: std::time::Instant) -> bool {
+        let elapsed = now.saturating_duration_since(self.last_refill);
+        let refill_count = elapsed.as_secs() / LIST_CHANGED_REFILL_INTERVAL.as_secs();
+        if refill_count > 0 {
+            self.tokens = self
+                .tokens
+                .saturating_add(u8::try_from(refill_count).unwrap_or(u8::MAX))
+                .min(LIST_CHANGED_BUCKET_CAPACITY);
+            self.last_refill +=
+                LIST_CHANGED_REFILL_INTERVAL.saturating_mul(u32::try_from(refill_count).unwrap_or(u32::MAX));
+        }
+
+        if self.tokens == 0 {
+            return false;
+        }
+        self.tokens -= 1;
+        true
+    }
 }
 
 impl ListChangedState {
     fn mark_tools_changed(&self) {
-        self.tools.store(true, Ordering::Relaxed);
+        self.mark_changed(ListChangedNamespace::Tools, std::time::Instant::now());
     }
 
     fn mark_resources_changed(&self) {
-        self.resources.store(true, Ordering::Relaxed);
+        self.mark_changed(ListChangedNamespace::Resources, std::time::Instant::now());
     }
 
     fn mark_prompts_changed(&self) {
-        self.prompts.store(true, Ordering::Relaxed);
+        self.mark_changed(ListChangedNamespace::Prompts, std::time::Instant::now());
+    }
+
+    fn mark_changed(&self, namespace: ListChangedNamespace, now: std::time::Instant) {
+        // Preserve burst coalescing: multiple notifications before the cache
+        // consumer observes one pending signal do not consume bucket tokens.
+        let (flag, dirty) = self.state_for(namespace);
+        dirty.store(true, Ordering::Relaxed);
+        if flag.load(Ordering::Relaxed) {
+            return;
+        }
+
+        self.schedule_changed(namespace, now);
+    }
+
+    fn schedule_changed(&self, namespace: ListChangedNamespace, now: std::time::Instant) {
+        let (flag, dirty) = self.state_for(namespace);
+        if flag.load(Ordering::Relaxed) || !dirty.load(Ordering::Relaxed) {
+            return;
+        }
+
+        let Ok(mut limiter) = self.limiter.lock() else {
+            // A poisoned limiter must not turn an unbounded notification
+            // stream into repeated refresh work.
+            return;
+        };
+        let bucket = match namespace {
+            ListChangedNamespace::Tools => &mut limiter.tools,
+            ListChangedNamespace::Resources => &mut limiter.resources,
+            ListChangedNamespace::Prompts => &mut limiter.prompts,
+        };
+        if bucket.try_take_at(now) {
+            dirty.store(false, Ordering::Relaxed);
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn state_for(&self, namespace: ListChangedNamespace) -> (&AtomicBool, &AtomicBool) {
+        match namespace {
+            ListChangedNamespace::Tools => (&self.tools, &self.tools_dirty),
+            ListChangedNamespace::Resources => (&self.resources, &self.resources_dirty),
+            ListChangedNamespace::Prompts => (&self.prompts, &self.prompts_dirty),
+        }
     }
 
     fn take_tools_changed(&self) -> bool {
-        self.tools.swap(false, Ordering::Relaxed)
+        self.take_changed(ListChangedNamespace::Tools, std::time::Instant::now())
     }
 
     fn take_resources_changed(&self) -> bool {
-        self.resources.swap(false, Ordering::Relaxed)
+        self.take_changed(ListChangedNamespace::Resources, std::time::Instant::now())
     }
 
     fn take_prompts_changed(&self) -> bool {
-        self.prompts.swap(false, Ordering::Relaxed)
+        self.take_changed(ListChangedNamespace::Prompts, std::time::Instant::now())
+    }
+
+    fn take_changed(&self, namespace: ListChangedNamespace, now: std::time::Instant) -> bool {
+        let (flag, _) = self.state_for(namespace);
+        let notified = flag.swap(false, Ordering::Relaxed);
+        self.schedule_changed(namespace, now);
+        notified || flag.swap(false, Ordering::Relaxed)
     }
 }
 
@@ -980,6 +1097,39 @@ mod tests {
         assert!(!state.take_tools_changed());
         assert!(!state.take_resources_changed());
         assert!(!state.take_prompts_changed());
+    }
+
+    #[test]
+    fn list_changed_state_coalesces_bursts_and_bounds_repeated_refreshes() {
+        let state = ListChangedState::default();
+        let now = std::time::Instant::now();
+
+        for _ in 0..LIST_CHANGED_BUCKET_CAPACITY {
+            state.mark_changed(ListChangedNamespace::Tools, now);
+            assert!(state.take_changed(ListChangedNamespace::Tools, now));
+        }
+
+        // The fifth notification in the same refill interval is suppressed.
+        state.mark_changed(ListChangedNamespace::Tools, now);
+        assert!(!state.take_changed(ListChangedNamespace::Tools, now));
+
+        // Buckets are independent per notification namespace.
+        state.mark_changed(ListChangedNamespace::Resources, now);
+        assert!(state.take_changed(ListChangedNamespace::Resources, now));
+    }
+
+    #[test]
+    fn list_changed_state_refills_after_cooldown() {
+        let state = ListChangedState::default();
+        let now = std::time::Instant::now();
+
+        for _ in 0..LIST_CHANGED_BUCKET_CAPACITY {
+            state.mark_changed(ListChangedNamespace::Prompts, now);
+            assert!(state.take_changed(ListChangedNamespace::Prompts, now));
+        }
+        state.mark_changed(ListChangedNamespace::Prompts, now);
+        assert!(!state.take_changed(ListChangedNamespace::Prompts, now));
+        assert!(state.take_changed(ListChangedNamespace::Prompts, now + LIST_CHANGED_REFILL_INTERVAL));
     }
 
     fn form_request(meta: Option<RequestMetaObject>) -> ElicitRequestParams {

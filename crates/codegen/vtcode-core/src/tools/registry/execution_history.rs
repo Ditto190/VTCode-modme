@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::config::constants::{defaults, tools};
 use crate::tools::continuation::read_chunk_progress_from_result;
+use crate::tools::output_spooler::SpooledOutputReference;
 use crate::tools::tool_intent;
 
 use super::execution_kernel::PATH_ALIAS_KEYS;
@@ -297,24 +298,12 @@ const MIN_READONLY_IDENTICAL_LIMIT: usize = 2;
 /// limit so high that every identical call immediately hard-blocks.
 const MAX_READONLY_IDENTICAL_LIMIT: usize = 4;
 
-fn spool_path_exists(result: &Value, workspace_root: &Path) -> bool {
-    let Some(spool_path) = result.get("spool_path").and_then(|v| v.as_str()) else {
+fn spool_reference_is_replayable(result: &Value, workspace_root: &Path) -> bool {
+    if result.get("spool_path").is_none() {
         return true;
-    };
-    spool_path_is_replayable(spool_path, workspace_root)
-}
-
-/// Check whether a spool path is still replayable. Relative spool paths
-/// resolve against the workspace root only — the recorded session's cwd is
-/// not consulted, so replay is judged in the same coordinate space the spool
-/// was written in and no `getcwd` syscall runs on the per-call dedup path.
-fn spool_path_is_replayable(spool_path: &str, workspace_root: &Path) -> bool {
-    let path = Path::new(spool_path);
-    if path.is_absolute() {
-        return path.exists();
     }
-
-    workspace_root.join(path).exists() || path.exists()
+    SpooledOutputReference::from_value(result)
+        .is_some_and(|reference| reference.read_verified_completed(workspace_root).is_ok())
 }
 
 /// Whether a TTL replay requires the record to reference a spool file.
@@ -724,14 +713,8 @@ impl ToolExecutionHistory {
                 continue;
             };
 
-            if let Some(spool_path) = result.get("spool_path").and_then(Value::as_str) {
-                if mode == ReplayMode::RequireSpool && !spool_path_exists(result, &self.workspace_root) {
-                    continue;
-                }
-                // Single source of truth for spool-path existence. Uses the
-                // shared helper so a relative path resolves against the
-                // workspace cwd consistently across all callers.
-                if !spool_path_is_replayable(spool_path, &self.workspace_root) {
+            if result.get("spool_path").is_some() {
+                if !spool_reference_is_replayable(result, &self.workspace_root) {
                     continue;
                 }
             } else if mode == ReplayMode::RequireSpool {
@@ -1095,13 +1078,18 @@ mod tests {
 
     #[test]
     fn finds_recent_spooled_result() {
-        let history = ToolExecutionHistory::new(10);
         let args = json!({"command": "git diff"});
         let temp = tempdir().unwrap();
-        let spool_path = temp.path().join("spooled-output.txt");
-        std::fs::write(&spool_path, "diff output").unwrap();
+        let history = ToolExecutionHistory::with_workspace_root(10, temp.path().to_path_buf());
+        let spool_path = ".vtcode/context/tool_outputs/spooled-output.txt";
+        let full_path = temp.path().join(spool_path);
+        std::fs::create_dir_all(full_path.parent().expect("spool parent")).unwrap();
+        std::fs::write(&full_path, "diff output").unwrap();
         let result = json!({
             "spool_path": spool_path,
+            "spool_state": "completed",
+            "spooled_bytes": 11,
+            "spool_sha256": vtcode_commons::utils::calculate_sha256(b"diff output"),
             "success": true
         });
 
@@ -1122,6 +1110,13 @@ mod tests {
 
         let found = history.find_recent_spooled_result("run_pty_cmd", &args, Duration::from_secs(60));
         assert_eq!(found, Some(result));
+
+        std::fs::write(&full_path, "changed-out").unwrap();
+        assert!(
+            history
+                .find_recent_spooled_result("run_pty_cmd", &args, Duration::from_secs(60))
+                .is_none()
+        );
     }
 
     #[test]

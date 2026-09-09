@@ -32,6 +32,7 @@ pub(crate) mod schema;
 pub mod tool_discovery;
 pub mod tool_discovery_cache;
 pub mod traits;
+pub mod trust;
 pub mod types;
 pub(crate) mod utils;
 
@@ -53,6 +54,7 @@ pub use sandbox_context::McpSandboxContext;
 pub(crate) use schema::{validate_against_schema, validate_tool_input};
 pub use tool_discovery::{DetailLevel, ToolDiscovery, ToolDiscoveryResult};
 pub use traits::{McpElicitationHandler, McpToolExecutor};
+pub use trust::{MAX_UNTRUSTED_MCP_DESCRIPTION_BYTES, render_untrusted_mcp_description};
 pub use types::{
     FileParamSchemaEntry, FileUploadResult, McpClientStatus, McpElicitationRequest, McpElicitationResponse,
     McpPromptDetail, McpPromptInfo, McpResourceData, McpResourceInfo, McpToolInfo, OPENAI_FILE_PARAMS_META_KEY,

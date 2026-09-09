@@ -18,6 +18,7 @@
 - Re-export facade in vtcode-core (`mcp/mod.rs`) must stay in sync.
 - `rmcp_client` is `pub(crate)` -- not part of the public API.
 - `convert_to_rmcp()` is `pub(crate)` -- internal JSON bridge.
+- Treat discovered server text as bounded untrusted resource content; retain host policy around it and keep enforcement in registration/tool policy.
 
 ## Gotchas
 
@@ -25,3 +26,4 @@
 - `rmcp-reqwest` is a renamed `reqwest` with rustls features -- not the same as the workspace `reqwest`.
 - `DEFAULT_ENV_VARS` is platform-conditional (`#[cfg(unix)]` / `#[cfg(windows)]`).
 - `McpSandboxContext` is optional for unsandboxed `McpClient::new`; session setup must pass it through initial, pooled, and reconnect stdio launches, whose stderr is bounded and redacted.
+- `list_changed` refreshes are burst-coalesced and token-bucket limited; throttled notifications must retain a dirty bit for one refresh after refill.

@@ -73,6 +73,7 @@ pub(super) fn build_shell_execution_plan(
     additional_permissions: Option<&AdditionalPermissions>,
 ) -> Result<ShellExecutionPlan> {
     let mut approval_reasons = Vec::new();
+    let requires_code_boundary_approval = crate::command_safety::command_requires_approval(requested_command);
     if crate::command_safety::command_might_be_dangerous(requested_command) {
         push_unique_reason(&mut approval_reasons, "Command appears dangerous and requires approval.");
     }
@@ -81,6 +82,12 @@ pub(super) fn build_shell_execution_plan(
     }
 
     if sandbox_permissions.requires_escalated_permissions() || !sandbox_config.enabled {
+        if requires_code_boundary_approval {
+            push_unique_reason(
+                &mut approval_reasons,
+                "Inline interpreter code requires an enforceable sandbox or explicit approval.",
+            );
+        }
         return Ok(ShellExecutionPlan {
             approval_reason: join_shell_approval_reasons(approval_reasons),
             sandbox_policy: None,
@@ -104,6 +111,12 @@ pub(super) fn build_shell_execution_plan(
     }
 
     let sandbox_policy = if matches!(policy, SandboxPolicy::DangerFullAccess) {
+        if requires_code_boundary_approval {
+            push_unique_reason(
+                &mut approval_reasons,
+                "Inline interpreter code requires an enforceable sandbox or explicit approval.",
+            );
+        }
         None
     } else {
         Some(policy)

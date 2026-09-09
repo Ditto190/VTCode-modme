@@ -26,7 +26,9 @@ use crate::agent::runloop::unified::tool_routing::{
 };
 
 use super::execute_hitl_tool;
-use super::execution_events::{emit_tool_completion_for_status, emit_tool_completion_status};
+use super::execution_events::{
+    emit_tool_completion_for_status, emit_tool_completion_status, emit_tool_outcome_observation,
+};
 use super::execution_runtime::execute_with_cache_and_streaming;
 use super::file_conflict_prompt::resolve_file_conflict_status;
 use super::status::{ToolExecutionStatus, ToolPipelineOutcome};
@@ -79,17 +81,21 @@ pub(crate) async fn run_tool_call(
 ) -> Result<ToolPipelineOutcome, anyhow::Error> {
     let requested_name = call.tool_name().unwrap_or(call.call_type.as_str());
     if call.function.is_none() {
-        return Ok(ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+        let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
             error: structured_failure_from_message("tool", "Tool call missing function"),
-        }));
+        });
+        emit_tool_outcome_observation(ctx.harness_emitter, requested_name, &outcome);
+        return Ok(outcome);
     }
 
     let args_val = match call.execution_arguments() {
         Ok(args) => args,
         Err(err) => {
-            return Ok(ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
                 error: structured_failure("tool", &anyhow!(err)),
-            }));
+            });
+            emit_tool_outcome_observation(ctx.harness_emitter, requested_name, &outcome);
+            return Ok(outcome);
         }
     };
 
@@ -129,6 +135,7 @@ pub(crate) async fn run_tool_call_with_args(
     turn_index: usize,
     prevalidated: bool,
 ) -> Result<ToolPipelineOutcome, anyhow::Error> {
+    let invocation_started_at = std::time::Instant::now();
     let mut effective_args = std::borrow::Cow::Borrowed(args_val);
     let mut canonical_name = None;
     let tool_call_id = tool_item_id.as_str();
@@ -136,9 +143,12 @@ pub(crate) async fn run_tool_call_with_args(
 
     if !prevalidated {
         if let Some(exhaustion) = ctx.harness_state.tool_budget_exhaustion() {
-            return Ok(ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            let mut outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
                 error: structured_failure_from_message(requested_name, exhaustion.policy_violation_message()),
-            }));
+            });
+            outcome.total_duration = invocation_started_at.elapsed();
+            emit_tool_outcome_observation(ctx.harness_emitter, requested_name, &outcome);
+            return Ok(outcome);
         }
 
         match ctx.tool_registry.admit_public_tool_call(requested_name, args_val) {
@@ -147,9 +157,12 @@ pub(crate) async fn run_tool_call_with_args(
                 effective_args = std::borrow::Cow::Owned(prepared.effective_args);
             }
             Err(err) => {
-                return Ok(ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+                let mut outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
                     error: structured_failure(requested_name, &anyhow!("Tool argument validation failed: {err}")),
-                }));
+                });
+                outcome.total_duration = invocation_started_at.elapsed();
+                emit_tool_outcome_observation(ctx.harness_emitter, requested_name, &outcome);
+                return Ok(outcome);
             }
         }
     } else if let Some(tool) = ctx.tool_registry.get_tool(requested_name) {
@@ -175,7 +188,10 @@ pub(crate) async fn run_tool_call_with_args(
     }
     let max_tool_retries = ctx.harness_state.max_tool_retries as usize;
     let finish_with_status = |status: ToolExecutionStatus, tool_execution_started: bool, args: &Value| {
-        let outcome = ToolPipelineOutcome::from_status(status);
+        let mut outcome = ToolPipelineOutcome::from_status(status);
+        if outcome.total_duration.is_zero() {
+            outcome.total_duration = invocation_started_at.elapsed();
+        }
         emit_tool_completion_for_status(
             harness_emitter,
             tool_started_emitted,
@@ -186,6 +202,7 @@ pub(crate) async fn run_tool_call_with_args(
             args,
             &outcome.status,
         );
+        emit_tool_outcome_observation(harness_emitter, name, &outcome);
         outcome
     };
 
@@ -372,7 +389,7 @@ pub(crate) async fn run_tool_call_with_args(
         return Ok(finish_with_status(status, true, effective_args.as_ref()));
     }
 
-    if let Some(outcome) = handle_start_planning(
+    if let Some(mut outcome) = handle_start_planning(
         ctx,
         name,
         effective_args.as_ref(),
@@ -383,6 +400,9 @@ pub(crate) async fn run_tool_call_with_args(
     )
     .await
     {
+        if outcome.total_duration.is_zero() {
+            outcome.total_duration = invocation_started_at.elapsed();
+        }
         emit_tool_completion_for_status(
             harness_emitter,
             tool_started_emitted,
@@ -393,6 +413,7 @@ pub(crate) async fn run_tool_call_with_args(
             effective_args.as_ref(),
             &outcome.status,
         );
+        emit_tool_outcome_observation(harness_emitter, name, &outcome);
         return Ok(outcome);
     }
     let budget_excluded_wait = excludes_wait_from_turn_clock(name, effective_args.as_ref());
@@ -422,7 +443,7 @@ pub(crate) async fn run_tool_call_with_args(
     if budget_excluded_wait {
         ctx.harness_state.end_budget_excluded_wait();
     }
-    let execution_status = resolve_file_conflict_status(
+    let execution_status = match resolve_file_conflict_status(
         ctx.tool_registry,
         ctx.tool_result_cache,
         ctx.session,
@@ -440,10 +461,34 @@ pub(crate) async fn run_tool_call_with_args(
         safety_prevalidated,
         show_live_pty_preview,
     )
-    .await?;
+    .await
+    {
+        Ok(status) => status,
+        Err(error) => {
+            let mut outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+                error: structured_failure(name, &error),
+            });
+            outcome.total_duration = invocation_started_at.elapsed();
+            emit_tool_completion_for_status(
+                harness_emitter,
+                tool_started_emitted,
+                true,
+                &harness_item_id,
+                tool_call_id,
+                name,
+                effective_args.as_ref(),
+                &outcome.status,
+            );
+            emit_tool_outcome_observation(harness_emitter, name, &outcome);
+            return Err(error);
+        }
+    };
 
     let mut pipeline_outcome = ToolPipelineOutcome::from_status(execution_status);
-    apply_post_execution_side_effects(
+    if pipeline_outcome.total_duration.is_zero() {
+        pipeline_outcome.total_duration = invocation_started_at.elapsed();
+    }
+    if let Err(error) = apply_post_execution_side_effects(
         ctx,
         &harness_item_id,
         tool_call_id,
@@ -455,7 +500,14 @@ pub(crate) async fn run_tool_call_with_args(
         tool_started_emitted,
         &mut pipeline_outcome,
     )
-    .await?;
+    .await
+    {
+        let mut outcome =
+            ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure { error: structured_failure(name, &error) });
+        outcome.total_duration = invocation_started_at.elapsed();
+        emit_tool_outcome_observation(harness_emitter, name, &outcome);
+        return Err(error);
+    }
 
     emit_tool_completion_for_status(
         harness_emitter,
@@ -467,6 +519,7 @@ pub(crate) async fn run_tool_call_with_args(
         effective_args.as_ref(),
         &pipeline_outcome.status,
     );
+    emit_tool_outcome_observation(harness_emitter, name, &pipeline_outcome);
     Ok(pipeline_outcome)
 }
 

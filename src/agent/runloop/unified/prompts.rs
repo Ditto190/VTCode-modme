@@ -76,20 +76,29 @@ pub(crate) async fn read_system_prompt(
         prompt.push_str(&section);
     }
 
-    let token_estimate = prompt.len().div_ceil(4) as u64;
-    let over_budget = report.token_estimate > max_tokens;
+    let token_estimate = vtcode_commons::estimate_tokens(&prompt) as u64;
+    let over_budget = token_estimate > max_tokens;
     let trimmed_sections = report.trimmed_sections.clone();
     (prompt, SystemPromptReport { token_estimate, over_budget, trimmed_sections })
 }
 
 fn budget_addendum(addendum: &str, remaining_budget_tokens: u64) -> String {
-    let addendum_tokens = addendum.len() as u64 / 4;
+    let addendum_tokens = vtcode_commons::estimate_tokens(addendum) as u64;
     if addendum_tokens <= remaining_budget_tokens {
         return addendum.to_string();
     }
-    let max_chars = (remaining_budget_tokens * 4) as usize;
-    let truncated: String = addendum.chars().take(max_chars).collect();
-    format!("{truncated}...")
+
+    const TRUNCATION_MARKER: &str = "...";
+    let marker_tokens = vtcode_commons::estimate_tokens(TRUNCATION_MARKER) as u64;
+    if remaining_budget_tokens <= marker_tokens {
+        return vtcode_commons::truncate_to_tokens(
+            TRUNCATION_MARKER,
+            usize::try_from(remaining_budget_tokens).unwrap_or(usize::MAX),
+        );
+    }
+    let content_budget = usize::try_from(remaining_budget_tokens - marker_tokens).unwrap_or(usize::MAX);
+    let truncated = vtcode_commons::truncate_to_tokens(addendum, content_budget);
+    format!("{truncated}{TRUNCATION_MARKER}")
 }
 
 fn estimate_subagent_section_chars(subagents: &[(String, String, bool)]) -> usize {
@@ -239,5 +248,18 @@ mod tests {
         assert!(prompt.contains("explorer: Read-only repo explorer Read-only."));
         assert!(prompt.contains("builder: Write-capable implementation agent Explicit delegation only."));
         assert!(!prompt.contains("subagents available"));
+    }
+
+    #[test]
+    fn budget_addendum_uses_token_boundary_for_large_input() {
+        let addendum = "Use the repository guidance carefully. ".repeat(2_000);
+        let budget = 32;
+
+        let result = budget_addendum(&addendum, budget);
+
+        assert!(result.ends_with("..."));
+        assert!(result.len() < addendum.len());
+        assert!(vtcode_commons::estimate_tokens(&result) <= usize::try_from(budget + 1).unwrap());
+        assert!(budget_addendum(&addendum, 0).is_empty());
     }
 }

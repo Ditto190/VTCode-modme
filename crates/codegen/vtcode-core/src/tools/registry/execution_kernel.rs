@@ -620,13 +620,21 @@ pub(super) fn preflight_validate_resolved_call(
         tool_names::RUN_PTY_CMD | tool_names::CREATE_PTY_SESSION | tool_names::SHELL
     ) || (validation_tool_name == tool_names::UNIFIED_EXEC
         && crate::tools::command_args::command_session_requires_command_safety(validation_args.as_ref()));
-    if should_validate_command
-        && let Some(command) = crate::tools::command_args::command_text(validation_args.as_ref())
+    if should_validate_command {
+        let command_value = crate::tools::command_args::normalized_command_value(validation_args.as_ref())
             .ok()
-            .flatten()
-        && let Err(err) = commands::validate_command_safety(&command)
-    {
-        failures.push(format!("Command security check failed: {err}"));
+            .flatten();
+        let validation_result = match command_value {
+            Some(Value::Array(_)) => crate::tools::command_args::command_words(validation_args.as_ref())
+                .ok()
+                .flatten()
+                .map_or(Ok(()), |command| commands::validate_command_argv(&command)),
+            Some(Value::String(command)) => commands::validate_shell_script(&command),
+            _ => Ok(()),
+        };
+        if let Err(err) = validation_result {
+            failures.push(format!("Command security check failed: {err}"));
+        }
     }
     enforce_file_operation_payload_limit(
         &validation_tool_name,

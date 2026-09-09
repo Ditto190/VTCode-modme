@@ -8,7 +8,8 @@ use super::{
 };
 use crate::agent::runloop::unified::progress::ProgressReporter;
 use crate::agent::runloop::unified::tool_pipeline::{
-    exec_settlement_mode_for_tool_call, execute_prevalidated_read_only_with_cache, run_tool_call_with_args,
+    emit_tool_outcome_observation, exec_settlement_mode_for_tool_call, execute_prevalidated_read_only_with_cache,
+    run_tool_call_with_args,
 };
 use crate::agent::runloop::unified::turn::context::{
     PreparedAssistantToolCall, TurnHandlerOutcome, TurnProcessingContext,
@@ -96,8 +97,12 @@ fn planned_execution_layout(
     allow_parallel: bool,
     max_parallel: usize,
 ) -> Vec<(PreparedToolBatchKind, usize)> {
+    let mut semantic_calls = std::collections::HashSet::new();
     PreparedToolBatch::plan_layout_with_limit(
-        validated_calls.iter().map(ValidatedToolCall::can_parallelize),
+        validated_calls.iter().map(|call| {
+            let semantic_key = format!("{}:{}", call.prepared.canonical_name, call.prepared.effective_args);
+            call.can_parallelize() && semantic_calls.insert(semantic_key)
+        }),
         allow_parallel,
         max_parallel,
     )
@@ -246,7 +251,11 @@ async fn execute_parallel_group<'a, 'b>(
         batch_tracker.record(&status);
         record_circuit_transition(t_ctx.ctx, &name, circuit_before).await;
 
-        let outcome = crate::agent::runloop::unified::tool_pipeline::ToolPipelineOutcome::from_status(status);
+        let mut outcome = crate::agent::runloop::unified::tool_pipeline::ToolPipelineOutcome::from_status(status);
+        if outcome.total_duration.is_zero() {
+            outcome.total_duration = start_time.elapsed();
+        }
+        emit_tool_outcome_observation(t_ctx.ctx.harness_emitter, &name, &outcome);
         if update_repetition_tracker(t_ctx.repeated_tool_attempts, &outcome, &name, &args) {
             // A failed verifier grants fix-up edits; give the model one
             // diagnostic explanation before the pending-verification text cap
@@ -389,14 +398,21 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
         .vt_cfg
         .map(|config| config.agent.harness.max_parallel_tool_calls)
         .unwrap_or(DEFAULT_MAX_PARALLEL_TOOL_CALLS);
-    let planned_layout = planned_execution_layout(&validated_calls, t_ctx.ctx.full_auto, max_parallel_tool_calls);
-    let (groups, parallel_groups, max_group_size) = execution_group_stats_from_layout(&planned_layout);
+    let planned_layout = planned_execution_layout(&validated_calls, true, max_parallel_tool_calls);
+    let (group_count, parallel_group_count, maximum_group_size) = execution_group_stats_from_layout(&planned_layout);
+    let admitted_parallel_calls = planned_layout
+        .iter()
+        .filter(|(kind, _)| matches!(kind, PreparedToolBatchKind::ParallelReadonly))
+        .map(|(_, len)| *len)
+        .sum::<usize>();
     tracing::debug!(
         target: "vtcode.turn.metrics",
         metric = "tool_dispatch_groups",
-        groups,
-        parallel_groups,
-        max_group_size,
+        configured_limit = max_parallel_tool_calls,
+        admitted_parallel_calls,
+        group_count,
+        parallel_group_count,
+        maximum_group_size,
         "turn metric"
     );
 

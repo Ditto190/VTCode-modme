@@ -27,7 +27,7 @@ use super::execution::execute_tool_with_timeout_ref_prevalidated;
 use super::execution_helpers::{build_tool_status_message, is_loop_detection_status, parse_cached_output};
 use super::file_conflict_runtime::{RuntimeToolExecution, into_runtime_tool_execution};
 use super::pty_stream::PtyStreamRuntime;
-use super::status::ToolExecutionStatus;
+use super::status::{TOOL_EXECUTION_METADATA_FIELD, ToolExecutionStatus};
 
 struct ProgressCallbackGuard<'a> {
     registry: &'a ToolRegistry,
@@ -403,7 +403,11 @@ async fn cache_successful_output(
         && should_cache_success_output(name, output, *command_success)
     {
         let (_, cache_key) = workspace_scoped_cache_key(registry, name, args_val, cache_target);
-        let output_json = serde_json::to_string(output).unwrap_or_else(|_| "{}".to_string());
+        let mut cache_output = output.clone();
+        if let Some(object) = cache_output.as_object_mut() {
+            object.remove(TOOL_EXECUTION_METADATA_FIELD);
+        }
+        let output_json = serde_json::to_string(&cache_output).unwrap_or_else(|_| "{}".to_string());
         let mut cache = tool_result_cache.write().await;
         cache.insert_arc(cache_key, Arc::new(output_json));
     }
@@ -541,9 +545,9 @@ mod tests {
     use vtcode_ui::tui::app::{InlineCommand, InlineHandle};
 
     use super::{
-        ProgressCallbackGuard, StreamingOutputCoalescer, execute_prevalidated_read_only_with_cache,
-        extract_pty_stream_command, set_tool_execution_status, should_cache_success_output,
-        should_show_loading_ui_for_tool_call,
+        ProgressCallbackGuard, StreamingOutputCoalescer, TOOL_EXECUTION_METADATA_FIELD,
+        execute_prevalidated_read_only_with_cache, extract_pty_stream_command, set_tool_execution_status,
+        should_cache_success_output, should_show_loading_ui_for_tool_call,
     };
     use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
     use crate::agent::runloop::unified::state::CtrlCState;
@@ -718,7 +722,12 @@ mod tests {
             other => panic!("expected cached read to succeed, got {other:?}"),
         };
 
-        assert_eq!(second_output, first_output);
+        let mut first_cached_shape = first_output;
+        first_cached_shape
+            .as_object_mut()
+            .expect("read output object")
+            .remove(TOOL_EXECUTION_METADATA_FIELD);
+        assert_eq!(second_output, first_cached_shape);
         assert_eq!(cache.read().await.stats().hits, 1);
     }
 

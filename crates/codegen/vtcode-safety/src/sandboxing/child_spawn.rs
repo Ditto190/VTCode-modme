@@ -133,8 +133,6 @@ pub const PRESERVED_ENV_VARS: &[&str] = &[
     "GOROOT",
     "JAVA_HOME",
     "PYTHON",
-    "PYTHONPATH",
-    "NODE_PATH",
     // Terminal capabilities
     "COLORTERM",
     "FORCE_COLOR",

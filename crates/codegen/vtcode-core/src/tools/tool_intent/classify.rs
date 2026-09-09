@@ -7,7 +7,9 @@ use crate::tools::tool_intent::actions::{
     action_matches_any, command_session_action_in, command_session_action_is, file_operation_action,
     file_operation_action_is,
 };
-use crate::tools::tool_intent::readonly::is_readonly_command_session_command;
+use crate::tools::tool_intent::readonly::{
+    is_parallel_safe_command_session_command, is_readonly_command_session_command,
+};
 use crate::tools::tool_intent::types::{ToolBehavior, ToolIntent, ToolMutationModel};
 
 /// Returns the subset of actions that are allowed for a multi-action tool
@@ -30,6 +32,9 @@ pub fn builtin_tool_behavior(tool_name: &str) -> Option<ToolBehavior> {
 
 pub fn is_parallel_safe_call(tool_name: &str, args: &Value) -> bool {
     let canonical = canonical_tool_name(tool_name);
+    if matches!(canonical, tools::EXEC_COMMAND | tools::UNIFIED_EXEC) && is_command_run_tool_call(canonical, args) {
+        return is_parallel_safe_command_session_command(args);
+    }
     if let Some(behavior) = builtin_tool_behavior_canonical(canonical) {
         return behavior.supports_parallel_calls && !behavior.classify(args).mutating;
     }

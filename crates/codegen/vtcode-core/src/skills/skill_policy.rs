@@ -370,7 +370,18 @@ pub(super) fn merge_skill_command_permissions(skill: &Skill, tool_name: &str, to
         "additional_permissions".to_string(),
         serde_json::to_value(&merged_permissions).expect("additional permissions should serialize"),
     );
-    debug!("Applied skill-scoped sandbox permissions for '{}' to tool '{}'", skill.name(), tool_name);
+    args.entry("justification".to_string()).or_insert_with(|| {
+        Value::String(format!(
+            "Skill '{}' requests its declared filesystem permissions. Approve the displayed effective paths to continue.",
+            skill.name()
+        ))
+    });
+    info!(
+        skill = skill.name(),
+        tool = tool_name,
+        effective_permissions = ?merged_permissions,
+        "Skill command requested explicit sandbox approval for its effective merged permissions"
+    );
 
     Value::Object(args)
 }

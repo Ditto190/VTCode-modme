@@ -38,6 +38,7 @@ impl PtyManager {
             spool_path: handle.output_spool_path.clone(),
             spool_available: spool_ready && !spool_failed,
             spool_complete: spool_ready && spool_finished && !spool_failed,
+            spool_integrity: handle.output_spool_integrity.lock().clone(),
         }))
     }
 

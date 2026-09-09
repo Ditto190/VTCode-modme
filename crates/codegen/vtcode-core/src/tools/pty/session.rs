@@ -174,6 +174,7 @@ pub(super) struct PtySessionHandle {
     pub(super) output_spool_ready: Arc<AtomicBool>,
     pub(super) output_spool_finished: Arc<AtomicBool>,
     pub(super) output_spool_path: String,
+    pub(super) output_spool_integrity: Arc<Mutex<Option<crate::tools::output_spooler::SpoolIntegrity>>>,
 }
 
 impl PtySessionHandle {

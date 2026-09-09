@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde_json::Value;
 
@@ -7,61 +6,6 @@ use crate::core::agent::features::FeatureSet;
 use crate::llm::provider::ToolDefinition;
 use crate::tools::tool_intent;
 use crate::tools::validation::commands;
-
-#[derive(Debug, Clone)]
-pub enum RecoveryDirective {
-    Retry { delay: Option<Duration> },
-    ToolFreeSynthesis { reason: String },
-    SurfaceHint { message: String },
-    Abort { reason: String },
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutionFailure {
-    pub category: vtcode_commons::ErrorCategory,
-    pub retryable: bool,
-    pub message: String,
-    pub retry_after: Option<Duration>,
-    pub directive: RecoveryDirective,
-}
-
-impl ExecutionFailure {
-    pub fn from_tool_error(error: &crate::tools::registry::ToolExecutionError) -> Self {
-        let retry_after = error.retry_after().or_else(|| error.retry_delay());
-        let directive = if error.retryable {
-            RecoveryDirective::Retry { delay: retry_after }
-        } else {
-            RecoveryDirective::SurfaceHint { message: error.user_message() }
-        };
-        Self {
-            category: error.category,
-            retryable: error.retryable,
-            message: error.user_message(),
-            retry_after,
-            directive,
-        }
-    }
-
-    pub fn from_anyhow(error: &anyhow::Error) -> Self {
-        let category = vtcode_commons::classify_anyhow_error(error);
-        // Delegate to the canonical authority in vtcode-commons so that any new
-        // retryable category added there is automatically honoured here.
-        let retryable = category.is_retryable();
-        let retry_after = None;
-        let directive = if retryable {
-            RecoveryDirective::Retry { delay: retry_after }
-        } else {
-            RecoveryDirective::SurfaceHint { message: error.to_string() }
-        };
-        Self {
-            category,
-            retryable,
-            message: error.to_string(),
-            retry_after,
-            directive,
-        }
-    }
-}
 
 pub fn should_expose_tool_in_mode(
     tool: &ToolDefinition,

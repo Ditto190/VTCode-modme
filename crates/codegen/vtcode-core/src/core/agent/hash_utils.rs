@@ -255,42 +255,39 @@ pub fn hash_tool_definitions(tools: Option<&[ToolDefinition]>) -> Option<u64> {
     tools.and_then(hash_json_value)
 }
 
-/// Compute a stable hash of the system prompt prefix.
+/// Compute the stable instruction digest from explicitly classified sections.
 ///
-/// Strips runtime sections (tool catalog, context, active tools) so the hash
-/// remains stable across turns even as runtime context changes.
-///
-/// Section boundaries share `find_prompt_section_bounds()`
-/// semantics with prompt construction (`BracketOrMarkdown`), so a renamed
-/// runtime header cannot silently change cache identity.
-///
-/// Keep `RUNTIME_HEADERS` in sync with the Anthropic wire split in
-/// `vtcode-llm/src/providers/anthropic/request_builder/system.rs`
-/// (`split_runtime_context_section`): both must treat `[History Directives]`
-/// as dynamic per-turn content or cached-prefix identity diverges from the
-/// actual cache breakpoint.
+/// Unlike earliest-header truncation, this retains stable sections that occur
+/// after a dynamic appendix and excludes each runtime section independently.
+/// Keep the dynamic list aligned with prompt assembly and provider cache
+/// breakpoints.
 pub fn stable_system_prefix_hash(system_prompt: &str) -> u64 {
-    const RUNTIME_HEADERS: &[&str] = &[
+    const DYNAMIC_HEADERS: &[&str] = &[
         "## Active Tools",
+        "## Environment",
+        "## Active Primary Agent Runtime State",
+        "[Harness Limits]",
         "[Runtime Tool Catalog]",
         "[Deferred Tools]",
         "[Runtime Context]",
         "[History Directives]",
         "[Context]",
+        "[Recovery Mode]",
     ];
-    let earliest = RUNTIME_HEADERS
-        .iter()
-        .filter_map(|header| {
-            crate::prompts::sections::find_prompt_section_bounds(
-                system_prompt,
-                header,
-                crate::prompts::sections::SectionBoundaryMode::BracketOrMarkdown,
-            )
-            .map(|(start, _)| start)
-        })
-        .min();
-    let stable_prefix = earliest.map(|start| &system_prompt[..start]).unwrap_or(system_prompt);
-    hash_value(&stable_prefix.trim_end())
+    let mut stable = String::with_capacity(system_prompt.len());
+    let mut dynamic = false;
+    for line in system_prompt.lines() {
+        let trimmed = line.trim();
+        let is_header = trimmed.starts_with("## ") || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+        if is_header {
+            dynamic = DYNAMIC_HEADERS.contains(&trimmed);
+        }
+        if !dynamic {
+            stable.push_str(line);
+            stable.push('\n');
+        }
+    }
+    hash_value(&stable.trim_end())
 }
 
 /// Generate a deduplication key for low-signal tool attempts.

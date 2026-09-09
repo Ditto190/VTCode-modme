@@ -139,6 +139,14 @@ plugin roots by the high-level skill loader. Native loading is limited to
 user/application-managed trusted locations, and `load_skill` is approval-
 required so a future executable-backed skill cannot become silently allowed.
 
+Skill instructions and MCP tool descriptions are untrusted resources, not host
+policy. VT Code escapes, bounds, and places them in explicit resource delimiters
+with host policy on both sides. Registry metadata remains authoritative for
+shell/network capability, and expanded out-of-workspace skill permissions still
+require the normal human approval flow; prompt text cannot grant them. Repeated
+MCP `list_changed` refreshes are burst-coalesced and constrained by a bounded
+cooldown/token bucket before discovery validation runs again.
+
 Do not treat a plugin manifest, README, `AGENTS.md`, or other repository text
 as consent to load native code. Review the plugin's provenance and approve an
 explicit native-plugin action only when you trust the binary and its full

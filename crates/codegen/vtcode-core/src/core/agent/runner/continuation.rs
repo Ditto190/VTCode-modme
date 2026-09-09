@@ -76,6 +76,8 @@ pub(super) struct ContinuationController {
     context_reset_mode: ContextResetMode,
     /// Stall threshold for context reset.
     context_reset_stall_threshold: u32,
+    transition_thread_id: Option<String>,
+    transition_turn_id: Option<String>,
 }
 
 impl ContinuationController {
@@ -102,7 +104,15 @@ impl ContinuationController {
             workspace_root,
             context_reset_mode,
             context_reset_stall_threshold,
+            transition_thread_id: None,
+            transition_turn_id: None,
         }
+    }
+
+    pub(super) fn with_transition_identity(mut self, thread_id: String, turn_id: String) -> Self {
+        self.transition_thread_id = Some(thread_id);
+        self.transition_turn_id = Some(turn_id);
+        self
     }
 
     /// Attach a durable progress monitor. Once set, the controller keeps the
@@ -331,11 +341,13 @@ impl ContinuationController {
         // Check if the consecutive stall count has crossed the context reset
         // threshold. If so, write a reset manifest without blocking the
         // executor so the next session starts from a clean context.
-        if let Err(error) = crate::core::agent::context_reset::maybe_write_reset_on_stall_async(
+        if let Err(error) = crate::core::agent::context_reset::maybe_write_reset_on_stall_with_context_async(
             &workspace_root,
             stall_count,
             &reset_mode,
             threshold,
+            self.transition_thread_id.clone(),
+            self.transition_turn_id.clone(),
         )
         .await
         {

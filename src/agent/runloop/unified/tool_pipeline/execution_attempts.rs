@@ -22,7 +22,7 @@ use vtcode_core::exec::cancellation;
 
 use super::CancellationTokens;
 use super::execution_helpers::process_llm_tool_output;
-use super::status::ToolExecutionStatus;
+use super::status::{TOOL_EXECUTION_METADATA_FIELD, ToolExecutionStatus};
 use super::timeout::{TimeoutWarningGuard, create_timeout_error};
 use super::{DEFAULT_TOOL_TIMEOUT, MAX_RETRY_BACKOFF, RETRY_BACKOFF_BASE};
 
@@ -358,10 +358,26 @@ async fn run_single_tool_attempt(
 
             let request = ToolExecutionRequest::new(name.to_string(), args.clone()).with_policy(policy);
             let outcome = registry.execute_public_tool_request(request).await;
-            let result: Result<Value, Error> = if let Some(output) = outcome.output {
+            let attempts = outcome.attempts.max(1);
+            let total_duration_ms = outcome.total_duration.as_millis().min(u128::from(u64::MAX)) as u64;
+            let last_error_category = outcome.last_error_category;
+            let result: Result<Value, Error> = if let Some(mut output) = outcome.output {
+                if let Some(object) = output.as_object_mut() {
+                    object.insert(
+                        TOOL_EXECUTION_METADATA_FIELD.to_string(),
+                        serde_json::json!({
+                            "attempts": attempts,
+                            "total_duration_ms": total_duration_ms,
+                            "last_error_category": last_error_category,
+                        }),
+                    );
+                }
                 Ok(output)
             } else if let Some(error) = outcome.error {
-                Ok(error.to_json_value())
+                Ok(error
+                    .with_attempt(attempts)
+                    .with_debug_metadata("total_duration_ms", total_duration_ms.to_string())
+                    .to_json_value())
             } else {
                 Err(anyhow::anyhow!("tool execution failed without output or error"))
             };

@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::time::Duration;
+use vtcode_commons::ErrorCategory;
 
 use super::ToolExecutionError;
 
@@ -121,6 +122,8 @@ impl ToolExecutionRequest {
 pub struct ToolExecutionOutcome {
     pub tool_name: String,
     pub attempts: u32,
+    pub total_duration: Duration,
+    pub last_error_category: Option<ErrorCategory>,
     pub output: Option<Value>,
     pub error: Option<ToolExecutionError>,
 }
@@ -131,6 +134,8 @@ impl ToolExecutionOutcome {
         Self {
             tool_name: tool_name.into(),
             attempts,
+            total_duration: Duration::ZERO,
+            last_error_category: None,
             output: Some(output),
             error: None,
         }
@@ -138,12 +143,28 @@ impl ToolExecutionOutcome {
 
     #[must_use]
     pub fn failure(tool_name: impl Into<String>, attempts: u32, error: ToolExecutionError) -> Self {
+        let last_error_category = Some(error.category);
         Self {
             tool_name: tool_name.into(),
             attempts,
+            total_duration: Duration::ZERO,
+            last_error_category,
             output: None,
             error: Some(error),
         }
+    }
+
+    #[must_use]
+    pub fn with_execution_metadata(
+        mut self,
+        total_duration: Duration,
+        last_error_category: Option<ErrorCategory>,
+    ) -> Self {
+        self.total_duration = total_duration;
+        if last_error_category.is_some() {
+            self.last_error_category = last_error_category;
+        }
+        self
     }
 
     #[must_use]

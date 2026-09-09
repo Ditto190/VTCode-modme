@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use hashbrown::HashMap;
+use parking_lot::Mutex as ParkingMutex;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock, watch};
 use tokio::task::JoinHandle;
@@ -12,6 +14,7 @@ use vtcode_bash_runner::{PipeSpawnOptions, ProcessHandle, spawn_pipe_process_wit
 
 use crate::sandboxing::build_sanitized_env;
 use crate::tools::ExecSessionId;
+use crate::tools::output_spooler::{SpoolIntegrity, encode_digest_hex};
 use crate::tools::pty::PtySize;
 use crate::tools::registry::{PtySessionGuard, PtySessionManager};
 use crate::tools::types::VTCodeExecSession;
@@ -28,6 +31,7 @@ pub(crate) struct PipeOutputStats {
     pub spool_path: String,
     pub spool_available: bool,
     pub spool_complete: bool,
+    pub spool_integrity: Option<SpoolIntegrity>,
 }
 
 #[derive(Default)]
@@ -123,6 +127,25 @@ struct PipeSpoolState {
     ready: Arc<AtomicBool>,
     failed: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
+    integrity: Arc<ParkingMutex<Option<SpoolIntegrity>>>,
+}
+
+pub(crate) fn create_live_spool_file(workspace_root: &Path, session_id: &str) -> (PathBuf, Option<std::fs::File>) {
+    let output_directory = Path::new(".vtcode/context/tool_outputs");
+    for attempt in 0..16_u32 {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!("_{attempt}")
+        };
+        let relative_path = output_directory.join(format!("write_stdin_{session_id}{suffix}.txt"));
+        match vtcode_commons::fs::bound_file::create_file_beneath(workspace_root, &relative_path) {
+            Ok(file) => return (relative_path, Some(file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return (relative_path, None),
+        }
+    }
+    (output_directory.join(format!("write_stdin_{session_id}_unavailable.txt")), None)
 }
 
 impl PipeSessionRecord {
@@ -175,10 +198,11 @@ impl PipeSessionManager {
         // since this runs per spawned exec session.
         let working_dir = tokio::task::spawn_blocking({
             let working_dir = working_dir.clone();
-            move || canonicalize_workspace(&working_dir)
+            move || vtcode_commons::canonicalize(&working_dir)
         })
         .await
-        .unwrap_or(working_dir);
+        .context("join exec-session working-directory canonicalization")?
+        .with_context(|| format!("canonicalize exec-session working directory {}", working_dir.display()))?;
         self.ensure_within_workspace(&working_dir)?;
 
         // Hold the write lock across check → spawn → insert so two concurrent
@@ -223,41 +247,42 @@ impl PipeSessionManager {
         let output_handle = Arc::clone(&handle);
         let (activity_tx, _) = watch::channel(0u64);
         let output_activity_tx = activity_tx.clone();
-        let spool_path = self.format_working_dir(
-            &self
-                .workspace_root
-                .join(".vtcode/context/tool_outputs")
-                .join(format!("write_stdin_{session_id}.txt")),
-        );
-        let spool_file_path = self.workspace_root.join(&spool_path);
+        let workspace_root = tokio::task::spawn_blocking({
+            let workspace_root = self.workspace_root.clone();
+            move || vtcode_commons::canonicalize(&workspace_root)
+        })
+        .await
+        .context("join exec-session workspace canonicalization")?
+        .with_context(|| format!("canonicalize exec-session workspace {}", self.workspace_root.display()))?;
+        let spool_session_id = session_id.as_str().to_owned();
+        let (spool_relative_path, spool_file) =
+            tokio::task::spawn_blocking(move || create_live_spool_file(&workspace_root, &spool_session_id))
+                .await
+                .unwrap_or_else(|_| {
+                    (
+                        PathBuf::from(format!(".vtcode/context/tool_outputs/write_stdin_{session_id}_unavailable.txt")),
+                        None,
+                    )
+                });
+        let spool_path = spool_relative_path.to_string_lossy().replace('\\', "/");
         let spool_ready = Arc::new(AtomicBool::new(false));
         let spool_ready_for_task = Arc::clone(&spool_ready);
         let spool_failed = Arc::new(AtomicBool::new(false));
         let spool_failed_for_task = Arc::clone(&spool_failed);
         let spool_finished = Arc::new(AtomicBool::new(false));
         let spool_finished_for_task = Arc::clone(&spool_finished);
+        let spool_integrity = Arc::new(ParkingMutex::new(None));
+        let spool_integrity_for_task = Arc::clone(&spool_integrity);
         let output_task = tokio::spawn(async move {
-            let mut spool_file =
-                if tokio::fs::create_dir_all(spool_file_path.parent().unwrap_or_else(|| Path::new(".")))
-                    .await
-                    .is_ok()
-                {
-                    tokio::fs::OpenOptions::new()
-                        .create(true)
-                        .write(true)
-                        .truncate(true)
-                        .open(&spool_file_path)
-                        .await
-                        .ok()
-                } else {
-                    None
-                };
+            let mut spool_file = spool_file.map(tokio::fs::File::from_std);
             if spool_file.is_none() {
                 spool_failed_for_task.store(true, Ordering::Release);
             } else {
                 spool_ready_for_task.store(true, Ordering::Release);
             }
             let mut spool_redactor = vtcode_commons::sanitizer::StreamingSecretRedactor::default();
+            let mut spool_hasher = Sha256::new();
+            let mut spool_byte_count = 0_u64;
             loop {
                 match tokio::time::timeout(tokio::time::Duration::from_millis(15), output_rx.recv()).await {
                     Ok(Some(chunk)) => {
@@ -268,9 +293,14 @@ impl PipeSessionManager {
                         let text = String::from_utf8_lossy(&chunk);
                         if let Some(file) = spool_file.as_mut() {
                             let sanitized = spool_redactor.push(&text);
-                            if !sanitized.is_empty() && file.write_all(sanitized.as_bytes()).await.is_err() {
-                                spool_failed_for_task.store(true, Ordering::Release);
-                                spool_file = None;
+                            if !sanitized.is_empty() {
+                                if file.write_all(sanitized.as_bytes()).await.is_err() {
+                                    spool_failed_for_task.store(true, Ordering::Release);
+                                    spool_file = None;
+                                } else {
+                                    spool_hasher.update(sanitized.as_bytes());
+                                    spool_byte_count = spool_byte_count.saturating_add(sanitized.len() as u64);
+                                }
                             }
                         }
                         output_clone.append(&text, chunk.len()).await;
@@ -285,10 +315,18 @@ impl PipeSessionManager {
             }
             if let Some(file) = spool_file.as_mut() {
                 let sanitized = spool_redactor.finish();
-                if (!sanitized.is_empty() && file.write_all(sanitized.as_bytes()).await.is_err())
-                    || file.flush().await.is_err()
-                {
+                let write_failed = !sanitized.is_empty() && file.write_all(sanitized.as_bytes()).await.is_err();
+                if !write_failed && !sanitized.is_empty() {
+                    spool_hasher.update(sanitized.as_bytes());
+                    spool_byte_count = spool_byte_count.saturating_add(sanitized.len() as u64);
+                }
+                if write_failed || file.sync_all().await.is_err() {
                     spool_failed_for_task.store(true, Ordering::Release);
+                } else {
+                    *spool_integrity_for_task.lock() = Some(SpoolIntegrity {
+                        byte_count: spool_byte_count,
+                        sha256: encode_digest_hex(spool_hasher.finalize()),
+                    });
                 }
             }
             spool_finished_for_task.store(true, Ordering::Release);
@@ -311,6 +349,7 @@ impl PipeSessionManager {
                 ready: spool_ready,
                 failed: spool_failed,
                 finished: spool_finished,
+                integrity: spool_integrity,
             },
         ));
 
@@ -339,6 +378,7 @@ impl PipeSessionManager {
             spool_path: record.spool.path.clone(),
             spool_available,
             spool_complete: spool_available && record.spool.finished.load(Ordering::Acquire),
+            spool_integrity: record.spool.integrity.lock().clone(),
         })
     }
 
@@ -612,6 +652,7 @@ impl ExecSessionManager {
                     spool_path: stats.spool_path,
                     spool_available: stats.spool_available,
                     spool_complete: stats.spool_complete,
+                    spool_integrity: stats.spool_integrity,
                 })
             }),
         }

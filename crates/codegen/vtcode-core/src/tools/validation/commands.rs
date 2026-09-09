@@ -4,7 +4,7 @@
 //! `command_safety` module. All dangerous-command detection, injection
 //! pattern detection, and shell parsing live in `command_safety/`.
 
-pub use crate::command_safety::validate_command_safety;
+pub use crate::command_safety::{validate_command_argv, validate_command_safety, validate_shell_script};
 
 #[cfg(test)]
 mod tests {

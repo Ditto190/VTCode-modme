@@ -10,7 +10,6 @@ use std::time::Instant;
 use tokio::task::spawn_blocking;
 
 use crate::core::agent::events::{ExecEventRecorder, SessionStoreSinkHandle};
-use crate::core::agent::harness_artifacts;
 use crate::core::agent::progress_monitor::ProgressMonitor;
 use crate::core::agent::runner::continuation::ContinuationController;
 use crate::core::agent::runtime::AgentRuntime;
@@ -146,7 +145,7 @@ impl AgentRunner {
         // `maybe_write_reset_on_stall`), clear the conversation history so
         // this session starts fresh from external artifacts only. The orient
         // context in the system prompt already includes the reset banner.
-        self.apply_context_reset_if_pending(&mut session_state).await;
+        self.apply_context_reset_if_pending(&mut session_state).await?;
 
         let mut runtime = AgentRuntime::new(session_state, None, steering_receiver);
 
@@ -195,6 +194,7 @@ impl AgentRunner {
             self.config().agent.harness.context_reset_mode.clone(),
             self.config().agent.harness.context_reset_stall_threshold,
         )
+        .with_transition_identity(self.session_id.clone(), task.id.clone())
         .with_progress_monitor(
             ProgressMonitor::with_persistence_async(
                 self.workspace().to_path_buf(),
@@ -239,23 +239,19 @@ impl AgentRunner {
     /// acts on it by clearing the conversation history so the agent starts
     /// fresh from external artifacts only. The manifest is consumed (deleted)
     /// so it only triggers once.
-    async fn apply_context_reset_if_pending(&self, session_state: &mut AgentSessionState) {
-        let manifest_path = harness_artifacts::current_context_reset_path(&self._workspace);
-
-        if !tokio::fs::try_exists(&manifest_path).await.unwrap_or(false) {
-            return;
+    async fn apply_context_reset_if_pending(&self, session_state: &mut AgentSessionState) -> Result<()> {
+        if crate::core::agent::context_reset::read_transition_manifest_async(&self._workspace)
+            .await?
+            .is_none()
+        {
+            return Ok(());
         }
 
         tracing::info!("Context reset manifest detected — clearing conversation history for fresh start");
         session_state.clear_conversation_history();
 
         // Consume the manifest so it only triggers once.
-        if let Err(e) = tokio::fs::remove_file(&manifest_path).await {
-            tracing::warn!(
-                error = %e,
-                path = %manifest_path.display(),
-                "Failed to remove context reset manifest after applying reset"
-            );
-        }
+        crate::core::agent::context_reset::consume_manifest_async(&self._workspace).await?;
+        Ok(())
     }
 }

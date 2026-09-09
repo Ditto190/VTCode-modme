@@ -13,6 +13,7 @@ use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use parking_lot::{Mutex, RwLock};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use sha2::{Digest, Sha256};
 use shell_words::join;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex as TokioMutex;
@@ -61,6 +62,8 @@ const THREAD_JOIN_GRACE_PERIOD_MS: u64 = 500;
 use crate::audit::PermissionAuditLog;
 use crate::config::{CommandsConfig, PtyConfig};
 use crate::telemetry::perf;
+use crate::tools::exec_session::create_live_spool_file;
+use crate::tools::output_spooler::{SpoolIntegrity, encode_digest_hex};
 use crate::tools::path_env;
 use crate::tools::shell::resolve_fallback_shell;
 use crate::tools::types::VTCodePtySession;
@@ -577,13 +580,9 @@ impl PtyManager {
         let scrollback =
             Arc::new(Mutex::new(PtyScrollback::new(self.config.scrollback_lines, self.config.max_scrollback_bytes)));
 
-        let output_spool_path = self.format_working_dir(
-            &self
-                .workspace_root
-                .join(".vtcode/context/tool_outputs")
-                .join(format!("write_stdin_{}.txt", sanitize_session_id(&session_id))),
-        );
-        let output_spool_file_path = self.workspace_root.join(&output_spool_path);
+        let (output_spool_relative_path, output_spool_file) =
+            create_live_spool_file(&self.workspace_root, &sanitize_session_id(&session_id));
+        let output_spool_path = output_spool_relative_path.to_string_lossy().replace('\\', "/");
         let (output_spool_tx, mut output_spool_rx) = tokio_mpsc::channel::<Vec<u8>>(64);
         let output_total_bytes = Arc::new(AtomicU64::new(0));
         let output_total_bytes_for_reader = Arc::clone(&output_total_bytes);
@@ -593,21 +592,11 @@ impl PtyManager {
         let output_spool_ready_for_task = Arc::clone(&output_spool_ready);
         let output_spool_finished = Arc::new(AtomicBool::new(false));
         let output_spool_finished_for_task = Arc::clone(&output_spool_finished);
+        let output_spool_integrity = Arc::new(Mutex::new(None));
+        let output_spool_integrity_for_task = Arc::clone(&output_spool_integrity);
 
         let output_spool_task = async move {
-            let mut spool_file = if let Some(parent) = output_spool_file_path.parent()
-                && tokio::fs::create_dir_all(parent).await.is_ok()
-            {
-                tokio::fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(&output_spool_file_path)
-                    .await
-                    .ok()
-            } else {
-                None
-            };
+            let mut spool_file = output_spool_file.map(tokio::fs::File::from_std);
 
             if spool_file.is_none() {
                 output_spool_failed_for_task.store(true, Ordering::Release);
@@ -615,6 +604,8 @@ impl PtyManager {
                 output_spool_ready_for_task.store(true, Ordering::Release);
             }
             let mut spool_redactor = vtcode_commons::sanitizer::StreamingSecretRedactor::default();
+            let mut spool_hasher = Sha256::new();
+            let mut spool_byte_count = 0_u64;
 
             while let Some(chunk) = output_spool_rx.recv().await {
                 let Some(file) = spool_file.as_mut() else {
@@ -622,18 +613,31 @@ impl PtyManager {
                 };
                 let text = String::from_utf8_lossy(&chunk);
                 let sanitized = spool_redactor.push(&text);
-                if !sanitized.is_empty() && file.write_all(sanitized.as_bytes()).await.is_err() {
-                    output_spool_failed_for_task.store(true, Ordering::Release);
-                    spool_file = None;
+                if !sanitized.is_empty() {
+                    if file.write_all(sanitized.as_bytes()).await.is_err() {
+                        output_spool_failed_for_task.store(true, Ordering::Release);
+                        spool_file = None;
+                    } else {
+                        spool_hasher.update(sanitized.as_bytes());
+                        spool_byte_count = spool_byte_count.saturating_add(sanitized.len() as u64);
+                    }
                 }
             }
 
             if let Some(file) = spool_file.as_mut() {
                 let sanitized = spool_redactor.finish();
-                if (!sanitized.is_empty() && file.write_all(sanitized.as_bytes()).await.is_err())
-                    || file.flush().await.is_err()
-                {
+                let write_failed = !sanitized.is_empty() && file.write_all(sanitized.as_bytes()).await.is_err();
+                if !write_failed && !sanitized.is_empty() {
+                    spool_hasher.update(sanitized.as_bytes());
+                    spool_byte_count = spool_byte_count.saturating_add(sanitized.len() as u64);
+                }
+                if write_failed || file.sync_all().await.is_err() {
                     output_spool_failed_for_task.store(true, Ordering::Release);
+                } else {
+                    *output_spool_integrity_for_task.lock() = Some(SpoolIntegrity {
+                        byte_count: spool_byte_count,
+                        sha256: encode_digest_hex(spool_hasher.finalize()),
+                    });
                 }
             }
             output_spool_finished_for_task.store(true, Ordering::Release);
@@ -787,6 +791,7 @@ info!("PTY session '{}' processed {} unicode characters across {} sessions with 
             output_spool_ready,
             output_spool_finished,
             output_spool_path,
+            output_spool_integrity,
         }));
 
         Ok(metadata)

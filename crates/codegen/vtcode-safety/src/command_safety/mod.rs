@@ -36,7 +36,9 @@ mod integration_tests;
 pub use audit::{AuditEntry, SafetyAuditLogger};
 pub use cache::SafetyDecisionCache;
 pub use command_db::CommandDatabase;
-pub use dangerous_commands::{command_might_be_dangerous, git_global_option_requires_prompt};
+pub use dangerous_commands::{
+    command_might_be_dangerous, command_requires_approval, git_global_option_requires_prompt,
+};
 pub use safe_command_registry::{SafeCommandRegistry, SafetyDecision};
 pub use shell_parser::parse_bash_lc_commands;
 pub use unified::{EvaluationReason, EvaluationResult, PolicyAwareEvaluator, UnifiedCommandEvaluator};
@@ -114,6 +116,99 @@ pub fn validate_command_safety(command: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validate an explicit argv command without flattening argument boundaries
+/// into shell text. Only an explicit shell `-c`/`-lc` argument is parsed as a
+/// script; metacharacters in ordinary argv values remain literal.
+pub fn validate_command_argv(command: &[String]) -> anyhow::Result<()> {
+    use anyhow::bail;
+
+    if command.is_empty() {
+        bail!("empty command");
+    }
+    if command_might_be_dangerous(command) {
+        bail!("Potential dangerous command detected");
+    }
+
+    let Some(unwrapped) = dangerous_commands::unwrap_command_prefix(command) else {
+        bail!("dynamic or malformed executable prefix");
+    };
+    if let [executable, flag, script, ..] = unwrapped
+        && matches!(
+            std::path::Path::new(executable).file_name().and_then(|name| name.to_str()),
+            Some("bash" | "sh" | "zsh")
+        )
+        && matches!(flag.as_str(), "-c" | "-lc" | "-ilc")
+    {
+        validate_shell_script(script)?;
+    }
+    Ok(())
+}
+
+/// Validate an explicitly requested shell script through the Bash AST while
+/// retaining legitimate compound-command boundaries. This is distinct from
+/// [`validate_command_safety`], whose raw-string compatibility API rejects
+/// unquoted chaining before execution intent is known.
+pub fn validate_shell_script(script: &str) -> anyhow::Result<()> {
+    use anyhow::bail;
+
+    if shell_parser::contains_dynamic_find_syntax(script) {
+        bail!("dynamic shell expansion in find commands is not allowed");
+    }
+    if contains_command_substitution(script) {
+        bail!("Command injection pattern detected");
+    }
+    shell_parser::validate_redirection_paths(script)?;
+    let commands = shell_parser::parse_shell_commands(script)
+        .map_err(|error| anyhow::anyhow!("invalid explicit shell script: {error}"))?;
+    for command in commands {
+        if command_might_be_dangerous(&command) {
+            bail!("Potential dangerous command detected");
+        }
+        let display = command.join(" ");
+        if let Some(pattern) = shell_parser::additional_dangerous_pattern(&display) {
+            bail!("Potential dangerous command: {pattern}");
+        }
+    }
+    Ok(())
+}
+
+fn contains_command_substitution(script: &str) -> bool {
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+    let mut characters = script.chars().peekable();
+    while let Some(character) = characters.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && !in_single_quote {
+            escaped = true;
+            continue;
+        }
+        if character == '\'' && !in_double_quote {
+            in_single_quote = !in_single_quote;
+            continue;
+        }
+        if character == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            continue;
+        }
+        if !in_single_quote {
+            if character == '`' {
+                return true;
+            }
+            if character == '$' {
+                let mut lookahead = characters.clone();
+                if lookahead.next() == Some('(') && lookahead.next() != Some('(') {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +227,34 @@ mod tests {
     #[test]
     fn validation_rejects_dynamic_find_option_splicing() {
         assert!(validate_command_safety("find src -maxdepth 0 -exe$''c touch /tmp/VT_BYPASS_POC {} +").is_err());
+    }
+
+    #[test]
+    fn argv_validation_preserves_explicit_shell_script_boundaries() {
+        let benign = [
+            "bash".to_string(),
+            "-lc".to_string(),
+            "IFS= read -r line; printf '<%s>' \"$line\"".to_string(),
+        ];
+        let destructive = ["bash".to_string(), "-lc".to_string(), "rm -rf /".to_string()];
+
+        let benign_result = validate_command_argv(&benign);
+        assert!(benign_result.is_ok(), "benign argv should pass: {benign_result:?}");
+        assert!(validate_command_argv(&destructive).is_err());
+    }
+
+    #[test]
+    fn explicit_shell_script_allows_static_chaining_but_rejects_substitution() {
+        assert!(validate_shell_script("printf first; printf second").is_ok());
+        assert!(validate_shell_script("printf '%s' \"$(whoami)\"").is_err());
+    }
+
+    #[test]
+    fn argv_validation_leaves_inline_code_for_sandbox_or_approval_admission() {
+        let command = ["python3".to_string(), "-c".to_string(), "print('ok')".to_string()];
+
+        assert!(validate_command_argv(&command).is_ok());
+        assert!(command_requires_approval(&command));
     }
 
     #[test]

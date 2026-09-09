@@ -7675,6 +7675,7 @@ dependencies = [
  "path-clean",
  "serde",
  "shell-escape",
+ "shell-words",
  "tokio",
  "vtcode-commons",
  "vtcode-exec-events",

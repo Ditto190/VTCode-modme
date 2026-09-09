@@ -13,7 +13,16 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use vtcode_commons::ErrorCategory;
 use vtcode_exec_events::ThreadEvent;
+
+#[derive(Debug, Clone)]
+pub struct ToolExecutionObservation {
+    pub tool_name: String,
+    pub attempts: u32,
+    pub duration_ms: u64,
+    pub error_category: Option<ErrorCategory>,
+}
 
 /// Manages the state of an active agent session, including conversation history,
 /// statistics, and turn-based constraints.
@@ -91,9 +100,8 @@ pub struct AgentSessionState {
     pub turn_total_ms: u128,
     pub turn_max_ms: u128,
     pub turn_durations_ms: Vec<u128>,
-    /// Per-tool execution latencies recorded during the current turn.
-    /// Entries are (tool_name, duration_ms).
-    pub turn_tool_latencies: Vec<(String, u64)>,
+    /// One canonical terminal observation per tool invocation in this turn.
+    pub turn_tool_observations: Vec<ToolExecutionObservation>,
     /// Cached total estimated token count for the conversation history.
     /// Updated incrementally on each push to avoid O(n) scans per turn.
     cached_total_tokens: usize,
@@ -174,7 +182,7 @@ impl AgentSessionState {
             turn_total_ms: 0,
             turn_max_ms: 0,
             turn_durations_ms: Vec::with_capacity(max_turns),
-            turn_tool_latencies: Vec::with_capacity(32),
+            turn_tool_observations: Vec::with_capacity(32),
             cached_total_tokens: 0,
             request_gap: RequestGapTracker::default(),
             last_reasoning_effort: None,
@@ -498,7 +506,7 @@ impl AgentSessionState {
         self.pending_actions = PendingActions::new(100);
         self.consecutive_idle_turns = 0;
         self.max_tool_loop_streak = 0;
-        self.turn_tool_latencies.clear();
+        self.turn_tool_observations.clear();
         self.current_stage = None;
         self.auto_compact_suppressed = crate::compaction::SUPPRESS_NONE;
         self.error_recovery.lock().reset();

@@ -22,6 +22,7 @@ use crate::prompts::system_prompt_cache::PROMPT_CACHE;
 use crate::skills::render::render_prompt_skills_section;
 use std::path::Path;
 use tracing::warn;
+use vtcode_commons::estimate_tokens;
 
 /// Shared Planning workflow header used by both static and incremental prompt builders.
 pub const PLANNING_WORKFLOW_READ_ONLY_HEADER: &str = "# PLANNING WORKFLOW (READ-ONLY)";
@@ -214,10 +215,22 @@ impl SectionKind {
             Self::StructuredReasoning => Some(0),
             Self::Skills => Some(1),
             Self::EnvironmentAddenda => Some(2),
-            Self::ShellProfile => Some(3),
-            Self::ToolGuidelines => Some(4),
+            // Shell safety guidance and the active-tool contract are required
+            // for the model to use the available tools safely. They must never
+            // disappear as a side effect of prompt budgeting.
+            Self::ShellProfile | Self::ToolGuidelines => None,
             Self::BaseContract => None,
         }
+    }
+
+    /// Whether this section belongs to the stable instruction prefix.
+    ///
+    /// Runtime tool catalogs and environment observations are deliberately
+    /// dynamic. Keeping this classification beside the section definition
+    /// avoids relying on an earliest-header heuristic, which can accidentally
+    /// make a later safety section part of (or outside) a cache boundary.
+    const fn is_cache_stable(self) -> bool {
+        matches!(self, Self::BaseContract | Self::StructuredReasoning | Self::Skills | Self::ShellProfile)
     }
 }
 
@@ -274,9 +287,23 @@ pub async fn compose_system_instruction_with_report(
     vtcode_config: Option<&crate::config::VTCodeConfig>,
     prompt_context: Option<&PromptContext>,
 ) -> (String, SystemPromptReport) {
+    let (prompt, report, _) =
+        compose_system_instruction_with_identity(project_root, vtcode_config, prompt_context).await;
+    (prompt, report)
+}
+
+/// Compose a prompt and retain the stable instruction digest used by local and
+/// provider-facing prompt caches.
+async fn compose_system_instruction_with_identity(
+    project_root: &Path,
+    vtcode_config: Option<&crate::config::VTCodeConfig>,
+    prompt_context: Option<&PromptContext>,
+) -> (String, SystemPromptReport, u64) {
     let sections = build_prompt_sections(project_root, vtcode_config, prompt_context).await;
+    let instruction_digest = stable_prompt_sections_digest(&sections);
     let (max_tokens, warn_enabled, trim_enabled) = system_prompt_budget_settings(vtcode_config);
-    apply_token_budget(sections, max_tokens, warn_enabled, trim_enabled)
+    let (prompt, report) = apply_token_budget(sections, max_tokens, warn_enabled, trim_enabled);
+    (prompt, report, instruction_digest)
 }
 
 /// Measure the system prompt size without applying budget trimming or warnings.
@@ -303,7 +330,7 @@ pub async fn measure_system_prompt_size(
 /// trim_enabled)` settings, falling back to the `AgentConfig` defaults when
 /// no config is available.
 fn system_prompt_budget_settings(vtcode_config: Option<&crate::config::VTCodeConfig>) -> (u64, bool, bool) {
-    vtcode_config.map_or((prompt_budget_constants::DEFAULT_MAX_SYSTEM_PROMPT_TOKENS, true, false), |cfg| {
+    vtcode_config.map_or((prompt_budget_constants::DEFAULT_MAX_SYSTEM_PROMPT_TOKENS, true, true), |cfg| {
         (
             cfg.agent.max_system_prompt_tokens,
             cfg.agent.system_prompt_budget_warning,
@@ -331,7 +358,7 @@ async fn build_prompt_sections(
 
     tracing::trace!(
         mode = ?prompt_mode,
-        base_tokens_approx = base_prompt.len() / 4, // rough token estimate
+        base_tokens = estimate_token_count(&base_prompt),
         "Selected system prompt mode"
     );
 
@@ -461,6 +488,16 @@ fn apply_token_budget(
     (text, report)
 }
 
+/// Hash only the explicitly stable prompt sections.
+fn stable_prompt_sections_digest(sections: &[PromptSection]) -> u64 {
+    let stable_sections = sections
+        .iter()
+        .filter(|section| section.kind.is_cache_stable())
+        .map(|section| (section.kind.name(), section.text.as_str()))
+        .collect::<Vec<_>>();
+    crate::core::agent::hash_utils::hash_value(&stable_sections)
+}
+
 /// Apply agent identity to the system prompt by replacing the title and intro lines.
 /// This combines the "VT Code" identity with the active agent mode so the LLM
 /// knows its role (e.g., "VT Code (Build mode)" or "VT Code (Auto mode)").
@@ -531,11 +568,33 @@ pub async fn generate_system_instruction_with_config_and_report(
     project_root: &Path,
     vtcode_config: Option<&crate::config::VTCodeConfig>,
 ) -> (Content, SystemPromptReport) {
-    let cache_key = cache_key(project_root, vtcode_config, 0);
+    generate_system_instruction_with_context_and_report(_config, project_root, vtcode_config, None).await
+}
+
+/// Generate a system instruction using a context-aware cache identity.
+///
+/// Context-free and context-aware prompts intentionally use different cache
+/// keys. This prevents a prompt assembled with workspace tools or skill
+/// metadata from being returned to a caller that requested the static prompt.
+pub async fn generate_system_instruction_with_context_and_report(
+    _config: &SystemPromptConfig,
+    project_root: &Path,
+    vtcode_config: Option<&crate::config::VTCodeConfig>,
+    prompt_context: Option<&PromptContext>,
+) -> (Content, SystemPromptReport) {
+    let (built_instruction, built_report, instruction_digest) =
+        compose_system_instruction_with_identity(project_root, vtcode_config, prompt_context).await;
+    let cache_key = cache_key_for_identity(
+        project_root,
+        vtcode_config,
+        instruction_digest,
+        prompt_context_digest(prompt_context),
+        0,
+    );
     let (instruction, report) = match PROMPT_CACHE.get(&cache_key) {
         Some(cached) => cached,
         None => {
-            let built = compose_system_instruction_with_report(project_root, vtcode_config, None).await;
+            let built = (built_instruction, built_report);
             PROMPT_CACHE.insert(cache_key, built.clone());
             built
         }
@@ -572,52 +631,128 @@ pub async fn apply_output_style(
 /// `catalog_epoch` is the tool-catalog version at the time of the request. When
 /// the tool set changes (e.g. planning workflow is toggled, MCP tools are refreshed), the
 /// epoch advances and the old cached prompt is superseded rather than served stale.
+#[cfg(test)]
 fn cache_key(project_root: &Path, vtcode_config: Option<&crate::config::VTCodeConfig>, catalog_epoch: u64) -> String {
+    let mode = vtcode_config
+        .map(|cfg| cfg.agent.system_prompt_mode)
+        .unwrap_or(SystemPromptMode::Default);
+    let instruction_digest =
+        crate::core::agent::hash_utils::hash_value(&("context-free", format!("{mode:?}"), static_profile_prompt(mode)));
+    cache_key_for_identity(project_root, vtcode_config, instruction_digest, 0, catalog_epoch)
+}
+
+/// Construct one cache key from independent prompt, context, configuration,
+/// provider-capability, and catalog-epoch digests.
+fn cache_key_for_identity(
+    project_root: &Path,
+    vtcode_config: Option<&crate::config::VTCodeConfig>,
+    instruction_digest: u64,
+    context_digest: u64,
+    catalog_epoch: u64,
+) -> String {
+    let config_digest = prompt_config_digest(vtcode_config);
+    let capability_digest = vtcode_config
+        .map(|cfg| {
+            let catalog = crate::config::models::model_catalog_entry(&cfg.agent.provider, &cfg.agent.default_model);
+            crate::core::agent::hash_utils::PromptCapabilityIdentity::from_catalog(
+                &cfg.agent.provider,
+                &cfg.agent.default_model,
+                Some(cfg.agent.reasoning_effort),
+                0,
+                catalog,
+            )
+            .digest()
+        })
+        .unwrap_or_else(|| {
+            crate::core::agent::hash_utils::PromptCapabilityIdentity::from_catalog("default", "default", None, 0, None)
+                .digest()
+        });
+    let catalog_epoch_digest = crate::core::agent::hash_utils::hash_value(&catalog_epoch);
+    let project_digest = crate::core::agent::hash_utils::hash_value(&project_root.to_string_lossy().as_ref());
+
+    format!(
+        "sys_prompt:{project_digest:016x}:{instruction_digest:016x}:{config_digest:016x}:{context_digest:016x}:cap{capability_digest:016x}:catalog{catalog_epoch_digest:016x}"
+    )
+}
+
+/// Digest configuration fields that affect prompt text or budget behavior.
+fn prompt_config_digest(vtcode_config: Option<&crate::config::VTCodeConfig>) -> u64 {
+    let Some(cfg) = vtcode_config else {
+        return crate::core::agent::hash_utils::hash_value(&"default-config");
+    };
+
     use std::hash::{Hash, Hasher};
-
     let mut hasher = crate::core::agent::hash_utils::StableHasher::new();
+    cfg.agent.provider.hash(&mut hasher);
+    cfg.agent.default_model.hash(&mut hasher);
+    format!("{:?}", cfg.agent.reasoning_effort).hash(&mut hasher);
+    cfg.agent.include_working_directory.hash(&mut hasher);
+    cfg.agent.include_temporal_context.hash(&mut hasher);
+    cfg.agent.temporal_context_use_utc.hash(&mut hasher);
+    cfg.agent.include_structured_reasoning_tags.hash(&mut hasher);
+    format!("{:?}", cfg.agent.system_prompt_mode).hash(&mut hasher);
+    format!("{:?}", cfg.agent.tool_documentation_mode).hash(&mut hasher);
+    format!("{:?}", cfg.agent.shell_prompt_profile).hash(&mut hasher);
+    cfg.agent.max_system_prompt_tokens.hash(&mut hasher);
+    cfg.agent.system_prompt_budget_warning.hash(&mut hasher);
+    cfg.agent.trim_system_prompt.hash(&mut hasher);
+    cfg.chat.ask_questions.enabled.hash(&mut hasher);
+    cfg.mcp.enabled.hash(&mut hasher);
+    cfg.prompt_cache.cache_friendly_prompt_shaping.hash(&mut hasher);
+    cfg.default_primary_agent.hash(&mut hasher);
+    hasher.finish()
+}
 
-    project_root.hash(&mut hasher);
+/// Digest the prompt-bearing parts of a context without relying on pointer or
+/// insertion order identity. Vectors are sorted because discovery order is not
+/// a semantic part of the rendered prompt contract.
+fn prompt_context_digest(prompt_context: Option<&PromptContext>) -> u64 {
+    let Some(context) = prompt_context else {
+        return crate::core::agent::hash_utils::hash_value(&"context-free");
+    };
 
-    if let Some(cfg) = vtcode_config {
-        let catalog = crate::config::models::model_catalog_entry(&cfg.agent.provider, &cfg.agent.default_model);
-        let capability_identity = crate::core::agent::hash_utils::PromptCapabilityIdentity::from_catalog(
-            &cfg.agent.provider,
-            &cfg.agent.default_model,
-            Some(cfg.agent.reasoning_effort),
-            catalog_epoch,
-            catalog,
-        );
-        capability_identity.hash(&mut hasher);
-        cfg.agent.include_working_directory.hash(&mut hasher);
-        cfg.agent.include_temporal_context.hash(&mut hasher);
-        cfg.agent.temporal_context_use_utc.hash(&mut hasher);
-        cfg.chat.ask_questions.enabled.hash(&mut hasher);
-        cfg.mcp.enabled.hash(&mut hasher);
-        cfg.prompt_cache.cache_friendly_prompt_shaping.hash(&mut hasher);
-        cfg.agent.include_structured_reasoning_tags.hash(&mut hasher);
-        std::mem::discriminant(&cfg.agent.system_prompt_mode).hash(&mut hasher);
-        std::mem::discriminant(&cfg.agent.tool_documentation_mode).hash(&mut hasher);
-        cfg.agent.max_system_prompt_tokens.hash(&mut hasher);
-        cfg.agent.system_prompt_budget_warning.hash(&mut hasher);
-        cfg.agent.trim_system_prompt.hash(&mut hasher);
-        cfg.default_primary_agent.hash(&mut hasher);
-        format!("{:?}", cfg.agent.shell_prompt_profile).hash(&mut hasher);
-    } else {
-        "default".hash(&mut hasher);
-        crate::core::agent::hash_utils::PromptCapabilityIdentity::from_catalog(
-            "default",
-            "default",
-            None,
-            catalog_epoch,
-            None,
-        )
-        .hash(&mut hasher);
-    }
+    let mut languages = context.languages.clone();
+    languages.sort();
+    let mut tools = context.available_tools.clone();
+    tools.sort();
+    let mut skills = context.available_skills.clone();
+    skills.sort();
+    let mut metadata = context
+        .available_skill_metadata
+        .iter()
+        .map(|skill| {
+            (
+                skill.name.clone(),
+                skill.description.clone(),
+                skill.short_description.clone(),
+                skill.path.clone(),
+                skill.scope,
+                skill.manifest.as_ref().map(|manifest| format!("{manifest:?}")),
+            )
+        })
+        .collect::<Vec<_>>();
+    metadata.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.3.cmp(&right.3)));
 
-    catalog_epoch.hash(&mut hasher);
+    let preferences = context.user_preferences.as_ref().map(|preferences| {
+        let mut preferred_languages = preferences.preferred_languages.clone();
+        preferred_languages.sort();
+        let mut preferred_frameworks = preferences.preferred_frameworks.clone();
+        preferred_frameworks.sort();
+        (preferred_languages, preferences.coding_style.clone(), preferred_frameworks)
+    });
 
-    format!("sys_prompt:{:016x}", hasher.finish())
+    crate::core::agent::hash_utils::hash_value(&(
+        context.workspace.as_ref(),
+        languages,
+        context.project_type.as_deref(),
+        tools,
+        skills,
+        metadata,
+        preferences,
+        context.capability_level.map(|level| format!("{level:?}")),
+        context.current_directory.as_ref(),
+        context.editor_context.as_ref(),
+    ))
 }
 
 /// Generate a minimal system instruction (pi-inspired, <1K tokens)
@@ -637,15 +772,13 @@ pub fn generate_specialized_instruction() -> Content {
 
 // ─── Token Estimation ────────────────────────────────────────────────────────
 
-/// Fast character-based token count estimation.
+/// Estimate prompt tokens through the shared workspace tokenizer.
 ///
-/// Uses the heuristic `tokens ~= chars / 4` which is accurate within ~20%
-/// for English text with code. This is intentionally approximate — the goal
-/// is monitoring and budget enforcement, not precise accounting.
+/// Keeping prompt budgeting on the common estimator makes prompt reports and
+/// the other runtime token budgets use the same tokenization semantics.
 #[must_use]
 pub fn estimate_token_count(text: &str) -> u64 {
-    // Round up to avoid underestimation
-    text.len().div_ceil(4) as u64
+    estimate_tokens(text) as u64
 }
 
 #[cfg(test)]
@@ -865,14 +998,13 @@ mod tests {
 
     #[test]
     fn test_minimal_prompt_token_count() {
-        // Rough estimate: 1 token ≈ 4 characters
-        let approx_tokens = minimal_system_prompt().len() / 4;
+        let approx_tokens = estimate_token_count(minimal_system_prompt());
         assert!(approx_tokens < 350, "Minimal prompt should stay compact, got ~{approx_tokens}");
     }
 
     #[test]
     fn test_default_prompt_token_count() {
-        let approx_tokens = default_system_prompt().len() / 4;
+        let approx_tokens = estimate_token_count(default_system_prompt());
         assert!(approx_tokens < 700, "Default prompt should stay compact, got ~{approx_tokens}");
     }
 
@@ -908,7 +1040,7 @@ mod tests {
         .await
         .expect("instruction appendix");
         let prompt = format!("{base}\n\n# INSTRUCTIONS\n{appendix}");
-        let approx_tokens = prompt.len() / 4;
+        let approx_tokens = estimate_token_count(&prompt);
 
         assert!(prompt.contains("### Instruction map"));
         assert!(prompt.contains("# Rust"));
@@ -1748,9 +1880,9 @@ mod tests {
     #[test]
     fn test_estimate_token_count() {
         assert_eq!(estimate_token_count(""), 0);
-        assert_eq!(estimate_token_count("hello"), 2); // 5 chars / 4 = 1.25 -> ceil = 2
-        assert_eq!(estimate_token_count("1234"), 1); // 4 chars / 4 = 1
-        assert_eq!(estimate_token_count("12345"), 2); // 5 chars / 4 = 1.25 -> ceil = 2
+        assert_eq!(estimate_token_count("hello"), estimate_tokens("hello") as u64);
+        assert_eq!(estimate_token_count("1234"), estimate_tokens("1234") as u64);
+        assert_eq!(estimate_token_count("12345"), estimate_tokens("12345") as u64);
 
         // Realistic prompt size check — these are estimates, not exact token counts
         let minimal_tokens = estimate_token_count(minimal_system_prompt());
@@ -1987,21 +2119,16 @@ Use a skill only when the user names it or the task clearly matches. Load detail
 
         assert_eq!(
             report.trimmed_sections,
-            vec![
-                "structured_reasoning",
-                "skills",
-                "environment_addenda",
-                "shell_profile",
-                "tool_guidelines",
-            ],
-            "sections must drop in lowest-trim-priority-first order"
+            vec!["structured_reasoning", "skills", "environment_addenda"],
+            "only advisory sections may be dropped in priority order"
         );
         assert!(text.contains("## Contract"), "base contract must never be dropped");
         assert!(!text.contains("## Structured Reasoning"));
         assert!(!text.contains("## Skills"));
         assert!(!text.contains("## Environment"));
-        assert!(!text.contains("## Active Tools"));
-        assert!(!report.over_budget, "text should fit budget once every droppable section is gone");
+        assert!(text.contains("## Shell Profile"), "shell safety guidance must be retained");
+        assert!(text.contains("## Active Tools"), "active-tool contract must be retained");
+        assert!(report.over_budget, "untrimmable safety sections may keep a tiny prompt over budget");
     }
 
     #[test]
@@ -2016,6 +2143,26 @@ Use a skill only when the user names it or the task clearly matches. Load detail
         let reasoning_changed = cache_key(&root, Some(&config), 1);
         assert_ne!(model_changed, reasoning_changed);
         assert_ne!(reasoning_changed, cache_key(&root, Some(&config), 2));
+    }
+
+    #[test]
+    fn stable_cache_identity_and_synthetic_second_turn_usage_are_reported_separately() {
+        let root = PathBuf::from("/workspace");
+        let config = VTCodeConfig::default();
+        assert_eq!(cache_key(&root, Some(&config), 7), cache_key(&root, Some(&config), 7));
+
+        // This fixture validates only local usage accounting. It is not
+        // evidence that a provider served the second turn from its cache.
+        let second_turn_usage = vtcode_commons::llm::Usage {
+            prompt_tokens: 100,
+            completion_tokens: 10,
+            total_tokens: 110,
+            cached_prompt_tokens: Some(75),
+            cache_creation_tokens: Some(25),
+            cache_read_tokens: None,
+            iterations: None,
+        };
+        assert_eq!(second_turn_usage.cache_hit_rate(), Some(75.0));
     }
 
     #[test]

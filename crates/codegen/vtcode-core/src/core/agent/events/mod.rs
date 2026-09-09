@@ -587,7 +587,19 @@ impl ExecEventRecorder {
         original_message_count: usize,
         compacted_message_count: usize,
         history_artifact_path: Option<&str>,
+        previous_envelope: Option<&crate::core::agent::request_envelope::SessionRequestEnvelope>,
+        new_envelope: Option<&crate::core::agent::request_envelope::SessionRequestEnvelope>,
     ) {
+        let previous_segment_id = previous_envelope.map(|envelope| envelope.segment_id().to_owned());
+        let new_segment_id = new_envelope.map(|envelope| envelope.segment_id().to_owned());
+        let previous_prefix_hash = previous_envelope.map(|envelope| format!("{:016x}", envelope.prefix_hash()));
+        let new_prefix_hash = new_envelope.map(|envelope| format!("{:016x}", envelope.prefix_hash()));
+        let previous_catalog_hash = previous_envelope
+            .and_then(crate::core::agent::request_envelope::SessionRequestEnvelope::catalog_hash)
+            .map(|hash| format!("{hash:016x}"));
+        let new_catalog_hash = new_envelope
+            .and_then(crate::core::agent::request_envelope::SessionRequestEnvelope::catalog_hash)
+            .map(|hash| format!("{hash:016x}"));
         self.record(ThreadEvent::ThreadCompactBoundary(Box::new(ThreadCompactBoundaryEvent {
             thread_id: self.thread_id.clone(),
             trigger,
@@ -595,12 +607,12 @@ impl ExecEventRecorder {
             original_message_count,
             compacted_message_count,
             history_artifact_path: history_artifact_path.map(str::to_string),
-            previous_segment_id: None,
-            new_segment_id: None,
-            previous_prefix_hash: None,
-            new_prefix_hash: None,
-            previous_catalog_hash: None,
-            new_catalog_hash: None,
+            previous_segment_id,
+            new_segment_id,
+            previous_prefix_hash,
+            new_prefix_hash,
+            previous_catalog_hash,
+            new_catalog_hash,
         })));
     }
 
@@ -854,6 +866,17 @@ impl ExecEventRecorder {
 
     /// Emit a tool latency harness event with recorded duration.
     pub fn record_tool_latency(&mut self, tool_name: &str, duration_ms: u64) {
+        self.record_tool_outcome(tool_name, 1, duration_ms, None);
+    }
+
+    /// Emit the single terminal harness observation for one invocation.
+    pub fn record_tool_outcome(
+        &mut self,
+        tool_name: &str,
+        attempts: u32,
+        duration_ms: u64,
+        error_category: Option<&str>,
+    ) {
         let item = ThreadItem {
             id: self.next_item_id(),
             details: ThreadItemDetails::Harness(Box::new(HarnessEventItem {
@@ -862,8 +885,8 @@ impl ExecEventRecorder {
                 command: None,
                 path: None,
                 exit_code: None,
-                attempt: None,
-                error_category: None,
+                attempt: Some(attempts),
+                error_category: error_category.map(str::to_string),
                 duration_ms: Some(duration_ms),
             })),
         };
@@ -923,6 +946,43 @@ mod tests {
 
     fn make_recorder() -> ExecEventRecorder {
         ExecEventRecorder::new("thread", None, None)
+    }
+
+    #[test]
+    fn compact_boundary_reports_the_installed_segment_identity() {
+        let previous = crate::core::agent::request_envelope::SessionRequestEnvelope::with_prefix_hash(
+            "segment-1",
+            "prompt",
+            vec![crate::llm::provider::ToolDefinition::function(
+                "read_file".to_string(),
+                "Read a file".to_string(),
+                serde_json::json!({"type": "object"}),
+            )],
+            11,
+            22,
+        );
+        let next = previous.begin_segment("segment-2");
+        let mut recorder = make_recorder();
+
+        recorder.compact_boundary(
+            CompactionTrigger::Auto,
+            CompactionMode::Local,
+            20,
+            8,
+            None,
+            Some(&previous),
+            Some(&next),
+        );
+
+        let events = recorder.into_events();
+        let Some(ThreadEvent::ThreadCompactBoundary(boundary)) = events.last() else {
+            panic!("expected compact boundary");
+        };
+        assert_eq!(boundary.previous_segment_id.as_deref(), Some(previous.segment_id()));
+        assert_eq!(boundary.new_segment_id.as_deref(), Some(next.segment_id()));
+        assert_eq!(boundary.previous_prefix_hash, boundary.new_prefix_hash);
+        assert_eq!(boundary.previous_catalog_hash, boundary.new_catalog_hash);
+        assert!(boundary.previous_catalog_hash.is_some());
     }
 
     #[tokio::test]

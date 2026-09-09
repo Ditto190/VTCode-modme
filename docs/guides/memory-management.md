@@ -73,6 +73,21 @@ Authored guidance files can import other files inline with `@path/to/file.md`.
 
 Persistent memory is VT Code's learned, per-repository memory store. It is separate from authored guidance, and VT Code injects only a compact startup summary after authored instructions.
 
+### Retrieval and bounded event retention
+
+Cross-session event search starts with deterministic BM25 relevance and applies
+only a mild recency multiplier:
+
+```text
+bm25 * (1 + 0.15 * 0.5^(age_days / 30))
+```
+
+Missing or invalid timestamps receive no boost. When the canonical event log
+exceeds its retention cap, VT Code deterministically extracts a bounded set of
+grounded facts from completed canonical events and persists that eviction
+summary before rewriting the log. If summary persistence fails, the event log
+is left untouched so recovery can retry without losing evidence.
+
 ### Storage layout
 
 For each repository, VT Code stores memory under:

@@ -263,7 +263,7 @@ fn is_history_jsonl(path: &Path) -> bool {
 }
 
 fn is_tool_output_spool_path(path: &Path) -> bool {
-    path_contains_components(path, &[".vtcode", "context", "tool_outputs"])
+    crate::tools::SpooledOutputReference::recognizes_path(path)
 }
 
 fn pty_session_id_from_tool_output_path(path: &Path) -> Option<String> {

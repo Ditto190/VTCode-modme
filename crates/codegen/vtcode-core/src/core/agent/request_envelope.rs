@@ -125,6 +125,15 @@ impl SessionRequestEnvelope {
     pub fn catalog_hash(&self) -> Option<u64> {
         self.catalog_hash
     }
+
+    /// Start a new immutable continuity segment while preserving the exact
+    /// prompt and tool-catalog identity used by subsequent requests.
+    #[must_use]
+    pub fn begin_segment(&self, segment_id: impl Into<Arc<str>>) -> Self {
+        let mut next = self.clone();
+        next.segment_id = segment_id.into();
+        next
+    }
 }
 
 fn core_priority(name: &str) -> u8 {
@@ -210,5 +219,18 @@ mod tests {
         let stable = SessionRequestEnvelope::with_prefix_hash("segment-1", "runtime prompt", vec![], 42, 7);
         assert_eq!(stable.instruction_digest(), 42);
         assert_eq!(stable.prefix_hash(), 7);
+    }
+
+    #[test]
+    fn new_segment_preserves_frozen_request_identity() {
+        let previous = SessionRequestEnvelope::new("segment-1", "fixed prompt", vec![tool("alpha")], 42);
+        let next = previous.begin_segment("segment-2");
+
+        assert_eq!(previous.segment_id(), "segment-1");
+        assert_eq!(next.segment_id(), "segment-2");
+        assert_eq!(previous.system_prompt().as_ref(), next.system_prompt().as_ref());
+        assert_eq!(previous.instruction_digest(), next.instruction_digest());
+        assert_eq!(previous.prefix_hash(), next.prefix_hash());
+        assert_eq!(previous.catalog_hash(), next.catalog_hash());
     }
 }

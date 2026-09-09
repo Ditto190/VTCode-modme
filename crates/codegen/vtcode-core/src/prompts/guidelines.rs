@@ -252,7 +252,7 @@ pub fn append_runtime_tool_prompt_sections_for_model(
     let pricing = crate::config::models::model_catalog_entry(provider.name(), model).map(|entry| entry.pricing);
     let profile = ToolGuidanceProfile::resolve(
         crate::compaction::effective_context_budget(config, provider, model),
-        prompt.len().div_ceil(4),
+        vtcode_commons::estimate_tokens(prompt),
         config.map_or(0, |cfg| cfg.agent.max_system_prompt_tokens as usize),
         pricing.and_then(|price| price.input),
         config.and_then(|cfg| cfg.agent.harness.max_budget_usd),
@@ -823,7 +823,7 @@ mod tests {
         let guidelines = generate_tool_guidelines_for_profile(&tools, None, ResolvedShellPromptProfile::UnixLike);
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("code_search"));
-        let approx_tokens = guidelines.len() / 4;
+        let approx_tokens = vtcode_commons::estimate_tokens(&guidelines);
         // The batching and bounded-diff guardrails are intentionally part of
         // the compact shared prompt; keep the budget below 400 tokens.
         assert!(approx_tokens < 400, "got ~{approx_tokens} tokens");

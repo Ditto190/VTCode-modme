@@ -228,7 +228,7 @@ pub(super) async fn build_turn_request(
         prompt_output.tool_snapshot.snapshot.clone()
     };
     let few_shot_context = prompt_output.few_shot_context.take();
-    let assembled_prefix_hash = stable_system_prefix_hash(&prompt_output.system_prompt);
+    let instruction_digest = stable_system_prefix_hash(&prompt_output.system_prompt);
     let capability_identity = vtcode_core::core::agent::hash_utils::PromptCapabilityIdentity::resolve(
         ctx.provider_client.as_ref(),
         request_model,
@@ -249,7 +249,7 @@ pub(super) async fn build_turn_request(
         &envelope_mode,
         prompt_output.system_prompt,
         selected_tools,
-        assembled_prefix_hash,
+        instruction_digest,
         capability_digest,
     );
     let ordered_wire_tools = request_envelope.ordered_tools();

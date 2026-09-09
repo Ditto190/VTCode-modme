@@ -323,6 +323,17 @@ command launches. The sandbox environment builder removes credential, token,
 cloud-provider, linker, and dynamic-loader variables case-insensitively. Extra
 environment entries supplied by a command override are filtered through the
 same rule, so an override cannot restore a sensitive inherited variable.
+`PYTHONPATH` and `NODE_PATH` are not inherited wholesale; only canonical entries
+already contained by the active workspace may cross a restrictive boundary.
+
+Simple argv commands execute directly. A shell is used only for explicit shell
+syntax after the shared parser, command-safety, redirection, policy, approval,
+and sandbox checks. Admission recursively unwraps `env`, assignments, `sudo`,
+and explicit shell `-c`/`-lc` layers and recognizes executables by basename;
+dynamic executable names fail closed. Interpreter inline-code flags—Python
+`-c`, Node/Ruby/Perl/AppleScript `-e`, PHP `-r`, and PowerShell command or
+encoded-command forms—are code-execution boundaries and require an enforceable
+sandbox policy or approval.
 
 MCP stdio launches use the same `SandboxManager` transformation through
 `McpSandboxContext`; the context is inherited by initial connections, pool
@@ -637,3 +648,8 @@ allowlist after caller overrides. Arbitrary names are not inherited, including
 credentials that do not match familiar token/key suffixes. Explicit full-access
 and externally managed sandbox policies preserve their existing environment
 semantics.
+
+Child working directories are canonicalized as an error-producing operation,
+then bound by directory descriptor before launch. In-process filesystem opens
+use descriptor-relative no-follow primitives. Restrictive execution fails
+closed when the platform cannot establish its required confinement.

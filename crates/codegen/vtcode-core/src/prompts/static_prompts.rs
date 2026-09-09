@@ -9,6 +9,7 @@ use crate::prompts::system::{
     MINIMAL_OPERATING_PROFILE_DELTA, MINIMAL_SPECIFIC_LINES, PROMPT_INTRO, PROMPT_ROLE_PARAGRAPH, PROMPT_TITLE,
     SHARED_CONTRACT_LINES, SPECIALIZED_OPERATING_PROFILE_DELTA,
 };
+use vtcode_commons::estimate_tokens;
 
 /// Agent identity labels for the system prompt.
 /// Maps agent names to human-readable identity strings that combine VT Code
@@ -32,7 +33,7 @@ static DEFAULT_SPECIALIZED_PROMPT: OnceLock<String> = OnceLock::new();
 
 fn append_runtime_guidance(prompt: &mut String) {
     let guidance = runtime_guidance_section();
-    assert!(guidance.len().div_ceil(4) <= RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS);
+    assert!(estimate_tokens(guidance) <= RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS);
     prompt.push_str(guidance);
     prompt.push('\n');
 }
@@ -210,7 +211,7 @@ mod tests {
                 "{mode:?} should place runtime guidance before the contract"
             );
             assert!(
-                (prompt.len().div_ceil(4) as u64) <= prompt_budget::DEFAULT_MAX_SYSTEM_PROMPT_TOKENS,
+                (estimate_tokens(prompt) as u64) <= prompt_budget::DEFAULT_MAX_SYSTEM_PROMPT_TOKENS,
                 "{mode:?} static prompt should fit the default budget"
             );
         }

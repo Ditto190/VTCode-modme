@@ -150,7 +150,7 @@ python3 scripts/generate_config_field_reference.py
 | `agent.theme` | `string` | no | `"ciapre"` | UI theme identifier controlling ANSI styling |
 | `agent.todo_planning_mode` | `boolean` | no | `true` | Enable TODO planning helper mode for structured task management |
 | `agent.tool_documentation_mode` | `string` | no | `"progressive"` | Tool documentation mode controlling token overhead for tool definitions Options: minimal (~800 tokens), progressive (~1.2k), full (~3k current) Progressive: signatures upfront, detailed docs on-demand (recommended) Minimal: signatures only, pi-coding-agent style (power users) Full: all documentation upfront (current behavior, default) |
-| `agent.trim_system_prompt` | `boolean` | no | `false` | Trim low-priority system prompt sections when over budget. Opt-in: silently dropping instructions changes agent behavior, so the default only warns. |
+| `agent.trim_system_prompt` | `boolean` | no | `true` | Trim advisory reasoning, skill summaries, and optional environment metadata when over budget. Set to `false` to warn without trimming; base, shell-safety, and active-tool contracts are never trimmed. |
 | `agent.ui_surface` | `string` | no | `"inline"` | Preferred rendering surface for the interactive chat UI (inline by default; auto, alternate, inline) |
 | `agent.user_instructions` | `null \| string` | no | `null` | Custom instructions provided by the user via configuration to guide agent behavior |
 | `agent.verbosity` | `string` | no | `"medium"` | Verbosity level for output text (low, medium, high) Applies to: GPT-5.4-family Responses workflows and other models that support verbosity control |

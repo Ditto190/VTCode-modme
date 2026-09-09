@@ -88,6 +88,57 @@ fn read_only_non_mutating_command_stays_read_only_without_prompt() {
 }
 
 #[test]
+fn inline_interpreter_code_runs_under_restrictive_sandbox_without_prompt() {
+    let config = vtcode_config::SandboxConfig {
+        enabled: true,
+        default_policy: vtcode_config::SandboxPolicy::ReadOnly,
+        ..Default::default()
+    };
+    let command = vec!["python3".to_string(), "-c".to_string(), "print('ok')".to_string()];
+
+    let plan = build_shell_execution_plan(
+        &config,
+        PathBuf::from("/tmp/ws").as_path(),
+        &command,
+        SandboxPermissions::UseDefault,
+        None,
+    )
+    .unwrap();
+
+    assert!(plan.approval_reason.is_none());
+    assert!(matches!(plan.sandbox_policy, Some(SandboxPolicy::ReadOnly { .. })));
+}
+
+#[test]
+fn inline_interpreter_code_requires_approval_without_enforceable_sandbox() {
+    for config in [
+        vtcode_config::SandboxConfig { enabled: false, ..Default::default() },
+        vtcode_config::SandboxConfig {
+            enabled: true,
+            default_policy: vtcode_config::SandboxPolicy::DangerFullAccess,
+            ..Default::default()
+        },
+    ] {
+        let command = vec!["node".to_string(), "-e".to_string(), "console.log('ok')".to_string()];
+        let plan = build_shell_execution_plan(
+            &config,
+            PathBuf::from("/tmp/ws").as_path(),
+            &command,
+            SandboxPermissions::UseDefault,
+            None,
+        )
+        .unwrap();
+
+        assert!(plan.sandbox_policy.is_none());
+        assert!(
+            plan.approval_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("Inline interpreter code"))
+        );
+    }
+}
+
+#[test]
 fn preflight_blocks_network_commands_when_network_disabled() {
     let policy = SandboxPolicy::workspace_write(vec![PathBuf::from("/tmp/ws")]);
     let command = vec!["curl".to_string(), "https://example.com".to_string()];

@@ -50,7 +50,7 @@ mod tests {
         let second = runtime_guidance_section();
         assert_eq!(first, second);
         assert_eq!(RUNTIME_GUIDANCE_SECTION.matches("## Runtime Guidance").count(), 1);
-        assert!(RUNTIME_GUIDANCE_SECTION.len().div_ceil(4) <= RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS);
+        assert!(vtcode_commons::estimate_tokens(RUNTIME_GUIDANCE_SECTION) <= RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS);
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Extra paths are sandbox-only"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("When useful, give concise progress updates"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("Before tools: state the next phase in one line"));

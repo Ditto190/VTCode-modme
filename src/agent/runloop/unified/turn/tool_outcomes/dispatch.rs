@@ -45,7 +45,7 @@ pub(crate) async fn handle_tool_calls<'a, 'b>(
         return Ok(None);
     }
 
-    let batch_candidate = t_ctx.ctx.full_auto && valid_calls > 1;
+    let batch_candidate = valid_calls > 1;
     tracing::debug!(
         target: "vtcode.turn.metrics",
         metric = "tool_dispatch_plan",

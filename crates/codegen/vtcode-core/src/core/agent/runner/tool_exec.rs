@@ -1,5 +1,6 @@
 use super::AgentRunner;
 use super::constants::{LOOP_THROTTLE_BASE_MS, LOOP_THROTTLE_MAX_MS};
+use super::tool_access::PreparedToolExecution;
 use super::tool_execution_guard::ToolExecutionGuard;
 use super::tool_rejection::{
     emit_failed_tool_outputs_for_completed_invocations, reject_denied_tool, reject_invalid_args,
@@ -21,6 +22,21 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::{info, warn};
 use vtcode_commons::ErrorCategory;
+
+fn record_tool_execution_observation(
+    state: &mut crate::core::agent::session::AgentSessionState,
+    tool_name: &str,
+    execution: &PreparedToolExecution,
+) {
+    state
+        .turn_tool_observations
+        .push(crate::core::agent::session::ToolExecutionObservation {
+            tool_name: tool_name.to_string(),
+            attempts: execution.attempts,
+            duration_ms: execution.total_duration.as_millis().min(u128::from(u64::MAX)) as u64,
+            error_category: execution.last_error_category,
+        });
+}
 
 fn snapshot_circuit_diagnostics(
     runner: &AgentRunner,
@@ -207,8 +223,12 @@ fn align_prepared_batches(
     allow_parallel: bool,
     max_parallel: usize,
 ) -> Vec<PreparedRunnerToolBatch> {
+    let mut semantic_calls = std::collections::HashSet::new();
     let layout = PreparedToolBatch::plan_layout_with_limit(
-        calls.iter().map(|call| call.prepared.can_parallelize()),
+        calls.iter().map(|call| {
+            let semantic_key = format!("{}:{}", call.prepared.canonical_name, call.prepared.effective_args);
+            call.prepared.can_parallelize() && semantic_calls.insert(semantic_key)
+        }),
         allow_parallel,
         max_parallel,
     );
@@ -273,8 +293,8 @@ impl AgentRunner {
             );
 
             match self.admit_tool_call(&step.tool_name, step.args.clone(), &mut runtime.state) {
-                Ok(fallback_prepared) => match self.execute_prepared_tool_internal(&fallback_prepared).await {
-                    Ok((res, _attempts)) => {
+                Ok(fallback_prepared) => match self.execute_prepared_tool_internal(&fallback_prepared).await.result {
+                    Ok(res) => {
                         info!(
                             agent = %agent_prefix,
                             fallback_tool = %step.tool_name,
@@ -450,13 +470,17 @@ impl AgentRunner {
                                 tool_call_id,
                                 args,
                                 tool_call_item,
-                                Err(ToolExecutionError::new(
-                                    "parallel_tool_semaphore",
-                                    ToolErrorType::ExecutionError,
-                                    "parallel tool semaphore closed",
-                                )),
+                                PreparedToolExecution {
+                                    result: Err(ToolExecutionError::new(
+                                        "parallel_tool_semaphore",
+                                        ToolErrorType::ExecutionError,
+                                        "parallel tool semaphore closed",
+                                    )),
+                                    attempts: 1,
+                                    total_duration: Duration::ZERO,
+                                    last_error_category: Some(ErrorCategory::ExecutionError),
+                                },
                                 circuit_before,
-                                0,
                             );
                         }
                     }
@@ -464,23 +488,18 @@ impl AgentRunner {
                     None
                 };
                 runner.throttle_repeated_tool(&name).await;
-                let _start = std::time::Instant::now();
-                let result = runner.execute_prepared_tool_internal(&prepared).await;
-                let duration_ms = _start.elapsed().as_millis() as u64;
-                (name, tool_call_id, args, tool_call_item, result, circuit_before, duration_ms)
+                let execution = runner.execute_prepared_tool_internal(&prepared).await;
+                (name, tool_call_id, args, tool_call_item, execution, circuit_before)
             });
         }
 
         let results = join_all(futures).await;
         let mut halt_turn = false;
-        for (name, call_id, args, tool_call_item, result, circuit_before, duration_ms) in results {
-            runtime.state.turn_tool_latencies.push((name.clone(), duration_ms));
+        for (name, call_id, args, tool_call_item, execution, circuit_before) in results {
+            record_tool_execution_observation(&mut runtime.state, &name, &execution);
             record_circuit_transition(self, &runtime.state.error_recovery, &name, circuit_before);
-            match result {
-                Ok((result, attempts)) => {
-                    if attempts > 1 {
-                        event_recorder.error_recovered(&name, attempts, "transient");
-                    }
+            match execution.result {
+                Ok(result) => {
                     event_recorder.tool_output_started(&tool_call_item.call_item_id, Some(&call_id));
                     apply_tool_success(
                         self,
@@ -496,17 +515,6 @@ impl AgentRunner {
                     );
                 }
                 Err(e) => {
-                    // Emit retry observability if the error carries attempt info
-                    if let Some(attempt) = e.attempts_made()
-                        && attempt > 1
-                    {
-                        event_recorder.tool_retry_attempted(
-                            &name,
-                            attempt,
-                            e.category.as_str(),
-                            e.retry_delay_ms.unwrap_or(0),
-                        );
-                    }
                     // Try fallback first before declaring failure.
                     let fallback_outcome = if let Some(fallback) = fallback_map.get(&call_id) {
                         self.try_execute_fallback(fallback, runtime, agent_prefix, &name).await
@@ -582,20 +590,10 @@ impl AgentRunner {
         self.throttle_repeated_tool(&name).await;
 
         let mut guard = ToolExecutionGuard::new(&name, &call.tool_call_id, runtime.state.error_recovery.clone());
-        let _tool_start = std::time::Instant::now();
-        let tool_outcome = self.execute_prepared_tool_internal(&call.prepared).await;
-        // Record latency once for both outcomes (mirrors the parallel-execution
-        // path, which measures once before the match instead of duplicating the
-        // push in each arm).
-        runtime
-            .state
-            .turn_tool_latencies
-            .push((name.clone(), _tool_start.elapsed().as_millis() as u64));
-        match tool_outcome {
-            Ok((result, attempts)) => {
-                if attempts > 1 {
-                    event_recorder.error_recovered(&name, attempts, "transient");
-                }
+        let tool_execution = self.execute_prepared_tool_internal(&call.prepared).await;
+        record_tool_execution_observation(&mut runtime.state, &name, &tool_execution);
+        match tool_execution.result {
+            Ok(result) => {
                 guard.mark_completed();
                 record_circuit_transition(self, &runtime.state.error_recovery, &name, circuit_before);
                 apply_tool_success(
@@ -613,17 +611,6 @@ impl AgentRunner {
                 Ok(false)
             }
             Err(e) => {
-                // Emit retry observability if retries occurred
-                if let Some(attempt) = e.attempts_made()
-                    && attempt > 1
-                {
-                    event_recorder.tool_retry_attempted(
-                        &name,
-                        attempt,
-                        e.category.as_str(),
-                        e.retry_delay_ms.unwrap_or(0),
-                    );
-                }
                 // Try fallback first before declaring failure.
                 let fallback_outcome = if let Some(fallback) = &call.prepared.fallback_recommendation {
                     self.try_execute_fallback(fallback, runtime, agent_prefix, &name).await
@@ -748,6 +735,28 @@ impl AgentRunner {
                 batch_calls,
                 allow_parallel_batch,
                 self.config().agent.harness.max_parallel_tool_calls,
+            );
+            let configured_limit = self.config().agent.harness.max_parallel_tool_calls;
+            let group_count = planned_batches.len();
+            let parallel_group_count = planned_batches
+                .iter()
+                .filter(|batch| matches!(batch.kind, PreparedToolBatchKind::ParallelReadonly))
+                .count();
+            let admitted_parallel_calls = planned_batches
+                .iter()
+                .filter(|batch| matches!(batch.kind, PreparedToolBatchKind::ParallelReadonly))
+                .map(|batch| batch.calls.len())
+                .sum::<usize>();
+            let maximum_group_size = planned_batches.iter().map(|batch| batch.calls.len()).max().unwrap_or(0);
+            tracing::debug!(
+                target: "vtcode.turn.metrics",
+                metric = "tool_dispatch_groups",
+                configured_limit,
+                admitted_parallel_calls,
+                group_count,
+                parallel_group_count,
+                maximum_group_size,
+                "turn metric"
             );
             for batch in planned_batches {
                 self.emit_tool_batch(

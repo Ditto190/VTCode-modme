@@ -17,6 +17,7 @@ use crate::config::constants::tools;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
@@ -27,6 +28,10 @@ use vtcode_commons::preview::{
     condense_text_bytes, excerpt_text_lines_with_limit, format_hidden_lines_summary, tail_preview_text,
 };
 use vtcode_commons::serde_helpers::json_to_string_pretty;
+use vtcode_commons::utils::calculate_sha256;
+
+const TOOL_OUTPUT_DIR: &str = ".vtcode/context/tool_outputs";
+const SPOOL_CREATE_ATTEMPTS: u32 = 16;
 
 /// Default threshold for spooling tool output to files (8KB).
 /// Keep this aligned with `DynamicContextConfig::default().tool_output_threshold`
@@ -179,8 +184,38 @@ pub struct SpoolResult {
     pub file_path: PathBuf,
     /// Original size in bytes
     pub original_bytes: usize,
+    /// Exact number of bytes committed to the immutable spool.
+    pub byte_count: u64,
+    /// SHA-256 digest of the committed bytes.
+    pub sha256: String,
+    /// Lifecycle state of this spool reference.
+    pub state: SpoolState,
     /// Full content written to the spool file
     pub content: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpoolState {
+    Pending,
+    Completed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpoolIntegrity {
+    pub byte_count: u64,
+    pub sha256: String,
+}
+
+pub(crate) fn encode_digest_hex(digest: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write as _;
+
+    let bytes = digest.as_ref();
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(encoded, "{byte:02x}");
+    }
+    encoded
 }
 
 /// Validated view of the bounded model-facing portion of a spooled result.
@@ -192,9 +227,25 @@ pub struct SpooledOutputReference<'a> {
     pub spool_path: &'a str,
     pub preview: Option<&'a str>,
     pub original_bytes: Option<u64>,
+    pub sha256: Option<&'a str>,
+    pub state: SpoolState,
 }
 
 impl<'a> SpooledOutputReference<'a> {
+    #[must_use]
+    pub fn recognizes_path(path: &Path) -> bool {
+        is_workspace_tool_output_path(path, true)
+    }
+
+    /// Return whether `path` names a direct child spool file rather than the
+    /// spool directory itself. Read-file and replay consumers require this
+    /// stricter shape; shell search commands may intentionally target the
+    /// directory through [`Self::recognizes_path`].
+    #[must_use]
+    pub fn recognizes_file_path(path: &Path) -> bool {
+        is_workspace_tool_output_path(path, false)
+    }
+
     #[must_use]
     pub fn from_value(value: &'a Value) -> Option<Self> {
         let spool_path = value
@@ -207,8 +258,135 @@ impl<'a> SpooledOutputReference<'a> {
             .and_then(Value::as_str)
             .filter(|preview| !preview.trim().is_empty());
         let original_bytes = value.get("spooled_bytes").and_then(Value::as_u64);
-        Some(Self { spool_path, preview, original_bytes })
+        let sha256 = value.get("spool_sha256").and_then(Value::as_str);
+        let state = match value.get("spool_state").and_then(Value::as_str) {
+            Some("pending") => SpoolState::Pending,
+            Some("completed") => SpoolState::Completed,
+            _ if value.get("spool_pending").and_then(Value::as_bool) == Some(true) => SpoolState::Pending,
+            _ if value.get("spool_complete").and_then(Value::as_bool) == Some(true) => SpoolState::Completed,
+            _ => SpoolState::Unknown,
+        };
+        Some(Self { spool_path, preview, original_bytes, sha256, state })
     }
+
+    /// Read an immutable completed spool after validating its workspace
+    /// location, regular-file identity, byte count, and digest.
+    pub fn read_verified_completed(&self, workspace_root: &Path) -> Result<String> {
+        anyhow::ensure!(self.state == SpoolState::Completed, "spool is not marked completed");
+        let expected_bytes = self.original_bytes.context("completed spool is missing byte count")?;
+        let expected_sha256 = self.sha256.context("completed spool is missing SHA-256 digest")?;
+        anyhow::ensure!(
+            is_workspace_tool_output_path(Path::new(self.spool_path), false),
+            "unrecognized tool output spool path"
+        );
+
+        let canonical_root = vtcode_commons::canonicalize(workspace_root)
+            .with_context(|| format!("canonicalize workspace root {}", workspace_root.display()))?;
+        let path = Path::new(self.spool_path);
+        let relative = if path.is_absolute() {
+            path.strip_prefix(&canonical_root)
+                .context("absolute spool path is outside workspace")?
+        } else {
+            path
+        };
+        anyhow::ensure!(
+            is_workspace_tool_output_path(relative, false),
+            "spool path is outside the tool output directory"
+        );
+
+        let mut file = vtcode_commons::fs::bound_file::open_file_beneath(&canonical_root, relative)
+            .with_context(|| format!("open completed spool {}", relative.display()))?;
+        let metadata = file.metadata().context("read completed spool metadata")?;
+        anyhow::ensure!(metadata.is_file(), "completed spool is not a regular file");
+        anyhow::ensure!(metadata.len() == expected_bytes, "completed spool length mismatch");
+        let capacity = usize::try_from(expected_bytes).context("completed spool is too large to read")?;
+        let mut bytes = Vec::with_capacity(capacity);
+        file.read_to_end(&mut bytes).context("read completed spool")?;
+        anyhow::ensure!(bytes.len() as u64 == expected_bytes, "completed spool changed while reading");
+        anyhow::ensure!(calculate_sha256(&bytes) == expected_sha256, "completed spool digest mismatch");
+        String::from_utf8(bytes).context("completed spool is not valid UTF-8")
+    }
+
+    /// Read a bounded snapshot of a live append-only spool. Pending output is
+    /// explicitly unverified because the producer may append after this read.
+    pub fn read_pending_bounded(&self, workspace_root: &Path, max_bytes: usize) -> Result<String> {
+        anyhow::ensure!(self.state == SpoolState::Pending, "spool is not marked pending");
+        anyhow::ensure!(max_bytes > 0, "pending spool read limit must be positive");
+        anyhow::ensure!(
+            is_workspace_tool_output_path(Path::new(self.spool_path), false),
+            "unrecognized tool output spool path"
+        );
+        let canonical_root = vtcode_commons::canonicalize(workspace_root)
+            .with_context(|| format!("canonicalize workspace root {}", workspace_root.display()))?;
+        let path = Path::new(self.spool_path);
+        let relative = if path.is_absolute() {
+            path.strip_prefix(&canonical_root)
+                .context("absolute spool path is outside workspace")?
+        } else {
+            path
+        };
+        let file = vtcode_commons::fs::bound_file::open_file_beneath(&canonical_root, relative)
+            .with_context(|| format!("open pending spool {}", relative.display()))?;
+        let mut bytes = Vec::with_capacity(max_bytes.min(64 * 1024));
+        file.take(max_bytes as u64)
+            .read_to_end(&mut bytes)
+            .context("read bounded pending spool")?;
+        Ok(decode_pending_snapshot(bytes))
+    }
+}
+
+/// Decode a bounded pending snapshot without turning a byte-boundary split
+/// into a completely missing preview. Pending spools are normally valid UTF-8
+/// because their producers write strings, but a byte cap can end inside the
+/// final code point. Drop only that incomplete trailing sequence; if the
+/// snapshot contains an invalid sequence elsewhere, preserve the readable
+/// portions with the standard replacement character.
+fn decode_pending_snapshot(bytes: Vec<u8>) -> String {
+    match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) => {
+            let utf8_error = error.utf8_error();
+            let bytes = error.into_bytes();
+            if utf8_error.error_len().is_none() {
+                String::from_utf8_lossy(&bytes[..utf8_error.valid_up_to()]).into_owned()
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+    }
+}
+
+fn is_workspace_tool_output_path(path: &Path, allow_directory: bool) -> bool {
+    // Tool arguments can replay a Windows path on Unix (or the reverse), so
+    // recognize both separators while still comparing exact path components.
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    let absolute = normalized.starts_with('/')
+        || (normalized.as_bytes().get(1) == Some(&b':') && normalized.as_bytes().get(2) == Some(&b'/'));
+    let mut components = Vec::new();
+    for component in normalized.split('/') {
+        if component.is_empty() || component == "." {
+            continue;
+        }
+        if component == ".." {
+            return false;
+        }
+        components.push(component);
+    }
+
+    let needle = [".vtcode", "context", "tool_outputs"];
+    if let Some(directory_start) = components.len().checked_sub(needle.len() + 1)
+        && (absolute || directory_start == 0)
+        && components[directory_start..directory_start + needle.len()] == needle
+    {
+        return true;
+    }
+    if !allow_directory {
+        return false;
+    }
+    let Some(directory_start) = components.len().checked_sub(needle.len()) else {
+        return false;
+    };
+    (absolute || directory_start == 0) && components[directory_start..] == needle
 }
 
 /// Fill in the bounded metadata required by a model-facing spool reference.
@@ -298,7 +476,7 @@ impl ToolOutputSpooler {
 
     /// Create a new spooler with custom configuration
     pub fn with_config(workspace_root: &Path, config: SpoolerConfig) -> Self {
-        let output_dir = workspace_root.join(".vtcode").join("context").join("tool_outputs");
+        let output_dir = workspace_root.join(TOOL_OUTPUT_DIR);
 
         let max_files = config.max_files;
         Self {
@@ -340,18 +518,12 @@ impl ToolOutputSpooler {
 
     /// Spool a tool output to a file and return a reference
     pub async fn spool_output(&self, tool_name: &str, value: &Value, is_mcp: bool) -> Result<SpoolResult> {
-        // Ensure output directory exists
-        fs::create_dir_all(&self.output_dir)
-            .await
-            .with_context(|| format!("Failed to create tool output directory: {}", self.output_dir.display()))?;
-
-        // Generate unique filename
+        // Generate a collision-resistant filename. Creation below is
+        // exclusive, so an existing immutable spool can never be truncated.
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros();
-        let filename = format!("{}_{}.txt", sanitize_tool_name(tool_name), timestamp);
-        let file_path = self.output_dir.join(&filename);
 
         // For file and command-session tools, extract raw content so the spooled file is directly usable.
         // This allows grep_file to work on the spooled output and makes reading more intuitive
@@ -442,10 +614,34 @@ impl ToolOutputSpooler {
         // Sanitize content to redact any secrets before writing to disk
         let sanitized_content = vtcode_commons::sanitizer::redact_secrets(content);
         let original_bytes = sanitized_content.len();
-
-        fs::write(&file_path, &sanitized_content)
-            .await
-            .with_context(|| format!("Failed to write tool output to: {}", file_path.display()))?;
+        let byte_count = original_bytes as u64;
+        let sha256 = calculate_sha256(sanitized_content.as_bytes());
+        let canonical_root = vtcode_commons::canonicalize(&self.workspace_root)
+            .with_context(|| format!("canonicalize spool workspace {}", self.workspace_root.display()))?;
+        let sanitized_name = sanitize_tool_name(tool_name);
+        let bytes = sanitized_content.as_bytes().to_vec();
+        let (file_path, relative_path) = tokio::task::spawn_blocking(move || -> Result<(PathBuf, PathBuf)> {
+            let output_dir = Path::new(TOOL_OUTPUT_DIR);
+            vtcode_commons::fs::bound_file::ensure_directory_beneath(&canonical_root, output_dir)
+                .context("create bound tool output directory")?;
+            for collision in 0..SPOOL_CREATE_ATTEMPTS {
+                let suffix = if collision == 0 {
+                    String::new()
+                } else {
+                    format!("_{collision}")
+                };
+                let filename = format!("{sanitized_name}_{timestamp}{suffix}.txt");
+                let relative = output_dir.join(filename);
+                match vtcode_commons::fs::bound_file::write_file_beneath(&canonical_root, &relative, &bytes) {
+                    Ok(()) => return Ok((canonical_root.join(&relative), relative)),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error).context("write immutable tool output spool"),
+                }
+            }
+            anyhow::bail!("tool output spool filename collisions exceeded {SPOOL_CREATE_ATTEMPTS} attempts")
+        })
+        .await
+        .context("join tool output spool writer")??;
 
         {
             let mut files = self.spooled_files.write().await;
@@ -461,8 +657,6 @@ impl ToolOutputSpooler {
             }
         }
 
-        let relative_path = file_path.strip_prefix(&self.workspace_root).unwrap_or(&file_path).to_path_buf();
-
         info!(
             tool = tool_name,
             bytes = original_bytes,
@@ -474,6 +668,9 @@ impl ToolOutputSpooler {
         Ok(SpoolResult {
             file_path: relative_path,
             original_bytes,
+            byte_count,
+            sha256,
+            state: SpoolState::Completed,
             content: sanitized_content,
         })
     }
@@ -586,6 +783,9 @@ impl ToolOutputSpooler {
 
             obj.insert("spool_path".to_string(), json!(spool_path));
             obj.insert("spooled_bytes".to_string(), json!(spool_result.original_bytes));
+            obj.insert("spool_sha256".to_string(), json!(spool_result.sha256));
+            obj.insert("spool_state".to_string(), json!("completed"));
+            obj.insert("spool_complete".to_string(), json!(true));
 
             // Keep the recovery guidance aligned with the model-facing command tools.
             // Large data stays on disk and the model pulls only the sections it needs.
@@ -826,6 +1026,52 @@ mod tests {
         assert!(result.get("file_path").is_none());
         assert!(result.get("truncated").is_none());
         assert!(result.get("omitted_bytes").is_none());
+    }
+
+    #[test]
+    fn pending_bounded_read_trims_incomplete_utf8_character() {
+        let temp = tempdir().unwrap();
+        let output_dir = temp.path().join(TOOL_OUTPUT_DIR);
+        std::fs::create_dir_all(&output_dir).unwrap();
+        let spool_path = output_dir.join("pending.txt");
+        std::fs::write(&spool_path, "prefix🙂suffix").unwrap();
+
+        let reference_value = json!({
+            "spool_path": ".vtcode/context/tool_outputs/pending.txt",
+            "spool_state": "pending",
+        });
+        let reference = SpooledOutputReference::from_value(&reference_value).unwrap();
+
+        // `🙂` is four bytes. Stop after its first byte and retain the valid
+        // prefix instead of making the entire preview unavailable.
+        let preview = reference.read_pending_bounded(temp.path(), "prefix".len() + 1).unwrap();
+        assert_eq!(preview, "prefix");
+    }
+
+    #[tokio::test]
+    async fn completed_spool_reference_detects_tampering_and_legacy_metadata() {
+        let temp = tempdir().unwrap();
+        let config = SpoolerConfig { threshold_bytes: 50, ..Default::default() };
+        let spooler = ToolOutputSpooler::with_config(temp.path(), config);
+        let expected = "x".repeat(200);
+        let result = spooler
+            .process_output("integrity", json!({"content": expected}), false)
+            .await
+            .expect("spool output");
+        let reference = SpooledOutputReference::from_value(&result).expect("typed spool reference");
+        let persisted = reference.read_verified_completed(temp.path()).expect("verified read");
+        assert!(persisted.contains(&expected));
+
+        let path = temp.path().join(reference.spool_path);
+        std::fs::write(&path, "y".repeat(persisted.len())).expect("tamper fixture");
+        assert!(reference.read_verified_completed(temp.path()).is_err());
+
+        let legacy = json!({
+            "spool_path": reference.spool_path,
+            "spool_complete": true,
+        });
+        let legacy_reference = SpooledOutputReference::from_value(&legacy).expect("legacy reference");
+        assert!(legacy_reference.read_verified_completed(temp.path()).is_err());
     }
 
     #[test]

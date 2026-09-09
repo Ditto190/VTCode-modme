@@ -35,6 +35,7 @@ mod timeout;
 pub(crate) mod validation;
 
 pub(crate) use execution::{run_tool_call, run_tool_call_with_args};
+pub(crate) use execution_events::emit_tool_outcome_observation;
 pub(crate) use execution_run::exec_settlement_mode_for_tool_call;
 pub(crate) use execution_run::resolve_harness_item_identity;
 pub(crate) use execution_runtime::execute_prevalidated_read_only_with_cache;

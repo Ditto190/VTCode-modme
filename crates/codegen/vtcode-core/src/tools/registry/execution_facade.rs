@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::task::Id as TokioTaskId;
 use tracing::{trace, warn};
@@ -112,13 +113,20 @@ fn tool_error_value_to_string(value: &Value) -> String {
 /// - Using a concurrent hash map (e.g., `dashmap`)
 /// - Using task-local storage via `tokio::task_local!`
 /// - Partitioning the map by task ID hash to reduce contention
-static TOOL_REENTRANCY_STACKS: Lazy<Mutex<HashMap<TokioTaskId, Vec<String>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-thread_local! {
-    static THREAD_REENTRANCY_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+#[derive(Debug)]
+struct ReentrancyFrame {
+    id: u64,
+    tool_name: String,
 }
 
-fn lock_reentrancy_stacks() -> parking_lot::MutexGuard<'static, HashMap<TokioTaskId, Vec<String>>> {
+static NEXT_REENTRANCY_FRAME_ID: AtomicU64 = AtomicU64::new(1);
+static TOOL_REENTRANCY_STACKS: Lazy<Mutex<HashMap<TokioTaskId, Vec<ReentrancyFrame>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+thread_local! {
+    static THREAD_REENTRANCY_STACK: RefCell<Vec<ReentrancyFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+fn lock_reentrancy_stacks() -> parking_lot::MutexGuard<'static, HashMap<TokioTaskId, Vec<ReentrancyFrame>>> {
     TOOL_REENTRANCY_STACKS.lock()
 }
 
@@ -136,43 +144,60 @@ enum ReentrancyContext {
 
 struct ToolReentrancyGuard {
     context: Option<ReentrancyContext>,
+    frame_id: u64,
 }
 
 impl ToolReentrancyGuard {
-    fn enter(tool_name: &str) -> std::result::Result<Self, ReentrancyViolation> {
+    fn enter(tool_name: &str, allow_parallel_sibling: bool) -> std::result::Result<Self, ReentrancyViolation> {
+        let frame_id = NEXT_REENTRANCY_FRAME_ID.fetch_add(1, Ordering::Relaxed);
         if let Some(task_id) = tokio::task::try_id() {
             let mut stacks = lock_reentrancy_stacks();
             let stack = stacks.entry(task_id).or_default();
             let stack_depth = stack.len();
-            let tool_reentry_count = stack.iter().filter(|active_tool| active_tool.as_str() == tool_name).count();
+            let tool_reentry_count = stack.iter().filter(|frame| frame.tool_name == tool_name).count();
 
-            if stack_depth >= REENTRANCY_STACK_DEPTH_LIMIT || tool_reentry_count >= REENTRANCY_PER_TOOL_LIMIT {
+            if stack_depth >= REENTRANCY_STACK_DEPTH_LIMIT
+                || (!allow_parallel_sibling && tool_reentry_count >= REENTRANCY_PER_TOOL_LIMIT)
+            {
                 let stack_trace = if stack.is_empty() {
                     "<empty>".to_string()
                 } else {
-                    stack.join(" -> ")
+                    stack
+                        .iter()
+                        .map(|frame| frame.tool_name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
                 };
                 return Err(ReentrancyViolation { stack_depth, tool_reentry_count, stack_trace });
             }
 
-            stack.push(tool_name.to_string());
-            return Ok(Self { context: Some(ReentrancyContext::Task(task_id)) });
+            stack.push(ReentrancyFrame { id: frame_id, tool_name: tool_name.to_string() });
+            return Ok(Self {
+                context: Some(ReentrancyContext::Task(task_id)),
+                frame_id,
+            });
         }
 
         let violation = THREAD_REENTRANCY_STACK.with(|stack_cell| {
             let mut stack = stack_cell.borrow_mut();
             let stack_depth = stack.len();
-            let tool_reentry_count = stack.iter().filter(|active_tool| active_tool.as_str() == tool_name).count();
+            let tool_reentry_count = stack.iter().filter(|frame| frame.tool_name == tool_name).count();
 
-            if stack_depth >= REENTRANCY_STACK_DEPTH_LIMIT || tool_reentry_count >= REENTRANCY_PER_TOOL_LIMIT {
+            if stack_depth >= REENTRANCY_STACK_DEPTH_LIMIT
+                || (!allow_parallel_sibling && tool_reentry_count >= REENTRANCY_PER_TOOL_LIMIT)
+            {
                 let stack_trace = if stack.is_empty() {
                     "<empty>".to_string()
                 } else {
-                    stack.join(" -> ")
+                    stack
+                        .iter()
+                        .map(|frame| frame.tool_name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
                 };
                 Some(ReentrancyViolation { stack_depth, tool_reentry_count, stack_trace })
             } else {
-                stack.push(tool_name.to_string());
+                stack.push(ReentrancyFrame { id: frame_id, tool_name: tool_name.to_string() });
                 None
             }
         });
@@ -181,7 +206,7 @@ impl ToolReentrancyGuard {
             return Err(violation);
         }
 
-        Ok(Self { context: Some(ReentrancyContext::Thread) })
+        Ok(Self { context: Some(ReentrancyContext::Thread), frame_id })
     }
 }
 
@@ -195,7 +220,9 @@ impl Drop for ToolReentrancyGuard {
             ReentrancyContext::Task(task_id) => {
                 let mut stacks = lock_reentrancy_stacks();
                 let should_remove = if let Some(stack) = stacks.get_mut(&task_id) {
-                    let _ = stack.pop();
+                    if let Some(position) = stack.iter().position(|frame| frame.id == self.frame_id) {
+                        stack.remove(position);
+                    }
                     stack.is_empty()
                 } else {
                     false
@@ -206,7 +233,10 @@ impl Drop for ToolReentrancyGuard {
             }
             ReentrancyContext::Thread => {
                 THREAD_REENTRANCY_STACK.with(|stack_cell| {
-                    let _ = stack_cell.borrow_mut().pop();
+                    let mut stack = stack_cell.borrow_mut();
+                    if let Some(position) = stack.iter().position(|frame| frame.id == self.frame_id) {
+                        stack.remove(position);
+                    }
                 });
             }
         }
@@ -324,6 +354,7 @@ impl ToolRegistry {
     }
 
     async fn execute_tool_request_internal(&self, request: ToolExecutionRequest) -> ToolExecutionOutcome {
+        let execution_started_at = Instant::now();
         let tool_name = &request.tool_name;
         let policy = request.policy.clone();
 
@@ -334,7 +365,8 @@ impl ToolRegistry {
             let error = ToolExecutionError::new(tool_name.clone(), ToolErrorType::PolicyViolation, message)
                 .with_tool_call_context(tool_name, &request.args)
                 .with_surface("tool_registry");
-            return ToolExecutionOutcome::failure(tool_name.clone(), 1, error);
+            return ToolExecutionOutcome::failure(tool_name.clone(), 1, error)
+                .with_execution_metadata(execution_started_at.elapsed(), None);
         }
 
         let mut retry_policy = crate::retry::RetryPolicy::from_retries(
@@ -369,7 +401,9 @@ impl ToolRegistry {
                 )
                 .await
                 {
-                    return ToolExecutionOutcome::failure(tool_name, attempt_index + 1, terminal);
+                    let category = Some(terminal.category);
+                    return ToolExecutionOutcome::failure(tool_name, attempt_index + 1, terminal)
+                        .with_execution_metadata(execution_started_at.elapsed(), category);
                 }
                 continue;
             }
@@ -401,12 +435,16 @@ impl ToolRegistry {
                         )
                         .await
                         {
-                            return ToolExecutionOutcome::failure(tool_name, attempt_index + 1, terminal);
+                            let category = Some(terminal.category);
+                            return ToolExecutionOutcome::failure(tool_name, attempt_index + 1, terminal)
+                                .with_execution_metadata(execution_started_at.elapsed(), category);
                         }
                         continue;
                     }
 
-                    return ToolExecutionOutcome::success(tool_name, attempt_index + 1, output);
+                    let recovered_category = last_error.as_ref().map(|error| error.category);
+                    return ToolExecutionOutcome::success(tool_name, attempt_index + 1, output)
+                        .with_execution_metadata(execution_started_at.elapsed(), recovered_category);
                 }
                 Err(error) => {
                     let mut base = ToolExecutionError::from_anyhow(
@@ -438,14 +476,16 @@ impl ToolRegistry {
                     )
                     .await
                     {
-                        return ToolExecutionOutcome::failure(tool_name, attempt_index + 1, terminal);
+                        let category = Some(terminal.category);
+                        return ToolExecutionOutcome::failure(tool_name, attempt_index + 1, terminal)
+                            .with_execution_metadata(execution_started_at.elapsed(), category);
                     }
                     continue;
                 }
             }
         }
 
-        ToolExecutionOutcome::failure(
+        let outcome = ToolExecutionOutcome::failure(
             tool_name,
             max_attempts,
             last_error.unwrap_or_else(|| {
@@ -456,7 +496,9 @@ impl ToolRegistry {
                 )
                 .with_surface("tool_registry")
             }),
-        )
+        );
+        let category = outcome.last_error_category;
+        outcome.with_execution_metadata(execution_started_at.elapsed(), category)
     }
 
     /// Apply the retry policy to a `ToolExecutionError` and either schedule
@@ -806,7 +848,8 @@ impl ToolRegistry {
             ));
         };
 
-        let _reentrancy_guard = match ToolReentrancyGuard::enter(&tool_name) {
+        let allow_parallel_sibling = prevalidated && tool_intent::is_parallel_safe_call(&tool_name, args);
+        let _reentrancy_guard = match ToolReentrancyGuard::enter(&tool_name, allow_parallel_sibling) {
             Ok(guard) => guard,
             Err(violation) => {
                 let reentry_count = violation.tool_reentry_count + 1;

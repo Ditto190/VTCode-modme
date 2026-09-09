@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 use vtcode_exec_events::{
-    ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadStartedEvent, TurnCompletedEvent,
-    TurnStartedEvent, Usage, VersionedThreadEvent,
+    AgentMessageItem, ItemCompletedEvent, ThreadCompletedEvent, ThreadCompletionSubtype, ThreadEvent, ThreadItem,
+    ThreadItemDetails, ThreadStartedEvent, TurnCompletedEvent, TurnStartedEvent, Usage, VersionedThreadEvent,
 };
 
 use crate::event_log::{DEFAULT_MAX_EVENTS, SessionEventLog};
@@ -605,6 +605,43 @@ fn cap_rewrite_keeps_event_log_appendable_and_reopenable() {
     let reopened = open(dir.path(), "sess-cap-rewrite", 2).expect("reopen compacted log");
     assert_eq!(reopened.event_count(), 2);
     assert_eq!(reopened.reconstruct_turn(2).expect("reconstruct after reopen").len(), 2);
+}
+
+#[test]
+fn cap_eviction_summary_contains_bounded_grounded_facts() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "sess-grounded-summary", 3).expect("open");
+    log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
+        .expect("append turn start");
+    log.append(&ThreadEvent::ItemCompleted(ItemCompletedEvent {
+        item: ThreadItem {
+            id: "message-1".into(),
+            details: ThreadItemDetails::AgentMessage(AgentMessageItem {
+                text: "The canonical event recorded a grounded implementation fact.".into(),
+            }),
+        },
+    }))
+    .expect("append message");
+    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
+        .expect("complete first turn");
+    log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
+        .expect("append second turn start");
+    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
+        .expect("complete second turn");
+
+    let derived = sessions_root(dir.path()).join("sess-grounded-summary/derived");
+    let summary_path = fs::read_dir(&derived)
+        .expect("read derived directory")
+        .filter_map(Result::ok)
+        .find(|entry| entry.file_name().to_string_lossy().starts_with("eviction-summary-"))
+        .map(|entry| entry.path())
+        .expect("summary file");
+    let summary: serde_json::Value =
+        serde_json::from_slice(&fs::read(summary_path).expect("read summary")).expect("parse summary");
+    assert_eq!(
+        summary["grounded_facts"],
+        serde_json::json!(["The canonical event recorded a grounded implementation fact."])
+    );
 }
 
 #[test]

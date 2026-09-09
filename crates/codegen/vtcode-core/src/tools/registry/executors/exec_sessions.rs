@@ -406,7 +406,7 @@ impl ToolRegistry {
         session_exited: bool,
     ) -> Result<bool> {
         if let Some(stats) = self.exec_sessions.output_stats(session_id).await? {
-            let safe_to_prune = !stats.spool_available || stats.spool_complete;
+            let safe_to_prune = !stats.spool_available || (stats.spool_complete && stats.spool_integrity.is_some());
             let spooler_config = self.output_spooler.config();
             attach_spool_metadata(
                 response,
@@ -750,13 +750,29 @@ fn attach_spool_metadata(
         return;
     }
 
-    if stats.spool_available && (stats.spool_complete || !session_exited) {
+    if stats.spool_available && stats.spool_complete {
+        let Some(integrity) = stats.spool_integrity.as_ref() else {
+            response["spool_complete"] = json!(false);
+            response["spool_pending"] = json!(true);
+            response["spool_state"] = json!("pending");
+            return;
+        };
         response["spool_path"] = json!(stats.spool_path);
         response["output_spooled"] = json!(true);
-        response["spool_complete"] = json!(stats.spool_complete);
+        response["spool_complete"] = json!(true);
+        response["spool_state"] = json!("completed");
+        response["spooled_bytes"] = json!(integrity.byte_count);
+        response["spool_sha256"] = json!(integrity.sha256);
+    } else if stats.spool_available && !session_exited {
+        response["spool_path"] = json!(stats.spool_path);
+        response["output_spooled"] = json!(true);
+        response["spool_complete"] = json!(false);
+        response["spool_pending"] = json!(true);
+        response["spool_state"] = json!("pending");
     } else if stats.spool_available {
         response["spool_complete"] = json!(false);
         response["spool_pending"] = json!(true);
+        response["spool_state"] = json!("pending");
     }
 }
 
@@ -790,6 +806,7 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: false,
+            spool_integrity: None,
         };
         let mut response = json!({});
 
@@ -811,6 +828,7 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: false,
+            spool_integrity: None,
         };
         let mut response = json!({});
 
@@ -819,7 +837,8 @@ mod tests {
         assert_eq!(response["spool_path"], stats.spool_path);
         assert_eq!(response["output_spooled"], true);
         assert_eq!(response["spool_complete"], false);
-        assert!(response.get("spool_pending").is_none());
+        assert_eq!(response["spool_pending"], true);
+        assert_eq!(response["spool_state"], "pending");
     }
 
     #[test]
@@ -830,6 +849,10 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: true,
+            spool_integrity: Some(crate::tools::output_spooler::SpoolIntegrity {
+                byte_count: 42,
+                sha256: "digest".to_string(),
+            }),
         };
         let mut response = json!({});
 
@@ -838,6 +861,9 @@ mod tests {
         assert_eq!(response["spool_path"], stats.spool_path);
         assert_eq!(response["output_spooled"], true);
         assert_eq!(response["spool_complete"], true);
+        assert_eq!(response["spool_state"], "completed");
+        assert_eq!(response["spooled_bytes"], 42);
+        assert_eq!(response["spool_sha256"], "digest");
         assert!(response.get("spool_pending").is_none());
     }
 
@@ -849,6 +875,7 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: true,
+            spool_integrity: None,
         };
         let mut response = json!({});
 
@@ -870,6 +897,7 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: true,
+            spool_integrity: None,
         };
         let mut response = json!({});
 
@@ -890,6 +918,10 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: true,
+            spool_integrity: Some(crate::tools::output_spooler::SpoolIntegrity {
+                byte_count: 42,
+                sha256: "digest".to_string(),
+            }),
         };
         let mut response = json!({"truncated": true});
 
@@ -908,6 +940,10 @@ mod tests {
             spool_path: ".vtcode/context/tool_outputs/run-1.txt".to_string(),
             spool_available: true,
             spool_complete: true,
+            spool_integrity: Some(crate::tools::output_spooler::SpoolIntegrity {
+                byte_count: 42,
+                sha256: "digest".to_string(),
+            }),
         };
         let mut response = json!({"query_truncated": true});
 

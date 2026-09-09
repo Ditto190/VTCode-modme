@@ -2,7 +2,7 @@ use super::AgentRunner;
 use crate::compaction::auto::{AutoCompactionInput, auto_compact_messages};
 use crate::compaction::memory_envelope::{MemoryEnvelopePlacement, local_compaction_config};
 use crate::core::agent::compaction_checkpoint::write_compaction_checkpoint_async;
-use crate::core::agent::context_reset::maybe_write_reset_after_compaction_async;
+use crate::core::agent::context_reset::maybe_write_reset_after_compaction_with_context_async;
 use crate::core::agent::conversation::conversation_from_messages;
 use crate::core::agent::session::AgentSessionState;
 use crate::exec::events::CompactionTrigger;
@@ -27,6 +27,7 @@ impl AgentRunner {
         preserve_recent_turns: usize,
         prompt_overhead_tokens: usize,
         reserved_output_tokens: usize,
+        request_envelope: &mut crate::core::agent::request_envelope::SessionRequestEnvelope,
     ) {
         let mut engine_cfg = local_compaction_config(Some(self.config()), false);
         // Honor the existing `context.preserve_recent_turns` knob: keep at least
@@ -79,6 +80,10 @@ impl AgentRunner {
             write_compaction_checkpoint_async(self._workspace.as_path(), envelope).await;
         }
 
+        let previous_envelope = request_envelope.clone();
+        let next_segment_id = format!("{}-compact-{}", previous_envelope.segment_id(), outcome.original_len);
+        *request_envelope = previous_envelope.begin_segment(next_segment_id);
+
         // If context reset is configured for on_compaction, write a reset
         // manifest so the next session starts from a clean context rather
         // than the compacted summary. This is distinct from compaction:
@@ -86,7 +91,23 @@ impl AgentRunner {
         // deliberately discards it to clear noise and bad assumptions.
         let reset_mode = self.config().agent.harness.context_reset_mode.as_str().to_owned();
         let workspace = self._workspace.clone();
-        match maybe_write_reset_after_compaction_async(workspace.as_path(), &reset_mode).await {
+        let mut checkpoint_paths = outcome.history_artifact_path.iter().cloned().collect::<Vec<_>>();
+        if outcome.envelope.is_some() {
+            checkpoint_paths.extend([
+                "memories/progress.md".to_string(),
+                "memories/compaction_summary.md".to_string(),
+            ]);
+        }
+        match maybe_write_reset_after_compaction_with_context_async(
+            workspace.as_path(),
+            &reset_mode,
+            Some(self.session_id.clone()),
+            Some(format!("compaction-{}", outcome.original_len)),
+            checkpoint_paths,
+            Some(format!("segment:{}", request_envelope.segment_id())),
+        )
+        .await
+        {
             Ok(true) => info!("Context reset manifest written after compaction (mode: {})", reset_mode),
             Ok(false) => {}
             Err(error) => warn!(error = %error, "Failed to write context reset manifest after compaction"),
@@ -98,6 +119,8 @@ impl AgentRunner {
             outcome.original_len,
             outcome.compacted_len,
             outcome.history_artifact_path.as_deref(),
+            Some(&previous_envelope),
+            Some(request_envelope),
         );
 
         info!(

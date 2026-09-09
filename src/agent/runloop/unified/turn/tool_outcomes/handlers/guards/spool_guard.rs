@@ -50,31 +50,20 @@ fn public_spool_grep_args(path: &str, pattern: &str) -> Value {
 /// exposing an unrelated file while the guard is constructing its response.
 async fn read_spool_preview_for_guard(workspace: &Path, path: &str) -> Option<String> {
     let workspace = workspace.to_path_buf();
-    let path = Path::new(path).to_path_buf();
-    tokio::task::spawn_blocking(move || -> std::io::Result<Option<String>> {
-        use std::io::Read;
-
-        let relative = if path.is_absolute() {
-            path.strip_prefix(&workspace)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::PermissionDenied, error))?
-        } else {
-            path.as_path()
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+        let reference = vtcode_core::tools::SpooledOutputReference {
+            spool_path: &path,
+            preview: None,
+            original_bytes: None,
+            sha256: None,
+            state: vtcode_core::tools::SpoolState::Pending,
         };
-        if !relative.starts_with(".vtcode/context/tool_outputs") {
-            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not a workspace spool"));
-        }
-
-        let mut file = vtcode_commons::fs::bound_file::open_file_beneath(&workspace, relative)?;
-        let len = file.metadata()?.len() as usize;
+        let content = reference.read_pending_bounded(&workspace, SPOOL_CHUNK_INLINE_MAX_BYTES)?;
+        let len = content.len();
         if len == 0 {
             return Ok(None);
         }
-
-        let total_cap = SPOOL_CHUNK_INLINE_MAX_BYTES.min(len);
-        let mut buffer = vec![0u8; total_cap];
-        let bytes_read = file.read(&mut buffer)?;
-        buffer.truncate(bytes_read);
-        let content = String::from_utf8_lossy(&buffer).into_owned();
         if content.len() <= SPOOL_CHUNK_INLINE_HEAD_BYTES + SPOOL_CHUNK_INLINE_TAIL_BYTES {
             return Ok(Some(content));
         }

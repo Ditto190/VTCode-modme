@@ -205,6 +205,12 @@ mod tests {
         assert!(!is_parallel_safe_call(tools::LIST_PTY_SESSIONS, &json!({})));
         assert!(!is_parallel_safe_call(tools::REQUEST_USER_INPUT, &json!({"questions": []})));
         assert!(!is_parallel_safe_call(tools::UNIFIED_EXEC, &json!({"action": "inspect", "session_id": "run-1"})));
+        assert!(is_parallel_safe_call(tools::EXEC_COMMAND, &json!({"cmd": "sed -n '1,40p' README.md"})));
+        assert!(!is_parallel_safe_call(tools::EXEC_COMMAND, &json!({"cmd": "cat README.md && cat Cargo.toml"})));
+        assert!(!is_parallel_safe_call(
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "sed -n '1,40p' README.md", "tty": true})
+        ));
     }
 
     #[test]

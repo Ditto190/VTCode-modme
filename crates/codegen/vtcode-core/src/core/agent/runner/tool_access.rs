@@ -13,6 +13,14 @@ use crate::tools::{command_args, tool_intent};
 use anyhow::{Result, bail};
 use serde_json::Value;
 use tracing::{info, warn};
+use vtcode_commons::ErrorCategory;
+
+pub(super) struct PreparedToolExecution {
+    pub result: std::result::Result<Value, ToolExecutionError>,
+    pub attempts: u32,
+    pub total_duration: std::time::Duration,
+    pub last_error_category: Option<ErrorCategory>,
+}
 
 fn restore_exact_file_read_output(mut output: Value) -> Value {
     let Some(obj) = output.as_object_mut() else {
@@ -195,13 +203,10 @@ impl AgentRunner {
         self.resolve_executable_tool_name(tool_name).await.is_some()
     }
 
-    /// Execute a prepared tool call, returning `(output, attempt_count)`.
-    /// The attempt count reflects retries performed inside the tool registry,
-    /// so callers can emit retry/recovery observability events.
-    pub(super) async fn execute_prepared_tool_internal(
-        &self,
-        prepared: &PreparedToolCall,
-    ) -> std::result::Result<(Value, u32), ToolExecutionError> {
+    /// Execute a prepared tool call and retain its one canonical terminal
+    /// result together with retry and timing metadata.
+    pub(super) async fn execute_prepared_tool_internal(&self, prepared: &PreparedToolCall) -> PreparedToolExecution {
+        let execution_started_at = std::time::Instant::now();
         let resolved_tool_name = prepared.canonical_name.as_str();
         let args = &prepared.effective_args;
         let shell_command = if tool_intent::is_command_run_tool_call(resolved_tool_name, args)
@@ -225,7 +230,8 @@ impl AgentRunner {
             let deny_glob_patterns =
                 crate::utils::merge_env_patterns(&cfg.commands.deny_glob, &format!("{}{}", agent_prefix, "DENY_GLOB"));
 
-            self.tool_registry
+            if let Err(error) = self
+                .tool_registry
                 .check_shell_policy(&cmd_text, &deny_regex_patterns, &deny_glob_patterns)
                 .map_err(|err| {
                     ToolExecutionError::policy_violation(
@@ -233,7 +239,15 @@ impl AgentRunner {
                         format!("tool denied by policy: {err}"),
                     )
                     .with_surface("agent_runner")
-                })?;
+                })
+            {
+                return PreparedToolExecution {
+                    attempts: 1,
+                    total_duration: execution_started_at.elapsed(),
+                    last_error_category: Some(error.category),
+                    result: Err(error),
+                };
+            }
 
             info!(target = "policy", agent = ?self.agent_type, tool = resolved_tool_name, cmd = %cmd_text, "shell_policy_checked");
         }
@@ -265,26 +279,37 @@ impl AgentRunner {
                         budget_secs = wall_clock_secs,
                         "tool execution exceeded the harness wall-clock budget; aborting"
                     );
-                    return Err(ToolExecutionError::new(
+                    let error = ToolExecutionError::new(
                         resolved_tool_name.to_string(),
                         ToolErrorType::Timeout,
                         format!("tool execution exceeded the harness wall-clock budget of {wall_clock_secs}s"),
                     )
-                    .with_surface("agent_runner"));
+                    .with_surface("agent_runner");
+                    return PreparedToolExecution {
+                        attempts: 1,
+                        total_duration: execution_started_at.elapsed(),
+                        last_error_category: Some(error.category),
+                        result: Err(error),
+                    };
                 }
             }
         } else {
             self.tool_registry.execute_prepared_public_tool_request(prepared, policy).await
         };
-        let attempts = outcome.attempts;
-        match (outcome.output, outcome.error) {
-            (Some(output), None) => Ok((restore_exact_file_read_output(output), attempts)),
+        let result = match (outcome.output, outcome.error) {
+            (Some(output), None) => Ok(restore_exact_file_read_output(output)),
             (_, Some(error)) => Err(error.with_surface("agent_runner")),
             _ => Err(ToolExecutionError::policy_violation(
                 resolved_tool_name.to_string(),
                 "tool execution failed without output or error",
             )
             .with_surface("agent_runner")),
+        };
+        PreparedToolExecution {
+            result,
+            attempts: outcome.attempts,
+            total_duration: outcome.total_duration,
+            last_error_category: outcome.last_error_category,
         }
     }
 
@@ -306,9 +331,7 @@ impl AgentRunner {
             ToolExecutionError::from_anyhow(tool_name, &error, 0, false, false, Some("agent_runner"))
                 .with_tool_call_context(tool_name, args)
         })?;
-        self.execute_prepared_tool_internal(&prepared)
-            .await
-            .map(|(value, _attempts)| value)
+        self.execute_prepared_tool_internal(&prepared).await.result
     }
 }
 

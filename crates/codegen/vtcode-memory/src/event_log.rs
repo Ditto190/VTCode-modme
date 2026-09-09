@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use vtcode_commons::VtCodePaths;
-use vtcode_exec_events::{EVENT_SCHEMA_VERSION, ThreadEvent, VersionedThreadEvent};
+use vtcode_exec_events::{EVENT_SCHEMA_VERSION, ThreadEvent, ThreadItemDetails, VersionedThreadEvent};
 
 use crate::error::SessionStoreError;
 use crate::manifest::{ManifestStore, PendingCapRewrite};
@@ -23,6 +23,8 @@ pub const DEFAULT_MAX_EVENTS: usize = 10_000;
 /// Maximum serialized event bytes retained before an append forces a write.
 /// Turn boundaries and reads still flush immediately.
 const MAX_WRITE_BUFFER_BYTES: usize = 64 * 1024;
+const MAX_EVICTION_GROUNDED_FACTS: usize = 32;
+const MAX_EVICTION_GROUNDED_FACT_BYTES: usize = 512;
 
 /// Callback used to persist a summary of events before they are evicted.
 ///
@@ -955,7 +957,71 @@ struct EvictionSummary {
     session_id: String,
     evicted_event_count: usize,
     event_types: BTreeMap<String, u64>,
+    grounded_facts: Vec<String>,
     created_at: String,
+}
+
+/// Extract a bounded, deterministic set of facts from canonical event
+/// payloads. This is intentionally structural rather than model-generated:
+/// eviction must remain synchronous, reproducible, and safe when the model is
+/// unavailable. Only completed item snapshots and terminal thread errors are
+/// considered, so streaming deltas and raw tool output cannot flood the
+/// derived summary.
+fn extract_grounded_facts(events: &[ThreadEvent]) -> Vec<String> {
+    let mut facts = Vec::new();
+    for event in events {
+        let candidates: Vec<String> = match event {
+            ThreadEvent::ItemCompleted(completed) => item_facts(&completed.item.details),
+            ThreadEvent::TurnFailed(failed) => vec![failed.message.clone()],
+            ThreadEvent::TurnBlocked(blocked) => vec![blocked.message.clone()],
+            ThreadEvent::Error(error) => vec![error.message.clone()],
+            _ => Vec::new(),
+        };
+        for candidate in candidates {
+            let fact = normalize_eviction_fact(&candidate);
+            if fact.is_empty() || facts.iter().any(|existing| existing == &fact) {
+                continue;
+            }
+            facts.push(fact);
+            if facts.len() == MAX_EVICTION_GROUNDED_FACTS {
+                return facts;
+            }
+        }
+    }
+    facts
+}
+
+fn item_facts(details: &ThreadItemDetails) -> Vec<String> {
+    match details {
+        ThreadItemDetails::AgentMessage(item) => vec![item.text.clone()],
+        ThreadItemDetails::Plan(item) => vec![item.text.clone()],
+        ThreadItemDetails::FileChange(item) => item
+            .changes
+            .iter()
+            .map(|change| {
+                let kind = match change.kind {
+                    vtcode_exec_events::PatchChangeKind::Add => "add",
+                    vtcode_exec_events::PatchChangeKind::Delete => "delete",
+                    vtcode_exec_events::PatchChangeKind::Update => "update",
+                };
+                format!("file {kind}: {}", change.path)
+            })
+            .collect(),
+        ThreadItemDetails::Harness(item) => item.message.clone().into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_eviction_fact(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.len() <= MAX_EVICTION_GROUNDED_FACT_BYTES {
+        return normalized;
+    }
+    let mut end = MAX_EVICTION_GROUNDED_FACT_BYTES - '…'.len_utf8();
+    while !normalized.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &normalized[..end])
 }
 
 fn default_eviction_summary_hook(derived_dir: PathBuf, session_id: String) -> EvictionSummaryHook {
@@ -972,6 +1038,7 @@ fn default_eviction_summary_hook(derived_dir: PathBuf, session_id: String) -> Ev
             session_id: session_id.clone(),
             evicted_event_count: events.len(),
             event_types,
+            grounded_facts: extract_grounded_facts(events),
             created_at: now_rfc3339(),
         };
         let path = derived_dir.join(format!("eviction-summary-{}.json", uuid::Uuid::new_v4().simple()));

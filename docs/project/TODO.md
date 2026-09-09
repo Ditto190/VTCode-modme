@@ -128,3 +128,7 @@ What you can do:
 log:
 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/checkpoints/turn_1075.json
 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/checkpoints/turn_1074.json
+
+===
+
+https://danluu.com/agentic-testing/

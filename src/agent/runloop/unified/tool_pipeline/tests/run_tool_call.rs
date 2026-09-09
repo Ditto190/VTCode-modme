@@ -1179,7 +1179,7 @@ async fn test_run_tool_call_requires_operator_preapproval_for_escalated_shell() 
 }
 
 #[tokio::test]
-async fn test_run_tool_call_reuses_streamed_invocation_item_without_duplicate_start() {
+async fn test_run_tool_call_reuses_streamed_invocation_and_emits_one_terminal_observation() {
     let mut test_ctx = TestContext::new().await;
     std::fs::create_dir_all(&test_ctx.workspace).expect("create workspace");
     std::fs::write(test_ctx.workspace.join("note.txt"), "hello\n").expect("write note.txt");
@@ -1264,6 +1264,7 @@ async fn test_run_tool_call_reuses_streamed_invocation_item_without_duplicate_st
     let payload = std::fs::read_to_string(log_dir.path().join("harness.jsonl")).expect("read harness log");
     let mut started_count = 0usize;
     let mut completed_count = 0usize;
+    let mut terminal_observation_count = 0usize;
 
     for line in payload.lines() {
         let value: Value = serde_json::from_str(line).expect("json line");
@@ -1281,10 +1282,19 @@ async fn test_run_tool_call_reuses_streamed_invocation_item_without_duplicate_st
                 completed_count += 1;
             }
         }
+        if event_type == "item.completed"
+            && item_type == "harness"
+            && item.get("event").and_then(Value::as_str) == Some("tool_latency_recorded")
+        {
+            terminal_observation_count += 1;
+            assert_eq!(item.get("attempt").and_then(Value::as_u64), Some(1));
+            assert!(item.get("duration_ms").and_then(Value::as_u64).is_some());
+        }
     }
 
     assert_eq!(started_count, 1);
     assert_eq!(completed_count, 1);
+    assert_eq!(terminal_observation_count, 1);
 }
 
 /// Regression: the interactive runloop validates (safety-admits) each tool

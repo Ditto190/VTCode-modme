@@ -17,6 +17,16 @@
 /// Checks if a command appears dangerous to execute.
 /// Returns true if the command should be blocked before execution.
 pub fn command_might_be_dangerous(command: &[String]) -> bool {
+    let Some(command) = unwrap_command_prefix(command) else {
+        return !command.is_empty();
+    };
+    let Some(executable) = command.first() else {
+        return false;
+    };
+    if executable_is_dynamic(executable) {
+        return true;
+    }
+
     // PowerShell's encoded-command form hides the script from every
     // platform-neutral parser. Treat it as dangerous before policy or shell
     // evaluation can classify the base64 payload as an ordinary argument.
@@ -38,7 +48,7 @@ pub fn command_might_be_dangerous(command: &[String]) -> bool {
     // Support bash -lc "..." parsing for chained commands
     // If the command is bash -c "..." or similar, parse the script and check each command
     if command.len() >= 3
-        && (command[0] == "bash" || command[0] == "sh" || command[0] == "zsh")
+        && matches!(extract_command_name(&command[0]), "bash" | "sh" | "zsh")
         && (command[1] == "-c" || command[1] == "-lc" || command[1] == "-ilc")
     {
         let script = &command[2];
@@ -48,10 +58,130 @@ pub fn command_might_be_dangerous(command: &[String]) -> bool {
                     return true;
                 }
             }
+        } else {
+            return true;
         }
     }
 
     false
+}
+
+/// Returns whether the command crosses an inline-code boundary that must be
+/// admitted by an enforceable sandbox or explicit human approval.
+///
+/// This is deliberately separate from [`command_might_be_dangerous`]: inline
+/// interpreter programs are not forbidden outright, but their source text can
+/// perform arbitrary effects that argv-level command classification cannot
+/// prove safe.
+pub fn command_requires_approval(command: &[String]) -> bool {
+    let Some(command) = unwrap_command_prefix(command) else {
+        return false;
+    };
+    if is_inline_code_execution(command) {
+        return true;
+    }
+
+    if command.len() >= 3
+        && matches!(extract_command_name(&command[0]), "bash" | "sh" | "zsh")
+        && matches!(command[1].as_str(), "-c" | "-lc" | "-ilc")
+        && let Ok(commands) = crate::command_safety::shell_parser::parse_shell_commands(&command[2])
+    {
+        return commands.iter().any(|nested| command_requires_approval(nested));
+    }
+
+    false
+}
+
+fn executable_is_dynamic(executable: &str) -> bool {
+    executable
+        .chars()
+        .any(|character| matches!(character, '$' | '`' | '*' | '?' | '[' | ']' | '{' | '}'))
+}
+
+fn is_environment_assignment(argument: &str) -> bool {
+    let Some((name, _value)) = argument.split_once('=') else {
+        return false;
+    };
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+pub(super) fn unwrap_command_prefix(mut command: &[String]) -> Option<&[String]> {
+    loop {
+        while command.first().is_some_and(|argument| is_environment_assignment(argument)) {
+            command = &command[1..];
+        }
+        let executable = command.first()?;
+        match extract_command_name(executable) {
+            "env" => {
+                command = &command[1..];
+                while let Some(argument) = command.first().map(String::as_str) {
+                    if is_environment_assignment(argument) || matches!(argument, "-i" | "--ignore-environment") {
+                        command = &command[1..];
+                    } else if matches!(argument, "-u" | "--unset") {
+                        command = command.get(2..)?;
+                    } else if argument.starts_with("--unset=") {
+                        command = &command[1..];
+                    } else if argument == "--" {
+                        command = &command[1..];
+                        break;
+                    } else if argument.starts_with('-') {
+                        return None;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            "sudo" => {
+                command = &command[1..];
+                while let Some(argument) = command.first().map(String::as_str) {
+                    if argument == "--" {
+                        command = &command[1..];
+                        break;
+                    }
+                    if matches!(argument, "-u" | "--user" | "-g" | "--group" | "-h" | "--host" | "-C" | "--chdir") {
+                        command = command.get(2..)?;
+                    } else if matches!(argument, "-E" | "-H" | "-n" | "-S" | "-k" | "-K" | "-b")
+                        || argument.starts_with("--user=")
+                        || argument.starts_with("--group=")
+                        || argument.starts_with("--host=")
+                        || argument.starts_with("--chdir=")
+                    {
+                        command = &command[1..];
+                    } else if argument.starts_with('-') {
+                        return None;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            _ => return Some(command),
+        }
+    }
+}
+
+fn is_inline_code_execution(command: &[String]) -> bool {
+    let Some(executable) = command.first().map(|value| extract_command_name(value).to_ascii_lowercase()) else {
+        return false;
+    };
+    let arguments = &command[1..];
+    match executable.as_str() {
+        "python" | "python3" | "python.exe" | "python3.exe" => arguments.iter().any(|argument| argument == "-c"),
+        "node" | "node.exe" | "ruby" | "ruby.exe" | "perl" | "perl.exe" | "osascript" => {
+            arguments.iter().any(|argument| argument == "-e")
+        }
+        "php" | "php.exe" => arguments.iter().any(|argument| argument == "-r"),
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => arguments.iter().any(|argument| {
+            matches!(
+                argument.to_ascii_lowercase().as_str(),
+                "-command" | "-c" | "-encodedcommand" | "-encoded" | "-enc" | "-e"
+            )
+        }),
+        _ => false,
+    }
 }
 
 fn is_encoded_powershell_invocation(command: &[String]) -> bool {
@@ -443,6 +573,48 @@ mod tests {
     fn command_might_be_dangerous_allows_git_status() {
         let cmd = vec!["git".to_string(), "status".to_string()];
         assert!(!command_might_be_dangerous(&cmd));
+    }
+
+    #[test]
+    fn wrappers_and_absolute_executables_do_not_hide_dangerous_commands() {
+        assert!(command_might_be_dangerous(&vec_str(&[
+            "env",
+            "MODE=test",
+            "sudo",
+            "-u",
+            "root",
+            "/usr/bin/git",
+            "reset",
+            "--hard",
+        ])));
+        assert!(command_might_be_dangerous(&vec_str(&["MODE=test", "/bin/sh", "-c", "rm -rf /",])));
+    }
+
+    #[test]
+    fn inline_interpreter_programs_are_code_execution_boundaries() {
+        for command in [
+            vec_str(&["/usr/bin/python3", "-c", "print('ok')"]),
+            vec_str(&["node", "-e", "console.log('ok')"]),
+            vec_str(&["ruby", "-e", "puts 'ok'"]),
+            vec_str(&["perl", "-e", "print 'ok'"]),
+            vec_str(&["php", "-r", "echo 'ok';"]),
+            vec_str(&["osascript", "-e", "return 1"]),
+            vec_str(&["pwsh", "-Command", "Write-Output ok"]),
+        ] {
+            assert!(!command_might_be_dangerous(&command), "inline code is not forbidden outright: {command:?}");
+            assert!(command_requires_approval(&command), "inline code should require policy admission: {command:?}");
+        }
+
+        let nested = vec_str(&["bash", "-lc", "python3 -c 'print(1)'"]);
+        assert!(command_requires_approval(&nested));
+        assert!(!command_might_be_dangerous(&nested));
+    }
+
+    #[test]
+    fn dynamic_or_unknown_wrapped_executables_fail_closed() {
+        assert!(command_might_be_dangerous(&vec_str(&["$TOOL", "status"])));
+        assert!(command_might_be_dangerous(&vec_str(&["env", "--unknown", "git", "status"])));
+        assert!(command_might_be_dangerous(&vec_str(&["sudo", "--unknown", "git", "status"])));
     }
 
     // ──── Git Branch Delete Tests ────

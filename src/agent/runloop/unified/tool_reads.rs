@@ -26,14 +26,7 @@ pub(crate) fn is_read_file_style_call(canonical_tool_name: &str, args: &Value) -
 }
 
 fn looks_like_tool_output_spool_path(path: &str) -> bool {
-    let normalized = path.replace('\\', "/");
-    let components: Vec<_> = normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect();
-    if components.contains(&"..") {
-        return false;
-    }
-    components
-        .windows(4)
-        .any(|parts| parts.starts_with(&[".vtcode", "context", "tool_outputs"]))
+    vtcode_core::tools::SpooledOutputReference::recognizes_file_path(std::path::Path::new(path))
 }
 
 pub(crate) fn spool_chunk_read_path<'a>(canonical_tool_name: &str, args: &'a Value) -> Option<&'a str> {
@@ -107,22 +100,16 @@ pub(crate) fn spool_page_source_path(canonical_tool_name: &str, args: &Value) ->
 /// tool calls. Used to short-circuit repeated reads of an error spool.
 pub(crate) async fn read_spool_head_for_error_check(workspace: &std::path::Path, path: &str) -> Option<String> {
     let workspace = workspace.to_path_buf();
-    let path = std::path::PathBuf::from(path);
-    tokio::task::spawn_blocking(move || -> std::io::Result<String> {
-        use std::io::Read;
-        let relative = if path.is_absolute() {
-            path.strip_prefix(&workspace)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::PermissionDenied, error))?
-        } else {
-            path.as_path()
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        let reference = vtcode_core::tools::SpooledOutputReference {
+            spool_path: &path,
+            preview: None,
+            original_bytes: None,
+            sha256: None,
+            state: vtcode_core::tools::SpoolState::Pending,
         };
-        if !relative.starts_with(".vtcode/context/tool_outputs") {
-            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not a workspace spool"));
-        }
-        let file = vtcode_commons::fs::bound_file::open_file_beneath(&workspace, relative)?;
-        let mut buffer = Vec::new();
-        file.take(4096).read_to_end(&mut buffer)?;
-        Ok(String::from_utf8_lossy(&buffer).into_owned())
+        reference.read_pending_bounded(&workspace, 4096)
     })
     .await
     .ok()?

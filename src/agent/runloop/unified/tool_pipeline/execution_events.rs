@@ -1,4 +1,4 @@
-use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
+use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter, tool_outcome_observation_event};
 use serde_json::Value;
 use vtcode_core::core::agent::events::{
     ToolOutputPayload, error_item_completed_event, tool_invocation_completed_event, tool_output_completed_event,
@@ -7,7 +7,23 @@ use vtcode_core::core::agent::events::{
 use vtcode_core::exec::events::{ToolCallStatus, tool_outcome_from_status};
 use vtcode_core::tools::registry::ToolExecutionError;
 
-use super::status::ToolExecutionStatus;
+use super::status::{ToolExecutionStatus, ToolPipelineOutcome};
+
+pub(crate) fn emit_tool_outcome_observation(
+    harness_emitter: Option<&HarnessEventEmitter>,
+    tool_name: &str,
+    outcome: &ToolPipelineOutcome,
+) {
+    let Some(emitter) = harness_emitter else {
+        return;
+    };
+    let duration_ms = outcome.total_duration.as_millis().min(u128::from(u64::MAX)) as u64;
+    let category = outcome
+        .last_error_category
+        .as_ref()
+        .map(|category| category.as_str().to_string());
+    let _ = emitter.emit(tool_outcome_observation_event(tool_name, outcome.attempts, duration_ms, category));
+}
 
 fn tool_error_output_payload(error: &ToolExecutionError) -> ToolOutputPayload {
     let mut payload = tool_output_payload_from_value(&error.to_json_value());

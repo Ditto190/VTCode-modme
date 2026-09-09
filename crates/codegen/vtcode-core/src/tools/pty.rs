@@ -46,6 +46,7 @@ pub(crate) struct PtyOutputStats {
     pub spool_path: String,
     pub spool_available: bool,
     pub spool_complete: bool,
+    pub spool_integrity: Option<crate::tools::output_spooler::SpoolIntegrity>,
 }
 
 // ── Shared types (headless) ─────────────────────────────────────────────────

@@ -199,9 +199,7 @@ fn read_compaction_summary(workspace_root: &Path) -> Option<String> {
 /// session. Returns the markdown content of the manifest, or `None` if no
 /// reset occurred.
 fn read_context_reset_manifest(workspace_root: &Path) -> Option<String> {
-    let path = harness_artifacts::current_context_reset_path(workspace_root);
-    let content = std::fs::read_to_string(&path).ok()?;
-    if content.trim().is_empty() { None } else { Some(content) }
+    crate::core::agent::context_reset::read_manifest_orientation(workspace_root)
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ use super::tool_handler::{
 };
 use crate::config::constants::tools;
 use crate::tools::shell::{ShellOutput as CoreShellOutput, ShellRunner};
+use crate::tools::validation::commands;
 
 /// Default timeout for shell commands (30 seconds).
 const DEFAULT_SHELL_TIMEOUT_MS: u64 = 30_000;
@@ -81,18 +82,52 @@ impl ShellHandler {
         &self,
         params: &ShellToolCallParams,
         cwd: &Path,
-        _env: Option<HashMap<String, String>>,
+        env: Option<HashMap<String, String>>,
     ) -> Result<CoreShellOutput, ToolCallError> {
-        let runner = ShellRunner::new(cwd.to_path_buf());
-        let command = params.command.join(" ");
-
         let timeout_ms = params.timeout_ms.unwrap_or(DEFAULT_SHELL_TIMEOUT_MS).min(MAX_SHELL_TIMEOUT_MS);
-
-        // Execute with timeout
-        let result = tokio::time::timeout(Duration::from_millis(timeout_ms), runner.exec(&command))
+        let result = if let Some((program, args)) = params.command.split_first().filter(|_| params.command.len() > 1) {
+            commands::validate_command_argv(&params.command).map_err(ToolCallError::Internal)?;
+            let canonical_cwd = vtcode_commons::paths::canonicalize_async(cwd)
+                .await
+                .map_err(|error| ToolCallError::Internal(error.into()))?;
+            let directory = tokio::task::spawn_blocking({
+                let canonical_cwd = canonical_cwd.clone();
+                move || vtcode_commons::fs::bound_file::open_directory_handle(&canonical_cwd)
+            })
             .await
-            .map_err(|_e| ToolCallError::Timeout(timeout_ms))?
-            .map_err(ToolCallError::Internal)?;
+            .map_err(|error| ToolCallError::Internal(error.into()))?
+            .map_err(|error| ToolCallError::Internal(error.into()))?;
+            let mut command = tokio::process::Command::new(program);
+            command.args(args).current_dir(&canonical_cwd);
+            vtcode_commons::fs::bound_file::set_command_working_directory(command.as_std_mut(), &directory)
+                .map_err(|error| ToolCallError::Internal(error.into()))?;
+            let current_env = env.unwrap_or_else(|| std::env::vars().collect());
+            let sanitized_env = crate::sandboxing::build_sanitized_env(
+                &current_env,
+                true,
+                false,
+                "shell-handler",
+                &[canonical_cwd.as_path()],
+            );
+            command.env_clear().envs(sanitized_env);
+            let output = tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
+                .await
+                .map_err(|_error| ToolCallError::Timeout(timeout_ms))?
+                .map_err(|error| ToolCallError::Internal(error.into()))?;
+            CoreShellOutput {
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                exit_code: output.status.code().unwrap_or(-1),
+            }
+        } else {
+            let command = params.command.first().map(String::as_str).unwrap_or_default();
+            commands::validate_shell_script(command).map_err(ToolCallError::Internal)?;
+            let runner = ShellRunner::new(cwd.to_path_buf());
+            tokio::time::timeout(Duration::from_millis(timeout_ms), runner.exec(command))
+                .await
+                .map_err(|_error| ToolCallError::Timeout(timeout_ms))?
+                .map_err(ToolCallError::Internal)?
+        };
 
         Ok(result)
     }
