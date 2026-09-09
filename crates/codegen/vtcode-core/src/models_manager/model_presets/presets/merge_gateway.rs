@@ -23,6 +23,10 @@ fn merge_reasoning_presets() -> Vec<ReasoningEffortPreset> {
         },
         ReasoningEffortPreset {
             effort: ReasoningEffortLevel::XHigh,
+            description: "Extra-high reasoning depth".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffortLevel::Max,
             description: "Maximum reasoning depth".to_string(),
         },
     ]

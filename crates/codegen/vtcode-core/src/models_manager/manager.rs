@@ -341,6 +341,10 @@ impl ModelsManager {
                 effort: ReasoningEffortLevel::XHigh,
                 description: "Extra reasoning for the hardest long-running tasks".to_string(),
             },
+            ReasoningEffortPreset {
+                effort: ReasoningEffortLevel::Max,
+                description: "Maximum reasoning depth".to_string(),
+            },
         ]
     }
 

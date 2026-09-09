@@ -91,6 +91,7 @@ fn merge_reasoning_control_for_model(model: &str) -> Option<MergeReasoningContro
         || model.starts_with("xai/")
         || model.starts_with("moonshot/")
         || model.starts_with("meta/")
+        || model.starts_with("zai/")
     {
         Some(MergeReasoningControl::ReasoningEffort)
     } else if model.starts_with("anthropic/")
@@ -1487,14 +1488,20 @@ impl LLMProvider for MergeGatewayProvider {
         matches!(
             model,
             models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5
+                | models::merge_gateway::ANTHROPIC_CLAUDE_FABLE_5_1
                 | models::merge_gateway::GOOGLE_GEMINI_3_6_FLASH
                 | models::merge_gateway::GOOGLE_GEMINI_3_7_FLASH
+                | models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH
                 | models::merge_gateway::QWEN_3_8_MAX
                 | models::merge_gateway::MOONSHOT_KIMI_K3
                 | models::merge_gateway::META_MUSE_SPARK_1_1
+                | models::merge_gateway::META_MUSE_SPARK_1_3
+                | models::merge_gateway::ZAI_GLM_5_3_FLASH
+                | models::merge_gateway::OPENAI_GPT_5_5
                 | models::merge_gateway::OPENAI_GPT_5_6_LUNA
                 | models::merge_gateway::OPENAI_GPT_5_6_SOL
                 | models::merge_gateway::OPENAI_GPT_5_6_TERRA
+                | models::merge_gateway::OPENAI_GPT_6_ASTRA
         )
     }
 
@@ -1732,8 +1739,29 @@ mod tests {
         assert!(provider.supports_reasoning_effort(models::merge_gateway::OPENAI_GPT_5_5));
         assert!(provider.supports_reasoning(models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5));
         assert!(provider.supports_reasoning_effort(models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5));
+        assert!(provider.supports_reasoning(models::merge_gateway::ZAI_GLM_5_3_FLASH));
+        assert!(provider.supports_reasoning_effort(models::merge_gateway::ZAI_GLM_5_3_FLASH));
         assert!(!provider.supports_reasoning(models::merge_gateway::DEFAULT_ROUTING));
         assert!(!provider.supports_reasoning_effort(models::merge_gateway::DEFAULT_ROUTING));
+    }
+
+    #[test]
+    fn native_payload_forwards_reasoning_effort_on_zai_route() {
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+        );
+        let request = LLMRequest {
+            model: models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+            reasoning_effort: Some(vtcode_config::types::ReasoningEffortLevel::High),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+
+        let payload = provider.build_native_payload(&request, false).expect("payload");
+
+        assert_eq!(payload["reasoning_effort"], "high");
+        assert!(payload.get("thinking").is_none());
     }
 
     #[test]

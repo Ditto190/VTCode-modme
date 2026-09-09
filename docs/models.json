@@ -4167,6 +4167,13 @@
         "name": "GPT-5.5 (Merge Gateway)",
         "description": "OpenAI GPT-5.5 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4192,6 +4199,13 @@
         "name": "GPT-6 Astra (Merge Gateway)",
         "description": "OpenAI GPT-6 Astra served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4217,6 +4231,14 @@
         "name": "Claude Opus 5 (Merge Gateway)",
         "description": "Anthropic Claude Opus 5 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4240,6 +4262,14 @@
         "name": "Gemini 3.6 Flash (Merge Gateway)",
         "description": "Google Gemini 3.6 Flash served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4263,6 +4293,14 @@
         "name": "Gemini 3.7 Flash (Merge Gateway)",
         "description": "Google Gemini 3.7 Flash served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4286,6 +4324,14 @@
         "name": "DeepSeek V4 Pro 0813 (Merge Gateway)",
         "description": "DeepSeek V4 Pro 0813 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4310,6 +4356,14 @@
         "name": "DeepSeek V4 Flash 0731 (Merge Gateway)",
         "description": "DeepSeek V4 Flash 0731 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4332,6 +4386,12 @@
         "name": "Grok 4.6 (Merge Gateway)",
         "description": "xAI Grok 4.6 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4355,6 +4415,14 @@
         "name": "Qwen3.8 Max (Merge Gateway)",
         "description": "Qwen3.8 Max served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4378,6 +4446,14 @@
         "name": "MiniMax H3 (Merge Gateway)",
         "description": "MiniMax H3 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4400,6 +4476,11 @@
         "name": "Kimi K3 (Merge Gateway)",
         "description": "Moonshot Kimi K3 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "high",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4424,6 +4505,14 @@
         "name": "Inkling (Merge Gateway)",
         "description": "Thinking Machines Inkling served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4446,6 +4535,14 @@
         "name": "Muse Spark 1.1 (Merge Gateway)",
         "description": "Meta Muse Spark 1.1 served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4469,6 +4566,11 @@
         "name": "GLM-5.3 Flash (Merge Gateway)",
         "description": "Z.AI GLM-5.3 Flash efficient multimodal model via Merge Gateway (320B total / 18B active, hybrid attention, native vision).",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "high",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4492,6 +4594,13 @@
         "name": "GPT-5.6 Luna (Merge Gateway)",
         "description": "OpenAI GPT-5.6 Luna served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4515,6 +4624,13 @@
         "name": "GPT-5.6 Sol (Merge Gateway)",
         "description": "OpenAI GPT-5.6 Sol served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4540,6 +4656,13 @@
         "name": "GPT-5.6 Terra (Merge Gateway)",
         "description": "OpenAI GPT-5.6 Terra served through Merge Gateway's native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4564,6 +4687,14 @@
         "name": "Gemini 3.8 Flash (Merge Gateway)",
         "description": "Google Gemini 3.8 Flash served through Merge Gateway native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4587,6 +4718,14 @@
         "name": "Claude Fable 5.1 (Merge Gateway)",
         "description": "Anthropic Claude Fable 5.1 served through Merge Gateway native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4611,6 +4750,14 @@
         "name": "DeepSeek V4 Flash 0731 Fast (Merge Gateway)",
         "description": "DeepSeek V4 Flash 0731 Fast served through Merge Gateway native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
@@ -4633,6 +4780,14 @@
         "name": "Muse Spark 1.3 (Merge Gateway)",
         "description": "Meta Muse Spark 1.3 served through Merge Gateway native Responses API.",
         "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
         "tool_call": true,
         "modalities": {
           "input": [
