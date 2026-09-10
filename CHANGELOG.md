@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.160.2 - 2026-09-10
+
+### Highlights
+#### Bug Fixes
+
+- Return None instead of error for unsupported reasoning effort serialization (2de59c02) 
+### Other Changes
 ## 0.160.1 - 2026-09-10
 
 ### Highlights
