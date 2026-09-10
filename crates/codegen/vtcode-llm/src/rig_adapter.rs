@@ -82,12 +82,7 @@ impl RigProviderCapabilities {
             // supplied by the Provider trait rather than the built-in catalog.
             Provider::OpenRouter => Some(json!({ "effort": effort.as_str() })),
             Provider::Anthropic => None,
-            _ => {
-                return Err(crate::provider::LLMError::InvalidRequest {
-                    message: format!("Provider `{}` does not serialize reasoning effort", self.provider.as_ref()),
-                    metadata: None,
-                });
-            }
+            _ => None,
         };
         Ok(payload)
     }
@@ -154,5 +149,55 @@ mod tests {
                 .reasoning_parameters(ReasoningEffortLevel::Max)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn native_providers_do_not_fail_rig_serialization() {
+        for (provider, model) in [
+            (Provider::MergeGateway, "openai/gpt-5.5"),
+            (Provider::OllamaCloud, "gpt-oss:120b-cloud"),
+        ] {
+            let payload = RigProviderCapabilities::new(provider, model)
+                .reasoning_parameters_for_supported_efforts(ReasoningEffortLevel::High, &["low", "medium", "high"])
+                .expect("native provider should not error on supported effort");
+            assert!(payload.is_none(), "native provider handles reasoning effort on its own");
+        }
+    }
+
+    #[test]
+    fn all_providers_handle_reasoning_parameters_gracefully() {
+        let supported_efforts = &["low", "medium", "high", "xhigh", "max"];
+        for (provider, model) in [
+            (Provider::OpenAI, "gpt-5.1-mini"),
+            (Provider::Anthropic, "claude-sonnet-5"),
+            (Provider::Gemini, "gemini-3.7-flash"),
+            (Provider::DeepSeek, "deepseek-v4.1-flash"),
+            (Provider::ZAI, "glm-5.3-flash"),
+            (Provider::Meta, "muse-spark-1.3"),
+            (Provider::OpenRouter, "openrouter/auto"),
+            (Provider::Ollama, "gpt-oss:20b"),
+            (Provider::OllamaCloud, "gpt-oss:20b-cloud"),
+            (Provider::LmStudio, "gpt-oss-20b"),
+            (Provider::LlamaCpp, "gpt-oss-20b"),
+            (Provider::Moonshot, "kimi-k3"),
+            (Provider::Minimax, "minimax-m2.7"),
+            (Provider::MiMo, "mimo-v2.5-pro"),
+            (Provider::Mistral, "ministral-3-3b-2512"),
+            (Provider::HuggingFace, "openai/gpt-oss-20b:huggingface"),
+            (Provider::OpenCodeZen, "gpt-5.6-sol"),
+            (Provider::OpenCodeGo, "glm-5.2"),
+            (Provider::Qwen, "deepseek-v4-flash"),
+            (Provider::StepFun, "step-3.7-flash"),
+            (Provider::Evolink, "deepseek-v4-flash"),
+            (Provider::Poolside, "laguna-xs2"),
+            (Provider::XAI, "grok-4-6"),
+            (Provider::NVIDIA, "nvidia/nemotron-3-nano-30b-a3b"),
+            (Provider::MergeGateway, "openai/gpt-5.5"),
+            (Provider::Vercel, "claude-sonnet-5"),
+        ] {
+            let result = RigProviderCapabilities::new(provider, model)
+                .reasoning_parameters_for_supported_efforts(ReasoningEffortLevel::High, supported_efforts);
+            assert!(result.is_ok(), "provider {provider:?} with model {model} should not error on supported effort");
+        }
     }
 }
