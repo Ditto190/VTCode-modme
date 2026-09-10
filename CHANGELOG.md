@@ -2,6 +2,24 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.161.0 - 2026-09-10
+
+### Highlights
+#### Bug Fixes
+
+- Resolve provider-prefixed models and retry stream failures (2a0bd6e2) 
+#### Features
+
+- Add DeepSeek V4.1 Flash to Merge Gateway and Vercel AI Gateway (cfd5f2dd) 
+### Other Changes
+#### Other
+
+- Update project (72f35a45) 
+- Update TODO (88577801) 
+#### Refactors
+
+- Generalize follow-up queue to bounded retries (3fdb1beb) 
+- Remove deprecated models and update references (33def312) 
 ## 0.160.2 - 2026-09-10
 
 ### Highlights
