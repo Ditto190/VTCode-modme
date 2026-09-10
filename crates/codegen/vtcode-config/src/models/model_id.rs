@@ -76,6 +76,8 @@ pub enum ModelId {
     DeepSeekV4Flash,
     /// DeepSeek V4 Flash Vision Exp - Experimental vision model with image + text input
     DeepSeekV4FlashVisionExp,
+    /// DeepSeek V4.1 Flash - Latest flash model with improved reasoning and efficiency
+    DeepSeekV41Flash,
 
     // Official Meta AI models
     /// Meta Muse Spark 1.1 - Official Meta AI Standard-tier reasoning model
@@ -308,6 +310,8 @@ pub enum ModelId {
     OpenRouterDeepSeekV4Pro,
     /// DeepSeek V4 Flash - Fast inference model via OpenRouter
     OpenRouterDeepSeekV4Flash,
+    /// DeepSeek V4.1 Flash - Latest flash model via OpenRouter
+    OpenRouterDeepSeekV41Flash,
     /// DeepSeek R1 - DeepSeek R1 reasoning model with chain-of-thought
     OpenRouterDeepSeekR1,
     /// OpenAI gpt-oss-120b - Open-weight 120B reasoning model via OpenRouter

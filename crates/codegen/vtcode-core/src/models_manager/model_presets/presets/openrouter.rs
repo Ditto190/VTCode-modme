@@ -89,6 +89,34 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             context_window: Some(128_000),
         },
         ModelPreset {
+            id: "openrouter/deepseek-ai/DeepSeek-V4.1-Flash".to_string(),
+            model: "deepseek-ai/DeepSeek-V4.1-Flash".to_string(),
+            display_name: "DeepSeek V4.1 Flash (OpenRouter)".to_string(),
+            description: "Latest DeepSeek flash model with improved reasoning and efficiency via OpenRouter"
+                .to_string(),
+            provider: Provider::OpenRouter,
+            default_reasoning_effort: ReasoningEffortLevel::High,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Low,
+                    description: "Fast".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Max,
+                    description: "Maximum thinking".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
+        ModelPreset {
             id: "openrouter/moonshotai/kimi-k3".to_string(),
             model: "moonshotai/kimi-k3".to_string(),
             display_name: "Kimi K3 (OpenRouter)".to_string(),

@@ -256,6 +256,13 @@ model_id_table! {
         display: "DeepSeek V4 Flash Vision Exp",
         description: "Experimental vision model — image + text input via chat/completions (base64/file_id/URL, 600 images, 48MiB body, 8192px)",
     },
+    DeepSeekV41Flash {
+        provider: DeepSeek,
+        id: models::deepseek::DEEPSEEK_V4_1_FLASH,
+        parse: [models::deepseek::DEEPSEEK_V4_1_FLASH],
+        display: "DeepSeek V4.1 Flash",
+        description: "Latest flash model with improved reasoning, efficiency, and agent capabilities",
+    },
     // Official Meta AI models
     MetaMuseSpark11 {
         provider: Meta,

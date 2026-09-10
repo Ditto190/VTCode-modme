@@ -252,6 +252,7 @@ impl ModelId {
                 | ModelId::MergeGatewayDeepseekV4Flash0731
                 | ModelId::MergeGatewayDeepseekV4Flash0731Fast
                 | ModelId::DeepSeekV4Flash
+                | ModelId::DeepSeekV41Flash
                 | ModelId::DeepSeekV4FlashVisionExp
                 | ModelId::ZaiGlm53Flash
                 | ModelId::MergeGatewayZaiGlm53Flash
@@ -279,6 +280,7 @@ impl ModelId {
                 | ModelId::MergeGatewayOpenAIGpt56Luna
                 | ModelId::CopilotGPT54Mini
                 | ModelId::DeepSeekV4Flash
+                | ModelId::DeepSeekV41Flash
                 | ModelId::DeepSeekV4FlashVisionExp
                 | ModelId::MergeGatewayDeepseekV4Flash0731
                 | ModelId::MergeGatewayDeepseekV4Flash0731Fast
@@ -406,7 +408,10 @@ impl ModelId {
             ModelId::ClaudeMythos51 => "5.1",
             ModelId::ClaudeOpus5 => "5",
             // DeepSeek generations
-            ModelId::DeepSeekV4Pro | ModelId::DeepSeekV4Flash | ModelId::DeepSeekV4FlashVisionExp => "4",
+            ModelId::DeepSeekV4Pro
+            | ModelId::DeepSeekV4Flash
+            | ModelId::DeepSeekV41Flash
+            | ModelId::DeepSeekV4FlashVisionExp => "4",
             ModelId::MergeGatewayDeepseekV4Pro0813 => "4-pro-0813",
             ModelId::MergeGatewayDeepseekV4Flash0731 => "4-flash-0731",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",

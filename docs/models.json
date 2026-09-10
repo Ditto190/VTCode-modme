@@ -1480,6 +1480,29 @@
           "high",
           "max"
         ]
+      },
+      "deepseek-v4.1-flash": {
+        "id": "deepseek-v4.1-flash",
+        "name": "DeepSeek V4.1 Flash",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "max_output_tokens": 384000,
+        "description": "Latest flash model with improved reasoning, efficiency, and agent capabilities",
+        "efficient": true,
+        "reasoning_efforts": [
+          "low",
+          "high",
+          "max"
+        ]
       }
     }
   },
@@ -2252,6 +2275,33 @@
           "top_tier": true,
           "generation": "5",
           "doc_comment": "Claude Sonnet 5 - Anthropic Claude Sonnet 5 listing"
+        }
+      },
+      "deepseek-ai/DeepSeek-V4.1-Flash": {
+        "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "name": "DeepSeek: V4.1 Flash",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "max_output_tokens": 384000,
+        "vtcode": {
+          "variant": "OpenRouterDeepSeekV41Flash",
+          "constant": "DEEPSEEK_V4_1_FLASH",
+          "vendor": "deepseek",
+          "display": "DeepSeek V4.1 Flash",
+          "description": "Latest flash model with improved reasoning and efficiency via OpenRouter",
+          "efficient": true,
+          "top_tier": true,
+          "generation": "4.1",
+          "doc_comment": "DeepSeek V4.1 Flash - Latest flash model via OpenRouter"
         }
       },
       "deepseek/deepseek-v4-flash": {

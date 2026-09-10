@@ -15,6 +15,7 @@ fn test_model_string_conversion() {
     // DeepSeek models
     assert_eq!(ModelId::DeepSeekV4Pro.as_str(), models::deepseek::DEEPSEEK_V4_PRO);
     assert_eq!(ModelId::DeepSeekV4Flash.as_str(), models::deepseek::DEEPSEEK_V4_FLASH);
+    assert_eq!(ModelId::DeepSeekV41Flash.as_str(), models::deepseek::DEEPSEEK_V4_1_FLASH);
     assert_eq!(ModelId::DeepSeekV4Flash.as_str(), models::deepseek::DEEPSEEK_V4_FLASH);
     // Official Meta AI models
     assert_eq!(ModelId::MetaMuseSpark11.as_str(), models::meta::MUSE_SPARK_1_1);
@@ -52,6 +53,7 @@ fn test_model_from_string() {
     // DeepSeek models
     assert_eq!(models::deepseek::DEEPSEEK_V4_PRO.parse::<ModelId>().unwrap(), ModelId::DeepSeekV4Pro);
     assert_eq!(models::deepseek::DEEPSEEK_V4_FLASH.parse::<ModelId>().unwrap(), ModelId::DeepSeekV4Flash);
+    assert_eq!(models::deepseek::DEEPSEEK_V4_1_FLASH.parse::<ModelId>().unwrap(), ModelId::DeepSeekV41Flash);
     assert_eq!(models::meta::MUSE_SPARK_1_1.parse::<ModelId>().unwrap(), ModelId::MetaMuseSpark11);
     assert_eq!(models::meta::MUSE_SPARK_1_2.parse::<ModelId>().unwrap(), ModelId::MetaMuseSpark12);
     assert_eq!(
@@ -249,6 +251,7 @@ fn test_model_generation() {
     // DeepSeek generations
     assert_eq!(ModelId::DeepSeekV4Pro.generation(), "4");
     assert_eq!(ModelId::DeepSeekV4Flash.generation(), "4");
+    assert_eq!(ModelId::DeepSeekV41Flash.generation(), "4");
     assert_eq!(ModelId::MetaMuseSpark11.generation(), "Muse-Spark-1.1");
     assert_eq!(ModelId::MetaMuseSpark12.generation(), "Muse-Spark-1.2");
     assert_eq!(ModelId::MetaMuseSpark12Contributor.generation(), "Muse-Spark-1.2");
@@ -286,6 +289,7 @@ fn test_models_for_provider() {
     let deepseek_models = ModelId::models_for_provider(Provider::DeepSeek);
     assert!(deepseek_models.contains(&ModelId::DeepSeekV4Pro));
     assert!(deepseek_models.contains(&ModelId::DeepSeekV4Flash));
+    assert!(deepseek_models.contains(&ModelId::DeepSeekV41Flash));
 
     let meta_models = ModelId::models_for_provider(Provider::Meta);
     assert_eq!(
