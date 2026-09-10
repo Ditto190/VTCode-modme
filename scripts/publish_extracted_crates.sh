@@ -217,6 +217,44 @@ if [[ -n "$START_FROM" ]]; then
 		exit 1
 	fi
 	CRATES=("${filtered[@]}")
+
+	# Validate that all earlier workspace dependencies of the starting crate
+	# have already been published on crates.io. This catches the common mistake
+	# of resuming from a dependent crate before its prerequisites are live.
+	start_crate="${CRATES[0]}"
+	start_manifest=""
+	if [[ -f "${start_crate}/Cargo.toml" ]]; then
+		start_manifest="${start_crate}/Cargo.toml"
+	else
+		manifest_path=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c "import sys,json; m=json.load(sys.stdin); m={p['name']:p['manifest_path'] for p in m['packages']}; print(m.get('${start_crate}',''))" 2>/dev/null || echo "")
+		if [[ -n "$manifest_path" && -f "$manifest_path" ]]; then
+			start_manifest="$manifest_path"
+		fi
+	fi
+
+	if [[ -n "$start_manifest" ]]; then
+		start_deps=$(grep -E 'vtcode-[a-z0-9_-]+\s*=' "$start_manifest" | grep -oE 'vtcode-[a-z0-9_-]+' | sort -u || true)
+		for dep in $start_deps; do
+			if [[ "$dep" == "$start_crate" ]]; then
+				continue
+			fi
+			dep_index=0
+			idx=0
+			for c in "${CRATES[@]}"; do
+				if [[ "$c" == "$dep" ]]; then
+					dep_index=$idx
+				fi
+				idx=$((idx + 1))
+			done
+			if [[ $dep_index -ge ${#CRATES[@]} ]]; then
+				if ! is_version_published "$dep" "$CURRENT_VERSION"; then
+					print_error "Cannot start from '${start_crate}' because dependency '${dep}' ${CURRENT_VERSION} has not been published yet." >&2
+					print_info "Publish '${dep}' first (without --start-from), or start from an earlier crate in the sequence." >&2
+					exit 1
+				fi
+			fi
+		done
+	fi
 fi
 
 run_cmd() {
@@ -416,16 +454,14 @@ maybe_tag() {
 
 post_publish_follow_up() {
 	local crate="$1"
-	if [[ $RUN_FOLLOW_UP -eq 0 ]]; then
-		echo "Skipping follow-up update/check for ${crate}."
-		return
-	fi
 	if [[ $DRY_RUN -eq 1 ]]; then
 		echo "[dry-run] Would run 'cargo update -p ${crate}' and 'cargo check -p ${crate}'."
 		return
 	fi
 	run_cmd "cargo update -p ${crate}"
-	run_cmd "cargo check -p ${crate}"
+	if [[ $RUN_FOLLOW_UP -eq 1 ]]; then
+		run_cmd "cargo check -p ${crate}"
+	fi
 }
 
 if [[ $RUN_TESTS -eq 1 ]]; then
