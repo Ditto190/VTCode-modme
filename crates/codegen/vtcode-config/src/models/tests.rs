@@ -144,7 +144,7 @@ fn test_provider_defaults() {
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Gemini), ModelId::Gemini37Flash);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::OpenAI), ModelId::GPT56Sol);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Anthropic), ModelId::ClaudeOpus5);
-    assert_eq!(ModelId::default_orchestrator_for_provider(Provider::DeepSeek), ModelId::DeepSeekV4Pro);
+    assert_eq!(ModelId::default_orchestrator_for_provider(Provider::DeepSeek), ModelId::DeepSeekV41Flash);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Meta), ModelId::MetaMuseSpark13);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::NVIDIA), ModelId::NvidiaNemotron3Ultra550bA55b);
     assert_eq!(

@@ -1,4 +1,4 @@
-pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
+pub const DEFAULT_MODEL: &str = "deepseek-v4.1-flash";
 pub const SUPPORTED_MODELS: &[&str] = &[
     "deepseek-v4-pro",
     "deepseek-v4-flash",
