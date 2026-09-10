@@ -162,6 +162,11 @@ pub enum WebSearchProvider {
     Auto,
     /// Keyless DuckDuckGo HTML scraping (`https://html.duckduckgo.com/html/`).
     Duckduckgo,
+    /// You.com Search API (`https://ydc-index.io/v1/search`). Requires a
+    /// `YDC_API_KEY` environment variable; the key is read at request time
+    /// and never logged. Opt-in only — the default provider stays
+    /// DuckDuckGo.
+    Youcom,
 }
 
 /// Web Search tool configuration.
@@ -179,8 +184,9 @@ pub enum WebSearchProvider {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WebSearchConfig {
-    /// Provider selection. Currently the only supported backend is
-    /// DuckDuckGo; this field is kept for future extension.
+    /// Provider selection. Supported backends are the keyless DuckDuckGo
+    /// HTML endpoint (default) and the You.com Search API (opt-in, requires
+    /// `YDC_API_KEY`).
     #[serde(default)]
     pub provider: WebSearchProvider,
 
@@ -661,6 +667,29 @@ session_max_requests = 5
         // lowercase, matching the LLM-facing schema strings.
         let json = serde_json::to_value(WebSearchProvider::Duckduckgo).unwrap();
         assert_eq!(json, serde_json::json!("duckduckgo"));
+    }
+
+    #[test]
+    fn web_search_youcom_provider_roundtrips() {
+        let json = serde_json::to_value(WebSearchProvider::Youcom).unwrap();
+        assert_eq!(json, serde_json::json!("youcom"));
+        let back: WebSearchProvider = serde_json::from_value(json).unwrap();
+        assert_eq!(back, WebSearchProvider::Youcom);
+    }
+
+    #[test]
+    fn web_search_youcom_provider_deserializes_from_toml() {
+        let config: ToolsConfig = toml::from_str(
+            r#"
+default_policy = "prompt"
+
+[web_search]
+provider = "youcom"
+"#,
+        )
+        .expect("tools config should parse");
+
+        assert_eq!(config.web_search.provider, WebSearchProvider::Youcom);
     }
 
     #[test]
