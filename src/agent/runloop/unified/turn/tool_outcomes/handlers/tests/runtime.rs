@@ -1522,11 +1522,9 @@ async fn repeated_read_only_guard_dedups_plan_file_in_planning_mode() {
 }
 
 fn exhaust_preview_budget_for_test(ctx: &mut TurnProcessingContext<'_>) {
-    ctx.push_tool_response(
-        "call-exhaust-budget",
-        Some(tool_names::EXEC_COMMAND),
-        "x".repeat(crate::agent::runloop::unified::run_loop_context::MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
-    );
+    let budget =
+        vtcode_config::constants::output_limits::turn_preview_budget_bytes(ctx.tool_registry.is_planning_active());
+    ctx.push_tool_response("call-exhaust-budget", Some(tool_names::EXEC_COMMAND), "x".repeat(budget + 1));
     assert!(ctx.harness_state.model_visible_preview_budget_exhausted());
 }
 

@@ -8,12 +8,36 @@ use vtcode_utility_tool_specs::{
 
 pub(crate) const OUTPUT_PREVIEW_CHARS_PER_TOKEN: usize = 4;
 
+/// Default per-result preview budget for plan-mode inspections that omit an
+/// explicit `max_output_tokens` (`2_000` tokens ≈ 8 KiB). Planning research
+/// fans out across many reads, so the smaller default keeps a dozen previews
+/// inside the `96 KiB` plan turn budget. Explicit caller values and
+/// verification commands are never clamped.
+pub(crate) const PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS: usize = 2_000;
+
 /// Validates and returns the requested model-visible result preview budget.
 ///
 /// A missing value resolves to the stable default. Values must be JSON integers
 /// so callers cannot silently coerce floats or strings into a larger context
 /// allocation than the model requested.
 pub(crate) fn max_output_tokens(args: &Value) -> Result<usize> {
+    resolve_max_output_tokens(args, false, false)
+}
+
+/// Planning-aware variant of [`max_output_tokens`].
+///
+/// An explicitly provided integer keeps existing validation exactly;
+/// verification commands keep the full default so build/test output stays
+/// authoritative. Only an omitted value on a non-verification call while
+/// planning is active resolves to [`PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS`].
+pub(crate) fn resolve_max_output_tokens(args: &Value, planning_active: bool, is_verification: bool) -> Result<usize> {
+    if args.get(MAX_OUTPUT_TOKENS_FIELD).is_none() && planning_active && !is_verification {
+        return Ok(PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS);
+    }
+    max_output_tokens_uncapped(args)
+}
+
+fn max_output_tokens_uncapped(args: &Value) -> Result<usize> {
     let Some(value) = args.get(MAX_OUTPUT_TOKENS_FIELD) else {
         return Ok(DEFAULT_MAX_OUTPUT_TOKENS);
     };
@@ -66,6 +90,30 @@ mod tests {
         assert!(max_output_tokens(&json!({"max_output_tokens": 50_001})).is_err());
         assert!(max_output_tokens(&json!({"max_output_tokens": 1.0})).is_err());
         assert!(max_output_tokens(&json!({"max_output_tokens": "100"})).is_err());
+    }
+
+    #[test]
+    fn plan_mode_clamp_applies_only_to_omitted_non_verification_defaults() {
+        // Omitted value in planning resolves to the smaller inspection default.
+        assert_eq!(resolve_max_output_tokens(&json!({}), true, false).unwrap(), PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS);
+        // The plan default resolves strictly below the execution default.
+        assert!(
+            resolve_max_output_tokens(&json!({}), true, false).unwrap()
+                < resolve_max_output_tokens(&json!({}), false, false).unwrap()
+        );
+        // Explicit caller values are never clamped, even in planning.
+        assert_eq!(
+            resolve_max_output_tokens(&json!({"max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS}), true, false).unwrap(),
+            DEFAULT_MAX_OUTPUT_TOKENS
+        );
+        assert_eq!(resolve_max_output_tokens(&json!({"max_output_tokens": 1}), true, false).unwrap(), 1);
+        // Verification commands keep the full default in planning.
+        assert_eq!(resolve_max_output_tokens(&json!({}), true, true).unwrap(), DEFAULT_MAX_OUTPUT_TOKENS);
+        // Execution mode is untouched.
+        assert_eq!(resolve_max_output_tokens(&json!({}), false, false).unwrap(), DEFAULT_MAX_OUTPUT_TOKENS);
+        // Invalid values still error in every mode.
+        assert!(resolve_max_output_tokens(&json!({"max_output_tokens": 0}), true, false).is_err());
+        assert!(resolve_max_output_tokens(&json!({"max_output_tokens": "100"}), true, false).is_err());
     }
 
     #[test]

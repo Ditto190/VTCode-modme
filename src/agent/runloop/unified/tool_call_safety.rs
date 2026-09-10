@@ -52,6 +52,10 @@ pub(crate) struct ToolCallSafetyValidator {
     /// mutable config and reapply it until a fresh execution explicitly
     /// resets the session.
     granted_session_limit: Mutex<Option<usize>>,
+    /// Total session headroom granted automatically in this session. Manual
+    /// grants bypass this budget; only the full-auto path claims from it so
+    /// unattended runs stay bounded while interactive approvals stay uncapped.
+    auto_granted_session_headroom: Mutex<usize>,
     #[cfg(test)]
     test_rate_limits: Mutex<TestRateLimits>,
 }
@@ -83,6 +87,7 @@ impl ToolCallSafetyValidator {
             safety_gateway,
             gateway_ctx: SafetyContext::new("runloop-safety-validator"),
             granted_session_limit: Mutex::new(None),
+            auto_granted_session_headroom: Mutex::new(0),
             #[cfg(test)]
             test_rate_limits: Mutex::new(test_rate_limits),
         }
@@ -99,6 +104,7 @@ impl ToolCallSafetyValidator {
             safety_gateway,
             gateway_ctx: SafetyContext::new("runloop-safety-validator"),
             granted_session_limit: Mutex::new(None),
+            auto_granted_session_headroom: Mutex::new(0),
             #[cfg(test)]
             test_rate_limits: Mutex::new(test_rate_limits),
         }
@@ -116,6 +122,10 @@ impl ToolCallSafetyValidator {
             .granted_session_limit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *self
+            .auto_granted_session_headroom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = 0;
         self.safety_gateway.reset_for_fresh_execution(max_per_turn, max_per_session);
     }
 
@@ -140,6 +150,22 @@ impl ToolCallSafetyValidator {
             .granted_session_limit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(self.safety_gateway.max_per_session());
+    }
+
+    /// Claim headroom for one automatic session-limit grant.
+    ///
+    /// Returns the grantable amount (`0` once the per-session auto budget is
+    /// exhausted) and records it so later grants in the same session see the
+    /// reduced remainder. Manual grants bypass this budget entirely.
+    pub(crate) fn claim_session_auto_grant(&self, requested: usize) -> usize {
+        let mut granted_total = self
+            .auto_granted_session_headroom
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let granted =
+            vtcode_core::config::constants::tool_limits::session_auto_grant_increment(*granted_total, requested);
+        *granted_total = granted_total.saturating_add(granted);
+        granted
     }
 
     /// Return the current session tool limit, including any user-granted
@@ -324,5 +350,27 @@ mod tests {
             validator.validate_call("read_file", &json!({})).await.unwrap();
         }
         assert!(validator.validate_call("read_file", &json!({})).await.is_err());
+    }
+
+    #[test]
+    fn session_auto_grant_headroom_bounds_automatic_growth_only() {
+        let validator = ToolCallSafetyValidator::new();
+        assert_eq!(validator.claim_session_auto_grant(100), 100);
+        assert_eq!(validator.claim_session_auto_grant(100), 100);
+
+        // Manual grants bypass the auto budget: headroom is unchanged.
+        validator.increase_session_limit(1000);
+        assert_eq!(validator.claim_session_auto_grant(100), 100);
+
+        // Exhaust the remaining headroom, then fail closed.
+        let remaining =
+            vtcode_core::config::constants::tool_limits::MAX_SESSION_AUTO_GRANT_TOTAL_HEADROOM.saturating_sub(300);
+        assert_eq!(validator.claim_session_auto_grant(remaining), remaining);
+        assert_eq!(validator.claim_session_auto_grant(100), 0);
+        assert_eq!(validator.claim_session_auto_grant(1), 0);
+
+        // Fresh execution resets the auto budget alongside granted limits.
+        validator.reset_for_fresh_execution(10, 10);
+        assert_eq!(validator.claim_session_auto_grant(100), 100);
     }
 }

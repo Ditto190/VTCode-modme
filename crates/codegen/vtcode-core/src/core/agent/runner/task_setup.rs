@@ -269,10 +269,13 @@ fn full_auto_tool_loop_budget(config: &VTCodeConfig, full_auto_active: bool) -> 
     }
     let capped = crate::config::constants::tool_limits::tool_loop_hard_cap(configured, false);
     if capped != configured {
+        let increment = capped.saturating_sub(configured);
         tracing::info!(
             configured,
             capped,
-            "Full-auto granted the maximum tool-loop budget upfront instead of prompting mid-run"
+            increment,
+            "Full-auto auto-granted +{} tool loops upfront instead of prompting mid-run",
+            increment,
         );
     }
     capped

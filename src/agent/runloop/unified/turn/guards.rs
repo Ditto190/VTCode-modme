@@ -774,7 +774,7 @@ mod tests {
 
     #[tokio::test]
     async fn planning_preview_exhaustion_schedules_synthesis_once() {
-        use crate::agent::runloop::unified::run_loop_context::MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+        use vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES_PLANNING;
         use vtcode_core::llm::provider as uni;
 
         let mut backing = TestTurnProcessingBacking::new(120).await;
@@ -782,11 +782,7 @@ mod tests {
         let mut ctx = backing.turn_processing_context();
         // Blind the model: one over-budget response flips the per-turn
         // preview budget, so every later inspection is a contentless stub.
-        ctx.push_tool_response(
-            "call-blind",
-            Some("exec_command"),
-            "x".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
-        );
+        ctx.push_tool_response("call-blind", Some("exec_command"), "x".repeat(TURN_PREVIEW_BUDGET_BYTES_PLANNING + 1));
         assert!(ctx.harness_state.model_visible_preview_budget_exhausted());
 
         let mut tracker = LoopTracker::new();
@@ -928,15 +924,11 @@ mod tests {
 
     #[tokio::test]
     async fn preview_exhaustion_does_not_trigger_synthesis_outside_planning() {
-        use crate::agent::runloop::unified::run_loop_context::MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+        use vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES;
 
         let mut backing = TestTurnProcessingBacking::new(120).await;
         let mut ctx = backing.turn_processing_context();
-        ctx.push_tool_response(
-            "call-blind",
-            Some("exec_command"),
-            "x".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
-        );
+        ctx.push_tool_response("call-blind", Some("exec_command"), "x".repeat(TURN_PREVIEW_BUDGET_BYTES + 1));
         assert!(ctx.harness_state.model_visible_preview_budget_exhausted());
 
         let mut tracker = LoopTracker::new();

@@ -239,7 +239,10 @@ impl<'a> TurnProcessingContext<'a> {
     where
         S: AsRef<str> + Into<String>,
     {
-        let content = self.harness_state.bound_model_visible_tool_preview(tool_name, content);
+        let budget = vtcode_config::constants::output_limits::turn_preview_budget_bytes(self.is_planning_active());
+        let content = self
+            .harness_state
+            .bound_model_visible_tool_preview_with_budget(tool_name, content, budget);
         let visible_output_bytes = content.len();
         let history_update = crate::agent::runloop::unified::turn::tool_outcomes::helpers::push_tool_response(
             self.working_history,

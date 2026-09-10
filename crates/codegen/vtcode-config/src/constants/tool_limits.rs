@@ -34,6 +34,31 @@ pub const PLANNING_WORKFLOW_TOOL_LOOP_CAP_MULTIPLIER: usize = 6;
 /// Maximum planning tool-loop extension accepted from one prompt.
 pub const PLANNING_WORKFLOW_MAX_TOOL_LOOP_INCREMENT_PER_PROMPT: usize = 80;
 
+/// Total auto-granted session headroom per session (tool calls).
+///
+/// Bounds full-auto session growth without blocking normal harness runs:
+/// the default `100` base reaches `2100` total (`20` auto-grants of `+100`),
+/// while a derived unified base such as `18_000` reaches `20_000`. Manual
+/// grants are uncapped; only the automatic path consults this budget.
+pub const MAX_SESSION_AUTO_GRANT_TOTAL_HEADROOM: usize = 2000;
+
+/// Increment a full-auto run grants itself against the session headroom cap.
+///
+/// Pure so the grant arithmetic stays unit tested without standing up a
+/// session. Returns `0` once the headroom is exhausted so the caller can
+/// fail closed instead of growing the session limit further.
+#[inline]
+pub const fn session_auto_grant_increment(already_auto_granted: usize, requested: usize) -> usize {
+    let remaining = MAX_SESSION_AUTO_GRANT_TOTAL_HEADROOM.saturating_sub(already_auto_granted);
+    if remaining == 0 {
+        return 0;
+    }
+    if requested > remaining {
+        return remaining;
+    }
+    requested
+}
+
 /// Absolute ceiling for per-turn tool-loop extensions derived from a
 /// configured base limit. Values at or above the absolute cap are returned
 /// unchanged so an already-generous configuration is never shrunk.
@@ -90,5 +115,14 @@ mod tests {
         assert_eq!(tool_loop_hard_cap(40, true), 240);
         assert_eq!(tool_loop_hard_cap(120, true), 240);
         assert_eq!(tool_loop_hard_cap(300, true), 300);
+    }
+
+    #[test]
+    fn session_auto_grant_increment_bounds_total_headroom() {
+        assert_eq!(session_auto_grant_increment(0, 100), 100);
+        assert_eq!(session_auto_grant_increment(1950, 100), 50);
+        assert_eq!(session_auto_grant_increment(2000, 100), 0);
+        assert_eq!(session_auto_grant_increment(2500, 100), 0);
+        assert_eq!(session_auto_grant_increment(0, 0), 0);
     }
 }

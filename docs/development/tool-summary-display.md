@@ -72,8 +72,8 @@ Explicit `expanded` mode preserves the existing per-call summary and live-output
 
 ## Model-visible tool output budget
 
-Tool-result previews copied into provider-facing history share a 32 KiB
-aggregate budget per turn. The existing per-result spool limit still applies;
+Tool-result previews copied into provider-facing history share an
+aggregate budget per turn (32 KiB execution, 96 KiB planning). The existing per-result spool limit still applies;
 when the aggregate budget is exhausted, later results expose only bounded
 metadata such as the tool name, spool path, byte count, completion state, and a
 short note. Complete output remains in the internal spool and current-session

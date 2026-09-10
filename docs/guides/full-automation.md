@@ -34,7 +34,7 @@ Primary-agent selection still works normally. If you explicitly select or config
 - Full-auto does not grant tools outside `[automation.full_auto].allowed_tools`, except workflow-coordination tools (`task_tracker`, `start_planning`, `request_user_input`), which stay available in every mode.
 - Explicit denies and policy blocks are honoured before full-auto review.
 - Promptable allow-listed actions are reviewed automatically instead of interrupting for user input.
-- Tool-loop and session tool-call limit increases are granted automatically (same increments and hard caps as manual approvals) instead of showing an interactive prompt. Set `auto_grant_tool_limits = false` to restore the prompts.
+- Tool-loop and session tool-call limit increases are granted automatically (same per-grant increments and hard caps as manual approvals) instead of showing an interactive prompt. Session auto-grants share a bounded `2000`-call headroom per session before failing closed. Set `auto_grant_tool_limits = false` to restore the prompts.
 - Non allow-listed tools are rejected before execution, and their attempts are logged.
 - If the acknowledgement profile is missing while required, the CLI aborts before launching.
 

@@ -20,8 +20,8 @@ impl ToolRegistry {
 
     /// Reset the aggregate provider-visible preview ledger at a turn boundary.
     ///
-    /// Call once per turn from each runloop so the 32 KiB budget in
-    /// `TURN_PREVIEW_BUDGET_BYTES` applies per turn rather than per session.
+    /// Call once per turn from each runloop so the planning-aware budget in
+    /// `turn_preview_budget_bytes` applies per turn rather than per session.
     pub fn begin_turn_preview_window(&self) {
         self.turn_preview_bytes.store(0, std::sync::atomic::Ordering::Relaxed);
     }

@@ -21,13 +21,27 @@ pub const DEFAULT_MESSAGE_LIMIT: usize = 4_000;
 /// Maximum message count limit.
 pub const MAX_MESSAGE_LIMIT: usize = 20_000;
 
-/// Aggregate provider-visible tool preview budget across one turn (32 KiB).
+/// Aggregate provider-visible tool preview budget across one turn (32 KiB
+/// execution, 96 KiB planning).
 ///
 /// Once a turn's tool previews exhaust this budget, later tool responses keep
 /// bounded outcome/control metadata while payload bodies are truncated or
-/// omitted. See the agent-loop contract ("Across a turn, provider-visible
-/// tool previews are capped at 32 KiB").
+/// omitted. Planning gets the larger budget because read-only research needs
+/// roughly a dozen spooled previews before synthesis; execution keeps the
+/// tighter bound so recovery converges promptly.
 pub const TURN_PREVIEW_BUDGET_BYTES: usize = 32 * 1024;
+/// Plan-mode per-turn preview budget (96 KiB ≈ a dozen spooled previews).
+pub const TURN_PREVIEW_BUDGET_BYTES_PLANNING: usize = 96 * 1024;
+
+/// Effective per-turn preview budget for the active workflow mode.
+#[inline]
+pub const fn turn_preview_budget_bytes(planning_active: bool) -> usize {
+    if planning_active {
+        TURN_PREVIEW_BUDGET_BYTES_PLANNING
+    } else {
+        TURN_PREVIEW_BUDGET_BYTES
+    }
+}
 
 /// Truncation marker appended when content is cut off.
 const TRUNCATION_MARKER: &str = "\n[... content truncated due to size limit ...]";
@@ -96,5 +110,12 @@ mod tests {
         // Should not append marker again
         collect_with_truncation(&mut output, "second content", 5, &mut truncated);
         assert_eq!(output.len(), len_after_marker);
+    }
+
+    #[test]
+    fn turn_preview_budget_splits_by_workflow_mode() {
+        assert_eq!(turn_preview_budget_bytes(false), 32 * 1024);
+        assert_eq!(turn_preview_budget_bytes(true), 96 * 1024);
+        assert_eq!(TURN_PREVIEW_BUDGET_BYTES_PLANNING, 3 * TURN_PREVIEW_BUDGET_BYTES);
     }
 }

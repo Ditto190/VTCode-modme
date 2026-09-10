@@ -198,6 +198,11 @@ fn clamp_tool_loop_increment(
 /// the same maximum one manual approval may add, clamped to the remaining
 /// headroom below the hard cap. Pure so the grant arithmetic stays unit
 /// tested without standing up an interactive session.
+///
+/// The planning branch is currently unreachable in the unified runloop:
+/// planning loop exhaustion early-returns to tool-free synthesis above and
+/// planning session limits are unbounded. It is retained for arithmetic
+/// symmetry with `tool_loop_hard_cap` and its tests, not as a live path.
 fn auto_tool_loop_grant_increment(current_limit: usize, hard_cap: usize, planning_active: bool) -> usize {
     let per_prompt_limit = if planning_active {
         PLANNING_WORKFLOW_MAX_TOOL_LOOP_INCREMENT_PER_PROMPT

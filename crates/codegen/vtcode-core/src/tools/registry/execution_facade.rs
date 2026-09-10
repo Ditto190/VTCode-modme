@@ -809,7 +809,19 @@ impl ToolRegistry {
             .registration_for(&tool_name)
             .and_then(|registration| registration.parameter_schema().cloned());
         let normalized_args = execution_kernel::normalize_tool_args(&tool_name, args, parameter_schema.as_ref())?;
-        let max_output_tokens = crate::tools::output_limits::max_output_tokens(normalized_args.as_ref())?;
+        // Plan-mode inspections default to a smaller per-result preview so a
+        // research fan-out fits the turn budget; explicit caller values and
+        // verification commands keep the full default (same predicate as the
+        // fast-reuse exemption below).
+        let is_verification_command = matches!(
+            tool_intent::classify_shell_activity(&tool_name, normalized_args.as_ref()),
+            tool_intent::ShellActivity::Verification
+        );
+        let max_output_tokens = crate::tools::output_limits::resolve_max_output_tokens(
+            normalized_args.as_ref(),
+            self.is_planning_active(),
+            is_verification_command,
+        )?;
         let handler_args = if crate::tools::output_limits::handler_accepts_output_metadata(parameter_schema.as_ref()) {
             Cow::Borrowed(normalized_args.as_ref())
         } else {
@@ -1064,8 +1076,9 @@ impl ToolRegistry {
         // must always re-execute: reusing a stale success would clear the
         // anti-blind-editing gate without verifying the current worktree, and
         // reusing a stale failure would keep the gate pending after a fix.
-        let is_verification_command =
-            matches!(tool_intent::classify_shell_activity(&tool_name, args), tool_intent::ShellActivity::Verification);
+        // (`is_verification_command` is bound once at preview-budget
+        // resolution above; the stripped output-metadata field does not
+        // affect shell classification.)
         if readonly_classification && !is_verification_command && !skip_loop_detection {
             let fast_reuse_max_age = Duration::from_secs(60);
             let fast_reused = self

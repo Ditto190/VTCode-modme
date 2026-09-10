@@ -321,7 +321,8 @@ PTY/session actions, polling, and stdin writes remain sequential. Both runloops
 honor `max_parallel_tool_calls` and trace the configured limit, admitted calls,
 group count, parallel-group count, and maximum group size.
 
-Across a turn, provider-visible tool previews are capped at 32 KiB. The
+Across a turn, provider-visible tool previews are capped at 32 KiB execution
+(96 KiB planning). The
 budget is enforced twice: at the tool-registry output boundary (which charges
 each response's payload bodies and truncates or strips them, marked with
 `preview_budget_exhausted`) and again by the unified runloop when responses

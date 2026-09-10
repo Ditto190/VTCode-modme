@@ -96,8 +96,6 @@ pub(crate) const TOOL_BUDGET_WARNING_THRESHOLD: f64 = 0.75;
 /// history for one turn. Complete output remains in the internal spool and
 /// current-session tool-output viewer; this only bounds the diagnostic surface
 /// seen by a model during a recovery-heavy turn.
-pub(crate) const MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES: usize =
-    vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES;
 /// Preview credit granted per admitted spool-page read. Paged spool reads are
 /// already size-bounded per result and capped sequentially per turn by the
 /// spool-chunk guard; without credit the aggregate budget blinds mid-file
@@ -744,6 +742,17 @@ impl HarnessTurnState {
             .saturating_add(u64::try_from(model_visible_output_bytes).unwrap_or(u64::MAX));
     }
 
+    /// Test-only execution-budget shorthand so exec-mode tests avoid
+    /// repeating the `32 KiB` denominator on every call.
+    #[cfg(test)]
+    pub(crate) fn bound_model_visible_tool_preview(&mut self, tool_name: Option<&str>, content: String) -> String {
+        self.bound_model_visible_tool_preview_with_budget(
+            tool_name,
+            content,
+            vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES,
+        )
+    }
+
     /// Bound the tool response before it enters provider-facing history.
     ///
     /// Tool output processing already applies a per-result preview limit, but
@@ -751,7 +760,16 @@ impl HarnessTurnState {
     /// inspect a spool file). Once the aggregate budget is exhausted, retain
     /// only bounded metadata so recovery cannot amplify one diagnostic into a
     /// recursively growing prompt.
-    pub(crate) fn bound_model_visible_tool_preview(&mut self, tool_name: Option<&str>, content: String) -> String {
+    ///
+    /// Callers pass the effective turn budget (`turn_preview_budget_bytes`)
+    /// so planning (`96 KiB`) and execution (`32 KiB`) share one accounting
+    /// path instead of duplicated ledgers.
+    pub(crate) fn bound_model_visible_tool_preview_with_budget(
+        &mut self,
+        tool_name: Option<&str>,
+        content: String,
+        budget_bytes: usize,
+    ) -> String {
         if content.is_empty() || !tool_preview_has_visible_body(&content) {
             return content;
         }
@@ -765,16 +783,17 @@ impl HarnessTurnState {
             return content;
         }
 
-        let remaining = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES.saturating_sub(self.model_visible_tool_preview_bytes);
+        let budget = budget_bytes.max(1);
+        let remaining = budget.saturating_sub(self.model_visible_tool_preview_bytes);
         if !self.model_visible_tool_preview_budget_exhausted && content.len() <= remaining {
             self.model_visible_tool_preview_bytes = self.model_visible_tool_preview_bytes.saturating_add(content.len());
-            if self.model_visible_tool_preview_bytes >= MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES {
+            if self.model_visible_tool_preview_bytes >= budget {
                 self.model_visible_tool_preview_budget_exhausted = true;
             }
             return content;
         }
 
-        self.model_visible_tool_preview_bytes = MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES;
+        self.model_visible_tool_preview_bytes = budget;
         self.model_visible_tool_preview_budget_exhausted = true;
         self.suppressed_tool_previews = self.suppressed_tool_previews.saturating_add(1);
         let metadata_remaining =
@@ -1841,12 +1860,12 @@ mod tests {
     use hashbrown::HashSet;
 
     use super::{
-        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES,
-        MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES, RecoveryMode, SESSION_LIMIT_AUTO_GRANT_INCREMENT,
-        TOOL_BUDGET_WARNING_THRESHOLD, TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES, ToolBudgetExhaustion,
-        ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion, ToolWallClockExhaustionNotice,
-        TurnExecutionPhase, TurnId, TurnPhase, TurnRunId, full_auto_loop_grants_enabled,
+        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES, RecoveryMode,
+        SESSION_LIMIT_AUTO_GRANT_INCREMENT, TOOL_BUDGET_WARNING_THRESHOLD, TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES,
+        ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion,
+        ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId, full_auto_loop_grants_enabled,
     };
+    use vtcode_config::constants::output_limits::{TURN_PREVIEW_BUDGET_BYTES, TURN_PREVIEW_BUDGET_BYTES_PLANNING};
     use vtcode_core::config::loader::VTCodeConfig;
 
     #[test]
@@ -1896,7 +1915,7 @@ mod tests {
         assert!(!second.contains('\u{1b}'));
         let repeated_b = "b".repeat(128);
         assert!(!second.contains(repeated_b.as_str()));
-        assert_eq!(state.model_visible_tool_preview_bytes, MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES);
+        assert_eq!(state.model_visible_tool_preview_bytes, TURN_PREVIEW_BUDGET_BYTES);
         assert!(state.model_visible_tool_preview_budget_exhausted);
         assert_eq!(state.suppressed_tool_previews, 1);
 
@@ -1935,11 +1954,35 @@ mod tests {
     fn preview_budget_exhausted_getter_tracks_bound_flip() {
         let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
         assert!(!state.model_visible_preview_budget_exhausted());
-        state.bound_model_visible_tool_preview(
-            Some("exec_command"),
-            "a".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
-        );
+        state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(TURN_PREVIEW_BUDGET_BYTES + 1));
         assert!(state.model_visible_preview_budget_exhausted());
+    }
+
+    #[test]
+    fn planning_preview_budget_keeps_midsize_payload_exec_strips_it() {
+        let payload = "a".repeat(60 * 1024);
+        assert!(payload.len() > TURN_PREVIEW_BUDGET_BYTES);
+        assert!(payload.len() < TURN_PREVIEW_BUDGET_BYTES_PLANNING);
+
+        let mut exec_state =
+            HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        let exec_result = exec_state.bound_model_visible_tool_preview_with_budget(
+            Some("exec_command"),
+            payload.clone(),
+            TURN_PREVIEW_BUDGET_BYTES,
+        );
+        assert!(exec_result.contains("preview_budget_exhausted"));
+        assert!(exec_state.model_visible_preview_budget_exhausted());
+
+        let mut plan_state =
+            HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        let plan_result = plan_state.bound_model_visible_tool_preview_with_budget(
+            Some("exec_command"),
+            payload.clone(),
+            TURN_PREVIEW_BUDGET_BYTES_PLANNING,
+        );
+        assert_eq!(plan_result, payload);
+        assert!(!plan_state.model_visible_preview_budget_exhausted());
     }
 
     #[test]
@@ -1947,10 +1990,7 @@ mod tests {
         use super::SPOOL_PAGE_PREVIEW_CREDIT_BYTES;
 
         let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
-        state.bound_model_visible_tool_preview(
-            Some("exec_command"),
-            "a".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES + 1),
-        );
+        state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(TURN_PREVIEW_BUDGET_BYTES + 1));
         assert!(state.model_visible_preview_budget_exhausted());
 
         // Without credit the page is stubbed.
@@ -1978,10 +2018,7 @@ mod tests {
     #[test]
     fn oversized_suppressed_preview_skips_unbounded_json_parse() {
         let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
-        state.bound_model_visible_tool_preview(
-            Some("exec_command"),
-            "a".repeat(MODEL_VISIBLE_TOOL_PREVIEW_BUDGET_BYTES),
-        );
+        state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(TURN_PREVIEW_BUDGET_BYTES));
 
         let content = format!(
             "{{\"error_summary\":\"should-not-be-parsed\",\"output\":\"{}\"}}",

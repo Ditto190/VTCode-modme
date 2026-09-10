@@ -165,12 +165,14 @@ impl ToolRegistry {
     /// Enforce the aggregate provider-visible preview budget for the turn.
     ///
     /// Per-result preview limiting (above) bounds one response; this bound
-    /// covers the whole turn: once `TURN_PREVIEW_BUDGET_BYTES` worth of
-    /// payload bodies has been emitted, later responses keep outcome/control
-    /// metadata while payload bodies are truncated to the remaining budget
-    /// and then omitted, marked with `preview_budget_exhausted`.
+    /// covers the whole turn: once the effective budget (`32 KiB` execution,
+    /// `96 KiB` planning) worth of payload bodies has been emitted, later
+    /// responses keep outcome/control metadata while payload bodies are
+    /// truncated to the remaining budget and then omitted, marked with
+    /// `preview_budget_exhausted`.
     fn enforce_turn_preview_budget(&self, mut value: Value) -> Value {
-        const BUDGET_BYTES: usize = vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES;
+        let budget_bytes =
+            vtcode_config::constants::output_limits::turn_preview_budget_bytes(self.is_planning_active());
 
         let body_bytes = payload_body_bytes(&value);
         if body_bytes == 0 {
@@ -178,12 +180,12 @@ impl ToolRegistry {
         }
 
         let previous = self.charge_turn_preview_bytes(body_bytes);
-        if previous >= BUDGET_BYTES {
+        if previous >= budget_bytes {
             strip_payload_bodies(&mut value);
             return value;
         }
-        if previous + body_bytes > BUDGET_BYTES {
-            truncate_payload_bodies(&mut value, BUDGET_BYTES - previous);
+        if previous + body_bytes > budget_bytes {
+            truncate_payload_bodies(&mut value, budget_bytes - previous);
         }
         value
     }
@@ -543,6 +545,36 @@ mod tests {
             body.len(),
             "a fresh turn window must accept the payload again"
         );
+    }
+
+    #[tokio::test]
+    async fn planning_preview_budget_holds_twelve_spooled_previews() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+        registry.enable_planning();
+        let body = "x".repeat(8_000);
+
+        for _ in 0..12 {
+            let result = registry
+                .process_tool_output("grep_file", json!({ "success": true, "output": body.clone() }), false, 100_000)
+                .await;
+            assert_eq!(result["output"].as_str().unwrap().len(), body.len());
+            assert!(result.get("preview_budget_exhausted").is_none());
+        }
+
+        // 96 KiB holds twelve 8_000-byte inline previews (96_000) with 2_304
+        // bytes left: the thirteenth truncates, the fourteenth strips.
+        let thirteenth = registry
+            .process_tool_output("grep_file", json!({ "success": true, "output": body.clone() }), false, 100_000)
+            .await;
+        assert_eq!(thirteenth["output"].as_str().unwrap().len(), 2_304);
+        assert_eq!(thirteenth["preview_budget_exhausted"], true);
+
+        let fourteenth = registry
+            .process_tool_output("grep_file", json!({ "success": true, "output": body }), false, 100_000)
+            .await;
+        assert!(fourteenth.get("output").is_none());
+        assert_eq!(fourteenth["preview_budget_exhausted"], true);
     }
     #[tokio::test]
     async fn small_pty_response_redacts_inline_secrets() {

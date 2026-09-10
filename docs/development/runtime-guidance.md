@@ -90,8 +90,8 @@ reads. Exited
 sessions with an unfinished spool retain the session and defer the reference
 until a later wait can safely observe the complete file.
 
-The provider-facing history also has a 32 KiB aggregate tool-preview budget per
-turn. After exhaustion, new payload bodies are replaced by bounded metadata,
+The provider-facing history also has an aggregate tool-preview budget per
+turn (32 KiB execution, 96 KiB planning). After exhaustion, new payload bodies are replaced by bounded metadata,
 but scalar control signals such as success, exit code, completion status,
 verification requirements, and retryability remain visible. The metadata tells
 the agent not to repeat equivalent calls merely to recover hidden output, and

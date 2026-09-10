@@ -63,13 +63,22 @@ pub(crate) async fn validate_tool_call_with_limit_prompt<S: UiSession + ?Sized>(
                     return Err(SafetyValidationFailure::SessionLimitNotIncreased);
                 }
                 if auto_grant {
+                    let granted = safety_validator.claim_session_auto_grant(SESSION_LIMIT_AUTO_GRANT_INCREMENT);
+                    if granted == 0 {
+                        tracing::warn!(
+                            tool = %tool_name,
+                            attempts = limit_increase_attempts,
+                            "Session auto-grant headroom exhausted; refusing further automatic increases"
+                        );
+                        return Err(SafetyValidationFailure::SessionLimitNotIncreased);
+                    }
                     record_session_limit_grant(
                         safety_validator,
                         harness_state.as_deref_mut(),
                         harness_emitter,
                         agent_name,
                         tool_name,
-                        SESSION_LIMIT_AUTO_GRANT_INCREMENT,
+                        granted,
                         limit_increase_attempts,
                         true,
                     );

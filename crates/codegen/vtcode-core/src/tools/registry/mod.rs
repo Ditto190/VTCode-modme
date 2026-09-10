@@ -184,8 +184,8 @@ pub struct ToolRegistry {
     pty_poll_counter: Arc<std::sync::atomic::AtomicU64>,
     /// Provider-visible preview bytes emitted this turn. Reset at each turn
     /// start by `begin_turn_preview_window()`; enforced in
-    /// `output_processing::process_tool_output` against
-    /// `TURN_PREVIEW_BUDGET_BYTES`.
+    /// `output_processing::process_tool_output` against the planning-aware
+    /// `turn_preview_budget_bytes`.
     turn_preview_bytes: Arc<std::sync::atomic::AtomicUsize>,
     /// Canonical `.vtcode/plans` directory, resolved once per registry for
     /// the planning-mode hot path (`is_plan_file_operation`).

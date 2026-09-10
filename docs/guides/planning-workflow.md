@@ -418,7 +418,11 @@ synthesis pass. Output controls such as `max_output_tokens` do not make an
 otherwise identical inspection count as new research; twelve genuinely
 distinct inspections remain eligible for continued research.
 
-Tool previews shown to the model share a bounded per-turn budget; once it is
+Tool previews shown to the model share a bounded per-turn budget (96 KiB in
+planning, 32 KiB execution); plan-mode inspections that omit an explicit
+`max_output_tokens` default to a smaller per-result preview (~8 KiB) so a
+research fan-out fits the budget, while explicit caller values and
+verification commands keep the full default. Once it is
 exhausted, further tool responses arrive as metadata stubs without body
 content. In planning mode this schedules the same single tool-free synthesis
 pass immediately — additional inspection cannot surface new evidence, so the
