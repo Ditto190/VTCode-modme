@@ -1967,7 +1967,7 @@ async fn finalize_turn_closes_streamed_items_that_never_reached_the_pipeline() {
 }
 
 #[tokio::test]
-async fn stale_plan_pause_without_mutations_consumes_text_response_budget() {
+async fn stale_plan_pause_discards_text_without_consuming_response_budget() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2023,11 +2023,14 @@ async fn stale_plan_pause_without_mutations_consumes_text_response_budget() {
     turn_context.harness_state.set_approved_plan_execution(true);
     let outcome = run_turn_loop(&mut history, turn_context)
         .await
-        .expect("turn loop should stop at the discarded text response cap");
+        .expect("turn loop should stop at the bounded stale-pause retries");
 
     assert!(matches!(outcome.result, TurnLoopResult::Blocked { .. }));
     assert!(outcome.final_response_was_fallback);
-    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    // Two bounded clearing retries plus the terminal stale response that ends
+    // Blocked. Discarded stale text never consumes the generic text-response
+    // budget, so the generic cap is not what stops this loop.
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
     assert!(!history.iter().any(|message| {
         message
             .content

@@ -672,6 +672,10 @@ impl<'a> TurnProcessingContext<'a> {
                     target: "vtcode.planning_workflow",
                     "retrying tool-free synthesis after denied interview returned no plan"
                 );
+                // The text above already incremented the generic text-response
+                // streak; queue one bounded allowance so the scheduled retry
+                // is not immediately cancelled by the cap on the next loop.
+                self.plan_session.queue_bounded_planning_follow_up();
                 return Ok(TurnHandlerOutcome::Continue);
             }
         }
@@ -694,6 +698,9 @@ impl<'a> TurnProcessingContext<'a> {
                 target: "vtcode.planning_workflow",
                 "retrying denied interview response as a bounded plan synthesis"
             );
+            // See the tool-free branch above: allow the queued retry through
+            // the generic text-response cap.
+            self.plan_session.queue_bounded_planning_follow_up();
             return Ok(TurnHandlerOutcome::Continue);
         }
 
@@ -715,6 +722,9 @@ impl<'a> TurnProcessingContext<'a> {
                 target: "vtcode.planning_workflow",
                 "re-prompting after pseudo-tool-call markup in plan mode"
             );
+            // Bounded reprompt with its own budget; queue one cap allowance
+            // so the cleanup pass is not blocked by the streak it just grew.
+            self.plan_session.queue_bounded_planning_follow_up();
             return Ok(TurnHandlerOutcome::Continue);
         }
 
@@ -1944,5 +1954,45 @@ Repairs the approved plan after the referenced paths moved.
         let mut history = vec![uni::Message::assistant("kept".to_string())];
         append_rejected_plan_draft_to_last_assistant(&mut history, "   ");
         assert_eq!(history[0].content.as_text(), "kept");
+    }
+
+    #[tokio::test]
+    async fn pseudo_reprompt_queues_bounded_cap_allowance() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.enable_planning();
+        let mut ctx = backing.turn_processing_context();
+        assert!(!ctx.plan_session.bounded_planning_follow_up_allowed());
+
+        let outcome = ctx
+            .handle_text_response(BROKEN_MARKUP_RESPONSE.to_string(), Vec::new(), None, None, false)
+            .await
+            .expect("text response should be handled");
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue), "pseudo markup should schedule a bounded reprompt");
+        assert!(
+            ctx.plan_session.bounded_planning_follow_up_allowed(),
+            "the scheduled reprompt must queue one cap allowance so the next request is not immediately blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_interview_retry_queues_bounded_cap_allowance() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.activate_planning_for_test();
+        backing.mark_interview_denied_for_test();
+        let mut ctx = backing.turn_processing_context();
+        assert!(!ctx.plan_session.bounded_planning_follow_up_allowed());
+
+        let outcome = ctx
+            .handle_text_response("Here is a research summary.".to_string(), Vec::new(), None, None, false)
+            .await
+            .expect("text response should be handled");
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Continue),
+            "denied-interview prose should schedule a bounded synthesis retry"
+        );
+        assert!(
+            ctx.plan_session.bounded_planning_follow_up_allowed(),
+            "the synthesis retry must queue one cap allowance"
+        );
     }
 }

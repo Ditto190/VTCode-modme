@@ -207,6 +207,11 @@ const PLANNING_RECOVERY_EXHAUSTED_NO_DRAFT_NOTICE: &str = "Plan synthesis failed
 /// `result_handler` (producer) and `post_tool_recovery` (consumer).
 pub(super) const RECOVERY_CONTRACT_VIOLATION_REASON: &str =
     "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls.";
+/// Reason set on `TurnLoopResult::Blocked` when an approved-plan execution
+/// turn keeps echoing the stale planning-turn pause after the bounded
+/// clearing retries are exhausted. The stale text is discarded, so the
+/// generic text-response budget never sees it.
+const STALE_APPROVED_PLAN_PAUSE_BLOCK_REASON: &str = "Approved-plan execution kept returning stale recovery state after bounded retries; the stale pause response was discarded.";
 pub(crate) const COMPLETED_TURN_FALLBACK_RESPONSE: &str = "The turn stopped before a final assistant response was produced. No final outcome was confirmed; please retry the request.";
 /// Planning-specific variant of [`COMPLETED_TURN_FALLBACK_RESPONSE`]. A
 /// plan-mode turn that ends without any final text must stay resumable: the
@@ -1007,13 +1012,15 @@ pub(crate) async fn run_turn_loop(
         // inline VTCode tool calls, while compaction does not discard this
         // turn-scoped counter.
         let text_response_streak = ctx.harness_state.consecutive_assistant_text_responses;
-        // A pending validation repair is a deliberate extra candidate, so
-        // allow the next request through the generic text-response cap. This
+        // A pending bounded planning retry (validation repair, denied-interview
+        // synthesis, pseudo-tool-call reprompt) is a deliberate extra candidate,
+        // so allow the next request through the generic text-response cap. This
         // allowance is queued independently of the response count because a
-        // repair can be scheduled after an ordinary planning response.
-        let plan_validation_repair_follow_up =
-            ctx.is_planning_active() && ctx.plan_session.plan_validation_repair_follow_up_allowed();
-        if text_response_streak >= MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN && !plan_validation_repair_follow_up {
+        // retry can be scheduled after an ordinary planning response has
+        // already used that budget.
+        let bounded_planning_follow_up =
+            ctx.is_planning_active() && ctx.plan_session.bounded_planning_follow_up_allowed();
+        if text_response_streak >= MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN && !bounded_planning_follow_up {
             tracing::warn!(
                 text_response_streak,
                 cap = MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN,
@@ -1039,8 +1046,8 @@ pub(crate) async fn run_turn_loop(
             };
             break;
         }
-        if plan_validation_repair_follow_up {
-            ctx.plan_session.consume_plan_validation_repair_follow_up();
+        if bounded_planning_follow_up {
+            ctx.plan_session.consume_bounded_planning_follow_up();
         }
 
         // Prepare turn processing context
@@ -1478,14 +1485,15 @@ pub(crate) async fn run_turn_loop(
             continue;
         }
         if stale_approved_plan_pause {
-            let response_count = turn_processing_ctx.harness_state.record_assistant_text_response();
-            if response_count >= MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN {
-                result = TurnLoopResult::Blocked {
-                    reason: Some(PENDING_VERIFICATION_BLOCK_REASON.to_string()),
-                };
-                break;
-            }
-
+            // The stale pause text is discarded (never committed to history),
+            // so it must not consume the generic text-response budget; that
+            // budget is recorded exactly once when the replacement response
+            // is processed. Retries stay bounded by
+            // `MAX_APPROVED_PLAN_STALE_PAUSE_RETRIES`, and the generic cap at
+            // the top of the loop remains responsible for runaway prose.
+            // Once the retries are exhausted the turn ends Blocked without
+            // storing the stale text, so it can never become a successful
+            // final answer.
             if turn_processing_ctx.harness_state.approved_plan_recovery_retries()
                 < MAX_APPROVED_PLAN_STALE_PAUSE_RETRIES
             {
@@ -1498,6 +1506,10 @@ pub(crate) async fn run_turn_loop(
                     .line(MessageStyle::Info, "Approved-plan execution resumed after clearing stale recovery state.");
                 continue;
             }
+            result = TurnLoopResult::Blocked {
+                reason: Some(STALE_APPROVED_PLAN_PAUSE_BLOCK_REASON.to_string()),
+            };
+            break;
         }
 
         // Restore input status if there are no tool calls (turn is completing)

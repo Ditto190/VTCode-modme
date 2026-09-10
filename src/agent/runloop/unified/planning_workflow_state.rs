@@ -42,11 +42,11 @@ pub(crate) struct PlanningWorkflowSessionState {
     /// planning turn. The counter is deliberately turn-scoped so a failed
     /// draft cannot consume the repair budget for every later user turn.
     plan_validation_repair_reprompts: u8,
-    /// Number of validation-repair requests waiting to be admitted through
+    /// Number of bounded planning retries waiting to be admitted through
     /// the turn loop. This is independent of the number of text responses
-    /// already emitted: a repair may be scheduled after an interview denial
+    /// already emitted: a retry may be scheduled after an interview denial
     /// or another ordinary planning response has used that budget.
-    plan_validation_repair_follow_ups_pending: u8,
+    bounded_planning_follow_ups_pending: u8,
     /// Counts re-prompts issued after the model emitted pseudo-tool-call
     /// markup (XML-ish tool-call text no parser could execute) as a plan-mode
     /// text response. Bounded so a checkpoint that keeps emitting the same
@@ -92,7 +92,7 @@ impl PlanningWorkflowSessionState {
         self.interview_denied = false;
         self.plan_synthesis_retry_used = false;
         self.plan_validation_repair_reprompts = 0;
-        self.plan_validation_repair_follow_ups_pending = 0;
+        self.bounded_planning_follow_ups_pending = 0;
         self.pseudo_tool_call_reprompts = 0;
         self.previous_primary_agent = None;
         self.fallback_primary_agent = None;
@@ -106,7 +106,7 @@ impl PlanningWorkflowSessionState {
         self.interview_denied = false;
         self.plan_synthesis_retry_used = false;
         self.plan_validation_repair_reprompts = 0;
-        self.plan_validation_repair_follow_ups_pending = 0;
+        self.bounded_planning_follow_ups_pending = 0;
         self.pseudo_tool_call_reprompts = 0;
         self.previous_primary_agent = None;
         self.fallback_primary_agent = None;
@@ -211,26 +211,37 @@ impl PlanningWorkflowSessionState {
     /// Reset the automatic validation-repair budget for a fresh planning turn.
     pub(crate) fn start_turn(&mut self) {
         self.plan_validation_repair_reprompts = 0;
-        self.plan_validation_repair_follow_ups_pending = 0;
+        self.bounded_planning_follow_ups_pending = 0;
     }
 
     pub(crate) fn plan_validation_repair_allowed(&self) -> bool {
         self.plan_validation_repair_reprompts < MAX_PLAN_VALIDATION_REPAIR_REPROMPTS
     }
 
-    pub(crate) fn plan_validation_repair_follow_up_allowed(&self) -> bool {
-        self.plan_validation_repair_follow_ups_pending > 0
+    /// Generic bounded-planning-retry allowance shared by validation repair,
+    /// denied-interview synthesis retries, and pseudo-tool-call reprompts.
+    /// Each queues exactly one extra request through the text-response cap;
+    /// the underlying retry budget (validation max 2, synthesis once,
+    /// pseudo max 2) is enforced separately by the caller.
+    pub(crate) fn bounded_planning_follow_up_allowed(&self) -> bool {
+        self.bounded_planning_follow_ups_pending > 0
     }
 
-    pub(crate) fn consume_plan_validation_repair_follow_up(&mut self) {
-        self.plan_validation_repair_follow_ups_pending =
-            self.plan_validation_repair_follow_ups_pending.saturating_sub(1);
+    pub(crate) fn consume_bounded_planning_follow_up(&mut self) {
+        self.bounded_planning_follow_ups_pending = self.bounded_planning_follow_ups_pending.saturating_sub(1);
+    }
+
+    /// Queue one cap-bypassing follow-up without consuming validation budget.
+    /// Use when a bounded non-validation retry (denied interview, pseudo
+    /// tool-call markup) schedules a `Continue`; the retry's own
+    /// used/allowed counters remain responsible for bounding the loop.
+    pub(crate) fn queue_bounded_planning_follow_up(&mut self) {
+        self.bounded_planning_follow_ups_pending = self.bounded_planning_follow_ups_pending.saturating_add(1);
     }
 
     pub(crate) fn mark_plan_validation_repair_used(&mut self) {
         self.plan_validation_repair_reprompts = self.plan_validation_repair_reprompts.saturating_add(1);
-        self.plan_validation_repair_follow_ups_pending =
-            self.plan_validation_repair_follow_ups_pending.saturating_add(1);
+        self.bounded_planning_follow_ups_pending = self.bounded_planning_follow_ups_pending.saturating_add(1);
     }
 
     pub(crate) fn plan_pseudo_tool_call_reprompt_allowed(&self) -> bool {
@@ -238,7 +249,7 @@ impl PlanningWorkflowSessionState {
     }
 
     pub(crate) fn mark_plan_pseudo_tool_call_reprompt_used(&mut self) {
-        self.pseudo_tool_call_reprompts += 1;
+        self.pseudo_tool_call_reprompts = self.pseudo_tool_call_reprompts.saturating_add(1);
     }
 
     pub(crate) fn interview_forcing_allowed(&self) -> bool {
@@ -482,25 +493,25 @@ mod tests {
             !state.plan_validation_repair_allowed(),
             "validation repairs must stop after the bounded automatic passes"
         );
-        assert!(state.plan_validation_repair_follow_up_allowed());
-        state.consume_plan_validation_repair_follow_up();
-        assert!(state.plan_validation_repair_follow_up_allowed());
-        state.consume_plan_validation_repair_follow_up();
-        assert!(!state.plan_validation_repair_follow_up_allowed());
+        assert!(state.bounded_planning_follow_up_allowed());
+        state.consume_bounded_planning_follow_up();
+        assert!(state.bounded_planning_follow_up_allowed());
+        state.consume_bounded_planning_follow_up();
+        assert!(!state.bounded_planning_follow_up_allowed());
 
         state.start_turn();
         assert!(state.plan_validation_repair_allowed(), "a fresh planning turn gets a fresh repair budget");
-        assert!(!state.plan_validation_repair_follow_up_allowed(), "a fresh turn has no stale repair request");
+        assert!(!state.bounded_planning_follow_up_allowed(), "a fresh turn has no stale repair request");
         state.mark_plan_validation_repair_used();
         assert!(
-            state.plan_validation_repair_follow_up_allowed(),
+            state.bounded_planning_follow_up_allowed(),
             "a repair remains pending regardless of earlier text responses"
         );
 
         state.exit();
         state.enter(PlanningEntrySource::UserRequest);
         assert!(state.plan_validation_repair_allowed());
-        assert!(!state.plan_validation_repair_follow_up_allowed(), "re-entry clears pending repair requests");
+        assert!(!state.bounded_planning_follow_up_allowed(), "re-entry clears pending repair requests");
     }
 
     #[test]
@@ -595,5 +606,47 @@ mod tests {
             })
         );
         assert_eq!(state.take_pending_plan_approval(), None);
+    }
+
+    #[test]
+    fn bounded_retry_queue_bypasses_cap_without_consuming_validation_budget() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::UserRequest);
+        assert!(!state.bounded_planning_follow_up_allowed());
+
+        // A denied-interview or pseudo-tool-call retry queues one allowance
+        // without touching the validation-repair budget.
+        state.queue_bounded_planning_follow_up();
+        assert!(state.bounded_planning_follow_up_allowed());
+        assert!(state.plan_validation_repair_allowed());
+
+        state.consume_bounded_planning_follow_up();
+        assert!(!state.bounded_planning_follow_up_allowed());
+        assert!(state.plan_validation_repair_allowed());
+    }
+
+    #[test]
+    fn bounded_retry_allowance_survives_prior_text_budget_use() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::UserRequest);
+
+        // Validation repair and generic retries share the pending queue so a
+        // retry scheduled after an ordinary planning response still admits
+        // exactly the queued requests.
+        state.mark_plan_validation_repair_used();
+        state.queue_bounded_planning_follow_up();
+        assert!(state.bounded_planning_follow_up_allowed());
+        state.consume_bounded_planning_follow_up();
+        assert!(state.bounded_planning_follow_up_allowed());
+        state.consume_bounded_planning_follow_up();
+        assert!(!state.bounded_planning_follow_up_allowed());
+
+        state.start_turn();
+        assert!(!state.bounded_planning_follow_up_allowed());
+
+        state.queue_bounded_planning_follow_up();
+        state.exit();
+        state.enter(PlanningEntrySource::UserRequest);
+        assert!(!state.bounded_planning_follow_up_allowed());
     }
 }

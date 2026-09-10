@@ -603,33 +603,43 @@ fn error_is_missing_resource(error: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
-/// Detect the exec-session-loss error text emitted by the exec session
-/// manager ("exec session '<id>' not found. ..."), mirroring the phrasing in
-/// `vtcode-core` exec_session tool errors.
-fn error_text_indicates_lost_exec_session(error: &str) -> bool {
+/// Detect the session-loss error text emitted by the exec session manager
+/// ("exec session '<id>' not found. ...") and the PTY session manager
+/// ("PTY session '<id>' not found"), mirroring the phrasing in `vtcode-core`
+/// exec_session and pty session_ops tool errors.
+fn error_text_indicates_lost_session(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("exec session") && lower.contains("not found")
+    lower.contains("not found") && (lower.contains("exec session") || lower.contains("pty session"))
 }
 
 /// Return whether `(canonical_name, args)` is a follow-up on an existing
-/// exec session rather than a fresh command run.
+/// exec/PTY session rather than a fresh command run.
 ///
 /// `canonical_name` must already be canonicalized (see [`canonical_tool_name`]).
 /// Any non-`run` `unified_exec` action counts as a follow-up
-/// (poll/wait/inspect/continue/input, plus list/code/write/close): session
+/// (poll/wait/inspect/continue/input, plus list/code/write/close), as does
+/// any non-`run` PTY session tool (`read_pty_session`, `send_pty_input`,
+/// `close_pty_session`, `list_pty_sessions`, `exec_pty_cmd`): session
 /// follow-ups carry a `session_id`, not command text, so they never classify
 /// as [`ShellActivity::Verification`]. A missing-session failure on one of
 /// them therefore needs its own lost-result branch in
 /// [`update_repetition_tracker`]: the verifier output it was waiting on died
 /// with the session. Fresh `run` calls are excluded: a run creates its
 /// session, so it cannot lose a prior verifier's result.
-fn is_exec_session_follow_up(canonical_name: &str, args: &serde_json::Value) -> bool {
+fn is_session_follow_up(canonical_name: &str, args: &serde_json::Value) -> bool {
     use vtcode_core::config::constants::tools;
     if canonical_name == tools::WRITE_STDIN {
         return true;
     }
-    if canonical_name == tools::UNIFIED_EXEC
-        && !vtcode_core::tools::tool_intent::is_command_run_tool_call(canonical_name, args)
+    if matches!(
+        canonical_name,
+        tools::UNIFIED_EXEC
+            | tools::READ_PTY_SESSION
+            | tools::SEND_PTY_INPUT
+            | tools::CLOSE_PTY_SESSION
+            | tools::LIST_PTY_SESSIONS
+            | tools::EXEC_PTY_CMD
+    ) && !vtcode_core::tools::tool_intent::is_command_run_tool_call(canonical_name, args)
     {
         return true;
     }
@@ -972,9 +982,10 @@ pub(crate) fn mutation_blocked_until_verification(
 ///
 /// A `true` return also covers *lost* verifier results: while the gate is
 /// pending, a verifier-level Failure/Timeout (or a session follow-up
-/// failure — `write_stdin` or a non-run `unified_exec` action — reporting a
-/// dead exec session) grants the same bounded window because the verifier
-/// never produced an observable verdict. In that case the tracker queues
+/// failure — `write_stdin`, a non-run `unified_exec` action, or a PTY
+/// session follow-up — reporting a dead exec/PTY session) grants the same
+/// bounded window because the verifier never produced an observable
+/// verdict. In that case the tracker queues
 /// [`VERIFICATION_RESULT_LOST_DIRECTIVE`] for the handlers to surface.
 pub(crate) fn update_repetition_tracker(
     loop_tracker: &mut LoopTracker,
@@ -1022,18 +1033,18 @@ pub(crate) fn update_repetition_tracker(
         loop_tracker.record_low_signal(low_signal_family.clone());
     }
 
-    // Lost verifier results via exec-session follow-ups: a `write_stdin` or
-    // `unified_exec` poll/wait/inspect/continue failure that reports a
-    // missing session means the session (and its pending verifier output)
-    // died before the result was captured, so the follow-up never classifies
-    // as ShellActivity::Verification. While the gate is pending, treat it
-    // like a failed verifier so the model gets a bounded fix/diagnostic
-    // window instead of deadlocking behind a gate that can no longer observe
-    // a successful verifier.
-    if is_exec_session_follow_up(canonical_name, args)
+    // Lost verifier results via session follow-ups: a `write_stdin`,
+    // `unified_exec` poll/wait/inspect/continue, or PTY session follow-up
+    // failure that reports a missing session means the session (and its
+    // pending verifier output) died before the result was captured, so the
+    // follow-up never classifies as ShellActivity::Verification. While the
+    // gate is pending, treat it like a failed verifier so the model gets a
+    // bounded fix/diagnostic window instead of deadlocking behind a gate
+    // that can no longer observe a successful verifier.
+    if is_session_follow_up(canonical_name, args)
         && loop_tracker.verification_is_pending()
         && let ToolExecutionStatus::Failure { error } = &outcome.status
-        && error_text_indicates_lost_exec_session(&error.message)
+        && error_text_indicates_lost_session(&error.message)
     {
         loop_tracker.verification_result_lost_notice_pending = true;
         loop_tracker.record_failed_verification();
@@ -1923,6 +1934,128 @@ mod tests {
             &failure,
             tools::UNIFIED_EXEC,
             &json!({"action": "run", "command": "echo hi"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn read_pty_session_poll_on_lost_pty_session_while_pending_grants_fix_window() {
+        // A verifier waited on via a PTY session poll whose session died
+        // reports "PTY session '<id>' not found" — the same lost-result shape
+        // as the exec-session manager, and it needs the same bounded window.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::READ_PTY_SESSION.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "PTY session 'pty-3' not found".to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::READ_PTY_SESSION,
+            &json!({"session_id": "pty-3"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(!mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+        assert!(tracker.take_verification_result_lost_notice());
+        assert!(!tracker.take_verification_result_lost_notice(), "the notice is one-shot");
+    }
+
+    #[test]
+    fn send_pty_input_on_lost_pty_session_while_pending_grants_fix_window() {
+        // `send_pty_input` is a session follow-up (carries `session_id`, never
+        // classifies as Verification), so a dead session there grants too.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::SEND_PTY_INPUT.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "PTY session 'pty-3' not found".to_string(),
+            ),
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::SEND_PTY_INPUT,
+            &json!({"session_id": "pty-3", "input": "q"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn create_pty_session_run_with_lost_session_text_takes_no_follow_up_path() {
+        // A fresh PTY `run` creates its session, so it is not a follow-up:
+        // the error text alone must not open the lost-result window.
+        // (`cargo check` classifies as Verification, so use `echo` which
+        // classifies as Inspection — nothing is granted here.)
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let failure = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::CREATE_PTY_SESSION.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "PTY session 'pty-3' not found".to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &failure,
+            tools::CREATE_PTY_SESSION,
+            &json!({"command": "echo hi"}),
+        ));
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn pty_follow_up_lost_session_without_pending_gate_grants_nothing() {
+        let mut tracker = LoopTracker::new();
+        let lost_session = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::READ_PTY_SESSION.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "PTY session 'pty-3' not found".to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &lost_session,
+            tools::READ_PTY_SESSION,
+            &json!({"session_id": "pty-3"}),
+        ));
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+    }
+
+    #[test]
+    fn pty_follow_up_unrelated_failure_while_pending_grants_no_fix_window() {
+        // "no longer writable" is a live-session failure, not a lost session:
+        // it carries no "not found", so the lost-result branch must not fire.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let unrelated = ToolPipelineOutcome::from_status(ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                tools::READ_PTY_SESSION.to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "PTY session 'pty-3' is no longer writable".to_string(),
+            ),
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &unrelated,
+            tools::READ_PTY_SESSION,
+            &json!({"session_id": "pty-3"}),
         ));
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.fix_edits_remaining, 0);
