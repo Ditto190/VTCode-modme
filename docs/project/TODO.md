@@ -139,3 +139,44 @@ What you can do:
 ╏[2026-09-09T06:41:24Z] INFO vtcode.turn.metrics turn metric metric=token_budget_breakdown ╏
 ╏run_id=session-vtcode-20260909T064105Z_730123-52316 turn_id=c009db09-30c5-40fe-a228-fc70a7187afa turn=1 ╏
 ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+---
+
+check and fix vtcode harness
+
+Recovery loop detected: capping repeated assistant responses to avoid wasted
+context.
+Turn blocked after repeated assistant responses reached the safety cap; the
+latest response was preserved.
+Turn blocked: Turn blocked after repeated assistant responses reached the
+safety cap; the latest response was preserved.
+What you can do:
+• In this session: Type 'continue' to resume, or describe alternative
+instructions
+• From terminal: Run `vtcode --resume session-vtcode-20260910T031644Z_885339-58945`
+• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/logs/trajectory.jsonl
+
+---
+
+    How to catch up
+    Lean into what's differentiated rather than cloning:
+    1. Make the eval framework the product. vtcode-eval + the WebMCP eval
+       corpus pattern is a real asset. If VT Code can say "here's a
+       reproducible benchmark showing my harness gets more tasks done per
+       dollar than Claude Code on your repo," that's a wedge the incumbents
+       can't easily match — they won't ship their internal evals. Publish
+       baseline suites, make vtcode eval a one-command story.
+    2. Own "the auditable agent." The security posture + ThreadEvent log +
+       vtcode-memory single-source-of-truth could become a story no one else
+       tells: every action replayable, every mutation digest-verified, every
+       permission decision inspectable. Enterprises care about this more than
+       raw model quality.
+
+---
+
+    Gap: Onboarding polish
+    Why it matters: Codex/Claude Code have zero-config first runs.
+    Catch-up move: Reduce time-to-first-success: auto-detect providers, ship a guided vtcode init, and make the default config excellent without reading
+    docs.
