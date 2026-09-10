@@ -3,7 +3,9 @@ use serde_json::json;
 
 use crate::agent::runloop::unified::inline_events::harness::harness_event;
 use crate::agent::runloop::unified::planning_workflow::detect_enter_planning_intent;
-use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, full_auto_loop_grants_enabled};
+use crate::agent::runloop::unified::run_loop_context::{
+    BudgetExhaustedMetrics, HarnessTurnState, budget_kind, emit_budget_exhausted_metric, full_auto_loop_grants_enabled,
+};
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
 use crate::agent::runloop::unified::turn::turn_helpers::{display_error, display_status};
 use crate::agent::runloop::unified::turn::turn_loop::TurnLoopContext;
@@ -287,6 +289,20 @@ fn emit_loop_hard_cap_break_metric(
         hard_cap,
         tool_calls = ctx.harness_state.tool_calls,
         "turn metric"
+    );
+    // Trajectory twin of the metric above: post-hoc reports of an exhausted
+    // turn ("tool budget exhausted") are otherwise undebuggable because no
+    // trajectory kind records which ceiling fired.
+    emit_budget_exhausted_metric(
+        ctx.traj,
+        BudgetExhaustedMetrics {
+            budget: budget_kind::TOOL_LOOP,
+            used: current_limit,
+            max: hard_cap,
+            step_count: Some(step_count),
+            planning_active: ctx.is_planning_active(),
+            tool_calls: ctx.harness_state.tool_calls,
+        },
     );
 }
 

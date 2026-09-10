@@ -419,7 +419,12 @@ otherwise identical inspection count as new research; twelve genuinely
 distinct inspections remain eligible for continued research. The generic
 turn-balancer caps apply as well; in planning mode they converge on the same
 plan-synthesis pass (with the `<proposed_plan>` contract) and consume the same
-once-per-turn slot.
+once-per-turn slot. In any mode, three listings with the same tool (`ls`,
+`find`, or `fd`, regardless of arguments) schedule the same single tool-free
+recovery pass, and every failed-closed turn budget (`tool_calls`,
+ `tool_loop`, `session_calls`) is recorded as a `budget_exhausted` trajectory
+ event with its used/max counts so post-hoc diagnosis can tell which ceiling
+ fired.
 
 Tool previews shown to the model share a bounded per-turn budget (96 KiB in
 planning, 32 KiB execution); plan-mode inspections that omit an explicit

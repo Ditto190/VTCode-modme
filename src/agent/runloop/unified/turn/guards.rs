@@ -961,6 +961,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_listing_loop_converges_on_third_same_base_scan() {
+        // Rehearsal of the observed build-mode listing loop (`ls src/`,
+        // `find …`, `ls src`, `ls -1 src`, …): argument variations keep every
+        // exact-request counter quiet, so the third same-base listing must
+        // schedule recovery instead of burning the turn tool-call budget.
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"stdout": "src\nsrc-tauri"}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for command in ["ls src/", "find src -maxdepth 1 -type d", "ls src"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tool_names::EXEC_COMMAND,
+                &json!({"cmd": command, "command": command, "action": "run"}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 2);
+        assert_eq!(tracker.repeated_navigation_count(), 0);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
+
+        update_repetition_tracker(
+            &mut tracker,
+            &success,
+            tool_names::EXEC_COMMAND,
+            &json!({"cmd": "ls -1 src", "command": "ls -1 src", "action": "run"}),
+        );
+        assert_eq!(tracker.max_coarse_listing_count(), 3);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert!(
+            ctx.working_history
+                .iter()
+                .any(|message| { message.content.as_text().contains("summarize only from collected evidence") })
+        );
+    }
+
+    #[tokio::test]
+    async fn build_search_triplets_do_not_trip_listing_convergence() {
+        // Distinct `rg` queries are semantically distinct questions, so three
+        // of them must not schedule recovery even though they share one
+        // coarse inspection family.
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"stdout": "src/lib.rs:1:hit"}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for query in ["rg -n 'alpha' src/", "rg -n 'beta' src/", "rg -n 'gamma' src/"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tool_names::EXEC_COMMAND,
+                &json!({"cmd": query, "command": query, "action": "run"}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 0);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
+    }
+
+    #[tokio::test]
     async fn navigation_loop_schedules_recovery_and_progress_only_recovery_text_completes() {
         let mut backing = TestTurnProcessingBacking::new(8).await;
         let mut ctx = backing.turn_processing_context();

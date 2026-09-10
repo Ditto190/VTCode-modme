@@ -999,8 +999,8 @@ pub(crate) fn update_repetition_tracker(
         .unwrap_or_else(|| signature_key.clone());
     // Successful but redundant scans (e.g. three overlapping `find` calls)
     // never match the exact family key. Track a coarse inspection family so
-    // the third repeat still surfaces in diagnostics without changing
-    // admission or blocking behavior.
+    // the third repeat surfaces in diagnostics and in the turn balancer's
+    // listing-loop tripwire without changing admission behavior.
     let coarse_family = coarse_inspection_family_key(canonical_name, args);
     let coarse_repeat = coarse_family.as_ref().map(|family| {
         let entry = loop_tracker

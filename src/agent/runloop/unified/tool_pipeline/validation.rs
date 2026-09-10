@@ -8,7 +8,10 @@ use vtcode_core::tools::ToolInvocationId;
 use vtcode_ui::tui::app::InlineHandle;
 
 use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter, harness_event};
-use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, SESSION_LIMIT_AUTO_GRANT_INCREMENT};
+use crate::agent::runloop::unified::run_loop_context::{
+    BudgetExhaustedMetrics, HarnessTurnState, SESSION_LIMIT_AUTO_GRANT_INCREMENT, budget_kind,
+    emit_budget_exhausted_metric,
+};
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::tool_call_safety::{SafetyError, ToolCallSafetyValidator};
 use crate::agent::runloop::unified::tool_routing::prompt_session_limit_increase;
@@ -44,6 +47,8 @@ pub(crate) async fn validate_tool_call_with_limit_prompt<S: UiSession + ?Sized>(
     harness_emitter: Option<&HarnessEventEmitter>,
     agent_name: Option<&str>,
     auto_grant: bool,
+    traj: &vtcode_core::core::trajectory::TrajectoryLogger,
+    planning_active: bool,
 ) -> Result<(), SafetyValidationFailure> {
     let mut limit_increase_attempts = 0u32;
     loop {
@@ -69,6 +74,17 @@ pub(crate) async fn validate_tool_call_with_limit_prompt<S: UiSession + ?Sized>(
                             tool = %tool_name,
                             attempts = limit_increase_attempts,
                             "Session auto-grant headroom exhausted; refusing further automatic increases"
+                        );
+                        emit_budget_exhausted_metric(
+                            traj,
+                            BudgetExhaustedMetrics {
+                                budget: budget_kind::SESSION_CALLS,
+                                used: safety_validator.session_count(),
+                                max: safety_validator.max_per_session(),
+                                step_count: None,
+                                planning_active,
+                                tool_calls: harness_state.as_deref().map_or(0, |state| state.tool_calls),
+                            },
                         );
                         return Err(SafetyValidationFailure::SessionLimitNotIncreased);
                     }

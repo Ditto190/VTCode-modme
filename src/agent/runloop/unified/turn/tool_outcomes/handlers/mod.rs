@@ -12,6 +12,9 @@ use super::error_handling::tool_denial_diagnostic;
 use super::helpers::{FAILED_VERIFICATION_FIX_ALLOWANCE, check_is_argument_error, mutation_blocked_until_verification};
 use crate::agent::runloop::unified::async_mcp_manager::approval_policy_from_human_in_the_loop;
 use crate::agent::runloop::unified::run_loop_context::full_auto_loop_grants_enabled;
+use crate::agent::runloop::unified::run_loop_context::{
+    BudgetExhaustedMetrics, budget_kind, emit_budget_exhausted_metric,
+};
 use crate::agent::runloop::unified::tool_call_safety::invocation_id_from_call_id;
 use crate::agent::runloop::unified::tool_pipeline::validation::{
     SafetyValidationFailure, validate_tool_call_with_limit_prompt,
@@ -316,6 +319,17 @@ pub(super) fn flush_budget_synthesis_directives(ctx: &mut TurnProcessingContext<
         && let Some(exhaustion) = ctx.harness_state.tool_budget_exhaustion()
     {
         ctx.push_system_message(exhaustion.synthesis_directive_message());
+        emit_budget_exhausted_metric(
+            ctx.traj,
+            BudgetExhaustedMetrics {
+                budget: budget_kind::TOOL_CALLS,
+                used: exhaustion.used,
+                max: exhaustion.max,
+                step_count: None,
+                planning_active: ctx.is_planning_active(),
+                tool_calls: ctx.harness_state.tool_calls,
+            },
+        );
         if ctx.harness_state.recovery_reason.is_none() {
             ctx.harness_state.recovery_reason = Some("tool-call budget exhausted".to_string());
         }
@@ -423,6 +437,9 @@ async fn run_safety_validation_loop(
     effective_args: &serde_json::Value,
 ) -> Result<Option<(ValidationResult, Option<String>)>> {
     let invocation_id = invocation_id_from_call_id(tool_call_id);
+    // Hoisted: `is_planning_active` borrows all of `ctx`, which would
+    // conflict with the `harness_state` reborrow in the call below.
+    let planning_active = ctx.is_planning_active();
     match validate_tool_call_with_limit_prompt(
         ctx.safety_validator,
         ctx.handle,
@@ -436,6 +453,8 @@ async fn run_safety_validation_loop(
         ctx.harness_emitter,
         Some(ctx.active_primary_agent.active().name()),
         full_auto_loop_grants_enabled(ctx.full_auto, ctx.vt_cfg),
+        ctx.traj,
+        planning_active,
     )
     .await
     {

@@ -545,6 +545,8 @@ impl<'a> CopilotRuntimeHost<'a> {
             self.harness_emitter,
             self.agent_name.as_deref(),
             session_limit_auto_grant,
+            self.traj,
+            self.tool_registry.is_planning_active(),
         )
         .await
         {
@@ -605,6 +607,8 @@ impl<'a> CopilotRuntimeHost<'a> {
                             self.harness_emitter,
                             self.agent_name.as_deref(),
                             session_limit_auto_grant,
+                            self.traj,
+                            self.tool_registry.is_planning_active(),
                         )
                         .await
                         {

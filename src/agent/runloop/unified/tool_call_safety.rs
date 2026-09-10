@@ -174,6 +174,12 @@ impl ToolCallSafetyValidator {
         self.safety_gateway.max_per_session()
     }
 
+    /// Return the number of tool calls counted against the session limit.
+    /// Read alongside [`Self::max_per_session`] for exhaustion telemetry.
+    pub(crate) fn session_count(&self) -> usize {
+        self.safety_gateway.get_stats().session_count
+    }
+
     #[cfg(test)]
     fn set_rate_limit_per_second(&self, limit: usize) {
         if limit > 0 {

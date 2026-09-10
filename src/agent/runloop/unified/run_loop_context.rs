@@ -173,6 +173,68 @@ impl ToolBudgetExhaustion {
     }
 }
 
+/// Budget kinds that can fail a turn closed. Recorded in trajectory telemetry
+/// so post-hoc diagnosis can tell which ceiling fired; the model-facing
+/// recovery directives already cover the live behavior.
+pub(crate) mod budget_kind {
+    /// Per-turn tool-call count (`max_tool_calls_per_turn`).
+    pub(crate) const TOOL_CALLS: &str = "tool_calls";
+    /// Per-turn tool-loop iterations (`max_tool_loops` hard cap).
+    pub(crate) const TOOL_LOOP: &str = "tool_loop";
+    /// Session-wide tool-call count (safety gateway + auto-grant headroom).
+    pub(crate) const SESSION_CALLS: &str = "session_calls";
+}
+
+/// Snapshot of a failed-closed turn budget for trajectory telemetry.
+/// Mirrors the `tool_catalog_cache_metrics` record shape.
+#[derive(Copy, Clone)]
+pub(crate) struct BudgetExhaustedMetrics {
+    pub budget: &'static str,
+    pub used: usize,
+    pub max: usize,
+    pub step_count: Option<usize>,
+    pub planning_active: bool,
+    pub tool_calls: usize,
+}
+
+/// Log one JSONL `budget_exhausted` record. Best effort like all trajectory
+/// logging: a disabled logger drops the record. Unknown `kind` values are
+/// ignored by trajectory consumers, so this adds no schema burden.
+pub(crate) fn emit_budget_exhausted_metric(traj: &TrajectoryLogger, metrics: BudgetExhaustedMetrics) {
+    traj.log(&budget_exhausted_record(metrics));
+}
+
+/// Serializable `budget_exhausted` record behind
+/// [`emit_budget_exhausted_metric`], kept separate so tests can assert exact
+/// field values without filesystem I/O (the async line writer behind
+/// `traj.log` is only flushable inside `vtcode-core` unit tests).
+#[derive(serde::Serialize)]
+pub(crate) struct BudgetExhaustedRecord {
+    kind: &'static str,
+    budget: &'static str,
+    used: usize,
+    max: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step_count: Option<usize>,
+    planning_active: bool,
+    tool_calls: usize,
+    ts: i64,
+}
+
+/// Pure record constructor behind [`emit_budget_exhausted_metric`].
+pub(crate) fn budget_exhausted_record(metrics: BudgetExhaustedMetrics) -> BudgetExhaustedRecord {
+    BudgetExhaustedRecord {
+        kind: "budget_exhausted",
+        budget: metrics.budget,
+        used: metrics.used,
+        max: metrics.max,
+        step_count: metrics.step_count,
+        planning_active: metrics.planning_active,
+        tool_calls: metrics.tool_calls,
+        ts: chrono::Utc::now().timestamp(),
+    }
+}
+
 impl ToolWallClockExhaustion {
     pub(crate) fn policy_violation_message(self) -> String {
         format!("Policy violation: exceeded tool wall clock budget ({}s)", self.max_secs)
@@ -1983,6 +2045,45 @@ mod tests {
         );
         assert_eq!(plan_result, payload);
         assert!(!plan_state.model_visible_preview_budget_exhausted());
+    }
+
+    #[test]
+    fn budget_exhausted_record_carries_exact_ceiling_values() {
+        use super::{BudgetExhaustedMetrics, budget_exhausted_record, budget_kind};
+
+        let value = serde_json::to_value(budget_exhausted_record(BudgetExhaustedMetrics {
+            budget: budget_kind::TOOL_CALLS,
+            used: 32,
+            max: 32,
+            step_count: None,
+            planning_active: false,
+            tool_calls: 32,
+        }))
+        .unwrap();
+        assert_eq!(value["kind"], "budget_exhausted");
+        assert_eq!(value["budget"], "tool_calls");
+        assert_eq!(value["used"], 32);
+        assert_eq!(value["max"], 32);
+        assert!(value.get("step_count").is_none());
+        assert_eq!(value["planning_active"], false);
+        assert_eq!(value["tool_calls"], 32);
+        assert!(value["ts"].is_number());
+
+        // Asymmetric counterpart: a planning tool-loop record differs in
+        // every mode-dependent field, so consumers can tell ceilings apart.
+        let planned = serde_json::to_value(budget_exhausted_record(BudgetExhaustedMetrics {
+            budget: budget_kind::TOOL_LOOP,
+            used: 20,
+            max: 20,
+            step_count: Some(20),
+            planning_active: true,
+            tool_calls: 41,
+        }))
+        .unwrap();
+        assert_eq!(planned["budget"], "tool_loop");
+        assert_eq!(planned["step_count"], 20);
+        assert_eq!(planned["planning_active"], true);
+        assert_ne!(planned["budget"], value["budget"]);
     }
 
     #[test]

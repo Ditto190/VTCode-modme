@@ -579,6 +579,8 @@ async fn check_tool_safety(
         ctx.harness_emitter,
         ctx.agent_name.as_deref(),
         auto_grant,
+        ctx.traj,
+        ctx.tool_registry.is_planning_active(),
     )
     .await
     {
