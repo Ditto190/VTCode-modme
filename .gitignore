@@ -855,6 +855,7 @@ vtcode.toml
 
 plans/
 .vtcode/reviews/
+.vtcode/scratch/
 .vtcode/tool-policy.json
 .vtcode/state/
 .vtcode/tasks/

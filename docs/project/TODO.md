@@ -199,3 +199,70 @@ instructions
     The strategic summary: don't out-Claude Claude Code. VT Code's defensible position is open + provider-neutral + verifiable: the only terminal agent where
     the harness, event stream, evals, and safety model are all inspectable and run against any model, including local ones. Double down on evals-as-marketing
     , local-model excellence, and protocol interop — those are things Claude Code and Codex structurally cannot offer.
+
+---
+
+# VT Code vs Codex CLI vs Claude Code — Research Note
+
+## Codex CLI Architecture (source: DeepWiki openai/codex — fetched; Zylos Research, 2026-03-26)
+
+- **100+ crate Rust monorepo** (`codex-rs`) — busybox-style binary dispatch, JS distribution shim, dual build (Cargo + Bazel). Key crates: `codex-core`, `codex-tui`, `codex-exec`, `codex-cli`, `codex-app-server`, `codex-mcp`, `codex-config`, `codex-cloud-tasks`.
+- **5 execution modes**, all converging on one `ThreadManager`:
+  | Mode | Entry | Use case | Persistence | Interaction |
+  |---|---|---|---|---|
+  | TUI | `codex` | Interactive dev | rollout files | Full UI |
+  | Exec | `codex exec` | Automation/CI | rollout (or ephemeral) | Non-interactive |
+  | App Server | `codex app-server` | IDE integration | yes | JSON-RPC |
+  | MCP Server | `codex mcp-server` | Tool delegation | yes | MCP stdio |
+  | Cloud | `codex cloud` | Remote tasks | remote | TUI/CLI for Cloud |
+- **Core layering**: `ThreadManager` (thread lifecycle + state DB) → `CodexThread` (submission queue, event emission) → `Session` (turn orchestration, prompt building, streaming) → `ContextManager` (history, compaction, token budget) → `ModelClient` (API retries, SSE parsing) → `RolloutRecorder` (event persistence).
+- **Session persistence = rollout files**: serialized event streams on disk (separate active/archived dirs), incremental replay for resumption, offline analysis via `rollout-trace`.
+- **Layered config**: defaults → global file → project file → env vars → feature flags → profiles → CLI args (highest precedence), consolidated by `ConfigBuilder`.
+- **Sandbox (crown jewel)**:
+    - Linux: Bubblewrap — `--unshare-user/pid/net`, read-only `/` root, explicit writable binds, `.git`/`.codex` re-bound read-only, seccomp + `PR_SET_NO_NEW_PRIVS`, fresh `/proc`.
+    - Managed proxy mode: TCP→UDS→TCP bridge; seccomp blocks new AF_UNIX/socketpair — prevents sandbox escape via Unix sockets.
+    - macOS: Seatbelt layered policy files. Windows: restricted tokens on private desktop (`Winsta0\Default`).
+- **Exec policy DSL**: `~/.codex/rules/*.rules` + workspace `.codex/rules/*.rules`; hardcoded-banned: shell interpreters (`python`, `node -e`, `bash -c`, `sudo`, bare `git`).
+- **Sandbox modes**: workspace-write (default) → read-only → full-disk-write-access → danger-full-access.
+- **Persistent threads**: rollout files + state DB; fork/rollback/archive (Zylos: SQLite-backed).
+- **Memory**: two-phase AI pipeline — cheap model extracts from up to 5,000 threads (concurrency 8), strong model consolidates under global lock; stored in `memory_summary.md`, 5k-token cap, SQLite job leases (1h expiry).
+- **App-server**: JSON-RPC 2.0 over stdio (NDJSON)/WebSocket — thread lifecycle (start/resume/fork/rollback/compact), steer/interrupt, filesystem RPCs, MCP mgmt, plugin install, TS/JSON-Schema export, Python SDK. Powers VS Code extension.
+- **Multi-agent**: `spawn_agent`/`send_input`/`wait_agent`/`close_agent`; depth 1, max 6 parallel; roles (awaiter, explorer); config inheritance.
+- **Hooks**: session_start, pre/post_tool_use, stop, `user_prompt_submit` (v0.116.0 — prompt augmentation/filtering).
+- **apply_patch**: parsed via formal Lark grammar (structured validation, not string replacement).
+- **Model lock**: Responses API only (`wire_api = "chat"` removed — hard error). Default `gpt-5.3-codex` (272k ctx); `gpt-5.1-codex-mini` for background tasks.
+- **Velocity**: v0.115–0.117 within 10 days (Mar 2026); 10–15 commits/day, 4–5 core engineers.
+
+## Comparison
+
+| Dimension           | VT Code                                                          | Codex CLI                                                                      | Claude Code                      |
+| ------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------- |
+| Model freedom       | **31 providers + local Ollama/LM Studio/llama.cpp**              | OpenAI Responses API only                                                      | Anthropic only                   |
+| Sandbox             | Sandboxed shell, policies, fail-closed adversarial coverage      | **Deeper**: bwrap/Seatbelt/Windows isolation, exec-policy DSL, banned commands | Seatbelt-lite + approval dialogs |
+| Session persistence | `ThreadEvent` log, checkpoints, compaction, resume               | SQLite threads, fork/rollback                                                  | In-session only                  |
+| Memory              | Per-session state store, cross-session query                     | **AI extraction+consolidation pipeline**                                       | None built-in                    |
+| Protocols           | **MCP, ACP, A2A, Skills, Plugins, WebMCP, Open Responses, ATIF** | MCP, app-server, plugins                                                       | MCP, SDK, plugins                |
+| Multi-agent         | Subagents, propose/verify, worktrees                             | Structured lifecycle tools, depth limits                                       | Task tool                        |
+| Eval                | **`vtcode-eval` pass@k/pass^k, env-based verification**          | Internal                                                                       | Internal                         |
+| Distribution        | Open source, niche                                               | OpenAI brand, huge adoption                                                    | Anthropic brand, dominant        |
+
+## Verdict
+
+- **VT Code wins on**: model neutrality (Codex is wire-format-locked), protocol breadth (A2A + WebMCP unique), eval infrastructure as first-class crate.
+- **Codex is ahead on**: sandbox depth (namespace isolation + seccomp socket-blocking + managed proxy), automated memory pipeline, unified JSON-RPC app-server, velocity/distribution.
+
+## Catch-up plan (prioritized)
+
+1. **Sandbox to Codex level**: namespace isolation on Linux (bubblewrap or Landlock+seccomp), read-only root + explicit writable binds, protected `.git`/`.vtcode`, managed network proxy mode; adversarial regression suite.
+2. **Automated memory**: two-phase pipeline over `vtcode-memory` event log — cheap-model extraction at startup, strong-model consolidation under lock.
+3. **Unified programmatic surface**: extend ACP or add JSON-RPC app-server shared by IDE/SDK/TUI; export schema.
+4. **Openness wedge**: publish reproducible `vtcode-eval` benchmarks — "same harness, 5 models" (a story competitors can't tell).
+5. **Onboarding polish**: one-command install → provider OAuth (`vtcode-auth`) → first task; VS Code extension over app-server.
+
+**Strategic point**: Codex is converging toward where VT Code already is (Rust, formal sandbox, persistent threads, plugins) while staying model-locked. Close sandbox/memory gaps, then lean on provider neutrality + open verifiable evaluation — the axis neither competitor can follow.
+
+## Sources
+
+- https://deepwiki.com/openai/codex (fetched via direct HTTP; overview page)
+- https://zylos.ai/research/2026-03-26-openai-codex-cli-architecture-multi-runtime-patterns/
+- https://github.com/openai/codex/tree/main/codex-rs
