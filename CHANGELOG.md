@@ -2,6 +2,27 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.160.0 - 2026-09-10
+
+### Highlights
+#### Bug Fixes
+
+- Address review — provider-aware errors, redirect-safe youcom client, count param (0df28ec0) (@mouse-value-add)
+- Keep workflow-coordination tools available in all modes (aa99d088) 
+- Prune stale model expectations and dead provider arms (684bdcb9) 
+#### Features
+
+- Add optional youcom provider to web_search (1ee55d50) (@mouse-value-add)
+- Add mode-aware preview budget and session grant cap (abfd628a) 
+- Add risk-first test guidance and tool_outputs hint (da06cb15) 
+- Emit budget_exhausted trajectory telemetry (088fc57b) 
+- Add DeepSeek-V4.1-Flash to DeepSeek and OpenRouter providers (184b103d) 
+- Promote V4.1-Flash to default, retire V4-Pro as default (603a1d3c) 
+### Other Changes
+#### Other
+
+- Update TODO (1b5f55fe) 
+- Update TODO (e6974e28) 
 ## 0.159.1 - 2026-09-09
 
 ### Highlights
