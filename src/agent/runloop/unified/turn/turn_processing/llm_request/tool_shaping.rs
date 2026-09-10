@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use vtcode_core::config::constants::tools as tool_names;
 use vtcode_core::core::agent::harness_kernel::SessionToolCatalogSnapshot;
 use vtcode_core::llm::provider::{self as uni};
 use vtcode_core::permissions::{build_advertised_permission_requests, evaluate_effective_permissions};
@@ -67,8 +68,10 @@ fn apply_permission_policy_to_tools(
 
     // When the auto agent is active, enforce the full-auto allow-list from
     // config so interactive auto has the same blast radius as --full-auto.
-    // An empty allowlist means no tools are allowed (matching CLI behaviour);
-    // a wildcard ["*"] means unrestricted.
+    // An empty allowlist means no execution tools are allowed (matching CLI
+    // behaviour); workflow-coordination tools (`task_tracker`,
+    // `start_planning`, `request_user_input`) still bypass the gate below.
+    // A wildcard ["*"] means unrestricted.
     let full_auto_allowlist: Option<&[String]> = if agent_permissions.default == PermissionDefault::Auto {
         let allowed = &cfg.automation.full_auto.allowed_tools;
         if cfg.automation.full_auto.enabled && !allowed.iter().any(|t| t == "*") {
@@ -111,9 +114,13 @@ fn apply_permission_policy_to_tools(
         .filter(|tool| {
             let name = tool.function_name();
 
-            // Enforce full-auto allow-list if present.
+            // Enforce full-auto allow-list if present. Workflow-coordination
+            // tools skip this gate only (they were already subject to the
+            // mode/primary-agent filters upstream, so this never injects a
+            // tool — it only keeps an already-visible one).
             if let Some(allowlist) = full_auto_allowlist
                 && !allowlist.iter().any(|allowed| allowed == name)
+                && !tool_names::is_workflow_coordination_tool(name)
             {
                 return false;
             }
@@ -319,5 +326,41 @@ mod tests {
             Some(&cfg),
         );
         assert_eq!(names(result), vec!["code_search", "exec_command", "web_fetch"]);
+    }
+
+    #[test]
+    fn workflow_coordination_tools_survive_allowlist_that_omits_them() {
+        // Regression guard: `task_tracker` was stripped from the Auto-mode
+        // wire catalog because the full-auto allow-list omitted it, while a
+        // non-workflow tool outside the list must still be filtered.
+        let cfg = cfg_with_full_auto(vec!["exec_command".into()]);
+        let result = apply_permission_policy_to_tools(
+            catalog(&[
+                "exec_command",
+                "code_search",
+                "task_tracker",
+                "start_planning",
+                "request_user_input",
+            ]),
+            &auto_agent(),
+            PathBuf::from(WORKSPACE).as_path(),
+            Some(&cfg),
+        );
+        assert_eq!(names(result), vec!["exec_command", "request_user_input", "start_planning", "task_tracker"]);
+    }
+
+    #[test]
+    fn empty_allowlist_still_exposes_workflow_coordination_tools() {
+        // Workflow coordination is control-plane, not execution blast radius:
+        // even an intentionally empty allow-list keeps the tracker visible so
+        // the model can report progress instead of going silent.
+        let cfg = cfg_with_full_auto(vec![]);
+        let result = apply_permission_policy_to_tools(
+            catalog(&["exec_command", "task_tracker"]),
+            &auto_agent(),
+            PathBuf::from(WORKSPACE).as_path(),
+            Some(&cfg),
+        );
+        assert_eq!(names(result), vec!["task_tracker"]);
     }
 }

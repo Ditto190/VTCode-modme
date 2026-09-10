@@ -398,6 +398,9 @@ impl ToolPolicyGateway {
 
     pub async fn is_allowed_in_full_auto(&self, name: &str) -> bool {
         let canonical = canonical_tool_name(name);
+        if tools::is_workflow_coordination_tool(canonical) {
+            return true;
+        }
         self.full_auto_allowlist
             .lock()
             .await
@@ -410,6 +413,9 @@ impl ToolPolicyGateway {
         let allowlist = self.full_auto_allowlist.lock().await;
         if let Some(allowlist) = &*allowlist {
             let canonical = canonical_tool_name(name);
+            if tools::is_workflow_coordination_tool(canonical) {
+                return false;
+            }
             !allowlist.contains(canonical)
         } else {
             false
@@ -434,6 +440,7 @@ impl ToolPolicyGateway {
         let has_allowlist = allowlist.is_some();
         if let Some(allowlist) = &*allowlist
             && !allowlist.contains(normalized)
+            && !tools::is_workflow_coordination_tool(normalized)
         {
             return Ok(ToolPermissionDecision::Deny);
         }
@@ -671,5 +678,64 @@ mod tests {
             .await
             .expect("constrained args");
         assert_eq!(constrained["max_results"], json!(50));
+    }
+
+    fn full_auto_session_config() -> SessionToolsConfig {
+        SessionToolsConfig::full_public(
+            crate::tools::handlers::SessionSurface::Interactive,
+            crate::config::types::CapabilityLevel::CodeSearch,
+            crate::config::ToolDocumentationMode::Full,
+            crate::tools::handlers::ToolModelCapabilities::default(),
+        )
+    }
+
+    async fn gateway_with_full_auto_allowlist(allowed: &[String]) -> ToolPolicyGateway {
+        let gateway = ToolPolicyGateway::without_persistence();
+        gateway
+            .enable_full_auto_permission(allowed, &[], full_auto_session_config())
+            .await;
+        gateway
+    }
+
+    #[tokio::test]
+    async fn workflow_coordination_tools_stay_allowed_outside_the_full_auto_allow_list() {
+        let gateway = gateway_with_full_auto_allowlist(&[tools::EXEC_COMMAND.to_string()]).await;
+
+        for tool in [tools::TASK_TRACKER, tools::START_PLANNING, tools::REQUEST_USER_INPUT] {
+            assert!(gateway.is_allowed_in_full_auto(tool).await, "{tool} must bypass the allow-list");
+            assert!(!gateway.is_denied_in_full_auto(tool).await, "{tool} must not read as denied");
+        }
+    }
+
+    #[tokio::test]
+    async fn non_workflow_tools_stay_gated_by_the_full_auto_allow_list() {
+        let gateway = gateway_with_full_auto_allowlist(&[tools::EXEC_COMMAND.to_string()]).await;
+
+        assert!(gateway.is_allowed_in_full_auto(tools::EXEC_COMMAND).await);
+        assert!(!gateway.is_allowed_in_full_auto(tools::CODE_SEARCH).await);
+        assert!(gateway.is_denied_in_full_auto(tools::CODE_SEARCH).await);
+    }
+
+    #[tokio::test]
+    async fn evaluate_tool_policy_does_not_deny_workflow_tools_outside_the_allow_list() {
+        let gateway = gateway_with_full_auto_allowlist(&[tools::EXEC_COMMAND.to_string()]).await;
+
+        let decision = gateway
+            .evaluate_tool_policy(tools::TASK_TRACKER, false, ToolPolicy::Prompt)
+            .await
+            .expect("policy evaluation");
+        assert!(
+            !matches!(decision, ToolPermissionDecision::Deny),
+            "task_tracker must survive an allow-list that omits it"
+        );
+
+        let decision = gateway
+            .evaluate_tool_policy(tools::CODE_SEARCH, false, ToolPolicy::Prompt)
+            .await
+            .expect("policy evaluation");
+        assert!(
+            matches!(decision, ToolPermissionDecision::Deny),
+            "non-workflow tools must stay denied outside the allow-list"
+        );
     }
 }

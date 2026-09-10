@@ -271,6 +271,15 @@ pub fn primary_agent_allows_tool(agent: &ActivePrimaryAgent, tool_name: &str) ->
         return true;
     }
 
+    // The task tracker stays available so restricted primaries (including
+    // custom `auto` agents with an explicit `tools:` list) can still report
+    // progress. Planning/interview tools stay author-curated: unlike the
+    // tracker they change the session mode, so an explicit omission must
+    // keep working.
+    if tool_name == tools::TASK_TRACKER {
+        return true;
+    }
+
     let allow_list_allows = agent
         .tools
         .as_ref()
@@ -772,6 +781,33 @@ mod tests {
         // ever emitted for subagent tools post-fold), so the whole tool is
         // filtered out regardless of the cleanup carve-out above.
         assert!(!primary_agent_allows_tool(&active, tools::AGENT));
+    }
+
+    #[test]
+    fn task_tracker_bypasses_restricted_tool_allow_list_but_mode_tools_obey_it() {
+        // A custom primary with an explicit `tools:` list omitting the
+        // tracker must still expose it, while planning/interview tools stay
+        // author-curated and other tools stay gated.
+        let mut spec = test_spec("restricted");
+        spec.tools = Some(vec![tools::CODE_SEARCH.to_string()]);
+        let active = ActivePrimaryAgent::from_spec(&spec);
+
+        assert!(primary_agent_allows_tool(&active, tools::TASK_TRACKER));
+        assert!(!primary_agent_allows_tool(&active, tools::START_PLANNING));
+        assert!(!primary_agent_allows_tool(&active, tools::APPLY_PATCH));
+    }
+
+    #[test]
+    fn task_tracker_bypass_survives_explicit_disallow_entry() {
+        // Mirrors the cleanup-tool guarantee: even a `disallowed_tools`
+        // entry must not silence progress reporting.
+        let mut spec = test_spec("restricted");
+        spec.tools = Some(vec![tools::CODE_SEARCH.to_string()]);
+        spec.disallowed_tools = vec![tools::TASK_TRACKER.to_string()];
+        let active = ActivePrimaryAgent::from_spec(&spec);
+
+        assert!(primary_agent_allows_tool(&active, tools::TASK_TRACKER));
+        assert!(!primary_agent_allows_tool(&active, tools::APPLY_PATCH));
     }
 
     #[test]

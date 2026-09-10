@@ -7,7 +7,7 @@
 - Normal sessions use primary agents plus granular permission rules.
 - Agent specs use `permissions.default` plus `allow`, `ask`, `auto`, and `deny` rule buckets.
 - The `permissions.auto` bucket sends matching calls to classifier-backed review instead of treating them as unrestricted.
-- `--full-auto` uses the explicit `[automation.full_auto]` allow-list as a hard gate. Tools outside the allow-list are denied; promptable outcomes inside the allow-list are routed through automatic permission review after explicit deny and policy checks instead of asking.
+- `--full-auto` uses the explicit `[automation.full_auto]` allow-list as a hard gate. Tools outside the allow-list are denied; promptable outcomes inside the allow-list are routed through automatic permission review after explicit deny and policy checks instead of asking. Workflow-coordination tools (`task_tracker`, `start_planning`, `request_user_input`) stay available in every mode even when omitted from the allow-list.
 - `--dangerously-skip-permissions` auto-approves promptable actions while still respecting explicit denies and policy blocks.
 
 Primary-agent selection still works normally. If you explicitly select or configure a primary agent, including `duck`, full-auto runs on top of that agent. If no primary agent is explicitly selected or configured, VT Code selects the effective `auto` primary agent. If full-auto needs that defaulted `auto` agent and no effective `auto` exists, startup fails fast.
@@ -31,7 +31,7 @@ Primary-agent selection still works normally. If you explicitly select or config
 ## Runtime Behaviour
 
 - VT Code displays the active allow-list at session start.
-- Full-auto does not grant tools outside `[automation.full_auto].allowed_tools`.
+- Full-auto does not grant tools outside `[automation.full_auto].allowed_tools`, except workflow-coordination tools (`task_tracker`, `start_planning`, `request_user_input`), which stay available in every mode.
 - Explicit denies and policy blocks are honoured before full-auto review.
 - Promptable allow-listed actions are reviewed automatically instead of interrupting for user input.
 - Tool-loop and session tool-call limit increases are granted automatically (same increments and hard caps as manual approvals) instead of showing an interactive prompt. Set `auto_grant_tool_limits = false` to restore the prompts.
@@ -51,6 +51,9 @@ allowed_tools = [
     "write_stdin",
     "apply_patch",
     "code_search",
+    "task_tracker",
+    "start_planning",
+    "request_user_input",
 ]
 ```
 

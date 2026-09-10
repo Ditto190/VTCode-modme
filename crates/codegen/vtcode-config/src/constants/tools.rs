@@ -147,6 +147,23 @@ pub const CLOSE_AGENT: &str = "close_agent";
 /// close already-running child work. Add new lifecycle-only cleanup tools here.
 pub const LIFECYCLE_CLEANUP_TOOLS: &[&str] = &[WAIT_AGENT, CLOSE_AGENT];
 
+/// Workflow-coordination tools that must remain available regardless of the
+/// `[automation.full_auto].allowed_tools` allow-list, so planning, checklist,
+/// and interview coordination keep working in Auto mode and other full-auto
+/// runs. These are control-plane (not execution blast radius): `task_tracker`
+/// owns only its session tracker file, `start_planning` only flips the
+/// planning-workflow state, and `request_user_input` still resolves through
+/// the interactive-session gate at execution time. Callers must pass the
+/// canonical tool name (see `canonical_tool_name`); matching is exact.
+pub const ALWAYS_AVAILABLE_WORKFLOW_TOOLS: &[&str] = &[TASK_TRACKER, START_PLANNING, REQUEST_USER_INPUT];
+
+/// Returns `true` for workflow-coordination tools that bypass the full-auto
+/// allow-list (see [`ALWAYS_AVAILABLE_WORKFLOW_TOOLS`]).
+#[inline]
+pub fn is_workflow_coordination_tool(canonical_name: &str) -> bool {
+    ALWAYS_AVAILABLE_WORKFLOW_TOOLS.contains(&canonical_name)
+}
+
 // Special wildcard for full access
 pub const WILDCARD_ALL: &str = "*";
 
@@ -269,3 +286,29 @@ const _: () = {
     // Wildcard
     validate_tool_name(WILDCARD_ALL);
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_coordination_tools_bypass_the_full_auto_allow_list() {
+        for tool in [TASK_TRACKER, START_PLANNING, REQUEST_USER_INPUT] {
+            assert!(is_workflow_coordination_tool(tool), "{tool} must bypass the allow-list");
+        }
+    }
+
+    #[test]
+    fn execution_tools_do_not_bypass_the_full_auto_allow_list() {
+        for tool in [
+            EXEC_COMMAND,
+            WRITE_STDIN,
+            APPLY_PATCH,
+            CODE_SEARCH,
+            WEB_FETCH,
+            "not_a_tool",
+        ] {
+            assert!(!is_workflow_coordination_tool(tool), "{tool} must stay allow-list gated");
+        }
+    }
+}

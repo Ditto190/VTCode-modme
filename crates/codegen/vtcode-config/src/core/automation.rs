@@ -99,6 +99,12 @@ fn default_full_auto_allowed_tools() -> Vec<String> {
         tools::WRITE_STDIN.to_string(),
         tools::APPLY_PATCH.to_string(),
         tools::CODE_SEARCH.to_string(),
+        // Workflow-coordination tools stay available in every mode (see
+        // `ALWAYS_AVAILABLE_WORKFLOW_TOOLS`); listing them here keeps the
+        // documented default coherent with runtime behavior.
+        tools::TASK_TRACKER.to_string(),
+        tools::START_PLANNING.to_string(),
+        tools::REQUEST_USER_INPUT.to_string(),
     ]
 }
 

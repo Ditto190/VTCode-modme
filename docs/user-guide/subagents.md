@@ -208,7 +208,7 @@ Only `name` and `description` are required.
 | `name` | unique agent identifier | use lowercase letters, digits, and hyphens |
 | `description` | delegation hint for VT Code and the model | include phrases like "use proactively" when you want read-only delegation to be attractive |
 | `mode` | agent availability | `primary`, `subagent`, or `all`; omitted mode defaults to `subagent` |
-| `tools` | allowlist of tool names | use VT Code tool ids from `vtcode schema tools`, such as `exec_command`, `write_stdin`, `apply_patch`, or advanced `code_search` |
+| `tools` | allowlist of tool names | use VT Code tool ids from `vtcode schema tools`, such as `exec_command`, `write_stdin`, `apply_patch`, or advanced `code_search`; `task_tracker` stays available regardless so agents can always report progress |
 | `disallowedTools` / `disallowed_tools` | denylist removed from inherited or allowed tools | use the same VT Code tool ids as `tools`; applied before runtime filtering |
 | `model` | model override | defaults to `inherit`; also accepts `small`, `haiku`, `sonnet`, `opus`, or a full model id |
 | `color` | TUI color metadata | optional; accepts simple color names such as `blue`, hex like `#4f8fd8`, or Git-style fg/bg strings such as `white #4f8fd8` |

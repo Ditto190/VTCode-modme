@@ -484,12 +484,15 @@ pub(crate) async fn initialize_session_ui(
         if allowlist.is_empty() {
             renderer.line(
                 MessageStyle::Info,
-                "Full-auto permission review enabled with no tool permissions; tool calls will be skipped.",
+                "Full-auto permission review enabled with no execution tool permissions; only workflow-coordination tools (task_tracker, start_planning, request_user_input) stay available.",
             )?;
         } else {
             renderer.line(
                 MessageStyle::Info,
-                &format!("Full-auto permission review enabled. Permitted tools: {}", allowlist.join(", ")),
+                &format!(
+                    "Full-auto permission review enabled. Permitted tools: {} (plus workflow-coordination tools: task_tracker, start_planning, request_user_input).",
+                    allowlist.join(", ")
+                ),
             )?;
         }
     }
