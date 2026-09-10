@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.160.1 - 2026-09-10
+
+### Highlights
+#### Bug Fixes
+
+- Keep cargo update running and guard --start-from resume (fb7da3c7) 
+### Other Changes
 ## 0.160.0 - 2026-09-10
 
 ### Highlights
