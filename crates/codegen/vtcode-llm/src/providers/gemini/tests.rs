@@ -1,7 +1,8 @@
 use super::helpers::InteractionStreamState;
 use super::wire::{
     Candidate, Content, FunctionCall as GeminiFunctionCall, GenerateContentResponse, Interaction, InteractionContent,
-    InteractionInput, InteractionOutput, InteractionResult, Part, ServerToolCall, ServerToolResponse,
+    InteractionInput, InteractionOutput, InteractionResult, InteractionTurnContent, Part, ServerToolCall,
+    ServerToolResponse,
 };
 use super::*;
 use crate::provider::{MessageContent, MessageRole, SpecificFunctionChoice, SpecificToolChoice, ToolDefinition};
@@ -326,6 +327,51 @@ fn convert_to_interaction_request_uses_function_result_for_chained_turns() {
             other => panic!("expected single function_result content, got {other:?}"),
         },
         other => panic!("expected content delta input, got {other:?}"),
+    }
+}
+
+#[test]
+fn convert_to_interaction_request_preserves_trailing_function_call_turn() {
+    let provider = GeminiProvider::new("test-key".to_string());
+    let test_signature = "sig_interaction_789".to_string();
+    let mut assistant_message = Message::assistant(String::new());
+    assistant_message.tool_calls = Some(vec![ToolCall {
+        id: "call_789".to_string(),
+        call_type: "function".to_string(),
+        function: Some(FunctionCall {
+            namespace: None,
+            name: "get_weather".to_string(),
+            arguments: r#"{"city":"Paris"}"#.to_string(),
+        }),
+        text: None,
+        thought_signature: Some(test_signature.clone()),
+    }]);
+
+    let request = LLMRequest {
+        messages: vec![Message::user("What's the weather?".to_string()), assistant_message].into(),
+        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        ..Default::default()
+    };
+
+    let interaction_request = provider
+        .convert_to_interaction_request(&request)
+        .expect("interaction request should build");
+
+    match interaction_request.input {
+        InteractionInput::Turns(turns) => {
+            assert_eq!(turns.len(), 2, "trailing function-call turn must survive the prefill guard");
+            assert_eq!(turns[1].role, "model");
+            match &turns[1].content {
+                InteractionTurnContent::Content(parts) => assert!(
+                    parts.iter().any(
+                        |part| matches!(part, InteractionContent::FunctionCall { signature, .. } if signature.as_ref() == Some(&test_signature))
+                    ),
+                    "thought signature should be preserved in request"
+                ),
+                other => panic!("expected content turn, got {other:?}"),
+            }
+        }
+        other => panic!("expected turns input, got {other:?}"),
     }
 }
 
@@ -1145,23 +1191,27 @@ fn gemini3_flash_extended_thinking_levels() {
 
     // But Gemini 3 Pro does not
     assert!(!GeminiProvider::supports_extended_thinking(models::google::GEMINI_3_7_FLASH));
-    assert!(!GeminiProvider::supports_extended_thinking(models::google::GEMINI_3_7_FLASH));
+    assert!(!GeminiProvider::supports_extended_thinking("gemini-3-pro"));
 
     // Get supported levels for each model
     let flash_levels = GeminiProvider::supported_thinking_levels(models::google::GEMINI_3_FLASH_PREVIEW);
     assert_eq!(flash_levels, vec!["minimal", "low", "medium", "high"]);
 
-    let pro31_levels = GeminiProvider::supported_thinking_levels(models::google::GEMINI_3_7_FLASH);
+    // Pro predicates are string-based by design (they cover future Pro
+    // releases with no catalog entry yet), so literals carry the intent here.
+    let pro31_levels = GeminiProvider::supported_thinking_levels("gemini-3.1-pro");
     assert_eq!(pro31_levels, vec!["low", "high"]);
 
-    let pro_levels = GeminiProvider::supported_thinking_levels(models::google::GEMINI_3_7_FLASH);
+    let pro_levels = GeminiProvider::supported_thinking_levels("gemini-3-pro");
     assert_eq!(pro_levels, vec!["low", "high"]);
 }
 
 #[test]
 fn gemini_3_pro_temperature_warning_predicate_excludes_flash_models() {
-    assert!(GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_7_FLASH));
-    assert!(GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_7_FLASH));
+    // Pro predicate is string-based by design (covers future Pro releases
+    // with no catalog entry yet), so literals carry the intent here.
+    assert!(GeminiProvider::is_gemini_3_pro_model("gemini-3.1-pro"));
+    assert!(GeminiProvider::is_gemini_3_pro_model("gemini-3-pro"));
     assert!(!GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_FLASH_PREVIEW));
     assert!(!GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_7_FLASH));
 }
@@ -1229,12 +1279,22 @@ fn gemini3_pro_medium_thinking_fallback() {
     use vtcode_config::constants::models;
     use vtcode_config::types::ReasoningEffortLevel;
 
-    let provider = GeminiProvider::new("test-key".to_string());
+    let mut model_behavior = vtcode_config::core::ModelConfig::default();
+    model_behavior.model_supports_reasoning_effort = Some(true);
+    let provider = GeminiProvider::from_config(
+        Some("test-key".to_string()),
+        Some("gemini-3-pro".to_string()),
+        None,
+        None,
+        None,
+        None,
+        Some(model_behavior),
+    );
 
     // Test Medium thinking level for Gemini 3 Pro (should fallback to high)
     let request = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: "gemini-3-pro".to_string(),
         reasoning_effort: Some(ReasoningEffortLevel::Medium),
         ..Default::default()
     };

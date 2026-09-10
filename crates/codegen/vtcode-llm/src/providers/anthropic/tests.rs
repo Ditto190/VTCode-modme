@@ -142,10 +142,10 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_effort_rejects_unsupported_models() {
+    fn test_validate_effort_rejects_models_without_thinking_profile() {
         let request = LLMRequest {
             messages: vec![Message::user("hi".to_string())].into(),
-            model: models::CLAUDE_SONNET_5.to_string(),
+            model: "claude-3-5-sonnet-20241022".to_string(),
             effort: Some("medium".to_string()),
             ..Default::default()
         };
@@ -166,7 +166,7 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_effort_xhigh_rejected_for_sonnet_4_6() {
+    fn test_validate_effort_xhigh_accepted_for_sonnet_5() {
         let config = AnthropicConfig::default();
         let request = LLMRequest {
             messages: vec![Message::user("hi".to_string())].into(),
@@ -175,11 +175,11 @@ mod validation_tests {
             ..Default::default()
         };
 
-        assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_err());
+        assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_ok());
     }
 
     #[test]
-    fn test_validate_sonnet_4_6_omits_prefill_without_thinking() {
+    fn test_validate_sonnet_5_omits_prefill_without_thinking() {
         let config = AnthropicConfig {
             extended_thinking_enabled: false,
             ..AnthropicConfig::default()
@@ -195,7 +195,7 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_sonnet_4_6_omits_prefill_thought_without_thinking() {
+    fn test_validate_sonnet_5_omits_prefill_thought_without_thinking() {
         let config = AnthropicConfig {
             extended_thinking_enabled: false,
             ..AnthropicConfig::default()
@@ -322,11 +322,11 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_structured_outputs_omits_prefill_for_unsupported_model() {
+    fn test_validate_structured_outputs_omits_prefill_for_fable_5() {
         let config = AnthropicConfig::default();
         let request = LLMRequest {
             messages: vec![Message::user("hi".to_string())].into(),
-            model: models::CLAUDE_SONNET_5.to_string(),
+            model: models::anthropic::CLAUDE_FABLE_5.to_string(),
             output_format: Some(json!({
                 "type": "object",
                 "properties": {
@@ -1085,7 +1085,7 @@ mod request_builder_tests {
     }
 
     #[test]
-    fn test_convert_to_anthropic_format_falls_back_to_high_for_sonnet_4_6_default_effort() {
+    fn test_convert_to_anthropic_format_uses_configured_default_effort_for_sonnet_5() {
         let request = LLMRequest {
             model: models::CLAUDE_SONNET_5.to_string(),
             messages: vec![Message::user("solve this carefully".to_string())].into(),
@@ -1103,7 +1103,7 @@ mod request_builder_tests {
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
 
         assert_eq!(payload["thinking"]["type"], "adaptive");
-        assert_eq!(payload["output_config"]["effort"], "high");
+        assert_eq!(payload["output_config"]["effort"], "xhigh");
     }
 
     #[test]

@@ -1009,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn beta_header_includes_interleaved_thinking_for_sonnet_4_6_manual_mode() {
+    fn beta_header_omits_interleaved_thinking_for_sonnet_5_adaptive_mode() {
         let provider = AnthropicProvider::with_model("test-key".to_string(), models::CLAUDE_SONNET_5.to_string());
         let request = LLMRequest {
             model: models::CLAUDE_SONNET_5.to_string(),
@@ -1020,12 +1020,12 @@ mod tests {
         };
 
         let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
-        let beta_header = provider
-            .beta_header_for_request(&request, &payload, false, None)
-            .expect("beta header");
+        let beta_header = provider.beta_header_for_request(&request, &payload, false, None);
 
-        assert_eq!(payload["thinking"]["type"], "enabled");
-        assert!(beta_header.contains("interleaved-thinking-2025-05-14"));
+        assert_eq!(payload["thinking"]["type"], "adaptive");
+        if let Some(header) = &beta_header {
+            assert!(!header.contains("interleaved-thinking-2025-05-14"));
+        }
     }
 
     #[test]

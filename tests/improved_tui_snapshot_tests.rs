@@ -71,7 +71,7 @@ fn test_ui_component_serialization() {
     let theme_repr = format!("{theme:?}");
     assert_snapshot!(
         &theme_repr,
-        @"InlineTheme { foreground: None, background: None, primary: None, secondary: None, tool_accent: None, tool_body: None, pty_body: None }"
+        @"InlineTheme { foreground: None, background: None, primary: None, secondary: None, tool_accent: None, tool_body: None, pty_body: None, error: None, warning: None }"
     );
 
     // Test InlineSegment serialization with different styles

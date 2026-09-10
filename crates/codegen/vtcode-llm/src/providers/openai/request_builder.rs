@@ -6,10 +6,7 @@ use crate::error_display;
 use crate::provider;
 use crate::providers::common::serialize_message_content_openai_for_model;
 use crate::rig_adapter::RigProviderCapabilities;
-use crate::system_prompt::{
-    default_system_prompt, openai_gpt6_contract_addendum, openai_gpt55_contract_addendum,
-    openai_gpt56_contract_addendum,
-};
+use crate::system_prompt::{default_system_prompt, openai_gpt6_contract_addendum, openai_gpt56_contract_addendum};
 use hashbrown::HashSet;
 use rig::providers::openai::responses_api::{
     AdditionalParameters as RigResponsesAdditionalParameters, Include as RigResponsesInclude,
@@ -167,7 +164,6 @@ fn augment_openai_instructions(model: &str, instructions: String) -> String {
             Some("gpt6") => Some(openai_gpt6_contract_addendum()),
             Some("gpt56") => Some(openai_gpt56_contract_addendum()),
             _ if is_gpt56_model(model) => Some(openai_gpt56_contract_addendum()),
-            _ if is_gpt55_model(model) => Some(openai_gpt55_contract_addendum()),
             _ => None,
         };
 

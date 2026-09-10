@@ -46,6 +46,12 @@ pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verificatio
 /// Loop warning fires.
 pub(crate) const NAVIGATION_LOOP_THRESHOLD: usize = 15;
 
+/// Trip count for same-binary directory listings (`ls`/`find`/`fd`) before the
+/// turn balancer schedules recovery. Each binary keeps its own coarse family
+/// (`exec::inspection::<base>`) across argument variations, so repeating one
+/// of them three times signals churn even when no exact request repeats.
+pub(crate) const LISTING_LOOP_TRIP_COUNT: usize = 3;
+
 /// Planning recovery thresholds for low-signal navigation. These are kept
 /// below the hard planning tool-call ceiling so the model gets one bounded,
 /// tool-free synthesis pass while the evidence is still useful.
@@ -162,6 +168,27 @@ impl LoopTracker {
 
     pub(crate) fn max_low_signal_count(&self) -> usize {
         self.low_signal_attempts.values().map(|(count, _)| *count).max().unwrap_or(0)
+    }
+
+    /// Highest repeat count among coarse directory-listing families
+    /// (`exec::inspection::ls|find|fd`), taking the max across binaries.
+    /// Repeated bare listings with the same tool carry no new semantic
+    /// question (unlike distinct `rg`/`grep` queries), so one tool used three
+    /// times counts as loop churn even when every command string differs.
+    /// Mixed binaries (`ls` + `find` + `fd`) stay below the trip count: each
+    /// binary is tracked in its own family.
+    pub(crate) fn max_coarse_listing_count(&self) -> usize {
+        self.coarse_inspection_attempts
+            .iter()
+            .filter_map(|(family, (count, _))| {
+                family
+                    .rsplit("::")
+                    .next()
+                    .is_some_and(|base| matches!(base, "ls" | "find" | "fd"))
+                    .then_some(*count)
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     /// Number of redundant navigations (total - unique) in the current window.
@@ -3152,8 +3179,60 @@ mod tests {
 
         // Cached has no limit, query does → mismatch
         assert!(!read_extent::extent_covers(
-            &json!({"action":"read","path":"AGENTS.md"}),
             &json!({"action":"read","path":"AGENTS.md","limit":200}),
+            &json!({"action":"read","path":"AGENTS.md"}),
         ));
+    }
+
+    fn successful_exec_output() -> ToolPipelineOutcome {
+        ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        })
+    }
+
+    #[test]
+    fn coarse_listing_count_groups_same_binary_across_paths() {
+        let mut tracker = LoopTracker::new();
+        assert_eq!(tracker.max_coarse_listing_count(), 0);
+        for command in ["ls src", "ls crates", "ls tests"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 3);
+    }
+
+    #[test]
+    fn coarse_listing_count_keeps_binaries_in_separate_families() {
+        let mut tracker = LoopTracker::new();
+        for command in ["ls src", "find crates -name lib.rs", "fd main src"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 1);
+    }
+
+    #[test]
+    fn coarse_listing_count_ignores_grep_style_searches() {
+        let mut tracker = LoopTracker::new();
+        for command in ["rg foo src", "rg bar crates", "grep -r baz src"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 0);
     }
 }

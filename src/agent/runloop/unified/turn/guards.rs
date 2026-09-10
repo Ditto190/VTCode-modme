@@ -331,7 +331,7 @@ pub(crate) async fn handle_turn_balancer(
     use vtcode_core::llm::provider as uni;
 
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, NAVIGATION_LOOP_THRESHOLD,
+        ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, LISTING_LOOP_TRIP_COUNT, NAVIGATION_LOOP_THRESHOLD,
         PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD,
         PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
     };
@@ -476,7 +476,11 @@ pub(crate) async fn handle_turn_balancer(
 
     let effective_repeat_limit = tool_repeat_limit.max(3);
     let repeated_low_signal = repeated_tool_attempts.max_low_signal_count();
-    if repeated_low_signal >= effective_repeat_limit
+    // Same-base directory listings (`ls`/`find`/`fd`) share one coarse family
+    // across argument variations, so three of them trip recovery even when no
+    // exact request repeats and the low-signal ledger stays quiet.
+    let repeated_listings = repeated_tool_attempts.max_coarse_listing_count();
+    if (repeated_low_signal >= effective_repeat_limit || repeated_listings >= LISTING_LOOP_TRIP_COUNT)
         && repeated_tool_attempts.consecutive_navigations >= effective_repeat_limit
     {
         let planning_active = ctx.is_planning_active();
@@ -1111,5 +1115,44 @@ mod tests {
             let text = message.content.as_text();
             text.contains("summarize only from collected evidence") && !text.contains("<proposed_plan>")
         }));
+    }
+
+    #[tokio::test]
+    async fn early_balancer_trips_on_listings_below_low_signal_limit() {
+        // With a lenient repeat limit (5), three same-binary listings stay
+        // below the low-signal cap but still trip recovery through the
+        // coarse-listing branch once consecutive navigations reach the limit.
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        let hit = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"results": [{"path": "src/main.rs"}]}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for command in ["ls src", "ls crates", "ls tests"] {
+            update_repetition_tracker(&mut tracker, &success, tool_names::EXEC_COMMAND, &json!({"cmd":command}));
+        }
+        for query in ["TurnLoop", "LoopTracker"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &hit,
+                tool_names::CODE_SEARCH,
+                &json!({"query":query,"path":"src"}),
+            );
+        }
+        assert!(tracker.max_low_signal_count() < 5);
+
+        let balancer_outcome = super::handle_turn_balancer(&mut ctx, 5, &mut tracker, 20, 5).await;
+        assert!(matches!(balancer_outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
     }
 }

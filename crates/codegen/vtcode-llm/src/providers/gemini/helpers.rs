@@ -249,8 +249,13 @@ impl GeminiProvider {
             }
         }
 
-        // Latest Gemini models reject prefilled model turns (last turn with role "model")
-        if Self::uses_latest_gemini_api(&request.model) && contents.last().is_some_and(|c| c.role == "model") {
+        // Latest Gemini models reject prefilled model turns (last turn with role "model").
+        // A trailing FunctionCall turn is an in-flight tool call, not a prefill:
+        // preserve it (and its thought signatures) rather than silently dropping it.
+        let trailing_prefill = contents.last().is_some_and(|content| {
+            content.role == "model" && !content.parts.iter().any(|part| matches!(part, Part::FunctionCall { .. }))
+        });
+        if Self::uses_latest_gemini_api(&request.model) && trailing_prefill {
             contents.pop();
         }
 
@@ -1176,8 +1181,19 @@ fn build_interaction_input(request: &LLMRequest) -> Result<InteractionInput, LLM
     };
     let mut turns = build_interaction_turns(relevant_messages, &request.messages)?;
 
-    // Latest Gemini models reject prefilled model turns (last turn with role "model")
-    if GeminiProvider::uses_latest_gemini_api(&request.model) && turns.last().is_some_and(|t| t.role == "model") {
+    // Latest Gemini models reject prefilled model turns (last turn with role "model").
+    // A trailing FunctionCall turn is an in-flight tool call, not a prefill:
+    // preserve it (and its signatures) rather than silently dropping it.
+    let trailing_prefill = turns.last().is_some_and(|turn| {
+        turn.role == "model"
+            && match &turn.content {
+                InteractionTurnContent::Text(_) => true,
+                InteractionTurnContent::Content(parts) => {
+                    !parts.iter().any(|part| matches!(part, InteractionContent::FunctionCall { .. }))
+                }
+            }
+    });
+    if GeminiProvider::uses_latest_gemini_api(&request.model) && trailing_prefill {
         turns.pop();
     }
 

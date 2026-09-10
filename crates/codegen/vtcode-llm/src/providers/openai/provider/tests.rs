@@ -1460,7 +1460,7 @@ fn chat_completions_payload_uses_function_wrapper() {
 }
 
 #[test]
-fn chat_completions_applies_gpt_5_5_addendum_only_for_gpt_5_5() {
+fn chat_completions_applies_gpt_5_6_addendum_only_for_gpt_5_6() {
     let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
     let mut request = sample_request(models::openai::GPT_5_6_SOL);
     request.system_prompt = Some(Arc::from("You are a helpful assistant."));
@@ -1475,10 +1475,10 @@ fn chat_completions_applies_gpt_5_5_addendum_only_for_gpt_5_5() {
         .and_then(Value::as_str)
         .expect("system content should be a string");
     assert!(system_content.contains("You are a helpful assistant."));
-    assert!(system_content.contains("## GPT-5.5 OpenAI Addendum"));
+    assert!(system_content.contains("## GPT-5.6 OpenAI Addendum"));
 
-    let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
-    let mut request = sample_request(models::openai::GPT_5_6_SOL);
+    let provider = native_openai_provider(models::openai::GPT_5);
+    let mut request = sample_request(models::openai::GPT_5);
     request.system_prompt = Some(Arc::from("You are a helpful assistant."));
     let payload = provider.convert_to_openai_format(&request).expect("conversion should succeed");
     let messages = payload
@@ -1490,7 +1490,7 @@ fn chat_completions_applies_gpt_5_5_addendum_only_for_gpt_5_5() {
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
         .expect("system content should be a string");
-    assert!(!system_content.contains("## GPT-5.5 OpenAI Addendum"));
+    assert!(!system_content.contains("## GPT-5.6 OpenAI Addendum"));
 }
 
 #[test]
@@ -1542,7 +1542,7 @@ fn chat_completions_applies_temperature_independent_of_max_tokens() {
 }
 
 #[test]
-fn chat_completions_omits_temperature_for_gpt_5_5_with_reasoning() {
+fn chat_completions_omits_temperature_for_gpt_5_6_with_reasoning() {
     let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
     let mut request = sample_request(models::openai::GPT_5_6_SOL);
     request.reasoning_effort = Some(vtcode_config::types::ReasoningEffortLevel::Medium);
@@ -1552,7 +1552,7 @@ fn chat_completions_omits_temperature_for_gpt_5_5_with_reasoning() {
 }
 
 #[test]
-fn chat_completions_keeps_temperature_for_gpt_5_5_without_reasoning() {
+fn chat_completions_keeps_temperature_for_gpt_5_6_without_reasoning() {
     let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
     let mut request = sample_request(models::openai::GPT_5_6_SOL);
     request.reasoning_effort = Some(vtcode_config::types::ReasoningEffortLevel::None);
@@ -1698,32 +1698,25 @@ fn responses_payload_uses_function_wrapper() {
 }
 
 #[test]
-fn responses_payload_omits_default_verbosity_for_gpt_5_2_codex() {
+fn responses_payload_omits_default_verbosity_for_gpt_5_codex() {
     let provider = native_openai_provider(models::openai::GPT_5_CODEX);
     let payload = responses_payload_for(models::openai::GPT_5_CODEX, &provider);
     assert_absent(&payload, "text");
 }
 
 #[test]
-fn responses_payload_ignores_configured_verbosity_for_gpt_5_2_codex() {
+fn responses_payload_keeps_configured_verbosity_medium_for_gpt_5_codex() {
     let provider = native_openai_provider(models::openai::GPT_5_CODEX);
     let mut request = sample_request(models::openai::GPT_5_CODEX);
     request.verbosity = Some(vtcode_config::types::VerbosityLevel::Medium);
     let payload = provider
         .convert_to_openai_responses_format(&request)
         .expect("conversion should succeed");
-    assert_absent(&payload, "text");
+    assert_eq!(payload.get("text").and_then(|t| t.get("verbosity")).and_then(Value::as_str), Some("medium"));
 }
 
 #[test]
-fn responses_payload_omits_default_verbosity_for_gpt_5_3_codex() {
-    let provider = native_openai_provider(models::openai::GPT_5_CODEX);
-    let payload = responses_payload_for(models::openai::GPT_5_CODEX, &provider);
-    assert_absent(&payload, "text");
-}
-
-#[test]
-fn responses_payload_keeps_configured_verbosity_for_gpt_5_3_codex() {
+fn responses_payload_keeps_configured_verbosity_for_gpt_5_codex() {
     let provider = native_openai_provider(models::openai::GPT_5_CODEX);
     let mut request = sample_request(models::openai::GPT_5_CODEX);
     request.verbosity = Some(vtcode_config::types::VerbosityLevel::High);
@@ -1734,7 +1727,7 @@ fn responses_payload_keeps_configured_verbosity_for_gpt_5_3_codex() {
 }
 
 #[test]
-fn responses_payload_keeps_configured_verbosity_for_gpt_5_4() {
+fn responses_payload_keeps_configured_verbosity_for_gpt_5_6_sol() {
     let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
     let mut request = sample_request(models::openai::GPT_5_6_SOL);
     request.verbosity = Some(vtcode_config::types::VerbosityLevel::High);
@@ -1774,7 +1767,7 @@ fn responses_payload_sets_instructions_from_system_prompt() {
 }
 
 #[test]
-fn responses_payload_applies_gpt_5_5_addendum_only_for_gpt_5_5() {
+fn responses_payload_applies_gpt_5_6_addendum_only_for_gpt_5_6() {
     let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
     let mut request = sample_request(models::openai::GPT_5_6_SOL);
     request.system_prompt = Some(Arc::from("You are a helpful assistant."));
@@ -1786,10 +1779,10 @@ fn responses_payload_applies_gpt_5_5_addendum_only_for_gpt_5_5() {
         .and_then(Value::as_str)
         .expect("instructions should exist");
     assert!(instructions.contains("You are a helpful assistant."));
-    assert!(instructions.contains("## GPT-5.5 OpenAI Addendum"));
+    assert!(instructions.contains("## GPT-5.6 OpenAI Addendum"));
 
-    let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
-    let mut request = sample_request(models::openai::GPT_5_6_SOL);
+    let provider = native_openai_provider(models::openai::GPT_5);
+    let mut request = sample_request(models::openai::GPT_5);
     request.system_prompt = Some(Arc::from("You are a helpful assistant."));
     let payload = provider
         .convert_to_openai_responses_format(&request)
@@ -1798,11 +1791,11 @@ fn responses_payload_applies_gpt_5_5_addendum_only_for_gpt_5_5() {
         .get("instructions")
         .and_then(Value::as_str)
         .expect("instructions should exist");
-    assert!(!instructions.contains("## GPT-5.5 OpenAI Addendum"));
+    assert!(!instructions.contains("## GPT-5.6 OpenAI Addendum"));
 }
 
 #[test]
-fn responses_payload_treats_gpt_5_5_dated_alias_like_gpt_5_5() {
+fn responses_payload_applies_gpt_5_6_addendum_with_priority_tier() {
     assert!(OpenAIProvider::is_responses_api_model(models::openai::GPT_5_6_SOL));
 
     let provider = OpenAIProvider::from_config(
@@ -1827,7 +1820,7 @@ fn responses_payload_treats_gpt_5_5_dated_alias_like_gpt_5_5() {
         .get("instructions")
         .and_then(Value::as_str)
         .expect("instructions should exist");
-    assert!(instructions.contains("## GPT-5.5 OpenAI Addendum"));
+    assert!(instructions.contains("## GPT-5.6 OpenAI Addendum"));
 }
 
 #[test]
@@ -2968,21 +2961,21 @@ fn chatgpt_backend_omits_max_output_tokens_and_blocks_unsupported_minimal_reason
 }
 
 #[test]
-fn responses_payload_defaults_gpt_5_4_reasoning_to_none() {
+fn responses_payload_defaults_gpt_5_6_sol_reasoning_to_none() {
     let payload =
         responses_payload_for(models::openai::GPT_5_6_SOL, &native_openai_provider(models::openai::GPT_5_6_SOL));
     assert_eq!(payload.get("reasoning").and_then(|r| r.get("effort")).and_then(Value::as_str), Some("none"));
 }
 
 #[test]
-fn responses_payload_defaults_gpt_5_3_codex_reasoning_to_high() {
+fn responses_payload_defaults_gpt_5_codex_reasoning_to_high() {
     let payload =
         responses_payload_for(models::openai::GPT_5_CODEX, &native_openai_provider(models::openai::GPT_5_CODEX));
     assert_eq!(payload.get("reasoning").and_then(|r| r.get("effort")).and_then(Value::as_str), Some("high"));
 }
 
 #[test]
-fn responses_payload_omits_sampling_parameters_for_gpt_5_4_high_reasoning() {
+fn responses_payload_omits_sampling_parameters_for_gpt_5_6_sol_high_reasoning() {
     let provider = native_openai_provider(models::openai::GPT_5_6_SOL);
     let mut request = sample_request(models::openai::GPT_5_6_SOL);
     request.reasoning_effort = Some(vtcode_config::types::ReasoningEffortLevel::High);

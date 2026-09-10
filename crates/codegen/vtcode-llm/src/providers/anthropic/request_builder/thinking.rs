@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_thinking_includes_display_for_sonnet_4_6_when_configured() {
+    fn adaptive_thinking_includes_display_for_sonnet_5_when_configured() {
         let request = LLMRequest {
             model: anthropic::CLAUDE_SONNET_5.to_string(),
             ..Default::default()

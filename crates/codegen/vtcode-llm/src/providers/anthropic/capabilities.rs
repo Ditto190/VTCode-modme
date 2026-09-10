@@ -153,54 +153,6 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
         });
     }
 
-    if matches_model(requested, models::anthropic::CLAUDE_OPUS_5) {
-        return Some(ClaudeThinkingProfile {
-            mode: ClaudeThinkingMode::Adaptive,
-            supports_manual_budget: false,
-            adaptive_only: false,
-            default_thinking_enabled: false,
-            manual_interleaved_beta: false,
-            supports_effort: true,
-            supports_task_budget: true,
-            default_display: ThinkingDisplay::Omitted,
-            default_effort: reasoning::XHIGH,
-            supports_xhigh_effort: true,
-            supports_max_effort: true,
-        });
-    }
-
-    if matches_model(requested, models::anthropic::CLAUDE_SONNET_5) {
-        return Some(ClaudeThinkingProfile {
-            mode: ClaudeThinkingMode::Adaptive,
-            supports_manual_budget: true,
-            adaptive_only: false,
-            default_thinking_enabled: false,
-            manual_interleaved_beta: true,
-            supports_effort: true,
-            supports_task_budget: false,
-            default_display: ThinkingDisplay::Summarized,
-            default_effort: reasoning::HIGH,
-            supports_xhigh_effort: false,
-            supports_max_effort: true,
-        });
-    }
-
-    if matches_model(requested, models::anthropic::CLAUDE_SONNET_5) {
-        return Some(ClaudeThinkingProfile {
-            mode: ClaudeThinkingMode::ManualBudget,
-            supports_manual_budget: true,
-            adaptive_only: false,
-            default_thinking_enabled: false,
-            manual_interleaved_beta: true,
-            supports_effort: false,
-            supports_task_budget: false,
-            default_display: ThinkingDisplay::Summarized,
-            default_effort: reasoning::HIGH,
-            supports_xhigh_effort: false,
-            supports_max_effort: false,
-        });
-    }
-
     None
 }
 
@@ -262,8 +214,9 @@ pub(crate) fn supports_assistant_prefill(model: &str, default_model: &str) -> bo
     // (legacy models), prefill is supported.
     match claude_thinking_profile(requested, default_model) {
         Some(profile) => {
-            // Haiku 4.5 is the only thinking-profile model that supports prefill.
-            // All others (Sonnet 5, Fable 5, Mythos 5, Opus 4.8, Sonnet 4.6) do not.
+            // Claude Sonnet 5 is the only thinking-profile model that supports
+            // prefill; adaptive-only profiles (Fable 5, Mythos 5) and Opus 5
+            // do not.
             !profile.adaptive_only && matches_model(requested, models::anthropic::CLAUDE_SONNET_5)
         }
         None => true,

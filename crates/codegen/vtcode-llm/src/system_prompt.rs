@@ -14,12 +14,6 @@ static OPENAI_GPT6_ADDENDUM: OnceLock<PromptFn> = OnceLock::new();
 
 const FALLBACK_SYSTEM_PROMPT: &str = "You are VT Code, a coding assistant.";
 
-const FALLBACK_GPT55_ADDENDUM: &str = r#"
-
-## GPT-5.5 OpenAI Addendum
-
-This session uses OpenAI's GPT-5.5 model. By using this model, you agree to OpenAI's usage policies and terms of service. The model may have specific capabilities, limitations, and content policies that differ from other models. For the latest information, refer to OpenAI's documentation."#;
-
 const FALLBACK_GPT56_ADDENDUM: &str = r#"
 
 ## GPT-5.6 OpenAI Addendum
@@ -46,13 +40,6 @@ pub(crate) fn default_system_prompt() -> String {
     DEFAULT_SYSTEM_PROMPT
         .get()
         .map_or_else(|| FALLBACK_SYSTEM_PROMPT.to_string(), |f| f())
-}
-
-/// Return the OpenAI GPT-5.5 contract addendum.
-pub(crate) fn openai_gpt55_contract_addendum() -> String {
-    OPENAI_GPT55_ADDENDUM
-        .get()
-        .map_or_else(|| FALLBACK_GPT55_ADDENDUM.to_string(), |f| f())
 }
 
 /// Return the OpenAI GPT-5.6 contract addendum.
