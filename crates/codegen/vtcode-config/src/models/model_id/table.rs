@@ -385,6 +385,13 @@ model_id_table! {
         display: "DeepSeek V4 Flash 0731 (Merge Gateway)",
         description: "DeepSeek V4 Flash 0731 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
+    MergeGatewayDeepseekV41Flash {
+        provider: MergeGateway,
+        id: models::merge_gateway::DEEPSEEK_V4_1_FLASH,
+        parse: [models::merge_gateway::DEEPSEEK_V4_1_FLASH],
+        display: "DeepSeek V4.1 Flash (Merge Gateway)",
+        description: "DeepSeek V4.1 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
     MergeGatewayXaiGrok46 {
         provider: MergeGateway,
         id: models::merge_gateway::XAI_GROK_4_6,
@@ -1091,6 +1098,13 @@ model_id_table! {
         display: "DeepSeek V4 Flash (Vercel AI Gateway)",
         description: "DeepSeek V4 Flash fast, cost-efficient reasoning model served through the Vercel AI Gateway",
     },
+    VercelDeepseekV41Flash {
+        provider: Vercel,
+        id: models::vercel::DEEPSEEK_V4_1_FLASH,
+        parse: [models::vercel::DEEPSEEK_V4_1_FLASH],
+        display: "DeepSeek V4.1 Flash (Vercel AI Gateway)",
+        description: "DeepSeek V4.1 Flash latest flash model served through the Vercel AI Gateway",
+    },
     VercelMoonshotaiKimiK3 {
         provider: Vercel,
         id: models::vercel::MOONSHOTAI_KIMI_K3,
@@ -1171,6 +1185,7 @@ mod tests {
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::MergeGatewayMetaMuseSpark13
                 | ModelId::MergeGatewayOpenAIGpt6Astra
+                | ModelId::MergeGatewayDeepseekV41Flash
         )
         // Vercel AI Gateway's curated `vendor/model` ids intentionally match
         // OpenRouter ids; explicit provider configuration selects the Vercel
@@ -1185,6 +1200,7 @@ mod tests {
                 | ModelId::VercelGoogleGemini38Flash
                 | ModelId::VercelDeepseekV4Pro
                 | ModelId::VercelDeepseekV4Flash
+                | ModelId::VercelDeepseekV41Flash
                 | ModelId::VercelMoonshotaiKimiK3
                 | ModelId::VercelMoonshotaiKimiK27Code
         )

@@ -79,6 +79,7 @@ impl ModelId {
             ModelId::MergeGatewayGoogleGemini38Flash,
             ModelId::MergeGatewayAnthropicClaudeFable51,
             ModelId::MergeGatewayDeepseekV4Flash0731Fast,
+            ModelId::MergeGatewayDeepseekV41Flash,
             ModelId::MergeGatewayOpenAIGpt6Astra,
             // Mistral models
             ModelId::MistralLarge3,
@@ -181,6 +182,7 @@ impl ModelId {
             ModelId::VercelGoogleGemini38Flash,
             ModelId::VercelDeepseekV4Pro,
             ModelId::VercelDeepseekV4Flash,
+            ModelId::VercelDeepseekV41Flash,
             ModelId::VercelMoonshotaiKimiK3,
             ModelId::VercelMoonshotaiKimiK27Code,
             ModelId::VercelAlibabaQwen38Max,

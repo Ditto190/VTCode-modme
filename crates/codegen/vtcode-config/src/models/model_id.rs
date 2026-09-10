@@ -118,6 +118,8 @@ pub enum ModelId {
     MergeGatewayDeepseekV4Pro0813,
     /// DeepSeek V4 Flash 0731 through Merge Gateway
     MergeGatewayDeepseekV4Flash0731,
+    /// DeepSeek V4.1 Flash through Merge Gateway
+    MergeGatewayDeepseekV41Flash,
     /// xAI Grok 4.6 through Merge Gateway
     MergeGatewayXaiGrok46,
     /// Qwen3.8 Max through Merge Gateway
@@ -409,6 +411,8 @@ pub enum ModelId {
     VercelDeepseekV4Pro,
     /// DeepSeek V4 Flash served through the Vercel AI Gateway
     VercelDeepseekV4Flash,
+    /// DeepSeek V4.1 Flash served through the Vercel AI Gateway
+    VercelDeepseekV41Flash,
     /// Kimi K3 served through the Vercel AI Gateway
     VercelMoonshotaiKimiK3,
     /// Kimi K2.7 Code served through the Vercel AI Gateway

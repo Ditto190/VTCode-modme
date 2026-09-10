@@ -22,6 +22,7 @@ pub const OPENAI_GPT_6_ASTRA: &str = "openai/gpt-6-astra";
 pub const GOOGLE_GEMINI_3_8_FLASH: &str = "google/gemini-3.8-flash";
 pub const ANTHROPIC_CLAUDE_FABLE_5_1: &str = "anthropic/claude-fable-5-1";
 pub const DEEPSEEK_V4_FLASH_0731_FAST: &str = "deepseek/deepseek-v4-flash-0731-fast";
+pub const DEEPSEEK_V4_1_FLASH: &str = "deepseek/deepseek-v4.1-flash";
 
 pub const DEFAULT_MODEL: &str = DEFAULT_ROUTING;
 
@@ -38,6 +39,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     DEEPSEEK_V4_PRO_0813,
     DEEPSEEK_V4_FLASH_0731,
     DEEPSEEK_V4_FLASH_0731_FAST,
+    DEEPSEEK_V4_1_FLASH,
     XAI_GROK_4_6,
     QWEN_3_8_MAX,
     MINIMAX_H3,
@@ -77,6 +79,7 @@ pub const THINKING_BUDGET_ROUTES: &[&str] = &[
     DEEPSEEK_V4_PRO_0813,
     DEEPSEEK_V4_FLASH_0731,
     DEEPSEEK_V4_FLASH_0731_FAST,
+    DEEPSEEK_V4_1_FLASH,
     QWEN_3_8_MAX,
     MINIMAX_H3,
     THINKINGMACHINES_INKLING,
@@ -95,6 +98,7 @@ pub const REASONING_MODELS: &[&str] = &[
     DEEPSEEK_V4_PRO_0813,
     DEEPSEEK_V4_FLASH_0731,
     DEEPSEEK_V4_FLASH_0731_FAST,
+    DEEPSEEK_V4_1_FLASH,
     XAI_GROK_4_6,
     QWEN_3_8_MAX,
     MINIMAX_H3,

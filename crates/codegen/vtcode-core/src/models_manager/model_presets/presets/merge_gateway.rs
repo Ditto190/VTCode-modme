@@ -106,6 +106,13 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             false,
         ),
         (
+            models::merge_gateway::DEEPSEEK_V4_1_FLASH,
+            "DeepSeek V4.1 Flash (Merge Gateway)",
+            "DeepSeek V4.1 Flash through Merge Gateway",
+            1_000_000,
+            false,
+        ),
+        (
             models::merge_gateway::XAI_GROK_4_6,
             "Grok 4.6 (Merge Gateway)",
             "xAI Grok 4.6 through Merge Gateway",

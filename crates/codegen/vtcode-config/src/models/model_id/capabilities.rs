@@ -135,7 +135,22 @@ fn catalog_lookup_id<'a>(provider: &str, id: &'a str) -> &'a str {
 fn generated_catalog_entry(provider: &str, id: &str) -> Option<ModelCatalogEntry> {
     let provider_key = catalog_provider_key(provider);
     let lookup_id = catalog_lookup_id(provider_key, id);
-    capability_generated::metadata_for(provider_key, lookup_id).map(|entry| ModelCatalogEntry {
+    // Exact match wins so gateway providers that store prefixed IDs
+    // (`merge-gateway`/`vercel` keep `openai/gpt-5.6-luna`) keep working.
+    // Fall back to stripping a provider-prefixed request model
+    // (`openai/gpt-5.6-luna` on provider `openai` stores `gpt-5.6-luna`).
+    // The strip is provider-scoped (prefix must equal the provider key) so an
+    // unrelated prefix (`other-org/gpt-5.6-luna`) does not resolve to the bare
+    // model's capabilities. Without this, reasoning-effort and context
+    // lookups miss and the harness omits the effort with an empty
+    // `supported:` diagnostic.
+    let entry = capability_generated::metadata_for(provider_key, lookup_id).or_else(|| {
+        lookup_id
+            .split_once('/')
+            .filter(|(prefix, _)| prefix.eq_ignore_ascii_case(provider_key))
+            .and_then(|(_, rest)| capability_generated::metadata_for(provider_key, rest))
+    });
+    entry.map(|entry| ModelCatalogEntry {
         provider: entry.provider,
         id: entry.id,
         display_name: entry.display_name,
@@ -243,6 +258,7 @@ impl ModelId {
                 | ModelId::EvolinkDeepseekV4Flash
                 | ModelId::VercelGoogleGemini38Flash
                 | ModelId::VercelDeepseekV4Flash
+                | ModelId::VercelDeepseekV41Flash
                 | ModelId::VercelOpenAiGpt56Luna
                 | ModelId::VercelAnthropicClaudeHaiku45
                 | ModelId::OpenRouterStepfunStep35FlashFree
@@ -250,6 +266,7 @@ impl ModelId {
                 | ModelId::StepFun37Flash
                 | ModelId::HuggingFaceDeepseekV4FlashNovita
                 | ModelId::MergeGatewayDeepseekV4Flash0731
+                | ModelId::MergeGatewayDeepseekV41Flash
                 | ModelId::MergeGatewayDeepseekV4Flash0731Fast
                 | ModelId::DeepSeekV4Flash
                 | ModelId::DeepSeekV41Flash
@@ -283,6 +300,7 @@ impl ModelId {
                 | ModelId::DeepSeekV41Flash
                 | ModelId::DeepSeekV4FlashVisionExp
                 | ModelId::MergeGatewayDeepseekV4Flash0731
+                | ModelId::MergeGatewayDeepseekV41Flash
                 | ModelId::MergeGatewayDeepseekV4Flash0731Fast
                 | ModelId::MetaMuseSpark11
                 | ModelId::MergeGatewayMinimaxH3
@@ -297,6 +315,8 @@ impl ModelId {
                 | ModelId::ZaiGlm53Flash
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::HuggingFaceGlm53FlashTogether
+                | ModelId::VercelDeepseekV4Flash
+                | ModelId::VercelDeepseekV41Flash
         )
     }
 
@@ -334,6 +354,8 @@ impl ModelId {
                 | ModelId::OpenCodeGoDeepseekV4Pro
                 | ModelId::DeepSeekV4Pro
                 | ModelId::MergeGatewayDeepseekV4Pro0813
+                | ModelId::MergeGatewayDeepseekV41Flash
+                | ModelId::VercelDeepseekV41Flash
                 | ModelId::MetaMuseSpark13
                 | ModelId::MetaMuseSpark13Contributor
                 | ModelId::MetaMuseSpark12
@@ -414,6 +436,7 @@ impl ModelId {
             | ModelId::DeepSeekV4FlashVisionExp => "4",
             ModelId::MergeGatewayDeepseekV4Pro0813 => "4-pro-0813",
             ModelId::MergeGatewayDeepseekV4Flash0731 => "4-flash-0731",
+            ModelId::MergeGatewayDeepseekV41Flash => "4.1",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
             ModelId::MetaMuseSpark12 | ModelId::MetaMuseSpark12Contributor => "Muse-Spark-1.2",
             ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
@@ -508,6 +531,7 @@ impl ModelId {
             ModelId::VercelGoogleGemini38Flash => "3.8",
             ModelId::VercelDeepseekV4Pro => "v4-pro",
             ModelId::VercelDeepseekV4Flash => "v4-flash",
+            ModelId::VercelDeepseekV41Flash => "4.1",
             ModelId::VercelMoonshotaiKimiK3 => "k3",
             ModelId::VercelMoonshotaiKimiK27Code => "k2.7",
             ModelId::VercelAlibabaQwen38Max => "3.8-max",
@@ -526,5 +550,32 @@ impl ModelId {
     /// Determine if this model supports optimized apply_patch tool
     pub fn supports_apply_patch_tool(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefixed_request_model_resolves_on_bare_provider() {
+        // Regression for `openai/gpt-5.6-luna` on provider `openai` resolving
+        // to empty `supported:` and omitting reasoning effort: exact bare hit
+        // and prefixed fallback must agree, while gateway prefixed entries
+        // keep their exact match.
+        let bare = model_catalog_entry("openai", "gpt-5.6-luna").expect("bare openai entry exists");
+        let prefixed = model_catalog_entry("openai", "openai/gpt-5.6-luna").expect("prefixed fallback must resolve");
+        assert_eq!(bare.reasoning_efforts, prefixed.reasoning_efforts);
+        assert!(!prefixed.reasoning_efforts.is_empty());
+
+        let gateway =
+            model_catalog_entry("merge-gateway", "openai/gpt-5.6-luna").expect("gateway prefixed entry exists");
+        assert!(!gateway.reasoning_efforts.is_empty());
+
+        // Asymmetric boundary: unknown model stays missing on both shapes,
+        // and an unrelated prefix must not resolve to the bare model.
+        assert!(model_catalog_entry("openai", "no-such-model-xyz").is_none());
+        assert!(model_catalog_entry("openai", "openai/no-such-model-xyz").is_none());
+        assert!(model_catalog_entry("openai", "other-org/gpt-5.6-luna").is_none());
     }
 }

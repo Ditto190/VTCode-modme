@@ -117,6 +117,7 @@ fn test_model_providers() {
     assert_eq!(ModelId::MergeGatewayAnthropicClaudeFable51.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayDeepseekV4Pro0813.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayDeepseekV4Flash0731.provider(), Provider::MergeGateway);
+    assert_eq!(ModelId::MergeGatewayDeepseekV41Flash.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayDeepseekV4Flash0731Fast.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayXaiGrok46.provider(), Provider::MergeGateway);
     assert_eq!(ModelId::MergeGatewayQwen38Max.provider(), Provider::MergeGateway);
@@ -309,13 +310,14 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaZaiGlm52));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 22);
+    assert_eq!(merge_gateway_models.len(), 23);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt55));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini37Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini38Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeFable51));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekV4Flash0731Fast));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekV41Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekV4Pro0813));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt56Terra));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayMetaMuseSpark13));
@@ -655,6 +657,7 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::VercelGoogleGemini38Flash
             | ModelId::VercelDeepseekV4Pro
             | ModelId::VercelDeepseekV4Flash
+            | ModelId::VercelDeepseekV41Flash
             | ModelId::VercelMoonshotaiKimiK3
             | ModelId::VercelMoonshotaiKimiK27Code => continue,
             _ => ModelId::from_str(&model.as_str()),
