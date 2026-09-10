@@ -176,7 +176,26 @@ instructions
 
 ---
 
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     Gap: Onboarding polish
     Why it matters: Codex/Claude Code have zero-config first runs.
     Catch-up move: Reduce time-to-first-success: auto-detect providers, ship a guided vtcode init, and make the default config excellent without reading
     docs.
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Gap: Sub-agent/parallel UX
+    Why it matters: Claude Code's Task tool is well-tuned in practice.
+    Catch-up move: Your propose/verify + worktree isolation is architecturally stronger — invest in making it visible: better progress surfacing in the TUI,
+    and cost/token reporting per sub-agent.
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Gap: Eval-driven credibility
+    Why it matters: Anthropic/OpenAI publish eval numbers; trust follows.
+    Catch-up move: Use vtcode-eval publicly: publish benchmark runs per provider/model on your repo. "Verified on these models with these scores" is a moat
+    no closed competitor can copy.
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Gap: Community/contributor surface
+    Why it matters: Both competitors have large contributor bases.
+    Catch-up move: The ~30-crate workspace is clean but intimidating. Crate-local AGENTS.md files help; add a good good-first-issue pipeline and
+    architecture tour doc for newcomers.
+    The strategic summary: don't out-Claude Claude Code. VT Code's defensible position is open + provider-neutral + verifiable: the only terminal agent where
+    the harness, event stream, evals, and safety model are all inspectable and run against any model, including local ones. Double down on evals-as-marketing
+    , local-model excellence, and protocol interop — those are things Claude Code and Codex structurally cannot offer.
