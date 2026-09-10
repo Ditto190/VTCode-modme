@@ -147,6 +147,9 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 // Preserve any accompanying prose so an exhausted-retries
                 // fallback can salvage it instead of discarding the turn.
                 if params.ctx.is_planning_active() {
+                    if params.ctx.try_planning_violation_repair(&assistant_text)? {
+                        return Ok(TurnHandlerOutcome::Continue);
+                    }
                     return params.ctx.break_planning_recovery_with_handoff(
                         "the synthesis response attempted a tool call while tools were disabled",
                         (!assistant_text.trim().is_empty()).then_some(assistant_text.as_str()),
@@ -317,6 +320,9 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 .trim()
                 .to_string();
                 if params.ctx.is_planning_active() {
+                    if params.ctx.try_planning_violation_repair(&salvage)? {
+                        return Ok(TurnHandlerOutcome::Continue);
+                    }
                     return params.ctx.break_planning_recovery_with_handoff(
                         "the synthesis response attempted tool-call markup",
                         (!salvage.is_empty()).then_some(salvage.as_str()),

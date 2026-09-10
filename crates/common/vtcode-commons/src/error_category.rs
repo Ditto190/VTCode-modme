@@ -577,6 +577,18 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
             "response did not contain",
             "unexpected response format",
             "failed to parse response",
+            // Post-tool follow-up streaming failures surface here when the
+            // provider drops the SSE/event stream mid-response. Without these
+            // markers the follow-up is misclassified as generic
+            // `ExecutionError` (non-retryable) and the turn ends instead of
+            // scheduling the bounded tool-free retry.
+            "stream disconnected",
+            "stream closed unexpectedly",
+            "incomplete stream",
+            "unexpected end of stream",
+            "truncated response",
+            "failed to decode stream",
+            "stream terminated",
         ],
     ) {
         return ErrorCategory::ServiceUnavailable;
@@ -622,6 +634,13 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
             // decode failure; Ollama (cloud) emits this on transient drops.
             // It is a transport error, not a payload problem — retryable.
             "error decoding response body",
+            // Transport-level stream teardown during a follow-up request.
+            // Distinct from response-shape markers above: the connection
+            // itself failed, not the payload. `stream error` stays specific
+            // (`received`) so `downstream error` prose does not match.
+            "connection closed before",
+            "stream reset",
+            "stream error received",
         ],
     ) {
         return ErrorCategory::Network;
@@ -739,6 +758,29 @@ mod tests {
     #[test]
     fn service_unavailable_is_classified() {
         assert_eq!(classify_error_message("503 service unavailable"), ErrorCategory::ServiceUnavailable);
+    }
+
+    #[test]
+    fn follow_up_stream_failures_are_retryable() {
+        // Post-tool follow-up streaming drops must not fall through to
+        // generic `ExecutionError`: both shapes are retryable.
+        for msg in [
+            "follow-up failed: stream disconnected mid-response",
+            "sse stream terminated before completion",
+            "incomplete stream while reading follow-up",
+            "connection closed before response completed",
+            "stream reset by peer during follow-up",
+            "h2 stream error received: internal error",
+        ] {
+            let category = classify_error_message(msg);
+            assert!(category.is_retryable(), "{msg} -> {category:?} should be retryable");
+        }
+        // Asymmetric boundary: unrelated `stream` prose without a failure
+        // marker stays non-retryable, and `downstream error` must not match
+        // the h2 `stream error received` marker.
+        assert_eq!(classify_error_message("upstream stream file ready"), ErrorCategory::ExecutionError);
+        assert_eq!(classify_error_message("downstream error: 400 bad request"), ErrorCategory::ExecutionError);
+        assert_eq!(classify_error_message("something went wrong"), ErrorCategory::ExecutionError);
     }
 
     #[test]

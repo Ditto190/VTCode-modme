@@ -1,8 +1,9 @@
 use super::*;
 use crate::agent::runloop::unified::plan_blocks::strip_plan_persistence_policy_line;
 use crate::agent::runloop::unified::planning_workflow::{
-    PlanApprovalRoute, PlanArtifactError, ValidatedPlanArtifact, emit_plan_ready_events, persist_plan_draft,
-    persisted_plan_is_ready, plan_approval_route, plan_repair_directive_for_error, validate_plan_content,
+    PlanApprovalRoute, PlanArtifactError, ValidatedPlanArtifact, build_plan_repair_directive, emit_plan_ready_events,
+    persist_plan_draft, persisted_plan_is_ready, plan_approval_route, plan_repair_directive_for_error,
+    validate_plan_content,
 };
 use crate::agent::runloop::unified::turn::turn_processing::resolve_effective_request_model;
 use crate::agent::runloop::unified::ui_interaction_stream_helpers::render_compact_reasoning_block;
@@ -179,6 +180,62 @@ impl<'a> TurnProcessingContext<'a> {
                 "planning recovery did not produce an approval-ready plan; planning remains active".to_string(),
             ),
         }))
+    }
+
+    /// Bounded repair for a planning tool-free violation that still carried
+    /// salvageable prose (tool calls or markup alongside plan-like text).
+    ///
+    /// Both violation surfaces in `result_handler.rs` (native tool calls and
+    /// textual markup during a tool-free pass) previously ended in an immediate
+    /// resumable handoff, bypassing the validation-repair budget that
+    /// `reject_plan_artifact` enjoys. When the salvage looks like an attempted
+    /// plan and repair budget remains, consume one repair, surface the
+    /// canonical format directive, and re-arm a tool-free pass instead.
+    /// Returns `true` when the caller should `Continue`; `false` means fall
+    /// through to the handoff. Terminal invariant holds: at most
+    /// `MAX_PLAN_VALIDATION_REPAIR_REPROMPTS` repairs per turn.
+    pub(crate) fn try_planning_violation_repair(&mut self, salvage: &str) -> anyhow::Result<bool> {
+        if !self.is_planning_active() {
+            return Ok(false);
+        }
+        let salvage = salvage.trim();
+        if salvage.is_empty() || !looks_like_attempted_plan(salvage) {
+            return Ok(false);
+        }
+        if !self.plan_session.plan_validation_repair_allowed() {
+            return Ok(false);
+        }
+        let validation = validate_plan_content(salvage);
+        // A valid plan mixed with violation markup still needs a clean
+        // text-only re-emit. Its validator report is ready, so
+        // `repair_feedback()` would misleadingly claim "validation issues";
+        // use validator-owned re-emit feedback instead so the model sees the
+        // real contract violation. Invalid drafts use the report-specific
+        // feedback via the shared error→directive mapping.
+        let (error, directive) = if validation.is_ready() {
+            let reasons = "synthesis mixed a valid plan with tool-call markup; re-emit text only".to_string();
+            let error = PlanArtifactError::Invalid { reasons, report: Box::new(validation) };
+            let directive = build_plan_repair_directive(
+                "The synthesis mixed a valid plan with tool-call markup. Re-emit the same plan as text only, without tool calls or tool-call markup.",
+            );
+            (error, directive)
+        } else {
+            let reasons = validation.reasons().join("; ");
+            let error = PlanArtifactError::Invalid { reasons, report: Box::new(validation) };
+            let directive = plan_repair_directive_for_error(&error);
+            (error, directive)
+        };
+        self.plan_session.mark_plan_validation_repair_used();
+        tracing::warn!(
+            target: "vtcode.planning_workflow",
+            error = %error,
+            repair_scheduled = true,
+            tool_free = true,
+            "planning violation carried plan-like salvage; scheduling bounded repair"
+        );
+        append_rejected_plan_draft_to_last_assistant(self.working_history, salvage);
+        self.push_system_message(directive);
+        Ok(self.retry_recovery_pass())
     }
 
     fn reject_plan_artifact(

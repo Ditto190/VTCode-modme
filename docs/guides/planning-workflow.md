@@ -417,11 +417,15 @@ inspections containing even one repeated semantic request schedule the same
 synthesis pass. Output controls such as `max_output_tokens` do not make an
 otherwise identical inspection count as new research; twelve genuinely
 distinct inspections remain eligible for continued research. The generic
-turn-balancer caps apply as well; in planning mode they converge on the same
-plan-synthesis pass (with the `<proposed_plan>` contract) and consume the same
-once-per-turn slot. In any mode, three listings with the same tool (`ls`,
-`find`, or `fd`, regardless of arguments) schedule the same single tool-free
-recovery pass, and every failed-closed turn budget (`tool_calls`,
+ turn-balancer caps apply as well; in planning mode they converge on the same
+ plan-synthesis pass (with the `<proposed_plan>` contract) and consume the same
+ once-per-turn slot. In execution mode, three listings with the same tool (`ls`,
+ `find`, or `fd`, regardless of arguments) schedule the same single tool-free
+ recovery pass; planning mode uses a higher tripwire of five so three
+ successful listings remain legitimate exploration under the dedicated 6/10
+ low-signal and 12-step synthesis guards. A planning tool-free violation that
+ still carries plan-like salvage consumes one validation-repair budget and
+ retries tool-free before the resumable handoff, and every failed-closed turn budget (`tool_calls`,
  `tool_loop`, `session_calls`) is recorded as a `budget_exhausted` trajectory
  event with its used/max counts so post-hoc diagnosis can tell which ceiling
  fired.

@@ -332,8 +332,8 @@ pub(crate) async fn handle_turn_balancer(
 
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
         ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, LISTING_LOOP_TRIP_COUNT, NAVIGATION_LOOP_THRESHOLD,
-        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD,
-        PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
+        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_LISTING_LOOP_TRIP_COUNT,
+        PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
     };
 
     // NL2Repo-Bench checks run on every step (no backoff) since they
@@ -479,11 +479,21 @@ pub(crate) async fn handle_turn_balancer(
     // Same-base directory listings (`ls`/`find`/`fd`) share one coarse family
     // across argument variations, so three of them trip recovery even when no
     // exact request repeats and the low-signal ledger stays quiet.
+    // Planning gets a higher tripwire: it owns dedicated convergence guards
+    // (6 consecutive / 10 total low-signal, 12-step nav synthesis) and a
+    // generous research ceiling, so three successful listings are legitimate
+    // exploration there rather than churn worth killing tools over.
+    let planning_active_for_listing = ctx.is_planning_active();
+    let listing_trip_count = if planning_active_for_listing {
+        PLANNING_LISTING_LOOP_TRIP_COUNT
+    } else {
+        LISTING_LOOP_TRIP_COUNT
+    };
     let repeated_listings = repeated_tool_attempts.max_coarse_listing_count();
-    if (repeated_low_signal >= effective_repeat_limit || repeated_listings >= LISTING_LOOP_TRIP_COUNT)
+    if (repeated_low_signal >= effective_repeat_limit || repeated_listings >= listing_trip_count)
         && repeated_tool_attempts.consecutive_navigations >= effective_repeat_limit
     {
-        let planning_active = ctx.is_planning_active();
+        let planning_active = planning_active_for_listing;
         let recovery_reason = if planning_active {
             format!(
                 "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
@@ -1035,6 +1045,57 @@ mod tests {
         let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
         assert!(!ctx.is_recovery_active());
+    }
+
+    #[tokio::test]
+    async fn planning_listing_triplet_stays_below_early_recovery() {
+        // Planning owns dedicated convergence guards (6/10 low-signal, 12-step
+        // nav synthesis), so three successful same-base listings are legitimate
+        // exploration and must not trip the generic fast-path. The fifth does.
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"stdout": "src\nsrc-tauri"}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for command in ["ls src/", "ls src", "ls -1 src"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tool_names::EXEC_COMMAND,
+                &json!({"cmd": command, "command": command, "action": "run"}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 3);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active(), "planning triplet must not schedule early recovery");
+
+        for command in ["ls -R src", "ls -lh src"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tool_names::EXEC_COMMAND,
+                &json!({"cmd": command, "command": command, "action": "run"}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 5);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 8, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                let text = message.content.as_text();
+                text.contains("<proposed_plan>") && text.contains("Action -> files")
+            }),
+            "planning listing recovery must instruct plan-format synthesis"
+        );
     }
 
     #[tokio::test]

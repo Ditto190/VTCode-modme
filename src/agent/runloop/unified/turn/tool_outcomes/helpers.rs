@@ -52,6 +52,11 @@ pub(crate) const NAVIGATION_LOOP_THRESHOLD: usize = 15;
 /// of them three times signals churn even when no exact request repeats.
 pub(crate) const LISTING_LOOP_TRIP_COUNT: usize = 3;
 
+/// Planning listing tripwire: planning owns dedicated convergence guards (6
+/// consecutive / 10 total low-signal, 12-step nav synthesis), so three
+/// successful listings are legitimate exploration there rather than churn.
+pub(crate) const PLANNING_LISTING_LOOP_TRIP_COUNT: usize = 5;
+
 /// Planning recovery thresholds for low-signal navigation. These are kept
 /// below the hard planning tool-call ceiling so the model gets one bounded,
 /// tool-free synthesis pass while the evidence is still useful.
