@@ -3,7 +3,7 @@ use super::post_tool_recovery::prepare_post_tool_tool_free_recovery;
 use super::post_tool_recovery::{ensure_post_tool_resume_directive, has_tool_response_since};
 use super::{
     ASSISTANT_TEXT_RESPONSE_CAP_REASON, COMPLETED_TURN_FALLBACK_RESPONSE, GENERIC_BLOCKED_FINAL_RESPONSE, HarnessUsage,
-    PENDING_VERIFICATION_BLOCK_REASON, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
+    PENDING_VERIFICATION_BLOCK_REASON, PLANNING_COMPLETED_FALLBACK_RESPONSE, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
     POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON, POST_TOOL_RECOVERY_REASON, POST_TOOL_RECOVERY_REASON_PLAN_MODE,
     POST_TOOL_RESUME_DIRECTIVE, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE, PostToolFailureRecovery,
     RECOVERY_CONTRACT_VIOLATION_REASON, RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER, accumulate_turn_usage,
@@ -2888,6 +2888,39 @@ async fn ensure_completed_synthesizes_fallback_when_no_final_exists() {
                 && message.content.as_text().contains(COMPLETED_TURN_FALLBACK_RESPONSE)
         }),
         "must push the generic fallback as FinalAnswer"
+    );
+}
+
+#[tokio::test]
+async fn ensure_completed_synthesizes_planning_fallback_when_planning_active() {
+    // Planning counterpart: with no FinalAnswer and planning active, the
+    // helper must publish the planning resumable handoff (keep planning +
+    // `<proposed_plan>` contract), not the generic retry text.
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    backing.activate_planning_for_test();
+    let mut history = vec![uni::Message::user("plan the fix".to_string())];
+    let mut ctx = backing.turn_loop_context();
+
+    let was_fallback = ensure_completed_turn_response(&mut ctx, &mut history, 0).expect("fallback must succeed");
+
+    assert!(was_fallback, "missing final must be reported as fallback");
+    assert!(ctx.harness_state.final_response_was_fallback());
+    assert!(
+        history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant
+                && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                && message.content.as_text().contains(PLANNING_COMPLETED_FALLBACK_RESPONSE)
+                && message.content.as_text().contains("keep planning")
+                && message.content.as_text().contains("<proposed_plan>")
+        }),
+        "must push the planning fallback as FinalAnswer"
+    );
+    assert!(
+        history.iter().all(|message| {
+            message.role != uni::MessageRole::Assistant
+                || !message.content.as_text().contains(COMPLETED_TURN_FALLBACK_RESPONSE)
+        }),
+        "planning fallback must not contain the generic retry text"
     );
 }
 

@@ -479,9 +479,19 @@ pub(crate) async fn handle_turn_balancer(
     if repeated_low_signal >= effective_repeat_limit
         && repeated_tool_attempts.consecutive_navigations >= effective_repeat_limit
     {
-        let recovery_reason = format!(
-            "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass; summarize only from collected evidence."
-        );
+        let planning_active = ctx.is_planning_active();
+        let recovery_reason = if planning_active {
+            format!(
+                "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+            )
+        } else {
+            format!(
+                "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass; summarize only from collected evidence."
+            )
+        };
+        if planning_active {
+            repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+        }
         ctx.activate_recovery(recovery_reason.clone());
         ctx.renderer
             .line(
@@ -521,8 +531,17 @@ pub(crate) async fn handle_turn_balancer(
         max_repeated,
         tool_repeat_limit,
     ) {
-        let recovery_reason =
-            "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass; summarize only from collected evidence.".to_string();
+        let planning_active = ctx.is_planning_active();
+        let recovery_reason = if planning_active {
+            format!(
+                "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+            )
+        } else {
+            "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass; summarize only from collected evidence.".to_string()
+        };
+        if planning_active {
+            repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+        }
         ctx.activate_recovery(recovery_reason.clone());
         ctx.renderer
             .line(
@@ -1035,6 +1054,62 @@ mod tests {
                 .content
                 .as_text()
                 .contains("Repeated low-signal navigation calls reached the per-turn fast-path cap")
+        }));
+    }
+
+    #[tokio::test]
+    async fn early_balancer_recovery_is_plan_aware_in_planning_workflow() {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"results": []}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        let same_args = json!({"query":"Result","path":"src"});
+        update_repetition_tracker(&mut tracker, &miss, tool_names::CODE_SEARCH, &same_args);
+        update_repetition_tracker(&mut tracker, &miss, tool_names::CODE_SEARCH, &same_args);
+        update_repetition_tracker(&mut tracker, &miss, tool_names::CODE_SEARCH, &same_args);
+
+        let balancer_outcome = super::handle_turn_balancer(&mut ctx, 3, &mut tracker, 20, 3).await;
+        assert!(matches!(balancer_outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert!(tracker.planning_low_signal_synthesis_triggered);
+        assert!(
+            ctx.working_history
+                .iter()
+                .any(|message| { message.content.as_text().contains("<proposed_plan>") })
+        );
+    }
+
+    #[tokio::test]
+    async fn early_balancer_recovery_stays_generic_outside_planning_workflow() {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"results": []}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        let same_args = json!({"query":"Other","path":"src"});
+        update_repetition_tracker(&mut tracker, &miss, tool_names::CODE_SEARCH, &same_args);
+        update_repetition_tracker(&mut tracker, &miss, tool_names::CODE_SEARCH, &same_args);
+        update_repetition_tracker(&mut tracker, &miss, tool_names::CODE_SEARCH, &same_args);
+
+        let balancer_outcome = super::handle_turn_balancer(&mut ctx, 3, &mut tracker, 20, 3).await;
+        assert!(matches!(balancer_outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert!(!tracker.planning_low_signal_synthesis_triggered);
+        assert!(ctx.working_history.iter().any(|message| {
+            let text = message.content.as_text();
+            text.contains("summarize only from collected evidence") && !text.contains("<proposed_plan>")
         }));
     }
 }

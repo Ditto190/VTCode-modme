@@ -39,19 +39,23 @@ impl std::error::Error for ReasoningEffortUnsupported {}
 pub struct ReasoningEffortMapper;
 
 impl ReasoningEffortMapper {
+    fn supported_levels(provider: &dyn LLMProvider, model: &str) -> &'static [&'static str] {
+        if let Some(levels) = crate::provider::catalog_reasoning_efforts(provider.name(), model) {
+            levels
+        } else if provider.supports_reasoning_effort(model) {
+            provider.supported_reasoning_efforts(model)
+        } else {
+            &[]
+        }
+    }
+
     pub fn resolve(
         provider: &dyn LLMProvider,
         model: &str,
         requested: ReasoningEffortLevel,
         allow_downgrade: bool,
     ) -> Result<ReasoningEffortMapping> {
-        let supported = if let Some(levels) = crate::provider::catalog_reasoning_efforts(provider.name(), model) {
-            levels
-        } else if provider.supports_reasoning_effort(model) {
-            provider.supported_reasoning_efforts(model)
-        } else {
-            &[]
-        };
+        let supported = Self::supported_levels(provider, model);
         Self::map(requested, supported, allow_downgrade)
     }
 
@@ -68,14 +72,20 @@ impl ReasoningEffortMapper {
         requested: ReasoningEffortLevel,
         allow_downgrade: bool,
     ) -> Option<ReasoningEffortMapping> {
-        let supported = if let Some(levels) = crate::provider::catalog_reasoning_efforts(provider.name(), model) {
-            levels
-        } else if provider.supports_reasoning_effort(model) {
-            provider.supported_reasoning_efforts(model)
-        } else {
-            &[]
-        };
-        Self::map_or_omit(requested, supported, allow_downgrade)
+        let supported = Self::supported_levels(provider, model);
+        match Self::map(requested, supported, allow_downgrade) {
+            Ok(mapping) => Some(mapping),
+            Err(error) => {
+                tracing::warn!(
+                    provider = provider.name(),
+                    model,
+                    requested = %requested,
+                    error = %error,
+                    "Configured reasoning effort is unsupported on this route; omitting it for this request"
+                );
+                None
+            }
+        }
     }
 
     /// Route-free variant for callers that already hold the supported levels.
@@ -88,7 +98,7 @@ impl ReasoningEffortMapper {
         match Self::map(requested, supported, allow_downgrade) {
             Ok(mapping) => Some(mapping),
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     requested = %requested,
                     error = %error,
                     "Configured reasoning effort is unsupported on this route; omitting it for this request"

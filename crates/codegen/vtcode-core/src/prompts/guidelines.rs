@@ -454,7 +454,7 @@ fn read_only_batching_guidance(has_read_file: bool) -> &'static str {
 }
 
 fn code_search_guidance(has_exec: bool, _shell_profile: ResolvedShellPromptProfile) -> String {
-    const BASE: &str = "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"]}`. Do not JSON-encode arrays or integers as strings.";
+    const BASE: &str = "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`.";
     if has_exec {
         format!("{BASE} Use `exec_command` or a skill for syntax patterns.")
     } else {

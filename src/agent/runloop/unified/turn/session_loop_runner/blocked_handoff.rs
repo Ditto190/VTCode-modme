@@ -188,6 +188,11 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             }
             let _ = renderer
                 .line(MessageStyle::Info, &format!("  • Blocker details: {}", artifacts.current_path.display()));
+            // The live pointer is cleared once the session recovers, which
+            // orphans transcripts that only name it. The timestamped archive
+            // survives clearing, so always print it alongside.
+            let _ = renderer
+                .line(MessageStyle::Info, &format!("  • Archived details: {}", artifacts.archive_path.display()));
 
             if let Some(handle) = handle {
                 handle.set_activity_state(vtcode_commons::ui_protocol::ActivityState::Blocked);

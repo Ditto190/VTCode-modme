@@ -208,6 +208,16 @@ const PLANNING_RECOVERY_EXHAUSTED_NO_DRAFT_NOTICE: &str = "Plan synthesis failed
 pub(super) const RECOVERY_CONTRACT_VIOLATION_REASON: &str =
     "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls.";
 pub(crate) const COMPLETED_TURN_FALLBACK_RESPONSE: &str = "The turn stopped before a final assistant response was produced. No final outcome was confirmed; please retry the request.";
+/// Planning-specific variant of [`COMPLETED_TURN_FALLBACK_RESPONSE`]. A
+/// plan-mode turn that ends without any final text must stay resumable: the
+/// research is preserved and the next `keep planning` turn reuses it instead
+/// of re-exploring. The generic fallback ("please retry the request") hides
+/// that contract, so planning publishes this response (paired with
+/// [`completed_fallback_reason`] planning reason) instead. Mirrors the
+/// `<proposed_plan>` contract in `break_planning_recovery_with_handoff`
+/// without duplicating its detail (that path knows the synthesis failed;
+/// this path only knows no final was produced).
+pub(crate) const PLANNING_COMPLETED_FALLBACK_RESPONSE: &str = "Planning remains active, but this turn ended without a final plan synthesis. The research gathered above is preserved; do NOT re-read files already read this turn. Type `keep planning` (or re-state the request) and emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. No changes were applied.";
 const COMPLETED_TURN_FALLBACK_REASON: &str = "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained.";
 /// Planning-specific variant of [`COMPLETED_TURN_FALLBACK_REASON`]. When a
 /// plan-mode turn ends via the generic fallback path, the generic reason hides
@@ -401,7 +411,11 @@ fn ensure_completed_turn_response(
         final_text
     } else {
         response_was_fallback = true;
-        let fallback = COMPLETED_TURN_FALLBACK_RESPONSE.to_string();
+        let fallback = if ctx.is_planning_active() {
+            PLANNING_COMPLETED_FALLBACK_RESPONSE.to_string()
+        } else {
+            COMPLETED_TURN_FALLBACK_RESPONSE.to_string()
+        };
         working_history
             .push(uni::Message::assistant(fallback.clone()).with_phase(Some(uni::AssistantPhase::FinalAnswer)));
         fallback

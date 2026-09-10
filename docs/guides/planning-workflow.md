@@ -416,7 +416,10 @@ Successful reads can still drift into a loop, so twelve consecutive planning
 inspections containing even one repeated semantic request schedule the same
 synthesis pass. Output controls such as `max_output_tokens` do not make an
 otherwise identical inspection count as new research; twelve genuinely
-distinct inspections remain eligible for continued research.
+distinct inspections remain eligible for continued research. The generic
+turn-balancer caps apply as well; in planning mode they converge on the same
+plan-synthesis pass (with the `<proposed_plan>` contract) and consume the same
+once-per-turn slot.
 
 Tool previews shown to the model share a bounded per-turn budget (96 KiB in
 planning, 32 KiB execution); plan-mode inspections that omit an explicit
