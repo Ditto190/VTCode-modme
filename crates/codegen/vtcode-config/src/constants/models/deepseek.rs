@@ -1,19 +1,6 @@
-pub const DEFAULT_MODEL: &str = "deepseek-v4.1-flash";
-pub const SUPPORTED_MODELS: &[&str] = &[
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-vision-exp",
-    "deepseek-v4.1-flash",
-];
+pub const DEFAULT_MODEL: &str = "deepseek-flash";
+pub const SUPPORTED_MODELS: &[&str] = &["deepseek-flash"];
 
-pub const REASONING_MODELS: &[&str] = &[
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-vision-exp",
-    "deepseek-v4.1-flash",
-];
+pub const REASONING_MODELS: &[&str] = &["deepseek-flash"];
 
-pub const DEEPSEEK_V4_PRO: &str = "deepseek-v4-pro";
-pub const DEEPSEEK_V4_FLASH: &str = "deepseek-v4-flash";
-pub const DEEPSEEK_V4_FLASH_VISION_EXP: &str = "deepseek-v4-flash-vision-exp";
-pub const DEEPSEEK_V4_1_FLASH: &str = "deepseek-v4.1-flash";
+pub const DEEPSEEK_FLASH: &str = "deepseek-flash";

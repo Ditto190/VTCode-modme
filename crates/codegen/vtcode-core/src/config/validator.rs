@@ -498,7 +498,8 @@ mod tests {
     fn retention_ok_for_responses_model() {
         let mut cfg = VTCodeConfig::default();
         cfg.prompt_cache.providers.openai.prompt_cache_retention = Some(PromptCacheRetention::H24);
-        let msg = check_prompt_cache_retention_compat(&cfg, crate::config::constants::models::openai::GPT_5, "openai");
+        let msg =
+            check_prompt_cache_retention_compat(&cfg, crate::config::constants::models::openai::GPT_5_6, "openai");
         assert!(msg.is_none());
     }
 
@@ -551,7 +552,7 @@ mod tests {
         let mut cfg = VTCodeConfig::default();
         cfg.provider.openai.hosted_shell.enabled = true;
 
-        let msg = check_openai_hosted_shell_compat(&cfg, crate::config::constants::models::openai::GPT_5, "openai");
+        let msg = check_openai_hosted_shell_compat(&cfg, crate::config::constants::models::openai::GPT_5_6, "openai");
         assert!(msg.is_none());
     }
 
@@ -573,7 +574,7 @@ mod tests {
             version: vtcode_config::core::OpenAIHostedSkillVersion::default(),
         }];
 
-        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5", "openai");
+        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5.6-sol", "openai");
 
         assert!(
             msg.as_deref()
@@ -589,7 +590,7 @@ mod tests {
         cfg.provider.openai.hosted_shell.skills =
             vec![vtcode_config::core::OpenAIHostedSkill::Inline { bundle_b64: " ".to_string(), sha256: None }];
 
-        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5", "openai");
+        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5.6-sol", "openai");
 
         assert!(
             msg.as_deref()
@@ -605,7 +606,7 @@ mod tests {
         cfg.provider.openai.hosted_shell.network_policy.policy_type =
             vtcode_config::core::OpenAIHostedShellNetworkPolicyType::Allowlist;
 
-        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5", "openai");
+        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5.6-sol", "openai");
 
         assert!(msg.as_deref().unwrap_or_default().contains("network_policy.allowed_domains"));
     }
@@ -624,7 +625,7 @@ mod tests {
                 value: "secret".to_string(),
             }];
 
-        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5", "openai");
+        let msg = check_openai_hosted_shell_compat(&cfg, "gpt-5.6-sol", "openai");
 
         assert!(msg.as_deref().unwrap_or_default().contains("domain_secrets[0].domain"));
     }
@@ -635,7 +636,7 @@ mod tests {
         let validator = ConfigValidator::new(&dir.path().join("models.json")).unwrap();
         let mut config = VTCodeConfig::default();
         config.agent.provider = "openai".to_owned();
-        config.agent.default_model = "gpt-5".to_owned();
+        config.agent.default_model = "gpt-5.6".to_owned();
         config.provider.openai.hosted_shell.enabled = true;
         config.provider.openai.hosted_shell.skills = vec![vtcode_config::core::OpenAIHostedSkill::SkillReference {
             skill_id: "   ".to_string(),

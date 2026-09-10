@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn moonshot_presets_exist_and_default_to_kimi_k3() {
         let presets = presets::moonshot_presets();
-        assert_eq!(presets.len(), 2);
+        assert_eq!(presets.len(), 1);
 
         let default = presets
             .iter()
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn nvidia_presets_expose_curated_models_and_default() {
         let presets = presets::nvidia_presets();
-        assert_eq!(presets.len(), 5);
+        assert_eq!(presets.len(), 3);
         let default = presets.iter().find(|preset| preset.is_default).expect("NVIDIA default preset");
         assert_eq!(default.model, "nvidia/nemotron-3-ultra-550b-a55b");
         assert_eq!(default.context_window, Some(1_000_000));
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn merge_gateway_presets_expose_curated_routes_and_default() {
         let presets = presets::merge_gateway_presets();
-        assert_eq!(presets.len(), 23);
+        assert_eq!(presets.len(), 16);
         let default = presets
             .iter()
             .find(|preset| preset.is_default)
@@ -397,12 +397,11 @@ mod tests {
     #[test]
     fn meta_presets_keep_standard_default_and_contributor_opt_in() {
         let presets = presets::meta_presets();
-        assert_eq!(presets.len(), 5);
+        assert_eq!(presets.len(), 3);
 
         let default = presets.iter().find(|preset| preset.is_default).expect("Meta default preset");
         assert_eq!(default.model, "muse-spark-1.3");
         assert!(presets.iter().any(|preset| preset.model == "muse-spark-1.3-contributor"));
-        assert!(presets.iter().any(|preset| preset.model == "muse-spark-1.2-contributor"));
         assert!(
             presets
                 .iter()
@@ -419,11 +418,5 @@ mod tests {
             .find(|preset| preset.model == "meta/muse-glimmer-30b")
             .expect("OpenRouter Glimmer preset");
         assert_eq!(glimmer.context_window, Some(131_072));
-
-        let spark = presets
-            .iter()
-            .find(|preset| preset.model == "meta/muse-spark-1.2")
-            .expect("OpenRouter Spark preset");
-        assert_eq!(spark.context_window, Some(1_048_576));
     }
 }

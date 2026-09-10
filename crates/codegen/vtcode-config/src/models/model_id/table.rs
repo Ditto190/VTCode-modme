@@ -84,20 +84,6 @@ macro_rules! model_id_table {
 
 model_id_table! {
     // Gemini models
-    Gemini36Flash {
-        provider: Gemini,
-        id: models::GEMINI_3_6_FLASH,
-        parse: [models::GEMINI_3_6_FLASH],
-        display: "Gemini 3.6 Flash",
-        description: "Latest flash model with improved reasoning, efficiency, and factual consistency",
-    },
-    Gemini37Flash {
-        provider: Gemini,
-        id: models::GEMINI_3_7_FLASH,
-        parse: [models::GEMINI_3_7_FLASH, models::GEMINI_3_FLASH_PREVIEW],
-        display: "Gemini 3.7 Flash",
-        description: "Flash model with 1M context and tunable thinking levels (low, medium, high)",
-    },
     Gemini38Flash {
         provider: Gemini,
         id: models::GEMINI_3_8_FLASH,
@@ -170,20 +156,6 @@ model_id_table! {
         display: "Claude Fable 5.1",
         description: "Successor to Claude Fable 5 for demanding reasoning and long-horizon agentic work, adaptive thinking always on, 1M context, 128K output, cache reads at 1/4 cost",
     },
-    ClaudeMythos5 {
-        provider: Anthropic,
-        id: models::CLAUDE_MYTHOS_5,
-        parse: [models::CLAUDE_MYTHOS_5],
-        display: "Claude Mythos 5",
-        description: "Shares Claude Fable 5's capabilities without safety classifiers. Limited availability through Project Glasswing",
-    },
-    ClaudeMythos51 {
-        provider: Anthropic,
-        id: models::CLAUDE_MYTHOS_5_1,
-        parse: [models::CLAUDE_MYTHOS_5_1],
-        display: "Claude Mythos 5.1",
-        description: "Shares Claude Fable 5.1's capabilities without safety classifiers. Project Glasswing only",
-    },
     ClaudeOpus5 {
         provider: Anthropic,
         id: models::CLAUDE_OPUS_5,
@@ -227,39 +199,11 @@ model_id_table! {
         display: "GitHub Copilot GPT-5.4 Mini",
         description: "GitHub Copilot GPT-5.4 Mini option for faster, lighter-weight tasks",
     },
-    CopilotClaudeSonnet46 {
-        provider: Copilot,
-        id: models::copilot::CLAUDE_SONNET_5,
-        parse: [models::copilot::CLAUDE_SONNET_5],
-        display: "GitHub Copilot Claude Sonnet 4.6",
-        description: "GitHub Copilot Claude Sonnet 4.6 option for balanced coding and reasoning work",
-    },
     // DeepSeek models
-    DeepSeekV4Pro {
+    DeepSeekFlash {
         provider: DeepSeek,
-        id: models::deepseek::DEEPSEEK_V4_PRO,
-        parse: [models::deepseek::DEEPSEEK_V4_PRO],
-        display: "DeepSeek V4 Pro",
-        description: "High-performance reasoning model with advanced thinking capabilities",
-    },
-    DeepSeekV4Flash {
-        provider: DeepSeek,
-        id: models::deepseek::DEEPSEEK_V4_FLASH,
-        parse: [models::deepseek::DEEPSEEK_V4_FLASH],
-        display: "DeepSeek V4 Flash",
-        description: "Official release with significantly enhanced agent capabilities for coding and tool use (Terminal Bench 2.1: 82.7, DeepSWE: 54.4)",
-    },
-    DeepSeekV4FlashVisionExp {
-        provider: DeepSeek,
-        id: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP,
-        parse: [models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP],
-        display: "DeepSeek V4 Flash Vision Exp",
-        description: "Experimental vision model — image + text input via chat/completions (base64/file_id/URL, 600 images, 48MiB body, 8192px)",
-    },
-    DeepSeekV41Flash {
-        provider: DeepSeek,
-        id: models::deepseek::DEEPSEEK_V4_1_FLASH,
-        parse: [models::deepseek::DEEPSEEK_V4_1_FLASH],
+        id: models::deepseek::DEEPSEEK_FLASH,
+        parse: [models::deepseek::DEEPSEEK_FLASH],
         display: "DeepSeek V4.1 Flash",
         description: "Latest flash model with improved reasoning, efficiency, and agent capabilities",
     },
@@ -270,20 +214,6 @@ model_id_table! {
         parse: [models::meta::MUSE_SPARK_1_1],
         display: "Muse Spark 1.1 (Meta AI)",
         description: "Official Meta AI Muse Spark 1.1 Standard-tier model with always-on reasoning and long context",
-    },
-    MetaMuseSpark12 {
-        provider: Meta,
-        id: models::meta::MUSE_SPARK_1_2,
-        parse: [models::meta::MUSE_SPARK_1_2],
-        display: "Muse Spark 1.2 (Meta AI)",
-        description: "Official Meta AI Muse Spark 1.2 Standard-tier flagship with always-on reasoning and long context",
-    },
-    MetaMuseSpark12Contributor {
-        provider: Meta,
-        id: models::meta::MUSE_SPARK_1_2_CONTRIBUTOR,
-        parse: [models::meta::MUSE_SPARK_1_2_CONTRIBUTOR],
-        display: "Muse Spark 1.2 Contributor (Meta AI)",
-        description: "Official Meta AI Muse Spark 1.2 Contributor-tier variant with always-on reasoning and long context",
     },
     MetaMuseSpark13 {
         provider: Meta,
@@ -321,20 +251,6 @@ model_id_table! {
         display: "Nemotron 3 Nano (NVIDIA)",
         description: "Efficient NVIDIA Nemotron 3 Nano model for coding, reasoning, instruction following, and tool use via NVIDIA NIM",
     },
-    NvidiaZaiGlm52 {
-        provider: NVIDIA,
-        id: models::nvidia::Z_AI_GLM_5_2,
-        parse: [],
-        display: "GLM-5.2 (NVIDIA)",
-        description: "Z.AI GLM-5.2 served through NVIDIA NIM for long-horizon reasoning and coding",
-    },
-    NvidiaDeepseekV4Flash0731 {
-        provider: NVIDIA,
-        id: models::nvidia::DEEPSEEK_V4_FLASH_0731,
-        parse: [models::nvidia::DEEPSEEK_V4_FLASH_0731],
-        display: "DeepSeek V4 Flash (NVIDIA)",
-        description: "DeepSeek V4 Flash served through NVIDIA NIM for fast reasoning and agentic coding",
-    },
     // Merge Gateway routes
     MergeGatewayDefaultRouting {
         provider: MergeGateway,
@@ -343,13 +259,6 @@ model_id_table! {
         display: "Default Routing (Merge Gateway)",
         description: "Merge Gateway's automatic route selection across configured model vendors",
     },
-    MergeGatewayOpenAIGpt55 {
-        provider: MergeGateway,
-        id: models::merge_gateway::OPENAI_GPT_5_5,
-        parse: [models::merge_gateway::OPENAI_GPT_5_5],
-        display: "GPT-5.5 (Merge Gateway)",
-        description: "OpenAI GPT-5.5 accessed through Merge Gateway's OpenAI-compatible endpoint",
-    },
     MergeGatewayAnthropicClaudeOpus5 {
         provider: MergeGateway,
         id: models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5,
@@ -357,38 +266,10 @@ model_id_table! {
         display: "Claude Opus 5 (Merge Gateway)",
         description: "Anthropic Claude Opus 5 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
-    MergeGatewayGoogleGemini36Flash {
+    MergeGatewayDeepseekFlash {
         provider: MergeGateway,
-        id: models::merge_gateway::GOOGLE_GEMINI_3_6_FLASH,
-        parse: [models::merge_gateway::GOOGLE_GEMINI_3_6_FLASH],
-        display: "Gemini 3.6 Flash (Merge Gateway)",
-        description: "Google Gemini 3.6 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
-    },
-    MergeGatewayGoogleGemini37Flash {
-        provider: MergeGateway,
-        id: models::merge_gateway::GOOGLE_GEMINI_3_7_FLASH,
-        parse: [models::merge_gateway::GOOGLE_GEMINI_3_7_FLASH],
-        display: "Gemini 3.7 Flash (Merge Gateway)",
-        description: "Google Gemini 3.7 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
-    },
-    MergeGatewayDeepseekV4Pro0813 {
-        provider: MergeGateway,
-        id: models::merge_gateway::DEEPSEEK_V4_PRO_0813,
-        parse: [models::merge_gateway::DEEPSEEK_V4_PRO_0813],
-        display: "DeepSeek V4 Pro 0813 (Merge Gateway)",
-        description: "DeepSeek V4 Pro 0813 accessed through Merge Gateway's OpenAI-compatible endpoint",
-    },
-    MergeGatewayDeepseekV4Flash0731 {
-        provider: MergeGateway,
-        id: models::merge_gateway::DEEPSEEK_V4_FLASH_0731,
-        parse: [models::merge_gateway::DEEPSEEK_V4_FLASH_0731],
-        display: "DeepSeek V4 Flash 0731 (Merge Gateway)",
-        description: "DeepSeek V4 Flash 0731 accessed through Merge Gateway's OpenAI-compatible endpoint",
-    },
-    MergeGatewayDeepseekV41Flash {
-        provider: MergeGateway,
-        id: models::merge_gateway::DEEPSEEK_V4_1_FLASH,
-        parse: [models::merge_gateway::DEEPSEEK_V4_1_FLASH],
+        id: models::merge_gateway::DEEPSEEK_FLASH,
+        parse: [models::merge_gateway::DEEPSEEK_FLASH],
         display: "DeepSeek V4.1 Flash (Merge Gateway)",
         description: "DeepSeek V4.1 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
@@ -398,13 +279,6 @@ model_id_table! {
         parse: [models::merge_gateway::XAI_GROK_4_6],
         display: "Grok 4.6 (Merge Gateway)",
         description: "xAI Grok 4.6 accessed through Merge Gateway's OpenAI-compatible endpoint",
-    },
-    MergeGatewayQwen38Max {
-        provider: MergeGateway,
-        id: models::merge_gateway::QWEN_3_8_MAX,
-        parse: [models::merge_gateway::QWEN_3_8_MAX],
-        display: "Qwen3.8 Max (Merge Gateway)",
-        description: "Qwen3.8 Max accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayMinimaxH3 {
         provider: MergeGateway,
@@ -490,13 +364,6 @@ model_id_table! {
         display: "Claude Fable 5.1 (Merge Gateway)",
         description: "Anthropic Claude Fable 5.1 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
-    MergeGatewayDeepseekV4Flash0731Fast {
-        provider: MergeGateway,
-        id: models::merge_gateway::DEEPSEEK_V4_FLASH_0731_FAST,
-        parse: [models::merge_gateway::DEEPSEEK_V4_FLASH_0731_FAST],
-        display: "DeepSeek V4 Flash 0731 Fast (Merge Gateway)",
-        description: "DeepSeek V4 Flash 0731 Fast served through Merge Gateway's OpenAI-compatible endpoint",
-    },
     // Mistral models
     MistralLarge3 {
         provider: Mistral,
@@ -520,13 +387,6 @@ model_id_table! {
         display: "GPT-OSS 120B (HF)",
         description: "OpenAI GPT-OSS 120B via Hugging Face router",
     },
-    HuggingFaceGlm52Novita {
-        provider: HuggingFace,
-        id: models::huggingface::ZAI_GLM_5_2_NOVITA,
-        parse: [models::huggingface::ZAI_GLM_5_2_NOVITA],
-        display: "GLM-5.2 (Novita)",
-        description: "Z.ai GLM-5.2 flagship model via Novita inference provider on HuggingFace router. 1M context for long-horizon tasks.",
-    },
     HuggingFaceGlm53FlashTogether {
         provider: HuggingFace,
         id: models::huggingface::ZAI_GLM_5_3_FLASH_TOGETHER,
@@ -548,44 +408,12 @@ model_id_table! {
         display: "Kimi K3 (Together)",
         description: "Kimi K3 2.8T flagship with 1M context and native vision via Together inference provider on HuggingFace router.",
     },
-    HuggingFaceDeepseekV4FlashNovita {
-        provider: HuggingFace,
-        id: models::huggingface::DEEPSEEK_V4_FLASH_NOVITA,
-        parse: [models::huggingface::DEEPSEEK_V4_FLASH_NOVITA],
-        display: "DeepSeek V4 Flash (Novita)",
-        description: "DeepSeek V4 Flash via Novita inference provider on HuggingFace router. Fast inference model for cost-effective reasoning (1M context, 158B params).",
-    },
-    HuggingFaceDeepseekV4ProTogether {
-        provider: HuggingFace,
-        id: models::huggingface::DEEPSEEK_V4_PRO_TOGETHER,
-        parse: [models::huggingface::DEEPSEEK_V4_PRO_TOGETHER],
-        display: "DeepSeek V4 Pro (Together)",
-        description: "DeepSeek V4 Pro via Together inference provider on HuggingFace router. High-performance reasoning model with advanced thinking capabilities (1M context, 1.6T params).",
-    },
-    HuggingFaceStep35Flash {
-        provider: HuggingFace,
-        id: models::huggingface::STEP_3_5_FLASH,
-        parse: [
-            models::huggingface::STEP_3_5_FLASH,
-            models::huggingface::STEP_3_5_FLASH_BASE,
-            models::huggingface::STEP_3_5_FLASH_LEGACY_FASTEST,
-        ],
-        display: "Step 3.5 Flash (HF)",
-        description: "Step 3.5 Flash flagship model via HuggingFace router (featherless-ai provider). Supports streaming and fast inference.",
-    },
     HuggingFaceMinimaxM3Novita {
         provider: HuggingFace,
         id: models::huggingface::MINIMAX_M3_NOVITA,
         parse: [models::huggingface::MINIMAX_M3_NOVITA],
         display: "MiniMax-M3 (Novita)",
         description: "MiniMax-M3 model via Novita inference provider on HuggingFace router. Frontier multimodal coding model with 1M context window.",
-    },
-    HuggingFaceDeepseekV4ProNovita {
-        provider: HuggingFace,
-        id: models::huggingface::DEEPSEEK_V4_PRO_NOVITA,
-        parse: [models::huggingface::DEEPSEEK_V4_PRO_NOVITA],
-        display: "DeepSeek V4 Pro (Novita)",
-        description: "DeepSeek V4 Pro via Novita inference provider on HuggingFace router. High-performance reasoning model with advanced thinking capabilities (1M context, 1.6T params).",
     },
     // StepFun models
     StepFun37Flash {
@@ -596,75 +424,19 @@ model_id_table! {
         description: "StepFun's flagship multimodal reasoning model with 256K context, native image/video input, and tool calling.",
     },
     // Evolink gateway models (namespaced; the provider strips the `evolink/` prefix)
-    EvolinkGpt52 {
-        provider: Evolink,
-        id: "evolink/gpt-5.2",
-        parse: ["evolink/gpt-5.2"],
-        display: "GPT-5.2 (Evolink)",
-        description: "GPT-5.2 served through the Evolink OpenAI-compatible gateway (direct.evolink.ai).",
-    },
-    EvolinkGpt55 {
-        provider: Evolink,
-        id: "evolink/gpt-5.5",
-        parse: ["evolink/gpt-5.5"],
-        display: "GPT-5.5 (Evolink)",
-        description: "GPT-5.5 flagship model served through the Evolink OpenAI-compatible gateway (direct.evolink.ai).",
-    },
-    EvolinkDeepseekV4Pro {
-        provider: Evolink,
-        id: "evolink/deepseek-v4-pro",
-        parse: ["evolink/deepseek-v4-pro"],
-        display: "DeepSeek V4 Pro (Evolink)",
-        description: "DeepSeek V4 Pro reasoning model served through the Evolink gateway (direct.evolink.ai).",
-    },
-    EvolinkDeepseekV4Flash {
-        provider: Evolink,
-        id: "evolink/deepseek-v4-flash",
-        parse: ["evolink/deepseek-v4-flash"],
-        display: "DeepSeek V4 Flash (Evolink)",
-        description: "DeepSeek V4 Flash fast inference model served through the Evolink gateway (direct.evolink.ai).",
-    },
-    EvolinkDoubaoSeed20Pro {
-        provider: Evolink,
-        id: "evolink/doubao-seed-2.0-pro",
-        parse: ["evolink/doubao-seed-2.0-pro"],
-        display: "Doubao Seed 2.0 Pro (Evolink)",
-        description: "Doubao Seed 2.0 Pro served through the Evolink gateway (direct.evolink.ai).",
-    },
     EvolinkGemini31Pro {
-        provider: Evolink,
-        id: "evolink/gemini-3.1-pro-preview",
-        parse: ["evolink/gemini-3.1-pro-preview"],
-        display: "Gemini 3.1 Pro (Evolink)",
-        description: "Gemini 3.1 Pro served through the Evolink gateway via OpenAI SDK format (direct.evolink.ai).",
-    },
-    EvolinkGemini35Flash {
-        provider: Evolink,
-        id: "evolink/gemini-3.5-flash",
-        parse: ["evolink/gemini-3.5-flash"],
-        display: "Gemini 3.5 Flash (Evolink)",
-        description: "Gemini 3.5 Flash served through the Evolink gateway via OpenAI SDK format (direct.evolink.ai).",
-    },
-    EvolinkMinimaxM3 {
+         provider: Evolink,
+         id: "evolink/gemini-3.1-pro-preview",
+         parse: ["evolink/gemini-3.1-pro-preview"],
+         display: "Gemini 3.1 Pro (Evolink)",
+         description: "Gemini 3.1 Pro served through the Evolink gateway via OpenAI SDK format (direct.evolink.ai).",
+     },
+     EvolinkMinimaxM3 {
         provider: Evolink,
         id: "evolink/MiniMax-M3",
         parse: ["evolink/MiniMax-M3"],
         display: "MiniMax-M3 (Evolink)",
         description: "MiniMax-M3 frontier multimodal model served through the Evolink gateway (direct.evolink.ai).",
-    },
-    EvolinkClaudeSonnet46 {
-        provider: Evolink,
-        id: "evolink/claude-sonnet-4-6",
-        parse: ["evolink/claude-sonnet-4-6"],
-        display: "Claude Sonnet 4.6 (Evolink)",
-        description: "Claude Sonnet 4.6 served through the Evolink gateway via Anthropic Messages API.",
-    },
-    EvolinkClaudeOpus48 {
-        provider: Evolink,
-        id: "evolink/claude-opus-4-8",
-        parse: ["evolink/claude-opus-4-8"],
-        display: "Claude Opus 4.8 (Evolink)",
-        description: "Claude Opus 4.8 served through the Evolink gateway via Anthropic Messages API.",
     },
     EvolinkClaudeHaiku45 {
         provider: Evolink,
@@ -687,13 +459,6 @@ model_id_table! {
         parse: [models::zai::GLM_5_3_FLASH],
         display: "GLM 5.3 Flash",
         description: "Z.ai efficient multimodal model with hybrid sparse+linear attention, 320B total / 18B active, 1M context and native vision",
-    },
-    ZaiGlm52 {
-        provider: ZAI,
-        id: models::zai::GLM_5_2,
-        parse: [models::zai::GLM_5_2],
-        display: "GLM 5.2",
-        description: "Z.ai flagship model for long-horizon tasks with truly usable 1M-token context",
     },
     // MiMo models
     MiMoV25Pro {
@@ -718,13 +483,6 @@ model_id_table! {
         display: "Kimi K3 (Moonshot)",
         description: "Kimi K3 - Moonshot.ai's 2.8T parameter flagship with Delta Attention, native vision, 1M context, and always-on deep reasoning",
     },
-    MoonshotKimiK27Code {
-        provider: Moonshot,
-        id: models::moonshot::KIMI_K2_7_CODE,
-        parse: [models::moonshot::KIMI_K2_7_CODE],
-        display: "Kimi K2.7 Code (Moonshot)",
-        description: "Kimi K2.7 Code - Moonshot.ai's most capable coding model with long-horizon coding breakthrough, 256K context, and strong reasoning",
-    },
     // OpenCode Zen models (parse only via the `opencode/`/`opencode-zen/` prefix)
     // OpenCode Go models (parse only via the `opencode-go/` prefix)
     OpenCodeGoGlm53 {
@@ -733,13 +491,6 @@ model_id_table! {
         parse: [],
         display: "GLM-5.3 (OpenCode Go)",
         description: "GLM-5.3 included with the OpenCode Go subscription for frontier long-horizon coding",
-    },
-    OpenCodeGoGlm52 {
-        provider: OpenCodeGo,
-        id: models::opencode_go::GLM_5_2,
-        parse: [],
-        display: "GLM-5.2 (OpenCode Go)",
-        description: "GLM-5.2 included with the OpenCode Go subscription for flagship open-model coding",
     },
     OpenCodeGoGpt56Luna {
         provider: OpenCodeGo,
@@ -754,13 +505,6 @@ model_id_table! {
         parse: [],
         display: "Kimi K3 (OpenCode Go)",
         description: "Kimi K3 included with the OpenCode Go subscription for frontier agentic coding",
-    },
-    OpenCodeGoKimiK27Code {
-        provider: OpenCodeGo,
-        id: models::opencode_go::KIMI_K2_7_CODE,
-        parse: [],
-        display: "Kimi K2.7 Code (OpenCode Go)",
-        description: "Kimi K2.7 Code included with the OpenCode Go subscription for long-horizon coding",
     },
     OpenCodeGoMimoV25 {
         provider: OpenCodeGo,
@@ -782,77 +526,6 @@ model_id_table! {
         parse: [],
         display: "MiniMax-M3 (OpenCode Go)",
         description: "MiniMax-M3 included with the OpenCode Go subscription for frontier agentic coding",
-    },
-    OpenCodeGoMuseSpark12Contributor {
-        provider: OpenCodeGo,
-        id: models::opencode_go::MUSE_SPARK_1_2_CONTRIBUTOR,
-        parse: [],
-        display: "Muse Spark 1.2 Contributor (OpenCode Go)",
-        description: "Muse Spark 1.2 Contributor included with the OpenCode Go subscription (limited regions)",
-    },
-    OpenCodeGoQwen38Max {
-        provider: OpenCodeGo,
-        id: models::opencode_go::QWEN_3_8_MAX,
-        parse: [],
-        display: "Qwen3.8 Max (OpenCode Go)",
-        description: "Qwen3.8 Max included with the OpenCode Go subscription for the highest capability tier",
-    },
-    OpenCodeGoQwen37Max {
-        provider: OpenCodeGo,
-        id: models::opencode_go::QWEN_3_7_MAX,
-        parse: [],
-        display: "Qwen3.7 Max (OpenCode Go)",
-        description: "Qwen3.7 Max included with the OpenCode Go subscription for the highest capability tier",
-    },
-    OpenCodeGoQwen37Plus {
-        provider: OpenCodeGo,
-        id: models::opencode_go::QWEN_3_7_PLUS,
-        parse: [],
-        display: "Qwen3.7 Plus (OpenCode Go)",
-        description: "Qwen3.7 Plus included with the OpenCode Go subscription as a balanced coding model",
-    },
-    OpenCodeGoQwen36Plus {
-        provider: OpenCodeGo,
-        id: models::opencode_go::QWEN_3_6_PLUS,
-        parse: [],
-        display: "Qwen3.6 Plus (OpenCode Go)",
-        description: "Qwen3.6 Plus included with the OpenCode Go subscription for cost-effective coding",
-    },
-    OpenCodeGoDeepseekV4Pro {
-        provider: OpenCodeGo,
-        id: models::opencode_go::DEEPSEEK_V4_PRO,
-        parse: [],
-        display: "DeepSeek V4 Pro (OpenCode Go)",
-        description: "DeepSeek V4 Pro included with the OpenCode Go subscription for high-quality reasoning",
-    },
-    OpenCodeGoDeepseekV4Flash {
-        provider: OpenCodeGo,
-        id: models::opencode_go::DEEPSEEK_V4_FLASH,
-        parse: [],
-        display: "DeepSeek V4 Flash (OpenCode Go)",
-        description: "DeepSeek V4 Flash included with the OpenCode Go subscription for fast, low-cost coding",
-    },
-    OpenCodeGoHy3 {
-        provider: OpenCodeGo,
-        id: models::opencode_go::HY3,
-        parse: [],
-        display: "Hy3 (OpenCode Go)",
-        description: "Hy3 included with the OpenCode Go subscription for high-volume coding",
-    },
-    // Qwen models (picker-only; their ids resolve to the native variants above)
-    QwenDeepSeekV4Flash {
-        provider: Qwen,
-        id: models::qwen::DEEPSEEK_V4_FLASH,
-        parse: [],
-        display: "DeepSeek V4 Flash (Qwen)",
-        description: "DeepSeek V4 Flash fast inference model served through Qwen Cloud API (1M context)",
-    },
-    QwenDeepSeekV4Pro {
-        provider: Qwen,
-        id: models::qwen::DEEPSEEK_V4_PRO,
-        parse: [],
-        display: "DeepSeek V4 Pro (Qwen)",
-        description: "DeepSeek V4 Pro high-performance reasoning model served through Qwen Cloud API (1M context)",
     },
     // Ollama models
     OllamaGptOss20b {
@@ -876,20 +549,6 @@ model_id_table! {
         display: "GPT-OSS 120B (cloud)",
         description: "Cloud-hosted GPT-OSS 120B accessed through Ollama Cloud for larger reasoning tasks",
     },
-    OllamaDeepseekV4FlashCloud {
-        provider: OllamaCloud,
-        id: models::ollama::DEEPSEEK_V4_FLASH_CLOUD,
-        parse: [models::ollama::DEEPSEEK_V4_FLASH_CLOUD],
-        display: "DeepSeek V4 Flash (cloud)",
-        description: "DeepSeek V4 Flash cloud deployment via Ollama with fast inference and efficient reasoning",
-    },
-    OllamaDeepseekV4ProCloud {
-        provider: OllamaCloud,
-        id: models::ollama::DEEPSEEK_V4_PRO_CLOUD,
-        parse: [models::ollama::DEEPSEEK_V4_PRO_CLOUD],
-        display: "DeepSeek V4 Pro (cloud)",
-        description: "DeepSeek V4 Pro cloud deployment via Ollama with advanced thinking and strong reasoning",
-    },
     OllamaMinimaxM3Cloud {
         provider: OllamaCloud,
         id: models::ollama::MINIMAX_M3_CLOUD,
@@ -897,26 +556,12 @@ model_id_table! {
         display: "MiniMax-M3 (cloud)",
         description: "Cloud-hosted MiniMax-M3 model served via Ollama Cloud",
     },
-    OllamaGlm52Cloud {
-        provider: OllamaCloud,
-        id: models::ollama::GLM_5_2_CLOUD,
-        parse: [models::ollama::GLM_5_2_CLOUD],
-        display: "GLM-5.2 (cloud)",
-        description: "Cloud-hosted GLM-5.2 flagship model for long-horizon tasks with 1M context via Ollama Cloud",
-    },
     OllamaGlm53Cloud {
         provider: OllamaCloud,
         id: models::ollama::GLM_5_3_CLOUD,
         parse: [models::ollama::GLM_5_3_CLOUD],
         display: "GLM-5.3 (cloud)",
         description: "Cloud-hosted GLM-5.3 flagship model for long-horizon tasks with 1M context via Ollama Cloud",
-    },
-    OllamaKimiK27CodeCloud {
-        provider: OllamaCloud,
-        id: models::ollama::KIMI_K2_7_CODE_CLOUD,
-        parse: [models::ollama::KIMI_K2_7_CODE_CLOUD],
-        display: "Kimi-K2.7-Code (cloud)",
-        description: "Cloud-hosted Kimi K2.7 Code model served via Ollama Cloud",
     },
     OllamaKimiK3Cloud {
         provider: OllamaCloud,
@@ -931,13 +576,6 @@ model_id_table! {
         parse: [models::ollama::GEMMA_4],
         display: "Gemma 4",
         description: "Google Gemma 4 model designed for frontier-level reasoning, agentic workflows, coding, and multimodal understanding (128K context).",
-    },
-    OllamaLagunaXs2 {
-        provider: Ollama,
-        id: models::ollama::LAGUNA_XS_2,
-        parse: [models::ollama::LAGUNA_XS_2],
-        display: "Laguna XS.2 (local)",
-        description: "Poolside's 33B MoE model with 3B activated parameters, optimized for agentic coding with sliding window attention and native reasoning support (128K context)",
     },
     // llama.cpp models
     LlamaCppGemma426bA4b {
@@ -961,13 +599,6 @@ model_id_table! {
         display: "GPT-OSS 20B (llama.cpp)",
         description: "OpenAI's open-weight GPT-OSS 20B model served locally through llama.cpp",
     },
-    LlamaCppStep35Flash {
-        provider: LlamaCpp,
-        id: models::llamacpp::STEP_3_5_FLASH,
-        parse: [models::llamacpp::STEP_3_5_FLASH],
-        display: "Step 3.5 Flash (llama.cpp)",
-        description: "StepFun's efficient reasoning model served locally through llama.cpp",
-    },
     // MiniMax models
     MinimaxM3 {
         provider: Minimax,
@@ -977,48 +608,12 @@ model_id_table! {
         description: "Frontier multimodal coding model with 1M context window",
     },
     // xAI models
-    XaiGrokBuild01 {
-        provider: XAI,
-        id: models::xai::GROK_BUILD_0_1,
-        parse: [models::xai::GROK_BUILD_0_1],
-        display: "Grok Build 0.1",
-        description: "xAI's fast coding model for agentic software engineering (256k context)",
-    },
     XaiGrok46 {
         provider: XAI,
         id: models::xai::GROK_4_6,
         parse: [models::xai::GROK_4_6],
         display: "Grok 4.6",
         description: "xAI's flagship reasoning model with reasoning_effort support (500k context)",
-    },
-    XaiGrok420Reasoning {
-        provider: XAI,
-        id: models::xai::GROK_4_20_REASONING,
-        parse: [models::xai::GROK_4_20_REASONING],
-        display: "Grok 4.20 Reasoning",
-        description: "xAI's reasoning-optimized model with chain-of-thought (1M context)",
-    },
-    // Poolside models
-    PoolsideLagunaM1 {
-        provider: Poolside,
-        id: models::poolside::LAGUNA_M1,
-        parse: [models::poolside::LAGUNA_M1],
-        display: "Laguna M.1",
-        description: "Poolside's flagship MoE coding agent model with 128K context, optimized for multi-step agentic tasks, tool use, and validation",
-    },
-    PoolsideLagunaXs2 {
-        provider: Poolside,
-        id: models::poolside::LAGUNA_XS2,
-        parse: [models::poolside::LAGUNA_XS2],
-        display: "Laguna XS.2",
-        description: "Poolside's efficient MoE coding agent model with 128K context, optimized for fast agentic coding with lower resource requirements",
-    },
-    PoolsideLagunaS21 {
-        provider: Poolside,
-        id: models::poolside::LAGUNA_S_2_1,
-        parse: [models::poolside::LAGUNA_S_2_1],
-        display: "Laguna S 2.1",
-        description: "Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks, tool use, and validation",
     },
     // Vercel AI Gateway models (ids use the gateway's native `vendor/model` format)
     VercelAnthropicClaudeSonnet5 {
@@ -1063,20 +658,6 @@ model_id_table! {
         display: "GPT-5.6 Luna (Vercel AI Gateway)",
         description: "OpenAI GPT-5.6 Luna cost-efficient reasoning model served through the Vercel AI Gateway",
     },
-    VercelOpenAiGpt53Codex {
-        provider: Vercel,
-        id: models::vercel::OPENAI_GPT_5_3_CODEX,
-        parse: [models::vercel::OPENAI_GPT_5_3_CODEX],
-        display: "GPT-5.3 Codex (Vercel AI Gateway)",
-        description: "OpenAI GPT-5.3 Codex coding-specialized model served through the Vercel AI Gateway",
-    },
-    VercelGoogleGemini31ProPreview {
-        provider: Vercel,
-        id: models::vercel::GOOGLE_GEMINI_3_1_PRO_PREVIEW,
-        parse: [models::vercel::GOOGLE_GEMINI_3_1_PRO_PREVIEW],
-        display: "Gemini 3.1 Pro Preview (Vercel AI Gateway)",
-        description: "Google Gemini 3.1 Pro Preview served through the Vercel AI Gateway",
-    },
     VercelGoogleGemini38Flash {
         provider: Vercel,
         id: models::vercel::GOOGLE_GEMINI_3_8_FLASH,
@@ -1084,24 +665,10 @@ model_id_table! {
         display: "Gemini 3.8 Flash (Vercel AI Gateway)",
         description: "Google Gemini 3.8 Flash fast, cost-efficient model served through the Vercel AI Gateway",
     },
-    VercelDeepseekV4Pro {
+    VercelDeepseekFlash {
         provider: Vercel,
-        id: models::vercel::DEEPSEEK_V4_PRO,
-        parse: [models::vercel::DEEPSEEK_V4_PRO],
-        display: "DeepSeek V4 Pro (Vercel AI Gateway)",
-        description: "DeepSeek V4 Pro flagship reasoning model served through the Vercel AI Gateway",
-    },
-    VercelDeepseekV4Flash {
-        provider: Vercel,
-        id: models::vercel::DEEPSEEK_V4_FLASH,
-        parse: [models::vercel::DEEPSEEK_V4_FLASH],
-        display: "DeepSeek V4 Flash (Vercel AI Gateway)",
-        description: "DeepSeek V4 Flash fast, cost-efficient reasoning model served through the Vercel AI Gateway",
-    },
-    VercelDeepseekV41Flash {
-        provider: Vercel,
-        id: models::vercel::DEEPSEEK_V4_1_FLASH,
-        parse: [models::vercel::DEEPSEEK_V4_1_FLASH],
+        id: models::vercel::DEEPSEEK_FLASH,
+        parse: [models::vercel::DEEPSEEK_FLASH],
         display: "DeepSeek V4.1 Flash (Vercel AI Gateway)",
         description: "DeepSeek V4.1 Flash latest flash model served through the Vercel AI Gateway",
     },
@@ -1112,40 +679,12 @@ model_id_table! {
         display: "Kimi K3 (Vercel AI Gateway)",
         description: "Moonshot AI Kimi K3 flagship reasoning model served through the Vercel AI Gateway",
     },
-    VercelMoonshotaiKimiK27Code {
-        provider: Vercel,
-        id: models::vercel::MOONSHOTAI_KIMI_K2_7_CODE,
-        parse: [models::vercel::MOONSHOTAI_KIMI_K2_7_CODE],
-        display: "Kimi K2.7 Code (Vercel AI Gateway)",
-        description: "Moonshot AI Kimi K2.7 Code coding-specialized model served through the Vercel AI Gateway",
-    },
-    VercelAlibabaQwen38Max {
-        provider: Vercel,
-        id: models::vercel::ALIBABA_QWEN_3_8_MAX,
-        parse: [models::vercel::ALIBABA_QWEN_3_8_MAX],
-        display: "Qwen3.8 Max (Vercel AI Gateway)",
-        description: "Alibaba Qwen3.8 Max flagship model served through the Vercel AI Gateway",
-    },
-    VercelAlibabaQwen3CoderNext {
-        provider: Vercel,
-        id: models::vercel::ALIBABA_QWEN_3_CODER_NEXT,
-        parse: [models::vercel::ALIBABA_QWEN_3_CODER_NEXT],
-        display: "Qwen3 Coder Next (Vercel AI Gateway)",
-        description: "Alibaba Qwen3 Coder Next coding-specialized model served through the Vercel AI Gateway",
-    },
     VercelMinimaxM3 {
         provider: Vercel,
         id: models::vercel::MINIMAX_M3,
         parse: [models::vercel::MINIMAX_M3],
         display: "MiniMax M3 (Vercel AI Gateway)",
-        description: "MiniMax M3 long-context reasoning model served through the Vercel AI Gateway",
-    },
-    VercelMistralDevstral2 {
-        provider: Vercel,
-        id: models::vercel::MISTRAL_DEVSTRAL_2,
-        parse: [models::vercel::MISTRAL_DEVSTRAL_2],
-        display: "Devstral 2 (Vercel AI Gateway)",
-        description: "Mistral Devstral 2 coding model served through the Vercel AI Gateway",
+        description: "MiniMax M3 model served through the Vercel AI Gateway",
     },
 }
 
@@ -1163,47 +702,28 @@ mod tests {
     /// resolve to) native provider variants. They are reachable only through
     /// picker selection or provider prefixes (`opencode*/`).
     fn round_trip_exempt(model: &ModelId) -> bool {
-        matches!(
-            model.provider(),
-            Provider::OpenCodeZen | Provider::OpenCodeGo | Provider::Qwen
-        )
-        // GLM-5.2 is also a curated OpenRouter model, and bare parsing keeps
-        // the existing OpenRouter precedence. Select the NVIDIA variant via
-        // the picker or an explicit provider.
-        || *model == ModelId::NvidiaZaiGlm52
-        // "gpt-oss-20b" is shared with OpenAI and parses to OpenAIGptOss20b
-        // (legacy behavior preserved by table row order).
-        || *model == ModelId::LlamaCppGptOss20b
-        // Merge Gateway's curated upstream ids intentionally match OpenRouter
-        // ids; explicit provider configuration selects the Merge route.
-        || matches!(
-            model,
-            ModelId::MergeGatewayOpenAIGpt55
-                | ModelId::MergeGatewayAnthropicClaudeOpus5
-                | ModelId::MergeGatewayGoogleGemini36Flash
-                | ModelId::MergeGatewayGoogleGemini37Flash
-                | ModelId::MergeGatewayGoogleGemini38Flash
-                | ModelId::MergeGatewayMetaMuseSpark13
-                | ModelId::MergeGatewayOpenAIGpt6Astra
-                | ModelId::MergeGatewayDeepseekV41Flash
-        )
-        // Vercel AI Gateway's curated `vendor/model` ids intentionally match
-        // OpenRouter ids; explicit provider configuration selects the Vercel
-        // route (bare parsing keeps the existing OpenRouter precedence).
-        || matches!(
-            model,
-            ModelId::VercelAnthropicClaudeSonnet5
-                | ModelId::VercelAnthropicClaudeOpus5
-                | ModelId::VercelOpenAiGpt6Astra
-                | ModelId::VercelOpenAiGpt56Sol
-                | ModelId::VercelOpenAiGpt56Luna
-                | ModelId::VercelGoogleGemini38Flash
-                | ModelId::VercelDeepseekV4Pro
-                | ModelId::VercelDeepseekV4Flash
-                | ModelId::VercelDeepseekV41Flash
-                | ModelId::VercelMoonshotaiKimiK3
-                | ModelId::VercelMoonshotaiKimiK27Code
-        )
+        let exempt = matches!(model.provider(), Provider::OpenCodeZen | Provider::OpenCodeGo | Provider::Qwen)
+            || *model == ModelId::LlamaCppGptOss20b
+            || matches!(
+                model,
+                ModelId::MergeGatewayAnthropicClaudeOpus5
+                    | ModelId::MergeGatewayGoogleGemini38Flash
+                    | ModelId::MergeGatewayMetaMuseSpark13
+                    | ModelId::MergeGatewayOpenAIGpt6Astra
+                    | ModelId::MergeGatewayDeepseekFlash
+            )
+            || matches!(
+                model,
+                ModelId::VercelAnthropicClaudeSonnet5
+                    | ModelId::VercelAnthropicClaudeOpus5
+                    | ModelId::VercelOpenAiGpt6Astra
+                    | ModelId::VercelOpenAiGpt56Sol
+                    | ModelId::VercelOpenAiGpt56Luna
+                    | ModelId::VercelGoogleGemini38Flash
+                    | ModelId::VercelDeepseekFlash
+                    | ModelId::VercelMoonshotaiKimiK3
+            );
+        exempt
     }
 
     #[test]
@@ -1234,10 +754,7 @@ mod tests {
         let cases: &[(&str, ModelId)] = &[
             (models::GPT, ModelId::GPT56Sol),
             (models::openai::GPT_5_6_SOL, ModelId::GPT56Sol),
-            (models::GEMINI_3_FLASH_PREVIEW, ModelId::Gemini37Flash),
             (models::CLAUDE_SONNET_5, ModelId::ClaudeSonnet5),
-            (models::huggingface::STEP_3_5_FLASH_BASE, ModelId::HuggingFaceStep35Flash),
-            (models::huggingface::STEP_3_5_FLASH_LEGACY_FASTEST, ModelId::HuggingFaceStep35Flash),
         ];
         for (alias, expected) in cases {
             let parsed = ModelId::from_str(alias).unwrap_or_else(|err| panic!("alias {alias} failed to parse: {err}"));

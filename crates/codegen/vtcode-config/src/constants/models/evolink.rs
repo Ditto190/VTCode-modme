@@ -11,9 +11,6 @@
 // --- OpenAI-compatible models (Chat Completions API) ---
 pub const GPT_5_6: &str = "gpt-5.6";
 pub const GPT_5_6_SOL: &str = "gpt-5.6-sol";
-pub const DEEPSEEK_V4_PRO: &str = "deepseek-v4-pro";
-pub const DEEPSEEK_V4_FLASH: &str = "deepseek-v4-flash";
-pub const DOUBAO_SEED_2_0_PRO: &str = "doubao-seed-2.0-pro";
 pub const GEMINI_3_1_PRO: &str = "gemini-3.7-flash";
 pub const GEMINI_3_7_FLASH: &str = "gemini-3.7-flash";
 pub const MINIMAX_M3: &str = "MiniMax-M3";
@@ -28,9 +25,6 @@ pub const DEFAULT_MODEL: &str = GPT_5_6;
 pub const SUPPORTED_MODELS: &[&str] = &[
     GPT_5_6,
     GPT_5_6_SOL,
-    DEEPSEEK_V4_PRO,
-    DEEPSEEK_V4_FLASH,
-    DOUBAO_SEED_2_0_PRO,
     GEMINI_3_1_PRO,
     GEMINI_3_7_FLASH,
     MINIMAX_M3,
@@ -44,7 +38,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
 const ANTHROPIC_FORMAT_MODELS: &[&str] = &[CLAUDE_SONNET_5, CLAUDE_OPUS_5, CLAUDE_OPUS_5, CLAUDE_SONNET_5];
 
 /// Models that emit reasoning traces / accept `reasoning_effort`.
-pub const REASONING_MODELS: &[&str] = &[DEEPSEEK_V4_PRO, DEEPSEEK_V4_FLASH, DOUBAO_SEED_2_0_PRO];
+pub const REASONING_MODELS: &[&str] = &[];
 
 /// Returns `true` if the model should use the Anthropic Messages API format.
 pub fn is_anthropic_format(model: &str) -> bool {

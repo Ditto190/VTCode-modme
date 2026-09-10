@@ -249,28 +249,15 @@ impl ModelId {
     pub fn is_flash_variant(&self) -> bool {
         matches!(
             self,
-            ModelId::Gemini37Flash
-                | ModelId::Gemini38Flash
-                | ModelId::MergeGatewayGoogleGemini36Flash
-                | ModelId::MergeGatewayGoogleGemini37Flash
+            ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
-                | ModelId::EvolinkGemini35Flash
-                | ModelId::EvolinkDeepseekV4Flash
                 | ModelId::VercelGoogleGemini38Flash
-                | ModelId::VercelDeepseekV4Flash
-                | ModelId::VercelDeepseekV41Flash
+                | ModelId::VercelDeepseekFlash
                 | ModelId::VercelOpenAiGpt56Luna
                 | ModelId::VercelAnthropicClaudeHaiku45
-                | ModelId::OpenRouterStepfunStep35FlashFree
-                | ModelId::HuggingFaceStep35Flash
                 | ModelId::StepFun37Flash
-                | ModelId::HuggingFaceDeepseekV4FlashNovita
-                | ModelId::MergeGatewayDeepseekV4Flash0731
-                | ModelId::MergeGatewayDeepseekV41Flash
-                | ModelId::MergeGatewayDeepseekV4Flash0731Fast
-                | ModelId::DeepSeekV4Flash
-                | ModelId::DeepSeekV41Flash
-                | ModelId::DeepSeekV4FlashVisionExp
+                | ModelId::MergeGatewayDeepseekFlash
+                | ModelId::DeepSeekFlash
                 | ModelId::ZaiGlm53Flash
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::HuggingFaceGlm53FlashTogether
@@ -289,34 +276,20 @@ impl ModelId {
         }
         matches!(
             self,
-            ModelId::Gemini37Flash
-                | ModelId::Gemini38Flash
-                | ModelId::MergeGatewayGoogleGemini37Flash
+            ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::GPT56Luna
                 | ModelId::MergeGatewayOpenAIGpt56Luna
                 | ModelId::CopilotGPT54Mini
-                | ModelId::DeepSeekV4Flash
-                | ModelId::DeepSeekV41Flash
-                | ModelId::DeepSeekV4FlashVisionExp
-                | ModelId::MergeGatewayDeepseekV4Flash0731
-                | ModelId::MergeGatewayDeepseekV41Flash
-                | ModelId::MergeGatewayDeepseekV4Flash0731Fast
+                | ModelId::DeepSeekFlash
+                | ModelId::MergeGatewayDeepseekFlash
                 | ModelId::MetaMuseSpark11
                 | ModelId::MergeGatewayMinimaxH3
-                | ModelId::HuggingFaceStep35Flash
-                | ModelId::HuggingFaceDeepseekV4FlashNovita
-                | ModelId::PoolsideLagunaXs2
                 | ModelId::OpenCodeGoMimoV25
-                | ModelId::OpenCodeGoQwen37Plus
-                | ModelId::OpenCodeGoQwen36Plus
-                | ModelId::OpenCodeGoDeepseekV4Flash
-                | ModelId::XaiGrokBuild01
                 | ModelId::ZaiGlm53Flash
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::HuggingFaceGlm53FlashTogether
-                | ModelId::VercelDeepseekV4Flash
-                | ModelId::VercelDeepseekV41Flash
+                | ModelId::VercelDeepseekFlash
         )
     }
 
@@ -328,8 +301,6 @@ impl ModelId {
         matches!(
             self,
             ModelId::Gemini38Flash
-                | ModelId::Gemini37Flash
-                | ModelId::MergeGatewayGoogleGemini37Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::GPT6Astra
                 | ModelId::GPT56Sol
@@ -340,50 +311,27 @@ impl ModelId {
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
-                | ModelId::MergeGatewayAnthropicClaudeFable51
-                | ModelId::ClaudeMythos5
-                | ModelId::ClaudeMythos51
                 | ModelId::ClaudeOpus5
                 | ModelId::OpenCodeGoGlm53
-                | ModelId::OpenCodeGoGlm52
-                | ModelId::OpenCodeGoKimiK27Code
                 | ModelId::OpenCodeGoMimoV25Pro
                 | ModelId::OpenCodeGoMinimaxM3
-                | ModelId::OpenCodeGoQwen37Max
-                | ModelId::OpenCodeGoQwen37Plus
-                | ModelId::OpenCodeGoDeepseekV4Pro
-                | ModelId::DeepSeekV4Pro
-                | ModelId::MergeGatewayDeepseekV4Pro0813
-                | ModelId::MergeGatewayDeepseekV41Flash
-                | ModelId::VercelDeepseekV41Flash
+                | ModelId::MergeGatewayDeepseekFlash
+                | ModelId::VercelDeepseekFlash
                 | ModelId::MetaMuseSpark13
                 | ModelId::MetaMuseSpark13Contributor
-                | ModelId::MetaMuseSpark12
                 | ModelId::MergeGatewayMetaMuseSpark13
                 | ModelId::ZaiGlm53
                 | ModelId::ZaiGlm53Flash
-                | ModelId::ZaiGlm52
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::HuggingFaceGlm53FlashTogether
                 | ModelId::HuggingFaceGlm53Together
-                | ModelId::OpenRouterStepfunStep35FlashFree
-                | ModelId::HuggingFaceDeepseekV4FlashNovita
-                | ModelId::HuggingFaceDeepseekV4ProTogether
-                | ModelId::HuggingFaceGlm52Novita
                 | ModelId::HuggingFaceMinimaxM3Novita
-                | ModelId::HuggingFaceDeepseekV4ProNovita
                 | ModelId::OpenRouterMoonshotaiKimiK3
-                | ModelId::OpenRouterMoonshotaiKimiK27Code
                 | ModelId::MoonshotKimiK3
                 | ModelId::MergeGatewayMoonshotKimiK3
-                | ModelId::MoonshotKimiK27Code
-                | ModelId::PoolsideLagunaM1
-                | ModelId::PoolsideLagunaS21
-                | ModelId::OllamaGlm52Cloud
                 | ModelId::OllamaGlm53Cloud
                 | ModelId::XaiGrok46
                 | ModelId::MergeGatewayXaiGrok46
-                | ModelId::XaiGrok420Reasoning
         )
     }
 
@@ -426,92 +374,48 @@ impl ModelId {
             ModelId::ClaudeSonnet5 => "5",
             ModelId::ClaudeFable5 => "5",
             ModelId::ClaudeFable51 => "5.1",
-            ModelId::ClaudeMythos5 => "5",
-            ModelId::ClaudeMythos51 => "5.1",
             ModelId::ClaudeOpus5 => "5",
             // DeepSeek generations
-            ModelId::DeepSeekV4Pro
-            | ModelId::DeepSeekV4Flash
-            | ModelId::DeepSeekV41Flash
-            | ModelId::DeepSeekV4FlashVisionExp => "4",
-            ModelId::MergeGatewayDeepseekV4Pro0813 => "4-pro-0813",
-            ModelId::MergeGatewayDeepseekV4Flash0731 => "4-flash-0731",
-            ModelId::MergeGatewayDeepseekV41Flash => "4.1",
+            ModelId::DeepSeekFlash => "4",
+            ModelId::MergeGatewayDeepseekFlash => "4.1",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
-            ModelId::MetaMuseSpark12 | ModelId::MetaMuseSpark12Contributor => "Muse-Spark-1.2",
             ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
             // Z.AI generations
             ModelId::ZaiGlm53 | ModelId::ZaiGlm53Flash | ModelId::MergeGatewayZaiGlm53Flash => "5.3",
-            ModelId::ZaiGlm52 => "5.2",
-            ModelId::Gemini36Flash => "3.6",
-            ModelId::Gemini37Flash => "3.7",
             ModelId::Gemini38Flash => "3.8",
-            ModelId::MergeGatewayGoogleGemini37Flash => "3.7",
             ModelId::MergeGatewayGoogleGemini38Flash => "3.8",
             ModelId::OpenCodeGoGlm53 => "5.3",
-            ModelId::OpenCodeGoGlm52 => "5.2",
             ModelId::OpenCodeGoGpt56Luna => "5.6-luna",
             ModelId::OpenCodeGoKimiK3 => "k3",
-            ModelId::OpenCodeGoKimiK27Code => "k2.7",
             ModelId::OpenCodeGoMimoV25 | ModelId::OpenCodeGoMimoV25Pro => "v2.5",
             ModelId::OpenCodeGoMinimaxM3 => "m3",
-            ModelId::OpenCodeGoMuseSpark12Contributor => "Muse-Spark-1.2",
-            ModelId::OpenCodeGoQwen38Max => "3.8-max",
-            ModelId::OpenCodeGoQwen37Max => "3.7-max",
-            ModelId::OpenCodeGoQwen37Plus => "3.7-plus",
-            ModelId::OpenCodeGoQwen36Plus => "3.6-plus",
-            ModelId::OpenCodeGoDeepseekV4Pro | ModelId::OpenCodeGoDeepseekV4Flash => "v4",
-            ModelId::OpenCodeGoHy3 => "hy3",
             ModelId::OllamaGptOss20b => "oss",
             ModelId::OllamaGptOss20bCloud => "oss-cloud",
             ModelId::OllamaGptOss120bCloud => "oss-cloud",
-            ModelId::OllamaDeepseekV4FlashCloud => "deepseek-v4-flash",
-            ModelId::OllamaDeepseekV4ProCloud => "deepseek-v4-pro",
             ModelId::OllamaMinimaxM3Cloud => "minimax-m3",
-            ModelId::OllamaGlm52Cloud => "glm-5.2",
             ModelId::OllamaGlm53Cloud => "glm-5.3",
-            ModelId::OllamaKimiK27CodeCloud => "kimi-k2.7-code",
-            ModelId::OllamaLagunaXs2 => "laguna-xs.2",
             ModelId::OllamaGemma4 => "gemma-4",
             ModelId::LlamaCppGemma426bA4b => "4",
             ModelId::LlamaCppGemma4E4b => "4",
             ModelId::LlamaCppGptOss20b => "oss",
-            ModelId::LlamaCppStep35Flash => "3.5",
             // MiniMax models
             ModelId::MinimaxM3 => "M3",
             // Moonshot models
             ModelId::MoonshotKimiK3 => "k3",
             ModelId::MergeGatewayMoonshotKimiK3 => "k3",
-            ModelId::MoonshotKimiK27Code => "k2.7",
             // Hugging Face generations
             ModelId::HuggingFaceOpenAIGptOss20b => "oss",
             ModelId::HuggingFaceOpenAIGptOss120b => "oss",
             ModelId::HuggingFaceMinimaxM3Novita => "m3",
-            ModelId::HuggingFaceGlm52Novita => "5.2",
             ModelId::HuggingFaceGlm53FlashTogether => "5.3",
             ModelId::HuggingFaceGlm53Together => "5.3",
-            ModelId::HuggingFaceDeepseekV4FlashNovita => "v4-flash",
-            ModelId::HuggingFaceDeepseekV4ProTogether => "v4-pro",
-            ModelId::HuggingFaceDeepseekV4ProNovita => "v4-pro",
-            ModelId::HuggingFaceStep35Flash => "3.5",
             // xAI models
-            ModelId::XaiGrokBuild01 => "build-0.1",
             ModelId::XaiGrok46 => "4.6",
             ModelId::MergeGatewayXaiGrok46 => "4.6",
-            ModelId::XaiGrok420Reasoning => "4.20",
-            // Poolside models
-            ModelId::PoolsideLagunaM1 => "laguna-m.1",
-            ModelId::PoolsideLagunaXs2 => "laguna-xs.2",
-            ModelId::PoolsideLagunaS21 => "laguna-s.2.1",
             // Qwen models
-            ModelId::QwenDeepSeekV4Flash | ModelId::QwenDeepSeekV4Pro => "v4",
             ModelId::MergeGatewayDefaultRouting => "routing",
-            ModelId::MergeGatewayOpenAIGpt55 => "5.5",
             ModelId::MergeGatewayAnthropicClaudeOpus5 => "5",
-            ModelId::MergeGatewayGoogleGemini36Flash => "3.6",
             ModelId::MergeGatewayAnthropicClaudeFable51 => "5.1",
-            ModelId::MergeGatewayDeepseekV4Flash0731Fast => "4-flash-0731-fast",
-            ModelId::MergeGatewayQwen38Max => "3.8-max",
             ModelId::MergeGatewayMinimaxH3 => "H3",
             ModelId::MergeGatewayThinkingMachinesInkling => "Inkling",
             ModelId::MergeGatewayMetaMuseSpark11 => "Muse-Spark-1.1",
@@ -526,18 +430,10 @@ impl ModelId {
             ModelId::VercelAnthropicClaudeHaiku45 => "4.5",
             ModelId::VercelOpenAiGpt56Sol | ModelId::VercelOpenAiGpt56Luna => "5.6",
             ModelId::VercelOpenAiGpt6Astra => "6",
-            ModelId::VercelOpenAiGpt53Codex => "5.3-codex",
-            ModelId::VercelGoogleGemini31ProPreview => "3.1-pro",
             ModelId::VercelGoogleGemini38Flash => "3.8",
-            ModelId::VercelDeepseekV4Pro => "v4-pro",
-            ModelId::VercelDeepseekV4Flash => "v4-flash",
-            ModelId::VercelDeepseekV41Flash => "4.1",
+            ModelId::VercelDeepseekFlash => "4.1",
             ModelId::VercelMoonshotaiKimiK3 => "k3",
-            ModelId::VercelMoonshotaiKimiK27Code => "k2.7",
-            ModelId::VercelAlibabaQwen38Max => "3.8-max",
-            ModelId::VercelAlibabaQwen3CoderNext => "coder-next",
             ModelId::VercelMinimaxM3 => "M3",
-            ModelId::VercelMistralDevstral2 => "devstral-2",
             _ => "unknown",
         }
     }

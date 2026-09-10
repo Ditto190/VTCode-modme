@@ -57,22 +57,5 @@ pub(crate) fn llamacpp_presets() -> Vec<ModelPreset> {
             supported_in_api: true,
             context_window: Some(131_072),
         },
-        ModelPreset {
-            id: format!("llamacpp/{}", llamacpp_models::STEP_3_5_FLASH),
-            model: llamacpp_models::STEP_3_5_FLASH.to_string(),
-            display_name: "Step 3.5 Flash (llama.cpp)".to_string(),
-            description: "StepFun's efficient reasoning model served through llama.cpp".to_string(),
-            provider: Provider::LlamaCpp,
-            default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
-            is_default: false,
-            upgrade: None,
-            show_in_picker: true,
-            supported_in_api: true,
-            context_window: Some(262_144),
-        },
     ]
 }

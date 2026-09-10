@@ -872,7 +872,7 @@ mod validation_tests {
     fn retention_ok_for_responses_model() {
         let mut cfg = VTCodeConfig::default();
         cfg.prompt_cache.providers.openai.prompt_cache_retention = Some(PromptCacheRetention::H24);
-        let model = vtcode_core::config::constants::models::openai::GPT_5; // responses model
+        let model = vtcode_core::config::constants::models::openai::GPT_5_6; // responses model
         let provider = "openai";
         assert!(check_prompt_cache_retention_compat(&cfg, model, provider).is_none());
     }
@@ -1285,7 +1285,7 @@ mod validation_tests {
             "--workspace",
             workspace.to_str().expect("workspace path"),
             "--model",
-            vtcode_core::config::constants::models::openai::GPT_5,
+            vtcode_core::config::constants::models::openai::GPT_5_6_SOL,
             "--config",
             "prompt_cache.providers.openai.prompt_cache_retention=24h",
         ]);

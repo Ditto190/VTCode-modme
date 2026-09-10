@@ -39,7 +39,7 @@ fn model_picker_lists_new_anthropic_models() {
 #[test]
 fn model_picker_lists_new_zai_models() {
     let options = MODEL_OPTIONS.as_slice();
-    assert!(has_model(options, ModelId::ZaiGlm52));
+    assert!(has_model(options, ModelId::ZaiGlm53));
 }
 
 #[test]
@@ -47,16 +47,14 @@ fn model_picker_lists_new_ollama_cloud_models() {
     let options = MODEL_OPTIONS.as_slice();
     assert!(has_model(options, ModelId::OllamaGptOss20b));
     assert!(has_model(options, ModelId::OllamaGptOss120bCloud));
-    assert!(has_model(options, ModelId::OllamaDeepseekV4FlashCloud));
-    assert!(has_model(options, ModelId::OllamaDeepseekV4ProCloud));
-    assert!(has_model(options, ModelId::OllamaGlm52Cloud));
+    assert!(has_model(options, ModelId::OllamaGlm53Cloud));
     assert!(has_model(options, ModelId::OllamaMinimaxM3Cloud));
 }
 
 #[test]
 fn model_picker_lists_new_gemini_models() {
     let options = MODEL_OPTIONS.as_slice();
-    assert!(has_model(options, ModelId::Gemini37Flash));
+    assert!(has_model(options, ModelId::Gemini38Flash));
 }
 
 #[test]
@@ -328,19 +326,6 @@ fn static_model_subtitle_formats_current_capabilities() {
 }
 
 #[test]
-fn static_model_search_terms_include_modalities_and_tool_state() {
-    let terms = static_model_search_terms(&ModelId::OpenRouterOpenAIGpt5Chat, false);
-
-    assert!(terms.iter().any(|term| term == "no tools"));
-    assert!(terms.iter().any(|term| term == "no-tools"));
-    assert!(terms.iter().any(|term| term == "tool_call disabled"));
-    assert!(terms.iter().any(|term| term == "modalities"));
-    assert!(terms.iter().any(|term| term == "file"));
-    assert!(terms.iter().any(|term| term == "image"));
-    assert!(terms.iter().any(|term| term == "text"));
-}
-
-#[test]
 fn dynamic_model_subtitle_stays_conservative_for_unknown_local_models() {
     let subtitle =
         dynamic_model_subtitle(Provider::Ollama, "custom-local-model", false, "ollama", "custom-local-model");
@@ -524,13 +509,13 @@ fn selection_omits_openai_service_tier_support_for_gpt_oss() {
 fn picker_separates_openrouter_reasoning_from_effort_support() {
     let option = MODEL_OPTIONS
         .iter()
-        .find(|option| option.id == "meta/muse-spark-1.2")
+        .find(|option| option.id == "meta/muse-spark-1.3")
         .expect("OpenRouter Muse Spark route should exist");
     let detail = selection_from_option(option);
 
     assert!(detail.reasoning_supported);
-    assert!(!detail.reasoning_effort_supported);
-    assert!(detail.reasoning_effort_levels().is_empty());
+    assert!(detail.reasoning_effort_supported);
+    assert!(!detail.reasoning_effort_levels().is_empty());
 }
 
 #[test]
@@ -555,10 +540,8 @@ fn openai_codex_reasoning_helpers_match_supported_variants() {
 
     assert!(supports_xhigh_reasoning("claude-sonnet-5"));
     assert!(supports_xhigh_reasoning("claude-fable-5"));
-    assert!(supports_xhigh_reasoning("claude-mythos-5"));
     assert!(supports_max_reasoning("claude-sonnet-5"));
     assert!(supports_max_reasoning("claude-fable-5"));
-    assert!(supports_max_reasoning("claude-mythos-5"));
     // The GPT-5.6 family supports Max adaptive reasoning.
     assert!(supports_max_reasoning("gpt-5.6-sol"));
 }

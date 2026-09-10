@@ -6,21 +6,10 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     "gpt-5.6-sol",   // GPT-5.6 Sol flagship model
     "gpt-5.6-terra", // GPT-5.6 Terra balanced model
     "gpt-5.6-luna",  // GPT-5.6 Luna efficient model
-    // GPT-5.5 flagship model
-    // GPT-5.5 dated release (2026-04-23)
-    "gpt-5.1", // GPT-5.3 Codex optimized for agentic coding with xhigh reasoning support
+    "gpt-5.1",       // GPT-5.3 Codex optimized for agentic coding with xhigh reasoning support
     "gpt-5.1-mini",
     "gpt-oss-20b",
     "gpt-oss-120b",
-    // Deprecated models retained for backward compatibility (config parsing, error
-    // fallback chains). They are NOT shown in the model picker. See OpenAI
-    // deprecations: https://developers.openai.com/api/docs/deprecations
-    //   gpt-5, gpt-5-mini, gpt-5-nano  — shut down Dec 11, 2026
-    //   o3, o4-mini                    — shut down Dec 11, 2026 / Oct 23, 2026
-    //   gpt-5-codex, gpt-5.1-codex,
-    //   gpt-5.1-codex-max,
-    //   gpt-5.1-codex-mini,
-    //   gpt-5.2-codex, codex-mini-latest — shut down July 23, 2026 / Feb 12, 2026
 ];
 
 /// Models that require the OpenAI Responses API
@@ -34,18 +23,6 @@ pub const RESPONSES_API_MODELS: &[&str] = &[
     GPT_5_1,
     GPT_5_6_SOL,
     GPT_5_1_MINI,
-    // Deprecated but still routed through Responses API if referenced:
-    GPT_5,
-    GPT_5_MINI,
-    GPT_5_NANO,
-    GPT_5_CODEX,
-    GPT_5_1_CODEX,
-    GPT_5_1_CODEX_MAX,
-    GPT_5_1_CODEX_MINI,
-    GPT_5_2_CODEX,
-    CODEX_MINI_LATEST,
-    O3,
-    O4_MINI,
 ];
 
 /// Models that support the OpenAI reasoning parameter payload
@@ -58,17 +35,6 @@ pub const REASONING_MODELS: &[&str] = &[
     GPT_5_6_LUNA,
     GPT_5_1,
     GPT_5_6_SOL,
-    // Deprecated but still support reasoning if referenced:
-    GPT_5,
-    GPT_5_MINI,
-    GPT_5_NANO,
-    GPT_5_CODEX,
-    GPT_5_1_CODEX,
-    GPT_5_1_CODEX_MAX,
-    GPT_5_1_CODEX_MINI,
-    GPT_5_2_CODEX,
-    O3,
-    O4_MINI,
 ];
 
 /// Models that support the native OpenAI `service_tier` request parameter.
@@ -87,21 +53,23 @@ pub const GPT_5_6_SOL: &str = "gpt-5.6-sol";
 pub const GPT_5_6_TERRA: &str = "gpt-5.6-terra";
 pub const GPT_5_6_LUNA: &str = "gpt-5.6-luna";
 pub const GPT_5_6: &str = "gpt-5.6";
-const GPT_5_1: &str = "gpt-5.1";
+pub const GPT_5_1: &str = "gpt-5.1";
+pub const GPT_5_1_MINI: &str = "gpt-5.1-mini";
+pub const GPT_OSS_20B: &str = "gpt-oss-20b";
+pub const GPT_OSS_120B: &str = "gpt-oss-120b";
+
+// Deprecated constants retained for backward compatibility in tests and internal code
 pub const GPT_5: &str = "gpt-5";
-pub const GPT_5_2_CODEX: &str = "gpt-5.2-codex"; // GPT-5.2 Codex optimized for agentic coding
-pub(crate) const GPT_5_1_CODEX: &str = "gpt-5.1-codex"; // GPT-5.1 Codex optimized for agentic coding
-pub(crate) const GPT_5_1_CODEX_MAX: &str = "gpt-5.1-codex-max"; // GPT-5.1 Codex Max optimized for longer-running coding tasks
-pub(crate) const GPT_5_1_CODEX_MINI: &str = "gpt-5.1-codex-mini"; // GPT-5.1 Codex mini cost-effective coding variant
-const GPT_5_1_MINI: &str = "gpt-5.1-mini";
-pub const GPT_5_CODEX: &str = "gpt-5-codex"; // GPT-5 Codex optimized for agentic coding
 pub const GPT_5_MINI: &str = "gpt-5-mini";
 pub const GPT_5_NANO: &str = "gpt-5-nano";
+pub const GPT_5_CODEX: &str = "gpt-5-codex";
+pub(crate) const GPT_5_1_CODEX: &str = "gpt-5.1-codex";
+pub(crate) const GPT_5_1_CODEX_MAX: &str = "gpt-5.1-codex-max";
+pub(crate) const GPT_5_1_CODEX_MINI: &str = "gpt-5.1-codex-mini";
+pub const GPT_5_2_CODEX: &str = "gpt-5.2-codex";
 const CODEX_MINI_LATEST: &str = "codex-mini-latest";
 pub const O3: &str = "o3";
 pub const O4_MINI: &str = "o4-mini";
-pub const GPT_OSS_20B: &str = "gpt-oss-20b";
-pub const GPT_OSS_120B: &str = "gpt-oss-120b";
 
 /// Mapping of deprecated OpenAI model IDs to their recommended replacements.
 ///

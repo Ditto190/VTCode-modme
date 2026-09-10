@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn cloud_ollama_models_bypass_check() {
-        assert!(is_cloud_ollama_model("deepseek-v4-flash:cloud"));
+        assert!(is_cloud_ollama_model("deepseek-flash:cloud"));
         assert!(is_cloud_ollama_model("glm-5.2-cloud"));
         assert!(!is_cloud_ollama_model("gpt-oss:20b"));
     }

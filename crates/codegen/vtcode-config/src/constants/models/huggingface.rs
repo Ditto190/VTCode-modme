@@ -4,41 +4,25 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     DEEPSEEK_R1,
     // Additional supported models
     OPENAI_GPT_OSS_20B,
-    // Novita inference provider models
-    ZAI_GLM_5_2_NOVITA,
     // Together inference provider models (incl. Z.AI Flash via Together)
     ZAI_GLM_5_3_FLASH_TOGETHER,
     ZAI_GLM_5_3_TOGETHER,
     // Moonshot inference provider models
     KIMI_K3_TOGETHER,
-    // Together inference provider models
-    DEEPSEEK_V4_PRO_TOGETHER,
-    STEP_3_5_FLASH,
     // DeepInfra inference provider models
     // Additional Novita models
-    DEEPSEEK_V4_PRO_NOVITA,
     MINIMAX_M3_NOVITA,
 ];
 
 pub(crate) const OPENAI_GPT_OSS_120B: &str = "openai/gpt-oss-120b:huggingface";
 const DEEPSEEK_R1: &str = "deepseek-ai/DeepSeek-R1";
-pub const STEP_3_5_FLASH_BASE: &str = "stepfun-ai/Step-3.5-Flash";
-pub const STEP_3_5_FLASH_PROVIDER: &str = "featherless-ai";
-pub(crate) const STEP_3_5_FLASH: &str = "stepfun-ai/Step-3.5-Flash:featherless-ai";
-pub(crate) const STEP_3_5_FLASH_LEGACY_FASTEST: &str = "stepfun-ai/Step-3.5-Flash:fastest";
 
 // Additional supported models
 pub(crate) const OPENAI_GPT_OSS_20B: &str = "openai/gpt-oss-20b:huggingface";
 
-pub const ZAI_GLM_5_2_NOVITA: &str = "zai-org/GLM-5.2:novita";
 pub const ZAI_GLM_5_3_FLASH_TOGETHER: &str = "zai-org/GLM-5.3-Flash:together";
 pub const ZAI_GLM_5_3_TOGETHER: &str = "zai-org/GLM-5.3:together";
 pub const KIMI_K3_TOGETHER: &str = "moonshotai/Kimi-K3:together";
-
-// DeepSeek V4 models via HF router
-pub(crate) const DEEPSEEK_V4_FLASH_NOVITA: &str = "deepseek-ai/DeepSeek-V4-Flash:novita";
-pub(crate) const DEEPSEEK_V4_PRO_TOGETHER: &str = "deepseek-ai/DeepSeek-V4-Pro:together";
-pub(crate) const DEEPSEEK_V4_PRO_NOVITA: &str = "deepseek-ai/DeepSeek-V4-Pro:novita";
 
 // DeepInfra inference provider models
 
@@ -52,13 +36,8 @@ pub const REASONING_MODELS: &[&str] = &[
     DEEPSEEK_R1,
     // Additional reasoning models
     OPENAI_GPT_OSS_20B,
-    ZAI_GLM_5_2_NOVITA,
     ZAI_GLM_5_3_FLASH_TOGETHER,
     ZAI_GLM_5_3_TOGETHER,
     MINIMAX_M3_NOVITA,
-    DEEPSEEK_V4_PRO_TOGETHER,
-    DEEPSEEK_V4_PRO_NOVITA,
-    DEEPSEEK_V4_FLASH_NOVITA,
-    STEP_3_5_FLASH,
     KIMI_K3_TOGETHER,
 ];

@@ -22,9 +22,7 @@ pub use capabilities::{
 pub enum ModelId {
     // Gemini models
     /// Gemini 3.6 Flash - Latest flash model with improved capabilities
-    Gemini36Flash,
     /// Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels
-    Gemini37Flash,
     /// Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE, agents, and enterprise workflows (1M context, 64k output, low/medium/high thinking)
     Gemini38Flash,
 
@@ -50,10 +48,6 @@ pub enum ModelId {
     ClaudeFable5,
     /// Claude Fable 5.1 - successor to Fable 5 for demanding reasoning and long-horizon agentic work, 1M context, adaptive thinking always on, cache reads at 1/4 cost
     ClaudeFable51,
-    /// Claude Mythos 5 - Fable 5-class model without safety classifiers, limited availability through Project Glasswing
-    ClaudeMythos5,
-    /// Claude Mythos 5.1 - same as Fable 5.1, Project Glasswing only, adaptive thinking always on, 1M context
-    ClaudeMythos51,
     /// Claude Opus 5 - Anthropic's newest Opus-tier model with 1M context, thinking on by default
     ClaudeOpus5,
     /// GitHub Copilot auto model selection
@@ -66,26 +60,14 @@ pub enum ModelId {
     CopilotGPT54,
     /// GitHub Copilot GPT-5.4 Mini
     CopilotGPT54Mini,
-    /// GitHub Copilot Claude Sonnet 4.6
-    CopilotClaudeSonnet46,
 
     // DeepSeek models
-    /// DeepSeek V4 Pro - High-performance reasoning model with advanced thinking
-    DeepSeekV4Pro,
-    /// DeepSeek V4 Flash - Fast inference model for cost-effective reasoning
-    DeepSeekV4Flash,
-    /// DeepSeek V4 Flash Vision Exp - Experimental vision model with image + text input
-    DeepSeekV4FlashVisionExp,
     /// DeepSeek V4.1 Flash - Latest flash model with improved reasoning and efficiency
-    DeepSeekV41Flash,
+    DeepSeekFlash,
 
     // Official Meta AI models
     /// Meta Muse Spark 1.1 - Official Meta AI Standard-tier reasoning model
     MetaMuseSpark11,
-    /// Meta Muse Spark 1.2 - Official Meta AI Standard-tier reasoning model
-    MetaMuseSpark12,
-    /// Meta Muse Spark 1.2 Contributor tier - opt-in variant with Meta's discounted data-contribution terms
-    MetaMuseSpark12Contributor,
     /// Meta Muse Spark 1.3 - Official Meta AI flagship Standard-tier reasoning model, tuned for agentic workflows
     MetaMuseSpark13,
     /// Meta Muse Spark 1.3 Contributor tier - opt-in variant with Meta's discounted data-contribution terms
@@ -98,32 +80,18 @@ pub enum ModelId {
     NvidiaNemotron3Super120bA12b,
     /// NVIDIA Nemotron 3 Nano - Efficient reasoning and tool-use model via NIM
     NvidiaNemotron3Nano30bA3b,
-    /// Z.AI GLM-5.2 served through NVIDIA NIM
-    NvidiaZaiGlm52,
-    /// DeepSeek V4 Flash served through NVIDIA NIM
-    NvidiaDeepseekV4Flash0731,
 
     // Merge Gateway routes
     /// Merge Gateway's default route selected by Merge
     MergeGatewayDefaultRouting,
-    /// OpenAI GPT-5.5 through Merge Gateway
-    MergeGatewayOpenAIGpt55,
     /// Anthropic Claude Opus 5 through Merge Gateway
     MergeGatewayAnthropicClaudeOpus5,
     /// Google Gemini 3.6 Flash through Merge Gateway
-    MergeGatewayGoogleGemini36Flash,
     /// Google Gemini 3.7 Flash through Merge Gateway
-    MergeGatewayGoogleGemini37Flash,
-    /// DeepSeek V4 Pro 0813 through Merge Gateway
-    MergeGatewayDeepseekV4Pro0813,
-    /// DeepSeek V4 Flash 0731 through Merge Gateway
-    MergeGatewayDeepseekV4Flash0731,
     /// DeepSeek V4.1 Flash through Merge Gateway
-    MergeGatewayDeepseekV41Flash,
+    MergeGatewayDeepseekFlash,
     /// xAI Grok 4.6 through Merge Gateway
     MergeGatewayXaiGrok46,
-    /// Qwen3.8 Max through Merge Gateway
-    MergeGatewayQwen38Max,
     /// MiniMax H3 through Merge Gateway
     MergeGatewayMinimaxH3,
     /// Moonshot Kimi K3 through Merge Gateway
@@ -146,8 +114,6 @@ pub enum ModelId {
     MergeGatewayGoogleGemini38Flash,
     /// Anthropic Claude Fable 5.1 through Merge Gateway
     MergeGatewayAnthropicClaudeFable51,
-    /// DeepSeek V4 Flash 0731 Fast through Merge Gateway
-    MergeGatewayDeepseekV4Flash0731Fast,
     /// OpenAI GPT-6 Astra through Merge Gateway
     MergeGatewayOpenAIGpt6Astra,
 
@@ -160,23 +126,14 @@ pub enum ModelId {
     /// OpenAI GPT-OSS 120B via Hugging Face router
     HuggingFaceOpenAIGptOss120b,
     /// Z.AI GLM-5.2 via Novita inference provider on Hugging Face router
-    HuggingFaceGlm52Novita,
     /// Z.AI GLM-5.3 Flash via Together inference provider on Hugging Face router
     HuggingFaceGlm53FlashTogether,
     /// Z.AI GLM-5.3 via Together inference provider on Hugging Face router
     HuggingFaceGlm53Together,
     /// Kimi K3 via Together on Hugging Face router
     HuggingFaceKimiK3Together,
-    /// DeepSeek V4 Flash via Novita on Hugging Face router
-    HuggingFaceDeepseekV4FlashNovita,
-    /// DeepSeek V4 Pro via Together on Hugging Face router
-    HuggingFaceDeepseekV4ProTogether,
-    /// Step 3.5 Flash via Hugging Face router
-    HuggingFaceStep35Flash,
     /// MiniMax M3 via Novita on Hugging Face router
     HuggingFaceMinimaxM3Novita,
-    /// DeepSeek V4 Pro via Novita on Hugging Face router
-    HuggingFaceDeepseekV4ProNovita,
 
     // StepFun models
     /// Step 3.7 Flash - StepFun's flagship multimodal reasoning model with tool calling
@@ -184,25 +141,12 @@ pub enum ModelId {
 
     // Evolink gateway models (namespaced as `evolink/<model>`)
     /// GPT-5.2 served through the Evolink gateway
-    EvolinkGpt52,
     /// GPT-5.5 served through the Evolink gateway
-    EvolinkGpt55,
-    /// DeepSeek V4 Pro served through the Evolink gateway
-    EvolinkDeepseekV4Pro,
-    /// DeepSeek V4 Flash served through the Evolink gateway
-    EvolinkDeepseekV4Flash,
-    /// Doubao Seed 2.0 Pro served through the Evolink gateway
-    EvolinkDoubaoSeed20Pro,
     /// Gemini 3.1 Pro served through the Evolink gateway (OpenAI SDK format)
     EvolinkGemini31Pro,
     /// Gemini 3.5 Flash served through the Evolink gateway (OpenAI SDK format)
-    EvolinkGemini35Flash,
     /// MiniMax-M3 served through the Evolink gateway (OpenAI Chat Completions format)
     EvolinkMinimaxM3,
-    /// Claude Sonnet 4.6 served through the Evolink gateway (Anthropic Messages API)
-    EvolinkClaudeSonnet46,
-    /// Claude Opus 4.8 served through the Evolink gateway (Anthropic Messages API)
-    EvolinkClaudeOpus48,
     /// Claude Haiku 4.5 served through the Evolink gateway (Anthropic Messages API)
     EvolinkClaudeHaiku45,
 
@@ -210,8 +154,6 @@ pub enum ModelId {
     ZaiGlm53,
     /// GLM-5.3 Flash - Z.ai efficient multimodal model with hybrid sparse+linear attention, 320B total / 18B active, 1M context, native vision
     ZaiGlm53Flash,
-    /// GLM-5.2 - Z.ai flagship model for long-horizon tasks with 1M context
-    ZaiGlm52,
 
     // MiMo models
     /// MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context
@@ -222,8 +164,6 @@ pub enum ModelId {
     // Moonshot models
     /// Kimi K3 - Moonshot.ai's 2.8T parameter flagship with Delta Attention, native vision, 1M context
     MoonshotKimiK3,
-    /// Kimi K2.7 Code - Moonshot.ai's most capable coding model with long-horizon coding breakthrough
-    MoonshotKimiK27Code,
 
     // OpenCode Zen models
 
@@ -231,13 +171,10 @@ pub enum ModelId {
     /// GLM-5.3 - Z.AI flagship for frontier long-horizon coding on OpenCode Go
     OpenCodeGoGlm53,
     /// GLM-5.2 - Z.AI flagship model included with OpenCode Go
-    OpenCodeGoGlm52,
     /// GPT-5.6 Luna - OpenAI cost-efficient frontier model on OpenCode Go
     OpenCodeGoGpt56Luna,
     /// Kimi K3 - Moonshot flagship 2.8T agentic model on OpenCode Go
     OpenCodeGoKimiK3,
-    /// Kimi K2.7 Code - Moonshot.ai's most capable coding model on OpenCode Go
-    OpenCodeGoKimiK27Code,
     /// MiMo-V2.5 - Xiaomi's omnimodal model on OpenCode Go
     OpenCodeGoMimoV25,
     /// MiMo-V2.5-Pro - Xiaomi's flagship reasoning model on OpenCode Go
@@ -245,27 +182,8 @@ pub enum ModelId {
     /// MiniMax M3 - Frontier multimodal coding model on OpenCode Go
     OpenCodeGoMinimaxM3,
     /// Muse Spark 1.2 Contributor - Meta long-context reasoning on OpenCode Go (limited regions)
-    OpenCodeGoMuseSpark12Contributor,
-    /// Qwen3.8 Max - Qwen 3.8 flagship on OpenCode Go
-    OpenCodeGoQwen38Max,
-    /// Qwen3.7 Max - Qwen flagship on OpenCode Go
-    OpenCodeGoQwen37Max,
-    /// Qwen3.7 Plus - Qwen balanced tier on OpenCode Go
-    OpenCodeGoQwen37Plus,
-    /// Qwen3.6 Plus - Qwen 3.6 tier on OpenCode Go
-    OpenCodeGoQwen36Plus,
-    /// DeepSeek V4 Pro - High-performance reasoning model on OpenCode Go
-    OpenCodeGoDeepseekV4Pro,
-    /// DeepSeek V4 Flash - Fast inference model on OpenCode Go
-    OpenCodeGoDeepseekV4Flash,
-    /// Hy3 - High-volume coding model on OpenCode Go
-    OpenCodeGoHy3,
 
     // Qwen models (non-Qwen3 only)
-    /// DeepSeek V4 Flash via Qwen Cloud API
-    QwenDeepSeekV4Flash,
-    /// DeepSeek V4 Pro via Qwen Cloud API
-    QwenDeepSeekV4Pro,
 
     // Ollama models
     /// GPT-OSS 20B - Open-weight GPT-OSS 20B model served via Ollama locally
@@ -274,24 +192,16 @@ pub enum ModelId {
     OllamaGptOss20bCloud,
     /// GPT-OSS 120B Cloud - Cloud-hosted GPT-OSS 120B served via Ollama Cloud
     OllamaGptOss120bCloud,
-    /// DeepSeek V4 Flash Cloud - Fast inference DeepSeek V4 Flash model via Ollama Cloud
-    OllamaDeepseekV4FlashCloud,
-    /// DeepSeek V4 Pro Cloud - High-performance DeepSeek V4 Pro model via Ollama Cloud
-    OllamaDeepseekV4ProCloud,
     /// MiniMax-M3 Cloud - Cloud-hosted MiniMax-M3 model served via Ollama Cloud
     OllamaMinimaxM3Cloud,
     /// GLM-5.2 Cloud - Cloud-hosted GLM-5.2 flagship model served via Ollama Cloud
-    OllamaGlm52Cloud,
     /// GLM-5.3 Cloud - Cloud-hosted GLM-5.3 flagship model served via Ollama Cloud
     OllamaGlm53Cloud,
-    /// Kimi K2.7 Code Cloud - Moonshot Kimi K2.7 Code via Ollama Cloud
-    OllamaKimiK27CodeCloud,
     /// Kimi K3 Cloud - Moonshot Kimi K3 via Ollama Cloud
     OllamaKimiK3Cloud,
     /// Gemma 4 - Google Gemma 4 model served via Ollama
     OllamaGemma4,
     /// Laguna XS.2 - Poolside's 33B MoE model (3B activated) for agentic coding via Ollama
-    OllamaLagunaXs2,
 
     // llama.cpp models
     /// Gemma 4 26B A4B - Desktop Gemma 4 MoE model served through llama.cpp
@@ -300,48 +210,29 @@ pub enum ModelId {
     LlamaCppGemma4E4b,
     /// GPT-OSS 20B - OpenAI open-weight model served through llama.cpp
     LlamaCppGptOss20b,
-    /// Step 3.5 Flash - StepFun local model served through llama.cpp
-    LlamaCppStep35Flash,
 
     // MiniMax models
     /// MiniMax-M3 - Frontier multimodal coding model with 1M context
     MinimaxM3,
 
     // OpenRouter models
-    /// DeepSeek V4 Pro - High-performance reasoning model via OpenRouter
-    OpenRouterDeepSeekV4Pro,
-    /// DeepSeek V4 Flash - Fast inference model via OpenRouter
-    OpenRouterDeepSeekV4Flash,
     /// DeepSeek V4.1 Flash - Latest flash model via OpenRouter
-    OpenRouterDeepSeekV41Flash,
-    /// DeepSeek R1 - DeepSeek R1 reasoning model with chain-of-thought
-    OpenRouterDeepSeekR1,
+    OpenRouterDeepSeekFlash,
     /// OpenAI gpt-oss-120b - Open-weight 120B reasoning model via OpenRouter
     OpenRouterOpenAIGptOss120b,
     /// OpenAI gpt-oss-120b:free - Open-weight 120B reasoning model free tier via OpenRouter
     OpenRouterOpenAIGptOss120bFree,
     /// OpenAI gpt-oss-20b - Open-weight 20B deployment via OpenRouter
     OpenRouterOpenAIGptOss20b,
-    /// OpenAI GPT-5 - OpenAI GPT-5 model accessed through OpenRouter
-    OpenRouterOpenAIGpt5,
-    /// OpenAI GPT-5 Chat - Chat optimised GPT-5 endpoint without tool use
-    OpenRouterOpenAIGpt5Chat,
     /// OpenAI GPT-6 Astra - OpenAI's flagship model for demanding end-to-end work via OpenRouter
     OpenRouterOpenAIGpt6Astra,
 
     /// Meta Muse Glimmer 30B via OpenRouter
     OpenRouterMetaMuseGlimmer30b,
     /// Meta Muse Spark 1.2 via OpenRouter
-    OpenRouterMetaMuseSpark12,
     /// Meta Muse Spark 1.3 via OpenRouter
     OpenRouterMetaMuseSpark13,
-    /// Meta Muse Spark 1.3 Contributor via OpenRouter
-    OpenRouterMetaMuseSpark13Contributor,
-
-    /// Gemini 3.6 Flash - Latest Gemini flash model with improved capabilities via OpenRouter
-    OpenRouterGoogleGemini36Flash,
     /// Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels via OpenRouter
-    OpenRouterGoogleGemini37Flash,
     /// Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE/agents with 1M context via OpenRouter
     OpenRouterGoogleGemini38Flash,
 
@@ -351,42 +242,17 @@ pub enum ModelId {
     OpenRouterMistralaiMistralLarge2512,
     /// DeepSeek V3.1 Nex N1 - Nex AGI DeepSeek V3.1 Nex N1 model via OpenRouter
     OpenRouterNexAgiDeepseekV31NexN1,
-    /// Step 3.5 Flash (free) - StepFun's most capable open-source reasoning model via OpenRouter
-    OpenRouterStepfunStep35FlashFree,
     /// GLM-5.2 - Z.AI GLM-5.2 flagship model for long-horizon tasks via OpenRouter
-    OpenRouterZaiGlm52,
     /// GLM-5.3 Flash - Z.AI efficient multimodal model with hybrid sparse+linear attention via OpenRouter
     OpenRouterZaiGlm53Flash,
     /// Kimi K3 - Moonshot AI's 2.8T parameter flagship via OpenRouter
     OpenRouterMoonshotaiKimiK3,
-    /// Kimi K2.7 Code - Moonshot AI's most capable coding model via OpenRouter
-    OpenRouterMoonshotaiKimiK27Code,
-    /// Hy3 Preview - Tencent's high-efficiency MoE model for agentic workflows via OpenRouter
-    OpenRouterTencentHy3Preview,
-    /// Grok Build 0.1 - xAI's fast coding model for agentic software engineering via OpenRouter
-    OpenRouterXAiGrokBuild01,
     /// Grok 4.6 - xAI's flagship reasoning model with reasoning_effort support via OpenRouter
     OpenRouterXAiGrok46,
     /// MiMo-V2.5 - Xiaomi's omnimodal agentic model for complex software engineering via OpenRouter
     OpenRouterXiaomiMimoV25,
     /// MiMo-V2.5-Pro - Xiaomi's flagship agentic model for complex software engineering via OpenRouter
     OpenRouterXiaomiMimoV25Pro,
-    /// Laguna XS.2 (free) - Poolside's efficient free coding agent model via OpenRouter
-    OpenRouterPoolsideLagunaXs2Free,
-    /// Laguna M.1 (free) - Poolside's flagship free coding agent model via OpenRouter
-    OpenRouterPoolsideLagunaM1Free,
-    /// Laguna S 2.1 (free) - Poolside's 118B MoE free coding agent model via OpenRouter
-    OpenRouterPoolsideLagunaS21Free,
-    /// Qwen3.8 27B - Qwen's open-weight dense vision-language model with flexible thinking via OpenRouter
-    OpenRouterQwenQwen3827b,
-
-    // Poolside models
-    /// Laguna M.1 - Poolside's flagship MoE coding agent model
-    PoolsideLagunaM1,
-    /// Laguna XS.2 - Poolside's efficient MoE coding agent model
-    PoolsideLagunaXs2,
-    /// Laguna S 2.1 - Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks
-    PoolsideLagunaS21,
 
     // Vercel AI Gateway models (namespaced as `vendor/model` on the gateway)
     /// Claude Sonnet 5 served through the Vercel AI Gateway
@@ -402,37 +268,18 @@ pub enum ModelId {
     /// GPT-5.6 Luna served through the Vercel AI Gateway
     VercelOpenAiGpt56Luna,
     /// GPT-5.3 Codex served through the Vercel AI Gateway
-    VercelOpenAiGpt53Codex,
     /// Gemini 3.1 Pro Preview served through the Vercel AI Gateway
-    VercelGoogleGemini31ProPreview,
     /// Gemini 3.8 Flash served through the Vercel AI Gateway
     VercelGoogleGemini38Flash,
-    /// DeepSeek V4 Pro served through the Vercel AI Gateway
-    VercelDeepseekV4Pro,
-    /// DeepSeek V4 Flash served through the Vercel AI Gateway
-    VercelDeepseekV4Flash,
     /// DeepSeek V4.1 Flash served through the Vercel AI Gateway
-    VercelDeepseekV41Flash,
+    VercelDeepseekFlash,
     /// Kimi K3 served through the Vercel AI Gateway
     VercelMoonshotaiKimiK3,
-    /// Kimi K2.7 Code served through the Vercel AI Gateway
-    VercelMoonshotaiKimiK27Code,
-    /// Qwen3.8 Max served through the Vercel AI Gateway
-    VercelAlibabaQwen38Max,
-    /// Qwen3 Coder Next served through the Vercel AI Gateway
-    VercelAlibabaQwen3CoderNext,
     /// MiniMax M3 served through the Vercel AI Gateway
     VercelMinimaxM3,
-    /// Devstral 2 served through the Vercel AI Gateway
-    VercelMistralDevstral2,
-
     // xAI models
-    /// Grok Build 0.1 - xAI's fast coding model for agentic software engineering
-    XaiGrokBuild01,
     /// Grok 4.6 - xAI's flagship reasoning model with reasoning_effort support (500k context)
     XaiGrok46,
-    /// Grok 4.20 0309 Reasoning - xAI's reasoning-optimized model with chain-of-thought
-    XaiGrok420Reasoning,
 
     /// User-defined model not in the hardcoded catalog.
     /// Carries the provider key string and model identifier string.

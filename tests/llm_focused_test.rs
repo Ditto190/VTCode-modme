@@ -44,8 +44,8 @@ fn test_provider_auto_detection() {
     assert_eq!(factory.provider_from_model("gpt-oss-20b"), Some("openai".to_string()));
     assert_eq!(factory.provider_from_model(models::CLAUDE_SONNET_5), Some("anthropic".to_string()));
     assert_eq!(factory.provider_from_model("claude-sonnet-4-20250514"), Some("anthropic".to_string()));
-    assert_eq!(factory.provider_from_model("gemini-3-flash-preview"), Some("gemini".to_string()));
-    assert_eq!(factory.provider_from_model(models::openrouter::DEEPSEEK_V4_PRO), Some("openrouter".to_string()));
+    assert_eq!(factory.provider_from_model("gemini-3.8-flash"), Some("gemini".to_string()));
+    assert_eq!(factory.provider_from_model("meta/muse-glimmer-30b"), Some("openrouter".to_string()));
     assert_eq!(factory.provider_from_model(models::moonshot::DEFAULT_MODEL), Some("moonshot".to_string()));
     assert_eq!(
         factory.provider_from_model(models::lmstudio::META_LLAMA_31_8B_INSTRUCT),
@@ -66,7 +66,7 @@ fn test_unified_client_creation() {
     let anthropic = create_provider_for_model(models::CLAUDE_SONNET_5, "test_key".to_string(), None, None);
     let _anthropic = anthropic.unwrap();
 
-    let openrouter = create_provider_for_model(models::openrouter::DEEPSEEK_V4_PRO, "test_key".to_string(), None, None);
+    let openrouter = create_provider_for_model("meta/muse-glimmer-30b", "test_key".to_string(), None, None);
     let _openrouter = openrouter.unwrap();
 
     let moonshot = create_provider_for_model(models::moonshot::DEFAULT_MODEL, "test_key".to_string(), None, None);

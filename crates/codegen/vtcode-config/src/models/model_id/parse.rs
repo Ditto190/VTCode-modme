@@ -11,11 +11,6 @@ impl FromStr for ModelId {
         use crate::constants::models;
         let trimmed = s.trim();
 
-        // Explicitly handle built-in models that might be shadowed by OpenRouter
-        if trimmed == models::zai::GLM_5_2 {
-            return Ok(ModelId::ZaiGlm52);
-        }
-
         if trimmed == models::zai::GLM_5_3 {
             return Ok(ModelId::ZaiGlm53);
         }
@@ -41,23 +36,11 @@ impl FromStr for ModelId {
         if let Some(opencode_model) = trimmed.strip_prefix("opencode-go/") {
             return match opencode_model {
                 m if m == models::opencode_go::GLM_5_3 => Ok(ModelId::OpenCodeGoGlm53),
-                m if m == models::opencode_go::GLM_5_2 => Ok(ModelId::OpenCodeGoGlm52),
                 m if m == models::opencode_go::GPT_5_6_LUNA => Ok(ModelId::OpenCodeGoGpt56Luna),
                 m if m == models::opencode_go::KIMI_K3 => Ok(ModelId::OpenCodeGoKimiK3),
-                m if m == models::opencode_go::KIMI_K2_7_CODE => Ok(ModelId::OpenCodeGoKimiK27Code),
                 m if m == models::opencode_go::MIMO_V2_5 => Ok(ModelId::OpenCodeGoMimoV25),
                 m if m == models::opencode_go::MIMO_V2_5_PRO => Ok(ModelId::OpenCodeGoMimoV25Pro),
                 m if m == models::opencode_go::MINIMAX_M3 => Ok(ModelId::OpenCodeGoMinimaxM3),
-                m if m == models::opencode_go::MUSE_SPARK_1_2_CONTRIBUTOR => {
-                    Ok(ModelId::OpenCodeGoMuseSpark12Contributor)
-                }
-                m if m == models::opencode_go::QWEN_3_8_MAX => Ok(ModelId::OpenCodeGoQwen38Max),
-                m if m == models::opencode_go::QWEN_3_7_MAX => Ok(ModelId::OpenCodeGoQwen37Max),
-                m if m == models::opencode_go::QWEN_3_7_PLUS => Ok(ModelId::OpenCodeGoQwen37Plus),
-                m if m == models::opencode_go::QWEN_3_6_PLUS => Ok(ModelId::OpenCodeGoQwen36Plus),
-                m if m == models::opencode_go::DEEPSEEK_V4_PRO => Ok(ModelId::OpenCodeGoDeepseekV4Pro),
-                m if m == models::opencode_go::DEEPSEEK_V4_FLASH => Ok(ModelId::OpenCodeGoDeepseekV4Flash),
-                m if m == models::opencode_go::HY3 => Ok(ModelId::OpenCodeGoHy3),
                 _ => Err(ModelParseError::InvalidModel(trimmed.to_string())),
             };
         }
@@ -73,8 +56,6 @@ impl FromStr for ModelId {
         match trimmed {
             // OpenRouter models without generated metadata
             "moonshotai/kimi-k3" => Ok(ModelId::OpenRouterMoonshotaiKimiK3),
-            "moonshotai/kimi-k2.7-code" => Ok(ModelId::OpenRouterMoonshotaiKimiK27Code),
-            "z-ai/glm-5.2" => Ok(ModelId::OpenRouterZaiGlm52),
             _ => {
                 if let Some(model) = Self::parse_openrouter_model(s) {
                     Ok(model)

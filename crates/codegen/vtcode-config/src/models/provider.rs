@@ -63,13 +63,7 @@ impl ProviderModelSupport for Provider {
             Provider::OpenAI => models::openai::REASONING_MODELS.contains(&model),
             Provider::Anthropic => models::anthropic::REASONING_MODELS.contains(&model),
             Provider::Copilot => false,
-            Provider::DeepSeek => {
-                model == models::deepseek::DEEPSEEK_V4_PRO
-                    || model == models::deepseek::DEEPSEEK_V4_FLASH
-                    || model == models::deepseek::DEEPSEEK_V4_1_FLASH
-                    || model == models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP
-                    || model == "deepseek-reasoner"
-            }
+            Provider::DeepSeek => model == models::deepseek::DEEPSEEK_FLASH || model == "deepseek-reasoner",
             Provider::Meta => models::meta::REASONING_MODELS.contains(&model),
             Provider::OpenRouter => {
                 if let Ok(model_id) = ModelId::from_str(model) {

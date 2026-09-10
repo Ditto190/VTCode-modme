@@ -79,10 +79,9 @@ curl https://ai-gateway.vercel.sh/v1/chat/completions \
 | `alibaba/qwen3.8-max` | Qwen3.8 Max | 1,000,000 | $2 | $6 | |
 | `alibaba/qwen3-coder-next` | Qwen3 Coder Next | 256,000 | $0.50 | $1.20 | No reasoning traces |
 | `minimax/minimax-m3` | MiniMax M3 | 512,000 | $0.30 | $1.20 | |
-| `mistral/devstral-2` | Devstral 2 | 256,000 | $0.40 | $2 | No reasoning traces |
 
 All curated models emit reasoning traces except
-`alibaba/qwen3-coder-next` and `mistral/devstral-2`.
+`alibaba/qwen3-coder-next`.
 
 Model IDs use the gateway's native `vendor/model` format. Unlisted gateway
 model IDs are accepted: VT Code validates the request shape only, not the
@@ -116,7 +115,7 @@ Selecting a model from the `/model` picker always routes to Vercel.
 - **Tool calling:** Function calling uses the OpenAI-compatible format.
 - **Streaming:** Streaming is fully supported.
 - **Reasoning:** Reasoning traces are surfaced for all curated models except
-  `alibaba/qwen3-coder-next` and `mistral/devstral-2`.
+  `alibaba/qwen3-coder-next`.
 - **Structured output:** Supported.
 
 ## Troubleshooting

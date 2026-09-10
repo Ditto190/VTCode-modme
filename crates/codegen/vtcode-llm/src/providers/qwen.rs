@@ -65,20 +65,12 @@ impl_openai_compat_provider!(QwenProvider, QwenSpec, {
         true
     }
 
-    fn supports_reasoning(&self, model: &str) -> bool {
-        let requested = if model.trim().is_empty() {
-            &self.core.model
-        } else {
-            model
-        };
-
+    fn supports_reasoning(&self, _model: &str) -> bool {
         self.core
             .model_behavior
             .as_ref()
             .and_then(|b| b.model_supports_reasoning)
             .unwrap_or(false)
-            || requested == models::qwen::DEEPSEEK_V4_FLASH
-            || requested == models::qwen::DEEPSEEK_V4_PRO
     }
 
     fn supports_reasoning_effort(&self, _model: &str) -> bool {
@@ -95,14 +87,7 @@ impl_openai_compat_provider!(QwenProvider, QwenSpec, {
         } else {
             model
         };
-        crate::provider::catalog_context_window(
-            "qwen",
-            requested,
-            match requested {
-                models::qwen::DEEPSEEK_V4_FLASH | models::qwen::DEEPSEEK_V4_PRO => 1_048_576,
-                _ => 131_072,
-            },
-        )
+        crate::provider::catalog_context_window("qwen", requested, 131_072)
     }
 });
 

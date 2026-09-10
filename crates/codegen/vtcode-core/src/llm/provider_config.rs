@@ -86,7 +86,7 @@ define_provider_config!(
     DeepSeekProviderConfig,
     "deepseek",
     "DeepSeek",
-    crate::config::constants::models::deepseek::DEEPSEEK_V4_PRO,
+    crate::config::constants::models::deepseek::DEEPSEEK_FLASH,
     crate::config::constants::urls::DEEPSEEK_API_BASE,
     Some(crate::config::constants::env_vars::DEEPSEEK_BASE_URL),
     ()

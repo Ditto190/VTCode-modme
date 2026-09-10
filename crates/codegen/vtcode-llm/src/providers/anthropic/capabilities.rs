@@ -73,22 +73,6 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
         });
     }
 
-    if matches_model(requested, models::anthropic::CLAUDE_MYTHOS_5_1) {
-        return Some(ClaudeThinkingProfile {
-            mode: ClaudeThinkingMode::Adaptive,
-            supports_manual_budget: false,
-            adaptive_only: true,
-            default_thinking_enabled: true,
-            manual_interleaved_beta: false,
-            supports_effort: true,
-            supports_task_budget: true,
-            default_display: ThinkingDisplay::Omitted,
-            default_effort: reasoning::HIGH,
-            supports_xhigh_effort: true,
-            supports_max_effort: true,
-        });
-    }
-
     if matches_model(requested, models::anthropic::CLAUDE_SONNET_5) {
         return Some(ClaudeThinkingProfile {
             mode: ClaudeThinkingMode::Adaptive,
@@ -106,22 +90,6 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
     }
 
     if matches_model(requested, models::anthropic::CLAUDE_FABLE_5) {
-        return Some(ClaudeThinkingProfile {
-            mode: ClaudeThinkingMode::Adaptive,
-            supports_manual_budget: false,
-            adaptive_only: true,
-            default_thinking_enabled: true,
-            manual_interleaved_beta: false,
-            supports_effort: true,
-            supports_task_budget: true,
-            default_display: ThinkingDisplay::Omitted,
-            default_effort: reasoning::HIGH,
-            supports_xhigh_effort: true,
-            supports_max_effort: true,
-        });
-    }
-
-    if matches_model(requested, models::anthropic::CLAUDE_MYTHOS_5) {
         return Some(ClaudeThinkingProfile {
             mode: ClaudeThinkingMode::Adaptive,
             supports_manual_budget: false,
@@ -160,8 +128,6 @@ fn supports_native_1m_context(model: &str) -> bool {
     matches_model(model, models::anthropic::CLAUDE_SONNET_5)
         || matches_model(model, models::anthropic::CLAUDE_FABLE_5)
         || matches_model(model, models::anthropic::CLAUDE_FABLE_5_1)
-        || matches_model(model, models::anthropic::CLAUDE_MYTHOS_5)
-        || matches_model(model, models::anthropic::CLAUDE_MYTHOS_5_1)
         || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
         || matches_model(model, models::anthropic::CLAUDE_SONNET_5)
         || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
@@ -233,7 +199,6 @@ pub(crate) fn supports_mid_conversation_system_messages(model: &str, default_mod
 pub(crate) fn supports_turn_scoped_system_messages(model: &str, default_model: &str) -> bool {
     let requested = resolve_model_name(model, default_model);
     matches_model(requested, models::anthropic::CLAUDE_FABLE_5)
-        || matches_model(requested, models::anthropic::CLAUDE_MYTHOS_5)
         || matches_model(requested, CLAUDE_OPUS_4_8)
         || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
 }
@@ -272,8 +237,6 @@ pub(crate) fn supports_compaction(model: &str) -> bool {
     matches_model(model, models::anthropic::CLAUDE_SONNET_5)
         || matches_model(model, models::anthropic::CLAUDE_FABLE_5)
         || matches_model(model, models::anthropic::CLAUDE_FABLE_5_1)
-        || matches_model(model, models::anthropic::CLAUDE_MYTHOS_5)
-        || matches_model(model, models::anthropic::CLAUDE_MYTHOS_5_1)
         || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
         || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
         || matches_model(model, models::anthropic::CLAUDE_SONNET_5)
@@ -296,8 +259,6 @@ pub(crate) fn rejects_sampling(model: &str, default_model: &str) -> bool {
     matches_model(requested, models::anthropic::CLAUDE_SONNET_5)
         || matches_model(requested, models::anthropic::CLAUDE_FABLE_5)
         || matches_model(requested, models::anthropic::CLAUDE_FABLE_5_1)
-        || matches_model(requested, models::anthropic::CLAUDE_MYTHOS_5)
-        || matches_model(requested, models::anthropic::CLAUDE_MYTHOS_5_1)
         || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
         || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
 }

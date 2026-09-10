@@ -349,7 +349,7 @@ fn convert_to_interaction_request_preserves_trailing_function_call_turn() {
 
     let request = LLMRequest {
         messages: vec![Message::user("What's the weather?".to_string()), assistant_message].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         ..Default::default()
     };
 
@@ -912,7 +912,7 @@ fn convert_to_gemini_request_includes_reasoning_config() {
     // Test High effort level for Gemini 3 Pro
     let request = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         reasoning_effort: Some(ReasoningEffortLevel::High),
         ..Default::default()
     };
@@ -930,7 +930,7 @@ fn convert_to_gemini_request_includes_reasoning_config() {
     // Test Low effort level for Gemini 3 Pro
     let request_low = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         reasoning_effort: Some(ReasoningEffortLevel::Low),
         ..Default::default()
     };
@@ -952,7 +952,7 @@ fn convert_to_gemini_request_includes_reasoning_config() {
     // Test that None effort results in low reasoning_config for Gemini (none is treated as low)
     let request_none = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         reasoning_effort: Some(ReasoningEffortLevel::None),
         ..Default::default()
     };
@@ -982,7 +982,7 @@ fn gemini31_pro_reasoning_mapping() {
     // Test High effort level for Gemini 3.1 Pro
     let request = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         reasoning_effort: Some(ReasoningEffortLevel::High),
         ..Default::default()
     };
@@ -1021,7 +1021,7 @@ fn thought_signature_preserved_in_function_call_response() {
     };
 
     let llm_response =
-        GeminiProvider::convert_from_gemini_response(response, models::google::GEMINI_3_7_FLASH.to_string())
+        GeminiProvider::convert_from_gemini_response(response, models::google::GEMINI_3_8_FLASH.to_string())
             .expect("conversion should succeed");
 
     let tool_calls = llm_response.tool_calls.expect("should have tool calls");
@@ -1061,7 +1061,7 @@ fn thought_signature_roundtrip_in_request() {
             },
         ]
         .into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         ..Default::default()
     };
 
@@ -1111,7 +1111,7 @@ fn parallel_function_calls_single_signature() {
     };
 
     let llm_response =
-        GeminiProvider::convert_from_gemini_response(response, models::google::GEMINI_3_7_FLASH.to_string())
+        GeminiProvider::convert_from_gemini_response(response, models::google::GEMINI_3_8_FLASH.to_string())
             .expect("conversion should succeed");
 
     let tool_calls = llm_response.tool_calls.expect("should have tool calls");
@@ -1171,15 +1171,15 @@ fn gemini_provider_supports_reasoning_effort_for_gemini3() {
     use vtcode_config::models::Provider;
 
     // Test that the provider correctly identifies Gemini 3 Pro as supporting reasoning effort
-    assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_7_FLASH));
-    assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_7_FLASH));
-    assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_7_FLASH));
+    assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_8_FLASH));
+    assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_8_FLASH));
+    assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_8_FLASH));
     assert!(Provider::Gemini.supports_reasoning_effort(models::google::GEMINI_3_FLASH_PREVIEW));
 
     // Test model IDs as well
-    assert!(ModelId::Gemini37Flash.supports_reasoning_effort());
-    assert!(ModelId::Gemini37Flash.supports_reasoning_effort());
-    assert!(ModelId::Gemini37Flash.supports_reasoning_effort());
+    assert!(ModelId::Gemini38Flash.supports_reasoning_effort());
+    assert!(ModelId::Gemini38Flash.supports_reasoning_effort());
+    assert!(ModelId::Gemini38Flash.supports_reasoning_effort());
 }
 
 #[test]
@@ -1190,7 +1190,7 @@ fn gemini3_flash_extended_thinking_levels() {
     assert!(GeminiProvider::supports_extended_thinking(models::google::GEMINI_3_FLASH_PREVIEW));
 
     // But Gemini 3 Pro does not
-    assert!(!GeminiProvider::supports_extended_thinking(models::google::GEMINI_3_7_FLASH));
+    assert!(!GeminiProvider::supports_extended_thinking(models::google::GEMINI_3_8_FLASH));
     assert!(!GeminiProvider::supports_extended_thinking("gemini-3-pro"));
 
     // Get supported levels for each model
@@ -1213,7 +1213,7 @@ fn gemini_3_pro_temperature_warning_predicate_excludes_flash_models() {
     assert!(GeminiProvider::is_gemini_3_pro_model("gemini-3.1-pro"));
     assert!(GeminiProvider::is_gemini_3_pro_model("gemini-3-pro"));
     assert!(!GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_FLASH_PREVIEW));
-    assert!(!GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_7_FLASH));
+    assert!(!GeminiProvider::is_gemini_3_pro_model(models::google::GEMINI_3_8_FLASH));
 }
 
 #[test]
@@ -1347,7 +1347,7 @@ fn convert_to_gemini_request_strips_sampling_params_for_latest_models() {
 
     let request = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_6_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         temperature: Some(0.7),
         top_p: Some(0.9),
         top_k: Some(40),
@@ -1378,7 +1378,7 @@ fn convert_to_gemini_request_strips_sampling_params_for_3_5_flash_lite() {
 
     let request = LLMRequest {
         messages: vec![Message::user("test".to_string())].into(),
-        model: models::google::GEMINI_3_7_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         temperature: Some(0.5),
         top_p: Some(0.8),
         top_k: Some(30),
@@ -1404,7 +1404,7 @@ fn latest_model_strips_prefilled_model_turn() {
             Message::assistant("prefilled response".to_string()),
         ]
         .into(),
-        model: models::google::GEMINI_3_6_FLASH.to_string(),
+        model: models::google::GEMINI_3_8_FLASH.to_string(),
         ..Default::default()
     };
 

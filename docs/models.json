@@ -540,27 +540,6 @@
           "structured_output": true,
           "thinking": true
         }
-      },
-      "step-3.5-flash": {
-        "id": "step-3.5-flash",
-        "name": "Step 3.5 Flash",
-        "description": "StepFun's efficient reasoning model configured for local llama.cpp inference.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "output_tokens": 32768,
-        "capabilities": {
-          "structured_output": true,
-          "thinking": true
-        }
       }
     }
   },
@@ -913,31 +892,6 @@
           "high"
         ]
       },
-      "deepseek-ai/DeepSeek-R1": {
-        "id": "deepseek-ai/DeepSeek-R1",
-        "name": "DeepSeek R1",
-        "description": "Powerful reasoning based open large language model.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 131072,
-        "capabilities": {
-          "structured_output": true
-        },
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high"
-        ]
-      },
       "deepseek-ai/DeepSeek-V3.2": {
         "id": "deepseek-ai/DeepSeek-V3.2",
         "name": "DeepSeek V3.2",
@@ -1039,58 +993,6 @@
           "high"
         ]
       },
-      "deepseek-ai/DeepSeek-V4-Flash:novita": {
-        "id": "deepseek-ai/DeepSeek-V4-Flash:novita",
-        "name": "DeepSeek V4 Flash (Novita)",
-        "description": "DeepSeek V4 Flash via Novita inference provider on HuggingFace router. Fast inference model for cost-effective reasoning (1M context, 158B params).",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "capabilities": {
-          "structured_output": true
-        },
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high"
-        ]
-      },
-      "deepseek-ai/DeepSeek-V4-Pro:together": {
-        "id": "deepseek-ai/DeepSeek-V4-Pro:together",
-        "name": "DeepSeek V4 Pro (Together)",
-        "description": "DeepSeek V4 Pro via Together inference provider on HuggingFace router. High-performance reasoning model with advanced thinking capabilities (1M context, 1.6T params).",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "capabilities": {
-          "structured_output": true
-        },
-        "is_pro": true,
-        "lightweight_model": "deepseek-ai/DeepSeek-V4-Flash:novita",
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high"
-        ]
-      },
       "MiniMaxAI/MiniMax-M3:novita": {
         "id": "MiniMaxAI/MiniMax-M3:novita",
         "name": "MiniMax-M3 (Novita)",
@@ -1111,33 +1013,6 @@
           "structured_output": true
         },
         "is_pro": true,
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high"
-        ]
-      },
-      "deepseek-ai/DeepSeek-V4-Pro:novita": {
-        "id": "deepseek-ai/DeepSeek-V4-Pro:novita",
-        "name": "DeepSeek V4 Pro (Novita)",
-        "description": "DeepSeek V4 Pro via Novita inference provider on HuggingFace router. High-performance reasoning model with advanced thinking capabilities (1M context, 1.6T params).",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "capabilities": {
-          "structured_output": true
-        },
-        "is_pro": true,
-        "lightweight_model": "deepseek-ai/DeepSeek-V4-Flash:novita",
         "reasoning_efforts": [
           "minimal",
           "low",
@@ -1411,78 +1286,8 @@
     "name": "DeepSeek",
     "doc": "https://api-docs.deepseek.com",
     "models": {
-      "deepseek-v4-flash": {
-        "id": "deepseek-v4-flash",
-        "name": "DeepSeek V4 Flash",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 384000,
-        "description": "Official release with significantly enhanced agent capabilities for coding and tool use",
-        "reasoning_efforts": [
-          "low",
-          "high",
-          "max"
-        ]
-      },
-      "deepseek-v4-pro": {
-        "id": "deepseek-v4-pro",
-        "name": "DeepSeek V4 Pro",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 384000,
-        "description": "High-performance reasoning model with advanced thinking capabilities",
-        "is_pro": true,
-        "lightweight_model": "deepseek-v4-flash",
-        "reasoning_efforts": [
-          "low",
-          "high",
-          "max"
-        ]
-      },
-      "deepseek-v4-flash-vision-exp": {
-        "id": "deepseek-v4-flash-vision-exp",
-        "name": "DeepSeek V4 Flash Vision Exp",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 384000,
-        "description": "Experimental vision model — image + text input via chat/completions (base64/file_id/URL, 600 images, 48MiB body, 8192px)",
-        "lightweight_model": "deepseek-v4-flash",
-        "reasoning_efforts": [
-          "low",
-          "high",
-          "max"
-        ]
-      },
-      "deepseek-v4.1-flash": {
-        "id": "deepseek-v4.1-flash",
+      "deepseek-flash": {
+        "id": "deepseek-flash",
         "name": "DeepSeek V4.1 Flash",
         "reasoning": true,
         "tool_call": true,
@@ -1515,47 +1320,6 @@
     "name": "Z.AI",
     "doc": "https://docs.z.ai/guides/llm/glm-5",
     "models": {
-      "glm-5.2": {
-        "id": "glm-5.2",
-        "name": "GLM-5.2",
-        "description": "Z.ai flagship model for long-horizon tasks with truly usable 1M-token context. Built for project-scale engineering context, delivering more stable long-task execution, more reliable adherence to engineering standards, and higher success rates in development scenarios.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 128000,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "context_caching": true,
-          "structured_output": true,
-          "tool_streaming": true
-        },
-        "vtcode": {
-          "variant": "ZaiGlm52",
-          "constant": "Z_AI_GLM_5_2",
-          "display": "GLM-5.2",
-          "description": "Z.ai flagship model for long-horizon tasks with 1M context.",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "5.2",
-          "doc_comment": "GLM-5.2 - Z.ai flagship model for long-horizon tasks"
-        },
-        "is_pro": true,
-        "reasoning_efforts": [
-          "low",
-          "high",
-          "max"
-        ]
-      },
       "glm-5.3-flash": {
         "id": "glm-5.3-flash",
         "name": "GLM-5.3 Flash",
@@ -1614,7 +1378,6 @@
         },
         "context": 1000000,
         "max_output_tokens": 128000,
-        "lightweight_model": "glm-5.2",
         "capabilities": {
           "thinking": true,
           "streaming": true,
@@ -1667,7 +1430,7 @@
       "glm-5.2": {
         "id": "glm-5.2",
         "name": "GLM-5.2 (OpenCode Go)",
-        "description": "GLM-5.2 — flagship Z.AI model included with the OpenCode Go subscription for long-horizon coding.",
+        "description": "GLM-5.2 \u2014 flagship Z.AI model included with the OpenCode Go subscription for long-horizon coding.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1686,27 +1449,10 @@
         },
         "is_pro": true
       },
-      "kimi-k2.7-code": {
-        "id": "kimi-k2.7-code",
-        "name": "Kimi K2.7 Code (OpenCode Go)",
-        "description": "Kimi K2.7 Code — Moonshot's most capable coding model included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "is_pro": true
-      },
       "mimo-v2.5": {
         "id": "mimo-v2.5",
         "name": "MiMo-V2.5 (OpenCode Go)",
-        "description": "MiMo-V2.5 — Xiaomi's omnimodal high-volume model included with the OpenCode Go subscription.",
+        "description": "MiMo-V2.5 \u2014 Xiaomi's omnimodal high-volume model included with the OpenCode Go subscription.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1722,7 +1468,7 @@
       "mimo-v2.5-pro": {
         "id": "mimo-v2.5-pro",
         "name": "MiMo-V2.5-Pro (OpenCode Go)",
-        "description": "MiMo-V2.5-Pro — Xiaomi's flagship reasoning model included with the OpenCode Go subscription.",
+        "description": "MiMo-V2.5-Pro \u2014 Xiaomi's flagship reasoning model included with the OpenCode Go subscription.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1740,7 +1486,7 @@
       "minimax-m3": {
         "id": "minimax-m3",
         "name": "MiniMax M3 (OpenCode Go)",
-        "description": "MiniMax M3 — frontier multimodal coding model included with the OpenCode Go subscription.",
+        "description": "MiniMax M3 \u2014 frontier multimodal coding model included with the OpenCode Go subscription.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1754,94 +1500,10 @@
         "context": 1048576,
         "is_pro": true
       },
-      "qwen3.7-max": {
-        "id": "qwen3.7-max",
-        "name": "Qwen3.7 Max (OpenCode Go)",
-        "description": "Qwen3.7 Max — highest capability Qwen tier included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "is_pro": true,
-        "lightweight_model": "qwen3.7-plus"
-      },
-      "qwen3.7-plus": {
-        "id": "qwen3.7-plus",
-        "name": "Qwen3.7 Plus (OpenCode Go)",
-        "description": "Qwen3.7 Plus — balanced Qwen coding model included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000
-      },
-      "qwen3.6-plus": {
-        "id": "qwen3.6-plus",
-        "name": "Qwen3.6 Plus (OpenCode Go)",
-        "description": "Qwen3.6 Plus — cost-effective Qwen coding model included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000
-      },
-      "deepseek-v4-pro": {
-        "id": "deepseek-v4-pro",
-        "name": "DeepSeek V4 Pro (OpenCode Go)",
-        "description": "DeepSeek V4 Pro — high-quality reasoning model included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 128000,
-        "is_pro": true,
-        "lightweight_model": "deepseek-v4-flash"
-      },
-      "deepseek-v4-flash": {
-        "id": "deepseek-v4-flash",
-        "name": "DeepSeek V4 Flash (OpenCode Go)",
-        "description": "DeepSeek V4 Flash — fast, low-cost coding model included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 128000
-      },
       "gpt-5.6-luna": {
         "id": "gpt-5.6-luna",
         "name": "GPT-5.6 Luna (OpenCode Go)",
-        "description": "GPT-5.6 Luna — OpenAI cost-efficient frontier model included with the OpenCode Go subscription.",
+        "description": "GPT-5.6 Luna \u2014 OpenAI cost-efficient frontier model included with the OpenCode Go subscription.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1858,7 +1520,7 @@
       "kimi-k3": {
         "id": "kimi-k3",
         "name": "Kimi K3 (OpenCode Go)",
-        "description": "Kimi K3 — Moonshot flagship 2.8T agentic model included with the OpenCode Go subscription.",
+        "description": "Kimi K3 \u2014 Moonshot flagship 2.8T agentic model included with the OpenCode Go subscription.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1875,7 +1537,7 @@
       "muse-spark-1.2-contributor": {
         "id": "muse-spark-1.2-contributor",
         "name": "Muse Spark 1.2 Contributor (OpenCode Go)",
-        "description": "Muse Spark 1.2 Contributor — Meta long-context reasoning model included with the OpenCode Go subscription (limited regions).",
+        "description": "Muse Spark 1.2 Contributor \u2014 Meta long-context reasoning model included with the OpenCode Go subscription (limited regions).",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -1885,39 +1547,6 @@
             "video",
             "audio",
             "pdf"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576
-      },
-      "qwen3.8-max": {
-        "id": "qwen3.8-max",
-        "name": "Qwen3.8 Max (OpenCode Go)",
-        "description": "Qwen3.8 Max — highest capability Qwen tier included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000
-      },
-      "hy3": {
-        "id": "hy3",
-        "name": "Hy3 (OpenCode Go)",
-        "description": "Hy3 — high-volume coding model included with the OpenCode Go subscription.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
           ],
           "output": [
             "text"
@@ -1964,76 +1593,6 @@
         "id": "muse-spark-1.1",
         "name": "Muse Spark 1.1",
         "description": "Meta's Standard-tier Muse Spark 1.1 model for reasoning and agentic coding workflows.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video",
-            "audio",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true,
-          "thinking": true
-        },
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ]
-      },
-      "muse-spark-1.2": {
-        "id": "muse-spark-1.2",
-        "name": "Muse Spark 1.2",
-        "description": "Meta Standard-tier Muse Spark 1.2 model for reasoning and agentic coding workflows.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video",
-            "audio",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true,
-          "thinking": true
-        },
-        "is_pro": true,
-        "lightweight_model": "muse-spark-1.1",
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ]
-      },
-      "muse-spark-1.2-contributor": {
-        "id": "muse-spark-1.2-contributor",
-        "name": "Muse Spark 1.2 Contributor",
-        "description": "Meta's Contributor-tier Muse Spark 1.2 model; prompts and completions may be used to train future Meta models.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -2180,70 +1739,6 @@
           "doc_comment": "Muse Glimmer 30B - Meta Muse Glimmer 30B reasoning model via OpenRouter"
         }
       },
-      "meta/muse-spark-1.2": {
-        "id": "meta/muse-spark-1.2",
-        "name": "Meta: Muse Spark 1.2",
-        "description": "Meta Muse Spark 1.2 reasoning model via OpenRouter.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video",
-            "file",
-            "audio"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "cost": {
-          "input": 1.25e-06,
-          "output": 4.25e-06,
-          "cache_read": 1.5e-07
-        },
-        "vtcode": {
-          "variant": "OpenRouterMetaMuseSpark12",
-          "constant": "META_MUSE_SPARK_1_2",
-          "vendor": "meta",
-          "display": "Muse Spark 1.2 (OpenRouter)",
-          "description": "Meta Muse Spark 1.2 reasoning model via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "Muse-Spark-1.2",
-          "doc_comment": "Muse Spark 1.2 - Meta Muse Spark 1.2 reasoning model via OpenRouter"
-        }
-      },
-      "stepfun/step-3.5-flash:free": {
-        "id": "stepfun/step-3.5-flash:free",
-        "name": "Step 3.5 Flash (free)",
-        "description": "Step 3.5 Flash is StepFun's most capable open-source foundation model. Built on a sparse Mixture of Experts (MoE) architecture, it selectively activates only 11B of its 196B parameters per token. It is a reasoning model that is incredibly speed efficient even at long contexts.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "vtcode": {
-          "variant": "OpenRouterStepfunStep35FlashFree",
-          "constant": "STEPFUN_STEP_3_5_FLASH_FREE",
-          "vendor": "stepfun",
-          "display": "Step 3.5 Flash (free)",
-          "description": "Step 3.5 Flash (free) model via OpenRouter",
-          "efficient": true,
-          "top_tier": true,
-          "generation": "Step-3.5",
-          "doc_comment": "Step 3.5 Flash (free) - StepFun's most capable open-source reasoning model via OpenRouter"
-        },
-        "is_pro": true
-      },
       "anthropic/claude-sonnet-5": {
         "id": "anthropic/claude-sonnet-5",
         "name": "Anthropic: Claude Sonnet 5",
@@ -2293,7 +1788,7 @@
         "context": 1000000,
         "max_output_tokens": 384000,
         "vtcode": {
-          "variant": "OpenRouterDeepSeekV41Flash",
+          "variant": "OpenRouterDeepSeekFlash",
           "constant": "DEEPSEEK_V4_1_FLASH",
           "vendor": "deepseek",
           "display": "DeepSeek V4.1 Flash",
@@ -2302,147 +1797,6 @@
           "top_tier": true,
           "generation": "4.1",
           "doc_comment": "DeepSeek V4.1 Flash - Latest flash model via OpenRouter"
-        }
-      },
-      "deepseek/deepseek-v4-flash": {
-        "id": "deepseek/deepseek-v4-flash",
-        "name": "DeepSeek: V4 Flash",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 384000,
-        "vtcode": {
-          "variant": "OpenRouterDeepSeekV4Flash",
-          "constant": "DEEPSEEK_V4_FLASH",
-          "vendor": "deepseek",
-          "display": "DeepSeek V4 Flash",
-          "description": "Fast inference model for cost-effective reasoning tasks via OpenRouter",
-          "efficient": true,
-          "top_tier": true,
-          "generation": "4",
-          "doc_comment": "DeepSeek V4 Flash - Fast inference model via OpenRouter"
-        }
-      },
-      "deepseek/deepseek-v4-pro": {
-        "id": "deepseek/deepseek-v4-pro",
-        "name": "DeepSeek: V4 Pro",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 384000,
-        "vtcode": {
-          "variant": "OpenRouterDeepSeekV4Pro",
-          "constant": "DEEPSEEK_V4_PRO",
-          "vendor": "deepseek",
-          "display": "DeepSeek V4 Pro",
-          "description": "High-performance reasoning model with advanced thinking capabilities via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "4",
-          "doc_comment": "DeepSeek V4 Pro - High-performance reasoning model via OpenRouter"
-        }
-      },
-      "deepseek/deepseek-r1": {
-        "id": "deepseek/deepseek-r1",
-        "name": "DeepSeek: R1",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 163840,
-        "max_output_tokens": 163840,
-        "cost": {
-          "input": 4e-07,
-          "output": 2e-06
-        },
-        "vtcode": {
-          "variant": "OpenRouterDeepSeekR1",
-          "constant": "DEEPSEEK_R1",
-          "vendor": "deepseek",
-          "display": "DeepSeek R1",
-          "description": "DeepSeek R1 reasoning model with chain-of-thought",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "2025-01-20",
-          "doc_comment": "DeepSeek R1 - DeepSeek R1 reasoning model with chain-of-thought"
-        }
-      },
-      "google/gemini-3.6-flash": {
-        "id": "google/gemini-3.6-flash",
-        "name": "Google: Gemini 3.6 Flash",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "file"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "vtcode": {
-          "variant": "OpenRouterGoogleGemini36Flash",
-          "constant": "GOOGLE_GEMINI_3_6_FLASH",
-          "vendor": "google",
-          "display": "Gemini 3.6 Flash",
-          "description": "Latest Gemini flash model with improved reasoning and efficiency via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "3.6",
-          "doc_comment": "Gemini 3.6 Flash - Latest Gemini flash model with improved reasoning and efficiency via OpenRouter"
-        }
-      },
-      "google/gemini-3.7-flash": {
-        "id": "google/gemini-3.7-flash",
-        "name": "Google: Gemini 3.7 Flash",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "file"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "vtcode": {
-          "variant": "OpenRouterGoogleGemini37Flash",
-          "constant": "GOOGLE_GEMINI_3_7_FLASH",
-          "vendor": "google",
-          "display": "Gemini 3.7 Flash",
-          "description": "Flash model with 1M context and tunable thinking levels via OpenRouter",
-          "efficient": true,
-          "top_tier": true,
-          "generation": "3.7",
-          "doc_comment": "Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels via OpenRouter"
         }
       },
       "google/gemini-3.8-flash": {
@@ -2471,72 +1825,6 @@
           "top_tier": true,
           "generation": "3.8",
           "doc_comment": "Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE, agents, and enterprise workflows via OpenRouter"
-        }
-      },
-      "openai/gpt-5": {
-        "id": "openai/gpt-5",
-        "name": "OpenAI: GPT-5",
-        "reasoning": false,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "file"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 400000,
-        "max_output_tokens": 128000,
-        "cost": {
-          "input": 1.25e-06,
-          "output": 1e-05
-        },
-        "vtcode": {
-          "variant": "OpenRouterOpenAIGpt5",
-          "constant": "OPENAI_GPT_5",
-          "vendor": "openai",
-          "display": "OpenAI GPT-5",
-          "description": "OpenAI GPT-5 model accessed through OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "2025-09-20",
-          "doc_comment": "OpenAI GPT-5 - OpenAI GPT-5 model accessed through OpenRouter"
-        }
-      },
-      "openai/gpt-5-chat": {
-        "id": "openai/gpt-5-chat",
-        "name": "OpenAI: GPT-5 Chat",
-        "reasoning": false,
-        "tool_call": false,
-        "modalities": {
-          "input": [
-            "file",
-            "image",
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 128000,
-        "max_output_tokens": 16384,
-        "cost": {
-          "input": 1.25e-06,
-          "output": 1e-05
-        },
-        "vtcode": {
-          "variant": "OpenRouterOpenAIGpt5Chat",
-          "constant": "OPENAI_GPT_5_CHAT",
-          "vendor": "openai",
-          "display": "OpenAI GPT-5 Chat",
-          "description": "Chat optimised GPT-5 endpoint without tool use",
-          "efficient": false,
-          "top_tier": false,
-          "generation": "2025-09-20",
-          "doc_comment": "OpenAI GPT-5 Chat - Chat optimised GPT-5 endpoint without tool use"
         }
       },
       "openai/gpt-oss-120b": {
@@ -2729,103 +2017,6 @@
         },
         "is_pro": true
       },
-      "moonshotai/kimi-k2.7-code": {
-        "id": "moonshotai/kimi-k2.7-code",
-        "name": "MoonshotAI: Kimi K2.7 Code",
-        "description": "Kimi K2.7 Code is Moonshot AI's most capable coding model, with a breakthrough in long-horizon coding tasks across Rust, Go, Python and more. Supports 256K context, multi-step tool invocation, and strong reasoning capabilities.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "max_output_tokens": 32768,
-        "cost": {
-          "input": 9.5e-07,
-          "output": 4e-06
-        },
-        "vtcode": {
-          "variant": "OpenRouterMoonshotaiKimiK27Code",
-          "constant": "MOONSHOTAI_KIMI_K2_7_CODE",
-          "vendor": "moonshotai",
-          "display": "Kimi K2.7 Code",
-          "description": "Kimi K2.7 Code most capable coding model with long-horizon coding breakthrough via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "K2.7",
-          "doc_comment": "Kimi K2.7 Code - Moonshot AI's most capable coding model with long-horizon coding breakthrough via OpenRouter"
-        },
-        "is_pro": true
-      },
-      "tencent/hy3-preview": {
-        "id": "tencent/hy3-preview",
-        "name": "Tencent: Hy3 preview",
-        "description": "Hy3 preview is a high-efficiency Mixture-of-Experts model from Tencent designed for agentic workflows and production use, with configurable reasoning levels across disabled, low, and high modes.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "cost": {
-          "input": 6.3e-08,
-          "output": 2.1e-07
-        },
-        "vtcode": {
-          "variant": "OpenRouterTencentHy3Preview",
-          "constant": "TENCENT_HY3_PREVIEW",
-          "vendor": "tencent",
-          "display": "Hy3 Preview",
-          "description": "Tencent Hy3 high-efficiency MoE model with configurable reasoning via OpenRouter",
-          "efficient": true,
-          "top_tier": false,
-          "generation": "Hy3",
-          "doc_comment": "Hy3 Preview - Tencent's high-efficiency MoE model for agentic workflows via OpenRouter"
-        }
-      },
-      "x-ai/grok-build-0.1": {
-        "id": "x-ai/grok-build-0.1",
-        "name": "xAI: Grok Build 0.1",
-        "description": "Grok Build 0.1 is xAI's fast coding model trained specifically for agentic software engineering workflows, optimized for interactive coding agents, tool use, and multi-step development tasks.",
-        "reasoning": false,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "cost": {
-          "input": 1e-06,
-          "output": 2e-06
-        },
-        "vtcode": {
-          "variant": "OpenRouterXAiGrokBuild01",
-          "constant": "X_AI_GROK_BUILD_0_1",
-          "vendor": "xai",
-          "display": "Grok Build 0.1",
-          "description": "xAI Grok Build 0.1 coding model for agentic software engineering via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "Grok-Build-0.1",
-          "doc_comment": "Grok Build 0.1 - xAI's fast coding model for agentic software engineering via OpenRouter"
-        }
-      },
       "x-ai/grok-4.6": {
         "id": "x-ai/grok-4.6",
         "name": "xAI: Grok 4.6",
@@ -2922,34 +2113,6 @@
           "doc_comment": "MiMo-V2.5 - Xiaomi's omnimodal agentic model for complex software engineering via OpenRouter"
         }
       },
-      "z-ai/glm-5.2": {
-        "id": "z-ai/glm-5.2",
-        "name": "Z.AI: GLM-5.2",
-        "description": "Z.AI flagship model for long-horizon tasks with truly usable 1M-token context. Built for project-scale engineering context, delivering more stable long-task execution and higher success rates in development scenarios.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "max_output_tokens": 128000,
-        "vtcode": {
-          "variant": "OpenRouterZaiGlm52",
-          "constant": "ZAI_GLM_5_2",
-          "vendor": "z-ai",
-          "display": "GLM-5.2",
-          "description": "Z.AI GLM-5.2 flagship model for long-horizon tasks with 1M context via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "5.2",
-          "doc_comment": "GLM-5.2 - Z.AI GLM-5.2 flagship model for long-horizon tasks via OpenRouter"
-        }
-      },
       "z-ai/glm-5.3-flash": {
         "id": "z-ai/glm-5.3-flash",
         "name": "Z.AI: GLM-5.3 Flash",
@@ -2982,133 +2145,6 @@
           "top_tier": true,
           "generation": "5.3",
           "doc_comment": "GLM-5.3 Flash - Z.AI efficient multimodal model with hybrid sparse+linear attention via OpenRouter"
-        }
-      },
-      "poolside/laguna-xs.2:free": {
-        "id": "poolside/laguna-xs.2:free",
-        "name": "Poolside: Laguna XS.2 (free)",
-        "description": "Laguna XS.2 is Poolside's efficient coding agent model, combining tool calling and reasoning capabilities with a compact footprint, quantized to fp8 for fast, cost-efficient agentic coding workflows.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "cost": {
-          "input": 0,
-          "output": 0
-        },
-        "vtcode": {
-          "variant": "OpenRouterPoolsideLagunaXs2Free",
-          "constant": "POOLSIDE_LAGUNA_XS_2_FREE",
-          "vendor": "poolside",
-          "display": "Laguna XS.2 (free)",
-          "description": "Poolside Laguna XS.2 compact free coding agent model via OpenRouter",
-          "efficient": true,
-          "top_tier": false,
-          "generation": "Laguna-XS.2",
-          "doc_comment": "Laguna XS.2 (free) - Poolside's efficient free coding agent model via OpenRouter"
-        }
-      },
-      "poolside/laguna-m.1:free": {
-        "id": "poolside/laguna-m.1:free",
-        "name": "Poolside: Laguna M.1 (free)",
-        "description": "Laguna M.1 is Poolside's flagship coding agent model, optimized for complex software engineering tasks with tool calling and reasoning support, quantized to fp8 for efficient inference.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "cost": {
-          "input": 0,
-          "output": 0
-        },
-        "vtcode": {
-          "variant": "OpenRouterPoolsideLagunaM1Free",
-          "constant": "POOLSIDE_LAGUNA_M_1_FREE",
-          "vendor": "poolside",
-          "display": "Laguna M.1 (free)",
-          "description": "Poolside Laguna M.1 flagship free coding agent model via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "Laguna-M.1",
-          "doc_comment": "Laguna M.1 (free) - Poolside's flagship free coding agent model via OpenRouter"
-        }
-      },
-      "poolside/laguna-s-2.1:free": {
-        "id": "poolside/laguna-s-2.1:free",
-        "name": "Poolside: Laguna S 2.1 (free)",
-        "description": "Laguna S 2.1 is Poolside's 118B MoE coding agent model, optimized for long-horizon agentic tasks with tool calling and reasoning support, available as a free endpoint via OpenRouter.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "cost": {
-          "input": 0,
-          "output": 0
-        },
-        "vtcode": {
-          "variant": "OpenRouterPoolsideLagunaS21Free",
-          "constant": "POOLSIDE_LAGUNA_S_2_1_FREE",
-          "vendor": "poolside",
-          "display": "Laguna S 2.1 (free)",
-          "description": "Poolside Laguna S 2.1 118B MoE free coding agent model via OpenRouter",
-          "efficient": false,
-          "top_tier": true,
-          "generation": "Laguna-S.2.1",
-          "doc_comment": "Laguna S 2.1 (free) - Poolside's 118B MoE free coding agent model via OpenRouter"
-        }
-      },
-      "qwen/qwen3.8-27b": {
-        "id": "qwen/qwen3.8-27b",
-        "name": "Qwen: Qwen3.8 27B",
-        "description": "Qwen3.8 27B is an open-weight dense vision-language model from Qwen. It is suited for coding, professional workflows, research, multimodal interaction, and long-running agent tasks, with flexible thinking that can be enabled or disabled.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "max_output_tokens": 131072,
-        "cost": {
-          "input": 4.5e-07,
-          "output": 3.2e-06
-        },
-        "vtcode": {
-          "variant": "OpenRouterQwenQwen3827b",
-          "constant": "QWEN_3_8_27B",
-          "vendor": "qwen",
-          "display": "Qwen3.8 27B",
-          "description": "Qwen3.8 27B open-weight dense vision-language model with flexible thinking via OpenRouter",
-          "efficient": false,
-          "top_tier": false,
-          "generation": "3.8",
-          "doc_comment": "Qwen3.8 27B - Qwen's open-weight dense vision-language model with flexible thinking via OpenRouter"
         }
       },
       "meta/muse-spark-1.3": {
@@ -3145,42 +2181,6 @@
           "top_tier": true,
           "generation": "Muse-Spark-1.3",
           "doc_comment": "Muse Spark 1.3 - Meta Muse Spark 1.3 reasoning model via OpenRouter"
-        }
-      },
-      "meta/muse-spark-1.3-contributor": {
-        "id": "meta/muse-spark-1.3-contributor",
-        "name": "Meta: Muse Spark 1.3 Contributor",
-        "description": "Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video",
-            "file",
-            "audio"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "cost": {
-          "input": 1e-07,
-          "output": 2e-07,
-          "cache_read": 2e-09
-        },
-        "vtcode": {
-          "variant": "OpenRouterMetaMuseSpark13Contributor",
-          "constant": "META_MUSE_SPARK_1_3_CONTRIBUTOR",
-          "vendor": "meta",
-          "display": "Muse Spark 1.3 Contributor (OpenRouter)",
-          "description": "Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter",
-          "efficient": true,
-          "top_tier": false,
-          "generation": "Muse-Spark-1.3-Contributor",
-          "doc_comment": "Muse Spark 1.3 Contributor - Meta Muse Spark 1.3 Contributor reasoning model via OpenRouter"
         }
       },
       "openai/gpt-6-astra": {
@@ -3316,27 +2316,6 @@
           "function_calling": true,
           "structured_output": true
         }
-      },
-      "deepseek-ai/deepseek-v4-flash-0731": {
-        "id": "deepseek-ai/deepseek-v4-flash-0731",
-        "name": "DeepSeek V4 Flash 0731 (NVIDIA)",
-        "description": "DeepSeek V4 Flash served through NVIDIA NIM for fast reasoning and agentic coding.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
       }
     }
   },
@@ -3439,39 +2418,6 @@
           ]
         },
         "context": 131072
-      },
-      "deepseek-v4-flash:cloud": {
-        "id": "deepseek-v4-flash:cloud",
-        "name": "DeepSeek V4 Flash (cloud)",
-        "description": "Fast inference DeepSeek V4 Flash model via Ollama Cloud with a 1M-token context window",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000
-      },
-      "deepseek-v4-pro:cloud": {
-        "id": "deepseek-v4-pro:cloud",
-        "name": "DeepSeek V4 Pro (cloud)",
-        "description": "High-performance DeepSeek V4 Pro model via Ollama Cloud",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 131072,
-        "lightweight_model": "deepseek-v4-flash:cloud"
       },
       "qwen3-coder:480b-cloud": {
         "id": "qwen3-coder:480b-cloud",
@@ -3623,22 +2569,6 @@
         "id": "nemotron-3-ultra:cloud",
         "name": "Nemotron 3 Ultra (cloud)",
         "description": "NVIDIA Nemotron 3 Ultra (550B) is built for high-throughput reasoning and long-running agent workflows with 256K context via Ollama Cloud.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144
-      },
-      "kimi-k2.7-code:cloud": {
-        "id": "kimi-k2.7-code:cloud",
-        "name": "Kimi K2.7 Code (cloud)",
-        "description": "Cloud-hosted Kimi K2.7 Code model served via Ollama Cloud",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -3927,10 +2857,10 @@
           "structured_output": true
         }
       },
-      "deepseek-v4-flash": {
-        "id": "deepseek-v4-flash",
-        "name": "DeepSeek V4 Flash (Qwen)",
-        "description": "DeepSeek V4 Flash fast inference model served through Qwen Cloud API (1M context)",
+      "deepseek-v4-pro": {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro (Qwen)",
+        "description": "DeepSeek V4 Pro high-performance reasoning model served through Qwen Cloud API (1M context)",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -3950,10 +2880,10 @@
           "structured_output": true
         }
       },
-      "deepseek-v4-pro": {
-        "id": "deepseek-v4-pro",
-        "name": "DeepSeek V4 Pro (Qwen)",
-        "description": "DeepSeek V4 Pro high-performance reasoning model served through Qwen Cloud API (1M context)",
+      "deepseek-flash": {
+        "id": "deepseek-flash",
+        "name": "DeepSeek Flash (Qwen)",
+        "description": "DeepSeek Flash fast inference model served through Qwen Cloud API (1M context)",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
@@ -3983,90 +2913,8 @@
     "api": "https://direct.evolink.ai/v1",
     "name": "Evolink",
     "doc": "https://docs.evolink.ai/llms.txt",
-    "default_model": "deepseek-v4-pro",
+    "default_model": "MiniMax-M3",
     "models": {
-      "deepseek-v4-pro": {
-        "id": "deepseek-v4-pro",
-        "name": "DeepSeek V4 Pro (Evolink)",
-        "description": "DeepSeek V4 Pro reasoning model served through the Evolink gateway.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 163840,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "reasoning_efforts": [
-          "low",
-          "medium",
-          "high"
-        ]
-      },
-      "deepseek-v4-flash": {
-        "id": "deepseek-v4-flash",
-        "name": "DeepSeek V4 Flash (Evolink)",
-        "description": "DeepSeek V4 Flash fast inference model served through the Evolink gateway.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "reasoning_efforts": [
-          "low",
-          "medium",
-          "high"
-        ]
-      },
-      "doubao-seed-2.0-pro": {
-        "id": "doubao-seed-2.0-pro",
-        "name": "Doubao Seed 2.0 Pro (Evolink)",
-        "description": "Doubao Seed 2.0 Pro served through the Evolink gateway.",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 262144,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "reasoning_efforts": [
-          "low",
-          "medium",
-          "high"
-        ]
-      },
       "MiniMax-M3": {
         "id": "MiniMax-M3",
         "name": "MiniMax-M3 (Evolink)",
@@ -4369,68 +3217,6 @@
           "structured_output": false
         }
       },
-      "deepseek/deepseek-v4-pro-0813": {
-        "id": "deepseek/deepseek-v4-pro-0813",
-        "name": "DeepSeek V4 Pro 0813 (Merge Gateway)",
-        "description": "DeepSeek V4 Pro 0813 served through Merge Gateway's native Responses API.",
-        "reasoning": true,
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "output_tokens": 384000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": false
-        },
-        "is_pro": true,
-        "lightweight_model": "deepseek/deepseek-v4-flash-0731"
-      },
-      "deepseek/deepseek-v4-flash-0731": {
-        "id": "deepseek/deepseek-v4-flash-0731",
-        "name": "DeepSeek V4 Flash 0731 (Merge Gateway)",
-        "description": "DeepSeek V4 Flash 0731 served through Merge Gateway's native Responses API.",
-        "reasoning": true,
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "output_tokens": 384000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": false
-        }
-      },
       "xai/grok-4.6": {
         "id": "xai/grok-4.6",
         "name": "Grok 4.6 (Merge Gateway)",
@@ -4459,37 +3245,6 @@
           "structured_output": false
         },
         "is_pro": true
-      },
-      "qwen/qwen3.8-max": {
-        "id": "qwen/qwen3.8-max",
-        "name": "Qwen3.8 Max (Merge Gateway)",
-        "description": "Qwen3.8 Max served through Merge Gateway's native Responses API.",
-        "reasoning": true,
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "output_tokens": 131000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": false
-        }
       },
       "minimax/minimax-h3": {
         "id": "minimax/minimax-h3",
@@ -4795,36 +3550,6 @@
         },
         "is_pro": true
       },
-      "deepseek/deepseek-v4-flash-0731-fast": {
-        "id": "deepseek/deepseek-v4-flash-0731-fast",
-        "name": "DeepSeek V4 Flash 0731 Fast (Merge Gateway)",
-        "description": "DeepSeek V4 Flash 0731 Fast served through Merge Gateway native Responses API.",
-        "reasoning": true,
-        "reasoning_efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "output_tokens": 384000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": false
-        }
-      },
       "deepseek/deepseek-v4.1-flash": {
         "id": "deepseek/deepseek-v4.1-flash",
         "name": "DeepSeek V4.1 Flash (Merge Gateway)",
@@ -4889,84 +3614,6 @@
       }
     }
   },
-  "poolside": {
-    "id": "poolside",
-    "env": [
-      "POOLSIDE_API_KEY"
-    ],
-    "api": "https://api.poolsi.de/openai/v1",
-    "name": "Poolside",
-    "doc": "https://docs.poolside.ai",
-    "default_model": "laguna-s-2.1",
-    "models": {
-      "laguna-s-2.1": {
-        "id": "laguna-s-2.1",
-        "name": "Laguna S 2.1",
-        "description": "Poolside's 118B MoE coding agent model with 1M context, optimized for long-horizon agentic tasks, tool use, and validation",
-        "version": "s.2.1",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1048576,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
-      },
-      "laguna-m.1": {
-        "id": "laguna-m.1",
-        "name": "Laguna M.1",
-        "description": "Poolside's flagship MoE coding agent model optimized for multi-step agentic tasks, tool use, and validation",
-        "version": "m.1",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 131072,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
-      },
-      "laguna-xs.2": {
-        "id": "laguna-xs.2",
-        "name": "Laguna XS.2",
-        "description": "Poolside's efficient MoE coding agent model optimized for fast agentic coding with lower resource requirements",
-        "version": "xs.2",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 131072,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
-      }
-    }
-  },
   "xai": {
     "id": "xai",
     "env": [
@@ -4977,28 +3624,6 @@
     "doc": "https://docs.x.ai",
     "default_model": "grok-4.6",
     "models": {
-      "grok-build-0.1": {
-        "id": "grok-build-0.1",
-        "name": "Grok Build 0.1",
-        "description": "xAI's fast coding model for agentic software engineering (256k context)",
-        "version": "build-0.1",
-        "reasoning": false,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
-      },
       "grok-4.6": {
         "id": "grok-4.6",
         "name": "Grok 4.6",
@@ -5029,77 +3654,6 @@
           "high",
           "xhigh"
         ]
-      },
-      "grok-4.20-0309-reasoning": {
-        "id": "grok-4.20-0309-reasoning",
-        "name": "Grok 4.20 Reasoning",
-        "description": "xAI's reasoning-optimized model with chain-of-thought (1M context)",
-        "version": "4.20",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "is_pro": true,
-        "lightweight_model": "grok-build-0.1"
-      },
-      "grok-4.20-0309-non-reasoning": {
-        "id": "grok-4.20-0309-non-reasoning",
-        "name": "Grok 4.20 Non-Reasoning",
-        "description": "xAI's fast non-reasoning variant of Grok 4.20 (1M context)",
-        "version": "4.20",
-        "reasoning": false,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
-      },
-      "grok-4.20-multi-agent-0309": {
-        "id": "grok-4.20-multi-agent-0309",
-        "name": "Grok 4.20 Multi-Agent",
-        "description": "xAI's multi-agent model with reasoning_effort controlling agent count (1M context)",
-        "version": "4.20",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        }
       }
     }
   },
@@ -5406,32 +3960,6 @@
           "output": 1.98e-06
         }
       },
-      "deepseek/deepseek-v4-flash": {
-        "id": "deepseek/deepseek-v4-flash",
-        "name": "DeepSeek V4 Flash (Vercel AI Gateway)",
-        "description": "DeepSeek V4 Flash fast, cost-efficient reasoning model served through the Vercel AI Gateway",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "cost": {
-          "input": 1.3e-07,
-          "output": 2.6e-07
-        }
-      },
       "deepseek/deepseek-v4.1-flash": {
         "id": "deepseek/deepseek-v4.1-flash",
         "name": "DeepSeek V4.1 Flash (Vercel AI Gateway)",
@@ -5484,84 +4012,6 @@
           "output": 1.5e-05
         }
       },
-      "moonshotai/kimi-k2.7-code": {
-        "id": "moonshotai/kimi-k2.7-code",
-        "name": "Kimi K2.7 Code (Vercel AI Gateway)",
-        "description": "Moonshot AI Kimi K2.7 Code coding-specialized model served through the Vercel AI Gateway",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "cost": {
-          "input": 9.5e-07,
-          "output": 4e-06
-        }
-      },
-      "alibaba/qwen3.8-max": {
-        "id": "alibaba/qwen3.8-max",
-        "name": "Qwen3.8 Max (Vercel AI Gateway)",
-        "description": "Alibaba Qwen3.8 Max flagship model served through the Vercel AI Gateway",
-        "reasoning": true,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 1000000,
-        "capabilities": {
-          "thinking": true,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "cost": {
-          "input": 2e-06,
-          "output": 6e-06
-        }
-      },
-      "alibaba/qwen3-coder-next": {
-        "id": "alibaba/qwen3-coder-next",
-        "name": "Qwen3 Coder Next (Vercel AI Gateway)",
-        "description": "Alibaba Qwen3 Coder Next coding-specialized model served through the Vercel AI Gateway",
-        "reasoning": false,
-        "tool_call": true,
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "context": 256000,
-        "capabilities": {
-          "thinking": false,
-          "streaming": true,
-          "function_calling": true,
-          "structured_output": true
-        },
-        "cost": {
-          "input": 5e-07,
-          "output": 1.2e-06
-        }
-      },
       "minimax/minimax-m3": {
         "id": "minimax/minimax-m3",
         "name": "MiniMax M3 (Vercel AI Gateway)",
@@ -5588,11 +4038,11 @@
           "output": 1.2e-06
         }
       },
-      "mistral/devstral-2": {
-        "id": "mistral/devstral-2",
-        "name": "Devstral 2 (Vercel AI Gateway)",
-        "description": "Mistral Devstral 2 coding model served through the Vercel AI Gateway",
-        "reasoning": false,
+      "deepseek/deepseek-flash": {
+        "id": "deepseek/deepseek-flash",
+        "name": "DeepSeek Flash (Vercel AI Gateway)",
+        "description": "DeepSeek Flash fast, cost-efficient reasoning model served through the Vercel AI Gateway",
+        "reasoning": true,
         "tool_call": true,
         "modalities": {
           "input": [
@@ -5602,16 +4052,16 @@
             "text"
           ]
         },
-        "context": 256000,
+        "context": 1000000,
         "capabilities": {
-          "thinking": false,
+          "thinking": true,
           "streaming": true,
           "function_calling": true,
           "structured_output": true
         },
         "cost": {
-          "input": 4e-07,
-          "output": 2e-06
+          "input": 1.3e-07,
+          "output": 2.6e-07
         }
       }
     }

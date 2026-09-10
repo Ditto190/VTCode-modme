@@ -115,7 +115,7 @@ fn test_provider_auto_detection() {
     assert_eq!(factory.provider_from_model("gemini-3.7-flash"), Some("gemini".to_string()));
 
     // Test OpenRouter models
-    assert_eq!(factory.provider_from_model(models::openrouter::DEEPSEEK_V4_PRO), Some("openrouter".to_string()));
+    assert_eq!(factory.provider_from_model("meta/muse-glimmer-30b"), Some("openrouter".to_string()));
     assert_eq!(factory.provider_from_model("anthropic/claude-sonnet-4.6"), Some("openrouter".to_string()));
 
     // Test LM Studio models
@@ -159,7 +159,7 @@ fn test_provider_creation() {
     let anthropic = create_provider_for_model(models::CLAUDE_SONNET_5, "test_key".to_string(), None, None);
     let _anthropic = anthropic.unwrap();
 
-    let openrouter = create_provider_for_model(models::openrouter::DEEPSEEK_V4_PRO, "test_key".to_string(), None, None);
+    let openrouter = create_provider_for_model("deepseek-ai/DeepSeek-V4.1-Flash", "test_key".to_string(), None, None);
     let _openrouter = openrouter.unwrap();
 
     let moonshot = create_provider_for_model(models::moonshot::DEFAULT_MODEL, "test_key".to_string(), None, None);
@@ -195,7 +195,7 @@ fn test_unified_client_creation() {
     }
 
     let openrouter_client =
-        create_provider_for_model(models::openrouter::DEEPSEEK_V4_PRO, "test_key".to_string(), None, None);
+        create_provider_for_model("deepseek-ai/DeepSeek-V4.1-Flash", "test_key".to_string(), None, None);
     assert!(openrouter_client.is_ok());
     if let Ok(client) = openrouter_client {
         assert_eq!(client.name(), "openrouter");
@@ -276,7 +276,7 @@ fn test_provider_supported_models() {
 
     let openrouter = OpenRouterProvider::new("test_key".to_string());
     let openrouter_models = openrouter.supported_models();
-    assert!(openrouter_models.contains(&models::openrouter::DEEPSEEK_V4_PRO.to_string()));
+    assert!(openrouter_models.contains(&"deepseek-ai/DeepSeek-V4.1-Flash".to_string()));
     assert!(openrouter_models.contains(&"anthropic/claude-sonnet-4.6".to_string()));
     assert!(openrouter_models.len() >= 2);
 
@@ -391,7 +391,7 @@ fn test_backward_compatibility() {
 
     // Test that the old make_client function still works
     use std::str::FromStr;
-    let model = ModelId::from_str("gemini-3-flash-preview").unwrap();
+    let model = ModelId::from_str("gemini-3.8-flash").unwrap();
     let client = make_client("test_key".to_string(), model).expect("client should be created");
 
     // Should be able to get model ID

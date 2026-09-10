@@ -12,7 +12,6 @@ VT Code includes a built-in `llamacpp` provider for local inference through [`ll
   - `gpt-oss-20b`
   - `gemma-4-26b-a4b`
   - `gemma-4-e4b`
-  - `step-3.5-flash`
 
 ## Quick start
 

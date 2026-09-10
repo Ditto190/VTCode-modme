@@ -12,15 +12,9 @@ pub const OPENAI_GPT_5_6_LUNA: &str = "openai/gpt-5.6-luna";
 pub const OPENAI_GPT_5_3_CODEX: &str = "openai/gpt-5.3-codex";
 pub const GOOGLE_GEMINI_3_1_PRO_PREVIEW: &str = "google/gemini-3.1-pro-preview";
 pub const GOOGLE_GEMINI_3_8_FLASH: &str = "google/gemini-3.8-flash";
-pub const DEEPSEEK_V4_PRO: &str = "deepseek/deepseek-v4-pro";
-pub const DEEPSEEK_V4_FLASH: &str = "deepseek/deepseek-v4-flash";
-pub const DEEPSEEK_V4_1_FLASH: &str = "deepseek/deepseek-v4.1-flash";
+pub const DEEPSEEK_FLASH: &str = "deepseek/deepseek-v4.1-flash";
 pub const MOONSHOTAI_KIMI_K3: &str = "moonshotai/kimi-k3";
-pub const MOONSHOTAI_KIMI_K2_7_CODE: &str = "moonshotai/kimi-k2.7-code";
-pub const ALIBABA_QWEN_3_8_MAX: &str = "alibaba/qwen3.8-max";
-pub const ALIBABA_QWEN_3_CODER_NEXT: &str = "alibaba/qwen3-coder-next";
 pub const MINIMAX_M3: &str = "minimax/minimax-m3";
-pub const MISTRAL_DEVSTRAL_2: &str = "mistral/devstral-2";
 
 pub const DEFAULT_MODEL: &str = ANTHROPIC_CLAUDE_SONNET_5;
 
@@ -36,16 +30,10 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     OPENAI_GPT_5_3_CODEX,
     GOOGLE_GEMINI_3_1_PRO_PREVIEW,
     GOOGLE_GEMINI_3_8_FLASH,
-    DEEPSEEK_V4_PRO,
-    DEEPSEEK_V4_FLASH,
-    DEEPSEEK_V4_1_FLASH,
+    DEEPSEEK_FLASH,
     MOONSHOTAI_KIMI_K3,
-    MOONSHOTAI_KIMI_K2_7_CODE,
-    ALIBABA_QWEN_3_8_MAX,
-    ALIBABA_QWEN_3_CODER_NEXT,
     MINIMAX_M3,
-    MISTRAL_DEVSTRAL_2,
 ];
 
 /// Models on the gateway that do not emit reasoning traces.
-pub const NON_REASONING_MODELS: &[&str] = &[ALIBABA_QWEN_3_CODER_NEXT, MISTRAL_DEVSTRAL_2];
+pub const NON_REASONING_MODELS: &[&str] = &[];

@@ -58,7 +58,7 @@ use rendering::{
     render_service_tier_inline, render_step_one_inline, render_step_one_plain, show_secure_api_modal,
 };
 #[cfg(test)]
-use rendering::{dynamic_model_subtitle, model_search_value, static_model_search_terms, static_model_subtitle};
+use rendering::{dynamic_model_subtitle, model_search_value, static_model_subtitle};
 #[cfg(test)]
 use selection::selection_from_option;
 use selection::{

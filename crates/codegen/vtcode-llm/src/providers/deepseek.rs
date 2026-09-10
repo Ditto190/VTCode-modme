@@ -111,14 +111,8 @@ impl OpenAiCompatSpec for DeepSeekSpec {
 }
 
 impl_openai_compat_provider!(DeepSeekProvider, DeepSeekSpec, {
-    fn supports_vision(&self, model: &str) -> bool {
-        let raw = if model.trim().is_empty() {
-            &self.core.model
-        } else {
-            model
-        };
-        let normalized = raw.trim().rsplit('/').next().unwrap_or(raw).trim().to_ascii_lowercase();
-        normalized == models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP
+    fn supports_vision(&self, _model: &str) -> bool {
+        false
     }
 
     fn supports_reasoning(&self, model: &str) -> bool {
@@ -136,8 +130,6 @@ impl_openai_compat_provider!(DeepSeekProvider, DeepSeekSpec, {
             .and_then(|b| b.model_supports_reasoning)
             .unwrap_or(false)
             || vtcode_config::models::model_catalog_entry("deepseek", &normalized).is_some_and(|entry| entry.reasoning)
-            || normalized == models::deepseek::DEEPSEEK_V4_PRO
-            || normalized == models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP
     }
 
     fn supports_reasoning_effort(&self, model: &str) -> bool {
@@ -217,7 +209,7 @@ mod tests {
     #[test]
     fn catalog_efforts_are_exposed_to_resolution_and_request_building() {
         let provider = DeepSeekProvider::new("test-key".to_string());
-        let model = models::deepseek::DEEPSEEK_V4_PRO;
+        let model = models::deepseek::DEEPSEEK_FLASH;
 
         assert_eq!(provider.supported_reasoning_efforts(model), &["low", "high", "max"]);
         let mapping = ReasoningEffortMapper::resolve(&provider, model, ReasoningEffortLevel::High, false)
@@ -287,16 +279,10 @@ mod tests {
     }
 
     #[test]
-    fn vision_capability_is_exclusive_to_flash_vision_exp() {
+    fn supports_vision_always_returns_false() {
         let provider = DeepSeekProvider::new("test-key".to_string());
-        assert!(provider.supports_vision(models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP));
-        assert!(!provider.supports_vision(models::deepseek::DEEPSEEK_V4_FLASH));
-        assert!(!provider.supports_vision(models::deepseek::DEEPSEEK_V4_PRO));
+        assert!(!provider.supports_vision(models::deepseek::DEEPSEEK_FLASH));
         assert!(!provider.supports_vision(""));
-        // empty string should check default model (pro) => false
-        let provider_flash =
-            DeepSeekProvider::with_model("k".to_string(), models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string());
-        assert!(provider_flash.supports_vision(""));
     }
 
     #[test]
@@ -308,11 +294,11 @@ mod tests {
         ]);
         let req = LLMRequest {
             messages: vec![msg].into(),
-            model: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string(),
+            model: models::deepseek::DEEPSEEK_FLASH.to_string(),
             ..Default::default()
         };
         let payload = provider.core.convert_request(&req).unwrap();
-        assert_eq!(payload["model"], models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP);
+        assert_eq!(payload["model"], models::deepseek::DEEPSEEK_FLASH);
         let content = &payload["messages"][0]["content"];
         let arr = content.as_array().expect("vision content should be array");
         assert_eq!(arr.len(), 2);
@@ -335,7 +321,7 @@ mod tests {
             .core
             .convert_request(&LLMRequest {
                 messages: vec![msg_low].into(),
-                model: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string(),
+                model: models::deepseek::DEEPSEEK_FLASH.to_string(),
                 ..Default::default()
             })
             .unwrap();
@@ -353,7 +339,7 @@ mod tests {
             .core
             .convert_request(&LLMRequest {
                 messages: vec![msg_url].into(),
-                model: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string(),
+                model: models::deepseek::DEEPSEEK_FLASH.to_string(),
                 ..Default::default()
             })
             .unwrap();
@@ -370,7 +356,7 @@ mod tests {
                 .core
                 .convert_request(&LLMRequest {
                     messages: vec![m].into(),
-                    model: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string(),
+                    model: models::deepseek::DEEPSEEK_FLASH.to_string(),
                     ..Default::default()
                 })
                 .unwrap();
@@ -396,7 +382,7 @@ mod tests {
             .core
             .convert_request(&LLMRequest {
                 messages: vec![msg_file_id].into(),
-                model: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string(),
+                model: models::deepseek::DEEPSEEK_FLASH.to_string(),
                 ..Default::default()
             })
             .unwrap();
@@ -418,7 +404,7 @@ mod tests {
             .core
             .convert_request(&LLMRequest {
                 messages: vec![msg_file_data].into(),
-                model: models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string(),
+                model: models::deepseek::DEEPSEEK_FLASH.to_string(),
                 ..Default::default()
             })
             .unwrap();
@@ -432,8 +418,6 @@ mod tests {
     fn supported_models_includes_vision() {
         let provider = DeepSeekProvider::new("k".to_string());
         let models = provider.supported_models();
-        assert!(models.contains(&models::deepseek::DEEPSEEK_V4_FLASH_VISION_EXP.to_string()));
-        assert!(models.contains(&models::deepseek::DEEPSEEK_V4_FLASH.to_string()));
-        assert!(models.contains(&models::deepseek::DEEPSEEK_V4_PRO.to_string()));
+        assert!(models.contains(&models::deepseek::DEEPSEEK_FLASH.to_string()));
     }
 }

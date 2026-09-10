@@ -823,9 +823,9 @@ mod tests {
             supports_context_edits: None,
             api_key_env: "ATLASCLOUD_API_KEY".to_string(),
             auth: None,
-            model: "deepseek-ai/deepseek-v4-flash".to_string(),
+            model: "deepseek-ai/deepseek-flash".to_string(),
             models: vec![
-                "deepseek-ai/deepseek-v4-flash".to_string(),
+                "deepseek-ai/deepseek-flash".to_string(),
                 "deepseek-ai/deepseek-v4-pro".to_string(),
                 "deepseek-ai/DeepSeek-V3-0324".to_string(),
                 "deepseek-ai/DeepSeek-V3.1".to_string(),
@@ -897,7 +897,7 @@ mod tests {
         assert_eq!(
             provider.supported_models(),
             vec![
-                "deepseek-ai/deepseek-v4-flash".to_string(),
+                "deepseek-ai/deepseek-flash".to_string(),
                 "deepseek-ai/deepseek-v4-pro".to_string(),
                 "deepseek-ai/DeepSeek-V3-0324".to_string(),
                 "deepseek-ai/DeepSeek-V3.1".to_string(),

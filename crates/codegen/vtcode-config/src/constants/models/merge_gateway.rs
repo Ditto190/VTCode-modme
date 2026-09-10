@@ -5,10 +5,7 @@ pub const OPENAI_GPT_5_5: &str = "openai/gpt-5.5";
 pub const ANTHROPIC_CLAUDE_OPUS_5: &str = "anthropic/claude-opus-5";
 pub const GOOGLE_GEMINI_3_6_FLASH: &str = "google/gemini-3.6-flash";
 pub const GOOGLE_GEMINI_3_7_FLASH: &str = "google/gemini-3.7-flash";
-pub const DEEPSEEK_V4_PRO_0813: &str = "deepseek/deepseek-v4-pro-0813";
-pub const DEEPSEEK_V4_FLASH_0731: &str = "deepseek/deepseek-v4-flash-0731";
 pub const XAI_GROK_4_6: &str = "xai/grok-4.6";
-pub const QWEN_3_8_MAX: &str = "qwen/qwen3.8-max";
 pub const MINIMAX_H3: &str = "minimax/minimax-h3";
 pub const MOONSHOT_KIMI_K3: &str = "moonshot/kimi-k3";
 pub const THINKINGMACHINES_INKLING: &str = "thinkingmachines/inkling";
@@ -21,8 +18,7 @@ pub const OPENAI_GPT_5_6_TERRA: &str = "openai/gpt-5.6-terra";
 pub const OPENAI_GPT_6_ASTRA: &str = "openai/gpt-6-astra";
 pub const GOOGLE_GEMINI_3_8_FLASH: &str = "google/gemini-3.8-flash";
 pub const ANTHROPIC_CLAUDE_FABLE_5_1: &str = "anthropic/claude-fable-5-1";
-pub const DEEPSEEK_V4_FLASH_0731_FAST: &str = "deepseek/deepseek-v4-flash-0731-fast";
-pub const DEEPSEEK_V4_1_FLASH: &str = "deepseek/deepseek-v4.1-flash";
+pub const DEEPSEEK_FLASH: &str = "deepseek/deepseek-v4.1-flash";
 
 pub const DEFAULT_MODEL: &str = DEFAULT_ROUTING;
 
@@ -36,12 +32,8 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
     GOOGLE_GEMINI_3_8_FLASH,
-    DEEPSEEK_V4_PRO_0813,
-    DEEPSEEK_V4_FLASH_0731,
-    DEEPSEEK_V4_FLASH_0731_FAST,
-    DEEPSEEK_V4_1_FLASH,
+    DEEPSEEK_FLASH,
     XAI_GROK_4_6,
-    QWEN_3_8_MAX,
     MINIMAX_H3,
     MOONSHOT_KIMI_K3,
     THINKINGMACHINES_INKLING,
@@ -76,11 +68,7 @@ pub const THINKING_BUDGET_ROUTES: &[&str] = &[
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
     GOOGLE_GEMINI_3_8_FLASH,
-    DEEPSEEK_V4_PRO_0813,
-    DEEPSEEK_V4_FLASH_0731,
-    DEEPSEEK_V4_FLASH_0731_FAST,
-    DEEPSEEK_V4_1_FLASH,
-    QWEN_3_8_MAX,
+    DEEPSEEK_FLASH,
     MINIMAX_H3,
     THINKINGMACHINES_INKLING,
 ];
@@ -89,18 +77,11 @@ pub const THINKING_BUDGET_ROUTES: &[&str] = &[
 /// per route: either a provider-native `reasoning_effort` or a Gateway-managed
 /// thinking budget.
 pub const REASONING_MODELS: &[&str] = &[
-    OPENAI_GPT_5_5,
     ANTHROPIC_CLAUDE_OPUS_5,
     ANTHROPIC_CLAUDE_FABLE_5_1,
-    GOOGLE_GEMINI_3_6_FLASH,
-    GOOGLE_GEMINI_3_7_FLASH,
     GOOGLE_GEMINI_3_8_FLASH,
-    DEEPSEEK_V4_PRO_0813,
-    DEEPSEEK_V4_FLASH_0731,
-    DEEPSEEK_V4_FLASH_0731_FAST,
-    DEEPSEEK_V4_1_FLASH,
+    DEEPSEEK_FLASH,
     XAI_GROK_4_6,
-    QWEN_3_8_MAX,
     MINIMAX_H3,
     MOONSHOT_KIMI_K3,
     THINKINGMACHINES_INKLING,
@@ -133,7 +114,6 @@ pub fn route_uses_thinking_budget(model: &str) -> bool {
     model.starts_with("anthropic/")
         || model.starts_with("google/gemini-")
         || model.starts_with("deepseek/")
-        || model.starts_with("qwen/")
         || model.starts_with("minimax/")
         || model.starts_with("thinkingmachines/")
 }

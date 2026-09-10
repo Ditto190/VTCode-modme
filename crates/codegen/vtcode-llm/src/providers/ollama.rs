@@ -1427,7 +1427,7 @@ mod tests {
     fn build_payload_rehydrates_glm_interleaved_history_into_content() {
         let provider = test_provider();
         let request = LLMRequest {
-            model: models::ollama::GLM_5_2_CLOUD.to_string(),
+            model: models::ollama::GLM_5_3_CLOUD.to_string(),
             messages: vec![Message::assistant("done".to_string()).with_reasoning(Some("trace".to_string()))].into(),
             ..Default::default()
         };

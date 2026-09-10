@@ -204,8 +204,8 @@ Model capability tier and lightweight fallback come from `docs/models.json` fiel
 `is_pro` and `lightweight_model`. Fallback stays within the selected provider and never
 returns the same model. Missing metadata gives no tier assertion or speculative fallback.
 Legacy built-in variants without matching catalog rows currently include
-`CopilotGPT52Codex`, `CopilotGPT54`, `CopilotClaudeSonnet46`, `EvolinkDeepseekV4Pro`,
-`MoonshotKimiK3`, `MoonshotKimiK27Code`, `PoolsideLagunaM1`, and `PoolsideLagunaS21`.
+`CopilotGPT52Codex`, `CopilotGPT54`, `EvolinkDeepseekV4Pro`,
+`MoonshotKimiK3`, and `MoonshotKimiK27Code`.
 These need explicit catalog metadata before they can participate in automatic fallback.
 Pricing is route-specific: OpenAI and OpenRouter Astra catalog routes are priced;
 Merge Gateway's Astra route currently has no pricing and therefore blocks with a USD cap.

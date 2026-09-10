@@ -93,21 +93,6 @@ impl HuggingFaceProvider {
         let model = model.trim();
         let lower = model.to_ascii_lowercase();
 
-        if lower.starts_with(&models::huggingface::STEP_3_5_FLASH_BASE.to_ascii_lowercase()) {
-            if !model.contains(':') {
-                return Ok(format!(
-                    "{}:{}",
-                    models::huggingface::STEP_3_5_FLASH_BASE,
-                    models::huggingface::STEP_3_5_FLASH_PROVIDER
-                ));
-            }
-            if let Some((base, provider)) = model.rsplit_once(':')
-                && provider.eq_ignore_ascii_case("fastest")
-            {
-                return Ok(format!("{}:{}", base, models::huggingface::STEP_3_5_FLASH_PROVIDER));
-            }
-        }
-
         if lower.contains("minimax-m2") && !model.contains(':') {
             return Err(LLMError::Provider {
                 message: format_llm_error(
@@ -526,18 +511,7 @@ impl HuggingFaceProvider {
     }
 
     fn format_error(&self, status: StatusCode, body: &str) -> LLMError {
-        let message = if body.contains("\"code\":\"model_not_supported\"")
-            && body.contains(models::huggingface::STEP_3_5_FLASH_BASE)
-        {
-            format!(
-                "HuggingFace API error ({}): Step 3.5 Flash requires the '{}' provider. \
-Enable that provider in your HuggingFace Inference Providers settings, or switch to another model.",
-                status,
-                models::huggingface::STEP_3_5_FLASH_PROVIDER
-            )
-        } else {
-            format!("HuggingFace API error ({status}): {body}")
-        };
+        let message = format!("HuggingFace API error ({status}): {body}");
 
         LLMError::Provider {
             message: format_llm_error(PROVIDER_NAME, &message),

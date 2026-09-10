@@ -17,8 +17,6 @@ impl ModelId {
         match self {
             // OpenRouter models without generated metadata
             ModelId::OpenRouterMoonshotaiKimiK3 => Cow::Borrowed("Kimi K3 (OpenRouter)"),
-            ModelId::OpenRouterMoonshotaiKimiK27Code => Cow::Borrowed("Kimi K2.7 Code (OpenRouter)"),
-            ModelId::OpenRouterZaiGlm52 => Cow::Borrowed("GLM-5.2 (OpenRouter)"),
             // Custom user-defined models
             ModelId::Custom(_, model) => Cow::Owned(model.clone()),
             // OpenRouter models

@@ -43,13 +43,6 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             true,
         ),
         (
-            models::merge_gateway::OPENAI_GPT_5_5,
-            "GPT-5.5 (Merge Gateway)",
-            "OpenAI GPT-5.5 through Merge Gateway",
-            1_100_000,
-            false,
-        ),
-        (
             models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5,
             "Claude Opus 5 (Merge Gateway)",
             "Anthropic Claude Opus 5 through Merge Gateway",
@@ -64,20 +57,6 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             false,
         ),
         (
-            models::merge_gateway::GOOGLE_GEMINI_3_6_FLASH,
-            "Gemini 3.6 Flash (Merge Gateway)",
-            "Google Gemini 3.6 Flash through Merge Gateway",
-            1_000_000,
-            false,
-        ),
-        (
-            models::merge_gateway::GOOGLE_GEMINI_3_7_FLASH,
-            "Gemini 3.7 Flash (Merge Gateway)",
-            "Google Gemini 3.7 Flash through Merge Gateway",
-            1_000_000,
-            false,
-        ),
-        (
             models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH,
             "Gemini 3.8 Flash (Merge Gateway)",
             "Google Gemini 3.8 Flash through Merge Gateway",
@@ -85,28 +64,7 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             false,
         ),
         (
-            models::merge_gateway::DEEPSEEK_V4_PRO_0813,
-            "DeepSeek V4 Pro 0813 (Merge Gateway)",
-            "DeepSeek V4 Pro 0813 through Merge Gateway",
-            1_000_000,
-            false,
-        ),
-        (
-            models::merge_gateway::DEEPSEEK_V4_FLASH_0731,
-            "DeepSeek V4 Flash 0731 (Merge Gateway)",
-            "DeepSeek V4 Flash 0731 through Merge Gateway",
-            1_000_000,
-            false,
-        ),
-        (
-            models::merge_gateway::DEEPSEEK_V4_FLASH_0731_FAST,
-            "DeepSeek V4 Flash 0731 Fast (Merge Gateway)",
-            "DeepSeek V4 Flash 0731 Fast through Merge Gateway",
-            1_000_000,
-            false,
-        ),
-        (
-            models::merge_gateway::DEEPSEEK_V4_1_FLASH,
+            models::merge_gateway::DEEPSEEK_FLASH,
             "DeepSeek V4.1 Flash (Merge Gateway)",
             "DeepSeek V4.1 Flash through Merge Gateway",
             1_000_000,
@@ -117,13 +75,6 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             "Grok 4.6 (Merge Gateway)",
             "xAI Grok 4.6 through Merge Gateway",
             500_000,
-            false,
-        ),
-        (
-            models::merge_gateway::QWEN_3_8_MAX,
-            "Qwen3.8 Max (Merge Gateway)",
-            "Qwen3.8 Max through Merge Gateway",
-            1_000_000,
             false,
         ),
         (

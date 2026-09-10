@@ -34,7 +34,6 @@ Local performance is dominated by memory bandwidth and VRAM. Rough guidance:
 |------|-----------|----------------|----------|
 | Tiny | 8–16 GB | `gemma-4-e4b` (llama.cpp), `llama-3.1-8b` (LM Studio) | Quick edits, autocomplete-style help |
 | Mid | 16–32 GB | `gpt-oss:20b`, `gemma-3-12b` | General coding assistance |
-| High | 32–64 GB | `gemma-4-26b-a4b`, `step-3.5-flash` | Heavier agentic workflows |
 | Max | 64 GB+ | Multiple / larger MoEs | Long-horizon tasks |
 
 Quantized GGUF models (llama.cpp) run with far less VRAM than full-precision

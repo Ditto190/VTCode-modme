@@ -528,12 +528,12 @@ mod tests {
 
     #[test]
     fn auto_lightweight_model_uses_lower_generation_glm_pair() {
-        assert_eq!(auto_lightweight_model("zai", &ModelId::ZaiGlm52.as_str()), ModelId::ZaiGlm52.as_str());
+        assert_eq!(auto_lightweight_model("zai", &ModelId::ZaiGlm53.as_str()), ModelId::ZaiGlm53.as_str());
     }
 
     #[test]
     fn auto_lightweight_model_prefers_same_generation_gemini_flash_lite() {
-        assert_eq!(auto_lightweight_model("gemini", &ModelId::Gemini37Flash.as_str()), ModelId::Gemini37Flash.as_str());
+        assert_eq!(auto_lightweight_model("gemini", &ModelId::Gemini38Flash.as_str()), ModelId::Gemini38Flash.as_str());
     }
 
     #[test]

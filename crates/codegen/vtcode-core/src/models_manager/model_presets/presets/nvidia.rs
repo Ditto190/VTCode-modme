@@ -32,18 +32,6 @@ pub(crate) fn nvidia_presets() -> Vec<ModelPreset> {
             "Efficient NVIDIA model for coding, reasoning, instruction following, and tool use",
             false,
         ),
-        (
-            models::nvidia::Z_AI_GLM_5_2,
-            "GLM-5.2 (NVIDIA)",
-            "Z.AI GLM-5.2 served through NVIDIA NIM for long-horizon reasoning and coding",
-            false,
-        ),
-        (
-            models::nvidia::DEEPSEEK_V4_FLASH_0731,
-            "DeepSeek V4 Flash (NVIDIA)",
-            "DeepSeek V4 Flash served through NVIDIA NIM for fast reasoning and agentic coding",
-            false,
-        ),
     ]
     .into_iter()
     .map(|(model, display_name, description, is_default)| ModelPreset {

@@ -331,8 +331,8 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Auth:** `AI_GATEWAY_API_KEY` (Bearer token; create a key in the [Vercel dashboard](https://vercel.com/dashboard) under AI Gateway)
 -   **Base URL:** `https://ai-gateway.vercel.sh/v1` (OpenAI Chat Completions compatible), override with `VERCEL_AI_GATEWAY_BASE_URL`
 -   **Default model:** `anthropic/claude-sonnet-5`
--   **Curated models:** 17 models from Anthropic, OpenAI, Google, DeepSeek, Moonshot, Alibaba, MiniMax, and Mistral
--   **Features:** Streaming, tool calls, structured output, reasoning traces (all curated models except `alibaba/qwen3-coder-next` and `mistral/devstral-2`), zero token markup, automatic failover, and unlisted gateway `vendor/model` IDs accepted
+-   **Curated models:** 16 models from Anthropic, OpenAI, Google, DeepSeek, Moonshot, Alibaba, and MiniMax
+-   **Features:** Streaming, tool calls, structured output, reasoning traces (all curated models except `alibaba/qwen3-coder-next`), zero token markup, automatic failover, and unlisted gateway `vendor/model` IDs accepted
 -   **Shared IDs:** several curated IDs also exist in OpenRouter's catalog; set `provider = "vercel"` explicitly when configuring the model string (picking from the `/model` picker always routes to Vercel)
 
 ## OmniRoute
@@ -380,7 +380,6 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Server:** VT Code targets `llama-server` and defaults to `http://localhost:8080/v1`
 -   **Environment:** `LLAMACPP_BASE_URL` overrides the endpoint; `LLAMACPP_MODEL_PATH` enables VT Code-managed startup
 -   **Managed startup:** VT Code can launch `llama-server -m /path/to/model.gguf --port ...` when the endpoint is localhost and a GGUF path is configured
--   **Starter catalog:** `gpt-oss-20b`, `gemma-4-26b-a4b`, `gemma-4-e4b`, and `step-3.5-flash`
 -   **Features:** Streaming, dynamic `/v1/models` discovery, local no-auth defaults, and OpenAI-compatible request handling
 
 ## Evolink Multi-Model Gateway
@@ -395,7 +394,6 @@ replace the retained evidence or expose provider chain-of-thought.
     -   `evolink/gpt-5.5`
     -   `evolink/deepseek-v4-pro`
     -   `evolink/deepseek-v4-flash`
-    -   `evolink/doubao-seed-2.0-pro`
     -   `evolink/gemini-3.1-pro-preview`
     -   `evolink/gemini-3.5-flash`
     -   `evolink/MiniMax-M3`
