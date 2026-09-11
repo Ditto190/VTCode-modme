@@ -2,6 +2,57 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.161.2 - 2026-09-11
+
+### Highlights
+
+#### Features
+
+- add deepseek-v4.1-flash:cloud to model picker (d5a9c0075) (@vinhnx)
+- style modal instruction headers and commands (c68a694d5) (@vinhnx)
+- extend line backgrounds across full terminal width (6a7888ea5) (@vinhnx)
+- humanize wall-clock limits and add exhaustion telemetry (9d006c502) (@vinhnx)
+
+#### Bug Fixes
+
+- add merge-gateway to streaming timeout fallback providers (c4de578a9) (@vinhnx)
+- render markdown in task rows, strip inline metadata, humanize titles (9bac82869) (@vinhnx)
+- collapse multiline history entries and fix arrow navigation (83e0eeb4f) (@vinhnx)
+- terminal next_action for structured preview-exhaustion errors (395403d94) (@vinhnx)
+- terminal next_action for preview_exhaustion_gate stops retry loop (6c6ad7466) (@vinhnx)
+- name open channels in preview-exhaustion guidance (fee1c038c) (@vinhnx)
+
+#### Documentation
+
+- add cloud API curl example for deepseek-v4.1-flash:cloud (06ffd6028) (@vinhnx)
+- drop completed items, log HITL popup cleanup task (8be890336) (@vinhnx)
+- add self-debugging rule to fix VT Code at the source (67d87e589) (@vinhnx)
+- add TODO task markdown rendering cleanup task (a90326302) (@vinhnx)
+
+### Other Changes
+
+#### Performance
+
+- avoid cloning tools when planning mask is a no-op (80e2b727b) (@vinhnx)
+- avoid clones and TOML merges on startup hot paths (570f5b5b7) (@vinhnx)
+
+#### Refactors
+
+- derive streaming fallback from provider capabilities (a6a8001ff) (@vinhnx)
+
+#### Other
+
+- Update TODO (beffb6698) (@vinhnx)
+- Update TODO (50d7d62d0) (@vinhnx)
+- Update TODO (5fc908fe1) (@vinhnx)
+- Update TODO (54b1c3d4f) (@vinhnx)
+- Update README (474453986) (@vinhnx)
+- Update TODO (91fb9e790) (@vinhnx)
+
+### Contributors
+
+@vinhnx
+
 ## 0.162.0 - 2026-09-11
 
 ### Highlights
