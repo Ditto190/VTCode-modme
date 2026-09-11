@@ -7,6 +7,7 @@ use tempfile::TempDir;
 struct ScriptedProvider {
     provider_name: &'static str,
     supports_responses_compaction: bool,
+    supports_streaming: bool,
     recorded_previous_response_ids: Arc<Mutex<Vec<Option<String>>>>,
     outcomes: Mutex<VecDeque<ScriptedProviderOutcome>>,
 }
@@ -29,9 +30,15 @@ impl ScriptedProvider {
         Self {
             provider_name,
             supports_responses_compaction,
+            supports_streaming: false,
             recorded_previous_response_ids,
             outcomes: Mutex::new(VecDeque::from(outcomes)),
         }
+    }
+
+    fn with_streaming(mut self, supports_streaming: bool) -> Self {
+        self.supports_streaming = supports_streaming;
+        self
     }
 }
 
@@ -42,7 +49,7 @@ impl uni::LLMProvider for ScriptedProvider {
     }
 
     fn supports_streaming(&self) -> bool {
-        false
+        self.supports_streaming
     }
 
     fn supports_responses_compaction(&self, _model: &str) -> bool {
@@ -77,6 +84,13 @@ impl uni::LLMProvider for ScriptedProvider {
             }),
             ScriptedProviderOutcome::Error(error) => Err(error),
         }
+    }
+
+    async fn stream(&self, _request: uni::LLMRequest) -> std::result::Result<uni::LLMStream, uni::LLMError> {
+        Err(uni::LLMError::Provider {
+            message: "LLM first token timed out after 1 seconds".to_string(),
+            metadata: None,
+        })
     }
 
     fn supported_models(&self) -> Vec<String> {
@@ -286,14 +300,32 @@ fn retryable_llm_error_excludes_usage_limit_messages() {
     assert!(!is_retryable_llm_error("Provider error: you have reached your weekly usage limit"));
 }
 
-#[test]
-fn supports_streaming_timeout_fallback_covers_supported_providers() {
-    assert!(supports_streaming_timeout_fallback("huggingface"));
-    assert!(supports_streaming_timeout_fallback("ollama"));
-    assert!(supports_streaming_timeout_fallback("minimax"));
-    assert!(supports_streaming_timeout_fallback("HUGGINGFACE"));
-    assert!(supports_streaming_timeout_fallback("merge-gateway"));
-    assert!(!supports_streaming_timeout_fallback("openai"));
+#[tokio::test]
+async fn streaming_timeout_falls_back_to_non_streaming_for_supported_models() {
+    use vtcode_core::utils::transcript;
+
+    transcript::clear();
+
+    let recorded_previous_response_ids = Arc::new(Mutex::new(Vec::new()));
+    let provider = ScriptedProvider::new(
+        "any-provider",
+        false,
+        Arc::clone(&recorded_previous_response_ids),
+        vec![ScriptedProviderOutcome::Success { content: Some("recovered"), request_id: None }],
+    )
+    .with_streaming(true);
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    *ctx.provider_client = Box::new(provider);
+    ctx.working_history.push(uni::Message::user("continue".to_string()));
+
+    let result = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None).await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.expect("non-streaming recovery").0.content.as_deref(), Some("recovered"));
+
+    transcript::clear();
 }
 
 #[test]
@@ -381,27 +413,28 @@ fn stream_timeout_error_detection_matches_common_messages() {
 
 #[test]
 fn llm_first_progress_timeout_defaults_to_fifth_of_turn_budget() {
-    assert_eq!(llm_first_progress_timeout_secs(300, false, "openai"), 60);
+    assert_eq!(llm_first_progress_timeout_secs(300, false, true), 60);
 }
 
 #[test]
 fn llm_first_progress_timeout_expands_for_planning_workflow() {
-    assert_eq!(llm_first_progress_timeout_secs(300, true, "openai"), 150);
+    assert_eq!(llm_first_progress_timeout_secs(300, true, true), 150);
 }
 
 #[test]
 fn llm_first_progress_timeout_planning_workflow_respects_smaller_turn_budget() {
-    assert_eq!(llm_first_progress_timeout_secs(180, true, "openai"), 90);
+    assert_eq!(llm_first_progress_timeout_secs(180, true, true), 90);
 }
 
 #[test]
-fn llm_first_progress_timeout_planning_workflow_huggingface_uses_higher_floor() {
-    assert_eq!(llm_first_progress_timeout_secs(150, true, "huggingface"), 90);
+fn llm_first_progress_timeout_planning_workflow_uses_capability_floor() {
+    assert_eq!(llm_first_progress_timeout_secs(150, true, true), 90);
+    assert_eq!(llm_first_progress_timeout_secs(150, true, false), 75);
 }
 
 #[test]
 fn llm_first_progress_timeout_respects_planning_workflow_cap() {
-    assert_eq!(llm_first_progress_timeout_secs(1_200, true, "huggingface"), 180);
+    assert_eq!(llm_first_progress_timeout_secs(1_200, true, true), 180);
 }
 
 #[test]

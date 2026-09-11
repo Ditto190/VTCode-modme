@@ -227,11 +227,3 @@ check TODO/tasks rendering, it should not use trailing and leading "|" anymore. 
 check image as current status and improve: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-11 at 15.51.03.png'
 
 ---
-
-CRITICAL: fix Tool execution completed, but the model follow-up failed (transient; bounded retry
-scheduled). Output above is valid.
-Follow-up error category: Request timed out
-[!] Follow-up failed transiently after tool execution; compacting context and
-scheduling one tool-enabled recovery pass.
-
-==> this is after vtcode agent ask user for input, then it failed to follow up due to a transient error.

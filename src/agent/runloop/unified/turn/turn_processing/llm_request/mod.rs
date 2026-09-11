@@ -63,7 +63,7 @@ use retry::{
     PostToolRetryAction, classify_llm_error, compact_error_message, compact_tool_messages_for_retry,
     has_recent_tool_responses, is_previous_response_chain_error, is_stream_timeout_error,
     llm_first_progress_timeout_secs, llm_retry_attempts, next_post_tool_retry_action,
-    supports_streaming_timeout_fallback, switch_to_non_streaming_retry_mode,
+    switch_to_non_streaming_retry_mode,
 };
 use snapshot::capture_turn_request_snapshot;
 #[cfg(test)]
@@ -169,10 +169,11 @@ async fn execute_llm_request_with_options_impl(
 ) -> Result<(uni::LLMResponse, bool)> {
     let turn_snapshot = capture_turn_request_snapshot(ctx, active_model, tool_free_recovery);
     let active_model = turn_snapshot.active_model.clone();
+    let supports_non_streaming = ctx.provider_client.supports_non_streaming(&active_model);
     let first_progress_timeout_secs = llm_first_progress_timeout_secs(
         turn_snapshot.turn_timeout_secs,
         turn_snapshot.planning_active,
-        &turn_snapshot.provider_name,
+        supports_non_streaming,
     );
 
     ctx.renderer
@@ -199,7 +200,6 @@ async fn execute_llm_request_with_options_impl(
     let action_suggestion = extract_action_from_messages(ctx.working_history);
 
     let max_retries = llm_retry_attempts(ctx.vt_cfg.map(|cfg| cfg.agent.max_task_retries));
-    let supports_non_streaming = ctx.provider_client.supports_non_streaming(&active_model);
     let mut llm_result = Err(anyhow::anyhow!("LLM request failed to execute"));
     let mut attempts_made = 0usize;
     let mut stream_fallback_used = false;
@@ -599,10 +599,7 @@ async fn execute_llm_request_with_options_impl(
                 }
 
                 if is_retryable && attempt < max_retries - 1 {
-                    if use_streaming
-                        && supports_streaming_timeout_fallback(&turn_snapshot.provider_name)
-                        && is_stream_timeout_error(&msg)
-                    {
+                    if use_streaming && supports_non_streaming && is_stream_timeout_error(&msg) {
                         switch_to_non_streaming_retry_mode(&mut use_streaming, &mut stream_fallback_used);
                         crate::agent::runloop::unified::turn::turn_helpers::display_status(
                             ctx.renderer,

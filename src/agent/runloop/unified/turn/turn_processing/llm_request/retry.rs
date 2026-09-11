@@ -12,25 +12,8 @@ pub(super) fn classify_llm_error(message: &str) -> vtcode_commons::ErrorCategory
     vtcode_commons::classify_error_message(message)
 }
 
-const STREAM_TIMEOUT_FALLBACK_PROVIDERS: &[&str] = &[
-    "huggingface",
-    "ollama",
-    "minimax",
-    "deepseek",
-    "moonshot",
-    "zai",
-    "openrouter",
-    "merge-gateway",
-];
-
 const RECENT_TOOL_RESPONSE_WINDOW: usize = 10;
 const TOOL_RETRY_MAX_CHARS: usize = 1200;
-
-pub(super) fn supports_streaming_timeout_fallback(provider_name: &str) -> bool {
-    STREAM_TIMEOUT_FALLBACK_PROVIDERS
-        .iter()
-        .any(|provider| provider_name.eq_ignore_ascii_case(provider))
-}
 
 pub(super) fn is_stream_timeout_error(message: &str) -> bool {
     let msg = message.to_ascii_lowercase();
@@ -117,7 +100,7 @@ pub(super) fn compact_tool_messages_for_retry(messages: &[uni::Message]) -> Vec<
 pub(crate) fn llm_first_progress_timeout_secs(
     turn_timeout_secs: u64,
     planning_active: bool,
-    provider_name: &str,
+    supports_non_streaming: bool,
 ) -> u64 {
     // A single slow first-token follow-up on a large context (common after many
     // accumulated tool outputs) should not burn all retries too aggressively.
@@ -129,11 +112,7 @@ pub(crate) fn llm_first_progress_timeout_secs(
 
     // Planning workflow requests usually include heavier context and can need
     // extra first-token latency budget before retries are useful.
-    let planning_floor = if supports_streaming_timeout_fallback(provider_name) {
-        90
-    } else {
-        60
-    };
+    let planning_floor = if supports_non_streaming { 90 } else { 60 };
     let planning_budget = (turn_timeout_secs / 2).clamp(planning_floor, 180);
     baseline.max(planning_budget)
 }
