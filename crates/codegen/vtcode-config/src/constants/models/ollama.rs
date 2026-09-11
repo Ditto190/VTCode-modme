@@ -11,6 +11,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     KIMI_K3_CLOUD,
     GEMMA_4,
     LAGUNA_XS_2,
+    DEEPSEEK_V4_1_FLASH_CLOUD,
 ];
 
 /// Models that emit structured reasoning traces when `think` is enabled
@@ -37,3 +38,4 @@ pub const MINIMAX_M3_CLOUD: &str = "minimax-m3:cloud";
 pub const KIMI_K3_CLOUD: &str = "kimi-k3:cloud";
 pub(crate) const GEMMA_4: &str = "gemma4";
 pub(crate) const LAGUNA_XS_2: &str = "laguna-xs.2";
+pub const DEEPSEEK_V4_1_FLASH_CLOUD: &str = "deepseek-v4.1-flash:cloud";

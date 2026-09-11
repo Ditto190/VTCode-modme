@@ -2612,6 +2612,22 @@
           ]
         },
         "context": 131072
+      },
+      "deepseek-v4.1-flash:cloud": {
+        "id": "deepseek-v4.1-flash:cloud",
+        "name": "DeepSeek V4.1 Flash (cloud)",
+        "description": "Cloud-hosted DeepSeek V4.1 Flash model via Ollama Cloud.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000
       }
     }
   },

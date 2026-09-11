@@ -127,5 +127,28 @@ pub(crate) fn ollama_presets() -> Vec<ModelPreset> {
             supported_in_api: true,
             context_window: Some(1_000_000),
         },
+        ModelPreset {
+            id: "ollama/deepseek-v4.1-flash:cloud".to_string(),
+            model: "deepseek-v4.1-flash:cloud".to_string(),
+            display_name: "DeepSeek V4.1 Flash (Ollama)".to_string(),
+            description: "Cloud-hosted DeepSeek V4.1 Flash model via Ollama Cloud".to_string(),
+            provider: Provider::OllamaCloud,
+            default_reasoning_effort: ReasoningEffortLevel::Medium,
+            supported_reasoning_efforts: vec![
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::Medium,
+                    description: "Balanced".to_string(),
+                },
+                ReasoningEffortPreset {
+                    effort: ReasoningEffortLevel::High,
+                    description: "Deep".to_string(),
+                },
+            ],
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            supported_in_api: true,
+            context_window: Some(1_000_000),
+        },
     ]
 }
