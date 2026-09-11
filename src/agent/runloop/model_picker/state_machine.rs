@@ -238,9 +238,37 @@ impl ModelPickerState {
         renderer: &mut AnsiRenderer,
         level: ReasoningEffortLevel,
     ) -> Result<ModelPickerProgress> {
-        let Some(_selection) = self.selection.as_ref() else {
+        let Some(selection) = self.selection.as_ref() else {
             return Err(anyhow!("Reasoning requested before selecting a model"));
         };
+        // Strict validation for explicit choices across all providers: an
+        // explicitly typed effort must be in the route's advertised levels.
+        // Inherited (`skip`) values bypass this and are best-effort adjusted
+        // in `finalize_model_selection`.
+        if level != ReasoningEffortLevel::None
+            && level != self.settings.current_reasoning
+            && !selection.reasoning_effort_levels().contains(&level)
+        {
+            let supported = selection
+                .reasoning_effort_levels()
+                .into_iter()
+                .map(|effort| effort.as_str().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            renderer.line(
+                MessageStyle::Error,
+                &format!(
+                    "Reasoning effort `{level}` is unsupported for {} ({}). Supported: {}. Choose a supported effort or 'skip'.",
+                    selection.model_display, selection.model_id, supported
+                ),
+            )?;
+            if self.settings.inline_enabled {
+                render_reasoning_inline(renderer, selection, self.settings.current_reasoning)?;
+            } else {
+                prompt_reasoning_plain(renderer, selection, self.settings.current_reasoning)?;
+            }
+            return Ok(ModelPickerProgress::InProgress);
+        }
         self.selected_reasoning = Some(level);
         self.continue_after_reasoning(renderer)
     }

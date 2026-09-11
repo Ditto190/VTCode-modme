@@ -40,7 +40,7 @@ fn service_tier_message_label(service_tier: Option<vtcode_config::OpenAIServiceT
 pub(crate) async fn finalize_model_selection(
     renderer: &mut AnsiRenderer,
     picker: &ModelPickerState,
-    selection: ModelSelectionResult,
+    mut selection: ModelSelectionResult,
     config: &mut CoreAgentConfig,
     vt_cfg: &mut Option<VTCodeConfig>,
     provider_client: &mut Box<dyn LLMProvider>,
@@ -88,18 +88,43 @@ pub(crate) async fn finalize_model_selection(
             },
         )
         .context("Failed to initialize provider for the selected model")?;
-        let mapping = ReasoningEffortMapper::resolve(
+        let mapping = match ReasoningEffortMapper::resolve(
             new_client.as_ref(),
             &selection.model,
             selection.reasoning,
             auth_cfg.agent.allow_reasoning_effort_downgrade,
-        )
-        .with_context(|| {
-            format!(
-                "resolve reasoning effort `{}` for provider `{}` model `{}`",
-                selection.reasoning, provider_name, selection.model
-            )
-        })?;
+        ) {
+            Ok(mapping) => mapping,
+            Err(_) if !selection.reasoning_changed => {
+                // Best-effort for inherited (persisted) effort across route changes:
+                // a stored `medium` must not block switching to routes like
+                // `merge-gateway/zai/glm-5.3-flash` (`low/high/max`) or
+                // `moonshot/kimi-k3`. Downgrade, else upgrade to nearest, else omit.
+                let requested = selection.reasoning;
+                let supported = new_client.supported_reasoning_efforts(&selection.model);
+                match best_effort_reasoning(requested, supported) {
+                    Some(effective) => {
+                        selection.reasoning = effective;
+                        vtcode_core::llm::reasoning_effort::ReasoningEffortMapping { requested, effective }
+                    }
+                    None => {
+                        selection.reasoning = vtcode_core::config::types::ReasoningEffortLevel::None;
+                        vtcode_core::llm::reasoning_effort::ReasoningEffortMapping {
+                            requested,
+                            effective: selection.reasoning,
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "resolve reasoning effort `{}` for provider `{}` model `{}`",
+                        selection.reasoning, provider_name, selection.model
+                    )
+                });
+            }
+        };
         let rig_payload = selection
             .provider_enum
             .filter(|_| selection.reasoning != vtcode_core::config::types::ReasoningEffortLevel::None)
@@ -454,9 +479,55 @@ fn runtime_provider_label(selection: &ModelSelectionResult, using_chatgpt_auth: 
     }
 }
 
+fn effort_order(level: vtcode_core::config::types::ReasoningEffortLevel) -> Option<usize> {
+    use vtcode_core::config::types::ReasoningEffortLevel as L;
+    match level {
+        L::Minimal => Some(0),
+        L::Low => Some(1),
+        L::Medium => Some(2),
+        L::High => Some(3),
+        L::XHigh => Some(4),
+        L::Max => Some(5),
+        L::None | L::Unknown => None,
+    }
+}
+
+fn best_effort_reasoning(
+    requested: vtcode_core::config::types::ReasoningEffortLevel,
+    supported: &[&str],
+) -> Option<vtcode_core::config::types::ReasoningEffortLevel> {
+    use vtcode_core::config::types::ReasoningEffortLevel as L;
+    if requested == L::None || supported.contains(&requested.as_str()) {
+        return Some(requested);
+    }
+    const ORDERED: [L; 6] = [L::Minimal, L::Low, L::Medium, L::High, L::XHigh, L::Max];
+    let requested_pos = effort_order(requested)?;
+    // Prefer nearest lower (downgrade preserves cost/latency expectations),
+    // else nearest higher (e.g. inherited `minimal` on a `low/high/max` route).
+    if let Some(lower) = ORDERED[..requested_pos]
+        .iter()
+        .rev()
+        .find(|level| supported.contains(&level.as_str()))
+    {
+        return Some(*lower);
+    }
+    if let Some(higher) = ORDERED
+        .iter()
+        .skip(requested_pos + 1)
+        .find(|level| supported.contains(&level.as_str()))
+    {
+        return Some(*higher);
+    }
+    // Supported list may use only a subset; fall back to first parseable entry.
+    if let Some(first) = supported.iter().filter_map(|value| L::parse(value)).next() {
+        return Some(first);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{read_workspace_api_key, resolve_runtime_api_key};
+    use super::{best_effort_reasoning, read_workspace_api_key, resolve_runtime_api_key};
     use crate::agent::runloop::model_picker::ModelSelectionResult;
     use tempfile::tempdir;
     use vtcode_config::VTCodeConfig;
@@ -565,5 +636,35 @@ mod tests {
 
         assert!(resolved.0.is_empty());
         assert!(resolved.1.is_none());
+    }
+
+    #[test]
+    fn best_effort_downgrades_inherited_medium_to_low_on_zai_route() {
+        assert_eq!(
+            best_effort_reasoning(ReasoningEffortLevel::Medium, &["low", "high", "max"]),
+            Some(ReasoningEffortLevel::Low)
+        );
+    }
+
+    #[test]
+    fn best_effort_upgrades_inherited_minimal_to_low_when_no_lower_exists() {
+        assert_eq!(
+            best_effort_reasoning(ReasoningEffortLevel::Minimal, &["low", "high", "max"]),
+            Some(ReasoningEffortLevel::Low)
+        );
+    }
+
+    #[test]
+    fn best_effort_keeps_supported_effort_unchanged() {
+        assert_eq!(
+            best_effort_reasoning(ReasoningEffortLevel::Max, &["low", "high", "max"]),
+            Some(ReasoningEffortLevel::Max)
+        );
+        assert_eq!(best_effort_reasoning(ReasoningEffortLevel::None, &[]), Some(ReasoningEffortLevel::None));
+    }
+
+    #[test]
+    fn best_effort_returns_none_when_route_exposes_no_efforts() {
+        assert_eq!(best_effort_reasoning(ReasoningEffortLevel::Medium, &[]), None);
     }
 }
