@@ -230,3 +230,7 @@ Blocker to clear: the preview budget is per-turn and resets only when the turn e
 > Model: deepseek/deepseek-v4.1-flash via Merge Gateway · medium
 > Session 3m 3s | 510.3k in / 13.8k out
 > Resume: vtcode --resume session-vtcode-20260911T052841Z_822890-08288
+
+---
+
+check and fix TODO task markdown rendering, it should render markdown correctly. also remove and reduce visual clutter '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-11 at 13.41.58.png'
