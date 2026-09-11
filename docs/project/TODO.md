@@ -193,3 +193,7 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 - https://deepwiki.com/openai/codex (fetched via direct HTTP; overview page)
 - https://zylos.ai/research/2026-03-26-openai-codex-cli-architecture-multi-runtime-patterns/
 - https://github.com/openai/codex/tree/main/codex-rs
+
+---
+
+Check and fix reverse history search, and with up/down keyboard navigation to traverse command history. when selecting an entry, it only shown 1 line and missing the full command content. Ensure multi-line commands are displayed correctly and navigation works seamlessly.
