@@ -154,9 +154,17 @@ VT Code automatically attaches the bearer token to requests when the API key is 
 You can also interact with Ollama directly via the HTTP API:
 
 ```bash
+# Local model example
 curl http://localhost:11434/api/chat \
   -d '{
     "model": "laguna-xs.2",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Ollama Cloud model example
+curl https://ollama.com/api/chat \
+  -d '{
+    "model": "deepseek-v4.1-flash:cloud",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
