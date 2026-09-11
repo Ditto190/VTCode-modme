@@ -862,6 +862,9 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 }
                 session.mark_dirty();
                 Some(InlineEvent::EditQueue)
+            } else if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_up_for_history() {
+                session.mark_dirty();
+                None
             } else if session.navigate_history_previous() {
                 session.mark_dirty();
                 Some(InlineEvent::HistoryPrevious)
@@ -875,7 +878,10 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
-            if session.navigate_history_next() {
+            if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_down_for_history() {
+                session.mark_dirty();
+                None
+            } else if session.navigate_history_next() {
                 session.clear_inline_prompt_suggestion();
                 session.mark_dirty();
                 Some(InlineEvent::HistoryNext)

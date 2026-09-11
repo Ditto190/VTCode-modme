@@ -117,3 +117,88 @@ fn history_picker_renders_search_field_above_results() {
 
     assert!(search_index < item_index);
 }
+
+#[test]
+fn arrow_up_moves_within_multiline_before_history() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("first message".to_string());
+    let _ = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    session.set_input("second".to_string());
+    let _ = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    session.set_input("line1\nline2\nline3".to_string());
+    assert_eq!(session.input_manager.cursor_row(), 2);
+
+    // First two Ups move the cursor, consume the key, emit no history event.
+    let up_cursor_1 = session.process_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert!(up_cursor_1.is_none());
+    assert_eq!(session.input_manager.content(), "line1\nline2\nline3");
+    assert_eq!(session.input_manager.cursor_row(), 1);
+    assert!(session.input_manager.history_index().is_none());
+
+    let up_cursor_2 = session.process_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert!(up_cursor_2.is_none());
+    assert_eq!(session.input_manager.cursor_row(), 0);
+
+    // At first line, Up traverses history.
+    let up_history = session.process_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert!(matches!(up_history, Some(InlineEvent::HistoryPrevious)));
+    assert_eq!(session.input_manager.content(), "second");
+}
+
+#[test]
+fn arrow_down_moves_within_multiline_before_history() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("only entry".to_string());
+    let _ = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    session.set_input("aaa\nbbb".to_string());
+    session.set_cursor(0);
+    assert_eq!(session.input_manager.cursor_row(), 0);
+
+    let down_cursor = session.process_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert!(down_cursor.is_none());
+    assert_eq!(session.input_manager.content(), "aaa\nbbb");
+    assert_eq!(session.input_manager.cursor_row(), 1);
+    assert!(session.input_manager.history_index().is_none());
+}
+
+#[test]
+fn shift_up_does_not_consume_multiline_cursor_move() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("line1\nline2\nline3".to_string());
+    assert_eq!(session.input_manager.cursor_row(), 2);
+
+    // Shift+Up must not be consumed as a plain cursor move (which would
+    // discard selection semantics); it keeps the prior fallback behavior.
+    let shifted = session.process_key(KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT));
+    assert!(shifted.is_none());
+    assert_eq!(session.input_manager.content(), "line1\nline2\nline3");
+    assert_eq!(session.input_manager.cursor_row(), 2);
+    assert!(session.input_manager.history_index().is_none());
+}
+
+#[test]
+fn history_picker_collapses_multiline_with_indicator_and_accepts_full() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let multiline = "cargo test --marker\nUNIQUE_SECOND_LINE_MARKER\nthird";
+    session.core.set_input(multiline.to_string());
+    let _ = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let _ = session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    let lines = rendered_app_session_lines(&mut session, 24);
+    let collapsed = lines
+        .iter()
+        .find(|line| line.contains("cargo test"))
+        .expect("collapsed multiline match should render");
+    assert!(collapsed.contains("+2 lines"), "collapsed row should indicate extra lines: {collapsed}");
+    assert!(
+        !lines.iter().any(|line| line.contains("UNIQUE_SECOND_LINE_MARKER")),
+        "second line must not leak as separate row"
+    );
+
+    // Navigate (single entry already selected) and accept full content.
+    let _ = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(!session.history_picker_state.active);
+    assert_eq!(session.core.input_manager.content(), multiline);
+}

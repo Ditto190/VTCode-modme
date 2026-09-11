@@ -444,6 +444,28 @@ impl Session {
         }
     }
 
+    /// Arrow-Up handling: move within multiline input first, history second.
+    ///
+    /// Returns `true` when the key was consumed by an intra-line cursor move
+    /// (caller should `mark_dirty()` and emit no history event). Movement is
+    /// by logical lines; wrapped visual rows still fall through to history.
+    pub(crate) fn move_cursor_up_for_history(&mut self) -> bool {
+        if !self.input_enabled {
+            return false;
+        }
+        self.clear_inline_prompt_suggestion();
+        self.input_manager.move_cursor_up()
+    }
+
+    /// Arrow-Down handling: move within multiline input first, history second.
+    pub(crate) fn move_cursor_down_for_history(&mut self) -> bool {
+        if !self.input_enabled {
+            return false;
+        }
+        self.clear_inline_prompt_suggestion();
+        self.input_manager.move_cursor_down()
+    }
+
     /// Returns the current history position for status bar display
     /// Returns (current_index, total_entries) or None if not navigating history
     pub fn history_position(&self) -> Option<(usize, usize)> {

@@ -522,4 +522,26 @@ mod tests {
         // Negative duration (clock skew)
         assert_eq!(format_time_ago(Duration::seconds(-10)), "just now");
     }
+
+    #[test]
+    fn test_accept_multiline_restores_full_content() {
+        let mut picker = HistoryPickerState::new();
+        let mut manager = InputManager::new();
+        let now = Utc::now();
+        let multiline = "cargo test \\\n  -- --nocapture\nthird line".to_string();
+        let history = vec![(multiline.clone(), vec![], now)];
+
+        picker.open(&manager);
+        picker.update_search(&history);
+        assert_eq!(picker.match_count(), 1);
+
+        let selected_content = picker.selected_match().map(|m| m.content.clone());
+        assert_eq!(selected_content, Some(multiline.clone()));
+        picker.accept(&mut manager);
+
+        assert!(!picker.active);
+        assert_eq!(manager.content(), multiline);
+        assert_eq!(manager.cursor(), multiline.len());
+        assert_eq!(manager.line_count(), 3);
+    }
 }

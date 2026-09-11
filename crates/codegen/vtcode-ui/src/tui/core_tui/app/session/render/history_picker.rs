@@ -1,11 +1,42 @@
 use super::*;
 use crate::tui::config::constants::ui;
-use crate::tui::core_tui::session::inline_list::{InlineListRow, list_cursor};
+use crate::tui::core_tui::session::inline_list::{InlineListRow, list_cursor, selection_padding_width};
 use crate::tui::core_tui::session::list_panel::{
     ListPanelLayout, SharedListPanelSections, SharedListPanelStyles, SharedListWidgetModel, SharedSearchField,
     fixed_section_rows, input_styles_from_theme, render_shared_list_panel, rows_to_u16,
 };
 use ratatui::widgets::Clear;
+
+/// Collapsed single-line display for a history entry.
+///
+/// Shows the first line only, with `· <time>` and `· +N lines` suffixes.
+/// Control characters from the original command are sanitized so embedded
+/// newlines/tabs can never break the single-row list layout. The full
+/// multiline content is preserved in `HistoryMatch::content` and restored
+/// into the composer on accept.
+pub(crate) fn collapsed_history_display(content: &str, time_label: &str) -> String {
+    let mut lines = content.lines();
+    let first = lines.next().unwrap_or("");
+    let extra_lines = lines.count();
+    let sanitized: String = first.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect();
+    let first = if sanitized.is_empty() && extra_lines > 0 {
+        "…"
+    } else {
+        sanitized.as_str()
+    };
+    let mut parts = vec![first.to_owned()];
+    if !time_label.is_empty() {
+        parts.push(time_label.to_owned());
+    }
+    if extra_lines > 0 {
+        if extra_lines == 1 {
+            parts.push("+1 line".to_owned());
+        } else {
+            parts.push(format!("+{extra_lines} lines"));
+        }
+    }
+    parts.join(" \u{b7} ")
+}
 
 struct HistoryPickerPanelModel {
     entries: Vec<(String, String)>,
@@ -38,14 +69,13 @@ impl SharedListWidgetModel for HistoryPickerPanelModel {
             .enumerate()
             .map(|(idx, (content, time_label))| {
                 let is_selected = self.selected == Some(idx);
-                let max_chars = width as usize;
+                // Reserve space for the "│ " selection gutter so rows never
+                // overflow the panel width and wrap.
+                let max_chars = (width as usize).saturating_sub(selection_padding_width());
 
-                // Build display text: "content · 3h ago"
-                let display_text = if time_label.is_empty() {
-                    content.clone()
-                } else {
-                    format!("{content} \u{b7} {time_label}")
-                };
+                // Collapsed display: first line only + "· +N lines" indicator.
+                // Full multiline content is restored into the composer on accept.
+                let display_text = collapsed_history_display(content, time_label);
 
                 let item_len = display_text.chars().count();
                 let truncated = if item_len > max_chars {
@@ -186,4 +216,40 @@ pub fn render_history_picker(session: &mut Session, frame: &mut Frame<'_>, area:
         .set_visible_rows(panel_model.visible_rows.min(ui::INLINE_LIST_MAX_ROWS));
     picker.navigator.set_selected(panel_model.selected);
     picker.navigator.set_scroll_offset(panel_model.offset);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collapsed_history_display;
+
+    #[test]
+    fn single_line_includes_time_without_line_suffix() {
+        assert_eq!(collapsed_history_display("cargo test", "3h ago"), "cargo test \u{b7} 3h ago");
+        assert_eq!(collapsed_history_display("cargo test", ""), "cargo test");
+    }
+
+    #[test]
+    fn multiline_collapses_to_first_line_with_indicator() {
+        let content = "cargo test \\\n  -- --nocapture\nthird line";
+        assert_eq!(collapsed_history_display(content, "just now"), "cargo test \\ \u{b7} just now \u{b7} +2 lines");
+        assert_eq!(collapsed_history_display("first\nsecond", ""), "first \u{b7} +1 line");
+    }
+
+    #[test]
+    fn multiline_display_contains_no_newlines_or_tabs() {
+        let content = "first\twith\ttabs\nsecond\rline\nthird";
+        let display = collapsed_history_display(content, "1m ago");
+        assert!(!display.contains('\n'));
+        assert!(!display.contains('\t'));
+        assert!(!display.contains('\r'));
+        assert!(display.contains("+2 lines"));
+    }
+
+    #[test]
+    fn display_sanitizes_other_control_characters() {
+        let content = "first\x1bwith\x07controls\nsecond";
+        let display = collapsed_history_display(content, "");
+        assert!(!display.chars().any(|ch| ch.is_control()));
+        assert!(display.contains("+1 line"));
+    }
 }

@@ -321,6 +321,46 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
         }
     }
 
+    // Arrow-Up/Down move within multiline input first; history traversal
+    // only happens at the first/last logical line. Ctrl+P/N remain
+    // unconditional history shortcuts via the hardcoded paths below.
+    // Shift is excluded so Shift+Up/Down keep their prior fallback behavior
+    // instead of being consumed as plain cursor moves (which would discard
+    // selection semantics). Rebound or explicitly unbound Up/Down fall through
+    // to the binding dispatch below, matching the app-layer fallback.
+    if !has_control && !has_alt && !has_command && !has_shift {
+        let cursor_move_claims_key = match key.code {
+            KeyCode::Up => match session.bindings.resolve(&key) {
+                Some(Action::HistoryPrevious) => true,
+                None => !session.rebindable_action_is_overridden(Action::HistoryPrevious),
+                _ => false,
+            },
+            KeyCode::Down => match session.bindings.resolve(&key) {
+                Some(Action::HistoryNext) => true,
+                None => !session.rebindable_action_is_overridden(Action::HistoryNext),
+                _ => false,
+            },
+            _ => false,
+        };
+        if cursor_move_claims_key {
+            match key.code {
+                KeyCode::Up => {
+                    if session.move_cursor_up_for_history() {
+                        session.mark_dirty();
+                        return None;
+                    }
+                }
+                KeyCode::Down => {
+                    if session.move_cursor_down_for_history() {
+                        session.mark_dirty();
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // Binding store: resolve user-rebindable actions first. Readline editing
     // shortcuts remain owned by the hardcoded composer paths below.
     if let Some(action) = session.bindings.resolve(&key) {

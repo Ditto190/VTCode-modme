@@ -210,6 +210,9 @@ impl InputManager {
     pub fn set_content(&mut self, content: String) {
         self.textarea = TextArea::from(content.split('\n'));
         configure_textarea(&mut self.textarea);
+        // `End` alone stays on the first line; `Bottom` + `End` reaches the
+        // true end of multiline buffers so accepted history restores fully.
+        self.textarea.move_cursor(CursorMove::Bottom);
         self.textarea.move_cursor(CursorMove::End);
         self.compact_paste_range = None;
         self.clear_selection();
@@ -486,6 +489,41 @@ impl InputManager {
         let last_col = self.textarea.lines().last().map_or(0, |l| l.chars().count());
         self.set_textarea_cursor(last_row, last_col);
         self.clear_selection();
+    }
+
+    /// Current cursor row (0-based) within the multiline composer.
+    pub fn cursor_row(&self) -> usize {
+        let DataCursor(row, _) = self.textarea.cursor();
+        row
+    }
+
+    /// Number of logical lines in the composer (at least 1).
+    pub fn line_count(&self) -> usize {
+        self.textarea.lines().len().max(1)
+    }
+
+    /// Move cursor up one line within multiline input.
+    /// Returns `true` when the cursor moved, `false` when already on first line.
+    pub fn move_cursor_up(&mut self) -> bool {
+        if self.cursor_row() == 0 {
+            return false;
+        }
+        self.textarea.cancel_selection();
+        self.textarea.move_cursor(CursorMove::Up);
+        self.clear_selection();
+        true
+    }
+
+    /// Move cursor down one line within multiline input.
+    /// Returns `true` when the cursor moved, `false` when already on last line.
+    pub fn move_cursor_down(&mut self) -> bool {
+        if self.cursor_row() + 1 >= self.line_count() {
+            return false;
+        }
+        self.textarea.cancel_selection();
+        self.textarea.move_cursor(CursorMove::Down);
+        self.clear_selection();
+        true
     }
 
     pub fn insert_char(&mut self, ch: char) {
@@ -961,6 +999,7 @@ impl InputManager {
         // would reset history navigation state.
         self.textarea = TextArea::from(entry.content.split('\n'));
         configure_textarea(&mut self.textarea);
+        self.textarea.move_cursor(CursorMove::Bottom);
         self.textarea.move_cursor(CursorMove::End);
         self.clear_selection();
         self.attachments = entry.attachment_elements();
@@ -1128,6 +1167,36 @@ mod tests {
 
         assert_eq!(manager.cursor(), 0);
         assert!(!manager.has_selection());
+    }
+
+    #[test]
+    fn multiline_cursor_up_down_stops_at_edges() {
+        let mut manager = InputManager::new();
+        manager.set_content("first\nsecond\nthird".to_owned());
+        assert_eq!(manager.line_count(), 3);
+        // set_content moves to end (last line).
+        assert_eq!(manager.cursor_row(), 2);
+
+        assert!(manager.move_cursor_up());
+        assert_eq!(manager.cursor_row(), 1);
+        assert!(manager.move_cursor_up());
+        assert_eq!(manager.cursor_row(), 0);
+        assert!(!manager.move_cursor_up());
+
+        assert!(manager.move_cursor_down());
+        assert_eq!(manager.cursor_row(), 1);
+        assert!(manager.move_cursor_down());
+        assert_eq!(manager.cursor_row(), 2);
+        assert!(!manager.move_cursor_down());
+    }
+
+    #[test]
+    fn single_line_cursor_up_down_does_not_move() {
+        let mut manager = InputManager::new();
+        manager.set_content("solo".to_owned());
+        assert_eq!(manager.line_count(), 1);
+        assert!(!manager.move_cursor_up());
+        assert!(!manager.move_cursor_down());
     }
 
     #[test]
