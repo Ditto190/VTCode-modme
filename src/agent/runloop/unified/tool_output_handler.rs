@@ -190,11 +190,128 @@ fn task_tracker_block_lines(output: &serde_json::Value) -> Vec<String> {
 }
 
 fn task_tracker_block_segments(lines: &[String]) -> Vec<Vec<InlineSegment>> {
-    let style = std::sync::Arc::new(InlineTextStyle::default());
+    use vtcode_core::ui::markdown::RenderMarkdownOptions;
+    use vtcode_core::ui::theme;
+    use vtcode_core::ui::tui::convert_style;
+
+    let default_style = std::sync::Arc::new(InlineTextStyle::default());
+    let base_style = MessageStyle::Info.style();
+    let theme_styles = theme::active_styles();
+    let mut fallback = convert_style(base_style);
+    if fallback.color.is_none() {
+        fallback = fallback.merge_color(Some(theme_styles.foreground));
+    }
+    let render_options = RenderMarkdownOptions {
+        preserve_code_indentation: true,
+        disable_code_block_table_reparse: false,
+        table_max_width: None,
+    };
     lines
         .iter()
-        .map(|line| vec![InlineSegment { text: line.clone(), style: style.clone() }])
+        .map(|line| {
+            render_tracker_inline_row(line, &theme_styles, &fallback, &default_style, &render_options)
+                .unwrap_or_else(|| vec![InlineSegment { text: line.clone(), style: default_style.clone() }])
+        })
         .collect()
+}
+
+/// Split a compact tree row into its tree prefix (`  ├ □ `) and markdown body.
+///
+/// Returns `None` for title/diagnostic lines so they keep their plain style.
+fn split_tracker_row_prefix(line: &str) -> Option<(&str, &str)> {
+    let mut rest = line;
+    let mut consumed_branch_or_status = false;
+    let leading_spaces = rest.len() - rest.trim_start_matches(' ').len();
+    rest = &rest[leading_spaces..];
+    loop {
+        if let Some(after) = rest
+            .strip_prefix("├ ")
+            .or_else(|| rest.strip_prefix("└ "))
+            .or_else(|| rest.strip_prefix("│ "))
+        {
+            rest = after;
+            consumed_branch_or_status = true;
+            continue;
+        }
+        break;
+    }
+    for token in ["□ ", "[x] ", "[-] ", "[!] "] {
+        if let Some(after) = rest.strip_prefix(token) {
+            rest = after;
+            consumed_branch_or_status = true;
+            break;
+        }
+    }
+    if !consumed_branch_or_status || rest.is_empty() {
+        return None;
+    }
+    let prefix_len = line.len() - rest.len();
+    Some((&line[..prefix_len], rest))
+}
+
+/// Render one compact tree row as styled segments: plain tree prefix plus a
+/// markdown-rendered body so `` `code` ``, **bold**, and file paths display
+/// styled instead of raw source. Returns `None` when the row has no tree
+/// prefix or markdown yields no visible output (caller falls back to plain).
+fn render_tracker_inline_row(
+    line: &str,
+    theme_styles: &vtcode_core::ui::theme::ThemeStyles,
+    fallback: &InlineTextStyle,
+    default_style: &std::sync::Arc<InlineTextStyle>,
+    render_options: &vtcode_core::ui::markdown::RenderMarkdownOptions,
+) -> Option<Vec<InlineSegment>> {
+    use vtcode_core::ui::markdown::render_markdown_to_lines_with_options;
+    use vtcode_core::ui::tui::convert_style;
+
+    let (prefix, body) = split_tracker_row_prefix(line)?;
+    if body.trim().is_empty() {
+        return None;
+    }
+    let rendered =
+        render_markdown_to_lines_with_options(body, MessageStyle::Info.style(), theme_styles, None, *render_options);
+    let mut segments = Vec::with_capacity(4);
+    segments.push(InlineSegment {
+        text: prefix.to_string(),
+        style: default_style.clone(),
+    });
+    // Single-line descriptions stay one row so inline replacement counts stay
+    // aligned; join any extra markdown lines with a space.
+    let rendered_lines = rendered
+        .iter()
+        .filter(|rendered_line| !rendered_line.is_empty())
+        .collect::<Vec<_>>();
+    let mut wrote_body = false;
+    for (line_index, rendered_line) in rendered_lines.iter().enumerate() {
+        if line_index > 0 {
+            segments.push(InlineSegment {
+                text: " ".to_string(),
+                style: default_style.clone(),
+            });
+        }
+        for seg in &rendered_line.segments {
+            if seg.text.is_empty() {
+                continue;
+            }
+            let converted = convert_style(seg.style);
+            let mut inline_style = fallback.clone();
+            inline_style.color = None;
+            if let Some(color) = converted.color
+                && Some(color) != fallback.color
+            {
+                inline_style.color = Some(color);
+            }
+            if let Some(bg) = converted.bg_color {
+                inline_style.bg_color = Some(bg);
+            }
+            inline_style.effects = converted.effects | fallback.effects;
+            segments.push(InlineSegment {
+                text: seg.text.clone(),
+                style: std::sync::Arc::new(inline_style),
+            });
+            wrote_body = true;
+        }
+    }
+    wrote_body.then_some(segments)
 }
 
 fn apply_task_tracker_block(
@@ -1507,6 +1624,48 @@ mod tests {
                 "    [x] Run checks",
             ]
         );
+    }
+
+    #[test]
+    fn task_tracker_row_segments_render_inline_code_without_backticks() {
+        let rows = task_tracker_block_segments(&[
+            "• Task tracker".to_string(),
+            "  └ □ Use `src/main.rs` parser".to_string(),
+        ]);
+
+        assert_eq!(rows.len(), 2);
+        // Title keeps its plain single segment.
+        assert_eq!(rows[0].len(), 1);
+        assert_eq!(rows[0][0].text, "• Task tracker");
+        // Tree prefix stays intact while the code span renders styled without
+        // literal backticks.
+        let text = rows[1].iter().map(|segment| segment.text.as_str()).collect::<String>();
+        assert_eq!(text, "  └ □ Use src/main.rs parser");
+        assert!(rows[1].len() > 1, "code span should produce distinct styled segments");
+        assert!(!text.contains('`'));
+    }
+
+    #[test]
+    fn task_tracker_row_segments_keep_diagnostics_plain() {
+        let rows = task_tracker_block_segments(&[
+            "• Task tracker".to_string(),
+            "  Tracker status: error".to_string(),
+            "  └ □ Plain action".to_string(),
+        ]);
+
+        assert_eq!(rows[1].len(), 1);
+        assert_eq!(rows[1][0].text, "  Tracker status: error");
+        let text = rows[2].iter().map(|segment| segment.text.as_str()).collect::<String>();
+        assert_eq!(text, "  └ □ Plain action");
+    }
+
+    #[test]
+    fn split_tracker_row_prefix_handles_nested_and_parent_rows() {
+        assert_eq!(split_tracker_row_prefix("  ├ □ Investigate"), Some(("  ├ □ ", "Investigate")));
+        assert_eq!(split_tracker_row_prefix("  │ [x] Update version"), Some(("  │ [x] ", "Update version")));
+        assert_eq!(split_tracker_row_prefix("  ├ Prepare release"), Some(("  ├ ", "Prepare release")));
+        assert_eq!(split_tracker_row_prefix("• Task tracker"), None);
+        assert_eq!(split_tracker_row_prefix("  Tracker status: error"), None);
     }
 
     // Use Tokio runtime for async test blocks

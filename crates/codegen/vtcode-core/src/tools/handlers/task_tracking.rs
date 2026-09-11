@@ -291,6 +291,107 @@ pub fn metadata_from_input(
     }
 }
 
+/// Markers that may trail a task description as inline `Action -> files: [...]
+/// -> verify: [...]` metadata. `outcome` is accepted so a polluted suffix is
+/// still stripped from the visible row even though the compact view never
+/// renders it.
+const INLINE_TASK_METADATA_MARKERS: &[&str] = &[" -> files:", " -> verify:", " -> outcome:"];
+
+fn parse_inline_bracket_list(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    inner
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+/// Split an inline `Action -> files: [...] -> verify: [...]` suffix out of a
+/// task description.
+///
+/// Returns `(clean_description, files, verify)`. Markers are recognized only
+/// outside inline-code spans so `` `a -> files: b` `` stays intact, and the
+/// Unicode `→` arrow is normalized first so both spellings agree with plan
+/// validation. When no marker exists outside backticks the description is
+/// returned trimmed with empty metadata.
+pub fn split_task_description_metadata(description: &str) -> (String, Vec<String>, Vec<String>) {
+    let normalized;
+    let source = if description.contains('→') {
+        normalized = description.replace('→', "->");
+        normalized.as_str()
+    } else {
+        description
+    };
+    let Some(first) = find_inline_metadata_marker(source, 0) else {
+        return (source.trim().to_string(), Vec::new(), Vec::new());
+    };
+    let head = source[..first.0].trim();
+    if head.is_empty() {
+        return (source.trim().to_string(), Vec::new(), Vec::new());
+    }
+
+    let mut files = Vec::new();
+    let mut verify = Vec::new();
+    let mut cursor = first.0;
+    while let Some((marker_start, marker)) = find_inline_metadata_marker(source, cursor) {
+        let value_start = marker_start + marker.len();
+        let next = find_inline_metadata_marker(source, value_start)
+            .map(|(start, _)| start)
+            .unwrap_or(source.len());
+        let value = source[value_start..next].trim();
+        if marker.contains("files:") {
+            files.extend(parse_inline_bracket_list(value));
+        } else if marker.contains("verify:") {
+            verify.extend(parse_inline_bracket_list(value));
+        }
+        cursor = next;
+        if cursor >= source.len() {
+            break;
+        }
+    }
+    (head.to_string(), files, verify)
+}
+
+/// Strip an inline `-> files:` / `-> verify:` / `-> outcome:` suffix for
+/// display. Structured metadata stays in the payload; the visible compact row
+/// must not reintroduce it as detail text.
+pub fn strip_task_description_metadata(description: &str) -> String {
+    split_task_description_metadata(description).0
+}
+
+fn find_inline_metadata_marker(source: &str, from: usize) -> Option<(usize, &'static str)> {
+    let mut inline_ticks: Option<usize> = None;
+    let mut cursor = from.min(source.len());
+    while cursor < source.len() {
+        let remainder = &source[cursor..];
+        if remainder.starts_with('`') {
+            let run = remainder.bytes().take_while(|byte| *byte == b'`').count();
+            if inline_ticks.is_some_and(|ticks| ticks == run) {
+                inline_ticks = None;
+            } else if inline_ticks.is_none() {
+                inline_ticks = Some(run);
+            }
+            cursor += run;
+            continue;
+        }
+        if inline_ticks.is_none() {
+            for marker in INLINE_TASK_METADATA_MARKERS {
+                if remainder.starts_with(marker) {
+                    return Some((cursor, marker));
+                }
+            }
+        }
+        let character = remainder.chars().next()?;
+        cursor += character.len_utf8();
+    }
+    None
+}
+
 /// A renderer-independent task tree used by both task-tracker implementations.
 ///
 /// The persisted checklist formats remain implementation-specific; this type is
@@ -383,12 +484,27 @@ pub fn compact_task_tree_view_from_items(items: &[Value]) -> Vec<Value> {
         else {
             continue;
         };
-        let description = description.to_string();
-        let metadata = TaskStepMetadata {
+        // Descriptions copied from plan steps may still carry an inline
+        // `Action -> files: [...] -> verify: [...]` suffix. Strip it for the
+        // visible row and fold it into structured metadata so the compact view
+        // never reintroduces files/verify as detail text.
+        let (clean_description, parsed_files, parsed_verify) = split_task_description_metadata(description);
+        let description = if clean_description.is_empty() {
+            description.trim().to_string()
+        } else {
+            clean_description
+        };
+        let mut metadata = TaskStepMetadata {
             files: string_array(item.get("files")),
             outcome: item.get("outcome").and_then(Value::as_str).map(ToOwned::to_owned),
             verify: string_or_string_array(item.get("verify")),
         };
+        if metadata.files.is_empty() {
+            metadata.files = parsed_files;
+        }
+        if metadata.verify.is_empty() {
+            metadata.verify = parsed_verify;
+        }
 
         ordered_paths.push(index_path.clone());
         nodes_by_path.insert(
@@ -633,5 +749,46 @@ mod tests {
         assert_eq!(lines[0]["files"], json!(["Cargo.toml"]));
         assert_eq!(lines[0]["outcome"], "Ready");
         assert_eq!(lines[0]["verify"], json!(["cargo check"]));
+    }
+
+    #[test]
+    fn split_task_description_metadata_strips_files_and_verify_suffix() {
+        let (clean, files, verify) =
+            split_task_description_metadata("Emit summary -> files: [src/a.rs, src/b.rs] -> verify: [cargo check]");
+        assert_eq!(clean, "Emit summary");
+        assert_eq!(files, vec!["src/a.rs".to_string(), "src/b.rs".to_string()]);
+        assert_eq!(verify, vec!["cargo check".to_string()]);
+    }
+
+    #[test]
+    fn split_task_description_metadata_keeps_inline_code_arrows_intact() {
+        let (clean, files, verify) =
+            split_task_description_metadata("Use `a -> files: b` in code -> files: [src/a.rs]");
+        assert_eq!(clean, "Use `a -> files: b` in code");
+        assert_eq!(files, vec!["src/a.rs".to_string()]);
+        assert!(verify.is_empty());
+    }
+
+    #[test]
+    fn split_task_description_metadata_without_markers_returns_trimmed_description() {
+        let (clean, files, verify) = split_task_description_metadata("  Just an action  ");
+        assert_eq!(clean, "Just an action");
+        assert!(files.is_empty());
+        assert!(verify.is_empty());
+    }
+
+    #[test]
+    fn compact_task_tree_view_from_items_strips_inline_metadata_into_fields() {
+        let items = vec![json!({
+            "index_path": "1",
+            "description": "Update parser -> files: [src/a.rs] -> verify: [cargo check]",
+            "status": "pending",
+        })];
+        let rows = compact_task_tree_view_from_items(&items);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["display"], "  └ □ Update parser");
+        assert_eq!(rows[0]["text"], "Update parser");
+        assert_eq!(rows[0]["files"], json!(["src/a.rs"]));
+        assert_eq!(rows[0]["verify"], json!(["cargo check"]));
     }
 }

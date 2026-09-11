@@ -50,8 +50,11 @@ item index.
 Successful tracker updates render as one compact hierarchical tree in both the
 inline transcript and the TODO panel. Parent rows show their branch and
 description; leaf rows use `[-]`, `□`, `[x]`, or `[!]` for in-progress, pending,
-completed, and blocked work. Files, outcomes, and verification commands remain
-structured tracker metadata rather than extra visible rows.
+completed, and blocked work. Descriptions render inline markdown (code spans,
+emphasis, file paths); inline `-> files:` / `-> verify:` suffixes copied from
+plan steps are stripped into structured fields. Files, outcomes, and
+verification commands remain structured tracker metadata rather than extra
+visible rows.
 
 ## Usage
 

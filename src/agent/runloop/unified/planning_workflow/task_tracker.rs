@@ -2,6 +2,7 @@ use anyhow::{Context, bail};
 use std::collections::HashMap;
 use vtcode_commons::paths::ensure_path_within_workspace_resolved;
 use vtcode_core::config::constants::tools;
+use vtcode_core::tools::handlers::task_tracking::split_task_description_metadata;
 use vtcode_core::tools::registry::ToolRegistry;
 use vtcode_ui::tui::app::{InlineHandle, InlineMessageKind, PlanContent};
 
@@ -156,11 +157,59 @@ fn append_unique_task_item(
         {
             existing["files"] = files.clone();
         }
+        let existing_verify_empty = existing
+            .get("verify")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(Vec::is_empty);
+        if existing_verify_empty
+            && let Some(verify) = item.get("verify").filter(|verify| !verify.as_array().is_none_or(Vec::is_empty))
+        {
+            existing["verify"] = verify.clone();
+        }
         return;
     }
 
     index_by_description.insert(key, items.len());
     items.push(item);
+}
+
+/// Build a tracker item from a plan-step description, splitting an inline
+/// `Action -> files: [...] -> verify: [...]` suffix into structured fields so
+/// the visible description stays clean. Explicit `step_files` (parsed from the
+/// plan phase) win over inline-parsed files; inline verify is kept when the
+/// caller provides none.
+fn build_task_item(description: &str, completed: bool, step_files: &[String]) -> serde_json::Value {
+    let (clean, parsed_files, parsed_verify) = split_task_description_metadata(description.trim());
+    let description = if clean.is_empty() {
+        description.trim().to_string()
+    } else {
+        clean
+    };
+    let mut item = serde_json::json!({
+        "description": description,
+        "status": if completed { "completed" } else { "pending" },
+    });
+    let files: Vec<String> = if step_files.is_empty() {
+        parsed_files
+    } else {
+        step_files
+            .iter()
+            .map(|file| file.trim())
+            .filter(|file| !file.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    };
+    if !files.is_empty()
+        && let Ok(files) = serde_json::to_value(&files)
+    {
+        item["files"] = files;
+    }
+    if !parsed_verify.is_empty()
+        && let Ok(verify) = serde_json::to_value(&parsed_verify)
+    {
+        item["verify"] = verify;
+    }
+    item
 }
 
 fn task_items_from_plan(plan: &PlanContent) -> Vec<serde_json::Value> {
@@ -176,15 +225,7 @@ fn task_items_from_plan(plan: &PlanContent) -> Vec<serde_json::Value> {
             if step.description.trim().is_empty() {
                 continue;
             }
-            let mut item = serde_json::json!({
-                "description": step.description.trim(),
-                "status": if step.completed { "completed" } else { "pending" },
-            });
-            if !step.files.is_empty()
-                && let Ok(files) = serde_json::to_value(&step.files)
-            {
-                item["files"] = files;
-            }
+            let item = build_task_item(&step.description, step.completed, &step.files);
             append_unique_task_item(&mut items, &mut index_by_description, item);
         }
     }
@@ -193,14 +234,8 @@ fn task_items_from_plan(plan: &PlanContent) -> Vec<serde_json::Value> {
     // checkbox steps so approval still produces a usable tracker.
     if items.is_empty() {
         for (description, completed) in sparse_implementation_task_lines(plan) {
-            append_unique_task_item(
-                &mut items,
-                &mut index_by_description,
-                serde_json::json!({
-                    "description": description,
-                    "status": if completed { "completed" } else { "pending" },
-                }),
-            );
+            let item = build_task_item(description, completed, &[]);
+            append_unique_task_item(&mut items, &mut index_by_description, item);
         }
     }
 
@@ -364,6 +399,23 @@ mod tests {
         let items = task_items_from_plan(&plan);
 
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["description"], "Update src/startup.rs -> verify: cargo nextest run -p vtcode");
+        assert_eq!(items[0]["description"], "Update src/startup.rs");
+        assert_eq!(items[0]["verify"], serde_json::json!(["cargo nextest run -p vtcode"]));
+    }
+
+    #[test]
+    fn inline_files_and_verify_are_split_into_structured_fields() {
+        let plan = PlanContent::from_markdown(
+            "Launch plan".to_string(),
+            "## Summary\nImprove startup behavior.\n\n## Implementation Steps\n1. Emit summary -> files: [src/a.rs, src/b.rs] -> verify: [cargo check]\n\n## Test Cases and Validation\n1. Run cargo check.\n\n## Assumptions and Defaults\n1. Existing policy remains unchanged.",
+            None,
+        );
+
+        let items = task_items_from_plan(&plan);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["description"], "Emit summary");
+        assert_eq!(items[0]["files"], serde_json::json!(["src/a.rs", "src/b.rs"]));
+        assert_eq!(items[0]["verify"], serde_json::json!(["cargo check"]));
     }
 }

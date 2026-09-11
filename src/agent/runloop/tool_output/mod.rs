@@ -364,13 +364,54 @@ pub(crate) fn tracker_view_lines(val: &Value) -> Vec<String> {
         .and_then(|obj| obj.get("title"))
         .and_then(Value::as_str)
         .or_else(|| val.get("checklist").and_then(|c| c.get("title")).and_then(Value::as_str))
-        .unwrap_or("Task tracker");
+        .map(humanize_tracker_title)
+        .unwrap_or_else(|| "Task tracker".to_string());
 
     let mut lines = Vec::with_capacity(view_rows.len() + summary_lines.len() + 1);
     lines.push(format!("• {title}"));
     lines.extend(summary_lines);
     lines.extend(view_rows);
     lines
+}
+
+/// Humanize generated tracker titles (`1789108823046-kind-lagoon` → `Kind
+/// Lagoon`) so the transcript header reads as a name instead of a file-stem
+/// ID. Only millisecond-timestamp-prefixed slugs are rewritten; user titles
+/// (`Release`, paths, sentences) pass through verbatim.
+pub(crate) fn humanize_tracker_title(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "Task tracker".to_string();
+    }
+    let mut parts = trimmed.splitn(2, ['-', '_']);
+    let prefix = parts.next().unwrap_or_default();
+    let slug = parts.next().unwrap_or_default();
+    let is_generated_id = prefix.len() >= 10
+        && prefix.chars().all(|character| character.is_ascii_digit())
+        && !slug.is_empty()
+        && slug
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_');
+    if !is_generated_id {
+        return trimmed.to_string();
+    }
+    let humanized = slug
+        .split(['-', '_'])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if humanized.is_empty() {
+        trimmed.to_string()
+    } else {
+        humanized
+    }
 }
 
 fn visible_tracker_view_row(value: &Value) -> Option<String> {
@@ -387,8 +428,8 @@ pub(crate) fn tracker_panel_metadata(val: &Value) -> Option<TaskPanelMetadata> {
     let title = checklist
         .get("title")
         .and_then(Value::as_str)
-        .filter(|title| !title.trim().is_empty())?
-        .to_string();
+        .filter(|title| !title.trim().is_empty())
+        .map(humanize_tracker_title)?;
     let completed = usize::try_from(checklist.get("completed").and_then(Value::as_u64)?).ok()?;
     let total = usize::try_from(checklist.get("total").and_then(Value::as_u64)?).ok()?;
     Some(TaskPanelMetadata { title, completed, total })
@@ -400,8 +441,11 @@ fn render_tracker_view(renderer: &mut AnsiRenderer, val: &Value) -> Result<bool>
         return Ok(false);
     }
 
+    // Render through the markdown pipeline so `` `code` `` and other inline
+    // formatting display styled instead of raw source. Tree prefixes (`├`,
+    // `└`, `□`) are plain text and survive the parser untouched.
     for line in lines {
-        renderer.line(MessageStyle::ToolDetail, &line)?;
+        renderer.render_markdown_output(MessageStyle::ToolDetail, &line)?;
     }
 
     Ok(true)
@@ -584,7 +628,7 @@ mod tests {
     use vtcode_core::utils::ansi::AnsiRenderer;
 
     use super::{
-        collect_inline_output, preferred_follow_up_rendered_body, render_tool_output,
+        collect_inline_output, humanize_tracker_title, preferred_follow_up_rendered_body, render_tool_output,
         should_render_command_session_terminal_panel, spooled_output_hint, tracker_panel_metadata,
         tracker_summary_lines, tracker_view_lines,
     };
@@ -1166,6 +1210,36 @@ mod tests {
                 "  └ [!] Resolve dependency",
             ]
         );
+    }
+
+    #[test]
+    fn humanize_tracker_title_strips_timestamp_prefix_from_generated_ids() {
+        assert_eq!(humanize_tracker_title("1789108823046-kind-lagoon"), "Kind Lagoon");
+        assert_eq!(humanize_tracker_title("1789108823046-kind_lagoon"), "Kind Lagoon");
+    }
+
+    #[test]
+    fn humanize_tracker_title_keeps_user_titles_verbatim() {
+        assert_eq!(humanize_tracker_title("Release"), "Release");
+        assert_eq!(humanize_tracker_title("2024-report"), "2024-report");
+        assert_eq!(humanize_tracker_title("  Task tracker  "), "Task tracker");
+    }
+
+    #[test]
+    fn tracker_view_lines_humanizes_generated_title() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "1789108823046-kind-lagoon",
+                "items": [
+                    { "index_path": "1", "description": "Investigate", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_view_lines(&payload);
+
+        assert_eq!(rows, vec!["• Kind Lagoon", "  └ □ Investigate"]);
     }
 
     #[test]
