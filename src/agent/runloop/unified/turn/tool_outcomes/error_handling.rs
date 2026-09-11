@@ -134,6 +134,22 @@ fn failure_guidance(error_msg: &str, failure_kind: &'static str) -> (&'static st
         );
     }
 
+    // Preview-budget exhaustion is budget-based, not scope-based: a narrower
+    // retry returns another contentless stub, so the generic "narrower scope"
+    // default only invites wasted retries that feed the blocked-call fuse
+    // (observed: three consecutive gate rejections on distinct reads in one
+    // execution turn). Keep the failure terminal for inspections; productive
+    // channels (edits from visible evidence, one verifier, spool paging,
+    // synthesis) are named instead. Error class and recoverability stay at
+    // the execution defaults so no control-flow behavior changes.
+    if failure_kind == "preview_exhaustion_gate" {
+        return (
+            "execution_failure",
+            true,
+            "STOP: further inspections return hidden stubs this turn. Do NOT retry or narrow the scope. Edit from visible evidence, run one verifier, page a spool in small ranges, or synthesize.",
+        );
+    }
+
     if check_is_argument_error(error_msg) {
         return ("invalid_arguments", true, "Fix tool arguments to match the schema.");
     }

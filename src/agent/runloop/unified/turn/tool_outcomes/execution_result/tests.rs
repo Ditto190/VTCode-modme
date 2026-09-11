@@ -66,6 +66,34 @@ fn fallback_from_error_redirects_background_agent_spawn() {
 }
 
 #[test]
+fn build_error_content_preview_exhaustion_gate_is_terminal_for_inspections() {
+    // Regression: the generic "narrower scope" default invited consecutive
+    // retries (three gate rejections on distinct reads in one execution turn),
+    // each feeding the blocked-call fuse. The gate is budget-based, so a
+    // narrower retry can only return another stub.
+    let payload = build_error_content(
+        "Tool preview budget is exhausted this turn; further inspection returns hidden stubs.".to_string(),
+        None,
+        None,
+        "preview_exhaustion_gate",
+    );
+
+    assert_eq!(payload.get("failure_kind").and_then(|v| v.as_str()), Some("preview_exhaustion_gate"));
+    assert_eq!(payload.get("error_class").and_then(|v| v.as_str()), Some("execution_failure"));
+    assert_eq!(payload.get("is_recoverable").and_then(|v| v.as_bool()), Some(true));
+    let next_action = payload.get("next_action").and_then(|v| v.as_str()).expect("next_action");
+    assert!(next_action.contains("Do NOT retry or narrow the scope"), "unexpected next_action: {next_action}");
+    assert!(!next_action.contains("narrower scope"), "retry-inviting wording survived: {next_action}");
+
+    // The generic default is unchanged for ordinary execution failures.
+    let generic = build_error_content("boom".to_string(), None, None, "execution");
+    assert_eq!(
+        generic.get("next_action").and_then(|v| v.as_str()),
+        Some("Try an alternative tool or narrower scope.")
+    );
+}
+
+#[test]
 fn build_error_content_includes_fallback_args() {
     let payload = build_error_content(
         "boom".to_string(),
