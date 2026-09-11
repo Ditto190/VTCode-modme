@@ -46,6 +46,14 @@ pub fn filter_tool_definitions_for_mode(
     }
 
     // Planning active: filter whole tools and mask action enums.
+    if !tools.is_empty()
+        && tools.iter().all(|tool| {
+            should_expose_tool_in_mode(tool, true, request_user_input_enabled) && planning_action_mask(tool).is_none()
+        })
+    {
+        return Some(tools);
+    }
+
     let filtered: Vec<ToolDefinition> = tools
         .iter()
         .filter(|tool| should_expose_tool_in_mode(tool, true, request_user_input_enabled))
@@ -62,31 +70,20 @@ pub fn filter_tool_definitions_for_mode(
 /// tool's JSON schema to only include read-only actions. This prevents the
 /// LLM from seeing write/edit/delete actions that would be rejected at
 /// execution time.
+fn planning_action_mask(tool: &ToolDefinition) -> Option<&'static [&'static str]> {
+    let function = tool.function.as_ref()?;
+    let allowed = tool_intent::planning_allowed_actions(function.name.as_str())?;
+    let action_enum = function.parameters.get("properties")?.get("action")?.get("enum")?;
+    action_enum.is_array().then_some(allowed)
+}
+
 fn mask_tool_actions_for_mode(tool: &ToolDefinition, planning_active: bool) -> ToolDefinition {
     if !planning_active {
         return tool.clone();
     }
-    let Some(name) = tool.function.as_ref().map(|f| f.name.as_str()) else {
+    let Some(allowed) = planning_action_mask(tool) else {
         return tool.clone();
     };
-    let Some(allowed) = tool_intent::planning_allowed_actions(name) else {
-        return tool.clone();
-    };
-    // Borrow-first pre-check (own-borrow-over-clone): only clone for mutation
-    // when the schema already carries a maskable `properties.action.enum`
-    // array. Most tools have no maskable enum, so the common no-op path avoids
-    // the mutable traversal setup while keeping the owned return type stable.
-    let needs_mask = tool
-        .function
-        .as_ref()
-        .and_then(|func| func.parameters.get("properties"))
-        .and_then(|props| props.get("action"))
-        .and_then(Value::as_object)
-        .and_then(|action| action.get("enum"))
-        .is_some_and(Value::is_array);
-    if !needs_mask {
-        return tool.clone();
-    }
 
     let mut masked = tool.clone();
     if let Some(func) = masked.function.as_mut()
@@ -482,10 +479,11 @@ mod tests {
     fn filter_tool_definitions_skips_masking_for_non_multi_action_tools() {
         let tools = Arc::new(vec![function_tool(tools::CODE_SEARCH)]);
 
-        let filtered = filter_tool_definitions_for_mode(Some(tools), true, false).expect("filtered tools");
+        let filtered = filter_tool_definitions_for_mode(Some(Arc::clone(&tools)), true, false).expect("filtered tools");
         assert_eq!(filtered.len(), 1);
         // No action property to mask — just verify the tool is still present.
         assert_eq!(filtered[0].function_name(), tools::CODE_SEARCH);
+        assert!(Arc::ptr_eq(&tools, &filtered));
     }
 
     #[test]

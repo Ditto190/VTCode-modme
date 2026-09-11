@@ -192,6 +192,11 @@ fn bootstrap_main() -> Result<BootstrapOutcome> {
     let matches = match build_augmented_cli_command().try_get_matches() {
         Ok(m) => m,
         Err(err) => {
+            if matches!(err.kind(), clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion) {
+                vtcode_commons::startup_trace::record_phase("cli_parsing", cli_phase);
+                vtcode_commons::startup_trace::record_milestone("short_lived_command_ready");
+                vtcode_commons::startup_trace::emit_summary();
+            }
             let err_text = err.to_string();
             if let Some(enhanced) = try_enhance_clap_error(&err_text) {
                 eprintln!("{enhanced}");
