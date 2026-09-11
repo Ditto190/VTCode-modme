@@ -100,9 +100,20 @@ curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.
 
 ```bash
 cd path/to/your/project
-vtcode init                    # scaffolds config + AGENTS.md; review before committing
-export OPENAI_API_KEY="sk-..." # or `vtcode login` for OAuth providers
+vtcode init         # scaffolds config + AGENTS.md; review before committing
 ```
+
+Set your API key — the TUI's `/secret` command stores it in your OS keyring
+(never in a workspace `.env` or shell history), which is the most secure option:
+
+```bash
+vtcode secret add openai   # headless; or run /secret add openai inside the TUI
+```
+
+`vtcode login` works for OAuth providers (ChatGPT, GitHub Copilot). Plain env
+vars and workspace `.env` still work and remain useful for CI — see
+[Getting started](./docs/user-guide/getting-started.md) for the credential
+resolution order.
 
 ### 3. Run
 
