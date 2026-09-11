@@ -21,6 +21,11 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 - **All built-in themes must meet WCAG AA 4.5:1 contrast** for foreground and all accent fields against background. Validate with `cargo nextest run -p vtcode-ui -E 'test(theme)'`. See `.vtcode/memory/gotchas.md` for catppuccin-latte special-case.
 - **Every new major feature must update docs**: user-facing behavior → `docs/development/` guide + a table row/section in the relevant quick-reference; agent-facing tool surface → prompt guidance (`crates/codegen/vtcode-core/src/prompts/guidelines.rs`) + schema (`crates/common/vtcode-utility-tool-specs`); runtime contract → `vtcode-exec-events::ThreadEvent`. No feature is "done" until the docs it changes are updated and the AGENTS.md detailed-guides links still resolve.
 
+## Self-Debugging (VT Code fixing itself)
+
+- When a bug appears in VT Code's own behavior, **fix VT Code — do not work around it yourself.** Patch the VT Code source that caused the bug; never substitute a manual workaround, wrapper script, or config shim in place of a source fix.
+- Before proposing a fix, read the trajectory log at `.vtcode/logs/trajectory.jsonl` to see what actually happened (tool calls, errors, retries) rather than guessing from the symptom.
+
 ## Detailed Guides
 
 - Development overview and setup: [docs/development/README.md](docs/development/README.md), [docs/development/DEVELOPMENT_SETUP.md](docs/development/DEVELOPMENT_SETUP.md).
