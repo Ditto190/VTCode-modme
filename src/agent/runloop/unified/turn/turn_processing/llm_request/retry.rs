@@ -20,6 +20,7 @@ const STREAM_TIMEOUT_FALLBACK_PROVIDERS: &[&str] = &[
     "moonshot",
     "zai",
     "openrouter",
+    "merge-gateway",
 ];
 
 const RECENT_TOOL_RESPONSE_WINDOW: usize = 10;

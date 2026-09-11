@@ -292,6 +292,7 @@ fn supports_streaming_timeout_fallback_covers_supported_providers() {
     assert!(supports_streaming_timeout_fallback("ollama"));
     assert!(supports_streaming_timeout_fallback("minimax"));
     assert!(supports_streaming_timeout_fallback("HUGGINGFACE"));
+    assert!(supports_streaming_timeout_fallback("merge-gateway"));
     assert!(!supports_streaming_timeout_fallback("openai"));
 }
 
