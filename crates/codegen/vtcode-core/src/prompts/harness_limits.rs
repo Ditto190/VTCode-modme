@@ -22,6 +22,11 @@ pub fn upsert_harness_limits_section(
     } else {
         max_tool_calls_per_turn.to_string()
     };
+    let max_tool_wall_clock_label = if max_tool_wall_clock_secs == 0 {
+        "unlimited".to_string()
+    } else {
+        format!("{max_tool_wall_clock_secs} seconds")
+    };
 
     while let Some((section_start, section_end)) =
         find_prompt_section_bounds(prompt, "[Harness Limits]", SectionBoundaryMode::BracketOnly)
@@ -36,7 +41,7 @@ pub fn upsert_harness_limits_section(
     let section = format!(
         "[Harness Limits]\n\
          - max_tool_calls_per_turn: {max_tool_calls_label}\n\
-         - max_tool_wall_clock_secs: {max_tool_wall_clock_secs}\n\
+         - max_tool_wall_clock_secs: {max_tool_wall_clock_label} (per turn; run long builds with exec_command, then wait through write_stdin next_wait_args)\n\
          - max_tool_retries: {max_tool_retries}\n\
          - max_readonly_tool_calls: {MAX_TOTAL_READONLY_CALLS} (global budget across all read-only tools; produce output before exhausting)\n\
          - max_same_file_path_reads: {MAX_SAME_FILE_PATH_READS} (per file path per turn; read a file once in full rather than paginating)"
@@ -121,9 +126,19 @@ mod tests {
         upsert_harness_limits_section(&mut prompt, 0, 600, 2);
 
         assert!(prompt.contains("- max_tool_calls_per_turn: unlimited"));
-        assert!(prompt.contains("- max_tool_wall_clock_secs: 600"));
+        assert!(prompt.contains("- max_tool_wall_clock_secs: 600 seconds"));
         assert!(prompt.contains("- max_tool_retries: 2"));
         assert!(prompt.contains("- max_readonly_tool_calls: 30"));
         assert!(prompt.contains("- max_same_file_path_reads: 6"));
+    }
+
+    #[test]
+    fn upsert_harness_limits_renders_unlimited_wall_clock() {
+        let mut prompt = "Base prompt".to_string();
+
+        upsert_harness_limits_section(&mut prompt, 4, 0, 2);
+
+        assert!(prompt.contains("- max_tool_wall_clock_secs: unlimited"));
+        assert!(prompt.contains("write_stdin next_wait_args"));
     }
 }

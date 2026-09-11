@@ -305,6 +305,17 @@ pub(super) fn flush_budget_synthesis_directives(ctx: &mut TurnProcessingContext<
         && let Some(exhaustion) = ctx.harness_state.wall_clock_budget_exhaustion()
     {
         ctx.push_system_message(exhaustion.synthesis_directive_message());
+        emit_budget_exhausted_metric(
+            ctx.traj,
+            BudgetExhaustedMetrics {
+                budget: budget_kind::WALL_CLOCK,
+                used: usize::try_from(exhaustion.max_secs).unwrap_or(usize::MAX),
+                max: usize::try_from(exhaustion.max_secs).unwrap_or(usize::MAX),
+                step_count: None,
+                planning_active: ctx.is_planning_active(),
+                tool_calls: ctx.harness_state.tool_calls,
+            },
+        );
         // Arm the tool-free recovery pass so the next request strips tool
         // definitions at the API level (`tools: None` + `ToolChoice::none`).
         // The directive alone is advisory: models kept emitting tool calls

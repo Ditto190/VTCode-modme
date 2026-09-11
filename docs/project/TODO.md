@@ -227,7 +227,3 @@ check TODO/tasks rendering, it should not use trailing and leading "|" anymore. 
 check image as current status and improve: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-11 at 15.51.03.png'
 
 ---
-
-check turn budget is exhausted for long run
-
-/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/logs/trajectory-20260911T084321Z.jsonl

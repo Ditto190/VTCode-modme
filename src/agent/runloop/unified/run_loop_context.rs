@@ -183,6 +183,8 @@ pub(crate) mod budget_kind {
     pub(crate) const TOOL_LOOP: &str = "tool_loop";
     /// Session-wide tool-call count (safety gateway + auto-grant headroom).
     pub(crate) const SESSION_CALLS: &str = "session_calls";
+    /// Per-turn aggregate tool wall-clock time (`max_tool_wall_clock_secs`).
+    pub(crate) const WALL_CLOCK: &str = "wall_clock_secs";
 }
 
 /// Snapshot of a failed-closed turn budget for trajectory telemetry.
