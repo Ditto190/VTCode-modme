@@ -1652,6 +1652,57 @@ async fn preview_exhaustion_gate_directs_planning_toward_synthesis() {
 }
 
 #[tokio::test]
+async fn preview_exhaustion_guidance_names_open_channels_without_inviting_retry() {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::ValidationResult;
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
+
+    // Planning: synthesis directive plus the channels that stay open.
+    let mut planning_backing = TestContextBacking::new(8).await;
+    planning_backing.tool_registry.enable_planning();
+    let mut planning_ctx = planning_backing.turn_processing_context();
+    exhaust_preview_budget_for_test(&mut planning_ctx);
+    let blocked = enforce_preview_exhaustion_inspection_gate(
+        &mut planning_ctx,
+        "call-plan-read",
+        tool_names::READ_FILE,
+        &json!({"path": "src/main.rs"}),
+        true,
+    );
+    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    let planning_text = planning_ctx
+        .working_history
+        .iter()
+        .map(|message| message.content.as_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(planning_text.contains("<proposed_plan>"));
+    assert!(planning_text.contains("spool paging"));
+    assert!(planning_text.contains("do not repeat exhausted inspections"));
+    assert!(!planning_text.contains("repeat the call"));
+
+    // Execution: spool-paging recovery without a plan directive (asymmetric).
+    let mut exec_backing = TestContextBacking::new(8).await;
+    let mut exec_ctx = exec_backing.turn_processing_context();
+    exhaust_preview_budget_for_test(&mut exec_ctx);
+    let blocked = enforce_preview_exhaustion_inspection_gate(
+        &mut exec_ctx,
+        "call-exec-read",
+        tool_names::READ_FILE,
+        &json!({"path": "src/main.rs"}),
+        true,
+    );
+    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    let exec_text = exec_ctx
+        .working_history
+        .iter()
+        .map(|message| message.content.as_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(exec_text.contains("page it in small ranges"));
+    assert!(!exec_text.contains("<proposed_plan>"));
+}
+
+#[tokio::test]
 async fn spool_guard_pass_banks_preview_credit_for_the_page() {
     use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::spool_guard::enforce_spool_chunk_read_guard;
 

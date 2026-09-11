@@ -394,7 +394,7 @@ pub(crate) async fn handle_turn_balancer(
     {
         repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         let recovery_reason = format!(
-            "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass. Trust preserved outcome metadata (tool, spool_path, byte_count, completion_state), do NOT re-read or repeat exhausted calls. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+            "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass. Trust preserved outcome metadata (tool, spool_path, byte_count, completion_state), do NOT re-read or repeat exhausted calls. Verification, task_tracker, session polling, spool paging, and plan-draft re-reads stay open until the synthesis pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
         );
         ctx.activate_recovery(recovery_reason.clone());
         ctx.renderer

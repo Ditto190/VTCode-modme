@@ -318,7 +318,8 @@ fn is_preview_gated_inspection(canonical_tool_name: &str, effective_args: &Value
 fn build_preview_exhaustion_error_content(planning_active: bool) -> String {
     let guidance = if planning_active {
         "Tool preview budget is exhausted this turn; further inspection returns hidden stubs. \
-         Synthesize the `<proposed_plan>` now from the evidence already gathered."
+         Synthesize the `<proposed_plan>` now from the evidence already gathered. \
+         Verification, task_tracker, session polling, spool paging in small ranges, and plan-draft re-reads stay open; do not repeat exhausted inspections."
     } else {
         "Tool preview budget is exhausted this turn; further inspection returns hidden stubs. \
          Work from the evidence already visible: summarize status, edit, verify, or report. \
