@@ -211,3 +211,7 @@ example: "
 @@ -100 +100 @@"
 
 current status need improvement: '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.48.06.png'
+
+---
+
+implement enter to steer the agent loop when press "enter". current behavior is only append to queue. find a way or new shortcut to steer the new message after next toolcall.
