@@ -72,6 +72,21 @@ fn mask_tool_actions_for_mode(tool: &ToolDefinition, planning_active: bool) -> T
     let Some(allowed) = tool_intent::planning_allowed_actions(name) else {
         return tool.clone();
     };
+    // Borrow-first pre-check (own-borrow-over-clone): only clone for mutation
+    // when the schema already carries a maskable `properties.action.enum`
+    // array. Most tools have no maskable enum, so the common no-op path avoids
+    // the mutable traversal setup while keeping the owned return type stable.
+    let needs_mask = tool
+        .function
+        .as_ref()
+        .and_then(|func| func.parameters.get("properties"))
+        .and_then(|props| props.get("action"))
+        .and_then(Value::as_object)
+        .and_then(|action| action.get("enum"))
+        .is_some_and(Value::is_array);
+    if !needs_mask {
+        return tool.clone();
+    }
 
     let mut masked = tool.clone();
     if let Some(func) = masked.function.as_mut()
@@ -471,6 +486,31 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         // No action property to mask — just verify the tool is still present.
         assert_eq!(filtered[0].function_name(), tools::CODE_SEARCH);
+    }
+
+    #[test]
+    fn filter_tool_definitions_preserves_action_schema_without_enum() {
+        let tools = Arc::new(vec![ToolDefinition::function(
+            tools::UNIFIED_FILE.to_string(),
+            "Unified file operation".to_string(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string" }
+                }
+            }),
+        )]);
+
+        let filtered = filter_tool_definitions_for_mode(Some(tools), true, false).expect("filtered tools");
+        let action = filtered[0]
+            .function
+            .as_ref()
+            .and_then(|function| function.parameters.get("properties"))
+            .and_then(|properties| properties.get("action"))
+            .expect("action schema should remain");
+
+        assert_eq!(action.get("type"), Some(&Value::String("string".to_string())));
+        assert!(action.get("enum").is_none());
     }
 
     #[test]

@@ -152,7 +152,37 @@ pub(super) fn compact_error_message(message: &str, max_chars: usize) -> String {
     if message.chars().count() <= max_chars {
         return message.to_string();
     }
-    let mut preview = message.chars().take(max_chars).collect::<String>();
+    // Bounded identifier-aware truncation: a naive char-prefix cut can split
+    // a field name mid-token (`reasoning_cont...`), hiding whether the
+    // provider rejected `reasoning_content`, `reasoning_continuation`, or
+    // another field. When the cut lands inside an identifier token, extend to
+    // the token end (bounded) so the distinguishing name survives while the
+    // trajectory record stays within its bounded preview budget. Full bodies remain in
+    // `tracing::warn!` at the call sites.
+    const MAX_IDENTIFIER_EXTENSION_CHARS: usize = 32;
+    let mut chars = message.chars();
+    let mut preview: String = chars.by_ref().take(max_chars).collect();
+    // Peek the remainder without materializing it: error bodies can be
+    // kilobytes of JSON/HTML, and trajectory records must stay bounded.
+    let mut remainder = chars.peekable();
+    let cut_inside_identifier = preview
+        .chars()
+        .next_back()
+        .is_some_and(|last| last.is_alphanumeric() || last == '_')
+        && remainder
+            .peek()
+            .is_some_and(|next| next.is_alphanumeric() || *next == '_' || *next == '-');
+    if cut_inside_identifier {
+        for _ in 0..MAX_IDENTIFIER_EXTENSION_CHARS {
+            match remainder.peek() {
+                Some(ch) if ch.is_alphanumeric() || *ch == '_' || *ch == '-' => {
+                    preview.push(*ch);
+                    remainder.next();
+                }
+                _ => break,
+            }
+        }
+    }
     preview.push_str("... [truncated]");
     preview
 }
@@ -187,4 +217,44 @@ pub(super) fn next_post_tool_retry_action(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_error_message_preserves_short_input() {
+        assert_eq!(compact_error_message("boom", 180), "boom");
+        assert_eq!(compact_error_message("", 0), "");
+    }
+
+    #[test]
+    fn compact_error_message_extends_split_identifier() {
+        // Cut lands inside `reasoning_content`: the distinguishing suffix
+        // must survive within a bounded extension.
+        let message = format!("{}reasoning_content and more detail here", "x".repeat(170));
+        let compacted = compact_error_message(&message, 180);
+        assert!(compacted.contains("reasoning_content"), "{compacted}");
+        assert!(compacted.ends_with("... [truncated]"));
+        assert!(compacted.chars().count() <= 180 + 32 + "... [truncated]".chars().count());
+    }
+
+    #[test]
+    fn compact_error_message_keeps_whitespace_cut_stable() {
+        // Asymmetric pair to the identifier case: a cut on whitespace must
+        // not grow, preserving the previous prefix behavior.
+        let message = format!("{} done and more detail here", "x".repeat(175));
+        let compacted = compact_error_message(&message, 180);
+        assert!(compacted.starts_with(&"x".repeat(175)));
+        assert!(compacted.ends_with("... [truncated]"));
+    }
+
+    #[test]
+    fn compact_error_message_bounds_long_identifier_tail() {
+        let message = format!("err {}{}", "y".repeat(179), "_tail_with_many_chars_beyond_cap_and_more");
+        let compacted = compact_error_message(&message, 180);
+        assert!(compacted.ends_with("... [truncated]"));
+        assert!(compacted.chars().count() <= 180 + 32 + "... [truncated]".chars().count());
+    }
 }

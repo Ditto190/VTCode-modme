@@ -15,6 +15,8 @@ struct StartupTraceState {
     started_at: Instant,
     first_render_seen: AtomicBool,
     first_render_hook: Mutex<Option<FirstRenderHook>>,
+    phases: Mutex<Vec<(String, f64)>>,
+    summary_emitted: AtomicBool,
 }
 
 static STATE: OnceLock<StartupTraceState> = OnceLock::new();
@@ -26,7 +28,29 @@ fn state() -> &'static StartupTraceState {
         started_at: Instant::now(),
         first_render_seen: AtomicBool::new(false),
         first_render_hook: Mutex::new(None),
+        phases: Mutex::new(Vec::new()),
+        summary_emitted: AtomicBool::new(false),
     })
+}
+
+fn push_phase_entry(name: &str, duration_ms: f64) {
+    let state = state();
+    if !state.enabled {
+        return;
+    }
+    let mut phases = state.phases.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Keep the machine-parseable summary unambiguous: `phases=<name=ms,...>`.
+    let sanitized: String = name
+        .chars()
+        .map(|ch| {
+            if ch == ',' || ch == '=' || ch.is_control() {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    phases.push((sanitized, duration_ms));
 }
 
 /// Initialize startup timing before tracing is configured.
@@ -46,7 +70,10 @@ pub fn record_phase(phase: &str, started_at: Option<Instant>) {
         return;
     };
     let elapsed_ms = started_at.elapsed().as_secs_f64() * 1_000.0;
-    eprintln!("VTCODE_STARTUP_TRACE phase={phase} duration_ms={elapsed_ms:.3}");
+    push_phase_entry(phase, elapsed_ms);
+    if state().enabled {
+        eprintln!("VTCODE_STARTUP_TRACE phase={phase} duration_ms={elapsed_ms:.3}");
+    }
 }
 
 /// Record a process-level startup milestone without requiring a phase timer.
@@ -56,6 +83,7 @@ pub fn record_milestone(name: &str) {
     let state = state();
     if state.enabled {
         let elapsed_ms = state.started_at.elapsed().as_secs_f64() * 1_000.0;
+        push_phase_entry(name, elapsed_ms);
         eprintln!("VTCODE_STARTUP_TRACE phase={name} elapsed_ms={elapsed_ms:.3}");
     }
 }
@@ -64,8 +92,33 @@ pub fn record_milestone(name: &str) {
 /// owns a timer. This keeps startup tracing usable across crate boundaries.
 pub fn record_duration(name: &str, duration: std::time::Duration) {
     if state().enabled {
-        eprintln!("VTCODE_STARTUP_TRACE phase={name} duration_ms={:.3}", duration.as_secs_f64() * 1_000.0);
+        let duration_ms = duration.as_secs_f64() * 1_000.0;
+        push_phase_entry(name, duration_ms);
+        eprintln!("VTCODE_STARTUP_TRACE phase={name} duration_ms={duration_ms:.3}");
     }
+}
+
+/// Emit one ordered, machine-parseable end-of-startup summary.
+///
+/// Format: `VTCODE_STARTUP_TRACE phase=summary total_ms=<n> phases=<name=ms,...>`.
+/// Silent unless `VTCODE_STARTUP_TRACE=1`. Emits at most once per process so
+/// both the one-shot boundary and the first-render path can call it safely.
+pub fn emit_summary() {
+    let state = state();
+    if !state.enabled {
+        return;
+    }
+    if state.summary_emitted.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let total_ms = state.started_at.elapsed().as_secs_f64() * 1_000.0;
+    let phases = state.phases.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let rendered = phases
+        .iter()
+        .map(|(name, duration_ms)| format!("{name}={duration_ms:.3}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    eprintln!("VTCODE_STARTUP_TRACE phase=summary total_ms={total_ms:.3} phases={rendered}");
 }
 
 /// Install work that should run after the first interactive frame is drawn.
@@ -109,7 +162,9 @@ pub fn record_first_render() {
 
     if state.enabled {
         let first_render_elapsed_ms = state.started_at.elapsed().as_secs_f64() * 1_000.0;
+        push_phase_entry("first_ui_render", first_render_elapsed_ms);
         eprintln!("VTCODE_STARTUP_TRACE phase=first_ui_render duration_ms={first_render_elapsed_ms:.3}");
+        emit_summary();
     }
 
     if HOOK_STATE.swap(0, Ordering::AcqRel) == 1 {

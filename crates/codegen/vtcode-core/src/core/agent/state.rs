@@ -1,5 +1,6 @@
 use crate::llm::provider::Message;
 use hashbrown::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 use vtcode_macros::StringNewtype;
 
@@ -314,19 +315,21 @@ pub fn request_history_needs_normalization(messages: &[Message]) -> bool {
     analyze_request_history(messages).needs_repair()
 }
 
-/// Rebuild a provider-facing message view with each assistant tool-call batch
-/// followed immediately by its matching results.
+/// Rebuild a shared provider-facing message view with each assistant
+/// tool-call batch followed immediately by its matching results.
 ///
 /// The rebuild is request-scoped and idempotent: orphaned, causally early, and
 /// duplicate results are omitted; missing calls receive a bounded cancellation
 /// result; and messages interleaved between a call batch and its results move
-/// after the complete batch. The input slice is never mutated.
-pub fn normalize_history_for_request(messages: &[Message]) -> Vec<Message> {
-    let analysis = analyze_request_history(messages);
+/// after the complete batch. A clean input is returned unchanged; repairs use
+/// copy-on-write and never mutate the source history.
+pub fn normalize_history_for_request_shared(messages: Arc<Vec<Message>>) -> Arc<Vec<Message>> {
+    let analysis = analyze_request_history(&messages);
     if !analysis.needs_repair() {
-        return messages.to_vec();
+        return messages;
     }
 
+    let messages = Arc::unwrap_or_clone(messages);
     let mut normalized = Vec::with_capacity(messages.len());
     for (message_index, message) in messages.iter().enumerate() {
         if analysis.invalid_result_indices.contains(&message_index)
@@ -353,7 +356,15 @@ pub fn normalize_history_for_request(messages: &[Message]) -> Vec<Message> {
         }
     }
 
-    normalized
+    Arc::new(normalized)
+}
+
+/// Compatibility wrapper for callers that own a slice rather than shared
+/// request history. The shared implementation keeps the production Arc path
+/// allocation-free for clean histories; this wrapper retains the historical
+/// owned return type for small slice-based callers and tests.
+pub fn normalize_history_for_request(messages: &[Message]) -> Vec<Message> {
+    Arc::unwrap_or_clone(normalize_history_for_request_shared(Arc::new(messages.to_vec())))
 }
 
 /// Find a split point that keeps tool-call outputs paired with their calls.
@@ -627,6 +638,15 @@ mod tests {
                 .iter()
                 .any(|msg| msg.tool_call_id.as_ref().is_some_and(|id| id == "orphan"))
         );
+    }
+
+    #[test]
+    fn request_normalization_shared_reuses_clean_history_arc() {
+        let messages = Arc::new(vec![Message::user("clean history".to_string())]);
+
+        let normalized = normalize_history_for_request_shared(Arc::clone(&messages));
+
+        assert!(Arc::ptr_eq(&messages, &normalized));
     }
 
     #[test]

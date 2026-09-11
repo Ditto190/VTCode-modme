@@ -319,11 +319,11 @@ fn build_preview_exhaustion_error_content(planning_active: bool) -> String {
     let guidance = if planning_active {
         "Tool preview budget is exhausted this turn; further inspection returns hidden stubs. \
          Synthesize the `<proposed_plan>` now from the evidence already gathered. \
-         Verification, task_tracker, session polling, spool paging in small ranges, and plan-draft re-reads stay open; do not repeat exhausted inspections."
+         Verification, task_tracker, session polling, spool paging in small ranges using a spool_path already in this conversation, and plan-draft re-reads stay open; do not repeat exhausted inspections."
     } else {
         "Tool preview budget is exhausted this turn; further inspection returns hidden stubs. \
          Work from the evidence already visible: summarize status, edit, verify, or report. \
-         To read a spooled output, page it in small ranges."
+         To read a spooled output, page it in small ranges using a spool_path already in this conversation."
     };
     super::super::super::execution_result::build_error_content(
         guidance.to_string(),

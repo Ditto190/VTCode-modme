@@ -23,6 +23,7 @@ use crate::core::agent::harness_kernel::{
 use crate::core::agent::hash_utils::stable_system_prefix_hash;
 use crate::core::agent::runtime::{AgentRuntime, RuntimeControl};
 use crate::core::agent::session::AgentSessionState;
+use crate::core::agent::state::normalize_history_for_request_shared;
 use crate::core::agent::task::{ContextItem, Task, TaskOutcome, TaskResults};
 use crate::exec::events::HarnessEventKind;
 use crate::llm::provider::{Message, ToolCall, ToolChoice, ToolDefinition, supports_responses_chaining};
@@ -767,15 +768,16 @@ impl AgentRunner {
                     top_p_override = top_p_override.filter(|value| *value >= 0.95);
                 }
 
+                let normalized_messages = normalize_history_for_request_shared(Arc::clone(&runtime.state.messages));
                 let (request_messages, previous_response_id) = prepare_responses_request_messages(
                     &mut runtime.state.previous_response_chains,
                     &provider_name,
                     self.provider_client.supports_responses_compaction(&turn_model),
                     &turn_model,
-                    &runtime.state.messages,
+                    &normalized_messages,
                 );
                 let request_messages = match request_messages {
-                    std::borrow::Cow::Borrowed(_) => Arc::clone(&runtime.state.messages),
+                    std::borrow::Cow::Borrowed(_) => Arc::clone(&normalized_messages),
                     std::borrow::Cow::Owned(messages) => Arc::new(messages),
                 };
                 let request = build_harness_request_plan(HarnessRequestPlanInput {

@@ -933,6 +933,18 @@ impl ConfigManager {
         self.layer_stack.effective_config()
     }
 
+    /// Return whether any enabled layer explicitly sets a top-level key.
+    ///
+    /// Borrow-only scan that avoids a full TOML merge for single-key presence
+    /// checks on the startup hot path (e.g. `default_primary_agent`).
+    pub fn has_explicit_top_level_key(&self, key: &str) -> bool {
+        self.layer_stack
+            .layers()
+            .iter()
+            .filter(|layer| layer.is_enabled())
+            .any(|layer| layer.config.as_table().is_some_and(|table| table.contains_key(key)))
+    }
+
     /// Get session duration from agent config
     pub fn session_duration(&self) -> std::time::Duration {
         std::time::Duration::from_secs(60 * 60) // Default 1 hour
@@ -1565,6 +1577,39 @@ mod sparse_config_tests {
         let value = ConfigManager::sparse_config_value(&config).expect("sparse config");
 
         assert_eq!(value.get("default_primary_agent").and_then(toml::Value::as_str), Some("auto"));
+    }
+
+    #[test]
+    fn has_explicit_top_level_key_matches_effective_config() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let workspace = temp_dir.path().join("workspace");
+        fs::create_dir_all(workspace.join(".vtcode")).expect("workspace dot dir");
+
+        let manager = crate::loader::ConfigBuilder::new()
+            .workspace(workspace.clone())
+            .build()
+            .expect("manager");
+        assert!(!manager.has_explicit_top_level_key("default_primary_agent"));
+        assert!(
+            manager
+                .effective_config()
+                .as_table()
+                .is_none_or(|table| !table.contains_key("default_primary_agent"))
+        );
+
+        let overridden = crate::loader::ConfigBuilder::new()
+            .workspace(workspace)
+            .cli_override("default_primary_agent".to_owned(), toml::Value::String("duck".to_owned()))
+            .build()
+            .expect("overridden manager");
+        assert!(overridden.has_explicit_top_level_key("default_primary_agent"));
+        assert!(
+            overridden
+                .effective_config()
+                .as_table()
+                .is_some_and(|table| table.contains_key("default_primary_agent"))
+        );
+        assert!(!overridden.has_explicit_top_level_key("definitely_missing_key"));
     }
 
     #[test]

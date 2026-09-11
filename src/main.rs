@@ -289,9 +289,11 @@ fn bootstrap_main() -> Result<BootstrapOutcome> {
     vtcode_commons::startup_trace::record_milestone("dispatch_ready");
     vtcode_commons::startup_trace::record_phase("bootstrap", bootstrap_phase);
     // For one-shot commands this is the last startup boundary before dispatch;
-    // interactive sessions publish the more useful first_ui_render milestone.
+    // interactive sessions publish the more useful first_ui_render milestone
+    // (which emits the summary itself via `record_first_render`).
     if !startup_policy.runs_interactive_session() {
         vtcode_commons::startup_trace::record_milestone("short_lived_command_ready");
+        vtcode_commons::startup_trace::emit_summary();
     }
     tracing::debug!(
         target = "vtcode.startup",

@@ -388,9 +388,7 @@ async fn load_exec_vt_config(
     let manager = crate::main_helpers::load_workspace_config(workspace)?;
     Ok(ExecVtConfig {
         config: manager.config().clone(),
-        primary_agent_explicitly_configured: crate::startup::has_explicit_default_primary_agent(
-            &manager.effective_config(),
-        ),
+        primary_agent_explicitly_configured: manager.has_explicit_top_level_key("default_primary_agent"),
     })
 }
 

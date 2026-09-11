@@ -102,7 +102,10 @@ pub(super) async fn load_startup_config(args: &Cli) -> Result<LoadedStartupConfi
         );
     }
     vtcode_commons::startup_trace::record_duration("config_loading", config_duration);
-    let primary_agent_explicitly_configured = has_explicit_default_primary_agent(&manager.effective_config());
+    // Borrow-only presence scan: avoids a second full TOML merge
+    // (`effective_config()`) on every launch; `manager.config()` below is the
+    // single owned clone for this startup.
+    let primary_agent_explicitly_configured = manager.has_explicit_top_level_key("default_primary_agent");
     let mut config = manager.config().clone();
 
     let (full_auto_requested, automation_prompt) = match args.full_auto.clone() {
@@ -125,14 +128,6 @@ pub(super) async fn load_startup_config(args: &Cli) -> Result<LoadedStartupConfi
         automation_prompt,
         primary_agent_explicitly_configured,
     })
-}
-
-pub(crate) fn has_explicit_default_primary_agent(config: &toml::Value) -> bool {
-    has_top_level_config_key(config, "default_primary_agent")
-}
-
-fn has_top_level_config_key(config: &toml::Value, key: &str) -> bool {
-    config.as_table().is_some_and(|table| table.contains_key(key))
 }
 
 #[cfg(test)]
@@ -226,19 +221,5 @@ enable_tracing = true
             vtcode_commons::canonicalize(&config_path).ok(),
             "startup must capture the resolved env path as the session override"
         );
-    }
-
-    #[test]
-    fn detects_explicit_default_primary_agent_key() {
-        let with_key = toml::Value::Table(r#"default_primary_agent = "duck""#.parse().expect("toml"));
-        let without_key = toml::Value::Table(
-            r#"[agent]
-provider = "openai""#
-                .parse()
-                .expect("toml"),
-        );
-
-        assert!(has_explicit_default_primary_agent(&with_key));
-        assert!(!has_explicit_default_primary_agent(&without_key));
     }
 }
