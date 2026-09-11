@@ -17,6 +17,8 @@ use unicode_width::UnicodeWidthStr;
 use super::layout::{ModalBodyContext, ModalRenderStyles, ModalSection};
 use super::state::{ModalListState, ModalSearchState, WizardModalState, WizardStepState};
 use crate::tui::core_tui::session::transcript_links::{TranscriptFileLinkTarget, decorate_detected_link_lines};
+use crate::tui::core_tui::style::ratatui_style_from_inline;
+use crate::tui::ui::shell_syntax::{ShellLineStyles, shell_syntax_segments};
 use crate::tui::ui::tui::session::wrapping;
 use ratatui::style::Color as RatatuiColor;
 use std::mem;
@@ -591,7 +593,7 @@ pub(crate) fn render_modal_body(
             ModalSection::List => constraints.push(Constraint::Min(1)),
         }
     }
-    let show_list_divider = context.list.is_some() && context.search.is_some();
+    let show_list_divider = context.list.is_some();
     if show_list_divider {
         // The divider is spliced directly before the List chunk, so List must
         // be the final section for the `chunk_idx` bookkeeping below to hold.
@@ -747,11 +749,35 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
     let content_width = area.width.saturating_sub(2) as usize;
     let bullet_prefix = format!("{} ", ui::MODAL_INSTRUCTIONS_BULLET);
     let bullet_indent = " ".repeat(UnicodeWidthStr::width(bullet_prefix.as_str()));
+    let shell_styles = ShellLineStyles::new();
 
     for line in instructions {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             items.push(vec![Line::default()]);
+            continue;
+        }
+
+        if let Some(header) = trimmed.strip_prefix("## ") {
+            first_content_rendered = true;
+            items.push(vec![Line::from(Span::styled(
+                header.to_uppercase(),
+                styles.header.add_modifier(Modifier::BOLD),
+            ))]);
+            continue;
+        }
+
+        if let Some(code) = trimmed.strip_prefix('`').and_then(|value| value.strip_suffix('`')) {
+            let command = code.trim();
+            first_content_rendered = true;
+            let mut spans = vec![Span::styled(
+                ui::MODAL_INSTRUCTIONS_BULLET.to_string(),
+                styles.instruction_bullet,
+            )];
+            for segment in shell_syntax_segments(command, &shell_styles, true) {
+                spans.push(Span::styled(segment.text, ratatui_style_from_inline(&segment.style, None)));
+            }
+            items.push(vec![Line::from(spans)]);
             continue;
         }
 
@@ -1119,6 +1145,28 @@ mod tests {
             instruction_body: Style::default(),
             hint: Style::default(),
         }
+    }
+
+    #[test]
+    fn modal_instruction_lines_marks_sections_and_highlights_commands() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 6),
+            &[
+                "Tool: shell — Run command".to_string(),
+                "## Command".to_string(),
+                "`cargo nextest run`".to_string(),
+                "## Context".to_string(),
+                "Reason: build check".to_string(),
+            ],
+            &styles,
+        );
+
+        let rendered = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(rendered.contains("COMMAND"));
+        assert!(rendered.contains("CONTEXT"));
+        assert!(rendered.contains("cargo nextest run"));
+        assert!(lines.iter().any(|line| line.spans.len() > 1));
     }
 
     fn render_modal_lines(search: ModalSearchState) -> Vec<String> {

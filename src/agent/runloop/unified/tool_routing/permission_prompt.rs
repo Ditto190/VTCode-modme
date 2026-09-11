@@ -297,6 +297,7 @@ pub(super) fn shell_allows_persistent_decisions(tool_name: &str, tool_args: Opti
     extract_shell_command_text(tool_name, tool_args).is_none()
 }
 
+#[cfg(test)]
 fn truncate_arg_preview(value: &str) -> String {
     const MAX_CHARS: usize = 60;
     const TRUNCATED_CHARS: usize = 57;
@@ -306,6 +307,19 @@ fn truncate_arg_preview(value: &str) -> String {
         truncated
     } else {
         value.to_string()
+    }
+}
+
+fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Option<Vec<String>> {
+    let command = extract_shell_command_text(tool_name, tool_args)?;
+    let command = command.trim();
+    (!command.is_empty()).then(|| command.lines().map(str::to_string).collect())
+}
+
+fn push_context_line(description_lines: &mut Vec<String>, label: &str, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() {
+        description_lines.push(format!("{label}: {value}"));
     }
 }
 
@@ -522,46 +536,37 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     let approval_learning_label = learning_target.display_label.as_str();
 
     let prompt_kind = tool_permission_prompt_kind(tool_name);
-    let mut description_lines = vec![format!("Tool: {}", tool_name), format!("Action: {}", display_name)];
+    let mut description_lines = vec![format!("Tool: {tool_name} — {display_name}")];
 
     if let Some(source_label) = source_thread_label {
-        description_lines.push(format!("Source: {source_label}"));
+        description_lines[0].push_str(&format!(" • Source: {source_label}"));
     }
 
-    if let Some(args) = tool_args
-        && let Some(obj) = args.as_object()
-    {
-        if let Some(diff_lines) = tool_args_diff_preview(tool_name, tool_args) {
-            description_lines.push(String::new());
-            description_lines.extend(diff_lines);
-        } else {
-            for (key, value) in obj.iter().take(3) {
-                if let Some(str_val) = value.as_str() {
-                    description_lines.push(format!("  {}: {}", key, truncate_arg_preview(str_val)));
-                } else if let Some(bool_val) = value.as_bool() {
-                    description_lines.push(format!("  {key}: {bool_val}"));
-                } else if let Some(num_val) = value.as_number() {
-                    description_lines.push(format!("  {key}: {num_val}"));
-                }
-            }
-            if obj.len() > 3 {
-                description_lines.push(format!("  ... and {} more arguments", obj.len() - 3));
-            }
-        }
+    if let Some(command_lines) = shell_command_preview_lines(tool_name, tool_args) {
+        description_lines.push("## Command".to_string());
+        description_lines.extend(command_lines.into_iter().map(|line| format!("`{line}`")));
+    } else if let Some(diff_lines) = tool_args_diff_preview(tool_name, tool_args) {
+        description_lines.push("## Preview".to_string());
+        description_lines.extend(diff_lines);
+    }
+
+    let has_context = approval_reason.is_some()
+        || justification.is_some()
+        || extract_shell_approval_justification(tool_name, tool_args).is_some();
+    if has_context {
+        description_lines.push("## Context".to_string());
     }
 
     if let Some(reason) = approval_reason {
-        description_lines.push(String::new());
-        description_lines.push(format!("Reason: {reason}"));
+        push_context_line(&mut description_lines, "Reason", reason);
     }
 
     if let Some(shell_justification) = extract_shell_approval_justification(tool_name, tool_args) {
-        description_lines.push(format!("Justification: {shell_justification}"));
+        push_context_line(&mut description_lines, "Justification", &shell_justification);
     }
 
     if let Some(just) = justification {
-        let just_lines = just.format_for_dialog();
-        description_lines.extend(just_lines);
+        description_lines.extend(just.format_for_dialog());
     }
 
     if let Some(recorder) = approval_recorder
@@ -569,11 +574,9 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
             .get_auto_approval_suggestion(approval_learning_key, approval_learning_label)
             .await
     {
-        description_lines.push(String::new());
         description_lines.push(format!("Suggestion: {suggestion}"));
     }
 
-    description_lines.push(String::new());
     description_lines.push(choose_handling_line("this tool execution"));
     let mut navigation_hint = if prompt_kind == ToolPermissionPromptKind::Mcp {
         APPROVAL_NAVIGATE_CANCEL.to_string()
@@ -673,18 +676,17 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
     use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
 
     let mut description_lines = vec![
-        format!("Tool: {}", tool_name),
-        String::new(),
-        format!("This tool is currently DENIED by tool policy configuration."),
+        format!("Tool: {tool_name}"),
+        "## Policy".to_string(),
+        "This tool is currently denied by tool policy configuration.".to_string(),
     ];
 
     if let Some(diag) = &diagnostic {
         if let Some(impact) = diag["impact"].as_str() {
-            description_lines.push(format!("Impact: {impact}"));
+            push_context_line(&mut description_lines, "Impact", impact);
         }
         if let Some(fix_action) = diag["fix"]["action"].as_str() {
-            description_lines.push(String::new());
-            description_lines.push(format!("Fix: {fix_action}"));
+            push_context_line(&mut description_lines, "Fix", fix_action);
         }
         if let Some(files) = diag["fix"]["files"].as_array() {
             for file in files {
@@ -695,7 +697,6 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
         }
     }
 
-    description_lines.push(String::new());
     description_lines.push(choose_handling_line("this tool"));
 
     let options = vec![
@@ -766,8 +767,8 @@ mod tests {
         extract_shell_approval_command_prefix_words, extract_shell_approval_justification,
         extract_shell_approval_scope_signature, extract_shell_command_text,
         extract_shell_persistent_approval_prefix_rule, render_shell_persistent_approval_prefix_entry,
-        shell_allows_persistent_decisions, shell_permission_cache_suffix, tool_permission_prompt_kind,
-        truncate_arg_preview,
+        shell_allows_persistent_decisions, shell_command_preview_lines, shell_permission_cache_suffix,
+        tool_permission_prompt_kind, truncate_arg_preview,
     };
     use crate::agent::runloop::unified::tool_routing::shell_approval::PersistentApprovalTarget;
 
@@ -816,6 +817,27 @@ mod tests {
         let truncated = truncate_arg_preview(&value);
         assert!(truncated.ends_with("..."));
         assert!(truncated.chars().count() <= 60);
+    }
+
+    #[test]
+    fn shell_command_preview_uses_highlightable_lines() {
+        let args = json!({
+            "action": "run",
+            "command": "cargo nextest run -p vtcode-ui"
+        });
+
+        let lines = shell_command_preview_lines(tools::UNIFIED_EXEC, Some(&args)).unwrap();
+        assert_eq!(lines, vec!["cargo nextest run -p vtcode-ui"]);
+    }
+
+    #[test]
+    fn shell_command_preview_ignores_non_run_actions() {
+        let args = json!({
+            "action": "poll",
+            "session_id": "run-123"
+        });
+
+        assert_eq!(shell_command_preview_lines(tools::UNIFIED_EXEC, Some(&args)), None);
     }
 
     #[test]
