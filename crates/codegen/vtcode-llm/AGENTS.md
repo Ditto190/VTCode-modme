@@ -10,7 +10,7 @@
 - `ModelResolver::resolve_with_mode` and `availability_with_mode` must receive the loaded config's credential storage mode; compatibility wrappers are only for callers without workspace config.
 - `ResolvedModel.api_key_env` carries provider-override credential identity through availability and picker selection; do not infer availability from provider alone.
 - `system_prompt.rs` provides stub getters with `OnceLock` setters; vtcode-core overrides at init.
-- Uses `compact_str::CompactString` (aliased `CompactStr` from `vtcode_core::types`) for small string fields.
+- The runloop's stream-timeout retry falls back to non-streaming keyed on `supports_non_streaming`; a provider that services non-streaming generation must override it explicitly (see `MergeGatewayProvider`) — relying on the trait default lets the fallback silently regress.
 
 ## Dependencies
 

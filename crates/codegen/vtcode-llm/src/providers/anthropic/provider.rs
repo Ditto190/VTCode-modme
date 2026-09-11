@@ -583,6 +583,11 @@ impl LLMProvider for AnthropicProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // Pinned so the stream-timeout fallback cannot silently regress.
+        true
+    }
+
     fn supports_reasoning(&self, model: &str) -> bool {
         // Codex-inspired robustness: Setting model_supports_reasoning to false
         // does NOT disable it for known reasoning models.
@@ -720,9 +725,17 @@ impl LLMClient for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::{AnthropicProvider, capabilities, code_execution_beta_name, headers};
-    use crate::provider::{ContentPart, LLMRequest, Message, MessageContent, ToolDefinition};
+    use crate::provider::{ContentPart, LLMProvider, LLMRequest, Message, MessageContent, ToolDefinition};
     use serde_json::json;
     use vtcode_config::constants::models;
+
+    #[test]
+    fn non_streaming_capability_is_pinned_for_stream_timeout_fallback() {
+        // Pinned true in the provider impl; MinimaxProvider's delegation and
+        // the runloop's stream-timeout fallback both depend on this value.
+        let provider = AnthropicProvider::new("test-key".to_string());
+        assert!(LLMProvider::supports_non_streaming(&provider, models::anthropic::CLAUDE_OPUS_5));
+    }
 
     #[test]
     fn resolve_minimax_base_url_defaults_to_anthropic_v1() {

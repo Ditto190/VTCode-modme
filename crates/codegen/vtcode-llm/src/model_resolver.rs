@@ -568,12 +568,12 @@ mod tests {
 
     #[test]
     fn resolver_uses_catalog_metadata_for_namespaced_evolink_models() {
-        let resolved = ModelResolver::resolve(None, "evolink/deepseek-v4-pro", &[], None).expect("model");
+        let resolved = ModelResolver::resolve(None, "evolink/MiniMax-M3", &[], None).expect("model");
 
         assert_eq!(resolved.provider, Provider::Evolink);
         assert!(resolved.known_model());
-        assert_eq!(resolved.context_window(), Some(163_840));
-        assert_eq!(resolved.supported_reasoning_efforts(), &["low", "medium", "high"]);
+        assert_eq!(resolved.context_window(), Some(1_000_000));
+        assert!(resolved.supported_reasoning_efforts().is_empty());
     }
 
     #[test]
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn resolver_separates_structured_reasoning_from_effort_support() {
         let resolved =
-            ModelResolver::resolve(Some("openrouter"), "meta/muse-spark-1.2", &[], None).expect("OpenRouter route");
+            ModelResolver::resolve(Some("openrouter"), "meta/muse-spark-1.3", &[], None).expect("OpenRouter route");
 
         assert!(resolved.reasoning_supported());
         assert!(!resolved.reasoning_effort_supported());
@@ -610,11 +610,11 @@ mod tests {
 
     #[test]
     fn resolver_keeps_official_meta_and_openrouter_meta_models_distinct() {
-        let official = ModelResolver::resolve(None, "muse-spark-1.2", &[], None).expect("official Meta model");
+        let official = ModelResolver::resolve(None, "muse-spark-1.3", &[], None).expect("official Meta model");
         assert_eq!(official.provider, Provider::Meta);
         assert!(official.known_model());
 
-        let marketplace = ModelResolver::resolve(None, "meta/muse-spark-1.2", &[], None).expect("OpenRouter model");
+        let marketplace = ModelResolver::resolve(None, "meta/muse-spark-1.3", &[], None).expect("OpenRouter model");
         assert_eq!(marketplace.provider, Provider::OpenRouter);
         assert!(marketplace.known_model());
     }

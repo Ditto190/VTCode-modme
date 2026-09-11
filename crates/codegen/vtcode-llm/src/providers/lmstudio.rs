@@ -224,6 +224,11 @@ impl LLMProvider for LmStudioProvider {
         self.inner.supports_streaming()
     }
 
+    fn supports_non_streaming(&self, model: &str) -> bool {
+        // Delegated (fail-safe): the stream-timeout fallback keys on this.
+        self.inner.supports_non_streaming(model)
+    }
+
     fn supports_reasoning(&self, model: &str) -> bool {
         self.inner.supports_reasoning(model)
     }

@@ -46,6 +46,11 @@ pub const TOOL_UNAVAILABLE_MODELS: &[&str] = &[];
 /// GPT-OSS models that use harmony tokenization
 pub const HARMONY_MODELS: &[&str] = &[GPT_OSS_20B, GPT_OSS_120B];
 
+/// Models that reject non-streaming requests on the OpenAI API. The provider
+/// advertises no non-streaming capability for them and coerces generation to
+/// an internally-streamed request (see `OpenAIProvider::requires_streaming_responses`).
+pub const STREAMING_REQUIRED_MODELS: &[&str] = &[GPT, GPT_5_6_SOL];
+
 // Convenience constants for commonly used models
 pub const GPT: &str = "gpt";
 pub const GPT_6_ASTRA: &str = "gpt-6-astra";

@@ -24,6 +24,11 @@ impl LLMProvider for OpenRouterProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // Pinned so the stream-timeout fallback cannot silently regress.
+        true
+    }
+
     fn supports_reasoning(&self, model: &str) -> bool {
         self.model_behavior
             .as_ref()

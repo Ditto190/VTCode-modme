@@ -893,6 +893,11 @@ impl LLMProvider for OllamaProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // Pinned so the stream-timeout fallback cannot silently regress.
+        true
+    }
+
     fn supports_tools(&self, _model: &str) -> bool {
         true
     }

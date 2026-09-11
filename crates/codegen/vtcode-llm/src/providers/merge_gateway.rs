@@ -1464,6 +1464,14 @@ impl LLMProvider for MergeGatewayProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // The native `/responses` surface services non-streaming generation on
+        // every route, and the harness's stream-timeout retry falls back to
+        // non-streaming only when this capability is advertised. Pin it here so
+        // the fallback cannot silently disappear with a trait-default change.
+        true
+    }
+
     fn supports_structured_output(&self, _model: &str) -> bool {
         false
     }
@@ -1553,6 +1561,20 @@ mod tests {
 
     fn sse_data(data: Value) -> String {
         format!("data: {}\n\n", serde_json::to_string(&data).expect("event payload"))
+    }
+
+    #[test]
+    fn non_streaming_capability_is_pinned_for_stream_timeout_fallback() {
+        // The harness's stream-timeout retry falls back to non-streaming only
+        // when this capability is advertised; losing it silently re-streams
+        // every retry into the first-token timeout watchdog.
+        let provider = test_provider("http://127.0.0.1:1");
+        for model in models::merge_gateway::SUPPORTED_MODELS {
+            assert!(
+                LLMProvider::supports_non_streaming(&provider, model),
+                "route {model} must advertise non-streaming fallback capability"
+            );
+        }
     }
 
     #[test]
@@ -1693,12 +1715,10 @@ mod tests {
 
     #[test]
     fn native_payload_omits_thinking_when_budget_exceeds_max_tokens() {
-        let provider = MergeGatewayProvider::with_model(
-            "test-key".to_string(),
-            models::merge_gateway::DEEPSEEK_V4_PRO_0813.to_string(),
-        );
+        let provider =
+            MergeGatewayProvider::with_model("test-key".to_string(), models::merge_gateway::DEEPSEEK_FLASH.to_string());
         let request = LLMRequest {
-            model: models::merge_gateway::DEEPSEEK_V4_PRO_0813.to_string(),
+            model: models::merge_gateway::DEEPSEEK_FLASH.to_string(),
             reasoning_effort: Some(vtcode_config::types::ReasoningEffortLevel::Medium),
             max_tokens: Some(1000),
             messages: vec![Message::user("hello".to_string())].into(),

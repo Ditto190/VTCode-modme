@@ -45,6 +45,11 @@ impl LLMProvider for GeminiProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // Pinned so the stream-timeout fallback cannot silently regress.
+        true
+    }
+
     fn supports_reasoning(&self, model: &str) -> bool {
         // Codex-inspired robustness: Setting model_supports_reasoning to false
         // does NOT disable it for known reasoning models.

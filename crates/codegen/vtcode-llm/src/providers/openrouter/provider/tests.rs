@@ -94,8 +94,9 @@ fn enforce_tool_capabilities_disables_tools_for_restricted_models() {
 
 #[test]
 fn enforce_tool_capabilities_keeps_tools_for_supported_models() {
-    let provider = OpenRouterProvider::with_model("test-key".to_string(), models::openrouter::OPENAI_GPT_5.to_string());
-    let request = request_with_tools(models::openrouter::OPENAI_GPT_5);
+    let provider =
+        OpenRouterProvider::with_model("test-key".to_string(), models::openrouter::OPENAI_GPT_OSS_120B.to_string());
+    let request = request_with_tools(models::openrouter::OPENAI_GPT_OSS_120B);
 
     match provider.enforce_tool_capabilities(&request) {
         Cow::Borrowed(borrowed) => {
@@ -108,11 +109,12 @@ fn enforce_tool_capabilities_keeps_tools_for_supported_models() {
 
 #[test]
 fn enforce_tool_capabilities_keeps_apply_patch_for_supported_models() {
-    let provider = OpenRouterProvider::with_model("test-key".to_string(), models::openrouter::OPENAI_GPT_5.to_string());
+    let provider =
+        OpenRouterProvider::with_model("test-key".to_string(), models::openrouter::OPENAI_GPT_OSS_120B.to_string());
     let request = LLMRequest {
         messages: vec![Message::user("hi".to_string())].into(),
         tools: Some(std::sync::Arc::new(vec![ToolDefinition::apply_patch("Apply VT Code patches".to_string())])),
-        model: models::openrouter::OPENAI_GPT_5.to_string(),
+        model: models::openrouter::OPENAI_GPT_OSS_120B.to_string(),
         tool_choice: Some(ToolChoice::Any),
         parallel_tool_calls: Some(true),
         ..Default::default()
@@ -130,19 +132,19 @@ fn enforce_tool_capabilities_keeps_apply_patch_for_supported_models() {
 
 #[test]
 fn effective_context_size_uses_catalog_capacity_for_known_routes() {
-    let provider = OpenRouterProvider::with_model("test-key".to_string(), "meta/muse-spark-1.2".to_string());
+    let provider = OpenRouterProvider::with_model("test-key".to_string(), "meta/muse-spark-1.3".to_string());
 
-    assert_eq!(provider.effective_context_size("meta/muse-spark-1.2"), 1_048_576);
+    assert_eq!(provider.effective_context_size("meta/muse-spark-1.3"), 1_048_576);
     assert_eq!(provider.effective_context_size("unlisted-route"), 128_000);
 }
 
 #[test]
 fn catalog_reasoning_capabilities_are_available_without_model_overrides() {
-    let provider = OpenRouterProvider::with_model("test-key".to_string(), "meta/muse-spark-1.2".to_string());
+    let provider = OpenRouterProvider::with_model("test-key".to_string(), "meta/muse-spark-1.3".to_string());
 
-    assert!(provider.supports_reasoning("meta/muse-spark-1.2"));
-    assert!(!provider.supports_reasoning_effort("meta/muse-spark-1.2"));
-    assert!(provider.supported_reasoning_efforts("meta/muse-spark-1.2").is_empty());
+    assert!(provider.supports_reasoning("meta/muse-spark-1.3"));
+    assert!(!provider.supports_reasoning_effort("meta/muse-spark-1.3"));
+    assert!(provider.supported_reasoning_efforts("meta/muse-spark-1.3").is_empty());
 }
 
 #[test]
@@ -294,7 +296,7 @@ async fn stream_normalized_emits_tool_call_start_and_delta_events() {
     let Some(server) = start_mock_server_or_skip().await else {
         return;
     };
-    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_OSS_120B);
 
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
@@ -314,7 +316,7 @@ data: [DONE]\n\n",
 
     let mut stream = provider
         .stream_normalized(LLMRequest {
-            model: models::openrouter::OPENAI_GPT_5.to_string(),
+            model: models::openrouter::OPENAI_GPT_OSS_120B.to_string(),
             messages: vec![Message::user("hello".to_string())].into(),
             ..Default::default()
         })
@@ -350,7 +352,7 @@ async fn stream_normalized_falls_back_to_raw_reasoning_when_continuation_field_i
     let Some(server) = start_mock_server_or_skip().await else {
         return;
     };
-    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_OSS_120B);
 
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
@@ -368,7 +370,7 @@ data: [DONE]\n\n",
 
     let mut stream = provider
         .stream_normalized(LLMRequest {
-            model: models::openrouter::OPENAI_GPT_5.to_string(),
+            model: models::openrouter::OPENAI_GPT_OSS_120B.to_string(),
             messages: vec![Message::user("hello".to_string())].into(),
             ..Default::default()
         })
@@ -394,7 +396,7 @@ async fn stream_normalized_fabricates_and_reuses_id_when_provider_omits_it() {
     let Some(server) = start_mock_server_or_skip().await else {
         return;
     };
-    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+    let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_OSS_120B);
 
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
@@ -413,7 +415,7 @@ data: [DONE]\n\n",
 
     let mut stream = provider
         .stream_normalized(LLMRequest {
-            model: models::openrouter::OPENAI_GPT_5.to_string(),
+            model: models::openrouter::OPENAI_GPT_OSS_120B.to_string(),
             messages: vec![Message::user("hello".to_string())].into(),
             ..Default::default()
         })
@@ -465,7 +467,7 @@ async fn stream_normalized_fabricates_distinct_ids_across_streams() {
         let Some(server) = start_mock_server_or_skip().await else {
             return;
         };
-        let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_5);
+        let provider = test_provider(&server.uri(), models::openrouter::OPENAI_GPT_OSS_120B);
 
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
@@ -483,7 +485,7 @@ data: [DONE]\n\n",
 
         let mut stream = provider
             .stream_normalized(LLMRequest {
-                model: models::openrouter::OPENAI_GPT_5.to_string(),
+                model: models::openrouter::OPENAI_GPT_OSS_120B.to_string(),
                 messages: vec![Message::user("hello".to_string())].into(),
                 ..Default::default()
             })

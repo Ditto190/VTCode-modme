@@ -217,6 +217,15 @@ mod tests {
         assert_eq!(mapping.effective, ReasoningEffortLevel::High);
     }
 
+    #[test]
+    fn macro_emits_non_streaming_capability_for_stream_timeout_fallback() {
+        // The `impl_openai_compat_provider!` emission is shared by every
+        // compat provider; losing it would silently disable the runloop's
+        // stream-timeout fallback to non-streaming for all of them.
+        let provider = DeepSeekProvider::new("test-key".to_string());
+        assert!(LLMProvider::supports_non_streaming(&provider, models::deepseek::DEEPSEEK_FLASH));
+    }
+
     fn base_request() -> LLMRequest {
         LLMRequest {
             messages: vec![Message::user("hello".to_string())].into(),

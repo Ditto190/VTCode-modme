@@ -3017,13 +3017,7 @@ fn openai_models_support_streaming() {
 
 #[test]
 fn native_stream_required_models_disable_non_streaming() {
-    for model in [
-        models::openai::GPT,
-        models::openai::GPT_5_6_SOL,
-        models::openai::GPT_5_6_SOL,
-        models::openai::GPT_5_6_SOL,
-        models::openai::GPT_5_6_SOL,
-    ] {
+    for model in models::openai::STREAMING_REQUIRED_MODELS {
         let provider = test_provider("http://test", model);
         assert!(!provider.supports_non_streaming(model), "Model {model} should require streaming");
     }

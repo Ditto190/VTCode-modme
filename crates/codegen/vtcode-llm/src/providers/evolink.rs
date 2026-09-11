@@ -275,6 +275,11 @@ impl LLMProvider for EvolinkProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // Pinned so the stream-timeout fallback cannot silently regress.
+        true
+    }
+
     fn supports_tools(&self, _model: &str) -> bool {
         true
     }
@@ -400,7 +405,7 @@ mod tests {
     fn payload_strips_prefix_and_maps_reasoning_effort() {
         let provider = EvolinkProvider::new("test-key".to_string());
         let mut request = LLMRequest {
-            model: "evolink/deepseek-v4-pro".to_string(),
+            model: "evolink/gpt-5.6".to_string(),
             messages: vec![Message::user("hello".to_string())].into(),
             reasoning_effort: Some(ReasoningEffortLevel::High),
             ..Default::default()
@@ -408,7 +413,7 @@ mod tests {
         provider.core.prepare(&mut request);
         let payload = provider.core.convert_request(&request).expect("payload should be valid");
 
-        assert_eq!(payload.get("model").and_then(|value| value.as_str()), Some(models::evolink::DEEPSEEK_V4_PRO));
+        assert_eq!(payload.get("model").and_then(|value| value.as_str()), Some(models::evolink::GPT_5_6));
         assert_eq!(payload.get("reasoning_effort").and_then(|value| value.as_str()), Some("high"));
         assert!(payload.get("temperature").is_none());
     }

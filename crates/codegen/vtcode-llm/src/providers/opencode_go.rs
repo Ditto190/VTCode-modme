@@ -138,6 +138,11 @@ impl LLMProvider for OpenCodeGoProvider {
         true
     }
 
+    fn supports_non_streaming(&self, _model: &str) -> bool {
+        // Pinned so the stream-timeout fallback cannot silently regress.
+        true
+    }
+
     fn supports_reasoning(&self, model: &str) -> bool {
         self.catalog_entry(model).map(|entry| entry.reasoning).unwrap_or(false)
     }

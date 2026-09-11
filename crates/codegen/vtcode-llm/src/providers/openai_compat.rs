@@ -500,6 +500,14 @@ macro_rules! impl_openai_compat_provider {
                 self.core.stream_prepared(request).await
             }
 
+            fn supports_non_streaming(&self, _model: &str) -> bool {
+                // `generate` services plain non-streaming Chat Completions.
+                // Pinned so the runloop's stream-timeout fallback to
+                // non-streaming cannot silently regress via a trait-default
+                // change; every compat provider inherits this emission.
+                true
+            }
+
             fn supported_models(&self) -> Vec<String> {
                 self.core.supported_models()
             }
