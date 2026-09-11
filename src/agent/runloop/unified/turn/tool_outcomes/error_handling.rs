@@ -169,6 +169,20 @@ fn structured_failure_guidance(
         return ("timeout", true, "Retry with smaller scope or a higher timeout.");
     }
 
+    // Mirror the unstructured `preview_exhaustion_gate` branch: budget-based,
+    // so a narrower retry returns another stub. Keep `error.is_recoverable`
+    // (the structured execution default) so control flow is unchanged; only
+    // the retry-inviting wording is replaced. Currently unreachable via the
+    // read-guard path (which uses `build_error_content`), kept for
+    // defense-in-depth if a structured error ever carries this kind.
+    if failure_kind == "preview_exhaustion_gate" {
+        return (
+            "execution_failure",
+            error.is_recoverable,
+            "STOP: further inspections return hidden stubs this turn. Do NOT retry or narrow the scope. Edit from visible evidence, run one verifier, page a spool in small ranges, or synthesize.",
+        );
+    }
+
     if matches!(error.category, ErrorCategory::InvalidParameters) || check_is_argument_error(&error.message) {
         return ("invalid_arguments", true, "Fix the tool arguments to match the schema.");
     }

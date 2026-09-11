@@ -193,6 +193,33 @@ fn build_structured_error_content_preserves_retry_and_partial_state_fields() {
 }
 
 #[test]
+fn build_structured_error_content_preview_exhaustion_gate_is_terminal_for_inspections() {
+    // Mirrors the unstructured-arm regression: a structured error carrying
+    // the preview-exhaustion kind must not invite narrower-scope retries,
+    // which can only return more stubs and feed the blocked-call fuse.
+    let mut error = ToolExecutionError::new(
+        tool_names::READ_FILE.to_string(),
+        ToolErrorType::ExecutionError,
+        "Tool preview budget is exhausted this turn.".to_string(),
+    );
+    error.is_recoverable = true;
+    // No caller suggestions: the arm's default must win (suggestions-first
+    // precedence is covered by
+    // `build_structured_error_content_preserves_retry_and_partial_state_fields`).
+    error.recovery_suggestions = Vec::new();
+
+    let payload = build_structured_error_content(&error, None, None, "preview_exhaustion_gate");
+
+    assert_eq!(payload.get("failure_kind").and_then(|value| value.as_str()), Some("preview_exhaustion_gate"));
+    let next_action = payload
+        .get("next_action")
+        .and_then(|value| value.as_str())
+        .expect("next_action");
+    assert!(next_action.contains("Do NOT retry or narrow the scope"), "unexpected next_action: {next_action}");
+    assert!(!next_action.contains("narrower scope"), "retry-inviting wording survived: {next_action}");
+}
+
+#[test]
 fn structured_retry_summary_ignores_initial_attempt() {
     let error = ToolExecutionError::new(
         tool_names::READ_FILE.to_string(),
