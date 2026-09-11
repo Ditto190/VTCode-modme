@@ -152,3 +152,13 @@ are separate — `/secret` manages API keys; `/login` manages OAuth.
 - Issues: https://github.com/vinhnx/vtcode/issues
 - [Full Installation Guide](./README.md)
 - [Technical Details](./NATIVE_INSTALLERS.md)
+
+## Conversation and file history
+
+| In-chat command | Action |
+| --- | --- |
+| `/rewind` | Pick a saved prompt and confirm restoring files and conversation together. |
+| `/redo` | Reverse the last rewind, including conversation. |
+| `/rewind-recover` | Recover both states after an interrupted rewind. |
+
+New prompts are checkpointed automatically. See [checkpoint details](../development/filesnap-checkpoints.md).

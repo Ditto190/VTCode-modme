@@ -605,6 +605,7 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "history" => handle_history_command(args, renderer),
         "new" => Ok(SlashCommandOutcome::NewSession),
         "rewind" => handle_rewind_command(args, renderer),
+        "redo" | "rewind-recover" => Ok(SlashCommandOutcome::Redo),
         "docs" => Ok(SlashCommandOutcome::OpenDocs),
         "feedback" => handle_feedback_command(args, renderer),
         "edit" => handle_edit_command(args),

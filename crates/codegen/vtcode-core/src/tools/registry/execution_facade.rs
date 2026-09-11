@@ -735,6 +735,12 @@ impl ToolRegistry {
         prevalidated: bool,
         exec_settlement_mode: ExecSettlementMode,
     ) -> Result<Value> {
+        crate::core::agent::snapshots::declare_prompt_edit(
+            self.harness_context_snapshot().session_id,
+            name.to_owned(),
+            args.clone(),
+        )
+        .await?;
         // PERFORMANCE OPTIMIZATION: Use memory pool for string allocations if enabled
         let _pool_guard = if self.optimization_config.memory_pool.enabled {
             Some(self.memory_pool.get_string())
