@@ -809,7 +809,7 @@ impl AnsiRenderer {
             RenderMarkdownOptions {
                 preserve_code_indentation,
                 disable_code_block_table_reparse: false,
-                table_max_width: terminal_table_content_width(indent),
+                table_max_width: terminal_table_content_width(""),
             },
         );
         if lines.is_empty() {
@@ -1167,6 +1167,7 @@ impl InlineSink {
 
         let mut prepared = Vec::with_capacity(rendered.len());
         let mut plain = Vec::with_capacity(rendered.len());
+        let available_width = table_max_width.map(|width| width.saturating_sub(UnicodeWidthStr::width(indent)));
 
         for line in rendered {
             // Pre-allocate segments and plain text with estimated capacity
@@ -1183,7 +1184,7 @@ impl InlineSink {
                 plain_line.push_str(indent);
             }
 
-            for segment in line.segments {
+            for segment in &line.segments {
                 if segment.text.is_empty() {
                     continue;
                 }
@@ -1210,11 +1211,30 @@ impl InlineSink {
                 }
                 inline_style.effects = converted.effects | fallback.effects;
                 plain_line.push_str(&segment.text);
-                segments.push(InlineSegment { text: segment.text, style: Arc::new(inline_style) });
+                segments.push(InlineSegment {
+                    text: segment.text.clone(),
+                    style: Arc::new(inline_style),
+                });
             }
 
             prepared.push(segments);
             plain.push(plain_line);
+            if let (Some(available_width), Some(background)) = (available_width, line.line_background) {
+                let padding_style = Style::new().bg_color(Some(background));
+                let rendered_width: usize = line
+                    .segments
+                    .iter()
+                    .map(|segment| UnicodeWidthStr::width(segment.text.as_str()))
+                    .sum();
+                let padding_width = available_width.saturating_sub(rendered_width);
+                if !line.segments.is_empty() {
+                    plain.push(String::new());
+                    prepared.push(vec![InlineSegment {
+                        text: " ".repeat(padding_width),
+                        style: Arc::new(convert_to_inline_style(padding_style)),
+                    }]);
+                }
+            }
         }
 
         if prepared.is_empty() {

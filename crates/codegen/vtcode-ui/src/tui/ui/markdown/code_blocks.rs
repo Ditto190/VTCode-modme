@@ -1,9 +1,12 @@
 use super::parsing::{flush_current_line, push_blank_line};
 use super::{CODE_LINE_NUMBER_MIN_WIDTH, MarkdownLine, MarkdownSegment, RenderMarkdownOptions};
 use crate::tui::config::loader::SyntaxHighlightingConfig;
+use crate::tui::core_tui::style::ratatui_style_from_ansi;
 use crate::tui::ui::syntax_highlight;
 use crate::tui::ui::theme::ThemeStyles;
-use crate::tui::utils::diff_styles::DiffColorPalette;
+use crate::tui::utils::diff_styles::{
+    DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content_ansi, style_sign_ansi,
+};
 use anstyle::{Effects, Style};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt::Write;
@@ -317,19 +320,20 @@ fn render_diff_code_block(
     prefix_segments: &[MarkdownSegment],
 ) -> Vec<MarkdownLine> {
     let mut lines = Vec::new();
-    let palette = DiffColorPalette::default();
     let context_style = code_block_style(theme_styles, base_style);
-    let header_style = palette.header_style();
-    let added_style = palette.added_style();
-    let removed_style = palette.removed_style();
-    let mut current_language_hint: Option<String> = None;
+    let style_context = current_diff_render_style_context();
+    let metadata_style = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack)));
+    let hunk_style = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+    let added_style = style_content_ansi(DiffLineType::Insert, style_context);
+    let removed_style = style_content_ansi(DiffLineType::Delete, style_context);
+    let added_marker_style = style_sign_ansi(DiffLineType::Insert, style_context);
+    let removed_marker_style = style_sign_ansi(DiffLineType::Delete, style_context);
+    let added_background = added_style.get_bg_color();
+    let removed_background = removed_style.get_bg_color();
 
     for line in normalize_diff_lines(code) {
         let trimmed = line.trim_end_matches('\n');
         let trimmed_start = trimmed.trim_start();
-        if let Some(path) = parse_diff_git_path(trimmed_start).or_else(|| parse_diff_marker_path(trimmed_start)) {
-            current_language_hint = language_hint_from_path(&path);
-        }
         if let Some((path, additions, deletions)) = parse_diff_summary_line(trimmed_start) {
             let leading_len = trimmed.len().saturating_sub(trimmed_start.len());
             let leading = &trimmed[..leading_len];
@@ -342,34 +346,38 @@ fn render_diff_code_block(
             line.push_segment(context_style, " ");
             line.push_segment(removed_style, &format!("-{deletions}"));
             line.push_segment(context_style, ")");
+            line.set_line_background(None);
             lines.push(line);
             continue;
         }
-        let style = if trimmed.is_empty() {
-            context_style
-        } else if is_diff_header_line(trimmed_start) {
-            header_style
-        } else if is_diff_addition_line(trimmed_start) {
-            added_style
-        } else if is_diff_deletion_line(trimmed_start) {
-            removed_style
-        } else {
-            context_style
-        };
 
         let mut line = prefixed_line(prefix_segments);
         if !trimmed.is_empty() {
-            if is_diff_header_line(trimmed_start) {
-                line.push_segment(style, trimmed);
+            if trimmed_start.starts_with("diff --git ") || trimmed_start.starts_with("index ") {
+                line.push_segment(metadata_style, trimmed);
+            } else if trimmed_start.starts_with("--- ") || trimmed_start.starts_with("*** Delete File:") {
+                line.push_segment(removed_style, trimmed);
+            } else if trimmed_start.starts_with("+++ ") || trimmed_start.starts_with("*** Add File:") {
+                line.push_segment(added_style, trimmed);
+            } else if is_diff_header_line(trimmed_start) {
+                line.push_segment(hunk_style, trimmed);
+            } else if is_diff_addition_line(trimmed_start) || trimmed_start.starts_with("*** Update File:") {
+                line.push_segment(added_marker_style, "+");
+                line.push_segment(added_style, &trimmed[1..]);
+            } else if is_diff_deletion_line(trimmed_start) {
+                line.push_segment(removed_marker_style, "-");
+                line.push_segment(removed_style, &trimmed[1..]);
             } else {
-                let marker_len = trimmed.chars().next().map(|ch| ch.len_utf8()).unwrap_or_default();
-                let (marker, content) = trimmed.split_at(marker_len);
-                line.push_segment(style, marker);
-                for segment in render_diff_content_segments(content, current_language_hint.as_deref(), style) {
-                    line.push_segment(segment.style, &segment.text);
-                }
+                line.push_segment(context_style, trimmed);
             }
         }
+        line.set_line_background(if is_diff_addition_line(trimmed_start) {
+            added_background
+        } else if is_diff_deletion_line(trimmed_start) {
+            removed_background
+        } else {
+            None
+        });
         lines.push(line);
     }
 

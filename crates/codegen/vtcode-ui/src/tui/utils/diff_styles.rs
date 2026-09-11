@@ -14,6 +14,8 @@ use crate::tui::ui::syntax_highlight::{DiffScopeBackgroundRgbs, diff_scope_backg
 use ratatui::style::{Color as RatatuiColor, Modifier, Style as RatatuiStyle};
 use vtcode_commons::color256_theme::rgb_to_ansi256_for_theme;
 
+use anstyle::{Color as AnstyleColor, Style as AnstyleStyle};
+
 // ── WCAG AA accessible colours ─────────────────────────────────────────────
 //
 // Verified to pass 4.5:1 minimum contrast ratio on their respective tinted
@@ -70,7 +72,7 @@ pub(crate) fn current_diff_render_style_context() -> DiffRenderStyleContext {
     diff_render_style_context_for(theme, level, scope_backgrounds_for_level(level))
 }
 
-fn diff_render_style_context_for(
+pub(crate) fn diff_render_style_context_for(
     theme: DiffTheme,
     level: DiffColorLevel,
     scope_backgrounds: DiffScopeBackgroundRgbs,
@@ -215,6 +217,54 @@ pub(crate) fn style_content(kind: DiffLineType, style_context: DiffRenderStyleCo
             .map(|c| RatatuiStyle::default().fg(c).bg(bg))
             .unwrap_or_else(|| RatatuiStyle::default().bg(bg)),
         (_, _, _, None) => fg.map(|c| RatatuiStyle::default().fg(c)).unwrap_or_default(),
+    }
+}
+
+/// Markdown rendering uses `anstyle`; return the plain diff style there.
+pub(crate) fn style_content_ansi(kind: DiffLineType, style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    let background = content_background(kind, style_context).map(ratatui_color_to_anstyle);
+    let foreground = indicator_fg(kind, style_context.theme).map(ratatui_color_to_anstyle);
+    match (kind, style_context.theme, style_context.level, background) {
+        (DiffLineType::Context, _, _, _) => AnstyleStyle::new(),
+        (_, DiffTheme::Light, _, background) => AnstyleStyle::new().fg_color(foreground).bg_color(background),
+        (_, _, DiffColorLevel::Ansi16, _) => AnstyleStyle::new().fg_color(foreground),
+        (_, _, _, background) => AnstyleStyle::new().fg_color(foreground).bg_color(background),
+    }
+}
+
+/// Markdown rendering uses `anstyle`; return the diff marker style there.
+pub(crate) fn style_sign_ansi(kind: DiffLineType, style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    let mut style = AnstyleStyle::new();
+    if let Some(foreground) = indicator_fg(kind, style_context.theme).map(ratatui_color_to_anstyle) {
+        style = style.fg_color(Some(foreground));
+    }
+    if indicator_dim(kind, style_context.theme) {
+        style = style.effects(anstyle::Effects::DIMMED);
+    }
+    style
+}
+
+fn ratatui_color_to_anstyle(color: RatatuiColor) -> AnstyleColor {
+    match color {
+        RatatuiColor::Reset => AnstyleColor::Ansi(anstyle::AnsiColor::Black),
+        RatatuiColor::Black => AnstyleColor::Ansi(anstyle::AnsiColor::Black),
+        RatatuiColor::Red => AnstyleColor::Ansi(anstyle::AnsiColor::Red),
+        RatatuiColor::Green => AnstyleColor::Ansi(anstyle::AnsiColor::Green),
+        RatatuiColor::Yellow => AnstyleColor::Ansi(anstyle::AnsiColor::Yellow),
+        RatatuiColor::Blue => AnstyleColor::Ansi(anstyle::AnsiColor::Blue),
+        RatatuiColor::Magenta => AnstyleColor::Ansi(anstyle::AnsiColor::Magenta),
+        RatatuiColor::Cyan => AnstyleColor::Ansi(anstyle::AnsiColor::Cyan),
+        RatatuiColor::Gray => AnstyleColor::Ansi(anstyle::AnsiColor::White),
+        RatatuiColor::DarkGray => AnstyleColor::Ansi(anstyle::AnsiColor::BrightBlack),
+        RatatuiColor::LightRed => AnstyleColor::Ansi(anstyle::AnsiColor::BrightRed),
+        RatatuiColor::LightGreen => AnstyleColor::Ansi(anstyle::AnsiColor::BrightGreen),
+        RatatuiColor::LightYellow => AnstyleColor::Ansi(anstyle::AnsiColor::BrightYellow),
+        RatatuiColor::LightBlue => AnstyleColor::Ansi(anstyle::AnsiColor::BrightBlue),
+        RatatuiColor::LightMagenta => AnstyleColor::Ansi(anstyle::AnsiColor::BrightMagenta),
+        RatatuiColor::LightCyan => AnstyleColor::Ansi(anstyle::AnsiColor::BrightCyan),
+        RatatuiColor::White => AnstyleColor::Ansi(anstyle::AnsiColor::BrightWhite),
+        RatatuiColor::Indexed(index) => AnstyleColor::Ansi256(anstyle::Ansi256Color(index)),
+        RatatuiColor::Rgb(red, green, blue) => AnstyleColor::Rgb(anstyle::RgbColor(red, green, blue)),
     }
 }
 

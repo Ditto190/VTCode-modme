@@ -55,9 +55,14 @@ impl MarkdownSegment {
 #[derive(Clone, Debug, Default)]
 pub struct MarkdownLine {
     pub segments: Vec<MarkdownSegment>,
+    pub line_background: Option<anstyle::Color>,
 }
 
 impl MarkdownLine {
+    fn set_line_background(&mut self, color: Option<anstyle::Color>) {
+        self.line_background = color;
+    }
+
     fn push_segment(&mut self, style: Style, text: &str) {
         self.push_segment_with_link(style, text, None::<String>);
     }

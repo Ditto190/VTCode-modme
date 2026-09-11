@@ -4,7 +4,11 @@ use super::links::{
     normalize_hash_location,
 };
 use super::*;
+use crate::tui::ui::syntax_highlight::DiffScopeBackgroundRgbs;
 use crate::tui::utils::diff_styles::DiffColorPalette;
+use crate::tui::utils::diff_styles::{
+    DiffColorLevel, DiffLineType, DiffTheme, diff_render_style_context_for, style_content_ansi, style_sign_ansi,
+};
 
 fn lines_to_text(lines: &[MarkdownLine]) -> Vec<String> {
     lines
@@ -471,7 +475,7 @@ fn test_markdown_code_block_without_language_skips_line_numbers() {
 }
 
 #[test]
-fn test_markdown_diff_code_block_strips_backgrounds() {
+fn markdown_diff_code_block_stores_line_background() {
     let markdown = "```diff\n@@ -1 +1 @@\n- old\n+ new\n context\n```\n";
     let lines = render_markdown(markdown);
 
@@ -485,7 +489,8 @@ fn test_markdown_diff_code_block_strips_backgrounds() {
                 .contains("+ new")
         })
         .expect("added line exists");
-    assert!(added_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
+    assert!(added_line.line_background.is_some());
+    assert!(added_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
 
     let removed_line = lines
         .iter()
@@ -497,7 +502,8 @@ fn test_markdown_diff_code_block_strips_backgrounds() {
                 .contains("- old")
         })
         .expect("removed line exists");
-    assert!(removed_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
+    assert!(removed_line.line_background.is_some());
+    assert!(removed_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
 
     let context_line = lines
         .iter()
@@ -509,14 +515,82 @@ fn test_markdown_diff_code_block_strips_backgrounds() {
                 .contains(" context")
         })
         .expect("context line exists");
+    assert!(context_line.line_background.is_none());
     assert!(context_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
+}
+
+#[test]
+fn markdown_diff_header_styles_are_classified() {
+    let markdown = "```diff\ndiff --git a/main.rs b/main.rs\nindex 1111111..2222222 100644\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n```\n";
+    let lines = render_markdown(markdown);
+
+    let text_and_style = |needle: &str| {
+        lines
+            .iter()
+            .flat_map(|line| line.segments.iter())
+            .find(|segment| segment.text.contains(needle))
+            .map(|segment| segment.style)
+            .unwrap_or_else(|| panic!("{needle} segment exists"))
+    };
+    let metadata = anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack);
+    let cyan = anstyle::Color::Ansi(anstyle::AnsiColor::Cyan);
+    let removed = style_content_ansi(
+        DiffLineType::Delete,
+        diff_render_style_context_for(DiffTheme::Dark, DiffColorLevel::TrueColor, Default::default()),
+    );
+    let added = style_content_ansi(
+        DiffLineType::Insert,
+        diff_render_style_context_for(DiffTheme::Dark, DiffColorLevel::TrueColor, Default::default()),
+    );
+
+    assert_eq!(text_and_style("diff --git").get_fg_color(), Some(metadata));
+    assert_eq!(text_and_style("index 1111111").get_fg_color(), Some(metadata));
+    assert_eq!(text_and_style("--- a/main.rs").get_fg_color(), removed.get_fg_color());
+    assert_eq!(text_and_style("+++ b/main.rs").get_fg_color(), added.get_fg_color());
+    assert_eq!(text_and_style("@@ -1 +1 @@").get_fg_color(), Some(cyan));
+}
+
+#[test]
+fn markdown_diff_lines_use_background_and_strong_markers() {
+    let markdown = "```diff\n-const value = 1;\n+const value = 2;\n```\n";
+    let lines = render_markdown(markdown);
+
+    let added_line = lines
+        .iter()
+        .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("+const value = 2;"))
+        .expect("added line exists");
+    let removed_line = lines
+        .iter()
+        .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("-const value = 1;"))
+        .expect("removed line exists");
+
+    assert_eq!(added_line.line_background, added_line.segments[1].style.get_bg_color());
+    assert_eq!(removed_line.line_background, removed_line.segments[1].style.get_bg_color());
+    assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
+    assert_ne!(removed_line.segments[0].style, removed_line.segments[1].style);
+}
+
+#[test]
+fn diff_style_helpers_set_line_background_and_marker() {
+    let truecolor = DiffScopeBackgroundRgbs::default();
+    for theme in [DiffTheme::Light, DiffTheme::Dark] {
+        let context = diff_render_style_context_for(theme, DiffColorLevel::TrueColor, truecolor);
+        for kind in [DiffLineType::Insert, DiffLineType::Delete] {
+            let style = style_content_ansi(kind, context);
+            let marker = style_sign_ansi(kind, context);
+            assert!(style.get_bg_color().is_some());
+            assert!(marker.get_fg_color().is_some());
+            if theme == DiffTheme::Dark {
+                assert_eq!(style.get_fg_color(), marker.get_fg_color());
+            }
+        }
+    }
 }
 
 #[test]
 fn test_markdown_unlabeled_diff_code_block_detects_diff() {
     let markdown = "```\n@@ -1 +1 @@\n- old\n+ new\n```\n";
     let lines = render_markdown_to_lines(markdown, Style::default(), &theme::active_styles(), None);
-    let expected_added_fg = DiffColorPalette::default().added_style().get_fg_color();
     let added_line = lines
         .iter()
         .find(|line| {
@@ -527,13 +601,8 @@ fn test_markdown_unlabeled_diff_code_block_detects_diff() {
                 .contains("+ new")
         })
         .expect("added line exists");
-    assert!(
-        added_line
-            .segments
-            .iter()
-            .any(|seg| seg.style.get_fg_color() == expected_added_fg)
-    );
-    assert!(added_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
+    assert!(added_line.line_background.is_some());
+    assert!(added_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
 }
 
 #[test]
@@ -545,10 +614,9 @@ fn test_diff_blank_line_renders_placeholder_space() {
 }
 
 #[test]
-fn test_markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
+fn markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
     let markdown = "```diff\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-const value = 1;\n+const value = 2;\n```\n";
     let lines = render_markdown(markdown);
-    let palette = DiffColorPalette::default();
 
     let added_line = lines
         .iter()
@@ -560,12 +628,7 @@ fn test_markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
                 .contains("+const value = 2;")
         })
         .expect("added line exists");
-    assert!(
-        added_line
-            .segments
-            .iter()
-            .any(|seg| seg.style.get_fg_color() == palette.added_style().get_fg_color())
-    );
+    assert!(added_line.line_background.is_some());
 
     let removed_line = lines
         .iter()
@@ -577,12 +640,7 @@ fn test_markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
                 .contains("-const value = 1;")
         })
         .expect("removed line exists");
-    assert!(
-        removed_line
-            .segments
-            .iter()
-            .any(|seg| seg.style.get_fg_color() == palette.removed_style().get_fg_color())
-    );
+    assert!(removed_line.line_background.is_some());
 
     let header_line = lines
         .iter()
@@ -594,12 +652,7 @@ fn test_markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
                 .contains("@@ -1 +1 @@")
         })
         .expect("hunk header exists");
-    assert!(
-        header_line
-            .segments
-            .iter()
-            .any(|seg| seg.style.get_fg_color() == palette.header_style().get_fg_color())
-    );
+    assert_eq!(header_line.segments[0].style.get_fg_color(), Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
 }
 
 #[test]
@@ -614,17 +667,15 @@ fn test_diff_prose_content_skips_syntax_highlighting() {
 }
 
 #[test]
-fn test_markdown_unlabeled_minimal_hunk_detects_diff() {
+fn markdown_unlabeled_minimal_hunk_detects_diff() {
     let markdown = "```\n@@\n pub fn demo() {\n  -    old();\n  +    new();\n }\n```\n";
     let lines = render_markdown_to_lines(markdown, Style::default(), &theme::active_styles(), None);
-    let palette = DiffColorPalette::default();
-
     let header_segment = lines
         .iter()
         .flat_map(|line| line.segments.iter())
         .find(|seg| seg.text.trim() == "@@")
         .expect("hunk header exists");
-    assert_eq!(header_segment.style.get_fg_color(), palette.header_style().get_fg_color());
+    assert_eq!(header_segment.style.get_fg_color(), Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
 
     let removed_segment = lines
         .iter()
@@ -636,12 +687,7 @@ fn test_markdown_unlabeled_minimal_hunk_detects_diff() {
                 .contains("-    old();")
         })
         .expect("removed line exists");
-    assert!(
-        removed_segment
-            .segments
-            .iter()
-            .any(|seg| seg.style.get_fg_color() == palette.removed_style().get_fg_color())
-    );
+    assert!(removed_segment.line_background.is_some());
 
     let added_segment = lines
         .iter()
@@ -653,12 +699,7 @@ fn test_markdown_unlabeled_minimal_hunk_detects_diff() {
                 .contains("+    new();")
         })
         .expect("added line exists");
-    assert!(
-        added_segment
-            .segments
-            .iter()
-            .any(|seg| seg.style.get_fg_color() == palette.added_style().get_fg_color())
-    );
+    assert!(added_segment.line_background.is_some());
 }
 
 #[test]
