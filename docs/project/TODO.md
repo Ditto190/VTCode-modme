@@ -215,3 +215,13 @@ current status need improvement: '/Users/vinhnguyenxuan/Documents/vtcode-resourc
 ---
 
 implement enter to steer the agent loop when press "enter". current behavior is only append to queue. find a way or new shortcut to steer the new message after next toolcall.
+
+---
+
+check and improve "[!] Turn balancer: repeated low-signal navigation detected; scheduling an early recovery pass" detection and recovery
+
+---
+
+check TODO/tasks rendering, it should not use trailing and leading "|" anymore. also do not rendering repeated tasks in the same TUI to prevent clutter and confusion. also for the tasks header, maybe remove it, don't show the tasks plan file random name. or just use a quick tasks summarization as the task header.
+
+check image as current status and improve: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-11 at 15.51.03.png'
