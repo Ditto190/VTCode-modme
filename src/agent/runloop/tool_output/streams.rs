@@ -44,9 +44,7 @@ use std::borrow::Cow;
 use anstyle::{AnsiColor, Effects, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use smallvec::SmallVec;
-use vtcode_commons::diff_paths::{
-    is_prose_language_hint, language_hint_from_path, parse_diff_git_path, parse_diff_marker_path,
-};
+use vtcode_commons::diff_paths::{language_hint_from_path, parse_diff_git_path, parse_diff_marker_path};
 use vtcode_commons::diff_preview::{
     DiffDisplayKind, DiffDisplayLine, diff_display_line_number_width, display_lines_from_unified_diff,
 };
@@ -57,7 +55,6 @@ use vtcode_commons::preview::{
 use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::tools::tool_intent;
-use vtcode_core::ui::markdown;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::files::colorize_diff_summary_line;
@@ -160,50 +157,21 @@ fn render_preview_line(
 }
 
 fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option<anstyle::Color>) -> Option<String> {
-    // Prose stays solid: syntax tokens on a tinted add/del background fail
-    // contrast and fight add/del semantics.
-    if is_prose_language_hint(language_hint) {
+    // Add/del bodies stay solid on the line tint. Syntax tokens (especially
+    // bright green/red from the theme) leak brightness onto the band and
+    // fight the unified red/green signal. Sign/gutter carry the colour.
+    let _ = language_hint;
+    if content.is_empty() {
         return None;
     }
-    let leading_ws_len = content
-        .char_indices()
-        .find(|(_, ch)| !ch.is_whitespace())
-        .map(|(idx, _)| idx)
-        .unwrap_or(content.len());
-    let (leading_ws, code_content) = content.split_at(leading_ws_len);
-
-    let segments = markdown::highlight_line_for_diff(code_content, language_hint)?;
-    if segments.is_empty() {
-        return None;
-    }
-
+    let bg = bg?;
     let mut out = String::with_capacity(content.len() + 16);
-    if !leading_ws.is_empty() {
-        // Keep indentation covered by the diff tint so wrapped/tinted rows
-        // have no unpainted holes.
-        if let Some(bg_color) = bg {
-            out.push_str(&AnsiStyle::new().bg_color(Some(bg_color)).render().to_string());
-        }
-        out.push_str(leading_ws);
-        if bg.is_some() {
-            out.push_str(&Reset.to_string());
-        }
-    }
-    for (style, text) in segments {
-        if text.is_empty() {
-            continue;
-        }
-        // Force the diff tint: syntect theme backgrounds must never punch
-        // holes in the full-width add/del background.
-        let mut token_style = style;
-        if let Some(bg_color) = bg {
-            token_style = token_style.bg_color(Some(bg_color));
-        }
-        out.push_str(&token_style.render().to_string());
-        out.push_str(&text);
-        out.push_str(&Reset.to_string());
-    }
-    if out.is_empty() { None } else { Some(out) }
+    // Reset first so no prior SGR state bleeds into this run.
+    out.push_str(&Reset.to_string());
+    out.push_str(&AnsiStyle::new().bg_color(Some(bg)).render().to_string());
+    out.push_str(content);
+    out.push_str(&Reset.to_string());
+    Some(out)
 }
 
 fn format_diff_line_with_gutter_and_syntax<'a>(
@@ -244,39 +212,34 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     };
 
     let bg = base_style.and_then(|style| style.get_bg_color());
+    // Unified gutter: bright red/green only on the sign; numbers stay dim
+    // grey on the same full-width tint. No BOLD/DIM bleed into the body.
     let marker_style = match marker {
         '+' => AnsiStyle::new()
             .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
-            .bg_color(bg)
-            .effects(Effects::BOLD),
+            .bg_color(bg),
         '-' => AnsiStyle::new()
             .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightRed)))
-            .bg_color(bg)
-            .effects(Effects::BOLD),
-        _ => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
-            .effects(Effects::DIMMED),
+            .bg_color(bg),
+        _ => AnsiStyle::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack))),
     };
-    let gutter_style = match marker {
-        '+' | '-' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
-            .bg_color(bg)
-            .effects(Effects::DIMMED),
-        _ => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
-            .effects(Effects::DIMMED),
-    };
+    let gutter_style = AnsiStyle::new()
+        .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
+        .bg_color(bg)
+        .effects(Effects::DIMMED);
     let reset = Reset;
     out.reserve(line.text.len() + 32);
     // Single gutter: `sign + number + │ + content`. The `│` keeps markdown
     // bullets (`- foo`) distinct from the diff marker (`+`/`-`). Every span
-    // carries the line tint so the band is full-width.
+    // carries the line tint so the band is full-width. Full Reset before
+    // each span so SGR state never leaks into the next.
     let line_no = match marker {
         '+' => line.new_line,
         '-' => line.old_line,
         _ => line.new_line.or(line.old_line),
     }
     .unwrap_or_default();
+    let _ = write!(out, "{reset}");
     let _ = write!(out, "{}", marker_style.render());
     out.push_str(match marker {
         '+' => "+",
@@ -289,13 +252,16 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     let _ = write!(out, "{reset}");
     if let Some(highlighted) = highlight_diff_content(content, language_hint, bg) {
         out.push_str(&highlighted);
-    } else if let Some(style) = base_style {
-        let _ = write!(out, "{}", style.render());
+    } else if base_style.is_some() {
+        // Body: line tint only (default fg). No syntax colours on the band.
+        let body = AnsiStyle::new().bg_color(bg);
+        let _ = write!(out, "{}", body.render());
         out.push_str(content);
+        let _ = write!(out, "{reset}");
     } else {
         out.push_str(content);
+        let _ = write!(out, "{reset}");
     }
-    let _ = write!(out, "{reset}");
     out
 }
 
@@ -829,11 +795,16 @@ mod tests {
     }
 
     #[test]
-    fn prose_diff_content_skips_syntax_highlighting() {
+    fn diff_bodies_stay_solid_no_syntax_brightness() {
         let bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
-        assert!(highlight_diff_content("- **bold** and `code`", Some("md"), bg).is_none());
-        assert!(highlight_diff_content("plain prose", Some("txt"), bg).is_none());
-        assert!(highlight_diff_content("plain prose", Some("markdown"), bg).is_none());
+        let rendered = highlight_diff_content("- **bold** and `code`", Some("md"), bg).expect("solid body");
+        // Solid tint only: no bright syntax SGR, no bold, no extra fg.
+        assert!(rendered.contains("48;2;20;58;45"));
+        assert!(!rendered.contains("38;2;"));
+        assert!(!rendered.contains("\u{1b}[1m"));
+        assert!(!rendered.contains("\u{1b}[91m"));
+        assert!(!rendered.contains("\u{1b}[92m"));
+        assert!(highlight_diff_content("plain", Some("txt"), None).is_none());
     }
 
     #[test]

@@ -462,12 +462,11 @@ fn paint_line_background(line: &mut MarkdownLine, bg: Option<anstyle::Color>) {
     }
 }
 
-/// Push a `+`/`-` diff body with per-language syntax highlighting.
+/// Push a `+`/`-` diff body.
 ///
-/// `render_diff_content_segments` owns the prose gate and the solid fallback,
-/// so prose/unknown languages render exactly as before. Highlighted token
-/// foregrounds are kept and the diff tint is forced as background so syntect
-/// theme holes can't punch through the full-width add/del background.
+/// Bodies stay solid on the line tint (default fg). Syntax/markdown token
+/// colours (bright greens/reds, bold) leak onto the band and fight the
+/// unified red/green signal — only the sign carries the colour.
 fn push_highlighted_diff_body(
     line: &mut MarkdownLine,
     body: &str,
@@ -475,13 +474,18 @@ fn push_highlighted_diff_body(
     fallback: Style,
     forced_bg: Option<anstyle::Color>,
 ) {
-    for segment in render_diff_content_segments(body, language, fallback) {
-        let style = match forced_bg {
-            Some(bg) => segment.style.bg_color(Some(bg)),
-            None => segment.style,
-        };
-        line.push_segment(style, &segment.text);
+    let _ = language;
+    // Clear every fg/effect; keep only the row tint so SGR cannot bleed.
+    let solid = match forced_bg {
+        Some(bg) => Style::new().bg_color(Some(bg)),
+        None => Style::new(),
+    };
+    let _ = fallback;
+    if body.is_empty() {
+        line.push_segment(solid, " ");
+        return;
     }
+    line.push_segment(solid, body);
 }
 
 fn parse_diff_summary_line(line: &str) -> Option<(&str, usize, usize)> {

@@ -687,7 +687,7 @@ fn markdown_diff_rows_paint_every_segment_for_solid_fill() {
 }
 
 #[test]
-fn markdown_diff_body_uses_file_language_syntax_highlight() {
+fn markdown_diff_body_stays_solid_on_tint() {
     let markdown = "```diff\ndiff --git a/main.rs b/main.rs\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}\n```\n";
     let lines = render_markdown(markdown);
 
@@ -706,24 +706,22 @@ fn markdown_diff_body_uses_file_language_syntax_highlight() {
     let added_line = find_body("fn new()");
     let removed_line = find_body("fn old()");
 
-    // Marker + highlighted body: more than the two solid spans.
-    assert!(added_line.segments.len() > 2, "added body should be syntax highlighted");
-    assert!(removed_line.segments.len() > 2, "removed body should be syntax highlighted");
-    // Marker keeps the diff sign style; body tokens carry distinct syntax colors.
+    // Marker + one solid body span (no syntax token leak).
+    assert!(added_line.segments.len() == 2, "added body should stay solid, got {}", added_line.segments.len());
+    assert!(
+        removed_line.segments.len() == 2,
+        "removed body should stay solid, got {}",
+        removed_line.segments.len()
+    );
     assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
-    // Every body token is painted (line tint or stronger word chip).
-    for segment in added_line.segments.iter().skip(1) {
-        assert!(segment.style.get_bg_color().is_some());
-    }
-    for segment in removed_line.segments.iter().skip(1) {
-        assert!(segment.style.get_bg_color().is_some());
-    }
-    // Every body token shares the line tint (uniform, no word chips).
+    // Every body token shares the line tint and default fg (no bright syntax).
     for segment in added_line.segments.iter().skip(1) {
         assert_eq!(segment.style.get_bg_color(), added_line.line_background);
+        assert_eq!(segment.style.get_fg_color(), None);
     }
     for segment in removed_line.segments.iter().skip(1) {
         assert_eq!(segment.style.get_bg_color(), removed_line.line_background);
+        assert_eq!(segment.style.get_fg_color(), None);
     }
 }
 
