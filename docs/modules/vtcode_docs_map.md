@@ -943,6 +943,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Problem, Solution, Usage, Architecture, Excluded Environment Variables
   - **User Questions**: "What can you tell me about Shell Environment Snapshot?", "How does Problem work?", "How does Solution work?"
 
+- **File**: `docs/compose/spec/shell-handler-output-cap.md`
+  - **Content**: Shell Handler Output Cap
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Shell Handler Output Cap?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/skills/SKILL_AUTHORING_GUIDE.md`
   - **Content**: Skill Authoring Guide
   - **Topics**: Create a Skill, Write `SKILL.md`, Purpose, Workflow, Resources
