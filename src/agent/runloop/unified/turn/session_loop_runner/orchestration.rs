@@ -1638,6 +1638,23 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 }
                 Err(_elapsed) => {
                     tracing::info!("Persistent memory finalization continues in the background");
+                    // Detached by design after the 5 s wait, but not silent:
+                    // an observer task logs the eventual outcome instead of
+                    // dropping the JoinHandle and losing any error.
+                    tokio::spawn(async move {
+                        match finalize_task.await {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(err)) => {
+                                tracing::warn!("Background persistent memory finalization failed: {}", err);
+                            }
+                            Err(join_error) => {
+                                tracing::warn!(
+                                    "Background persistent memory finalization task panicked or was aborted: {}",
+                                    join_error
+                                );
+                            }
+                        }
+                    });
                 }
             }
         }

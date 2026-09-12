@@ -448,7 +448,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/guides/async-architecture.md`
   - **Content**: VT Code Async Architecture Guide
-  - **Topics**: When Should VT Code Use Async?, Architecture: Async vs. Synchronous Paths, Key Async Patterns in VT Code, Anti-Patterns to Avoid, Integration with Event Loop
+  - **Topics**: When Should VT Code Use Async?, Architecture: Async vs. Synchronous Paths, Key Async Patterns in VT Code, Anti-Patterns to Avoid, Task Extent, Error Propagation, and Cancel-Safety
   - **User Questions**: "What can you tell me about VT Code Async Architecture Guide?", "How does When Should VT Code Use Async? work?", "How does Architecture: Async vs. Synchronous Paths work?"
 
 - **File**: `docs/guides/code-organization-patterns.md`

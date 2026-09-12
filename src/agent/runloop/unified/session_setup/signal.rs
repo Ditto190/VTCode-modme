@@ -51,13 +51,15 @@ impl Drop for SignalHandlerGuard {
 ///    OS can always deliver the signal to this handler.
 ///
 /// 6. **MCP shutdown has tight timeout** - On double Ctrl+C, MCP shutdown is
-///    fire-and-forget with a 500ms timeout to prevent blocking the exit.
+///    awaited inline with a 500ms timeout so MCP children shut down before
+///    `std::process::exit(130)`; on the first Ctrl+C (cancel path) it is
+///    detached so the handler can process a second Ctrl+C without delay.
 ///
 /// # Signal Flow
 ///
 /// 1. OS delivers SIGINT → Tokio runtime wakes up the signal handler task
 /// 2. Signal handler calls `request_local_stop()` → `CtrlCState::register_signal()`
-/// 3. If `CtrlCSignal::Exit` is returned → fire-and-forget MCP shutdown (500ms timeout)
+/// 3. If `CtrlCSignal::Exit` is returned → MCP shutdown awaited inline (500ms timeout)
 /// 4. Call `emergency_terminal_cleanup()` → `restore_tui()` → `std::process::exit(130)`
 ///
 /// # Emergency Terminal Cleanup
@@ -81,25 +83,27 @@ pub(crate) fn spawn_signal_handler(
                     let signal = request_local_stop(&ctrl_c_state, &ctrl_c_notify);
 
                     if matches!(signal, CtrlCSignal::Exit) {
-                        // Fire-and-forget MCP shutdown with a tight timeout so
-                        // the process exits immediately on double Ctrl+C.
+                        // Await the bounded shutdown inline: the spawned variant
+                        // never ran, because emergency_terminal_cleanup() calls
+                        // std::process::exit(130) before the task could make
+                        // progress, orphaning MCP children. Bounded at 500ms so
+                        // double-Ctrl+C still exits promptly.
                         if let Some(mcp_manager) = &async_mcp_manager {
-                            let mcp = Arc::clone(mcp_manager);
-                            tokio::spawn(async move {
-                                let _ = tokio::time::timeout(
-                                    std::time::Duration::from_millis(500),
-                                    mcp.shutdown(),
-                                ).await;
-                            });
+                            let _ = tokio::time::timeout(
+                                std::time::Duration::from_millis(500),
+                                mcp_manager.shutdown(),
+                            )
+                            .await;
                         }
                         emergency_terminal_cleanup();
                         break;
                     }
 
-                    // Cancel path: fire-and-forget MCP shutdown so the signal
-                    // handler loop immediately continues and can process a
-                    // second Ctrl+C without delay.  The exit path (double
-                    // Ctrl+C) also uses fire-and-forget, so this is consistent.
+                    // Cancel path: deliberately detached, bounded shutdown so
+                    // the signal handler loop immediately continues and can
+                    // process a second Ctrl+C without delay. Detached is safe
+                    // here because the work is bounded (2s) and the process is
+                    // not exiting; the outcome is intentionally unobserved.
                     if let Some(mcp_manager) = &async_mcp_manager {
                         let mcp = Arc::clone(mcp_manager);
                         tokio::spawn(async move {

@@ -301,6 +301,16 @@ The eval and sandbox environment must not contain shortcuts the agent can exploi
 
 ---
 
+## 21. Spawned Task Ownership
+
+Every `tokio::spawn`/`spawn_blocking` call site must have an owner: the `JoinHandle` is awaited before the spawning scope exits, stored behind a Drop-abort guard or an owned field with a shutdown path, or dropped only with a comment documenting the detachment as safe (bounded work, token/channel termination, observable outcome). Rust tasks have indefinite extent, unaware cancellation, and never-propagated errors — an unowned task is killed silently at process exit and discards panics and `Err` results (see `docs/guides/async-architecture.md`, "Task Extent, Error Propagation, and Cancel-Safety").
+
+**Violation**: A `tokio::spawn` whose handle is dropped without await, guard, or documented-detached comment; a detached task whose error/panic outcome is silently lost; async work spawned inside `Drop` or between a bounded shutdown await and `std::process::exit`.
+
+**Remediation**: Await the handle, store it in a guard, or document the detachment with its termination and observability story. Detached tasks that can fail meaningfully must log or send their outcome (observer pattern). Cleanup before `process::exit` must be awaited inline with a timeout, not spawned.
+
+---
+
 ## Enforcement
 
 These invariants should be enforced by:

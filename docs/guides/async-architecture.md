@@ -536,6 +536,64 @@ tokio::spawn(async move {
 cancel_clone.cancel();  // Gracefully stop the task
 ```
 
+## Task Extent, Error Propagation, and Cancel-Safety
+
+Rust's async model gives every spawned task three properties that differ from
+most other async/await languages (see "A Design Space Exploration of
+Async/Await", Gray/Krishnamurthi/Crichton, OOPSLA 2026 — dimensions of *extent*,
+*propagation*, and *awareness*): tasks have **indefinite extent** (a detached
+task outlives the scope that spawned it), **unaware cancellation** (a task is
+cancelled only by being dropped or aborted — it runs no cleanup except `Drop`
+of its own locals), and **never-propagated errors** (an unawaited `JoinHandle`
+discards panics and aborts silently). VT Code rules that follow from this:
+
+### Rule 1: Every spawned task has an owner
+
+A `tokio::spawn`/`spawn_blocking` call site must satisfy exactly one of:
+
+1. **Awaited** — the handle is joined before the spawning scope exits.
+2. **Guarded** — the handle is stored in a Drop-abort guard or an owned field
+   with a shutdown path (see the existing RAII guards:
+   `BackgroundTaskGuard`, `SignalHandlerGuard`, `TimeoutWarningGuard`,
+   `ProcessHandle::Drop`).
+3. **Documented detached** — the handle is dropped *only* with a comment
+   stating why detachment is safe: the work is bounded, terminated by a token
+   or channel drop, and its outcome is observable (logged or sent over a
+   channel). Example: the legacy WebMCP session expiry loop
+   (`crates/codegen/vtcode-webmcp/src/remote_mcp.rs`) and the cancel-path MCP
+   shutdown in `src/agent/runloop/unified/session_setup/signal.rs`.
+
+"Fire-and-forget" without all three properties is a bug: on process exit the
+task is killed mid-flight (nothing joins it), and its error is invisible.
+
+### Rule 2: Detached tasks must not die silently
+
+An unawaited `JoinHandle` throws away `JoinError` (panic or abort) and the
+task's own `Err` results. If a detached task can fail in a way that matters,
+spawn a small observer that joins the handle and logs, or have the task send
+its outcome over a channel. Example:
+`orchestration.rs` wraps the timeout-detached persistent-memory finalization
+task in an observer that logs the eventual outcome.
+
+### Rule 3: `select!` and `timeout` cancel at every `.await`
+
+`tokio::select!` polls arms and drops the losing futures; `tokio::time::timeout`
+drops the wrapped future on elapse. Cancellation happens at each `.await`
+point inside those futures, so:
+
+- Only put **cancel-safe** futures in `select!` arms (e.g. `recv()` on channels,
+  `cancelled()` on tokens). A future that writes state or produces partial
+  output before completing loses that progress when dropped.
+- Work inside a `timeout` must be resumable or its cleanup must live **outside**
+  the future: a task-local `CancellationToken`, an RAII guard, or explicit
+  teardown after the timeout (see the tool pipeline's
+  `terminate_active_exec_sessions` after `timeout` in
+  `src/agent/runloop/unified/tool_pipeline/execution_attempts.rs`).
+- Prefer awaiting a bounded cleanup inline over spawning it when the next step
+  is `std::process::exit` — a spawned shutdown task never runs (see
+  `signal.rs`, where the double-Ctrl+C path awaits MCP shutdown inline within a
+  500ms bound before exiting).
+
 ## Integration with Event Loop
 
 ### The Main Event Loop (Async)
@@ -570,7 +628,8 @@ async fn main() {
 
 ### Spawning Long-Running Operations
 
-When a key is pressed that triggers a long operation:
+When a key is pressed that triggers a long operation, keep ownership of the
+spawned task (see Anti-Pattern 2 and the task-extent rules below):
 
 ```rust
 Event::Key(key) if key.code == KeyCode::Enter => {
@@ -579,9 +638,10 @@ Event::Key(key) if key.code == KeyCode::Enter => {
         let result = tool.execute().await;
         // Post result to UI via channel
     });
-    
-    // Main loop continues, responding to events
-    // Task runs concurrently
+
+    // Main loop continues, responding to events.
+    // Store `task` (e.g. in a JoinHandle slot or Drop-abort guard) so the
+    // task has an owner — do not drop it and forget the outcome.
 }
 ```
 

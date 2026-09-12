@@ -80,6 +80,16 @@ Every long-lived spawned task must have explicit lifecycle ownership:
 
 This avoids task leaks and makes shutdown behavior deterministic.
 
+Every `tokio::spawn` has exactly one owner: awaited, guarded (Drop-abort or
+owned field), or *documented detached* — a comment stating why detachment is
+safe (bounded work, token/channel termination, observable outcome). Unawaited
+handles discard panics and `Err` results silently, so detached tasks that can
+fail meaningfully must log or send their outcome. Never spawn async cleanup
+inside `Drop`; cleanup that must happen before `std::process::exit` is awaited
+inline with a timeout. Details and examples: "Task Extent, Error Propagation,
+and Cancel-Safety" in `docs/guides/async-architecture.md`; invariant #21 in
+`docs/harness/ARCHITECTURAL_INVARIANTS.md`.
+
 ## Channel Boundaries
 
 Use channels to isolate producers and consumers instead of sharing mutable state:

@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use url::Url;
 use uuid::Uuid;
 
@@ -641,11 +641,9 @@ async fn legacy_sse_handler(State(endpoint): State<Arc<RemoteMcpEndpoint>>, head
         };
     spawn_legacy_server(endpoint.handler.clone(), input_receiver, output_sender, cancellation.clone());
     let endpoint_event = Event::default().event("endpoint").data(format!("/messages/{session_id}"));
-    let guard = LegacyStreamGuard {
-        store: endpoint.legacy_sessions.clone(),
-        session_id,
-        cancellation,
-    };
+    // Cancelling the token makes the session's expiry loop remove it; no
+    // async work is spawned from Drop.
+    let guard = cancellation.drop_guard();
     let message_stream = legacy_event_stream(output_receiver, guard, endpoint_event);
     Sse::new(message_stream)
         .keep_alive(KeepAlive::new().interval(LEGACY_KEEP_ALIVE).text("keep-alive"))
@@ -723,7 +721,7 @@ fn quote_header_value(value: &str) -> String {
 
 fn legacy_event_stream(
     receiver: mpsc::Receiver<ServerJsonRpcMessage>,
-    guard: LegacyStreamGuard,
+    guard: DropGuard,
     endpoint_event: Event,
 ) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
     let first = stream::once(async move { Ok(endpoint_event) });
@@ -788,6 +786,9 @@ impl LegacySessionStore {
         let expiration_store = self.clone();
         let expiration_id = session_id.clone();
         let expiration_token = cancellation.clone();
+        // Deliberately detached: bounded by the session TTL and terminated by
+        // `cancellation` (dropped with the session); it owns removing the
+        // session from the store, so its outcome cannot be silently lost.
         drop(tokio::spawn(async move {
             expiration_store.expire_when_idle(expiration_id, expiration_token).await;
         }));
@@ -821,7 +822,12 @@ impl LegacySessionStore {
             };
             tokio::select! {
                 _ = sleep(remaining) => {}
-                _ = cancellation.cancelled() => return,
+                // The token is cancelled by the stream's DropGuard or the
+                // server task ending; this loop owns removing the session.
+                _ = cancellation.cancelled() => {
+                    self.remove(&session_id).await;
+                    return;
+                }
             }
             let expired = self
                 .sessions
@@ -842,23 +848,6 @@ impl LegacySessionStore {
             .await
             .get(session_id)
             .map(|session| session.expires_at.saturating_duration_since(Instant::now()))
-    }
-}
-
-struct LegacyStreamGuard {
-    store: LegacySessionStore,
-    session_id: String,
-    cancellation: CancellationToken,
-}
-
-impl Drop for LegacyStreamGuard {
-    fn drop(&mut self) {
-        self.cancellation.cancel();
-        let store = self.store.clone();
-        let session_id = self.session_id.clone();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            drop(handle.spawn(async move { store.remove(&session_id).await }));
-        }
     }
 }
 
@@ -1529,6 +1518,30 @@ mod tests {
         assert_eq!(expired.status().as_u16(), 404);
 
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn cancelled_legacy_session_is_removed_by_expiry_loop_without_spawn_in_drop() {
+        let endpoint = Arc::new(RemoteMcpEndpoint::new(adapter(), (*config()).clone()).expect("valid endpoint"));
+        let (session_id, _input, _output, _output_sender, cancellation) =
+            endpoint.create_legacy_session().await.expect("legacy session");
+        // Mirror the SSE handler: a DropGuard cancels the token when the
+        // response stream ends, and the session's expiry loop must own the
+        // removal (no async work spawned from Drop).
+        let guard = cancellation.drop_guard();
+        assert!(endpoint.legacy_sender(&session_id).await.is_some(), "session exists before drop");
+        drop(guard);
+
+        let removed = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if endpoint.legacy_sender(&session_id).await.is_none() {
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(removed.is_ok(), "session was not removed after its token was cancelled");
     }
 
     #[tokio::test]
