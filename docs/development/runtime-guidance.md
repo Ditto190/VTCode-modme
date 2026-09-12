@@ -40,7 +40,8 @@ parallel lifecycle schema. A provider error or timeout fails the turn; an
 interrupted stream is never reported as successful completion. Open tool calls
 are closed with a terminal failed status, while partial streamed text remains
 partial and is not promoted to a successful final answer. Follow-up steering
-received during streaming is retained for the next turn.
+received during streaming is applied to the live history at the next turn-loop
+iteration boundary, or retained for the next turn when the turn ends first.
 
 Request segment fingerprints include the provider route, model, context capacity,
 effective reasoning tag, tool/parallel/cache capabilities, and current tool catalog
@@ -106,7 +107,9 @@ Interactive follow-ups are durable steering intents. Each queued intent has a
 UUID, the session envelope stores at most 16 pending intents and a 64-ID applied
 window, and the intent is acknowledged only after its tagged user message is
 durably checkpointed. Recovery compares IDs in the envelope with tagged history,
-not just instruction text, so duplicate text remains meaningful.
+not just instruction text, so duplicate text remains meaningful. Delivery is
+mid-turn: the tagged user message is appended to live history at the next
+turn-loop iteration boundary, right after the current tool-call batch.
 
 Even when `.vtcode/prompts/system.md` replaces the static base prompt, the
 compiled section is reattached after prompt layers are resolved. This keeps the

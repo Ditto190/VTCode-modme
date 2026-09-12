@@ -134,9 +134,9 @@ impl<'a> InlineEventContext<'a> {
                     self.modal.restore_input_draft(input);
                     InlineLoopAction::Continue
                 } else {
-                    // The TUI echoes accepted steering inputs immediately; the
-                    // queued intent is consumed via the steering channel and
-                    // applied when the current turn completes.
+                    // The queued intent is consumed via the steering channel
+                    // and applied to the live history at the next tool-call
+                    // boundary of the running turn (mid-turn steering).
                     self.input_processor().passive()
                 }
             }

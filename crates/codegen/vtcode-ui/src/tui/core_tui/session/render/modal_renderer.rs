@@ -343,8 +343,8 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                 vec![
                     Binding::new("!cmd", "shell mode"),
                     Binding::new("@path", "file reference"),
-                    Binding::new("Enter", "submit/queue"),
-                    Binding::new("Ctrl+Enter", "run/steer"),
+                    Binding::new("Enter", "run / steer busy turn"),
+                    Binding::new("Ctrl+Enter", "queue for next turn"),
                     Binding::new("Shift+Enter", "new line"),
                     Binding::new("Esc", "clear/cancel"),
                     Binding::new("Ctrl+C", "interrupt/copy"),

@@ -299,6 +299,20 @@ impl TestTurnProcessingBacking {
         inputs
     }
 
+    /// Queue a follow-up intent directly, bypassing the steering channel
+    /// (simulates an intent left over from a previous turn drain).
+    pub(crate) fn queue_follow_up_input_for_test(&mut self, input: &str) {
+        self.runtime_steering.queue_follow_up_input(input.to_string());
+    }
+
+    /// Snapshot of intents accepted but not yet durably checkpointed
+    /// (queued + in-flight).
+    pub(crate) fn pending_follow_up_intents_snapshot(
+        &mut self,
+    ) -> Vec<vtcode_core::core::agent::steering::QueuedFollowUpIntent> {
+        self.runtime_steering.pending_follow_up_intents_snapshot()
+    }
+
     pub(crate) fn set_loop_limit(&self, tool_name: &str, limit: usize) {
         self.autonomous_executor.set_loop_limit(tool_name, limit);
     }

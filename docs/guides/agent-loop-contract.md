@@ -63,7 +63,9 @@ reason, partial assistant text is not treated as a successful final answer, and
 tool calls that were opened but did not reach a terminal provider response are
 completed as failed. A timeout applies to the provider stream acquisition and
 is reported as a failure; it does not silently convert an empty or partial
-stream into success. Steering follow-ups remain queued for the next turn.
+stream into success. Steering follow-ups are applied to the live history at the
+next turn-loop iteration boundary (after the current tool-call batch); when the
+turn ends before that boundary, they remain queued for the next turn.
 
 Failure-like tool results include hard failures, timeouts, and successful process
 responses with a non-zero exit status. Non-zero results retain their stdout,
@@ -348,6 +350,9 @@ Steering follow-ups are persisted as UUID-tagged intents. The schema-v3 session
 envelope keeps at most 16 pending intents and a 64-ID applied window. Recovery
 replays only pending IDs absent from both the applied window and tagged user
 history; the public `FollowUpInput(String)` message shape remains unchanged.
+Intents are applied to live history at the next turn-loop iteration boundary
+(after the current tool-call batch) and acknowledged only after the post-turn
+history checkpoint succeeds.
 
 ## Budget and Limits
 

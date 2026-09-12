@@ -534,23 +534,33 @@ fn streaming_state_set_on_agent_append_pasted_message() {
 }
 
 #[test]
-fn busy_enter_queues_submission() {
+fn busy_enter_steers_active_run() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     set_busy_status(&mut session);
     session.set_input("keep searching in docs/".to_string());
 
     let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(event, Some(InlineEvent::QueueSubmit(value)) if value == "keep searching in docs/"));
+    assert!(matches!(event, Some(InlineEvent::Steer(value)) if value == "keep searching in docs/"));
 }
 
 #[test]
-fn busy_control_enter_steers_active_run() {
+fn busy_enter_keeps_slash_commands_on_queue_path() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    set_busy_status(&mut session);
+    session.set_input("/model gpt-4o".to_string());
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(event, Some(InlineEvent::QueueSubmit(value)) if value == "/model gpt-4o"));
+}
+
+#[test]
+fn busy_control_enter_queues_submission() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     set_busy_status(&mut session);
     session.set_input("keep searching in docs/".to_string());
 
     let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
-    assert!(matches!(event, Some(InlineEvent::Steer(value)) if value == "keep searching in docs/"));
+    assert!(matches!(event, Some(InlineEvent::QueueSubmit(value)) if value == "keep searching in docs/"));
 }
 
 #[test]
@@ -567,15 +577,28 @@ fn app_busy_control_enter_queues_batchable_submission() {
 }
 
 #[test]
-fn app_busy_plain_enter_queues_non_batchable_submission() {
+fn app_busy_plain_enter_steers_active_run() {
     let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
     set_app_session_busy_status(&mut session);
     session.core.set_input("one turn".to_string());
 
     let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
-        matches!(&event, Some(AppInlineEvent::QueueSubmit(value)) if value.text == "one turn" && !value.batchable),
-        "expected non-batchable QueueSubmit, got: {event:?}"
+        matches!(&event, Some(AppInlineEvent::Steer(value)) if value.text == "one turn"),
+        "expected Steer, got: {event:?}"
+    );
+}
+
+#[test]
+fn app_busy_slash_command_copy_submits_immediately() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    set_app_session_busy_status(&mut session);
+    session.core.set_input("/copy".to_string());
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(&event, Some(AppInlineEvent::Submit(value)) if value.text == "/copy"),
+        "expected immediate Submit, got: {event:?}"
     );
 }
 

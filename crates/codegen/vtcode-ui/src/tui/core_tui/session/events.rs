@@ -536,8 +536,12 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
                 };
                 session.mark_dirty();
 
+                // Ctrl+Enter while a turn is running joins the queue so the
+                // message dispatches after the current turn completes; plain
+                // Enter steers instead.
                 return if session.is_running_activity() {
-                    Some(InlineEvent::Steer(submitted))
+                    session.push_queued_input(submitted.text.clone());
+                    Some(InlineEvent::QueueSubmit(submitted))
                 } else {
                     Some(InlineEvent::Submit(submitted))
                 };
@@ -557,14 +561,18 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
 
             session.mark_dirty();
 
-            // If a turn is actively running, queue the message so it starts immediately after
-            // the current turn completes. Otherwise submit directly so the turn starts now.
+            // If a turn is actively running, steer the message so it is
+            // injected into the conversation right after the current
+            // tool-call batch. Slash commands keep the queue path (the core
+            // surface has no busy slash interception).
             if session.is_running_activity() {
-                session.push_queued_input(submitted.text.clone());
-                Some(InlineEvent::QueueSubmit(submitted))
-            } else {
-                Some(InlineEvent::Submit(submitted))
+                if submitted.text.trim_start().starts_with('/') {
+                    session.push_queued_input(submitted.text.clone());
+                    return Some(InlineEvent::QueueSubmit(submitted));
+                }
+                return Some(InlineEvent::Steer(submitted));
             }
+            Some(InlineEvent::Submit(submitted))
         }
         KeyCode::Tab => {
             if !session.input_enabled {

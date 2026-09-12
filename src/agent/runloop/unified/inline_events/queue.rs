@@ -6,8 +6,8 @@ use vtcode_ui::tui::app::{InlineHandle, SubmittedInput};
 pub(crate) struct QueuedInput {
     pub(crate) input: SubmittedInput,
     pub(crate) primary_agent: Option<String>,
-    /// Only Ctrl+Enter submissions are batchable; plain Enter queued while
-    /// busy must dispatch as its own turn.
+    /// Only Ctrl+Enter submissions are batchable; plain-Enter slash commands
+    /// queued while busy must dispatch as their own turn.
     pub(crate) batchable: bool,
 }
 

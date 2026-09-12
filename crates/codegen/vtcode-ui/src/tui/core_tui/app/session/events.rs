@@ -958,15 +958,15 @@ pub(super) fn process_key_with_clipboard_image_reader(
                         Some("pause") => Some(InlineEvent::Pause),
                         Some("resume") => Some(InlineEvent::Resume),
                         other => {
-                            // Match the reference agents: Ctrl+Enter while a
-                            // turn is running joins the visible queue, so the
-                            // message hangs above the composer, renders as the
-                            // user's own bubble when dispatched, and can be
-                            // edited via Shift+← before it sends. Plain messages
-                            // are marked batchable so several queued messages
-                            // coalesce into ONE turn (batching applies to plain
-                            // Ctrl+Enter only); slash commands and plain Enter
-                            // stay one per turn so command intent is preserved.
+                            // Ctrl+Enter while a turn is running joins the
+                            // visible queue, so the message hangs above the
+                            // composer, renders as the user's own bubble when
+                            // dispatched, and can be edited via Shift+← before
+                            // it sends. Plain messages are marked batchable so
+                            // several queued messages coalesce into ONE turn;
+                            // slash commands stay one per turn so command
+                            // intent is preserved. Plain Enter steers the
+                            // active run instead of queueing.
                             if let Some(command_name) = other {
                                 tracing::debug!(target: "vtcode_ui::keys", %command_name, "ctrl+enter queued slash command");
                                 session.push_queued_input(submitted.text.clone());
@@ -1003,14 +1003,20 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 return Some(InlineEvent::Submit(submitted));
             }
 
-            // If a turn is actively running, queue the message so it starts immediately after
-            // the current turn completes. Otherwise submit directly so the turn starts now.
+            // While a turn is actively running, steer plain text: the message
+            // is injected into the conversation right after the current
+            // tool-call batch, so the model sees it on its next request within
+            // this turn. Slash commands keep the queue path, and Ctrl+Enter
+            // keeps the queue role. Otherwise submit directly so the turn
+            // starts now.
             if session.is_running_activity() {
-                session.push_queued_input(submitted.text.clone());
-                Some(InlineEvent::QueueSubmit(submitted))
-            } else {
-                Some(InlineEvent::Submit(submitted))
+                if submitted.text.trim_start().starts_with('/') {
+                    session.push_queued_input(submitted.text.clone());
+                    return Some(InlineEvent::QueueSubmit(submitted));
+                }
+                return Some(InlineEvent::Steer(submitted));
             }
+            Some(InlineEvent::Submit(submitted))
         }
         KeyCode::Tab => {
             if !session.core.input_enabled() {

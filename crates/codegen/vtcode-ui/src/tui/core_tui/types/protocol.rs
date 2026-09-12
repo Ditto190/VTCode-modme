@@ -18,7 +18,8 @@ pub struct SubmittedInput {
     pub attachments: Vec<ContentPart>,
     /// Whether this submission may be merged with other queued text-only
     /// submissions of the same agent into a single model turn. Ctrl+Enter sets
-    /// this; a plain Enter queued while busy must stay a one-per-turn dispatch.
+    /// this when it queues while busy; steered inputs bypass the queue
+    /// entirely and plain-Enter slash commands stay a one-per-turn dispatch.
     pub batchable: bool,
 }
 

@@ -56,8 +56,8 @@ VT Code supports several multiline input paths:
 
 ### Core input shortcuts
 
-- `Enter` queues the current draft.
-- `Ctrl+Enter` runs the draft immediately, or steers the active turn.
+- `Enter` submits the draft when idle, or steers the active turn by injecting the message right after the current tool-call batch.
+- `Ctrl+Enter` queues the draft for the next turn while a turn is running (batchable), or runs it immediately when idle.
 - `Ctrl+J` inserts a literal line feed.
 - `Esc` cancels the current input or closes an active modal.
 

@@ -314,6 +314,17 @@ impl RuntimeSteering {
             .collect()
     }
 
+    /// Pop every queued follow-up intent and move it to the in-flight queue,
+    /// returning the intents for immediate application to live history
+    /// (mid-turn steering). Until the post-turn history checkpoint succeeds,
+    /// the moved intents stay in the pending snapshot exactly like
+    /// turn-boundary delivery.
+    pub fn drain_follow_up_intents_to_in_flight(&mut self) -> Vec<QueuedFollowUpIntent> {
+        let drained: Vec<_> = self.queued_follow_up_inputs.drain(..).collect();
+        self.in_flight_follow_up_intents.extend(drained.iter().cloned());
+        drained
+    }
+
     /// Mark intents whose tagged user messages have been durably checkpointed
     /// as applied. Until this is called, the intents remain in the pending
     /// snapshot so a crash cannot lose them between history and envelope IO.

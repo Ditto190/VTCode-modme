@@ -69,6 +69,8 @@ pub enum SteeringMessage {
     Pause,
     /// Resume the agent's execution loop.
     Resume,
-    /// Inject input as a follow-up message after the current turn ends (FollowUp).
+    /// Inject input as a follow-up user message. The turn loop applies it to
+    /// live history at the next iteration boundary (mid-turn steering) or, if
+    /// the turn ends first, delivers it at the next turn boundary.
     FollowUpInput(String),
 }

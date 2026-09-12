@@ -324,7 +324,7 @@ fn arm_tool_loop_synthesis_recovery(harness_state: &mut HarnessTurnState, curren
 
 pub(super) async fn handle_steering_messages(
     ctx: &mut TurnLoopContext<'_>,
-    working_history: &mut [uni::Message],
+    working_history: &mut Vec<uni::Message>,
     result: &mut TurnLoopResult,
 ) -> Result<bool> {
     let renderer = &mut *ctx.renderer;
@@ -333,9 +333,14 @@ pub(super) async fn handle_steering_messages(
     let ctrl_c_notify = ctx.ctrl_c_notify;
 
     let Some(mut receiver) = ctx.runtime_steering.take_receiver() else {
+        apply_pending_follow_ups_mid_turn(renderer, ctx.runtime_steering, working_history)?;
         return Ok(false);
     };
 
+    // Inputs accepted during this call are acknowledged once their outcome is
+    // known: delivered mid-turn ("Steered into active turn") or deferred to
+    // the next turn after an interrupt ("Queued Follow-up Input").
+    let mut accepted_this_call: Vec<String> = Vec::new();
     let steering_result: Result<bool> = loop {
         let mut pending = Vec::new();
         while let Ok(message) = receiver.try_recv() {
@@ -355,7 +360,7 @@ pub(super) async fn handle_steering_messages(
         if let Some(pause_index) = pending.iter().position(|message| matches!(message, SteeringMessage::Pause)) {
             for message in pending.drain(..pause_index) {
                 if let SteeringMessage::FollowUpInput(input) = message {
-                    queue_follow_up_input(renderer, ctx.runtime_steering, input)?;
+                    queue_follow_up_input(renderer, ctx.runtime_steering, input, &mut accepted_this_call)?;
                 }
             }
             pending.remove(0);
@@ -368,6 +373,7 @@ pub(super) async fn handle_steering_messages(
                 ctx.runtime_steering,
                 result,
                 pending,
+                &mut accepted_this_call,
             )
             .await?
             {
@@ -378,13 +384,20 @@ pub(super) async fn handle_steering_messages(
 
         for message in pending {
             if let SteeringMessage::FollowUpInput(input) = message {
-                queue_follow_up_input(renderer, ctx.runtime_steering, input)?;
+                queue_follow_up_input(renderer, ctx.runtime_steering, input, &mut accepted_this_call)?;
             }
         }
     };
 
     ctx.runtime_steering.set_receiver(Some(receiver));
     let steering_interrupted = steering_result?;
+    if !steering_interrupted {
+        // Deliver queued steering to the live history so the next LLM request
+        // in this turn already sees it. Intents move to the in-flight queue
+        // and are acknowledged by the post-turn history checkpoint, exactly
+        // like turn-boundary delivery.
+        apply_pending_follow_ups_mid_turn(renderer, ctx.runtime_steering, working_history)?;
+    }
     if !ctx.runtime_steering.pending_follow_up_intents_snapshot().is_empty() {
         let session_id = ctx.tool_registry.harness_context_snapshot().session_id;
         let steering_update = vtcode_core::compaction::memory_envelope::SessionMemoryEnvelopeUpdate {
@@ -406,6 +419,9 @@ pub(super) async fn handle_steering_messages(
         }
     }
     if steering_interrupted {
+        for input in &accepted_this_call {
+            display_status(renderer, &format!("Queued Follow-up Input: {input}"))?;
+        }
         return Ok(true);
     }
 
@@ -416,15 +432,46 @@ fn queue_follow_up_input(
     renderer: &mut vtcode_core::utils::ansi::AnsiRenderer,
     runtime_steering: &mut vtcode_core::core::agent::runtime::RuntimeSteering,
     input: String,
+    accepted: &mut Vec<String>,
 ) -> Result<()> {
     match runtime_steering.try_queue_follow_up_input(input.clone()) {
-        Ok(()) => display_status(renderer, &format!("Queued Follow-up Input: {input}"))?,
+        Ok(()) => accepted.push(input),
         Err(error) => {
             tracing::warn!(%error, "Rejected follow-up steering input");
             display_status(renderer, &format!("Follow-up Input Rejected: {error}"))?;
         }
     }
     Ok(())
+}
+
+/// Apply every queued follow-up intent to the live turn history so the next
+/// LLM request in this turn sees it (mid-turn steering). Each intent moves to
+/// the in-flight queue and stays in the pending snapshot until the post-turn
+/// history checkpoint acknowledges it, preserving the crash-recovery
+/// contract.
+fn apply_pending_follow_ups_mid_turn(
+    renderer: &mut vtcode_core::utils::ansi::AnsiRenderer,
+    runtime_steering: &mut vtcode_core::core::agent::runtime::RuntimeSteering,
+    working_history: &mut Vec<uni::Message>,
+) -> Result<()> {
+    for intent in runtime_steering.drain_follow_up_intents_to_in_flight() {
+        let (intent_id, input) = intent.into_parts();
+        push_steered_user_message(working_history, &intent_id, &input);
+        display_status(renderer, &format!("Steered into active turn: {input}"))?;
+    }
+    Ok(())
+}
+
+/// Append a steered user message tagged with its intent id so restart
+/// recovery can dedupe it (mirrors
+/// `AgentSessionState::add_user_message_with_intent`).
+fn push_steered_user_message(working_history: &mut Vec<uni::Message>, intent_id: &str, input: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    let tokens = input.len().saturating_div(4);
+    let metadata = vtcode_commons::message_metadata::MessageMetadata::user_input(now, tokens).with_intent_id(intent_id);
+    working_history.push(uni::Message::user(input.to_string()).with_metadata(metadata));
 }
 
 async fn cancel_for_steering_stop(tool_registry: &mut vtcode_core::tools::ToolRegistry, result: &mut TurnLoopResult) {
@@ -443,6 +490,7 @@ async fn handle_pause_signal(
     runtime_steering: &mut vtcode_core::core::agent::runtime::RuntimeSteering,
     result: &mut TurnLoopResult,
     pending: Vec<SteeringMessage>,
+    accepted: &mut Vec<String>,
 ) -> Result<bool> {
     display_status(renderer, "Paused by steering signal. Waiting for Resume...")?;
 
@@ -457,7 +505,7 @@ async fn handle_pause_signal(
                 return Ok(true);
             }
             SteeringMessage::FollowUpInput(input) => {
-                queue_follow_up_input(renderer, runtime_steering, input)?;
+                queue_follow_up_input(renderer, runtime_steering, input, accepted)?;
             }
             SteeringMessage::Pause => {}
         }
@@ -481,7 +529,7 @@ async fn handle_pause_signal(
                         return Ok(true);
                     }
                     Some(SteeringMessage::FollowUpInput(input)) => {
-                        queue_follow_up_input(renderer, runtime_steering, input)?;
+                        queue_follow_up_input(renderer, runtime_steering, input, accepted)?;
                     }
                     Some(SteeringMessage::Pause) => {}
                     None => return Ok(false),
@@ -689,6 +737,7 @@ mod tests {
     use std::time::Duration;
     use vtcode_core::config::loader::VTCodeConfig;
     use vtcode_core::core::agent::steering::SteeringMessage;
+    use vtcode_core::llm::provider::MessageRole;
 
     #[test]
     fn detects_implement_the_plan_trigger() {
@@ -955,7 +1004,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn steering_follow_up_inputs_queue_in_order() {
+    async fn steering_follow_up_inputs_apply_mid_turn_in_order() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         sender
@@ -978,8 +1027,57 @@ mod tests {
 
         assert!(!handled);
         assert!(matches!(result, TurnLoopResult::Completed { .. }));
-        let inputs = backing.deferred_follow_up_inputs();
-        assert_eq!(inputs, vec!["first".to_string(), "second".to_string()]);
+        let steered: Vec<String> = working_history
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .map(|message| message.content.as_text().to_string())
+            .collect();
+        assert_eq!(steered, vec!["first".to_string(), "second".to_string()]);
+        // Every steered message is tagged with its intent id so restart
+        // recovery can dedupe it.
+        assert!(working_history.iter().any(|message| {
+            message.role == MessageRole::User
+                && message
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.intent_id())
+                    .is_some_and(|intent_id| !intent_id.is_empty())
+        }));
+        // Applied intents move to the in-flight queue and stay in the pending
+        // snapshot until the post-turn checkpoint acknowledges them.
+        let snapshot: Vec<String> = backing
+            .pending_follow_up_intents_snapshot()
+            .iter()
+            .map(|intent| intent.text().to_string())
+            .collect();
+        assert_eq!(snapshot, vec!["first".to_string(), "second".to_string()]);
+        assert_eq!(backing.deferred_follow_up_inputs(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn leftover_steering_intent_applies_without_channel_messages() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        backing.set_steering_receiver(receiver);
+        backing.queue_follow_up_input_for_test("leftover");
+
+        let mut working_history = Vec::new();
+        let mut result = TurnLoopResult::Completed { plan_approved_execution_pending: false };
+        let handled = {
+            let mut ctx = backing.turn_loop_context();
+            handle_steering_messages(&mut ctx, &mut working_history, &mut result)
+                .await
+                .expect("handle steering")
+        };
+
+        assert!(!handled);
+        let steered: Vec<String> = working_history
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .map(|message| message.content.as_text().to_string())
+            .collect();
+        assert_eq!(steered, vec!["leftover".to_string()]);
+        assert_eq!(backing.deferred_follow_up_inputs(), Vec::<String>::new());
     }
 
     #[tokio::test]
@@ -1009,8 +1107,12 @@ mod tests {
 
         assert!(!handled);
         assert!(matches!(result, TurnLoopResult::Completed { .. }));
-        let inputs = backing.deferred_follow_up_inputs();
-        assert_eq!(inputs, vec!["refine search".to_string()]);
+        let steered: Vec<String> = working_history
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .map(|message| message.content.as_text().to_string())
+            .collect();
+        assert_eq!(steered, vec!["refine search".to_string()]);
     }
 
     #[tokio::test]
@@ -1035,8 +1137,12 @@ mod tests {
 
         assert!(!handled);
         assert!(matches!(result, TurnLoopResult::Completed { .. }));
-        let inputs = backing.deferred_follow_up_inputs();
-        assert_eq!(inputs, vec!["use the queued note".to_string()]);
+        let steered: Vec<String> = working_history
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .map(|message| message.content.as_text().to_string())
+            .collect();
+        assert_eq!(steered, vec!["use the queued note".to_string()]);
     }
 
     #[tokio::test]
