@@ -8,9 +8,9 @@ use serde_json::Value;
 use vtcode_config::{ResourceLimitsPreset, SandboxPolicy as RuntimeSandboxPolicy, SeccompProfilePreset};
 
 use crate::sandboxing::{
-    AdditionalPermissions, CommandSpec as SandboxCommandSpec, NetworkAllowlistEntry, ResourceLimits, SandboxManager,
-    SandboxPermissions, SandboxPolicy, SandboxTransformError, SeccompProfile, SensitivePath, WritableRoot,
-    default_sensitive_paths,
+    AdditionalPermissions, CommandSpec as SandboxCommandSpec, LinuxSandboxLauncher, NetworkAllowlistEntry,
+    ResourceLimits, SandboxManager, SandboxPermissions, SandboxPolicy, SandboxTransformError, SeccompProfile,
+    SensitivePath, WritableRoot, default_sensitive_paths,
 };
 use crate::tools::tool_intent;
 
@@ -649,9 +649,9 @@ fn transform_command_with_sandbox_policy(
         .with_args(command[1..].to_vec())
         .with_cwd(sandbox_cwd.to_path_buf());
     let manager = SandboxManager::new();
-    let linux_sandbox_executable = resolve_linux_sandbox_executable();
+    let linux_sandbox_launcher = resolve_linux_sandbox_launcher();
     let exec_env = manager
-        .transform(spec, policy, sandbox_cwd, linux_sandbox_executable.as_deref())
+        .transform(spec, policy, sandbox_cwd, linux_sandbox_launcher.as_ref())
         .map_err(|err| map_sandbox_transform_error(err, policy))?;
 
     let executable = exec_env.program.to_string_lossy().to_string();
@@ -668,9 +668,9 @@ fn transform_command_with_sandbox_policy(
 fn map_sandbox_transform_error(error: SandboxTransformError, policy: &SandboxPolicy) -> anyhow::Error {
     match error {
         SandboxTransformError::MissingSandboxExecutable => anyhow!(
-            "Sandbox is enabled for '{}' but no Linux sandbox helper is configured. \
-             Set `VTCODE_LINUX_SANDBOX_EXECUTABLE` to a helper that accepts \
-             `--sandbox-policy`, `--seccomp-profile`, and `--resource-limits`.",
+            "Sandbox is enabled for '{}' but the VT Code sandbox launcher could not be resolved \
+             (std::env::current_exe() failed). Set `VTCODE_LINUX_SANDBOX_EXECUTABLE` to a helper \
+             that accepts `--sandbox-policy`, `--seccomp-profile`, and `--resource-limits`.",
             policy.description()
         ),
         SandboxTransformError::UnavailableSandboxType(sandbox_type) => anyhow!(
@@ -889,22 +889,26 @@ fn resolve_argument_path(argument: &str, working_dir: &Path) -> Option<PathBuf> 
 }
 
 #[cfg(target_os = "linux")]
-fn resolve_linux_sandbox_executable() -> Option<PathBuf> {
+fn resolve_linux_sandbox_launcher() -> Option<LinuxSandboxLauncher> {
     #[cfg(test)]
-    if let Some(path) = LINUX_SANDBOX_EXECUTABLE_OVERRIDE.lock().ok().and_then(|guard| guard.clone()) {
-        return Some(path);
+    if let Some(launcher) = LINUX_SANDBOX_EXECUTABLE_OVERRIDE.lock().ok().and_then(|guard| guard.clone()) {
+        return Some(launcher);
     }
 
-    std::env::var_os("VTCODE_LINUX_SANDBOX_EXECUTABLE").map(PathBuf::from)
+    // Explicit env override keeps the external-helper protocol; otherwise the
+    // vtcode binary itself is the helper via its hidden `sandbox-exec`
+    // subcommand (busybox dispatch).
+    LinuxSandboxLauncher::resolve()
 }
 
 #[cfg(not(target_os = "linux"))]
-fn resolve_linux_sandbox_executable() -> Option<PathBuf> {
+fn resolve_linux_sandbox_launcher() -> Option<LinuxSandboxLauncher> {
     None
 }
 
 #[cfg(all(test, target_os = "linux"))]
-static LINUX_SANDBOX_EXECUTABLE_OVERRIDE: LazyLock<Mutex<Option<PathBuf>>> = LazyLock::new(|| Mutex::new(None));
+static LINUX_SANDBOX_EXECUTABLE_OVERRIDE: LazyLock<Mutex<Option<LinuxSandboxLauncher>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 #[cfg(all(test, target_os = "linux"))]
 pub(super) struct LinuxSandboxExecutableOverrideGuard;
@@ -921,7 +925,7 @@ impl Drop for LinuxSandboxExecutableOverrideGuard {
 #[cfg(all(test, target_os = "linux"))]
 pub(super) fn set_linux_sandbox_executable_override_for_tests(path: PathBuf) -> LinuxSandboxExecutableOverrideGuard {
     if let Ok(mut guard) = LINUX_SANDBOX_EXECUTABLE_OVERRIDE.lock() {
-        *guard = Some(path);
+        *guard = Some(LinuxSandboxLauncher::external(path));
     }
     LinuxSandboxExecutableOverrideGuard
 }

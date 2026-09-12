@@ -27,6 +27,11 @@ struct ToolsSchemaDocument {
 pub async fn handle_schema_command(command: SchemaCommands, config: &VTCodeConfig) -> Result<String> {
     match command {
         SchemaCommands::Tools { mode, format, names } => render_tools_schema(mode, format, &names, config).await,
+        SchemaCommands::Acp => {
+            let payload = serde_json::to_string_pretty(&vtcode_acp::lifecycle_schema_document())
+                .context("failed to serialize ACP extension schema document")?;
+            Ok(format!("{payload}\n"))
+        }
     }
 }
 

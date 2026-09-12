@@ -30,6 +30,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 
 - Development overview and setup: [docs/development/README.md](docs/development/README.md), [docs/development/DEVELOPMENT_SETUP.md](docs/development/DEVELOPMENT_SETUP.md).
 - Testing: [docs/development/testing.md](docs/development/testing.md), [docs/guides/pty-integration-testing.md](docs/guides/pty-integration-testing.md).
+- Evals: [docs/guides/eval.md](docs/guides/eval.md) — suite authoring, `vtcode eval`, reproducible JSON envelopes.
 - CI/release: [docs/development/ci-cd.md](docs/development/ci-cd.md), [docs/development/CHANGELOG_GENERATION.md](docs/development/CHANGELOG_GENERATION.md).
 - Architecture/conventions: [docs/guides/code-organization-patterns.md](docs/guides/code-organization-patterns.md), [docs/guides/async-architecture.md](docs/guides/async-architecture.md), [docs/development/rust-performance-principles.md](docs/development/rust-performance-principles.md).
 - Tools/security: [docs/development/grep-tool-guide.md](docs/development/grep-tool-guide.md), [docs/development/grep-quick-reference.md](docs/development/grep-quick-reference.md), [docs/development/COMMAND_SECURITY_MODEL.md](docs/development/COMMAND_SECURITY_MODEL.md), [docs/guides/security.md](docs/guides/security.md).

@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use super::child_spawn::build_sanitized_env;
-use super::exec_env::{CommandSpec, ExecEnv, SandboxType};
+use super::exec_env::{CommandSpec, ExecEnv, LinuxSandboxLauncher, SandboxType};
 #[cfg(target_os = "macos")]
 use super::policy::NetworkAllowlistEntry;
 use super::policy::SandboxPolicy;
@@ -39,12 +39,15 @@ impl SandboxManager {
     }
 
     /// Transform a command specification into a sandboxed execution environment.
+    ///
+    /// `linux_launcher` describes how the Linux sandbox helper is invoked
+    /// (`None` on other platforms, or when no helper could be resolved).
     pub fn transform(
         &self,
         spec: CommandSpec,
         policy: &SandboxPolicy,
         sandbox_cwd: &Path,
-        sandbox_executable: Option<&Path>,
+        linux_launcher: Option<&LinuxSandboxLauncher>,
     ) -> Result<ExecEnv, SandboxTransformError> {
         // Determine the sandbox type based on policy and platform
         let sandbox_type = self.determine_sandbox_type(policy)?;
@@ -82,7 +85,7 @@ impl SandboxManager {
         // Transform based on sandbox type
         match sandbox_type {
             SandboxType::MacosSeatbelt => self.transform_seatbelt(spec, policy, sandbox_cwd),
-            SandboxType::LinuxLandlock => self.transform_landlock(spec, policy, sandbox_cwd, sandbox_executable),
+            SandboxType::LinuxLandlock => self.transform_landlock(spec, policy, sandbox_cwd, linux_launcher),
             SandboxType::WindowsRestrictedToken => self.transform_windows(spec, policy, sandbox_cwd),
             SandboxType::None => {
                 Err(SandboxTransformError::InvalidPolicy("Cannot transform with SandboxType::None".into()))
@@ -226,9 +229,19 @@ impl SandboxManager {
         spec: CommandSpec,
         policy: &SandboxPolicy,
         sandbox_cwd: &Path,
-        sandbox_executable: Option<&Path>,
+        linux_launcher: Option<&LinuxSandboxLauncher>,
     ) -> Result<ExecEnv, SandboxTransformError> {
-        let sandbox_exe = sandbox_executable.ok_or(SandboxTransformError::MissingSandboxExecutable)?;
+        let launcher = linux_launcher.ok_or(SandboxTransformError::MissingSandboxExecutable)?;
+
+        // Hostname allowlists cannot be enforced exactly by Landlock/seccomp
+        // (BPF cannot inspect connect() destinations) and no managed proxy
+        // exists yet — fail closed exactly like the Seatbelt profile does.
+        if policy.has_network_allowlist() {
+            return Err(SandboxTransformError::InvalidPolicy(
+                "Linux sandbox cannot enforce hostname network allowlists exactly; refusing to run with unrestricted network"
+                    .to_string(),
+            ));
+        }
 
         // Serialize the policy for the sandbox helper (includes Landlock rules)
         let policy_json = serde_json::to_string(policy)
@@ -240,14 +253,20 @@ impl SandboxManager {
             .to_json()
             .map_err(|e| SandboxTransformError::CreationFailed(format!("failed to serialize seccomp profile: {e}")))?;
 
-        // Serialize resource limits for cgroup/rlimit enforcement
-        let resource_limits = policy.resource_limits();
+        // Resource limits are enforced only when a policy explicitly carries
+        // them; auto-derived defaults (e.g. conservative limits for read-only)
+        // are serialized as unlimited so ordinary commands keep working.
+        let resource_limits = match policy {
+            SandboxPolicy::WorkspaceWrite { resource_limits, .. } => resource_limits.clone(),
+            _ => super::policy::ResourceLimits::unlimited(),
+        };
         let limits_json = serde_json::to_string(&resource_limits)
             .map_err(|e| SandboxTransformError::CreationFailed(format!("failed to serialize resource limits: {e}")))?;
 
         let sandbox_cwd_str = sandbox_cwd.to_string_lossy().to_string();
 
-        let mut args = vec![
+        let mut args = launcher.prefix_args.clone();
+        args.extend([
             "--sandbox-policy-cwd".to_string(),
             sandbox_cwd_str,
             "--sandbox-policy".to_string(),
@@ -258,11 +277,11 @@ impl SandboxManager {
             limits_json,
             "--".to_string(),
             os_string_to_arg(spec.program.clone()),
-        ];
+        ]);
         args.extend(spec.args);
 
         Ok(ExecEnv {
-            program: sandbox_exe.to_path_buf(),
+            program: launcher.program.clone(),
             args,
             cwd: spec.cwd,
             env: spec.env,
@@ -296,6 +315,7 @@ fn os_string_to_arg(value: OsString) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_no_sandbox_for_full_access() {
@@ -378,7 +398,57 @@ mod tests {
 
         let result = manager.transform(spec, &SandboxPolicy::read_only(), Path::new("/tmp"), None);
 
-        assert!(matches!(result, Err(SandboxTransformError::MissingSandboxExecutable)));
+        if super::exec_env::SandboxType::LinuxLandlock.is_available() {
+            assert!(matches!(result, Err(SandboxTransformError::MissingSandboxExecutable)));
+        } else {
+            // Kernels without Landlock fail closed even earlier.
+            assert!(matches!(result, Err(SandboxTransformError::UnavailableSandboxType(_))));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn landlock_transform_rejects_hostname_allowlists() {
+        let manager = SandboxManager::new();
+        if !super::exec_env::SandboxType::LinuxLandlock.is_available() {
+            return;
+        }
+        let launcher = LinuxSandboxLauncher::busybox(PathBuf::from("/usr/local/bin/vtcode"));
+        let policy =
+            SandboxPolicy::read_only_with_network(vec![super::policy::NetworkAllowlistEntry::https("api.example.com")]);
+
+        let result = manager.transform(CommandSpec::new("echo"), &policy, Path::new("/tmp"), Some(&launcher));
+
+        assert!(
+            matches!(result, Err(SandboxTransformError::InvalidPolicy(message)) if message.contains("allowlist")),
+            "allowlist must fail closed on Linux, got {result:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn landlock_transform_prepends_busybox_subcommand() {
+        let manager = SandboxManager::new();
+        if !super::exec_env::SandboxType::LinuxLandlock.is_available() {
+            return;
+        }
+        let launcher = LinuxSandboxLauncher::busybox(PathBuf::from("/usr/local/bin/vtcode"));
+        let env = manager
+            .transform(
+                CommandSpec::new("echo").with_args(vec!["hi"]),
+                &SandboxPolicy::read_only(),
+                Path::new("/tmp"),
+                Some(&launcher),
+            )
+            .unwrap();
+
+        assert!(env.sandbox_active);
+        assert_eq!(env.program, PathBuf::from("/usr/local/bin/vtcode"));
+        assert_eq!(env.args.first().map(String::as_str), Some("sandbox-exec"));
+        assert!(env.args.iter().any(|arg| arg == "--sandbox-policy"));
+        assert!(env.args.iter().any(|arg| arg == "--seccomp-profile"));
+        assert!(env.args.iter().any(|arg| arg == "--resource-limits"));
+        assert!(env.args.iter().any(|arg| arg == "--"));
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -394,14 +464,14 @@ mod tests {
         drop(env.insert("PATH".to_string(), "/usr/bin:/bin".to_string()));
         drop(env.insert("INTERNAL_AUTH_BLOB".to_string(), "secret".to_string()));
         let spec = CommandSpec::new("echo").with_env(env);
-        let sandbox_helper = if cfg!(target_os = "linux") {
-            Some(Path::new("/tmp/vtcode-test-sandbox-helper"))
+        let sandbox_launcher = if cfg!(target_os = "linux") {
+            Some(LinuxSandboxLauncher::external(Path::new("/tmp/vtcode-test-sandbox-helper").to_path_buf()))
         } else {
             None
         };
 
         let transformed = manager
-            .transform(spec, &SandboxPolicy::read_only(), Path::new("/tmp"), sandbox_helper)
+            .transform(spec, &SandboxPolicy::read_only(), Path::new("/tmp"), sandbox_launcher.as_ref())
             .unwrap();
 
         assert!(transformed.sandbox_active);

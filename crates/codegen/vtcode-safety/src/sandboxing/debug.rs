@@ -9,7 +9,7 @@ use std::process::Stdio;
 use anyhow::{Context, Result};
 use tokio::process::Command;
 
-use super::{CommandSpec, SandboxManager, SandboxPolicy, SandboxType};
+use super::{CommandSpec, LinuxSandboxLauncher, SandboxManager, SandboxPolicy, SandboxType};
 
 /// Result of a sandbox debug test.
 #[derive(Debug)]
@@ -54,7 +54,7 @@ pub async fn debug_sandbox(
     policy: &SandboxPolicy,
     command: &[String],
     cwd: &Path,
-    sandbox_executable: Option<&Path>,
+    linux_launcher: Option<&LinuxSandboxLauncher>,
 ) -> Result<SandboxDebugResult> {
     if !sandbox_type.is_available() {
         return Ok(SandboxDebugResult::unavailable(sandbox_type));
@@ -70,7 +70,7 @@ pub async fn debug_sandbox(
 
     let manager = SandboxManager::new();
     let exec_env = manager
-        .transform(spec, policy, cwd, sandbox_executable)
+        .transform(spec, policy, cwd, linux_launcher)
         .context("Failed to transform command for sandbox")?;
 
     let mut cmd = Command::new(&exec_env.program);
@@ -97,7 +97,7 @@ pub async fn test_path_writable(
     policy: &SandboxPolicy,
     test_path: &Path,
     cwd: &Path,
-    sandbox_executable: Option<&Path>,
+    linux_launcher: Option<&LinuxSandboxLauncher>,
 ) -> Result<bool> {
     let test_file = test_path.join(".vtcode_sandbox_test");
     let test_command = vec![
@@ -106,7 +106,7 @@ pub async fn test_path_writable(
         format!("touch '{}' && rm -f '{}'", test_file.display(), test_file.display()),
     ];
 
-    let result = debug_sandbox(SandboxType::platform_default(), policy, &test_command, cwd, sandbox_executable).await?;
+    let result = debug_sandbox(SandboxType::platform_default(), policy, &test_command, cwd, linux_launcher).await?;
 
     Ok(result.success)
 }
@@ -115,7 +115,7 @@ pub async fn test_path_writable(
 pub async fn test_network_blocked(
     policy: &SandboxPolicy,
     cwd: &Path,
-    sandbox_executable: Option<&Path>,
+    linux_launcher: Option<&LinuxSandboxLauncher>,
 ) -> Result<bool> {
     let test_command = vec![
         "sh".to_string(),
@@ -123,7 +123,7 @@ pub async fn test_network_blocked(
         "curl -s --connect-timeout 2 https://example.com > /dev/null 2>&1".to_string(),
     ];
 
-    let result = debug_sandbox(SandboxType::platform_default(), policy, &test_command, cwd, sandbox_executable).await?;
+    let result = debug_sandbox(SandboxType::platform_default(), policy, &test_command, cwd, linux_launcher).await?;
 
     Ok(!result.success)
 }

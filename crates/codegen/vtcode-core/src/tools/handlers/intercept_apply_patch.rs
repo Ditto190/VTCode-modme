@@ -178,7 +178,7 @@ mod tests {
             sub_id: None,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             approval_policy: Constrained::default(),
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: None,
             sandbox_policy: Constrained::default(),
         }
     }

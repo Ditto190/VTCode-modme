@@ -126,6 +126,29 @@ impl ExecPolicyManager {
         Ok(())
     }
 
+    /// Load rule files as precedence layers; `layers[0]` wins over later
+    /// entries when both define the same pattern. Missing files are skipped.
+    /// Returns the number of files actually loaded.
+    pub async fn load_policy_layers(&self, layers: &[PathBuf]) -> Result<usize> {
+        let parser = super::parser::PolicyParser::new();
+        let mut merged = Policy::empty();
+        let mut loaded = 0usize;
+        for layer in layers {
+            if !layer.is_file() {
+                continue;
+            }
+            let layer_policy = parser
+                .load_file(layer)
+                .await
+                .with_context(|| format!("Failed to load policy layer {}", layer.display()))?;
+            merged.prepend_layer(layer_policy.rules().iter().cloned());
+            loaded += 1;
+        }
+        let mut policy = self.policy.write().await;
+        *policy = merged;
+        Ok(loaded)
+    }
+
     /// Add a prefix rule to the policy.
     async fn add_prefix_rule(&self, pattern: &[String], decision: Decision) -> Result<()> {
         let mut policy = self.policy.write().await;
@@ -314,6 +337,39 @@ impl ExecPolicyManager {
 /// Shared reference to an ExecPolicyManager.
 pub type SharedExecPolicyManager = Arc<ExecPolicyManager>;
 
+/// Canonical rule-file layers for `workspace_root`, highest precedence first:
+/// `<workspace>/.vtcode/rules/*.rules` (project rules) over
+/// `~/.vtcode/rules/*.rules` (user rules). Files within a directory load in
+/// sorted order; missing directories yield no layers.
+pub fn rules_layers(workspace_root: &Path) -> Vec<PathBuf> {
+    fn dir_layers(dir: PathBuf) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rules"))
+            .collect();
+        files.sort();
+        files
+    }
+
+    let mut layers = dir_layers(workspace_root.join(".vtcode").join("rules"));
+    if let Some(home) = dirs::home_dir() {
+        layers.extend(dir_layers(home.join(".vtcode").join("rules")));
+    }
+    layers
+}
+
+/// Create a shared manager with the default rule layers for `workspace_root`
+/// auto-loaded (see [`rules_layers`]). Missing rule directories are fine;
+/// errors from unreadable or malformed files propagate.
+pub async fn shared_exec_policy_manager_with_rules(workspace_root: &Path) -> Result<SharedExecPolicyManager> {
+    let manager = Arc::new(ExecPolicyManager::with_defaults(workspace_root.to_path_buf()));
+    let _loaded = manager.load_policy_layers(&rules_layers(workspace_root)).await?;
+    Ok(manager)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +393,68 @@ mod tests {
         // Unknown command should need approval
         let result = manager.check_approval(&["unknown".to_string(), "command".to_string()]).await;
         assert!(result.requires_approval());
+    }
+
+    #[tokio::test]
+    async fn load_policy_layers_first_layer_wins_on_duplicate_patterns() {
+        let workspace = tempdir().unwrap();
+        let ws_rules = workspace.path().join(".vtcode").join("rules");
+        std::fs::create_dir_all(&ws_rules).unwrap();
+        std::fs::write(ws_rules.join("project.rules"), "allow: git push\n").unwrap();
+
+        let user = tempdir().unwrap();
+        let user_rules = user.path().join("rules");
+        std::fs::create_dir_all(&user_rules).unwrap();
+        std::fs::write(user_rules.join("user.rules"), "prompt: git push\nforbidden: rm\n").unwrap();
+
+        let manager = ExecPolicyManager::with_defaults(workspace.path().to_path_buf());
+        let layers = vec![ws_rules.join("project.rules"), user_rules.join("user.rules")];
+        let loaded = manager.load_policy_layers(&layers).await.unwrap();
+        assert_eq!(loaded, 2);
+
+        // The workspace layer's `allow` wins over the user layer's `prompt`
+        // for the same pattern.
+        let result = manager.check_approval(&["git".to_string(), "push".to_string()]).await;
+        assert!(result.can_proceed());
+
+        // Patterns only present in the lower-precedence layer still apply.
+        let result = manager
+            .check_approval(&["rm".to_string(), "-rf".to_string(), "/".to_string()])
+            .await;
+        assert!(!result.can_proceed());
+    }
+
+    #[tokio::test]
+    async fn load_policy_layers_skips_missing_files() {
+        let dir = tempdir().unwrap();
+        let manager = ExecPolicyManager::with_defaults(dir.path().to_path_buf());
+        let loaded = manager
+            .load_policy_layers(&[dir.path().join("does-not-exist.rules")])
+            .await
+            .unwrap();
+        assert_eq!(loaded, 0);
+    }
+
+    #[test]
+    fn rules_layers_lists_workspace_files_sorted_before_user_layers() {
+        let workspace = tempdir().unwrap();
+        let ws_rules = workspace.path().join(".vtcode").join("rules");
+        std::fs::create_dir_all(&ws_rules).unwrap();
+        std::fs::write(ws_rules.join("b.rules"), "").unwrap();
+        std::fs::write(ws_rules.join("a.rules"), "").unwrap();
+        std::fs::write(ws_rules.join("ignored.txt"), "").unwrap();
+
+        let layers = rules_layers(workspace.path());
+        // Workspace rules come first (highest precedence), sorted; non-`.rules`
+        // files are excluded. User layers (if any exist under $HOME) come after.
+        let workspace_count = layers
+            .iter()
+            .take_while(|p| p.starts_with(ws_rules.join("a.rules").parent().unwrap()))
+            .count();
+        assert!(workspace_count >= 2, "expected workspace rules layers, got {layers:?}");
+        assert_eq!(layers[0].file_name().unwrap(), "a.rules");
+        assert_eq!(layers[1].file_name().unwrap(), "b.rules");
+        assert!(layers.iter().all(|p| p.extension().and_then(|e| e.to_str()) == Some("rules")));
     }
 
     #[tokio::test]

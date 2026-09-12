@@ -21,8 +21,11 @@ use super::helpers::PrimaryAgentCatalog;
 use super::types::SessionHandle;
 
 pub(crate) mod handlers;
+pub(crate) mod lifecycle;
 mod prompt;
 mod session_state;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod tool_config;
 #[cfg(test)]
 mod tool_config_tests;

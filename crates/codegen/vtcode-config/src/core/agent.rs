@@ -1329,6 +1329,15 @@ pub struct MemoriesConfig {
     /// Overrides the model used for global memory consolidation.
     #[serde(default)]
     pub consolidation_model: Option<String>,
+
+    /// Number of recent sessions scanned by batch memory extraction
+    /// (`run_batch_memory_extraction` / `/memory rebuild --batch`).
+    #[serde(default = "default_memories_batch_sessions")]
+    pub batch_sessions: usize,
+
+    /// Maximum concurrent per-session reads during batch extraction.
+    #[serde(default = "default_memories_batch_concurrency")]
+    pub batch_concurrency: usize,
 }
 
 impl Default for MemoriesConfig {
@@ -1338,6 +1347,8 @@ impl Default for MemoriesConfig {
             use_memories: default_memories_use(),
             extract_model: None,
             consolidation_model: None,
+            batch_sessions: default_memories_batch_sessions(),
+            batch_concurrency: default_memories_batch_concurrency(),
         }
     }
 }
@@ -1350,6 +1361,16 @@ const fn default_memories_generate() -> bool {
 #[inline]
 const fn default_memories_use() -> bool {
     true
+}
+
+#[inline]
+const fn default_memories_batch_sessions() -> usize {
+    50
+}
+
+#[inline]
+const fn default_memories_batch_concurrency() -> usize {
+    8
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1377,6 +1398,11 @@ pub struct PersistentMemoryConfig {
     #[serde(default = "default_persistent_memory_startup_byte_limit")]
     pub startup_byte_limit: usize,
 
+    /// Startup token budget for the injected memory excerpt. `0` disables the
+    /// token cap and keeps only the line/byte budgets.
+    #[serde(default = "default_persistent_memory_startup_token_budget")]
+    pub startup_token_budget: usize,
+
     /// Codex-compatible memories sub-configuration
     #[serde(default)]
     pub memories: MemoriesConfig,
@@ -1390,6 +1416,7 @@ impl Default for PersistentMemoryConfig {
             directory_override: None,
             startup_line_limit: default_persistent_memory_startup_line_limit(),
             startup_byte_limit: default_persistent_memory_startup_byte_limit(),
+            startup_token_budget: default_persistent_memory_startup_token_budget(),
             memories: MemoriesConfig::default(),
         }
     }
@@ -1427,6 +1454,11 @@ const fn default_persistent_memory_startup_line_limit() -> usize {
 #[inline]
 const fn default_persistent_memory_startup_byte_limit() -> usize {
     25 * 1024
+}
+
+#[inline]
+const fn default_persistent_memory_startup_token_budget() -> usize {
+    5000
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

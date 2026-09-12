@@ -35,4 +35,7 @@ pub enum SchemaCommands {
         #[arg(long = "name", value_name = "TOOL")]
         names: Vec<String>,
     },
+    /// Emit the VT Code ACP lifecycle extension wire contract
+    /// (`session/fork`, `session/rollback`, `session/compact`).
+    Acp,
 }

@@ -22,6 +22,8 @@ mod init_project;
 mod man;
 mod messages;
 mod notify;
+#[cfg(target_os = "linux")]
+mod sandbox_exec;
 mod session_store;
 mod sessions;
 pub(crate) mod skills_index;

@@ -9,6 +9,7 @@ mod helpers;
 mod session;
 mod types;
 
+pub use agent::lifecycle::lifecycle_schema_document;
 use session::run_acp_agent;
 
 #[derive(Debug, Default, Clone, Copy)]

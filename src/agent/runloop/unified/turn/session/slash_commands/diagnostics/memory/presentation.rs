@@ -398,6 +398,19 @@ pub(super) fn show_memory_actions_modal(
             search_value: Some("memory rebuild summary".to_string()),
         },
         InlineListItem {
+            title: "Batch Extract Memory From Past Sessions".to_string(),
+            subtitle: Some(
+                "Read grounded facts from recent sessions and consolidate them into memory."
+                    .to_string(),
+            ),
+            badge: Some("Action".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::ConfigAction(format!(
+                "{MEMORY_ACTION_PREFIX}rebuild_batch"
+            ))),
+            search_value: Some("memory batch extract sessions".to_string()),
+        },
+        InlineListItem {
             title: "Open Raw Settings Section".to_string(),
             subtitle: Some(
                 "Jump to `/config agent.persistent_memory` for the raw settings palette."

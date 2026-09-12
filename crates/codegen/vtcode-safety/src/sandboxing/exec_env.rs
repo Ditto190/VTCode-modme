@@ -172,6 +172,52 @@ pub struct ExecEnv {
     pub sandbox_type: SandboxType,
 }
 
+/// How the Linux sandbox helper binary is invoked.
+///
+/// The default helper is the `vtcode` binary itself (busybox pattern): the
+/// launcher subcommand token must be prepended before the helper-protocol
+/// flags. An external helper configured via `VTCODE_LINUX_SANDBOX_EXECUTABLE`
+/// receives the protocol flags directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinuxSandboxLauncher {
+    /// The helper program to execute.
+    pub program: PathBuf,
+    /// Arguments inserted before the helper-protocol flags (e.g. the
+    /// `sandbox-exec` subcommand token for busybox dispatch).
+    pub prefix_args: Vec<String>,
+}
+
+impl LinuxSandboxLauncher {
+    /// An external helper binary invoked as `<helper> --sandbox-policy …`.
+    pub fn external(helper: PathBuf) -> Self {
+        Self { program: helper, prefix_args: Vec::new() }
+    }
+
+    /// VT Code itself, dispatched to its hidden `sandbox-exec` subcommand.
+    pub fn busybox(binary: PathBuf) -> Self {
+        Self {
+            program: binary,
+            prefix_args: vec!["sandbox-exec".to_string()],
+        }
+    }
+
+    /// Resolve the Linux sandbox helper: an explicit
+    /// `VTCODE_LINUX_SANDBOX_EXECUTABLE` override is invoked directly;
+    /// otherwise VT Code itself is the helper via busybox dispatch.
+    #[cfg(target_os = "linux")]
+    pub fn resolve() -> Option<Self> {
+        if let Some(helper) = std::env::var_os("VTCODE_LINUX_SANDBOX_EXECUTABLE") {
+            return Some(Self::external(helper.into()));
+        }
+        std::env::current_exe().ok().map(Self::busybox)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn resolve() -> Option<Self> {
+        None
+    }
+}
+
 /// Type of sandbox being used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SandboxType {
@@ -222,7 +268,12 @@ impl SandboxType {
         match self {
             Self::None => true,
             Self::MacosSeatbelt => cfg!(target_os = "macos"),
-            Self::LinuxLandlock => cfg!(target_os = "linux"),
+            // Available only when the kernel actually enforces Landlock
+            // (Linux 5.13+); older kernels fail closed.
+            #[cfg(target_os = "linux")]
+            Self::LinuxLandlock => super::linux::landlock_supported(),
+            #[cfg(not(target_os = "linux"))]
+            Self::LinuxLandlock => false,
             // Not yet implemented — `transform_windows` is a pass-through.
             // Returning `false` here causes fail-closed behavior: requesting
             // a ReadOnly/WorkspaceWrite policy on Windows yields an explicit

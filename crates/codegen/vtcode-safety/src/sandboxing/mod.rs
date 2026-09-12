@@ -40,6 +40,10 @@
 mod child_spawn;
 mod debug;
 mod exec_env;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+mod linux_seccomp;
 mod manager;
 mod permissions;
 mod policy;
@@ -53,7 +57,9 @@ pub use debug::{
     DebugSubcommand, SandboxDebugResult, debug_sandbox, sandbox_capabilities_summary, test_network_blocked,
     test_path_writable,
 };
-pub use exec_env::{CommandSpec, ExecEnv, ExecExpiration, SandboxType};
+pub use exec_env::{CommandSpec, ExecEnv, ExecExpiration, LinuxSandboxLauncher, SandboxType};
+#[cfg(target_os = "linux")]
+pub use linux::{apply_sandbox_restrictions, landlock_supported};
 pub use manager::{SandboxManager, SandboxTransformError};
 pub use permissions::{AdditionalPermissions, SandboxPermissions};
 pub use policy::{

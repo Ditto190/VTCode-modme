@@ -35,6 +35,10 @@ pub enum SessionStoreError {
         /// Underlying IO error.
         source: std::io::Error,
     },
+
+    /// An audit pack is malformed or unsafe (bad schema, path traversal).
+    #[error("invalid audit pack: {0}")]
+    InvalidPack(String),
 }
 
 impl SessionStoreError {

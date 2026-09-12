@@ -33,6 +33,8 @@ pub mod event_log;
 /// Manifest and turn-index persistence helpers.
 pub mod manifest;
 pub mod migration;
+/// Digest-verified audit packs for sessions.
+pub mod pack;
 pub mod progress;
 pub mod query;
 pub mod retention;
@@ -42,11 +44,18 @@ pub use event_log::{
     DEFAULT_MAX_EVENTS, EvictionSummaryHook, SessionEventLog, SessionManifest, TurnIndex, TurnIndexEntry,
 };
 pub use migration::{MigrationReport, migrate_legacy};
+pub use pack::{
+    AUDIT_PACK_SCHEMA_VERSION, AuditPackEntry, AuditVerification, SessionAuditPack, audit_pack_path, create_audit_pack,
+    read_audit_pack, verify_audit_pack, write_audit_pack,
+};
 pub use progress::{
     GoalClassifierVerdict, GoalEvent, GoalHistoryEntry, GoalOrchestration, GoalPauseReason, GoalPhase, GoalStatus,
     GoalTracker, Milestone, MilestoneStatus, ProgressLedger, load_progress, progress_path, save_progress,
 };
-pub use query::{FactRecord, MemorySearchResult, SessionSummary, query_facts, recent_sessions, search_memory};
+pub use query::{
+    FactRecord, MemorySearchResult, SessionMemoryView, SessionSummary, query_facts, recent_sessions, search_memory,
+    session_memory_facts, write_session_memory_view,
+};
 pub use retention::{RetentionPolicy, apply_retention, apply_retention_preserving, gc_legacy};
 
 use std::path::{Path, PathBuf};

@@ -21,6 +21,7 @@ use super::tool_handler::{
     ApprovalPolicy, Constrained, ShellEnvironmentPolicy, ToolCallError, ToolHandler, ToolInvocation, ToolKind,
     ToolOutput, ToolPayload, ToolSession, ToolSpec, TurnContext,
 };
+use crate::sandboxing::LinuxSandboxLauncher;
 use crate::tool_policy::ToolPolicy;
 use crate::tools::result::ToolResult as SplitToolResult;
 use crate::tools::traits::Tool;
@@ -61,7 +62,7 @@ impl<H: ToolHandler + 'static> HandlerToToolAdapter<H> {
             sub_id: None,
             shell_environment_policy: ShellEnvironmentPolicy::Inherit,
             approval_policy: Constrained::allow_any(ApprovalPolicy::Never), // Approval handled by existing system
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: LinuxSandboxLauncher::resolve(),
             sandbox_policy: Constrained::allow_any(Default::default()),
         });
 

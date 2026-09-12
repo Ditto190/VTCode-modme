@@ -1,4 +1,4 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 /// `exec` subcommands.
 #[derive(Subcommand, Debug, Clone)]
@@ -13,20 +13,35 @@ pub enum ExecSubcommand {
         long_about = "Run an evaluation suite against the agent. Each task in the suite is\n\
                       executed autonomously, then verified with environment probes.\n\
                       Results are aggregated into a report with pass@k and pass^k metrics.\n\n\
-                      Examples:\n  vtcode exec eval --suite my-suite.json\n  vtcode exec eval --suite suite.json --output report.md"
+                      `vtcode eval` is a shorthand alias for this subcommand.\n\n\
+                      Examples:\n  vtcode exec eval --suite my-suite.json\n  vtcode exec eval --suite suite.json --output report.md\n  vtcode exec eval --suite suite.json --format json --output report.json"
     )]
     Eval(ExecEvalArgs),
 }
 
-/// Arguments for `vtcode exec eval`.
+/// Report format for eval runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum EvalOutputFormat {
+    /// Human-readable markdown report.
+    #[default]
+    Markdown,
+    /// Machine-readable JSON envelope with run metadata for reproducible,
+    /// publishable benchmark results.
+    Json,
+}
+
+/// Arguments for `vtcode exec eval` (and the `vtcode eval` alias).
 #[derive(Args, Debug, Clone)]
 pub struct ExecEvalArgs {
     /// Path to the eval suite JSON file
     #[arg(long, value_name = "FILE")]
     pub suite: String,
-    /// Optional path to write the markdown report
+    /// Optional path to write the report (format follows --format)
     #[arg(long, value_name = "FILE")]
     pub output: Option<String>,
+    /// Report format: markdown (human) or json (reproducible benchmark envelope)
+    #[arg(long, value_enum, default_value_t = EvalOutputFormat::Markdown)]
+    pub format: EvalOutputFormat,
 }
 
 /// Arguments for `vtcode exec resume`.

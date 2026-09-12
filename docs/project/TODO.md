@@ -181,10 +181,43 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 ## Catch-up plan (prioritized)
 
 1. **Sandbox to Codex level**: namespace isolation on Linux (bubblewrap or Landlock+seccomp), read-only root + explicit writable binds, protected `.git`/`.vtcode`, managed network proxy mode; adversarial regression suite.
+   - **Done 2026-09-12**: in-process Linux enforcement — `vtcode sandbox-exec` self-launcher (busybox dispatch), Landlock (kernel-ABI-exact ruleset: read-everywhere minus sensitive paths, write only writable roots, execute unrestricted), seccomp-BPF (`PR_SET_NO_NEW_PRIVS`, blocklist, clone-namespace flag filter, clone3→ENOSYS, AF_INET/6 socket block), optional rlimits, external-helper protocol preserved via `VTCODE_LINUX_SANDBOX_EXECUTABLE`. See `vtcode-safety/src/sandboxing/linux.rs` + `docs/development/COMMAND_SECURITY_MODEL.md`.
+   - **Remaining**: managed network proxy (domain allowlist still fails closed), kernel-level `.git` write protection on Linux (Landlock lacks deny rules), Windows restricted tokens.
 2. **Automated memory**: two-phase pipeline over `vtcode-memory` event log — cheap-model extraction at startup, strong-model consolidation under lock.
+   - **Found 2026-09-12**: the two-phase pipeline already exists (`vtcode-core/src/persistent_memory/`: extract/consolidation model routes, `MemoryLock`, `memory_summary.md`). Remaining gaps: batch extraction over past sessions, live `derived/memory.json` producer, background (non-inline) finalization, token-based injection cap.
+   - **Done 2026-09-12**: all four gaps closed — `vtcode_memory::write_session_memory_view` (live `derived/memory.json` producer, called from `finalize_persistent_memory` which now also takes `session_id`); `persistent_memory/batch.rs` (`run_batch_memory_extraction`, semaphore-concurrent per-session reads + one classify/consolidate pass under `MemoryLock`, surfaced as `/memory` → "Batch Extract Memory From Past Sessions"); finalization runs as a spawned task (5 s kickoff wait, detaches instead of being cancelled); `startup_token_budget` (default 5000, applied last) in `read_persistent_memory_excerpt`.
 3. **Unified programmatic surface**: extend ACP or add JSON-RPC app-server shared by IDE/SDK/TUI; export schema.
 4. **Openness wedge**: publish reproducible `vtcode-eval` benchmarks — "same harness, 5 models" (a story competitors can't tell).
+   - **Done 2026-09-12 (tooling)**: top-level `vtcode eval` command (alias of `vtcode exec eval`); `--format json` emits a reproducible-run envelope (schema v1: harness name/version, provider, model, suite path + SHA-256 of the exact suite file, full serialized metrics); `EvalReport::new` constructor; repo-agnostic `smoke-workspace-basics.json` baseline suite + `evals/README.md` + [docs/guides/eval.md](../guides/eval.md). Note: verify commands exec as raw argv (no shell) — suite checks must be quote/pipe-free.
+   - **Remaining (non-code)**: actually running and publishing per-provider/model benchmark rounds, a CI job that runs the smoke suite on a schedule, more baseline suites per language ecosystem.
 5. **Onboarding polish**: one-command install → provider OAuth (`vtcode-auth`) → first task; VS Code extension over app-server.
+   - **Ground truth 2026-09-12**: already largely built — `src/startup/first_run.rs` wizard (provider detection across env/.env/keyring/OAuth/local with "ready" markers, keyring key storage, model + lightweight-model + reasoning + memory + trust steps), `vtcode init` guided questionnaire, `vtcode login` OAuth (OpenAI/OpenRouter/Copilot/codex import). Remaining gaps are narrower: first-run coverage for `exec` mode (currently chat-only), default-config review, VS Code extension.
+6. **Managed network proxy** (deferred 2026-09-12 with design notes): to lift the domain-allowlist fail-closed error, build a CONNECT-aware HTTP proxy bound to `127.0.0.1:0` in `vtcode-safety` that enforces `SandboxPolicy::is_network_allowed(domain, port)` per CONNECT target. Integration points: inject `HTTPS_PROXY`/`NO_PROXY` into the sanitized sandbox env (`child_spawn.rs`); Seatbelt replaces `(allow network*)` with `(allow network-outbound (remote ip "127.0.0.1:<port>"))`; Linux adds seccomp `AF_UNIX` blocking under proxy mode (Codex's unix-socket escape fix) plus optional Landlock ABI4 port rules. Lifetime: per-session (PTY sessions outlive commands), with idle shutdown. Requires its own adversarial test matrix (proxy bypass via raw sockets is already covered: `socket(AF_INET)` is EPERM under restricted networking, so only loopback-to-proxy egress exists).
+
+## Strategy round 2 (2026-09-12): differentiate, don't clone
+
+Ground-truthed against the tree; owner: eval-as-product + auditable-agent.
+
+- **Eval as product**: tooling landed (item 4 above). Next: scheduled CI run of `smoke-workspace-basics.json` + published JSON envelopes per provider/model; suite authoring guide for third-party repos.
+- **"The auditable agent"**: the substrate exists and needs packaging, not building — canonical `ThreadEvent` log (`vtcode-memory`), prompt-prefix/catalog hash chains (`vtcode-exec-events` `previous_prefix_hash`/`new_prefix_hash`), ATIF + Open Responses exports, `vtcode trajectory`, eval trace digests, privacy-preserving `HarnessTraceSummary`. Candidate deliverable: a single "audit pack" command/doc that bundles events.jsonl + manifest + derived views + digest verification for enterprise review.
+  - **Done 2026-09-12 (pack command)**: `vtcode-memory/src/pack.rs` — `SessionAuditPack` (SHA-256 + byte count per file, manifest counter snapshot, sorted deterministic entries), `create/read/write/verify_audit_pack`; traversal-validated entry paths (`SessionStoreError::InvalidPack`); verification classifies drift as MODIFIED/MISSING/informational NEW. CLI: `vtcode session-store pack <session> [--output FILE | --verify FILE]` (exit 1 on failed verify). Docs: `docs/development/session-persistence.md` § Audit packs.
+  - **Remaining**: audit-pack coverage in scheduled CI, and an "audit pack" narrative doc tying together packs + hash chains + ATIF/trace exports for the enterprise story.
+- **Onboarding**: premise mostly stale (see item 5 ground truth); keep VS Code extension as the real remaining gap.
+- **Sub-agent/parallel UX**: real gap. Per-subagent token/cost reporting exists in trace summaries (`HarnessTraceSummary`, eval traces) but not surfaced live in the TUI. Needs product design: progress surfacing + per-subagent cost in `vtcode-ui`.
+
+## Unified programmatic surface — decision (2026-09-12)
+
+**Decision: extend ACP; do not build a native JSON-RPC app-server.** Rationale:
+
+- ACP already provides the unified programmatic surface (JSON-RPC over stdio, session lifecycle, auth, permission prompts) and is an open standard — aligning with the open-interop wedge. A proprietary dialect clones Codex's approach, the thing the strategy says not to do.
+- DRY: one transport, one session-state implementation (`ThreadManager`-backed bridge), one auth surface. A native app-server would duplicate ACP + `exec`.
+- The Codex proxy stays as-is: `vtcode app-server` continues to serve `provider = "codex"` by delegating to the sidecar, unchanged.
+- Feasibility confirmed: the `agent-client-protocol` 2.0 SDK supports custom `JsonRpcRequest` implementations dispatched by method name.
+
+**Implemented 2026-09-12** (`vtcode-acp/src/zed/agent/lifecycle.rs`): three lifecycle extension methods on the standard ACP connection — `session/fork` (independent session cloned via `ThreadBootstrap::from_snapshot`), `session/rollback` (turn-boundary truncation via `replace_messages`; `keep_last_turns = 0` clears, fewer-turns-than-requested no-ops), `session/compact` (LLM summarization via the shared session provider + `compact_history`; no lock held across the await). Wire contract exportable via **`vtcode schema acp`** (`lifecycle_schema_document()`, JSON Schemas for all request/response types). Standard ACP clients (Zed) are unaffected. Docs: `docs/acp/ACP_INTEGRATION.md` § VT Code Lifecycle Extensions.
+
+**Remaining**: advertise the extensions in the ACP `initialize` capabilities if a consumer needs discovery; consider WebSocket transport if a remote host story materializes.
+- **Community surface**: crate-local AGENTS.md files complete; missing an architecture tour doc and a good-first-issue pipeline (GitHub-side, not code).
 
 **Strategic point**: Codex is converging toward where VT Code already is (Rust, formal sandbox, persistent threads, plugins) while staying model-locked. Close sandbox/memory gaps, then lean on provider neutrality + open verifiable evaluation — the axis neither competitor can follow.
 

@@ -164,7 +164,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/session-persistence.md`
   - **Content**: Session Event Persistence
-  - **User Questions**: "What can you tell me about Session Event Persistence?"
+  - **Topics**: Audit packs
+  - **User Questions**: "What can you tell me about Session Event Persistence?", "How does Audit packs work?"
 
 - **File**: `docs/development/TUI_ONLY_REFACTORING.md`
   - **Content**: TUI-Only Tool Permission Refactoring
@@ -349,6 +350,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Configuring the inline status line
   - **Topics**: Available modes, Command payload structure, Example script
   - **User Questions**: "What can you tell me about Configuring the inline status line?", "How does Available modes work?", "How does Command payload structure work?"
+
+- **File**: `docs/guides/eval.md`
+  - **Content**: Eval framework guide
+  - **Topics**: One-command usage, What `--format json` emits, Authoring suites, Related
+  - **User Questions**: "What can you tell me about Eval framework guide?", "How does One-command usage work?", "How does What `--format json` emits work?"
 
 - **File**: `docs/guides/full-automation.md`
   - **Content**: Full Automation

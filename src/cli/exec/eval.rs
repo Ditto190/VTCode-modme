@@ -7,9 +7,11 @@
 
 use crate::startup::require_full_auto_workspace_trust;
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use vtcode_core::cli::args::EvalOutputFormat;
 use vtcode_core::cli::input_hardening::validate_agent_safe_text;
 use vtcode_core::config::VTCodeConfig;
 use vtcode_core::config::models::ModelId;
@@ -28,12 +30,13 @@ use vtcode_eval::{
 use super::ExecCommandKind;
 use super::run::task_spec;
 
-/// Handle the `vtcode exec eval --suite <path>` command.
+/// Handle the `vtcode exec eval` / `vtcode eval` command.
 pub(crate) async fn handle_eval_command(
     config: &CoreAgentConfig,
     vt_cfg: &VTCodeConfig,
     suite_path: &Path,
     output_path: Option<&Path>,
+    format: EvalOutputFormat,
 ) -> Result<()> {
     let suite_json = tokio::fs::read_to_string(suite_path)
         .await
@@ -58,16 +61,59 @@ pub(crate) async fn handle_eval_command(
 
     let report = run_suite_with_options(&executor, &suite, EvalRunOptions::default()).await?;
 
-    let markdown = report.to_markdown();
+    let rendered = match format {
+        EvalOutputFormat::Markdown => report.to_markdown(),
+        EvalOutputFormat::Json => {
+            json_report_envelope(&config.provider, &config.model, suite_path, &suite_json, &report)?
+        }
+    };
     if let Some(path) = output_path {
-        tokio::fs::write(path, &markdown)
+        tokio::fs::write(path, &rendered)
             .await
             .with_context(|| format!("write report to {}", path.display()))?;
         eprintln!("\nReport written to {}", path.display());
     } else {
-        println!("{markdown}");
+        println!("{rendered}");
     }
     Ok(())
+}
+
+/// Reproducible-run envelope for JSON reports: everything a published
+/// benchmark result needs to be re-verified later (harness version, model
+/// route, exact suite contents, and the aggregated metrics).
+#[derive(serde::Serialize)]
+struct EvalRunEnvelope<'a> {
+    schema_version: u32,
+    harness: &'a str,
+    harness_version: &'a str,
+    provider: &'a str,
+    model: &'a str,
+    suite_path: String,
+    suite_sha256: String,
+    report: &'a vtcode_eval::EvalReport,
+}
+
+const EVAL_RUN_ENVELOPE_SCHEMA_VERSION: u32 = 1;
+
+fn json_report_envelope(
+    provider: &str,
+    model: &str,
+    suite_path: &Path,
+    suite_json: &str,
+    report: &vtcode_eval::EvalReport,
+) -> Result<String> {
+    let digest = Sha256::digest(suite_json.as_bytes());
+    let envelope = EvalRunEnvelope {
+        schema_version: EVAL_RUN_ENVELOPE_SCHEMA_VERSION,
+        harness: "vtcode",
+        harness_version: env!("CARGO_PKG_VERSION"),
+        provider,
+        model,
+        suite_path: suite_path.display().to_string(),
+        suite_sha256: digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+        report,
+    };
+    serde_json::to_string_pretty(&envelope).context("serialize eval run envelope")
 }
 
 /// Production executor: runs each task through the agent runner and applies
@@ -201,7 +247,14 @@ async fn run_eval_task(
     runner.enable_full_auto(allowed_tools).await;
     runner.set_quiet(true);
 
-    let ts = task_spec(&ExecCommandKind::Eval { suite_path: PathBuf::new(), output_path: None }, false);
+    let ts = task_spec(
+        &ExecCommandKind::Eval {
+            suite_path: PathBuf::new(),
+            output_path: None,
+            format: EvalOutputFormat::Markdown,
+        },
+        false,
+    );
     let task = Task {
         id: eval_task.id.clone(),
         title: eval_task.name.clone(),
@@ -360,6 +413,27 @@ fn build_probes(eval_task: &EvalTask) -> Vec<Box<dyn EnvironmentProbe>> {
 mod tests {
     use super::*;
     use vtcode_eval::EvalTask;
+
+    #[test]
+    fn json_report_envelope_embeds_reproducibility_metadata() {
+        let suite_json = r#"{"id":"s","name":"s","attempts":1,"tasks":[]}"#;
+        let digest = Sha256::digest(suite_json.as_bytes());
+        let expected_sha = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+
+        let report = vtcode_eval::EvalReport::new("2026-01-01T00:00:00Z", Vec::new());
+        let envelope =
+            json_report_envelope("openai", "gpt-test", Path::new("suite.json"), suite_json, &report).expect("envelope");
+        let value: serde_json::Value = serde_json::from_str(&envelope).expect("valid JSON");
+
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["harness"], "vtcode");
+        assert_eq!(value["provider"], "openai");
+        assert_eq!(value["model"], "gpt-test");
+        assert_eq!(value["suite_sha256"], expected_sha);
+        assert!(value["report"].is_object());
+        assert!(value["model"].is_string());
+        assert!(value["provider"].is_string());
+    }
 
     #[test]
     fn build_probes_parses_command_and_args() {

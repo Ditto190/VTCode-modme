@@ -1,6 +1,6 @@
 use crate::startup::StartupContext;
 use anyhow::Result;
-use vtcode_core::cli::args::{Cli, Commands};
+use vtcode_core::cli::args::{Cli, Commands, ExecSubcommand};
 use vtcode_core::mcp::cli::handle_mcp_command;
 
 use super::run::{
@@ -108,6 +108,18 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
                 dry_run,
                 events_path: events,
                 last_message_file,
+                command,
+                primary_agent_explicitly_configured: startup.primary_agent_explicitly_configured,
+            };
+            exec::handle_exec_command(core_cfg, cfg, options).await?;
+        }
+        Commands::Eval(args) => {
+            let command = exec::resolve_exec_command(Some(ExecSubcommand::Eval(args)), None)?;
+            let options = exec::ExecCommandOptions {
+                json: false,
+                dry_run: false,
+                events_path: None,
+                last_message_file: None,
                 command,
                 primary_agent_explicitly_configured: startup.primary_agent_explicitly_configured,
             };

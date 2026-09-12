@@ -420,6 +420,53 @@ async fn handle_memory_action(
             drop(spinner);
             ctx.renderer.line(MessageStyle::Info, "Rebuilt memory summary and registry.")?;
         }
+        "rebuild_batch" => {
+            let (max_sessions, concurrency) = vtcode_core::persistent_memory::batch_parameters_from_config(
+                ctx.vt_cfg.as_ref().map(|cfg| &cfg.agent.persistent_memory),
+            );
+            ctx.renderer.line(
+                MessageStyle::Info,
+                &format!("Batch-extracting memory from up to {max_sessions} recent sessions..."),
+            )?;
+            let spinner = start_loading_status(
+                ctx.handle,
+                ctx.input_status_state,
+                "Batch extracting memory from past sessions...",
+            );
+            let report = vtcode_core::persistent_memory::run_batch_memory_extraction(
+                ctx.config,
+                ctx.vt_cfg.as_ref(),
+                ctx.config.workspace.as_path(),
+                max_sessions,
+                concurrency,
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+            drop(spinner);
+            ctx.renderer.line(
+                MessageStyle::Info,
+                &format!(
+                    "Scanned {} sessions ({} contributed facts, {} active skipped); {} unique candidates.",
+                    report.sessions_scanned,
+                    report.sessions_with_facts,
+                    report.active_sessions_skipped,
+                    report.candidate_facts,
+                ),
+            )?;
+            if let Some(write) = report.write_report {
+                ctx.renderer.line(
+                    MessageStyle::Info,
+                    &format!(
+                        "Consolidated memory under {} ({} facts added).",
+                        write.directory.display(),
+                        write.added_facts
+                    ),
+                )?;
+            } else {
+                ctx.renderer
+                    .line(MessageStyle::Info, "No new candidate facts to consolidate.")?;
+            }
+        }
         _ => bail!("Unknown memory action: {action_key}"),
     }
 

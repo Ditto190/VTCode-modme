@@ -341,12 +341,61 @@ workers, and reconnects. `McpClient::new` remains a compatibility constructor
 for unsandboxed library callers. MCP stderr is capped and secret-redacted
 before logging.
 
-The platform contract is intentionally conservative. Linux restrictive
-policies require the configured helper. Windows restrictive policies return an
-explicit unsupported error because native restricted-token isolation is not
-implemented. macOS keeps full-network and blocked-network modes, but rejects
-hostname allowlists rather than widening them to port-wide access: Seatbelt is
-not a documented, reliable third-party domain-filtering contract.
+The platform contract is intentionally conservative. Linux restrictive policies
+are enforced by the built-in launcher (below) when the kernel supports Landlock
+and fail closed otherwise. Windows restrictive policies return an explicit
+unsupported error because native restricted-token isolation is not implemented.
+macOS keeps full-network and blocked-network modes, but rejects hostname
+allowlists rather than widening them to port-wide access: Seatbelt is not a
+documented, reliable third-party domain-filtering contract.
+
+### Linux kernel enforcement (Landlock + seccomp)
+
+Linux restrictive policies are enforced by the VT Code binary itself, which
+doubles as the sandbox helper (busybox dispatch). Command transforms wrap
+sandboxed commands as `vtcode sandbox-exec --sandbox-policy-cwd …
+--sandbox-policy … --seccomp-profile … --resource-limits … -- <command>`, and
+the launcher applies the restrictions to itself before exec-ing the wrapped
+command. `VTCODE_LINUX_SANDBOX_EXECUTABLE` still overrides the helper with an
+external binary that accepts the same protocol.
+
+Enforcement (see `vtcode-safety/src/sandboxing/linux.rs`):
+
+-   **Landlock** (kernel 5.13+): reads granted everywhere except sensitive
+    credential paths; writes granted only for writable roots (read-only
+    policies may write `/dev/null` only). Execute paths stay unrestricted,
+    matching the macOS profile. Landlock has no deny rules, so `.git`/`.vtcode`
+    write protection inside writable roots remains at the preflight layer on
+    Linux (macOS enforces it in the kernel).
+-   **seccomp-BPF** (`PR_SET_NO_NEW_PRIVS` + filters): blocks dangerous
+    syscalls (`ptrace`, `mount`, `bpf`, `unshare`, `setns`, …), rejects
+    namespace-creating `clone` flags and blocks `clone3` with `ENOSYS` so libc
+    falls back to filtered `clone`, and denies `AF_INET`/`AF_INET6` socket
+    creation when the policy denies network. Unix sockets stay available.
+-   **rlimits**: applied only when a workspace-write policy explicitly
+    configures them.
+-   Kernels without Landlock fail closed (`UnavailableSandboxType`), matching
+    the Windows posture. Hostname network allowlists remain unsupported and
+    fail closed on both platforms until the managed network proxy lands.
+
+Tests: `vtcode-safety` unit tests cover grant computation and filter
+construction; `tests/sandbox_exec_integration.rs` exercises the real binary on
+Linux and needs a Landlock-capable kernel (in containers, run with
+`--security-opt seccomp=unconfined`).
+
+### Rule-file layers
+
+Rule files (`.rules`, TOML/JSON/simple formats — see `exec_policy::PolicyParser`) can declare
+prefix rules with `allow`/`prompt`/`forbidden` decisions. VT Code discovers them in two layers,
+highest precedence first:
+
+1. `<workspace>/.vtcode/rules/*.rules` — project rules
+2. `~/.vtcode/rules/*.rules` — user rules
+
+`exec_policy::rules_layers` enumerates the layers (sorted within each directory) and
+`ExecPolicyManager::load_policy_layers` merges them so a pattern defined in a higher-precedence
+layer wins. `exec_policy::shared_exec_policy_manager_with_rules` builds a manager with both
+layers auto-loaded.
 
 ### Provider diagnostics
 

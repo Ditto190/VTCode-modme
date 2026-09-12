@@ -4,7 +4,7 @@
 
 ## Conventions
 
-- `events.jsonl` is canonical; `derived/` and `index/` are regenerated views — never persist session history elsewhere.
+- `events.jsonl` is canonical; `derived/` and `index/` are regenerated views — never persist session history elsewhere. `query::write_session_memory_view` is the live producer for `derived/memory.json` (envelope-compatible shape); `session_memory_facts` reads it (batch memory extraction depends on both).
 - `progress.rs` hosts the `GoalTracker` state machine and compaction-safe `ProgressLedger` view.
 - Append-only: do not mutate historical events; new facts go through `append`.
 - Off the hot path: never read the log back into agent context; use derived queries for revert/compaction/analytics.
@@ -16,6 +16,7 @@
 - Session event bytes are synced before derived metadata; publish the turn index before the manifest, leave the pending cap-rewrite marker until both are durable, and rescan when metadata is malformed, inconsistent, or offsets exceed the canonical log.
 - Session directories are `0700` and session files are `0600`; preserve the symlink-safe `vtcode-commons` filesystem primitives.
 - `query::search_memory` uses BM25 (`k1=1.2`, `b=0.75`) with deterministic chunk-id ties and only the documented mild timestamp recency multiplier; invalidate the manifest LRU when atomic manifests change.
+- `pack.rs` audit packs: SHA-256 manifests of the whole session dir; `audit-pack.json` excludes itself from walks, entry paths are traversal-validated (`SessionStoreError::InvalidPack`), and verification reports post-pack additions as informational `unaccounted`, not failures.
 - Cap eviction invokes its summary hook before replacing `events.jsonl`; a failed summary keeps the canonical events intact.
 
 ## Dependencies

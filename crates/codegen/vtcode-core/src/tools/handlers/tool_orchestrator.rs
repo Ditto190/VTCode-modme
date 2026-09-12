@@ -106,7 +106,7 @@ impl ToolOrchestrator {
             sandbox: initial_sandbox,
             policy: turn_ctx.sandbox_policy.get(),
             sandbox_cwd: &turn_ctx.cwd,
-            codex_linux_sandbox_exe: turn_ctx.codex_linux_sandbox_exe.as_ref(),
+            linux_sandbox_launcher: turn_ctx.linux_sandbox_launcher.as_ref(),
         };
 
         match tool.run(req, &initial_attempt, tool_ctx).await {
@@ -149,7 +149,7 @@ impl ToolOrchestrator {
                     sandbox: SandboxType::None,
                     policy: turn_ctx.sandbox_policy.get(),
                     sandbox_cwd: &turn_ctx.cwd,
-                    codex_linux_sandbox_exe: None,
+                    linux_sandbox_launcher: None,
                 };
 
                 tool.run(req, &escalated_attempt, tool_ctx).await
@@ -330,7 +330,7 @@ mod tests {
             sub_id: None,
             shell_environment_policy: ShellEnvironmentPolicy::Inherit,
             approval_policy: Constrained::allow_any(ApprovalPolicy::Never),
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: None,
             sandbox_policy: Constrained::allow_any(sandbox_policy),
         }
     }

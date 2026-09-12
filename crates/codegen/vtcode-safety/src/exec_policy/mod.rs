@@ -30,6 +30,8 @@ mod policy;
 pub use approval::{
     AskForApproval, ExecApprovalRequirement, ExecPolicyAmendment, RejectConfig, default_exec_approval_requirement,
 };
-pub use manager::{ExecPolicyConfig, ExecPolicyManager, SharedExecPolicyManager};
+pub use manager::{
+    ExecPolicyConfig, ExecPolicyManager, SharedExecPolicyManager, rules_layers, shared_exec_policy_manager_with_rules,
+};
 pub use parser::{PolicyFile, PolicyParser, PolicyRule};
 pub use policy::{Decision, Policy, PolicyEvaluation, PrefixRule, RuleMatch};

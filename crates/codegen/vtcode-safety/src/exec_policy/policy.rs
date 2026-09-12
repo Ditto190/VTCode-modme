@@ -97,6 +97,30 @@ impl Policy {
         Ok(())
     }
 
+    /// The prefix rules in evaluation order (first match wins).
+    pub fn rules(&self) -> &[PrefixRule] {
+        &self.prefix_rules
+    }
+
+    /// Prepend a higher-precedence layer of rules.
+    ///
+    /// Used when merging rule-file layers (workspace rules over user rules):
+    /// a pattern that already exists — either in this policy or earlier within
+    /// `rules` — keeps its first occurrence, so the highest-precedence layer
+    /// wins and evaluation order (`check`) stays deterministic.
+    pub fn prepend_layer(&mut self, rules: impl IntoIterator<Item = PrefixRule>) {
+        let mut new_rules: Vec<PrefixRule> = Vec::new();
+        for rule in rules {
+            let pattern = rule.pattern.clone();
+            let duplicate = new_rules.iter().any(|existing: &PrefixRule| existing.pattern == pattern)
+                || self.prefix_rules.iter().any(|existing| existing.pattern == pattern);
+            if !duplicate {
+                new_rules.push(rule);
+            }
+        }
+        drop(self.prefix_rules.splice(0..0, new_rules));
+    }
+
     /// Check a single command against the policy.
     pub fn check(&self, command: &[String]) -> RuleMatch {
         for rule in &self.prefix_rules {

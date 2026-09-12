@@ -26,6 +26,20 @@ Retention defaults to 50 sessions or 30 days. It operates after session
 closure/startup on a blocking task, preserves active/current sessions, skips
 symlinks, and removes only validated direct children of the sessions root.
 
+## Audit packs
+
+`vtcode session-store pack <session>` produces a digest-verified snapshot of a
+session's store: every file (canonical log, manifest, turn index, derived
+views) with its byte count and SHA-256, plus a manifest counter snapshot.
+Packs default to `<session>/derived/audit-pack.json`; `--output` overrides the
+destination. `--verify <pack-file>` re-digests the current session contents
+and reports per-file `MODIFIED`/`MISSING`/`NEW` status, failing with a
+non-zero exit when listed artifacts no longer match. Files added after the
+pack are reported as `NEW` but do not fail verification; the pack pins a
+point-in-time, it does not forbid later writes. Pack entry paths are
+validated on load, so a hand-edited pack cannot point verification outside
+the session directory.
+
 Verification:
 
 ```text

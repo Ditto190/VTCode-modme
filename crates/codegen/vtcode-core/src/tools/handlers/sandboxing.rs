@@ -20,8 +20,9 @@ use crate::exec_policy::default_exec_approval_requirement as canonical_default_e
 pub use crate::exec_policy::{AskForApproval, ExecApprovalRequirement, ExecPolicyAmendment, RejectConfig};
 use crate::sandboxing::{
     CommandSpec as CanonicalCommandSpec, ExecEnv as CanonicalExecEnv, ExecExpiration as CanonicalExecExpiration,
-    ResourceLimits, SandboxManager as CanonicalSandboxManager, SandboxPolicy as CanonicalSandboxPolicy,
-    SandboxTransformError as CanonicalSandboxTransformError, SandboxType as CanonicalSandboxType, SeccompProfile,
+    LinuxSandboxLauncher, ResourceLimits, SandboxManager as CanonicalSandboxManager,
+    SandboxPolicy as CanonicalSandboxPolicy, SandboxTransformError as CanonicalSandboxTransformError,
+    SandboxType as CanonicalSandboxType, SeccompProfile,
 };
 
 use super::tool_handler::{ToolSession, TurnContext};
@@ -369,7 +370,7 @@ pub struct SandboxAttempt<'a> {
     pub sandbox: SandboxType,
     pub policy: &'a SandboxConfig,
     pub sandbox_cwd: &'a Path,
-    pub codex_linux_sandbox_exe: Option<&'a PathBuf>,
+    pub linux_sandbox_launcher: Option<&'a LinuxSandboxLauncher>,
 }
 
 impl<'a> SandboxAttempt<'a> {
@@ -386,12 +387,7 @@ impl<'a> SandboxAttempt<'a> {
             .with_env(spec.env)
             .with_expiration(CanonicalExecExpiration::from(spec.timeout_ms));
         let canonical_env = CanonicalSandboxManager::new()
-            .transform(
-                canonical_spec,
-                &canonical_policy,
-                self.sandbox_cwd,
-                self.codex_linux_sandbox_exe.map(PathBuf::as_path),
-            )
+            .transform(canonical_spec, &canonical_policy, self.sandbox_cwd, self.linux_sandbox_launcher)
             .map_err(SandboxTransformError::from)?;
 
         Ok(ExecEnv::from_canonical(canonical_env))

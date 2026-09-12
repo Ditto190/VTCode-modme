@@ -58,6 +58,7 @@ pub struct ShellToolCallParams {
 }
 
 // Re-export the canonical SandboxPermissions from the sandboxing module.
+use crate::sandboxing::LinuxSandboxLauncher;
 pub use crate::sandboxing::SandboxPermissions;
 
 /// Tool output types (from Codex)
@@ -220,7 +221,7 @@ pub struct TurnContext {
     pub sub_id: Option<String>,
     pub shell_environment_policy: ShellEnvironmentPolicy,
     pub approval_policy: Constrained<ApprovalPolicy>,
-    pub codex_linux_sandbox_exe: Option<PathBuf>,
+    pub linux_sandbox_launcher: Option<LinuxSandboxLauncher>,
     /// Sandbox policy from Codex (for orchestrator integration)
     pub sandbox_policy: Constrained<super::sandboxing::SandboxConfig>,
 }
@@ -428,7 +429,7 @@ mod tests {
             sub_id: None,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             approval_policy: Constrained::allow_any(ApprovalPolicy::default()),
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: None,
             sandbox_policy: Constrained::allow_any(Default::default()),
         };
 
@@ -444,7 +445,7 @@ mod tests {
             sub_id: None,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             approval_policy: Constrained::allow_any(ApprovalPolicy::default()),
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: None,
             sandbox_policy: Constrained::allow_any(Default::default()),
         };
 

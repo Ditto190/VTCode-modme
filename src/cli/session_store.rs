@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use vtcode_core::cli::args::SessionStoreCommand;
 use vtcode_memory::{
-    DEFAULT_MAX_EVENTS, RetentionPolicy, apply_retention, migrate_legacy, open, query_facts, recent_sessions,
+    DEFAULT_MAX_EVENTS, RetentionPolicy, apply_retention, migrate_legacy, open, query_facts, read_audit_pack,
+    recent_sessions, verify_audit_pack, write_audit_pack,
 };
 
 /// Handle the `session-store` CLI subcommand.
@@ -63,6 +64,41 @@ pub async fn handle_session_store_command(command: SessionStoreCommand) -> Resul
                 println!("- [{}] {}", f.session_id, f.fact);
             }
             println!("{} fact(s).", facts.len());
+        }
+        SessionStoreCommand::Pack { session, output, verify } => {
+            if let Some(pack_path) = verify {
+                let pack = read_audit_pack(&pack_path)
+                    .with_context(|| format!("failed to read audit pack {}", pack_path.display()))?;
+                let report = verify_audit_pack(&workspace, &session, &pack).context("failed to verify audit pack")?;
+                if report.verified {
+                    println!("VERIFIED: {} files match the audit pack.", pack.entries.len());
+                } else {
+                    println!("FAILED: audit pack does not match the current session contents.");
+                }
+                for m in &report.mismatches {
+                    println!("  MODIFIED: {m}");
+                }
+                for m in &report.missing {
+                    println!("  MISSING:  {m}");
+                }
+                for u in &report.unaccounted {
+                    println!("  NEW:      {u}");
+                }
+                if !report.verified {
+                    anyhow::bail!("audit pack verification failed");
+                }
+                return Ok(());
+            }
+            let (pack, path) =
+                write_audit_pack(&workspace, &session, output.as_deref()).context("failed to create audit pack")?;
+            println!(
+                "Wrote audit pack to {} ({} files, session status: {}, turns: {}, events: {}).",
+                path.display(),
+                pack.entries.len(),
+                pack.status,
+                pack.turn_count,
+                pack.event_count
+            );
         }
     }
     Ok(())

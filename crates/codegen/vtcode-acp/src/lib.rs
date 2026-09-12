@@ -50,7 +50,7 @@ pub(crate) use session::{
     SessionPromptResult, SessionState, SessionUpdate, SessionUpdateNotification, ToolCallRecord, TurnStatus,
 };
 pub use transport::{StdioTransport, StdioTransportOptions};
-pub use zed::{StandardAcpAdapter, ZedAcpAdapter};
+pub use zed::{StandardAcpAdapter, ZedAcpAdapter, lifecycle_schema_document};
 
 #[deprecated(since = "0.60.0", note = "Use AcpClientV2 for ACP protocol compliance")]
 pub(crate) use client::{AcpClient, AcpClientBuilder};

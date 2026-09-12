@@ -116,11 +116,14 @@ python3 scripts/generate_config_field_reference.py
 | `agent.persistent_memory.directory_override` | `null \| string` | no | `null` | Optional user-local directory override for persistent memory storage |
 | `agent.persistent_memory.enabled` | `boolean` | no | `false` | Toggle main-session persistent memory for this repository. Natural-language saves resolve "it", "this", and "that" only against the immediately preceding assistant answer and require confirmation; identity names and aliases are stored as preferences. |
 | `agent.persistent_memory.memories.consolidation_model` | `null \| string` | no | `null` | Overrides the model used for global memory consolidation. |
+| `agent.persistent_memory.memories.batch_concurrency` | `integer` | no | `8` | Maximum concurrent per-session reads during batch memory extraction. |
+| `agent.persistent_memory.memories.batch_sessions` | `integer` | no | `50` | Number of recent sessions scanned by batch memory extraction (`/memory` → batch extract). |
 | `agent.persistent_memory.memories.extract_model` | `null \| string` | no | `null` | Overrides the model used for per-thread memory extraction. |
 | `agent.persistent_memory.memories.generate_memories` | `boolean` | no | `true` | Controls whether newly completed threads can be stored as memory-generation inputs. |
 | `agent.persistent_memory.memories.use_memories` | `boolean` | no | `true` | Controls whether VT Code injects existing memories into future sessions. |
 | `agent.persistent_memory.startup_byte_limit` | `integer` | no | `25600` | Startup byte budget scanned from memory_summary.md before VT Code renders a compact startup summary |
 | `agent.persistent_memory.startup_line_limit` | `integer` | no | `200` | Startup line budget scanned from memory_summary.md before VT Code renders a compact startup summary |
+| `agent.persistent_memory.startup_token_budget` | `integer` | no | `5000` | Startup token budget for the injected memory excerpt; `0` disables the token cap and keeps only the line/byte budgets |
 | `agent.project_doc_fallback_filenames` | `array` | no | `[]` | Additional filenames to check when AGENTS.md is absent at a directory level. |
 | `agent.project_doc_fallback_filenames[]` | `string` | no | `-` | - |
 | `agent.project_doc_max_bytes` | `integer` | no | `16384` | Maximum bytes of AGENTS.md/CLAUDE.md content to load from project hierarchy |

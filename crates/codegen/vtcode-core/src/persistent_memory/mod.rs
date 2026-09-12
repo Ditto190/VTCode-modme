@@ -18,6 +18,7 @@ use crate::llm::{
 };
 use vtcode_commons::VtCodePaths;
 
+mod batch;
 mod fact_extraction;
 mod legacy_migration;
 mod llm_ops;
@@ -25,6 +26,7 @@ mod lock;
 mod reader;
 mod rendering;
 
+pub use batch::{BatchMemoryReport, batch_parameters_from_config, run_batch_memory_extraction};
 pub use fact_extraction::{
     dedup_latest_facts, maybe_extract_tool_fact, maybe_extract_user_fact, normalize_whitespace, truncate_for_fact,
 };
@@ -105,6 +107,9 @@ pub struct PersistentMemoryExcerpt {
     pub truncated: bool,
     pub bytes_read: usize,
     pub lines_read: usize,
+    /// Rough token estimate of the returned excerpt (0 when no token budget
+    /// is configured; whitespace-based approximation, not exact tokenization).
+    pub tokens_estimated: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -369,6 +374,18 @@ pub async fn read_persistent_memory_excerpt(
 
     let (contents, truncated, bytes_read, lines_read) =
         truncate_memory_excerpt(&raw, config.startup_line_limit, config.startup_byte_limit);
+    // Apply the token budget last (it sees the already line/byte-truncated
+    // text) so the injected excerpt always fits the configured prompt budget.
+    let (contents, truncated, tokens_estimated) = if config.startup_token_budget > 0 {
+        let trimmed = crate::llm::utils::truncate_to_token_limit(&contents, config.startup_token_budget);
+        let truncated = truncated || trimmed != contents;
+        // Estimate AFTER truncation so the count describes the excerpt that is
+        // actually injected, not the pre-truncation text.
+        let tokens = trimmed.split_whitespace().count();
+        (trimmed, truncated, tokens)
+    } else {
+        (contents, truncated, 0)
+    };
 
     Ok(Some(PersistentMemoryExcerpt {
         status,
@@ -376,6 +393,7 @@ pub async fn read_persistent_memory_excerpt(
         truncated,
         bytes_read,
         lines_read,
+        tokens_estimated,
     }))
 }
 
@@ -391,11 +409,20 @@ pub async fn finalize_persistent_memory(
     runtime_config: &RuntimeAgentConfig,
     vt_cfg: Option<&VTCodeConfig>,
     history: &[Message],
+    session_id: &str,
 ) -> Result<Option<PersistentMemoryWriteReport>> {
     let config = effective_generated_memory_config(vt_cfg);
     if !config.enabled || !config.auto_write {
         return Ok(None);
     }
+
+    // Live producer for the per-session derived memory view: without this,
+    // cross-session queries (`vtcode_memory::query_facts` / `search_memory`)
+    // only ever observe legacy-migrated sessions. Cheap file I/O — run before
+    // the LLM-backed global persist so it completes even when finalization is
+    // cut short.
+    write_session_derived_view(runtime_config.workspace.as_path(), session_id, history);
+
     let cfg_status = config.clone();
     let ws_status = runtime_config.workspace.clone();
     if tokio::task::spawn_blocking(move || persistent_memory_status(&cfg_status, ws_status.as_path()))
@@ -418,6 +445,39 @@ pub async fn finalize_persistent_memory(
         false,
     )
     .await
+}
+
+/// Build the per-session memory view: prefer the compaction envelope's
+/// grounded facts when one was persisted, else re-run the lightweight
+/// extraction over the session history.
+fn session_memory_view(
+    workspace_root: &Path,
+    session_id: &str,
+    history: &[Message],
+) -> vtcode_memory::SessionMemoryView {
+    if let Some(envelope) = crate::compaction::memory_envelope::load_latest_memory_envelope(workspace_root, session_id)
+        && !envelope.grounded_facts.is_empty()
+    {
+        return vtcode_memory::SessionMemoryView {
+            summary: envelope.summary,
+            facts: envelope.grounded_facts.into_iter().map(|record| record.fact).collect(),
+        };
+    }
+    vtcode_memory::SessionMemoryView {
+        summary: String::new(),
+        facts: dedup_latest_facts(history, DEFAULT_FACT_LIMIT)
+            .into_iter()
+            .map(|record| record.fact)
+            .collect(),
+    }
+}
+
+/// Best-effort write of the derived memory view into the session store.
+fn write_session_derived_view(workspace_root: &Path, session_id: &str, history: &[Message]) {
+    let view = session_memory_view(workspace_root, session_id, history);
+    if let Err(error) = vtcode_memory::write_session_memory_view(workspace_root, session_id, &view) {
+        tracing::warn!(target: "vtcode.memory", session_id, error = %error, "failed to persist derived session memory view");
+    }
 }
 
 pub async fn rebuild_persistent_memory_summary(

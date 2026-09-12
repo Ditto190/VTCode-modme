@@ -194,7 +194,7 @@ impl SensitivePath {
     }
 
     /// Check if a given path matches this sensitive path pattern.
-    fn matches(&self, path: &Path) -> bool {
+    pub(crate) fn matches(&self, path: &Path) -> bool {
         let expanded = self.expand_path();
         #[cfg(windows)]
         {
@@ -212,7 +212,7 @@ impl SensitivePath {
 }
 
 #[cfg(not(windows))]
-fn path_starts_with_case_insensitive(path: &Path, prefix: &Path) -> bool {
+pub(crate) fn path_starts_with_case_insensitive(path: &Path, prefix: &Path) -> bool {
     let mut path_components = path.components();
     prefix.components().all(|prefix_component| {
         path_components.next().is_some_and(|path_component| {
@@ -548,6 +548,30 @@ impl Default for SeccompProfile {
 }
 
 impl SeccompProfile {
+    /// Syscalls this profile blocks outright.
+    #[must_use]
+    pub(crate) fn blocked_syscalls(&self) -> &[String] {
+        &self.blocked_syscalls
+    }
+
+    /// Whether new namespace creation is permitted.
+    #[must_use]
+    pub(crate) fn allow_namespaces(&self) -> bool {
+        self.allow_namespaces
+    }
+
+    /// Whether network socket creation is permitted.
+    #[must_use]
+    pub(crate) fn allow_network_sockets(&self) -> bool {
+        self.allow_network_sockets
+    }
+
+    /// Whether the profile is log-only (no filter installed).
+    #[must_use]
+    pub(crate) fn log_only(&self) -> bool {
+        self.log_only
+    }
+
     /// Create a strict profile blocking all dangerous syscalls.
     #[must_use]
     pub fn strict() -> Self {
@@ -965,7 +989,7 @@ impl SandboxPolicy {
 
     /// Get the seccomp profile for this policy (Linux only).
     #[must_use]
-    pub(crate) fn seccomp_profile(&self) -> SeccompProfile {
+    pub fn seccomp_profile(&self) -> SeccompProfile {
         match self {
             Self::ReadOnly { network_access, network_allowlist } => {
                 let mut profile = SeccompProfile::strict();

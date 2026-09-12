@@ -180,6 +180,7 @@ async fn finalize_persistent_memory_ignores_explicit_memory_prompts() {
         &runtime,
         Some(&vt_cfg),
         &[Message::user("remember that I prefer cargo nextest".to_string())],
+        "finalize-test-session",
     )
     .await
     .expect("finalize should skip ignored prompts");
@@ -214,6 +215,7 @@ async fn finalize_persistent_memory_skips_existing_authored_note_duplicates() {
         &[Message::user(
             "Please note that I prefer cargo nextest for test runs".to_string(),
         )],
+        "finalize-duplicate-test-session",
     )
     .await
     .expect("existing duplicate should skip routing");

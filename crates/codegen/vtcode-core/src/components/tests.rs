@@ -385,7 +385,7 @@ async fn handler_facade_executes_via_cgp() {
         approval_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(
             crate::tools::handlers::tool_handler::ApprovalPolicy::default(),
         ),
-        codex_linux_sandbox_exe: None,
+        linux_sandbox_launcher: None,
         sandbox_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(Default::default()),
     });
     let invocation = ToolInvocation {
@@ -416,7 +416,7 @@ async fn handler_facade_denied_by_ctx() {
         approval_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(
             crate::tools::handlers::tool_handler::ApprovalPolicy::default(),
         ),
-        codex_linux_sandbox_exe: None,
+        linux_sandbox_launcher: None,
         sandbox_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(Default::default()),
     });
     let invocation = ToolInvocation {
@@ -456,7 +456,7 @@ async fn same_context_both_facades() {
         approval_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(
             crate::tools::handlers::tool_handler::ApprovalPolicy::default(),
         ),
-        codex_linux_sandbox_exe: None,
+        linux_sandbox_launcher: None,
         sandbox_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(Default::default()),
     });
     let invocation = ToolInvocation {
@@ -712,7 +712,7 @@ async fn bridge_handler_facade() {
         approval_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(
             crate::tools::handlers::tool_handler::ApprovalPolicy::default(),
         ),
-        codex_linux_sandbox_exe: None,
+        linux_sandbox_launcher: None,
         sandbox_policy: crate::tools::handlers::tool_handler::Constrained::allow_any(Default::default()),
     });
     let invocation = ToolInvocation {

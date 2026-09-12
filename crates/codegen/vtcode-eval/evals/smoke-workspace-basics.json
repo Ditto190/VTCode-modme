@@ -1,0 +1,39 @@
+{
+  "attempts": 3,
+  "id": "smoke-workspace-basics",
+  "name": "Smoke: workspace file and git basics",
+  "tasks": [
+    {
+      "category": "capability",
+      "id": "create-exact-file",
+      "name": "Create a file with exact contents",
+      "prompt": "Create a file named greeting.txt in the repository root containing exactly one line with the content: vtcode-eval-smoke-line (no leading or trailing whitespace on the line). Do not create any other files.",
+      "timeout_secs": 300,
+      "verify_commands": ["grep -qx vtcode-eval-smoke-line greeting.txt"]
+    },
+    {
+      "category": "capability",
+      "id": "nested-structure",
+      "name": "Create a nested directory structure",
+      "prompt": "Create the directory structure notes/2026/ containing a file journal.md whose only line is the markdown heading: #Journal (written as one word, no space after the hash). Create no other files outside the notes/ directory.",
+      "timeout_secs": 300,
+      "verify_commands": ["test -d notes/2026", "grep -qx #Journal notes/2026/journal.md"]
+    },
+    {
+      "category": "capability",
+      "id": "exact-json-file",
+      "name": "Create a file with exact structured content",
+      "prompt": "Create a file named data/config.json (create the data directory as needed) containing exactly one line with this JSON object and nothing else: {\"name\":\"vtcode-eval\",\"count\":3}",
+      "timeout_secs": 300,
+      "verify_commands": ["grep -qx {\"name\":\"vtcode-eval\",\"count\":3} data/config.json"]
+    },
+    {
+      "category": "capability",
+      "id": "git-commit",
+      "name": "Stage and commit a change",
+      "prompt": "Append a single line reading: eval-committed to the end of NOTES.md (create the file if it does not exist), then commit the change with git using the exact commit message: eval-add-notes (a single token, no spaces). Verify the commit exists with git log before finishing. Do not push.",
+      "timeout_secs": 300,
+      "verify_commands": ["grep -qx eval-committed NOTES.md", "git log --grep eval-add-notes --oneline --exit-code"]
+    }
+  ]
+}

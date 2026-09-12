@@ -1383,6 +1383,7 @@ impl AgentRunner {
                 &runtime_agent_config,
                 Some(self.config()),
                 &runtime.state.messages,
+                &self.session_id,
             )
             .await
             {

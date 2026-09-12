@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 /// Subcommands for the unified per-session state store.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum SessionStoreCommand {
@@ -34,5 +36,21 @@ pub enum SessionStoreCommand {
         /// Maximum number of facts to return.
         #[arg(long, default_value_t = 100)]
         limit: usize,
+    },
+    /// Create or verify a digest-verified audit pack for a session.
+    ///
+    /// A pack is a SHA-256 manifest of every file in the session store
+    /// (`events.jsonl`, manifest, index, derived views) that a reviewer can
+    /// re-verify to prove the artifacts are unmodified.
+    Pack {
+        /// Session id (directory name under `.vtcode/sessions/`).
+        session: String,
+        /// Write the audit pack here (default: `<session>/derived/audit-pack.json`).
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Verify an existing audit pack against the current session contents
+        /// instead of creating a new one.
+        #[arg(long, value_name = "FILE", conflicts_with = "output")]
+        verify: Option<PathBuf>,
     },
 }

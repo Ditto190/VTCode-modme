@@ -33,6 +33,11 @@ pub struct EvalReport {
 }
 
 impl EvalReport {
+    /// Create a report from generated-at metadata and suite reports.
+    pub fn new(generated_at: impl Into<String>, suites: Vec<SuiteReport>) -> Self {
+        Self { generated_at: generated_at.into(), suites }
+    }
+
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
         out.push_str("# Eval Report\n\n");

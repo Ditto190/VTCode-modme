@@ -46,6 +46,7 @@ pub enum ExecCommandKind {
     Eval {
         suite_path: PathBuf,
         output_path: Option<PathBuf>,
+        format: vtcode_core::cli::args::EvalOutputFormat,
     },
 }
 
@@ -71,6 +72,7 @@ pub(crate) fn resolve_exec_command(command: Option<ExecSubcommand>, prompt: Opti
         Some(ExecSubcommand::Eval(eval_args)) => Ok(ExecCommandKind::Eval {
             suite_path: PathBuf::from(&eval_args.suite),
             output_path: eval_args.output.map(PathBuf::from),
+            format: eval_args.format,
         }),
         None => Ok(ExecCommandKind::Run { prompt_arg: prompt }),
     }

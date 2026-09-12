@@ -187,6 +187,16 @@ fn bootstrap_main() -> Result<BootstrapOutcome> {
         return Ok(BootstrapOutcome::ExitEarly);
     }
 
+    // The hidden `sandbox-exec` subcommand turns the binary into the Linux
+    // sandbox helper. It must short-circuit before any startup machinery so
+    // sandboxed spawns stay fast and independent of config loading.
+    #[cfg(target_os = "linux")]
+    {
+        if crate::cli::sandbox_exec::try_run_sandbox_exec_mode() {
+            return Ok(BootstrapOutcome::ExitEarly);
+        }
+    }
+
     let cli_start = std::time::Instant::now();
     let cli_phase = vtcode_commons::startup_trace::phase_started();
     let matches = match build_augmented_cli_command().try_get_matches() {

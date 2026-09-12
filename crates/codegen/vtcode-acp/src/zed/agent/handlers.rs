@@ -49,7 +49,7 @@ use tracing::warn;
 use vtcode_core::config::api_keys::{ApiKeySources, get_api_key_with_mode};
 use vtcode_core::llm::factory::ProviderConfig;
 use vtcode_core::llm::factory::create_provider_with_config;
-use vtcode_core::llm::provider::{LLMRequest, LLMStreamEvent, Message};
+use vtcode_core::llm::provider::{LLMProvider, LLMRequest, LLMStreamEvent, Message};
 
 /// Register every SACP `AgentToClient` request/notification handler that the
 /// vtcode bridge implements. The agent must be `Send + Sync + 'static` so
@@ -333,28 +333,7 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
         (data.provider.clone(), data.model.clone(), data.reasoning_effort)
     };
 
-    let session_api_key = resolve_api_key_for_provider(&agent, &session_provider_name);
-    let provider = create_provider_with_config(
-        &session_provider_name,
-        ProviderConfig {
-            api_key: Some(session_api_key),
-            openai_chatgpt_auth: if session_provider_name.eq_ignore_ascii_case("openai") {
-                agent.config.openai_chatgpt_auth.clone()
-            } else {
-                None
-            },
-            copilot_auth: None,
-            base_url: None,
-            model: Some(session_model.clone()),
-            prompt_cache: Some(agent.config.prompt_cache.clone()),
-            timeouts: None,
-            openai: None,
-            anthropic: None,
-            model_behavior: agent.config.model_behavior.clone(),
-            workspace_root: Some(agent.config.workspace.clone()),
-        },
-    )
-    .map_err(|err| SdkError::internal_error().data(err.to_string()))?;
+    let provider = build_session_provider(&agent, &session_provider_name, &session_model)?;
 
     let supports_streaming = provider.supports_streaming();
     let reasoning_effort = if session_reasoning_effort == vtcode_core::config::types::ReasoningEffortLevel::None {
@@ -626,10 +605,38 @@ async fn run_prompt(agent: Arc<ZedAgent>, args: PromptRequest) -> Result<PromptR
     Ok(PromptResponse::new(stop_reason))
 }
 
-fn resolve_api_key_for_provider(agent: &ZedAgent, provider: &str) -> String {
-    if provider.eq_ignore_ascii_case(&agent.config.provider) && !agent.config.api_key.is_empty() {
-        return agent.config.api_key.clone();
-    }
-
-    get_api_key_with_mode(provider, &ApiKeySources::default(), agent.credential_storage_mode).unwrap_or_default()
+/// Build the LLM provider for a session's provider/model route. Shared by the
+/// prompt handler and the `session/compact` lifecycle extension.
+pub(super) fn build_session_provider(
+    agent: &ZedAgent,
+    provider_name: &str,
+    model: &str,
+) -> Result<Box<dyn LLMProvider>, SdkError> {
+    let api_key = if provider_name.eq_ignore_ascii_case(&agent.config.provider) && !agent.config.api_key.is_empty() {
+        agent.config.api_key.clone()
+    } else {
+        get_api_key_with_mode(provider_name, &ApiKeySources::default(), agent.credential_storage_mode)
+            .unwrap_or_default()
+    };
+    create_provider_with_config(
+        provider_name,
+        ProviderConfig {
+            api_key: Some(api_key),
+            openai_chatgpt_auth: if provider_name.eq_ignore_ascii_case("openai") {
+                agent.config.openai_chatgpt_auth.clone()
+            } else {
+                None
+            },
+            copilot_auth: None,
+            base_url: None,
+            model: Some(model.to_string()),
+            prompt_cache: Some(agent.config.prompt_cache.clone()),
+            timeouts: None,
+            openai: None,
+            anthropic: None,
+            model_behavior: agent.config.model_behavior.clone(),
+            workspace_root: Some(agent.config.workspace.clone()),
+        },
+    )
+    .map_err(|err| SdkError::internal_error().data(err.to_string()))
 }

@@ -250,7 +250,7 @@ pub fn wrap_stdio_command(
         .filter_map(|(k, v)| v.map(|val| (k.to_owned(), val.to_owned())))
         .collect();
 
-    let sandbox_executable = std::env::var_os("VTCODE_LINUX_SANDBOX_EXECUTABLE").map(PathBuf::from);
+    let linux_launcher = crate::sandboxing::LinuxSandboxLauncher::resolve();
     let spec = crate::sandboxing::CommandSpec::new(original_program)
         .with_args(original_args.into_iter().map(|arg| arg.to_string_lossy().into_owned()))
         .with_cwd(current_dir.clone())
@@ -260,7 +260,7 @@ pub fn wrap_stdio_command(
                 .collect(),
         );
     let exec_env = crate::sandboxing::SandboxManager::new()
-        .transform(spec, sandbox_policy, &current_dir, sandbox_executable.as_deref())
+        .transform(spec, sandbox_policy, &current_dir, linux_launcher.as_ref())
         .context("transform MCP stdio command with the sandbox policy")?;
 
     let mut new_command = std::process::Command::new(exec_env.program);

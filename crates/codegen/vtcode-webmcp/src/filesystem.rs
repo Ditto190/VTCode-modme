@@ -19,7 +19,8 @@ use uuid::Uuid;
 use vtcode_commons::diff::{DiffHunk, DiffLineKind, DiffOptions, compute_diff};
 use vtcode_commons::exclusions::{SENSITIVE_FILES, is_sensitive_file};
 use vtcode_safety::sandboxing::{
-    CommandSpec, ExecExpiration, SandboxManager, SandboxPolicy, SensitivePath, default_sensitive_paths,
+    CommandSpec, ExecExpiration, LinuxSandboxLauncher, SandboxManager, SandboxPolicy, SensitivePath,
+    default_sensitive_paths,
 };
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -564,11 +565,11 @@ impl RuntimeAdapter for FilesystemWorkspace {
             .with_cwd(self.root.as_ref().to_path_buf())
             .with_env(environment)
             .with_expiration(ExecExpiration::Timeout(CHECK_TIMEOUT));
-        let sandbox_executable = std::env::var_os("VTCODE_LINUX_SANDBOX_EXECUTABLE").map(PathBuf::from);
+        let linux_launcher = LinuxSandboxLauncher::resolve();
         let check_policy = check_sandbox_policy(self.root.as_ref())
             .map_err(|error| WebmcpError::Adapter(format!("failed to build WebMCP check sandbox: {error}")))?;
         let exec_env = SandboxManager::new()
-            .transform(spec, &check_policy, self.root.as_ref(), sandbox_executable.as_deref())
+            .transform(spec, &check_policy, self.root.as_ref(), linux_launcher.as_ref())
             .map_err(|error| WebmcpError::Adapter(format!("failed to sandbox WebMCP check: {error}")))?;
         let mut child = Command::new(exec_env.program)
             .args(exec_env.args)

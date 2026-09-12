@@ -165,8 +165,8 @@ pub(super) async fn handle_exec_command_impl(
     options: ExecCommandOptions,
 ) -> Result<()> {
     // Handle eval command separately — it runs multiple tasks, not a single one.
-    if let ExecCommandKind::Eval { suite_path, output_path } = &options.command {
-        return super::eval::handle_eval_command(config, vt_cfg, suite_path, output_path.as_deref()).await;
+    if let ExecCommandKind::Eval { suite_path, output_path, format } = &options.command {
+        return super::eval::handle_eval_command(config, vt_cfg, suite_path, output_path.as_deref(), *format).await;
     }
 
     if config.provider.eq_ignore_ascii_case(CODEX_PROVIDER) {

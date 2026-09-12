@@ -144,6 +144,8 @@ controls for the extraction and injection pipeline:
 | `use_memories` | `bool` | `true` | Whether existing memories are injected into future sessions. |
 | `extract_model` | `string?` | agent model | Overrides the model used for per-thread memory extraction. |
 | `consolidation_model` | `string?` | agent model | Overrides the model used for global memory consolidation. |
+| `batch_sessions` | `usize` | `50` | Recent sessions scanned by batch memory extraction. |
+| `batch_concurrency` | `usize` | `8` | Concurrent per-session reads during batch extraction (clamped to 1–16). |
 
 ### Startup behavior
 
@@ -159,13 +161,27 @@ The startup scan is controlled by:
 
 - `agent.persistent_memory.startup_line_limit`
 - `agent.persistent_memory.startup_byte_limit`
+- `agent.persistent_memory.startup_token_budget` (applied last; `0` disables the token cap)
 
 ### Write flow
 
 When `agent.persistent_memory.auto_write = true`, VT Code writes memory in two phases:
 
-1. Session finalization writes one rollout summary into `rollout_summaries/`.
+1. Session finalization writes one rollout summary into `rollout_summaries/`, and persists the
+   session's grounded facts into the canonical session store (`<session>/derived/memory.json`),
+   which is what cross-session fact queries and batch extraction read. Finalization runs as a
+   spawned task: VT Code waits up to 5 seconds for the kickoff, then lets it finish in the
+   background while the UI finalizes (the global memory lock serializes concurrent writers).
 2. Consolidation merges pending rollout summaries into `preferences.md`, `repository-facts.md`, `MEMORY.md`, and `memory_summary.md`.
+
+### Batch extraction
+
+The `/memory` palette includes **Batch Extract Memory From Past Sessions**, which reads the
+grounded-fact views of the most recent `batch_sessions` sessions (concurrent reads bounded by
+`batch_concurrency`), dedupes them, and consolidates the survivors into the global memory files
+under the same memory lock. Still-active sessions are skipped so partial snapshots are never
+ingested. This is the equivalent of Codex's multi-thread memory sweep; run it after enabling
+memory on a workspace with existing session history.
 
 VT Code now treats LLM assistance as a hard requirement for memory mutation:
 

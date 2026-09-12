@@ -154,8 +154,12 @@ process-level privileges.
 
 Platform behavior is explicit:
 
-- Linux uses the configured sandbox helper when one is available; a restrictive
-  policy fails closed if the helper cannot be applied.
+- Linux restrictive policies are enforced by the built-in `vtcode
+  sandbox-exec` launcher (Landlock filesystem rules plus seccomp syscall
+  filtering, kernel 5.13+). `VTCODE_LINUX_SANDBOX_EXECUTABLE` may override the
+  helper with an external binary speaking the same protocol. A restrictive
+  policy fails closed if Landlock is unavailable or the restrictions cannot be
+  applied.
 - macOS preserves full-network and blocked-network modes. Hostname allowlists
   are rejected unless exact enforcement is available; Seatbelt profiles are
   not treated as a reliable third-party domain-filtering contract.

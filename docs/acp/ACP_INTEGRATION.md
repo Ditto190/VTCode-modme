@@ -346,6 +346,30 @@ Health check endpoint.
 }
 ```
 
+## VT Code Lifecycle Extensions
+
+Beyond the standard ACP methods (`session/new`, `session/load`, `session/prompt`,
+`session/cancel`), VT Code serves three **extension methods** on the same ACP
+connection for programmatic hosts that need the session-lifecycle operations
+Codex's proprietary app-server exposes:
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `session/fork` | `{session_id}` | `{session_id}` — new independent session with copied history |
+| `session/rollback` | `{session_id, keep_last_turns}` | `{remaining_messages}` — drops trailing user turns (`0` clears) |
+| `session/compact` | `{session_id}` | `{original_messages, compacted_messages}` — LLM summarization in place |
+
+Standard ACP clients (Zed) are unaffected — they never call the extensions.
+The machine-readable wire contract, including JSON Schemas for every request
+and response, is exportable:
+
+```sh
+vtcode schema acp
+```
+
+This is VT Code's answer to Codex's `thread/fork`/`thread/compact` RPCs: the
+same capability, on an open protocol, without a parallel app-server surface.
+
 ## Configuration
 
 Agent registry can be configured via `vtcode.toml`:

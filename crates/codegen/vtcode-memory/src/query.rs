@@ -362,6 +362,92 @@ fn tokenize(text: &str) -> Vec<String> {
     tokens
 }
 
+/// Minimal per-session memory view persisted into `derived/memory.json`.
+///
+/// The serialized shape is compatible with the legacy
+/// `SessionMemoryEnvelope` layout (`grounded_facts: [{fact: …}]`) so
+/// `query_facts`, `search_memory`, and the legacy migration importer all read
+/// the same file format.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SessionMemoryView {
+    /// Short session summary (may be empty when unknown).
+    pub summary: String,
+    /// Grounded facts extracted from the session, in extraction order.
+    pub facts: Vec<String>,
+}
+
+/// Persist a session's derived memory view to
+/// `<session>/derived/memory.json` (atomic, private permissions).
+///
+/// This is the live producer for the per-session memory file: cross-session
+/// queries (`query_facts`, `search_memory`) and the batch memory pipeline
+/// observe sessions through it. Fails when the session directory cannot be
+/// created or the file cannot be written; it never mutates `events.jsonl`.
+pub fn write_session_memory_view(
+    workspace: &Path,
+    session_id: &str,
+    view: &SessionMemoryView,
+) -> Result<(), SessionStoreError> {
+    let dir = crate::session_dir(workspace, session_id);
+    crate::ensure_private_directory(&dir)?;
+    crate::ensure_private_directory(&dir.join(crate::DERIVED_DIR))?;
+
+    let envelope = serde_json::json!({
+        "session_id": session_id,
+        "schema_version": 3,
+        "summary": view.summary,
+        "grounded_facts": view
+            .facts
+            .iter()
+            .map(|fact| serde_json::json!({ "fact": fact }))
+            .collect::<Vec<_>>(),
+        "touched_files": [],
+        "generated_at": Utc::now().to_rfc3339(),
+    });
+    let bytes = serde_json::to_vec_pretty(&envelope)
+        .map_err(|error| SessionStoreError::io(dir.clone(), std::io::Error::other(error)))?;
+    let dest = dir.join(crate::DERIVED_DIR).join("memory.json");
+    vtcode_commons::VtCodePaths::write_private_file_atomic(&dest, &bytes)
+        .map_err(|error| SessionStoreError::io(dest, std::io::Error::other(error)))?;
+    invalidate_manifest_cache(&dir.join("manifest.json"));
+    Ok(())
+}
+
+/// Read one session's grounded facts from its derived memory view.
+///
+/// Returns an empty list when the view has not been written yet; unlike
+/// [`query_facts`] this never scans sibling sessions.
+pub fn session_memory_facts(
+    workspace: &Path,
+    session_id: &str,
+    limit: usize,
+) -> Result<Vec<FactRecord>, SessionStoreError> {
+    let memory = crate::session_dir(workspace, session_id)
+        .join(crate::DERIVED_DIR)
+        .join("memory.json");
+    let Ok(bytes) = std::fs::read(&memory) else {
+        return Ok(Vec::new());
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Ok(Vec::new());
+    };
+    let mut facts = Vec::new();
+    if let Some(arr) = value.get("grounded_facts").and_then(|v| v.as_array()) {
+        for item in arr {
+            if let Some(fact) = item.get("fact").and_then(|f| f.as_str()) {
+                facts.push(FactRecord {
+                    fact: fact.to_string(),
+                    session_id: session_id.to_string(),
+                });
+                if facts.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(facts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,5 +656,50 @@ mod tests {
         replaced["updated_at"] = serde_json::json!("2099-01-01T00:00:00Z");
         std::fs::write(&path, serde_json::to_vec(&replaced).expect("serialize")).expect("replace");
         assert_eq!(recent_sessions(dir.path(), 1)[0].updated_at, "2099-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn session_memory_view_round_trips_through_queries() {
+        let dir = TempDir::new().expect("tempdir");
+        let view = SessionMemoryView {
+            summary: "Implemented the frobnicator".to_string(),
+            facts: vec![
+                "Uses tokio for async runtime".to_string(),
+                "Prefers anyhow errors".to_string(),
+            ],
+        };
+        write_session_memory_view(dir.path(), "view-session", &view).expect("write view");
+
+        let facts = session_memory_facts(dir.path(), "view-session", 10).expect("read facts");
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0].session_id, "view-session");
+        assert_eq!(facts[0].fact, "Uses tokio for async runtime");
+
+        let all = query_facts(dir.path(), 10).expect("query facts");
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().all(|record| record.session_id == "view-session"));
+
+        let results = search_memory(dir.path(), "tokio", 5, 0.0).expect("search");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].snippet.contains("tokio"));
+    }
+
+    #[test]
+    fn session_memory_facts_respects_limit_and_missing_files() {
+        let dir = TempDir::new().expect("tempdir");
+        assert!(
+            session_memory_facts(dir.path(), "missing-session", 5)
+                .expect("missing")
+                .is_empty()
+        );
+
+        let view = SessionMemoryView {
+            summary: String::new(),
+            facts: (0..5).map(|index| format!("fact-{index}")).collect(),
+        };
+        write_session_memory_view(dir.path(), "limited", &view).expect("write");
+        let limited = session_memory_facts(dir.path(), "limited", 3).expect("read");
+        assert_eq!(limited.len(), 3);
+        assert_eq!(limited[2].fact, "fact-2");
     }
 }

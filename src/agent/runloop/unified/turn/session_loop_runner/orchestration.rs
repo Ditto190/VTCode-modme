@@ -1610,25 +1610,35 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         }
         agent_touched_paths.extend(context_manager.tracked_instruction_activity_paths());
         // Skip persistent memory on interrupt-exits (it makes LLM API calls which
-        // delay shutdown significantly). For normal exits, cap it with a timeout.
+        // delay shutdown significantly). For normal exits, wait up to 5 s for
+        // the kickoff; the spawned task is *not* cancelled on timeout — it
+        // detaches and keeps running (coordinated by the memory lock) while
+        // the TUI finalizes, instead of being dropped mid-flight.
         if !matches!(session_end_reason, SessionEndReason::Exit) {
-            match timeout(
-                Duration::from_secs(5),
+            let finalize_config = config.clone();
+            let finalize_vt_cfg = vt_cfg.clone();
+            let finalize_messages = runtime.state.messages.clone();
+            let finalize_session_id = turn_run_id.0.clone();
+            let mut finalize_task = tokio::spawn(async move {
                 vtcode_core::persistent_memory::finalize_persistent_memory(
-                    &config,
-                    vt_cfg.as_ref(),
-                    &runtime.state.messages,
-                ),
-            )
-            .await
-            {
-                Ok(Err(err)) => {
+                    &finalize_config,
+                    finalize_vt_cfg.as_ref(),
+                    &finalize_messages,
+                    &finalize_session_id,
+                )
+                .await
+            });
+            match timeout(Duration::from_secs(5), &mut finalize_task).await {
+                Ok(Ok(Ok(_))) => {}
+                Ok(Ok(Err(err))) => {
                     tracing::warn!("Failed to update persistent memory at session finalization: {}", err);
                 }
-                Err(_elapsed) => {
-                    tracing::warn!("Persistent memory finalization timed out, skipping");
+                Ok(Err(join_error)) => {
+                    tracing::warn!("Persistent memory finalization task failed: {}", join_error);
                 }
-                Ok(Ok(_)) => {}
+                Err(_elapsed) => {
+                    tracing::info!("Persistent memory finalization continues in the background");
+                }
             }
         }
 

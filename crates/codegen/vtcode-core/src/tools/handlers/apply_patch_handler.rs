@@ -487,7 +487,7 @@ mod tests {
             sub_id: None,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             approval_policy: Constrained::default(),
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: None,
             sandbox_policy: Constrained::default(),
         });
         let tool_ctx = ToolCtx {
@@ -501,7 +501,7 @@ mod tests {
             sandbox: SandboxType::None,
             policy: &policy,
             sandbox_cwd: workspace.path(),
-            codex_linux_sandbox_exe: None,
+            linux_sandbox_launcher: None,
         };
         let request = ApplyPatchRequest {
             patch: "*** Begin Patch\n*** Add File: created.txt\n+must not exist\n*** End Patch\n".to_string(),

@@ -5,6 +5,7 @@ use crate::register_acp_connection;
 use crate::workspace::{DefaultWorkspaceTrustSynchronizer, WorkspaceTrustSyncOutcome, WorkspaceTrustSynchronizer};
 use crate::zed::agent::ZedAgent;
 use crate::zed::agent::handlers::install_handlers;
+use crate::zed::agent::lifecycle::install_lifecycle_handlers;
 use crate::zed::connection::ConnectionHandle;
 use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use anyhow::{Context, Result};
@@ -85,8 +86,13 @@ pub async fn run_acp_agent(config: &CoreAgentConfig, vt_cfg: &VTCodeConfig, titl
             let agent: Arc<ZedAgent> = Arc::new(agent);
 
             // Build the SACP agent-side connection, then attach the
-            // vtcode request/notification handlers around `ZedAgent`.
-            let builder = install_handlers(Agent.builder().name("vtcode"), Arc::clone(&agent));
+            // vtcode request/notification handlers around `ZedAgent`,
+            // plus the VT Code lifecycle extensions (session/fork,
+            // session/rollback, session/compact).
+            let builder = install_lifecycle_handlers(
+                install_handlers(Agent.builder().name("vtcode"), Arc::clone(&agent)),
+                Arc::clone(&agent),
+            );
 
             // The SACP dispatch loop never exposes `ConnectionTo` outside
             // of handler closures, so we use `connect_with` to capture

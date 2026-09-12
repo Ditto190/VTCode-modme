@@ -34,7 +34,7 @@ pub use config::{
     ToolConfig,
 };
 pub use dependencies::{DependenciesSubcommand, ManagedDependency};
-pub use exec::{ExecEvalArgs, ExecResumeArgs, ExecSubcommand};
+pub use exec::{EvalOutputFormat, ExecEvalArgs, ExecResumeArgs, ExecSubcommand};
 pub use models::ModelCommands;
 pub use plugins::PluginsSubcommand;
 pub use pods::PodsCommands;
@@ -375,6 +375,16 @@ pub enum Commands {
         )]
         prompt: Option<String>,
     },
+    /// Run an evaluation suite (shorthand for `vtcode exec eval`)
+    ///
+    /// Executes each task in the suite autonomously in an isolated worktree,
+    /// verifies the outcome with environment probes, and aggregates pass@k /
+    /// pass^k metrics into a markdown or JSON report.
+    ///
+    /// Examples:
+    ///   vtcode eval --suite suite.json
+    ///   vtcode eval --suite suite.json --format json --output report.json
+    Eval(ExecEvalArgs),
     /// Manage durable scheduled tasks
     ///
     /// Create, list, and delete scheduled tasks that run on a recurring or

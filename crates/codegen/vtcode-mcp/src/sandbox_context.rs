@@ -5,14 +5,14 @@ use hashbrown::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use vtcode_safety::sandboxing::{CommandSpec, SandboxManager, SandboxPolicy};
+use vtcode_safety::sandboxing::{CommandSpec, LinuxSandboxLauncher, SandboxManager, SandboxPolicy};
 
 /// Sandbox policy and launch context inherited by MCP stdio providers.
 #[derive(Debug, Clone)]
 pub struct McpSandboxContext {
     policy: SandboxPolicy,
     sandbox_cwd: PathBuf,
-    linux_sandbox_executable: Option<PathBuf>,
+    linux_sandbox_executable: Option<LinuxSandboxLauncher>,
 }
 
 impl McpSandboxContext {
@@ -22,14 +22,14 @@ impl McpSandboxContext {
         Self {
             policy,
             sandbox_cwd: sandbox_cwd.into(),
-            linux_sandbox_executable: std::env::var_os("VTCODE_LINUX_SANDBOX_EXECUTABLE").map(PathBuf::from),
+            linux_sandbox_executable: LinuxSandboxLauncher::resolve(),
         }
     }
 
     /// Override the Linux helper path, primarily for embedding applications and tests.
     #[must_use]
     pub fn with_linux_sandbox_executable(mut self, executable: impl Into<PathBuf>) -> Self {
-        self.linux_sandbox_executable = Some(executable.into());
+        self.linux_sandbox_executable = Some(LinuxSandboxLauncher::external(executable.into()));
         self
     }
 
@@ -60,7 +60,7 @@ impl McpSandboxContext {
                     .collect(),
             );
         let exec_env = SandboxManager::new()
-            .transform(spec, &self.policy, &cwd, self.linux_sandbox_executable.as_deref())
+            .transform(spec, &self.policy, &cwd, self.linux_sandbox_executable.as_ref())
             .map_err(|error| anyhow!("failed to apply MCP sandbox: {error}"))?;
 
         Ok(SandboxedStdioCommand {
