@@ -448,8 +448,9 @@ impl Session {
                 .first_mut()
                 .filter(|span| AsRef::<str>::as_ref(&span.content) == ui::INLINE_AGENT_QUOTE_PREFIX)
         {
-            let replacement = " ".repeat(UnicodeWidthStr::width(ui::INLINE_AGENT_QUOTE_PREFIX));
-            prefix_span.content = replacement.into();
+            // Zero-indent: a suppressed bullet leaves no indent so the first
+            // row starts at column 0 like every continuation row.
+            prefix_span.content = String::new().into();
         }
 
         let first_line_prefix_text = {
@@ -458,20 +459,19 @@ impl Session {
             text
         };
         let first_line_prefix_width = UnicodeWidthStr::width(first_line_prefix_text.as_str());
-        let indent = " ".repeat(prefix_width);
         let mut lines = Vec::with_capacity(wrapped.len());
         for (index, (mut line, mut line_links)) in wrapped.into_iter().zip(explicit_links).enumerate() {
             let mut spans = Vec::new();
-            let (prefix_len, prefix_width) = if index == 0 {
+            // Continuation rows start at column 0: agent, tool, and PTY rows
+            // share one left edge and are distinguished by bullet color only.
+            let (prefix_len, prefix_col_width) = if index == 0 {
                 (first_line_prefix_text.len(), first_line_prefix_width)
             } else {
-                (indent.len(), prefix_width)
+                (0, 0)
             };
             if index == 0 {
                 spans.append(&mut prefix_spans);
                 spans.push(Span::raw(left_padding));
-            } else if !indent.is_empty() {
-                spans.push(Span::raw(indent.clone()));
             }
             spans.append(&mut line.spans);
             if spans.is_empty() {
@@ -481,7 +481,7 @@ impl Session {
             for link in &mut line_links {
                 link.start += prefix_len;
                 link.end += prefix_len;
-                link.start_col += prefix_width;
+                link.start_col += prefix_col_width;
             }
 
             lines.push(TranscriptLine {

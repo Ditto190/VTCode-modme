@@ -26,7 +26,7 @@ pub struct ToolJustification {
 
 -   `new()` - Create justification with tool name and reason
 -   `with_outcome()` - Add expected outcome description
--   `format_for_dialog()` - Format for TUI display with text wrapping
+-   `format_for_dialog()` - Verbose multi-line format for logs/tests (78-char wrap with `Agent Reasoning:` / `Expected Outcome:` / `Risk Level:` headers)
 
 #### 2. **JustificationManager** (`crates/codegen/vtcode-core/src/tools/registry/justification.rs`)
 
@@ -110,8 +110,11 @@ pub struct JustificationExtractor;
    b. Check approval patterns (ApprovalRecorder)
       - If high-approval-rate → auto-approve
       - If has history → show suggestion in dialog
-   c. Format justification for TUI display
-      - format_for_dialog() wraps text to 78 chars
+    c. Format justification for TUI display
+       - Approval dialog uses compact single-row fields (`Reason:` / `Expected:` / `Risk:`),
+         first logical line only + middle-truncation (160 chars, 32 for risk), via
+         `compact_justification_lines()` in `permission_prompt.rs` so the HITL popup stays scannable.
+         `format_for_dialog()` remains the verbose log/test format.
    d. Show approval dialog with:
       - Tool name and arguments
       - Agent reasoning (if available)
@@ -162,7 +165,8 @@ Stored in the user cache directory's approval-pattern file:
 
 -   `prompt_tool_permission()` - Extended with optional justification parameter
 -   `ensure_tool_permission()` - Routes justification to approval dialog
--   Dialog displays justification via `format_for_dialog()`
+-   Dialog displays the compact justification (`Reason:` / `Expected:` / `Risk:` single rows);
+    the verbose `format_for_dialog()` output remains for logs/tests
 
 ### 2. Session Management (`src/agent/runloop/unified/turn/session.rs`)
 
@@ -195,23 +199,17 @@ User requests: "Run the build and check for errors"
 3. Justification extraction:
    - Decision ledger contains: "Need to verify code compiles before refactoring"
    - Extracted reason: "Need to verify code compiles before refactoring"
-4. Approval dialog shows:
+4. Approval dialog shows (compact single-row fields):
 
     Tool Permission Required
     Tool: exec_command
-    Action: Execute build
-      command: cargo build
-
-    Agent
-      Need to verify code compiles before
-      refactoring
-
-    Expected Outcome:
-      Will capture command output for analysis
-      and decision-making.
-
-    Risk Level: High
-    Approved 3 times previously (100%)
+    ## Command
+    `cargo build`
+    ## Intent
+    Reason: Need to verify code compiles before refactoring
+    Expected: Will capture command output for analysis
+    Risk: High
+    Suggestion: Approved 3 times previously (100%)
 
      Approve Once
      Allow for Session

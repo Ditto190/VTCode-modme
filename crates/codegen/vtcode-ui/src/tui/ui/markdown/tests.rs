@@ -656,12 +656,94 @@ fn markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
 }
 
 #[test]
+fn markdown_diff_body_uses_file_language_syntax_highlight() {
+    let markdown = "```diff\ndiff --git a/main.rs b/main.rs\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}\n```\n";
+    let lines = render_markdown(markdown);
+
+    let find_body = |needle: &str| {
+        lines
+            .iter()
+            .find(|line| {
+                line.segments
+                    .iter()
+                    .map(|seg| seg.text.as_str())
+                    .collect::<String>()
+                    .contains(needle)
+            })
+            .unwrap_or_else(|| panic!("{needle} line exists"))
+    };
+    let added_line = find_body("fn new()");
+    let removed_line = find_body("fn old()");
+
+    // Marker + highlighted body: more than the two solid spans.
+    assert!(added_line.segments.len() > 2, "added body should be syntax highlighted");
+    assert!(removed_line.segments.len() > 2, "removed body should be syntax highlighted");
+    // Marker keeps the diff sign style; body tokens carry distinct syntax colors.
+    assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
+    // Forced diff tint covers every body token (no syntect background holes).
+    for segment in added_line.segments.iter().skip(1) {
+        assert_eq!(segment.style.get_bg_color(), added_line.line_background);
+    }
+    for segment in removed_line.segments.iter().skip(1) {
+        assert_eq!(segment.style.get_bg_color(), removed_line.line_background);
+    }
+}
+
+#[test]
+fn markdown_diff_body_without_path_stays_solid() {
+    let markdown = "```diff\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}\n```\n";
+    let lines = render_markdown(markdown);
+
+    let added_line = lines
+        .iter()
+        .find(|line| {
+            line.segments
+                .iter()
+                .map(|seg| seg.text.as_str())
+                .collect::<String>()
+                .contains("fn new()")
+        })
+        .expect("added line exists");
+    // No file header means no language hint: marker + single solid body span.
+    assert_eq!(added_line.segments.len(), 2);
+}
+
+#[test]
+fn markdown_diff_prose_file_body_stays_solid() {
+    let markdown = "```diff\ndiff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old **bold** text\n+new **bold** text\n```\n";
+    let lines = render_markdown(markdown);
+
+    let added_line = lines
+        .iter()
+        .find(|line| {
+            line.segments
+                .iter()
+                .map(|seg| seg.text.as_str())
+                .collect::<String>()
+                .contains("new **bold** text")
+        })
+        .expect("added line exists");
+    assert_eq!(added_line.segments.len(), 2, "prose body must stay solid");
+    assert!(added_line.line_background.is_some());
+}
+
+#[test]
 fn test_diff_prose_content_skips_syntax_highlighting() {
     let fallback = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightGreen)));
     for hint in [Some("md"), Some("markdown"), Some("txt")] {
         let segments = render_diff_content_segments("- **Agent-first**: prose `code`", hint, fallback);
         assert_eq!(segments.len(), 1, "prose hint {hint:?} must stay solid");
         assert_eq!(segments[0].text, "- **Agent-first**: prose `code`");
+        assert_eq!(segments[0].style, fallback);
+    }
+}
+
+#[test]
+fn test_diff_unknown_language_stays_solid_fallback() {
+    let fallback = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightGreen)));
+    for hint in [None, Some(""), Some("xyzunknown123")] {
+        let segments = render_diff_content_segments("fn new() {}", hint, fallback);
+        assert_eq!(segments.len(), 1, "unknown hint {hint:?} must stay solid");
         assert_eq!(segments[0].style, fallback);
     }
 }

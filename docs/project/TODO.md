@@ -196,24 +196,6 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 
 ---
 
-Improve HITL confirmation popup UI/UX: currently it being too clutter and noisy '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.41.14.png'. Highlight the command with code syntax highlight and provide a clear separation between different sections of the popup.
-
----
-
-find a way to visual agent's message (the one being pushed indentation much larger than other cells) '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.39.28.png'. maybe find away to unify all of the indentation styles across different message types. or use a different visual cue to distinguish agent messages from user messages and tool call outputs.
-
----
-
-improve diff view with full-width background color and better visiual diff elements for easier comparison and readability. dim gutter, visual diff head with proper red/green for
-example: "
---- a/README.md
-+++ b/README.md
-@@ -100 +100 @@"
-
-current status need improvement: '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.48.06.png'
-
----
-
 implement enter to steer the agent loop when press "enter". current behavior is only append to queue. find a way or new shortcut to steer the new message after next toolcall.
 
 ---

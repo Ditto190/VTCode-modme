@@ -993,8 +993,10 @@ pub fn modal_list_item_lines(
         }
     };
     if item.is_divider {
+        // Untitled dividers span the list content width so option groups
+        // (approve vs deny) read as clearly separated sections.
         let divider = if item.title.is_empty() {
-            ui::INLINE_BLOCK_HORIZONTAL.repeat(8)
+            ui::INLINE_BLOCK_HORIZONTAL.repeat(content_width.max(8))
         } else {
             item.title.clone()
         };

@@ -84,12 +84,22 @@ pub(crate) fn agent_prefix_spans(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::with_capacity(3);
     let prefix_style = ratatui_style_from_inline(&prefix_style_fn(line), theme.foreground);
+    // The bullet is the zero-indent visual cue that distinguishes agent rows
+    // from tool/PTY rows sharing the same left edge: primary accent + bold.
+    let bullet_style = ratatui_style_from_inline(
+        &InlineTextStyle {
+            color: theme.primary.or(theme.foreground),
+            ..InlineTextStyle::default()
+        }
+        .bold(),
+        theme.foreground,
+    );
     let has_label = labels.agent.as_ref().is_some_and(|label| !label.is_empty());
     let prefix_has_trailing_space = ui::INLINE_AGENT_QUOTE_PREFIX
         .chars()
         .last()
         .is_some_and(|ch| ch.is_whitespace());
-    spans.push(Span::styled(ui::INLINE_AGENT_QUOTE_PREFIX, prefix_style));
+    spans.push(Span::styled(ui::INLINE_AGENT_QUOTE_PREFIX, bullet_style));
     if has_label && !prefix_has_trailing_space {
         spans.push(Span::styled(" ", prefix_style));
     }

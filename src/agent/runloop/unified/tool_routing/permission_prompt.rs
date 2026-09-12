@@ -316,11 +316,69 @@ fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Op
     (!command.is_empty()).then(|| command.lines().map(str::to_string).collect())
 }
 
-fn push_context_line(description_lines: &mut Vec<String>, label: &str, value: &str) {
-    let value = value.trim();
-    if !value.is_empty() {
-        description_lines.push(format!("{label}: {value}"));
+/// Max logical rows shown for the approved command block; longer commands
+/// collapse behind an overflow count so the popup fits its viewport budget.
+const MAX_COMMAND_PREVIEW_LINES: usize = 8;
+
+/// Format command lines for the approval dialog, collapsing long commands to
+/// head + tail so a dangerous suffix can't hide behind the overflow.
+fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
+    if command_lines.len() <= MAX_COMMAND_PREVIEW_LINES {
+        return command_lines.into_iter().map(|line| format!("`{line}`")).collect();
     }
+    const HEAD_LINES: usize = 5;
+    const TAIL_LINES: usize = 2;
+    let hidden = command_lines.len().saturating_sub(HEAD_LINES + TAIL_LINES);
+    let mut preview = Vec::with_capacity(HEAD_LINES + TAIL_LINES + 1);
+    preview.extend(command_lines.iter().take(HEAD_LINES).map(|line| format!("`{line}`")));
+    preview.push(format!("… +{hidden} more lines (full command runs on approval)"));
+    preview.extend(
+        command_lines
+            .iter()
+            .skip(command_lines.len().saturating_sub(TAIL_LINES))
+            .map(|line| format!("`{line}`")),
+    );
+    preview
+}
+/// Max chars per context row (modal wrapping handles visual width).
+const MAX_CONTEXT_LINE_CHARS: usize = 160;
+const MAX_RISK_LINE_CHARS: usize = 32;
+
+fn push_context_line(description_lines: &mut Vec<String>, label: &str, value: &str) {
+    push_capped_context_line(description_lines, label, value, MAX_CONTEXT_LINE_CHARS);
+}
+
+fn push_capped_context_line(description_lines: &mut Vec<String>, label: &str, value: &str, max_chars: usize) {
+    let first = value.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+    if !first.is_empty() {
+        description_lines.push(format!("{label}: {}", vtcode_commons::formatting::truncate_middle(first, max_chars)));
+    }
+}
+
+/// Compact agent-justification lines for the approval dialog: one logical row
+/// per field so the popup stays scannable. Full reasoning remains in logs.
+fn compact_justification_lines(just: &vtcode_core::tools::ToolJustification) -> Vec<String> {
+    let mut lines = Vec::new();
+    let reason = just.reason.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+    if !reason.is_empty() {
+        lines.push(format!("Reason: {}", vtcode_commons::formatting::truncate_middle(reason, MAX_CONTEXT_LINE_CHARS)));
+    }
+    let outcome = just
+        .expected_outcome
+        .as_deref()
+        .map(|outcome| outcome.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or(""))
+        .filter(|outcome| !outcome.is_empty());
+    if let Some(outcome) = outcome {
+        lines.push(format!(
+            "Expected: {}",
+            vtcode_commons::formatting::truncate_middle(outcome, MAX_CONTEXT_LINE_CHARS)
+        ));
+    }
+    let risk = just.risk_level.trim();
+    if !risk.is_empty() {
+        lines.push(format!("Risk: {}", vtcode_commons::formatting::truncate_middle(risk, MAX_RISK_LINE_CHARS)));
+    }
+    lines
 }
 
 fn tool_args_diff_preview(tool_name: &str, tool_args: Option<&Value>) -> Option<Vec<String>> {
@@ -544,7 +602,7 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
 
     if let Some(command_lines) = shell_command_preview_lines(tool_name, tool_args) {
         description_lines.push("## Command".to_string());
-        description_lines.extend(command_lines.into_iter().map(|line| format!("`{line}`")));
+        description_lines.extend(format_command_preview_lines(command_lines));
     } else if let Some(diff_lines) = tool_args_diff_preview(tool_name, tool_args) {
         description_lines.push("## Preview".to_string());
         description_lines.extend(diff_lines);
@@ -554,7 +612,7 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
         || justification.is_some()
         || extract_shell_approval_justification(tool_name, tool_args).is_some();
     if has_context {
-        description_lines.push("## Context".to_string());
+        description_lines.push("## Intent".to_string());
     }
 
     if let Some(reason) = approval_reason {
@@ -566,7 +624,7 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     }
 
     if let Some(just) = justification {
-        description_lines.extend(just.format_for_dialog());
+        description_lines.extend(compact_justification_lines(just));
     }
 
     if let Some(recorder) = approval_recorder
@@ -574,7 +632,10 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
             .get_auto_approval_suggestion(approval_learning_key, approval_learning_label)
             .await
     {
-        description_lines.push(format!("Suggestion: {suggestion}"));
+        description_lines.push(format!(
+            "Suggestion: {}",
+            vtcode_commons::formatting::truncate_middle(&suggestion, MAX_CONTEXT_LINE_CHARS)
+        ));
     }
 
     description_lines.push(choose_handling_line("this tool execution"));
@@ -764,11 +825,11 @@ mod tests {
 
     use super::{
         ToolPermissionPromptKind, build_tool_permission_options, cancelled_prompt_decision,
-        extract_shell_approval_command_prefix_words, extract_shell_approval_justification,
+        compact_justification_lines, extract_shell_approval_command_prefix_words, extract_shell_approval_justification,
         extract_shell_approval_scope_signature, extract_shell_command_text,
-        extract_shell_persistent_approval_prefix_rule, render_shell_persistent_approval_prefix_entry,
-        shell_allows_persistent_decisions, shell_command_preview_lines, shell_permission_cache_suffix,
-        tool_permission_prompt_kind, truncate_arg_preview,
+        extract_shell_persistent_approval_prefix_rule, format_command_preview_lines, push_capped_context_line,
+        render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions, shell_command_preview_lines,
+        shell_permission_cache_suffix, tool_permission_prompt_kind, truncate_arg_preview,
     };
     use crate::agent::runloop::unified::tool_routing::shell_approval::PersistentApprovalTarget;
 
@@ -1097,5 +1158,67 @@ mod tests {
     #[test]
     fn mcp_prompt_cancellation_is_non_persistent() {
         assert_eq!(cancelled_prompt_decision(ToolPermissionPromptKind::Mcp), super::HitlDecision::DeniedOnce);
+    }
+
+    #[test]
+    fn capped_context_line_keeps_first_logical_row_only() {
+        let mut lines = Vec::new();
+        push_capped_context_line(&mut lines, "Reason", "  \nFirst reason\nSecond reason\n", 160);
+        assert_eq!(lines, vec!["Reason: First reason"]);
+
+        let mut blank = Vec::new();
+        push_capped_context_line(&mut blank, "Reason", "   \n  ", 160);
+        assert!(blank.is_empty());
+    }
+
+    #[test]
+    fn compact_justification_lines_stay_single_row_per_field() {
+        let just = vtcode_core::tools::ToolJustification {
+            tool_name: "exec_command".to_string(),
+            reason: "Build the project\nwith more detail on a second line".to_string(),
+            expected_outcome: Some("Binary compiles\nplus extra".to_string()),
+            risk_level: "High".to_string(),
+            timestamp: "now".to_string(),
+        };
+        let lines = compact_justification_lines(&just);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("Reason: Build the project"));
+        assert!(!lines[0].contains('\n'));
+        assert!(lines[1].starts_with("Expected: Binary compiles"));
+        assert_eq!(lines[2], "Risk: High");
+    }
+
+    #[test]
+    fn compact_justification_lines_truncate_long_reason() {
+        let just = vtcode_core::tools::ToolJustification {
+            tool_name: "exec_command".to_string(),
+            reason: "x".repeat(400),
+            expected_outcome: None,
+            risk_level: String::new(),
+            timestamp: "now".to_string(),
+        };
+        let lines = compact_justification_lines(&just);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].chars().count() <= "Reason: ".len() + super::MAX_CONTEXT_LINE_CHARS);
+    }
+
+    #[test]
+    fn command_preview_collapse_keeps_head_and_tail() {
+        let command_lines: Vec<String> = (1..=12).map(|n| format!("line{n}")).collect();
+        let preview = format_command_preview_lines(command_lines);
+        // 5 head + overflow + 2 tail = 8 rows, fitting the viewport budget.
+        assert_eq!(preview.len(), 8);
+        assert!(preview[0].contains("line1"));
+        assert!(preview[4].contains("line5"));
+        assert!(preview[5].contains("+5 more lines"));
+        assert!(preview[6].contains("line11"));
+        assert!(preview[7].contains("line12"));
+    }
+
+    #[test]
+    fn command_preview_short_command_stays_full() {
+        let command_lines = vec!["cargo test".to_string(), "second line".to_string()];
+        let preview = format_command_preview_lines(command_lines);
+        assert_eq!(preview, vec!["`cargo test`", "`second line`"]);
     }
 }

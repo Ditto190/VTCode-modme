@@ -330,10 +330,14 @@ fn render_diff_code_block(
     let removed_marker_style = style_sign_ansi(DiffLineType::Delete, style_context);
     let added_background = added_style.get_bg_color();
     let removed_background = removed_style.get_bg_color();
+    let mut current_language: Option<String> = None;
 
     for line in normalize_diff_lines(code) {
         let trimmed = line.trim_end_matches('\n');
         let trimmed_start = trimmed.trim_start();
+        if let Some(path) = parse_diff_git_path(trimmed_start).or_else(|| parse_diff_marker_path(trimmed_start)) {
+            current_language = language_hint_from_path(&path);
+        }
         if let Some((path, additions, deletions)) = parse_diff_summary_line(trimmed_start) {
             let leading_len = trimmed.len().saturating_sub(trimmed_start.len());
             let leading = &trimmed[..leading_len];
@@ -361,12 +365,27 @@ fn render_diff_code_block(
                 line.push_segment(added_style, trimmed);
             } else if is_diff_header_line(trimmed_start) {
                 line.push_segment(hunk_style, trimmed);
-            } else if is_diff_addition_line(trimmed_start) || trimmed_start.starts_with("*** Update File:") {
+            } else if is_diff_addition_line(trimmed_start) {
+                line.push_segment(added_marker_style, "+");
+                push_highlighted_diff_body(
+                    &mut line,
+                    &trimmed[1..],
+                    current_language.as_deref(),
+                    added_style,
+                    added_background,
+                );
+            } else if trimmed_start.starts_with("*** Update File:") {
                 line.push_segment(added_marker_style, "+");
                 line.push_segment(added_style, &trimmed[1..]);
             } else if is_diff_deletion_line(trimmed_start) {
                 line.push_segment(removed_marker_style, "-");
-                line.push_segment(removed_style, &trimmed[1..]);
+                push_highlighted_diff_body(
+                    &mut line,
+                    &trimmed[1..],
+                    current_language.as_deref(),
+                    removed_style,
+                    removed_background,
+                );
             } else {
                 line.push_segment(context_style, trimmed);
             }
@@ -382,6 +401,28 @@ fn render_diff_code_block(
     }
 
     lines
+}
+
+/// Push a `+`/`-` diff body with per-language syntax highlighting.
+///
+/// `render_diff_content_segments` owns the prose gate and the solid fallback,
+/// so prose/unknown languages render exactly as before. Highlighted token
+/// foregrounds are kept and the diff tint is forced as background so syntect
+/// theme holes can't punch through the full-width add/del background.
+fn push_highlighted_diff_body(
+    line: &mut MarkdownLine,
+    body: &str,
+    language: Option<&str>,
+    fallback: Style,
+    forced_bg: Option<anstyle::Color>,
+) {
+    for segment in render_diff_content_segments(body, language, fallback) {
+        let style = match forced_bg {
+            Some(bg) => segment.style.bg_color(Some(bg)),
+            None => segment.style,
+        };
+        line.push_segment(style, &segment.text);
+    }
 }
 
 fn parse_diff_summary_line(line: &str) -> Option<(&str, usize, usize)> {
@@ -681,7 +722,18 @@ pub(crate) fn render_diff_content_segments(
         return vec![MarkdownSegment::new(fallback_style, text)];
     }
 
-    if let Some(segments) = highlight_line_for_diff(text, language)
+    // Unknown/missing languages must stay solid so the diff add/del color
+    // (green/red) is preserved. Syntect falls back to "Plain Text" with a
+    // single default-style span, which would drop the diff foreground.
+    let hint = language.map(str::trim).filter(|hint| !hint.is_empty());
+    let Some(hint) = hint else {
+        return vec![MarkdownSegment::new(fallback_style, text)];
+    };
+    if std::ptr::eq(syntax_highlight::find_syntax_by_token(hint), syntax_highlight::find_syntax_plain_text()) {
+        return vec![MarkdownSegment::new(fallback_style, text)];
+    }
+
+    if let Some(segments) = highlight_line_for_diff(text, Some(hint))
         && !segments.is_empty()
     {
         return segments

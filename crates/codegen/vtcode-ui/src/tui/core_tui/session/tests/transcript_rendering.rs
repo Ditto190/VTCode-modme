@@ -220,7 +220,7 @@ fn user_messages_render_with_dividers() {
 }
 
 #[test]
-fn agent_messages_include_left_padding() {
+fn agent_messages_use_zero_indent_with_bullet_cue() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(
         InlineMessageKind::Agent,
@@ -236,18 +236,38 @@ fn agent_messages_include_left_padding() {
     let second_line = &content_lines[1];
 
     let expected_prefix = format!("{}{}", ui::INLINE_AGENT_QUOTE_PREFIX, ui::INLINE_AGENT_MESSAGE_LEFT_PADDING);
-    let continuation_prefix = " ".repeat(expected_prefix.chars().count());
 
-    assert!(first_line.starts_with(&expected_prefix), "agent message should include left padding",);
+    assert!(first_line.starts_with(&expected_prefix), "agent message should start with the bullet cue",);
     assert!(
-        second_line.starts_with(&continuation_prefix),
-        "agent message continuation should align with content padding",
+        !second_line.starts_with(' '),
+        "agent message continuation should start at column 0, got: {second_line:?}",
     );
     assert!(
         !second_line.starts_with(&expected_prefix),
         "agent message continuation should not repeat bullet prefix",
     );
     assert!(!first_line.contains('│'), "agent message should not render a left border",);
+}
+
+#[test]
+fn agent_bullet_uses_primary_color_cue() {
+    use anstyle::{Color as AnsiColorEnum, RgbColor};
+    use ratatui::style::Modifier;
+
+    let accent = AnsiColorEnum::Rgb(RgbColor(0x12, 0x34, 0x56));
+    let theme = InlineTheme { primary: Some(accent), ..Default::default() };
+    let mut session = Session::new(theme, None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("Response")]);
+
+    let index = session.lines.len().checked_sub(1).expect("agent message should be available");
+    let spans = session.render_message_spans(index);
+    let bullet = spans
+        .iter()
+        .find(|span| span.content.clone().into_owned() == ui::INLINE_AGENT_QUOTE_PREFIX)
+        .expect("agent bullet span should be present");
+
+    assert_eq!(bullet.style.fg, Some(ratatui_color_from_ansi(accent)));
+    assert!(bullet.style.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -719,12 +739,8 @@ fn agent_numbered_code_lines_keep_hanging_indent_when_wrapped() {
 
     let first = &content_lines[0];
     let second = &content_lines[1];
-    let agent_indent = " ".repeat(
-        format!("{}{}", ui::INLINE_AGENT_QUOTE_PREFIX, ui::INLINE_AGENT_MESSAGE_LEFT_PADDING)
-            .chars()
-            .count(),
-    );
-    let expected_prefix = format!("{agent_indent}{}", " ".repeat(" 12  ".chars().count()));
+    // Zero-indent: only the code gutter hangs on continuation rows.
+    let expected_prefix = " ".repeat(" 12  ".chars().count());
 
     assert!(first.contains("12  fn wrapped_diff"), "first line was: {first:?}");
     assert!(
@@ -753,12 +769,8 @@ fn agent_omitted_code_lines_keep_hanging_indent_when_wrapped() {
 
     let first = &content_lines[0];
     let second = &content_lines[1];
-    let agent_indent = " ".repeat(
-        format!("{}{}", ui::INLINE_AGENT_QUOTE_PREFIX, ui::INLINE_AGENT_MESSAGE_LEFT_PADDING)
-            .chars()
-            .count(),
-    );
-    let expected_prefix = format!("{agent_indent}{}", " ".repeat("21-421  ".chars().count()));
+    // Zero-indent: only the code gutter hangs on continuation rows.
+    let expected_prefix = " ".repeat("21-421  ".chars().count());
 
     assert!(first.contains("21-421"), "first line was: {first:?}");
     assert!(first.contains("…"), "first line was: {first:?}");
