@@ -677,9 +677,10 @@ pub(crate) fn block_mutation_until_verification(
             // piped or `;`-joined verifiers never clear the gate, and the
             // model reading the rejection must not have to guess. Examples
             // span ecosystems because `is_verification_invocation` admits
-            // cargo/go/npm/pytest/gradle/scripts/check.sh, not just cargo.
+            // cargo/go/npm/bun/deno/make/ruff/tsc/eslint/pytest/gradle/scripts/check.sh,
+            // not just cargo. Docs-only prose edits stay allowed while pending.
             format!(
-                "Mutation blocked until verification: {count} mutating command(s) since the last successful verification are awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `pytest` — standalone or as a pure `&&` chain; no `|`, `;`, or `||`.{fix_hint}"
+                "Mutation blocked until verification: {count} mutating command(s) since the last successful verification are awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `pytest` — standalone or as a pure `&&` chain; no `|`, `;`, or `||`. Docs-only edits stay allowed.{fix_hint}"
             )
         },
     );

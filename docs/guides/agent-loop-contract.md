@@ -259,7 +259,9 @@ the blocker resolves so `continue`/`--resume` can still read them.
 Blocked responses are reason-specific. A pending-verification response explains
 that inspection-only checks, link checks, and `git diff --check` do not clear the
 anti-blind checkpoint and directs the operator to run `cargo check --locked` or
-the relevant `cargo nextest run`. A context-capacity response explains that
+the relevant `cargo nextest run`. The gate trips after 6 consecutive successful
+mutations; docs-only prose edits stay allowed while pending and never increment
+the counter. A context-capacity response explains that
 bounded compaction could not reduce the request, retains completed tool outputs,
 and directs the operator to resume after reducing context or switching models.
 Other blocked reasons use a generic retry handoff. Existing recovery text is

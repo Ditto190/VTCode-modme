@@ -14,7 +14,7 @@ use crate::agent::runloop::unified::turn::tool_outcomes::{is_grep_style_no_match
 
 /// Threshold: number of consecutive file mutations before the Anti-Blind-Editing
 /// warning fires. NL2Repo-Bench recommends verifying after every few edits.
-pub(crate) const BLIND_EDITING_THRESHOLD: usize = 4;
+pub(crate) const BLIND_EDITING_THRESHOLD: usize = 6;
 pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let it exit 0 before further edits.";
 pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "CRITICAL: Multiple edits were made without verification. Stop editing and run one verifier with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, `npm test`, or `pytest` — standalone or as a pure `&&` chain (no `|`, `;`, or `||`; cap output with `max_output_tokens`), and let it exit 0 before another mutation. Piped checks do not clear the gate.";
 /// Fix-up window granted after a failed verification attempt. A failed
@@ -965,6 +965,71 @@ fn path_targets_plan_artifact(path: &str) -> bool {
         || normalized.contains("/tmp/vtcode-plans/")
 }
 
+fn path_is_docs_only(path: &str) -> bool {
+    let normalized = path.trim().replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    let file_name = lower.rsplit('/').next().unwrap_or_default();
+    // Well-known prose filenames count only with a docs extension or no
+    // extension at all, so `README.py` and `docs/script.py` stay code edits.
+    let stem = file_name.split('.').next().unwrap_or_default();
+    if matches!(stem, "readme" | "changelog" | "license") {
+        let ext = file_name.rsplit('.').next().unwrap_or_default();
+        if ext == stem || matches!(ext, "md" | "mdx" | "txt" | "rst") {
+            return true;
+        }
+    }
+    matches!(file_name.rsplit('.').next(), Some("md" | "mdx" | "txt" | "rst"))
+}
+
+/// Docs-only writes are low-risk prose edits. They neither trip nor clear the
+/// anti-blind gate: while pending they stay allowed (warn-only), and they never
+/// increment `consecutive_mutations`. Mixed docs+code patches, empty path sets,
+/// and exec-tool mutations fail closed as code edits.
+pub(crate) fn is_docs_only_write(name: &str, args: &serde_json::Value) -> bool {
+    use vtcode_core::config::constants::tools as tool_names;
+    use vtcode_core::tools::names::canonical_tool_name;
+    use vtcode_core::tools::tool_intent::file_operation_action;
+
+    let canonical = canonical_tool_name(name);
+    let is_file_write = matches!(
+        canonical,
+        tool_names::APPLY_PATCH
+            | tool_names::WRITE_FILE
+            | tool_names::EDIT_FILE
+            | tool_names::CREATE_FILE
+            | tool_names::SEARCH_REPLACE
+            | tool_names::DELETE_FILE
+            | tool_names::MOVE_FILE
+            | tool_names::COPY_FILE
+            | tool_names::UNIFIED_FILE
+    );
+    if !is_file_write {
+        return false;
+    }
+    if canonical == tool_names::UNIFIED_FILE
+        && file_operation_action(args)
+            .map(|action| action.eq_ignore_ascii_case("read"))
+            .unwrap_or(false)
+    {
+        return false;
+    }
+    let mut paths = vtcode_core::tools::apply_patch::mutation_target_paths(canonical, args);
+    // `mutation_target_paths` SINGULAR_KEYS lacks camelCase `filePath`
+    // (covered by `is_plan_artifact_write`); supplement it so the same
+    // call is not docs-only via `path` but blocked via `filePath`.
+    // Duplicates are harmless: every path must still be docs-only.
+    if let Some(extra) = args.get("filePath").and_then(|value| value.as_str()) {
+        let trimmed = extra.trim();
+        if !trimmed.is_empty() {
+            paths.push(PathBuf::from(trimmed));
+        }
+    }
+    if paths.is_empty() {
+        return false;
+    }
+    paths.iter().all(|path| path.to_str().is_some_and(path_is_docs_only))
+}
+
 pub(crate) fn is_plan_artifact_write(name: &str, args: &serde_json::Value) -> bool {
     use vtcode_core::config::constants::tools as tool_names;
     use vtcode_core::tools::names::canonical_tool_name;
@@ -1020,8 +1085,9 @@ fn is_execution_tool(name: &str) -> bool {
 
 /// Return whether a tool call must wait for a successful verification step.
 ///
-/// Reads, inspections, verification commands, task tracking, and dedicated
-/// plan-artifact writes remain available while the checkpoint is pending.
+/// Reads, inspections, verification commands, task tracking, dedicated
+/// plan-artifact writes, and docs-only prose writes remain available while the
+/// checkpoint is pending.
 /// A failed verifier grants a bounded fix-up window ([`FAILED_VERIFICATION_FIX_ALLOWANCE`])
 /// so a broken build can be repaired, and piped verifier attempts
 /// (e.g. `cargo check 2>&1 | head`) are admitted to run even though only a
@@ -1031,7 +1097,7 @@ pub(crate) fn mutation_blocked_until_verification(
     name: &str,
     args: &serde_json::Value,
 ) -> bool {
-    if !loop_tracker.verification_is_pending() || is_plan_artifact_write(name, args) {
+    if !loop_tracker.verification_is_pending() || is_plan_artifact_write(name, args) || is_docs_only_write(name, args) {
         return false;
     }
 
@@ -1236,10 +1302,11 @@ pub(crate) fn update_repetition_tracker(
                 }
             }
         }
-    } else if is_plan_artifact_write(canonical_name, args) {
-        // Plan artifact writes in dedicated plan storage are allowed in Planning workflow and
-        // should not trigger anti-blind-editing verification pressure.
-        // Low-signal repetition history is preserved: plan writes are not
+    } else if is_plan_artifact_write(canonical_name, args) || is_docs_only_write(canonical_name, args) {
+        // Plan artifact writes in dedicated plan storage and docs-only prose
+        // writes are allowed while pending and should not trigger
+        // anti-blind-editing verification pressure.
+        // Low-signal repetition history is preserved: plan/docs writes are not
         // navigation, so they neither advance nor clear that window.
         loop_tracker.reset_navigation_window(false);
     } else {
@@ -1544,7 +1611,24 @@ mod tests {
         assert!(mutation_blocked_until_verification(
             &tracker,
             tools::WRITE_FILE,
+            &json!({"path":"src/lib.rs","content":"new"})
+        ));
+        // Docs-only prose stays allowed while pending and never trips the gate.
+        assert!(!mutation_blocked_until_verification(
+            &tracker,
+            tools::WRITE_FILE,
             &json!({"path":"README.md","content":"new"})
+        ));
+        assert!(!mutation_blocked_until_verification(
+            &tracker,
+            tools::WRITE_FILE,
+            &json!({"path":"docs/guide.md","content":"new"})
+        ));
+        // Mixed docs+code patches stay blocked (fail closed).
+        assert!(mutation_blocked_until_verification(
+            &tracker,
+            tools::APPLY_PATCH,
+            &json!({"patch":"*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** Update File: src/lib.rs\n@@\n-old\n+new\n*** End Patch\n"})
         ));
         assert!(mutation_blocked_until_verification(
             &tracker,
@@ -1727,6 +1811,133 @@ mod tests {
             update_repetition_tracker(&mut tracker, &chained_success, tools::EXEC_COMMAND, &json!({"cmd": command}));
             assert!(tracker.verification_is_pending(), "`;`/`||`/`|` chains must not clear the gate: {command}");
         }
+    }
+
+    #[test]
+    fn gate_trips_on_sixth_consecutive_code_mutation_not_fifth() {
+        let mut tracker = LoopTracker::new();
+        let edit = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for _ in 0..(BLIND_EDITING_THRESHOLD - 1) {
+            update_repetition_tracker(&mut tracker, &edit, tools::EDIT_FILE, &json!({"path": "src/lib.rs"}));
+        }
+        assert!(!tracker.verification_is_pending());
+        assert!(!mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+        update_repetition_tracker(&mut tracker, &edit, tools::EDIT_FILE, &json!({"path": "src/lib.rs"}));
+        assert!(tracker.verification_is_pending());
+        assert!(mutation_blocked_until_verification(&tracker, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+    }
+
+    #[test]
+    fn docs_only_writes_stay_allowed_and_do_not_increment_counter() {
+        let mut tracker = LoopTracker::new();
+        let docs_edit = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for _ in 0..BLIND_EDITING_THRESHOLD {
+            update_repetition_tracker(
+                &mut tracker,
+                &docs_edit,
+                tools::WRITE_FILE,
+                &json!({"path": "README.md", "content": "prose"}),
+            );
+        }
+        assert_eq!(tracker.consecutive_mutations, 0);
+        assert!(!tracker.verification_is_pending());
+
+        let mut pending = LoopTracker::with_verification_snapshot((true, 0));
+        pending.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        update_repetition_tracker(&mut pending, &docs_edit, tools::EDIT_FILE, &json!({"path": "docs/guide.md"}));
+        assert!(pending.verification_is_pending());
+        assert_eq!(pending.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+        assert!(!mutation_blocked_until_verification(&pending, tools::EDIT_FILE, &json!({"path": "docs/guide.md"})));
+        assert!(mutation_blocked_until_verification(&pending, tools::EDIT_FILE, &json!({"path": "src/lib.rs"})));
+    }
+
+    #[test]
+    fn expanded_verifiers_clear_gate_while_mutating_lookalikes_do_not() {
+        for command in [
+            "bun test",
+            "deno lint",
+            "make test",
+            "just lint",
+            "ruff check src/",
+            "tsc --noEmit",
+            "eslint src/",
+            "python3 -m pytest",
+            "uv run pytest",
+        ] {
+            let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+            tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+            assert!(
+                !mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "verifier must be admitted: {command}"
+            );
+            let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+                output: serde_json::json!({"exit_code": 0}),
+                stdout: None,
+                modified_files: vec![],
+                command_success: true,
+            });
+            update_repetition_tracker(&mut tracker, &success, tools::EXEC_COMMAND, &json!({"cmd": command}));
+            assert!(!tracker.verification_is_pending(), "verifier must clear the gate: {command}");
+        }
+        for command in [
+            "make clean",
+            "make test clean",
+            "tsc",
+            "eslint --fix src/",
+            "ruff format src/",
+            "bun install",
+        ] {
+            let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+            tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+            assert!(
+                mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "mutating lookalike must stay blocked: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn docs_only_boundary_cases_fail_closed() {
+        let pending = LoopTracker::with_verification_snapshot((true, 0));
+        // Code under docs/ stays a code edit.
+        for path in [
+            "docs/script.py",
+            "docs/app.ts",
+            "README.py",
+            "readme_script.py",
+            "LICENSE-MIT",
+        ] {
+            assert!(
+                mutation_blocked_until_verification(&pending, tools::EDIT_FILE, &json!({"path": path})),
+                "code-looking path must stay blocked: {path}"
+            );
+            assert!(!is_docs_only_write(tools::EDIT_FILE, &json!({"path": path})), "{path}");
+        }
+        // Prose spellings stay allowed, including camelCase `filePath`
+        // (supplemented: `mutation_target_paths` lacks that key).
+        for args in [
+            json!({"path": "README"}),
+            json!({"path": "README.md"}),
+            json!({"path": "CHANGELOG.rst"}),
+            json!({"path": "LICENSE"}),
+            json!({"path": "docs/guide.md"}),
+            json!({"filePath": "docs/guide.md"}),
+        ] {
+            assert!(!mutation_blocked_until_verification(&pending, tools::EDIT_FILE, &args), "{args}");
+            assert!(is_docs_only_write(tools::EDIT_FILE, &args), "{args}");
+        }
+        // Exec-tool mutations never qualify, even for prose paths.
+        assert!(!is_docs_only_write(tools::EXEC_COMMAND, &json!({"cmd": "echo hi > README.md"})));
     }
 
     #[test]
@@ -2294,7 +2505,7 @@ mod tests {
         });
 
         for _ in 0..BLIND_EDITING_THRESHOLD {
-            update_repetition_tracker(&mut tracker, &edit, tools::EDIT_FILE, &json!({"path":"README.md"}));
+            update_repetition_tracker(&mut tracker, &edit, tools::EDIT_FILE, &json!({"path":"src/lib.rs"}));
         }
         assert!(tracker.verification_is_pending());
 

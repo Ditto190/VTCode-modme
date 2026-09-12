@@ -6,7 +6,7 @@ use crate::tui::ui::syntax_highlight;
 use crate::tui::ui::theme::ThemeStyles;
 use crate::tui::utils::diff_styles::{
     DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content_ansi, style_file_header_new_ansi,
-    style_file_header_old_ansi, style_gutter_ansi, style_hunk_header_ansi, style_sign_ansi,
+    style_file_header_old_ansi, style_hunk_header_ansi, style_sign_ansi,
 };
 use anstyle::{Effects, Style};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -15,7 +15,7 @@ use syntect::util::LinesWithEndings;
 use vtcode_commons::diff_paths::{
     format_start_only_hunk_header, is_diff_addition_line, is_diff_deletion_line, is_diff_header_line,
     is_diff_new_file_marker_line, is_prose_language_hint, language_hint_from_path, looks_like_diff_content,
-    parse_diff_git_path, parse_diff_marker_path, parse_hunk_starts,
+    parse_diff_git_path, parse_diff_marker_path,
 };
 
 const DIFF_SUMMARY_PREFIX: &str = "• Diff ";
@@ -332,9 +332,6 @@ fn render_diff_code_block(
     let removed_style = style_content_ansi(DiffLineType::Delete, style_context);
     let added_marker_style = style_sign_ansi(DiffLineType::Insert, style_context);
     let removed_marker_style = style_sign_ansi(DiffLineType::Delete, style_context);
-    let added_gutter_style = style_gutter_ansi(DiffLineType::Insert, style_context);
-    let removed_gutter_style = style_gutter_ansi(DiffLineType::Delete, style_context);
-    let context_gutter_style = style_gutter_ansi(DiffLineType::Context, style_context);
     let file_old_style = style_file_header_old_ansi(style_context);
     let file_new_style = style_file_header_new_ansi(style_context);
     let file_old_background = file_old_style.get_bg_color();
@@ -343,12 +340,6 @@ fn render_diff_code_block(
     let removed_background = removed_style.get_bg_color();
     let mut current_language: Option<String> = None;
     let normalized = normalize_diff_lines(code);
-    let gutter_width = diff_gutter_width(&normalized);
-    // Start at 1 so hunk-less diffs (bare `+`/`-` lines, bare `@@`) show
-    // `1` instead of `0` — line 0 doesn't exist. Parsed hunk headers
-    // overwrite these immediately when present.
-    let mut old_line_no = 1u32;
-    let mut new_line_no = 1u32;
 
     for line in &normalized {
         let trimmed = line.trim_end_matches('\n');
@@ -380,22 +371,18 @@ fn render_diff_code_block(
                 line.set_line_background(None);
             } else if trimmed_start.starts_with("--- ") || trimmed_start.starts_with("*** Delete File:") {
                 line.push_segment(file_old_style, trimmed);
+                paint_line_background(&mut line, file_old_background);
                 line.set_line_background(file_old_background);
             } else if trimmed_start.starts_with("+++ ") || trimmed_start.starts_with("*** Add File:") {
                 line.push_segment(file_new_style, trimmed);
+                paint_line_background(&mut line, file_new_background);
                 line.set_line_background(file_new_background);
             } else if is_diff_header_line(trimmed_start) {
-                if let Some((old_start, new_start)) = parse_hunk_starts(trimmed_start) {
-                    old_line_no = old_start as u32;
-                    new_line_no = new_start as u32;
-                }
                 line.push_segment(hunk_style, trimmed);
+                paint_line_background(&mut line, hunk_background);
                 line.set_line_background(hunk_background);
             } else if is_diff_addition_line(trimmed_start) {
-                let gutter = format!("{:>gutter_width$} │ ", new_line_no);
-                new_line_no = new_line_no.saturating_add(1);
                 line.push_segment(added_marker_style, "+");
-                line.push_segment(added_gutter_style, &gutter);
                 push_highlighted_diff_body(
                     &mut line,
                     &trimmed_start[1..],
@@ -403,16 +390,15 @@ fn render_diff_code_block(
                     added_style,
                     added_background,
                 );
+                paint_line_background(&mut line, added_background);
                 line.set_line_background(added_background);
             } else if trimmed_start.starts_with("*** Update File:") {
                 line.push_segment(added_marker_style, "+");
                 line.push_segment(added_style, &trimmed[1..]);
+                paint_line_background(&mut line, added_background);
                 line.set_line_background(added_background);
             } else if is_diff_deletion_line(trimmed_start) {
-                let gutter = format!("{:>gutter_width$} │ ", old_line_no);
-                old_line_no = old_line_no.saturating_add(1);
                 line.push_segment(removed_marker_style, "-");
-                line.push_segment(removed_gutter_style, &gutter);
                 push_highlighted_diff_body(
                     &mut line,
                     &trimmed_start[1..],
@@ -420,13 +406,10 @@ fn render_diff_code_block(
                     removed_style,
                     removed_background,
                 );
+                paint_line_background(&mut line, removed_background);
                 line.set_line_background(removed_background);
             } else if let Some(context_body) = trimmed.strip_prefix(' ') {
-                let gutter = format!("{:>gutter_width$} │ ", new_line_no);
-                old_line_no = old_line_no.saturating_add(1);
-                new_line_no = new_line_no.saturating_add(1);
-                line.push_segment(context_gutter_style, " ");
-                line.push_segment(context_gutter_style, &gutter);
+                line.push_segment(context_style, " ");
                 line.push_segment(context_style, context_body);
                 line.set_line_background(None);
             } else {
@@ -442,40 +425,20 @@ fn render_diff_code_block(
     lines
 }
 
-/// Estimate the gutter number width for a normalized diff block.
+/// Fill unpainted holes on a tinted diff row.
 ///
-/// Simulates hunk counters so large files widen the gutter instead of
-/// misaligning; falls back to the overlay width (4) for header-only diffs.
-fn diff_gutter_width(normalized: &[String]) -> usize {
-    // Mirror the render counters' 1-based start so width matches the
-    // displayed numbers at digit boundaries (e.g. 99999 vs 100000).
-    let mut old_line_no = 1u32;
-    let mut new_line_no = 1u32;
-    let mut max_no = 0u32;
-    for line in normalized {
-        let trimmed_start = line.trim_start();
-        if is_diff_header_line(trimmed_start) {
-            if let Some((old_start, new_start)) = parse_hunk_starts(trimmed_start) {
-                old_line_no = old_start as u32;
-                new_line_no = new_start as u32;
-                max_no = max_no.max(old_line_no).max(new_line_no);
-            }
-            continue;
-        }
-        if is_diff_addition_line(trimmed_start) {
-            max_no = max_no.max(new_line_no);
-            new_line_no = new_line_no.saturating_add(1);
-        } else if is_diff_deletion_line(trimmed_start) {
-            max_no = max_no.max(old_line_no);
-            old_line_no = old_line_no.saturating_add(1);
-        } else if line.strip_prefix(' ').is_some() {
-            max_no = max_no.max(new_line_no);
-            old_line_no = old_line_no.saturating_add(1);
-            new_line_no = new_line_no.saturating_add(1);
+/// Every segment on an add/del/file/hunk row must carry the row background —
+/// including blockquote/list prefixes and the marker — otherwise the
+/// full-width fill shows striped gaps.
+fn paint_line_background(line: &mut MarkdownLine, bg: Option<anstyle::Color>) {
+    let Some(bg) = bg else {
+        return;
+    };
+    for segment in &mut line.segments {
+        if segment.style.get_bg_color().is_none() {
+            segment.style = segment.style.bg_color(Some(bg));
         }
     }
-    let digits = max_no.max(1).to_string().len();
-    digits.max(4)
 }
 
 /// Push a `+`/`-` diff body with per-language syntax highlighting.

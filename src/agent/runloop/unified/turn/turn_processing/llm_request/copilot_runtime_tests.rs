@@ -757,8 +757,8 @@ async fn vtcode_tool_calls_render_transcript_output_via_shared_pipeline() {
 async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
     let temp = TempDir::new().expect("temp workspace");
     let workspace = temp.path().to_path_buf();
-    let target = workspace.join("blocked.txt");
-    let blocked_target = workspace.join("blocked-after-checkpoint.txt");
+    let target = workspace.join("blocked.rs");
+    let blocked_target = workspace.join("blocked-after-checkpoint.rs");
 
     let mut tool_registry = ToolRegistry::new(workspace).await;
     let tool_result_cache = Arc::new(RwLock::new(ToolResultCache::new(8)));
@@ -842,7 +842,7 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
                 tool_call_id: "mutation-call".to_string(),
                 tool_name: vtcode_core::config::constants::tools::APPLY_PATCH.to_string(),
                 arguments: json!({
-                    "patch": "*** Begin Patch\n*** Add File: blocked.txt\n+mutation must trigger verification\n*** End Patch\n"
+                    "patch": "*** Begin Patch\n*** Add File: blocked.rs\n+mutation must trigger verification\n*** End Patch\n"
                 }),
             },
         )
@@ -872,7 +872,7 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
                 tool_call_id: "blocked-call".to_string(),
                 tool_name: vtcode_core::config::constants::tools::APPLY_PATCH.to_string(),
                 arguments: json!({
-                    "patch": "*** Begin Patch\n*** Add File: blocked-after-checkpoint.txt\n+must stay absent\n*** End Patch\n"
+                    "patch": "*** Begin Patch\n*** Add File: blocked-after-checkpoint.rs\n+must stay absent\n*** End Patch\n"
                 }),
             },
         )

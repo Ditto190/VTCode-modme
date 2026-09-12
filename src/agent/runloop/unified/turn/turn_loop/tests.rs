@@ -1399,8 +1399,8 @@ async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_re
 
         async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
             let request_number = self.requests.fetch_add(1, Ordering::SeqCst);
-            let response = if request_number < 4 {
-                let path = format!("anti-blind-regression-{request_number}.txt");
+            let response = if request_number < 6 {
+                let path = format!("anti-blind-regression-{request_number}.rs");
                 let patch =
                     format!("*** Begin Patch\n*** Add File: {path}\n+mutation {request_number}\n*** End Patch\n");
                 uni::LLMResponse {
@@ -1452,7 +1452,7 @@ async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_re
 
     let requests = Arc::new(AtomicUsize::new(0));
     let text_responses = Arc::new(AtomicUsize::new(0));
-    let mut backing = TestTurnProcessingBacking::new(8).await;
+    let mut backing = TestTurnProcessingBacking::new(12).await;
     backing.set_provider(Box::new(RepeatedTextAfterMutationsProvider {
         requests: requests.clone(),
         text_responses: text_responses.clone(),
@@ -1473,7 +1473,7 @@ async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_re
         } if reason == "Turn blocked after repeated unverified assistant responses; verification is still pending."
     ));
     assert_eq!(text_responses.load(Ordering::SeqCst), 2);
-    assert_eq!(requests.load(Ordering::SeqCst), 6, "the provider must not receive a third pending text request");
+    assert_eq!(requests.load(Ordering::SeqCst), 8, "the provider must not receive a third pending text request");
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
         message.phase == Some(uni::AssistantPhase::FinalAnswer)
@@ -1569,33 +1569,33 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
             };
 
             let response = match request_number {
-                0..=2 => tool_call(
+                0..=4 => tool_call(
                     "successful_edit",
                     tool_names::APPLY_PATCH,
-                    json!({"patch": patch(&format!("anti-blind-sequence-{request_number}.txt"), "effective edit")}),
+                    json!({"patch": patch(&format!("anti-blind-sequence-{request_number}.rs"), "effective edit")}),
                 ),
-                3 => tool_call(
+                5 => tool_call(
                     "failed_patch",
                     tool_names::APPLY_PATCH,
                     json!({
-                        "patch": "*** Begin Patch\n*** Update File: missing-target.txt\n@@\n-old\n+new\n*** End Patch\n"
+                        "patch": "*** Begin Patch\n*** Update File: missing-target.rs\n@@\n-old\n+new\n*** End Patch\n"
                     }),
                 ),
-                4 => tool_call(
+                6 => tool_call(
                     "inspection",
                     tool_names::EXEC_COMMAND,
                     json!({"cmd": "rg -n 'effective edit' . || true"}),
                 ),
-                5 => tool_call(
+                7 => tool_call(
                     "link_check",
                     tool_names::EXEC_COMMAND,
                     json!({"cmd": "rg -n '\\[[^]]+\\]\\([^)]*\\)' . || true"}),
                 ),
-                6 => tool_call("diff_check", tool_names::EXEC_COMMAND, json!({"cmd": "git diff --check"})),
-                7 => tool_call(
+                8 => tool_call("diff_check", tool_names::EXEC_COMMAND, json!({"cmd": "git diff --check"})),
+                9 => tool_call(
                     "successful_edit",
                     tool_names::APPLY_PATCH,
-                    json!({"patch": patch("anti-blind-sequence-final.txt", "last effective edit")}),
+                    json!({"patch": patch("anti-blind-sequence-final.rs", "last effective edit")}),
                 ),
                 _ => {
                     self.steps.lock().expect("step trace lock").push("unverified_text".to_string());
@@ -1650,10 +1650,12 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
         outcome.result,
         steps.lock().expect("step trace lock").as_slice()
     );
-    assert_eq!(requests.load(Ordering::SeqCst), 10, "two pending text responses are the terminal cap");
+    assert_eq!(requests.load(Ordering::SeqCst), 12, "two pending text responses are the terminal cap");
     assert_eq!(
         steps.lock().expect("step trace lock").as_slice(),
         [
+            "successful_edit",
+            "successful_edit",
             "successful_edit",
             "successful_edit",
             "successful_edit",

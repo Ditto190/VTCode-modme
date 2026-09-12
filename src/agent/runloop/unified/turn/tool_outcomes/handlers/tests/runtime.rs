@@ -1426,7 +1426,7 @@ async fn pending_verification_blocks_patch_before_filesystem_mutation() {
     let mut backing = TestContextBacking::new(4).await;
     backing.select_build_primary_agent();
     let patch_args = json!({
-        "input": "*** Begin Patch\n*** Update File: sample.txt\n@@\n-hello\n+goodbye\n*** End Patch\n"
+        "input": "*** Begin Patch\n*** Update File: sample.rs\n@@\n-hello\n+goodbye\n*** End Patch\n"
     });
     cache_tool_permission(&mut backing, tool_names::APPLY_PATCH, &patch_args, PermissionGrant::Permanent).await;
 

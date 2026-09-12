@@ -23,6 +23,21 @@ pub enum ShellActivity {
     Mutation,
 }
 
+fn make_like_verification_targets(words: &[String]) -> bool {
+    let mut saw_target = false;
+    for word in words.iter().skip(1) {
+        let lower = word.to_ascii_lowercase();
+        if lower.starts_with('-') || lower.contains('=') {
+            continue;
+        }
+        if !matches!(lower.as_str(), "test" | "tests" | "check" | "checks" | "lint" | "verify" | "validate") {
+            return false;
+        }
+        saw_target = true;
+    }
+    saw_target
+}
+
 fn is_verification_invocation(words: &[String]) -> bool {
     let command_words = crate::tools::command_args::command_words_after_environment_prefix(words);
     let first = command_words.first().map(String::as_str).unwrap_or_default();
@@ -46,10 +61,39 @@ fn is_verification_invocation(words: &[String]) -> bool {
         }
         "go" => matches!(second.as_deref(), Some("test" | "build")),
         "npm" | "pnpm" | "yarn" => {
-            matches!(second.as_deref(), Some("test" | "build"))
-                || (second.as_deref() == Some("run") && matches!(third.as_deref(), Some("test" | "build")))
+            matches!(second.as_deref(), Some("test" | "build" | "lint" | "check"))
+                || (second.as_deref() == Some("run")
+                    && matches!(third.as_deref(), Some("test" | "build" | "lint" | "check")))
+        }
+        "bun" | "bunx" => {
+            matches!(second.as_deref(), Some("test"))
+                || (second.as_deref() == Some("run")
+                    && matches!(third.as_deref(), Some("test" | "build" | "lint" | "check")))
+        }
+        "deno" => matches!(second.as_deref(), Some("test" | "lint" | "check")),
+        "make" | "gmake" | "just" => make_like_verification_targets(command_words),
+        "uv" => {
+            command_words.iter().any(|word| word == "pytest")
+                || (command_words.iter().any(|word| word == "ruff") && command_words.iter().any(|word| word == "check"))
+        }
+        "ruff" => {
+            if second.as_deref() == Some("format") {
+                return words.iter().any(|word| word == "--check");
+            }
+            matches!(second.as_deref(), Some("check" | "lint"))
+        }
+        "tsc" => {
+            // Bare `tsc` emits output (mutation). Only `--noEmit` type-checks.
+            words.iter().any(|word| word == "--noEmit")
+        }
+        "eslint" => {
+            // `eslint --fix` rewrites the worktree (mutation).
+            !words.iter().any(|word| word == "--fix" || word == "--fix-dry-run")
         }
         "rustc" | "pytest" | "xcodebuild" | "gradle" | "gradlew" => true,
+        "python" | "python3" => {
+            command_words.iter().any(|word| word == "-m") && command_words.iter().any(|word| word == "pytest")
+        }
         _ if first.ends_with("/scripts/check.sh") || first.ends_with("/scripts/check-dev.sh") => true,
         _ => false,
     }
@@ -501,6 +545,48 @@ mod tests {
             "cargo check --locked | head -40",
             "cargo check --locked && cargo nextest run --locked -p vtcode-ui | head -40",
             "cargo check --locked &",
+        ] {
+            assert_eq!(
+                classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),
+                ShellActivity::Mutation,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn expanded_verifiers_classify_as_verification() {
+        for command in [
+            "bun test",
+            "bun run test",
+            "deno lint",
+            "deno check mod.ts",
+            "make test",
+            "make lint",
+            "just verify",
+            "ruff check src/",
+            "ruff format --check",
+            "tsc --noEmit",
+            "eslint src/",
+            "python3 -m pytest",
+            "uv run pytest",
+            "npm run lint",
+        ] {
+            assert_eq!(
+                classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),
+                ShellActivity::Verification,
+                "{command}"
+            );
+        }
+        for command in [
+            "make clean",
+            "make test clean",
+            "just fmt",
+            "tsc",
+            "eslint --fix src/",
+            "ruff format src/",
+            "bun install",
+            "uv sync",
         ] {
             assert_eq!(
                 classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)),

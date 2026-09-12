@@ -87,8 +87,6 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 
 ---
 
-Improve HITL confirmation popup UI/UX: currently it being too clutter and noisy '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.41.14.png'. Highlight the command with code syntax highlight and provide a clear separation between different sections of the popup.
-
 ---
 
 find a way to visual agent's message (the one being pushed indentation much larger than other cells) '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.39.28.png'. maybe find away to unify all of the indentation styles across different message types. or use a different visual cue to distinguish agent messages from user messages and tool call outputs.
@@ -134,3 +132,7 @@ Apply lessons from "A Design Space Exploration of Async/Await" (arXiv 2608.20677
 - Consolidating ~12 ad-hoc RAII abort guards into a shared TaskGuard (vtcode-commons): wide refactor, follow-up.
 - Full cancellation/fairness pass over all select! sites: audit doc's own backlog item.
 - Retiring stale docs/async/ASYNC_ARCHITECTURE.md.
+
+===
+
+should we remove [!] Anti-Blind-Editing it keep blocking the edits.

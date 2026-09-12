@@ -184,6 +184,15 @@ fn wrap_line_internal(
     let continuation_width = UnicodeWidthStr::width(continuation_prefix);
     let use_continuation_prefix =
         !continuation_prefix.is_empty() && continuation_width > 0 && continuation_width < max_width;
+    // Diff rows carry a tinted bg on every span; paint the hanging-indent
+    // prefix with the same bg so wrapped continuation rows don't start with
+    // an unpainted strip. Non-diff lines keep the default prefix style.
+    let continuation_prefix_style = line
+        .spans
+        .iter()
+        .find_map(|span| span.style.bg)
+        .map(|bg| Style::default().bg(bg))
+        .unwrap_or_default();
 
     let mut rows = Vec::new();
     let mut current_spans: Vec<Span<'static>> = Vec::new();
@@ -204,7 +213,7 @@ fn wrap_line_internal(
     let ensure_continuation_prefix =
         |spans: &mut Vec<Span<'static>>, current_width: &mut usize, rows: &[Line<'static>]| {
             if use_continuation_prefix && spans.is_empty() && !rows.is_empty() {
-                push_span(spans, &Style::default(), continuation_prefix);
+                push_span(spans, &continuation_prefix_style, continuation_prefix);
                 *current_width = continuation_width;
             }
         };
@@ -749,5 +758,31 @@ mod tests {
             .collect();
         assert_eq!(rendered, "aｶﾞ", "wrapping must preserve all characters");
         assert_eq!(wrapped.len(), 2, "dakuten occupies a cell, so width-3 content must wrap at width 2");
+    }
+
+    #[test]
+    fn test_wrap_continuation_prefix_inherits_diff_bg() {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+
+        let bg = Style::default().bg(Color::Rgb(20, 58, 45));
+        let line = Line::from(vec![Span::styled("- long diff body that must wrap onto a second row", bg)]);
+        let wrapped = wrap_line_with_hanging_prefix(line, 20, "  ");
+        assert!(wrapped.len() > 1, "narrow width must wrap");
+        assert_eq!(
+            wrapped[1].spans[0].style.bg,
+            Some(Color::Rgb(20, 58, 45)),
+            "wrapped diff rows must not start with an unpainted strip"
+        );
+    }
+
+    #[test]
+    fn test_wrap_continuation_prefix_stays_plain_without_bg() {
+        use ratatui::text::Span;
+
+        let line = Line::from(vec![Span::raw("plain prose that must wrap onto a second row here")]);
+        let wrapped = wrap_line_with_hanging_prefix(line, 20, "  ");
+        assert!(wrapped.len() > 1, "narrow width must wrap");
+        assert_eq!(wrapped[1].spans[0].style.bg, None);
     }
 }

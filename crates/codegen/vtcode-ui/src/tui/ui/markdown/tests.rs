@@ -482,16 +482,16 @@ fn markdown_diff_code_block_stores_line_background() {
     let joined = |line: &MarkdownLine| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>();
     let added_line = lines
         .iter()
-        .find(|line| joined(line).contains('│') && joined(line).contains("new"))
+        .find(|line| joined(line).contains("+ new"))
         .expect("added line exists");
     assert!(added_line.line_background.is_some());
     assert!(added_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
     assert_eq!(added_line.segments[0].text, "+");
-    assert!(added_line.segments[1].text.contains('│'));
+    assert!(!added_line.segments.iter().any(|seg| seg.text.contains('│')));
 
     let removed_line = lines
         .iter()
-        .find(|line| joined(line).contains('│') && joined(line).contains("old"))
+        .find(|line| joined(line).contains("- old"))
         .expect("removed line exists");
     assert!(removed_line.line_background.is_some());
     assert!(removed_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
@@ -550,16 +550,14 @@ fn markdown_diff_lines_use_background_and_strong_markers() {
         .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("const value = 1;"))
         .expect("removed line exists");
 
-    // Marker `+` + dim gutter `N │` + body: at least 3 segments now.
-    assert!(added_line.segments.len() >= 3);
+    // Marker-only reference shape: sign + body, solid full-width tint.
     assert_eq!(added_line.segments[0].text, "+");
-    assert!(added_line.segments[1].text.contains('│'));
+    assert!(!added_line.segments.iter().any(|seg| seg.text.contains('│')));
     assert_eq!(added_line.line_background, added_line.segments[0].style.get_bg_color());
     assert_eq!(removed_line.line_background, removed_line.segments[0].style.get_bg_color());
     assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
     assert_ne!(removed_line.segments[0].style, removed_line.segments[1].style);
-    // Gutter recedes (dimmed) while the sign stays bold.
-    assert!(added_line.segments[1].style.get_effects().contains(anstyle::Effects::DIMMED));
+    // The sign stays bold for scannability.
     assert!(added_line.segments[0].style.get_effects().contains(anstyle::Effects::BOLD));
 }
 
@@ -645,6 +643,36 @@ fn markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
 }
 
 #[test]
+fn markdown_diff_rows_paint_every_segment_for_solid_fill() {
+    let markdown = "```diff\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-const value = 1;\n+const value = 2;\n```\n";
+    let lines = render_markdown(markdown);
+
+    for needle in [
+        "const value = 2;",
+        "const value = 1;",
+        "--- a/main.rs",
+        "+++ b/main.rs",
+        "@@ -1 +1 @@",
+    ] {
+        let line = lines
+            .iter()
+            .find(|line| {
+                line.segments
+                    .iter()
+                    .map(|seg| seg.text.as_str())
+                    .collect::<String>()
+                    .contains(needle)
+            })
+            .unwrap_or_else(|| panic!("{needle} line exists"));
+        let bg = line.line_background.expect("tinted rows need full-width bg");
+        assert!(!line.segments.is_empty());
+        for segment in &line.segments {
+            assert_eq!(segment.style.get_bg_color(), Some(bg), "unpainted hole in {needle}");
+        }
+    }
+}
+
+#[test]
 fn markdown_diff_body_uses_file_language_syntax_highlight() {
     let markdown = "```diff\ndiff --git a/main.rs b/main.rs\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}\n```\n";
     let lines = render_markdown(markdown);
@@ -693,8 +721,8 @@ fn markdown_diff_body_without_path_stays_solid() {
                 .contains("fn new()")
         })
         .expect("added line exists");
-    // No file header means no language hint: marker + dim gutter + solid body.
-    assert_eq!(added_line.segments.len(), 3);
+    // No file header means no language hint: marker + single solid body span.
+    assert_eq!(added_line.segments.len(), 2);
     assert_eq!(added_line.segments[0].text, "+");
 }
 
@@ -713,7 +741,7 @@ fn markdown_diff_prose_file_body_stays_solid() {
                 .contains("new **bold** text")
         })
         .expect("added line exists");
-    assert_eq!(added_line.segments.len(), 3, "prose body: marker + gutter + solid");
+    assert_eq!(added_line.segments.len(), 2, "prose body: marker + solid");
     assert!(added_line.line_background.is_some());
 }
 

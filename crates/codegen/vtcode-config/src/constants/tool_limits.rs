@@ -3,7 +3,7 @@ pub const DEFAULT_MAX_TOOL_CALLS_PER_TURN: usize = 120;
 /// Default safety-gateway session fuse when no run-specific budget is loaded.
 pub const DEFAULT_SAFETY_MAX_TOOL_CALLS_PER_SESSION: usize = 100;
 /// Default maximum number of tool-loop iterations in one agent turn.
-pub const DEFAULT_MAX_TOOL_LOOPS: usize = 40;
+pub const DEFAULT_MAX_TOOL_LOOPS: usize = 60;
 /// Default maximum number of turns in full-auto execution.
 pub const DEFAULT_FULL_AUTO_MAX_TURNS: usize = 100;
 /// Default conversation-turn retention limit. This is a context-retention
@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn default_execution_loop_budgets_are_moderate_and_bounded() {
         assert_eq!(DEFAULT_MAX_TOOL_CALLS_PER_TURN, 120);
-        assert_eq!(DEFAULT_MAX_TOOL_LOOPS, 40);
+        assert_eq!(DEFAULT_MAX_TOOL_LOOPS, 60);
         assert_eq!(DEFAULT_FULL_AUTO_MAX_TURNS, 100);
         assert_eq!(DEFAULT_MAX_CONVERSATION_TURNS, 150);
     }
@@ -109,6 +109,7 @@ mod tests {
     fn tool_loop_hard_cap_scales_and_bounds() {
         assert_eq!(tool_loop_hard_cap(20, false), 60);
         assert_eq!(tool_loop_hard_cap(40, false), 120);
+        assert_eq!(tool_loop_hard_cap(60, false), 120);
         assert_eq!(tool_loop_hard_cap(120, false), 120);
         assert_eq!(tool_loop_hard_cap(200, false), 200);
         assert_eq!(tool_loop_hard_cap(0, false), 0);

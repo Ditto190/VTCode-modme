@@ -54,11 +54,12 @@
 
 </div>
 
-VT Code is an open-source Rust terminal coding agent for interactive sessions
-and long-running autonomous work. It is a **harness, not just an LLM wrapper**:
-the model reasons, while the runtime supplies the tools, context, sandbox,
-state, evaluation, and verification that turn reasoning into safe, reviewable
-progress — without ever leaving the terminal.
+VT Code is an open-source terminal coding agent written in Rust, built for
+interactive sessions and long-running autonomous work alike. It is a
+**harness, not just an LLM wrapper**: the model reasons, while the runtime
+supplies the tools, context, sandbox, state, evaluation, and verification that
+turn reasoning into safe, reviewable progress — without ever leaving the
+terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows are
@@ -73,9 +74,9 @@ progress — without ever leaving the terminal.
 
 ## Highlights
 
-- **31 LLM providers, one interface** — cloud gateways, OpenAI-compatible
+- **One interface, every backend** — cloud gateways, OpenAI-compatible
   endpoints, and local inference (Ollama, LM Studio, llama.cpp) behind a single
-  provider abstraction with streaming.
+  streaming provider abstraction.
 - **Sandboxed execution by default** — command policies, workspace approvals,
   and fail-closed defenses against injection, path/symlink escape, and
   environment leakage.
@@ -95,15 +96,15 @@ progress — without ever leaving the terminal.
 Most coding agents stop at "call the model, run the tool." VT Code treats the
 agent loop itself as an engineering problem:
 
-| Pillar                     | What it means                                                                                                                            |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.                         |
-| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection, path/symlink escape, and env leakage. |
-| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction, resumable handoffs — verified before "done".               |
-| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.                            |
-| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.                   |
-| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.                        |
-| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                 |
+| Pillar                     | What it means                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.                           |
+| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection, path/symlink escape, and env leakage.   |
+| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction, resumable handoffs — verified before "done".                 |
+| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.                             |
+| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.                     |
+| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.                         |
+| **Runs anywhere**          | Cloud gateways, OpenAI-compatible endpoints, and local runtimes — one streaming interface.                                                  |
 
 ## Quick start
 
@@ -173,9 +174,9 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 
 ## Documentation
 
-| Area    | Guides                                                                                                                                                                                                                                                                                                                              |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) · [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in) · [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) · [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
+| Area    | Guides                                                                                                                              |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) |
 | Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
 | Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) |
 | Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
@@ -184,10 +185,11 @@ The full catalog lives in the [Documentation Index](./docs/INDEX.md).
 
 ## Providers
 
-31 built-in providers — including multi-model gateways (OpenRouter, Merge
-Gateway, Vercel AI Gateway), custom OpenAI-compatible endpoints, and local
-backends. [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source
-of truth for credentials and model defaults.
+Built-in providers span first-party APIs (OpenAI, Anthropic, Gemini, DeepSeek,
+Qwen, Mistral, xAI, and more), multi-model gateways (OpenRouter, Merge Gateway,
+Vercel AI Gateway), custom OpenAI-compatible endpoints, and local backends.
+[Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
+for credentials and model defaults.
 
 ```bash
 vtcode models list
@@ -206,7 +208,7 @@ graph LR
     types --> config --> core --> tools --> agent --> TUI
 ```
 
-1. Clone and run the fast gate:
+Clone and run the fast gate:
 
 ```bash
 git clone https://github.com/vinhnx/vtcode.git
