@@ -4,7 +4,9 @@ use anstyle::{AnsiColor, Color, Style as AnsiStyle};
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line, is_diff_header_line};
 use vtcode_core::config::constants::tools;
 use vtcode_core::tools::tool_intent;
-use vtcode_core::utils::diff_styles::{DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg, diff_hunk_bg};
+use vtcode_core::utils::diff_styles::{
+    DiffColorLevel, DiffTheme, diff_add_bg, diff_add_word_bg, diff_del_bg, diff_del_word_bg, diff_hunk_bg,
+};
 use vtcode_core::utils::style_helpers::bold_color;
 
 /// Get background color for diff lines based on detected theme and color level.
@@ -35,6 +37,10 @@ pub(crate) struct GitStyles {
     pub(crate) file_old: Option<AnsiStyle>,
     pub(crate) file_new: Option<AnsiStyle>,
     pub(crate) hunk: Option<AnsiStyle>,
+    /// Stronger chips for word-level (intra-line) highlights on add rows.
+    pub(crate) add_word: Option<AnsiStyle>,
+    /// Stronger chips for word-level (intra-line) highlights on del rows.
+    pub(crate) remove_word: Option<AnsiStyle>,
 }
 
 impl GitStyles {
@@ -82,8 +88,24 @@ impl GitStyles {
                     .bg_color(diff_hunk_bg_color())
                     .effects(anstyle::Effects::BOLD),
             ),
+            add_word: diff_word_bg_style(true),
+            remove_word: diff_word_bg_style(false),
         }
     }
+}
+
+fn diff_word_bg_style(is_addition: bool) -> Option<AnsiStyle> {
+    if DiffColorLevel::detect() == DiffColorLevel::Ansi16 {
+        return None;
+    }
+    let theme = DiffTheme::detect();
+    let level = DiffColorLevel::detect();
+    let bg = if is_addition {
+        diff_add_word_bg(theme, level)
+    } else {
+        diff_del_word_bg(theme, level)
+    };
+    Some(AnsiStyle::new().bg_color(Some(bg)))
 }
 
 pub(crate) struct LsStyles {

@@ -706,23 +706,26 @@ fn markdown_diff_body_stays_solid_on_tint() {
     let added_line = find_body("fn new()");
     let removed_line = find_body("fn old()");
 
-    // Marker + one solid body span (no syntax token leak).
-    assert!(added_line.segments.len() == 2, "added body should stay solid, got {}", added_line.segments.len());
-    assert!(
-        removed_line.segments.len() == 2,
-        "removed body should stay solid, got {}",
-        removed_line.segments.len()
-    );
+    // Marker + body (word chips may split into tinted spans).
+    assert!(added_line.segments.len() >= 2, "added body needs marker + body");
+    assert!(removed_line.segments.len() >= 2, "removed body needs marker + body");
     assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
-    // Every body token shares the line tint and default fg (no bright syntax).
     for segment in added_line.segments.iter().skip(1) {
-        assert_eq!(segment.style.get_bg_color(), added_line.line_background);
         assert_eq!(segment.style.get_fg_color(), None);
+        assert!(segment.style.get_bg_color().is_some());
     }
     for segment in removed_line.segments.iter().skip(1) {
-        assert_eq!(segment.style.get_bg_color(), removed_line.line_background);
         assert_eq!(segment.style.get_fg_color(), None);
+        assert!(segment.style.get_bg_color().is_some());
     }
+    let add_line_bg = added_line.line_background.expect("add tint");
+    assert!(
+        added_line
+            .segments
+            .iter()
+            .any(|s| s.style.get_bg_color().is_some_and(|bg| bg != add_line_bg)),
+        "add row should carry a word chip"
+    );
 }
 
 #[test]
@@ -740,8 +743,8 @@ fn markdown_diff_body_without_path_stays_solid() {
                 .contains("fn new()")
         })
         .expect("added line exists");
-    // No file header means no language hint: marker + single solid body span.
-    assert_eq!(added_line.segments.len(), 2);
+    // No file header: marker + body (word chips may split the body).
+    assert!(added_line.segments.len() >= 2);
     assert_eq!(added_line.segments[0].text, "+");
 }
 
@@ -760,7 +763,8 @@ fn markdown_diff_prose_file_body_stays_solid() {
                 .contains("new **bold** text")
         })
         .expect("added line exists");
-    assert_eq!(added_line.segments.len(), 2, "prose body: marker + solid");
+    // Marker + body (word chips may split into tinted spans).
+    assert!(added_line.segments.len() >= 2, "prose body: marker + solid/chips");
     assert!(added_line.line_background.is_some());
 }
 
