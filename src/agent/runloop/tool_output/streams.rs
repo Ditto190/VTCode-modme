@@ -268,7 +268,7 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
         '+' | '-' => AnsiStyle::new()
             .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
             .bg_color(bg)
-            .effects(Effects::BOLD),
+            .effects(Effects::DIMMED),
         _ => AnsiStyle::new()
             .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
             .effects(Effects::DIMMED),

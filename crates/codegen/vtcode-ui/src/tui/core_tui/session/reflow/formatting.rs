@@ -151,6 +151,14 @@ impl Session {
             return false;
         }
 
+        let text: String = line.spans.iter().map(|span| span.content.as_ref()).collect();
+        let trimmed_start = text.trim_start();
+        // Body rows (`+`/`-`/` ` + dim gutter) and visual file/hunk headers
+        // (`---`/`+++` red/green bands, `@@` neutral band) all paint full-width.
+        if trimmed_start.starts_with("--- ") || trimmed_start.starts_with("+++ ") || trimmed_start.starts_with("@@") {
+            return true;
+        }
+
         let first_span_char = line.spans[0].content.chars().next();
         matches!(first_span_char, Some('+') | Some('-') | Some(' '))
     }

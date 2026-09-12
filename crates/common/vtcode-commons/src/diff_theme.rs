@@ -110,6 +110,17 @@ pub fn diff_del_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
     }
 }
 
+/// Get background color for hunk header (`@@ -old +new @@`) lines.
+///
+/// Neutral blue-grey tint (not red/green) so hunk separators stay visually
+/// distinct from add/del content while still painting full-width.
+pub fn diff_hunk_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+    match theme {
+        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(30, 45, 62)),
+        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(221, 235, 244)),
+    }
+}
+
 /// Get gutter foreground color for light theme (dark theme uses dimmed default).
 pub fn diff_gutter_fg_light(_level: DiffColorLevel) -> Color {
     Color::Ansi(AnsiColor::Black)

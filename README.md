@@ -24,6 +24,7 @@
 <summary><strong>Contents</strong></summary>
 
 - [Overview](#overview)
+- [Highlights](#highlights)
 - [Why VT Code](#why-vt-code)
 - [Quick start](#quick-start)
   - [1. Install](#1-install)
@@ -70,20 +71,39 @@ progress — without ever leaving the terminal.
 > **Video companions:** [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
 > [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o).
 
+## Highlights
+
+- **31 LLM providers, one interface** — cloud gateways, OpenAI-compatible
+  endpoints, and local inference (Ollama, LM Studio, llama.cpp) behind a single
+  provider abstraction with streaming.
+- **Sandboxed execution by default** — command policies, workspace approvals,
+  and fail-closed defenses against injection, path/symlink escape, and
+  environment leakage.
+- **Durable long-run sessions** — checkpoints, auto-compaction, spooled tool
+  output, task tracking, and resumable handoffs.
+- **One canonical event contract** — `ThreadEvent` powers replay, archives,
+  memory views, and trajectory export.
+- **Extensible without forking** — MCP servers, Agent Skills, Agent Plugins,
+  ACP (Zed), A2A, and the WebMCP browser bridge.
+- **Measured, not vibes** — a built-in eval framework with pass@k / pass^k
+  metrics and environment-based outcome verification.
+- **A TUI worth living in** — themes validated against WCAG AA contrast,
+  markdown rendering, and diff previews.
+
 ## Why VT Code
 
 Most coding agents stop at "call the model, run the tool." VT Code treats the
 agent loop itself as an engineering problem:
 
-| Pillar                     | What it means                                                                                                                             |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.                          |
-| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection, path/symlink escape, and env leakage.  |
-| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction, resumable handoffs — verified before "done".                |
-| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.                             |
-| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.                    |
-| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.                         |
-| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                   |
+| Pillar                     | What it means                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.                         |
+| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection, path/symlink escape, and env leakage. |
+| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction, resumable handoffs — verified before "done".               |
+| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.                            |
+| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.                   |
+| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.                        |
+| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                 |
 
 ## Quick start
 
@@ -153,12 +173,14 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 
 ## Documentation
 
-| Area    | Guides                                                                                                                                                                                                                                                              |
+| Area    | Guides                                                                                                                                                                                                                                                                                                                              |
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) · [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in) · [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) · [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
 | Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
 | Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) |
 | Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
+
+The full catalog lives in the [Documentation Index](./docs/INDEX.md).
 
 ## Providers
 
@@ -203,16 +225,15 @@ See [Development setup](./docs/development/DEVELOPMENT_SETUP.md) and
 
 ## Contributing
 
-VT Code grows with its community. Bug fixes, docs, ideas, testing, and
-reviews are all welcome.
-
 ### Ways to contribute
 
-- **Security advisories**: Please report vulnerabilities privately first: [Security Policy](https://github.com/vinhnx/VTCode/security/policy).
+- **Security**: Found a vulnerability? Follow the [Security
+  Policy](https://github.com/vinhnx/VTCode/security/policy).
 - **Bug fixes and patches**: Small or large, every fix counts.
 - **Documentation**: Guides, examples, and corrections help everyone.
 - **Features and ideas**: Open an issue or start a discussion.
-- **Code reviews and testing**: Trying things out and reporting breakage keeps the project healthy.
+- **Code reviews and testing**: Trying things out and reporting breakage keeps
+  the project healthy.
 
 ### Getting started
 

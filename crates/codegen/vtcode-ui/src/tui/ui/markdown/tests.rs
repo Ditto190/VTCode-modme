@@ -479,41 +479,27 @@ fn markdown_diff_code_block_stores_line_background() {
     let markdown = "```diff\n@@ -1 +1 @@\n- old\n+ new\n context\n```\n";
     let lines = render_markdown(markdown);
 
+    let joined = |line: &MarkdownLine| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>();
     let added_line = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("+ new")
-        })
+        .find(|line| joined(line).contains('│') && joined(line).contains("new"))
         .expect("added line exists");
     assert!(added_line.line_background.is_some());
     assert!(added_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
+    assert_eq!(added_line.segments[0].text, "+");
+    assert!(added_line.segments[1].text.contains('│'));
 
     let removed_line = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("- old")
-        })
+        .find(|line| joined(line).contains('│') && joined(line).contains("old"))
         .expect("removed line exists");
     assert!(removed_line.line_background.is_some());
     assert!(removed_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
+    assert_eq!(removed_line.segments[0].text, "-");
 
     let context_line = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains(" context")
-        })
+        .find(|line| joined(line).contains("context"))
         .expect("context line exists");
     assert!(context_line.line_background.is_none());
     assert!(context_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
@@ -557,17 +543,24 @@ fn markdown_diff_lines_use_background_and_strong_markers() {
 
     let added_line = lines
         .iter()
-        .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("+const value = 2;"))
+        .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("const value = 2;"))
         .expect("added line exists");
     let removed_line = lines
         .iter()
-        .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("-const value = 1;"))
+        .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("const value = 1;"))
         .expect("removed line exists");
 
-    assert_eq!(added_line.line_background, added_line.segments[1].style.get_bg_color());
-    assert_eq!(removed_line.line_background, removed_line.segments[1].style.get_bg_color());
+    // Marker `+` + dim gutter `N │` + body: at least 3 segments now.
+    assert!(added_line.segments.len() >= 3);
+    assert_eq!(added_line.segments[0].text, "+");
+    assert!(added_line.segments[1].text.contains('│'));
+    assert_eq!(added_line.line_background, added_line.segments[0].style.get_bg_color());
+    assert_eq!(removed_line.line_background, removed_line.segments[0].style.get_bg_color());
     assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
     assert_ne!(removed_line.segments[0].style, removed_line.segments[1].style);
+    // Gutter recedes (dimmed) while the sign stays bold.
+    assert!(added_line.segments[1].style.get_effects().contains(anstyle::Effects::DIMMED));
+    assert!(added_line.segments[0].style.get_effects().contains(anstyle::Effects::BOLD));
 }
 
 #[test]
@@ -598,7 +591,7 @@ fn test_markdown_unlabeled_diff_code_block_detects_diff() {
                 .iter()
                 .map(|seg| seg.text.as_str())
                 .collect::<String>()
-                .contains("+ new")
+                .contains("new")
         })
         .expect("added line exists");
     assert!(added_line.line_background.is_some());
@@ -618,41 +611,37 @@ fn markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
     let markdown = "```diff\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-const value = 1;\n+const value = 2;\n```\n";
     let lines = render_markdown(markdown);
 
+    let joined = |line: &MarkdownLine| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>();
     let added_line = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("+const value = 2;")
-        })
+        .find(|line| joined(line).contains("const value = 2;"))
         .expect("added line exists");
     assert!(added_line.line_background.is_some());
 
     let removed_line = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("-const value = 1;")
-        })
+        .find(|line| joined(line).contains("const value = 1;"))
         .expect("removed line exists");
     assert!(removed_line.line_background.is_some());
 
     let header_line = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("@@ -1 +1 @@")
-        })
+        .find(|line| joined(line).contains("@@ -1 +1 @@"))
         .expect("hunk header exists");
     assert_eq!(header_line.segments[0].style.get_fg_color(), Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+    assert!(header_line.line_background.is_some());
+
+    let old_header = lines
+        .iter()
+        .find(|line| joined(line).contains("--- a/main.rs"))
+        .expect("old file header exists");
+    assert!(old_header.line_background.is_some());
+
+    let new_header = lines
+        .iter()
+        .find(|line| joined(line).contains("+++ b/main.rs"))
+        .expect("new file header exists");
+    assert!(new_header.line_background.is_some());
 }
 
 #[test]
@@ -704,8 +693,9 @@ fn markdown_diff_body_without_path_stays_solid() {
                 .contains("fn new()")
         })
         .expect("added line exists");
-    // No file header means no language hint: marker + single solid body span.
-    assert_eq!(added_line.segments.len(), 2);
+    // No file header means no language hint: marker + dim gutter + solid body.
+    assert_eq!(added_line.segments.len(), 3);
+    assert_eq!(added_line.segments[0].text, "+");
 }
 
 #[test]
@@ -723,7 +713,7 @@ fn markdown_diff_prose_file_body_stays_solid() {
                 .contains("new **bold** text")
         })
         .expect("added line exists");
-    assert_eq!(added_line.segments.len(), 2, "prose body must stay solid");
+    assert_eq!(added_line.segments.len(), 3, "prose body: marker + gutter + solid");
     assert!(added_line.line_background.is_some());
 }
 
@@ -759,27 +749,16 @@ fn markdown_unlabeled_minimal_hunk_detects_diff() {
         .expect("hunk header exists");
     assert_eq!(header_segment.style.get_fg_color(), Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
 
+    let joined = |line: &MarkdownLine| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>();
     let removed_segment = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("-    old();")
-        })
+        .find(|line| joined(line).contains("old();"))
         .expect("removed line exists");
     assert!(removed_segment.line_background.is_some());
 
     let added_segment = lines
         .iter()
-        .find(|line| {
-            line.segments
-                .iter()
-                .map(|seg| seg.text.as_str())
-                .collect::<String>()
-                .contains("+    new();")
-        })
+        .find(|line| joined(line).contains("new();"))
         .expect("added line exists");
     assert!(added_segment.line_background.is_some());
 }

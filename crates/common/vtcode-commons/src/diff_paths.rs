@@ -175,7 +175,7 @@ pub fn looks_like_diff_content(content: &str) -> bool {
 }
 
 /// Parse unified diff hunk header starts from `@@ -old,+new @@`.
-pub(crate) fn parse_hunk_starts(line: &str) -> Option<(usize, usize)> {
+pub fn parse_hunk_starts(line: &str) -> Option<(usize, usize)> {
     let trimmed = line.trim_end();
     let rest = trimmed.strip_prefix("@@ -")?;
     let mut parts = rest.split_whitespace();

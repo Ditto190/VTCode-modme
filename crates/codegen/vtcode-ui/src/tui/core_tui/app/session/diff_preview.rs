@@ -18,8 +18,8 @@ use crate::tui::core_tui::style::{ratatui_color_from_ansi, ratatui_style_from_an
 use crate::tui::ui::markdown::render_diff_content_segments;
 use crate::tui::utils::diff::{DiffBundle, DiffOptions, compute_diff_with_theme};
 use crate::tui::utils::diff_styles::{
-    DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content, style_gutter, style_line_bg,
-    style_sign,
+    DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content, style_gutter, style_hunk_header,
+    style_line_bg, style_sign,
 };
 
 pub(crate) fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area: Rect) {
@@ -73,6 +73,7 @@ fn render_file_header(
 fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState, diff_bundle: &DiffBundle) {
     let language = language_hint_from_path(&preview.file_path);
     let style_context = current_diff_render_style_context();
+    let width = area.width as usize;
 
     let mut lines: Vec<Line> = Vec::new();
     let max_display = area.height.saturating_sub(1) as usize;
@@ -85,7 +86,12 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
 
         match display_line.kind {
             DiffDisplayKind::HunkHeader => {
-                lines.push(Line::from(Span::styled(display_line.text, Style::default().fg(Color::Cyan))));
+                let header_style = style_hunk_header(style_context);
+                lines.push(pad_line_to_width(
+                    Line::from(Span::styled(display_line.text, header_style)).style(header_style),
+                    width,
+                    header_style,
+                ));
             }
             DiffDisplayKind::Metadata => {
                 lines.push(Line::from(Span::styled(display_line.text, Style::default().fg(Color::DarkGray))));
@@ -138,7 +144,7 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
                     }
                 }
 
-                lines.push(Line::from(spans).style(line_bg));
+                lines.push(pad_line_to_width(Line::from(spans).style(line_bg), width, line_bg));
             }
         }
     }
@@ -148,6 +154,33 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
     }
 
     frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::NONE)), area);
+}
+
+/// Pad a diff row with tinted spaces so the background spans the full width.
+///
+/// `Paragraph` only paints behind actual spans; without padding the tint
+/// ends at the last character and short rows look striped.
+fn pad_line_to_width(mut line: Line<'static>, width: usize, bg_style: Style) -> Line<'static> {
+    if width == 0 {
+        return line;
+    }
+    let line_width: usize = line
+        .spans
+        .iter()
+        .map(|span| {
+            span.content
+                .chars()
+                .map(|ch| unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1))
+                .sum::<usize>()
+        })
+        .sum();
+    let padding = width.saturating_sub(line_width);
+    if padding == 0 {
+        return line;
+    }
+    let pad_bg = bg_style.bg.map(|bg| Style::default().bg(bg)).unwrap_or_default();
+    line.spans.push(Span::styled(" ".repeat(padding), pad_bg));
+    line
 }
 
 fn header_action_label(mode: DiffPreviewMode) -> &'static str {

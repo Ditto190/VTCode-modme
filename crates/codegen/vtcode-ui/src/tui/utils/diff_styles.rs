@@ -6,7 +6,7 @@
 // Re-export diff theme from vtcode-commons
 pub use vtcode_commons::diff_theme::{
     DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg, diff_gutter_bg_add_light, diff_gutter_bg_del_light,
-    diff_gutter_fg_light,
+    diff_gutter_fg_light, diff_hunk_bg,
 };
 pub use vtcode_commons::styling::DiffColorPalette;
 
@@ -172,33 +172,81 @@ fn indicator_fg(kind: DiffLineType, theme: DiffTheme) -> Option<RatatuiColor> {
     }
 }
 
-/// Should the diff indicator use the DIM modifier?
-fn indicator_dim(kind: DiffLineType, theme: DiffTheme) -> bool {
-    matches!((kind, theme), (DiffLineType::Insert | DiffLineType::Delete, DiffTheme::Light))
+/// Dim muted gutter foreground so line numbers recede behind content.
+/// Gutter is always dimmed (both themes); the `+`/`-` sign stays bright.
+fn gutter_fg(theme: DiffTheme) -> RatatuiColor {
+    match theme {
+        DiffTheme::Dark => RatatuiColor::DarkGray,
+        DiffTheme::Light => RatatuiColor::Gray,
+    }
 }
 
-/// Build a style for a line-level indicator (gutter or sign).
-fn indicator_style(kind: DiffLineType, theme: DiffTheme) -> RatatuiStyle {
-    let mut s = RatatuiStyle::default();
-    if let Some(color) = indicator_fg(kind, theme) {
-        s = s.fg(color);
+fn hunk_bg_for_context(style_context: DiffRenderStyleContext) -> Option<RatatuiColor> {
+    if style_context.level == DiffColorLevel::Ansi16 {
+        return None;
     }
-    if indicator_dim(kind, theme) {
-        s = s.add_modifier(Modifier::DIM);
-    }
-    s
+    let rgb_bg = diff_hunk_bg(style_context.theme, style_context.level);
+    Some(ratatui_color_from_anstyle(rgb_bg))
 }
 
 // ── Public style API ────────────────────────────────────────────────────────
 
-/// Gutter (line number) style.
+/// Gutter (line number + `│`) style: dimmed muted foreground on the diff tint.
+///
+/// Dim on both themes so numbers recede while `+`/`-` content stays bright
+/// for easy comparison.
 pub(crate) fn style_gutter(kind: DiffLineType, style_context: DiffRenderStyleContext) -> RatatuiStyle {
-    indicator_style(kind, style_context.theme)
+    let bg = content_background(kind, style_context);
+    let mut style = RatatuiStyle::default()
+        .fg(gutter_fg(style_context.theme))
+        .add_modifier(Modifier::DIM);
+    if let Some(bg) = bg {
+        style = style.bg(bg);
+    }
+    style
 }
 
-/// Sign character (`+`/`-`) style.
+/// Sign character (`+`/`-`) style: bright bold foreground on the diff tint.
 pub(crate) fn style_sign(kind: DiffLineType, style_context: DiffRenderStyleContext) -> RatatuiStyle {
-    indicator_style(kind, style_context.theme)
+    let mut style = RatatuiStyle::default().add_modifier(Modifier::BOLD);
+    if let Some(color) = indicator_fg(kind, style_context.theme) {
+        style = style.fg(color);
+    }
+    if let Some(bg) = content_background(kind, style_context) {
+        style = style.bg(bg);
+    }
+    style
+}
+
+/// Hunk header (`@@ -old +new @@`) band: bold cyan on a neutral blue-grey tint.
+pub(crate) fn style_hunk_header(style_context: DiffRenderStyleContext) -> RatatuiStyle {
+    let mut style = RatatuiStyle::default().fg(RatatuiColor::Cyan).add_modifier(Modifier::BOLD);
+    if let Some(bg) = hunk_bg_for_context(style_context) {
+        style = style.bg(bg);
+    }
+    style
+}
+
+/// File header band for `--- a/path` (red) and `+++ b/path` (green).
+fn style_file_header(kind: DiffLineType, style_context: DiffRenderStyleContext) -> RatatuiStyle {
+    let mut style = RatatuiStyle::default().add_modifier(Modifier::BOLD);
+    if let Some(color) = indicator_fg(kind, style_context.theme) {
+        style = style.fg(color);
+    }
+    if let Some(bg) = content_background(kind, style_context) {
+        style = style.bg(bg);
+    }
+    style
+}
+
+/// `--- a/path` header: bold red on the deletion tint.
+pub(crate) fn style_file_header_old(style_context: DiffRenderStyleContext) -> RatatuiStyle {
+    style_file_header(DiffLineType::Delete, style_context)
+}
+
+/// `+++ b/path` header: bold green on the addition tint.
+pub(crate) fn style_file_header_new(style_context: DiffRenderStyleContext) -> RatatuiStyle {
+    style_file_header(DiffLineType::Insert, style_context)
 }
 
 /// Content style for plain (non-syntax-highlighted) diff lines.
@@ -233,15 +281,62 @@ pub(crate) fn style_content_ansi(kind: DiffLineType, style_context: DiffRenderSt
 }
 
 /// Markdown rendering uses `anstyle`; return the diff marker style there.
+///
+/// Bright bold foreground on the diff tint — never dimmed so `+`/`-` stay
+/// scannable against the dimmed gutter.
 pub(crate) fn style_sign_ansi(kind: DiffLineType, style_context: DiffRenderStyleContext) -> AnstyleStyle {
-    let mut style = AnstyleStyle::new();
-    if let Some(foreground) = indicator_fg(kind, style_context.theme).map(ratatui_color_to_anstyle) {
-        style = style.fg_color(Some(foreground));
-    }
-    if indicator_dim(kind, style_context.theme) {
-        style = style.effects(anstyle::Effects::DIMMED);
+    let background = content_background(kind, style_context).map(ratatui_color_to_anstyle);
+    let foreground = indicator_fg(kind, style_context.theme).map(ratatui_color_to_anstyle);
+    let mut style = AnstyleStyle::new().fg_color(foreground).bg_color(background);
+    if !matches!(kind, DiffLineType::Context) {
+        style = style.effects(anstyle::Effects::BOLD);
     }
     style
+}
+
+/// Dimmed gutter style for `anstyle` rendering (line numbers + `│`).
+pub(crate) fn style_gutter_ansi(kind: DiffLineType, style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    let background = content_background(kind, style_context).map(ratatui_color_to_anstyle);
+    let foreground = Some(ratatui_color_to_anstyle(gutter_fg(style_context.theme)));
+    AnstyleStyle::new()
+        .fg_color(foreground)
+        .bg_color(background)
+        .effects(anstyle::Effects::DIMMED)
+}
+
+/// Hunk header band for `anstyle` rendering: bold cyan on neutral tint.
+pub(crate) fn style_hunk_header_ansi(style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    let mut style = AnstyleStyle::new()
+        .fg_color(Some(AnstyleColor::Ansi(anstyle::AnsiColor::Cyan)))
+        .effects(anstyle::Effects::BOLD);
+    if style_context.level != DiffColorLevel::Ansi16 {
+        style = style.bg_color(Some(diff_hunk_bg(style_context.theme, style_context.level)));
+    }
+    style
+}
+
+/// File header band for `anstyle` rendering (`---` red, `+++` green).
+fn style_file_header_ansi(kind: DiffLineType, style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    let background = content_background(kind, style_context).map(ratatui_color_to_anstyle);
+    let foreground = indicator_fg(kind, style_context.theme).map(ratatui_color_to_anstyle);
+    let mut style = AnstyleStyle::new()
+        .fg_color(foreground)
+        .bg_color(background)
+        .effects(anstyle::Effects::BOLD);
+    if style_context.level == DiffColorLevel::Ansi16 {
+        style = AnstyleStyle::new().fg_color(foreground).effects(anstyle::Effects::BOLD);
+    }
+    style
+}
+
+/// `--- a/path` header for `anstyle` rendering.
+pub(crate) fn style_file_header_old_ansi(style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    style_file_header_ansi(DiffLineType::Delete, style_context)
+}
+
+/// `+++ b/path` header for `anstyle` rendering.
+pub(crate) fn style_file_header_new_ansi(style_context: DiffRenderStyleContext) -> AnstyleStyle {
+    style_file_header_ansi(DiffLineType::Insert, style_context)
 }
 
 fn ratatui_color_to_anstyle(color: RatatuiColor) -> AnstyleColor {
@@ -320,25 +415,29 @@ mod tests {
     }
 
     #[test]
-    fn dark_gutter_context_has_no_style() {
+    fn dark_gutter_context_is_dimmed_without_bg() {
         let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
         let style = style_gutter(DiffLineType::Context, ctx);
-        assert_eq!(style, RatatuiStyle::default());
+        assert!(style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(style.bg, None);
     }
 
     #[test]
-    fn insert_gutter_uses_light_green_on_dark() {
+    fn insert_gutter_is_dimmed_muted_on_diff_bg() {
         let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
         let style = style_gutter(DiffLineType::Insert, ctx);
-        assert_eq!(style.fg, Some(RatatuiColor::LightGreen));
-        assert!(!style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(style.fg, Some(RatatuiColor::DarkGray));
+        assert!(style.add_modifier.contains(Modifier::DIM));
+        assert!(style.bg.is_some());
     }
 
     #[test]
-    fn delete_gutter_uses_custom_red_on_dark() {
+    fn delete_gutter_is_dimmed_muted_on_diff_bg() {
         let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
         let style = style_gutter(DiffLineType::Delete, ctx);
-        assert_eq!(style.fg, Some(RatatuiColor::Rgb(255, 90, 90)));
+        assert_eq!(style.fg, Some(RatatuiColor::DarkGray));
+        assert!(style.add_modifier.contains(Modifier::DIM));
+        assert!(style.bg.is_some());
     }
 
     #[test]
@@ -349,23 +448,49 @@ mod tests {
     }
 
     #[test]
-    fn sign_style_dark_uses_light_green_and_custom_red() {
+    fn sign_style_dark_uses_light_green_and_custom_red_with_bold() {
         let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
         let add_sign = style_sign(DiffLineType::Insert, ctx);
         let del_sign = style_sign(DiffLineType::Delete, ctx);
         assert_eq!(add_sign.fg, Some(RatatuiColor::LightGreen));
         assert_eq!(del_sign.fg, Some(RatatuiColor::Rgb(255, 90, 90)));
+        assert!(add_sign.add_modifier.contains(Modifier::BOLD));
+        assert!(del_sign.add_modifier.contains(Modifier::BOLD));
+        assert!(add_sign.bg.is_some());
+        assert!(del_sign.bg.is_some());
     }
 
     #[test]
-    fn sign_style_light_uses_light_green_and_light_red_with_dim() {
+    fn sign_style_light_stays_bright_bold_without_dim() {
         let ctx = test_style_context(DiffTheme::Light, DiffColorLevel::TrueColor);
         let add_sign = style_sign(DiffLineType::Insert, ctx);
         let del_sign = style_sign(DiffLineType::Delete, ctx);
         assert_eq!(add_sign.fg, Some(RatatuiColor::LightGreen));
         assert_eq!(del_sign.fg, Some(RatatuiColor::LightRed));
-        assert!(add_sign.add_modifier.contains(Modifier::DIM));
-        assert!(del_sign.add_modifier.contains(Modifier::DIM));
+        assert!(add_sign.add_modifier.contains(Modifier::BOLD));
+        assert!(!add_sign.add_modifier.contains(Modifier::DIM));
+        assert!(!del_sign.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn hunk_header_uses_cyan_bold_on_neutral_bg() {
+        let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let style = style_hunk_header(ctx);
+        assert_eq!(style.fg, Some(RatatuiColor::Cyan));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
+        assert!(style.bg.is_some());
+    }
+
+    #[test]
+    fn file_headers_use_red_green_bold_on_tinted_bg() {
+        let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let old = style_file_header_old(ctx);
+        let new = style_file_header_new(ctx);
+        assert!(old.add_modifier.contains(Modifier::BOLD));
+        assert!(new.add_modifier.contains(Modifier::BOLD));
+        assert!(old.bg.is_some());
+        assert!(new.bg.is_some());
+        assert_ne!(old.fg, new.fg);
     }
 
     #[test]

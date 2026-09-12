@@ -4,7 +4,7 @@ use anstyle::{AnsiColor, Color, Style as AnsiStyle};
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line, is_diff_header_line};
 use vtcode_core::config::constants::tools;
 use vtcode_core::tools::tool_intent;
-use vtcode_core::utils::diff_styles::{DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg};
+use vtcode_core::utils::diff_styles::{DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg, diff_hunk_bg};
 use vtcode_core::utils::style_helpers::bold_color;
 
 /// Get background color for diff lines based on detected theme and color level.
@@ -19,10 +19,22 @@ fn diff_line_bg_color(is_addition: bool) -> Option<Color> {
     Some(bg)
 }
 
+fn diff_hunk_bg_color() -> Option<Color> {
+    let theme = DiffTheme::detect();
+    let level = DiffColorLevel::detect();
+    if level == DiffColorLevel::Ansi16 {
+        return None;
+    }
+    Some(diff_hunk_bg(theme, level))
+}
+
 pub(crate) struct GitStyles {
     pub(crate) add: Option<AnsiStyle>,
     pub(crate) remove: Option<AnsiStyle>,
     pub(crate) header: Option<AnsiStyle>,
+    pub(crate) file_old: Option<AnsiStyle>,
+    pub(crate) file_new: Option<AnsiStyle>,
+    pub(crate) hunk: Option<AnsiStyle>,
 }
 
 impl GitStyles {
@@ -31,6 +43,8 @@ impl GitStyles {
         // terminals; deletions must NOT be DIMMED (dim red on maroon is
         // unreadable, see README prose diff). Bold lives on the gutter marker
         // in `format_diff_line_with_gutter_and_syntax`, not on content.
+        // File/hunk headers are bold bands: `---` red, `+++` green, `@@` cyan
+        // on a neutral tint — all full-width via line backgrounds.
         Self {
             add: Some(
                 AnsiStyle::new()
@@ -42,7 +56,29 @@ impl GitStyles {
                     .fg_color(Some(Color::Ansi(AnsiColor::BrightRed)))
                     .bg_color(diff_line_bg_color(false)),
             ),
-            header: Some(AnsiStyle::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))).bg_color(None)),
+            header: Some(
+                AnsiStyle::new()
+                    .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
+                    .effects(anstyle::Effects::BOLD),
+            ),
+            file_old: Some(
+                AnsiStyle::new()
+                    .fg_color(Some(Color::Ansi(AnsiColor::BrightRed)))
+                    .bg_color(diff_line_bg_color(false))
+                    .effects(anstyle::Effects::BOLD),
+            ),
+            file_new: Some(
+                AnsiStyle::new()
+                    .fg_color(Some(Color::Ansi(AnsiColor::BrightGreen)))
+                    .bg_color(diff_line_bg_color(true))
+                    .effects(anstyle::Effects::BOLD),
+            ),
+            hunk: Some(
+                AnsiStyle::new()
+                    .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
+                    .bg_color(diff_hunk_bg_color())
+                    .effects(anstyle::Effects::BOLD),
+            ),
         }
     }
 }
@@ -147,6 +183,17 @@ pub(crate) fn select_line_style(
     let trimmed = line.trim_start();
     // Always detect and style diff lines, even when tool_name is not provided
     // (e.g. git_diff payloads routed through generic rendering path).
+    // File headers get red/green bands, `@@` hunks get the neutral cyan band,
+    // other metadata (`diff --git`, `index`, ...) stays dim with no band.
+    if trimmed.starts_with("--- ") {
+        return git.file_old;
+    }
+    if trimmed.starts_with("+++ ") {
+        return git.file_new;
+    }
+    if trimmed.starts_with("@@") {
+        return git.hunk.or(git.header);
+    }
     if is_diff_header_line(trimmed) {
         return git.header;
     }
@@ -230,6 +277,27 @@ mod tests {
         assert_eq!(header, git.header);
         let added = select_line_style(None, "+added", &git, &ls);
         assert_eq!(added, git.add);
+    }
+
+    #[test]
+    fn file_and_hunk_headers_use_tinted_bold_bands() {
+        let git = GitStyles::new();
+        let ls = LsStyles::from_components(HashMap::new(), Vec::new());
+        assert_eq!(select_line_style(None, "--- a/README.md", &git, &ls), git.file_old);
+        assert_eq!(select_line_style(None, "+++ b/README.md", &git, &ls), git.file_new);
+        assert_eq!(select_line_style(None, "@@ -100 +100 @@", &git, &ls), git.hunk);
+        for style in [git.file_old, git.file_new] {
+            let style = style.expect("header band style exists");
+            assert!(style.get_bg_color().is_some());
+            assert!(style.get_effects().contains(Effects::BOLD));
+        }
+        // Hunk tint is disabled on Ansi16 by design (no bg support), so only
+        // assert the background when the terminal advertises more colors.
+        let hunk = git.hunk.expect("header band style exists");
+        assert!(hunk.get_effects().contains(Effects::BOLD));
+        assert_eq!(hunk.get_bg_color().is_some(), DiffColorLevel::detect() != DiffColorLevel::Ansi16);
+        let header = git.header.expect("metadata header exists");
+        assert_eq!(header.get_bg_color(), None);
     }
 
     #[test]

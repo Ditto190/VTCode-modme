@@ -5,7 +5,8 @@ use crate::tui::core_tui::style::ratatui_style_from_ansi;
 use crate::tui::ui::syntax_highlight;
 use crate::tui::ui::theme::ThemeStyles;
 use crate::tui::utils::diff_styles::{
-    DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content_ansi, style_sign_ansi,
+    DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content_ansi, style_file_header_new_ansi,
+    style_file_header_old_ansi, style_gutter_ansi, style_hunk_header_ansi, style_sign_ansi,
 };
 use anstyle::{Effects, Style};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -14,7 +15,7 @@ use syntect::util::LinesWithEndings;
 use vtcode_commons::diff_paths::{
     format_start_only_hunk_header, is_diff_addition_line, is_diff_deletion_line, is_diff_header_line,
     is_diff_new_file_marker_line, is_prose_language_hint, language_hint_from_path, looks_like_diff_content,
-    parse_diff_git_path, parse_diff_marker_path,
+    parse_diff_git_path, parse_diff_marker_path, parse_hunk_starts,
 };
 
 const DIFF_SUMMARY_PREFIX: &str = "• Diff ";
@@ -322,17 +323,34 @@ fn render_diff_code_block(
     let mut lines = Vec::new();
     let context_style = code_block_style(theme_styles, base_style);
     let style_context = current_diff_render_style_context();
-    let metadata_style = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack)));
-    let hunk_style = Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
+    let metadata_style = Style::new()
+        .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack)))
+        .effects(Effects::DIMMED);
+    let hunk_style = style_hunk_header_ansi(style_context);
+    let hunk_background = hunk_style.get_bg_color();
     let added_style = style_content_ansi(DiffLineType::Insert, style_context);
     let removed_style = style_content_ansi(DiffLineType::Delete, style_context);
     let added_marker_style = style_sign_ansi(DiffLineType::Insert, style_context);
     let removed_marker_style = style_sign_ansi(DiffLineType::Delete, style_context);
+    let added_gutter_style = style_gutter_ansi(DiffLineType::Insert, style_context);
+    let removed_gutter_style = style_gutter_ansi(DiffLineType::Delete, style_context);
+    let context_gutter_style = style_gutter_ansi(DiffLineType::Context, style_context);
+    let file_old_style = style_file_header_old_ansi(style_context);
+    let file_new_style = style_file_header_new_ansi(style_context);
+    let file_old_background = file_old_style.get_bg_color();
+    let file_new_background = file_new_style.get_bg_color();
     let added_background = added_style.get_bg_color();
     let removed_background = removed_style.get_bg_color();
     let mut current_language: Option<String> = None;
+    let normalized = normalize_diff_lines(code);
+    let gutter_width = diff_gutter_width(&normalized);
+    // Start at 1 so hunk-less diffs (bare `+`/`-` lines, bare `@@`) show
+    // `1` instead of `0` — line 0 doesn't exist. Parsed hunk headers
+    // overwrite these immediately when present.
+    let mut old_line_no = 1u32;
+    let mut new_line_no = 1u32;
 
-    for line in normalize_diff_lines(code) {
+    for line in &normalized {
         let trimmed = line.trim_end_matches('\n');
         let trimmed_start = trimmed.trim_start();
         if let Some(path) = parse_diff_git_path(trimmed_start).or_else(|| parse_diff_marker_path(trimmed_start)) {
@@ -359,48 +377,105 @@ fn render_diff_code_block(
         if !trimmed.is_empty() {
             if trimmed_start.starts_with("diff --git ") || trimmed_start.starts_with("index ") {
                 line.push_segment(metadata_style, trimmed);
+                line.set_line_background(None);
             } else if trimmed_start.starts_with("--- ") || trimmed_start.starts_with("*** Delete File:") {
-                line.push_segment(removed_style, trimmed);
+                line.push_segment(file_old_style, trimmed);
+                line.set_line_background(file_old_background);
             } else if trimmed_start.starts_with("+++ ") || trimmed_start.starts_with("*** Add File:") {
-                line.push_segment(added_style, trimmed);
+                line.push_segment(file_new_style, trimmed);
+                line.set_line_background(file_new_background);
             } else if is_diff_header_line(trimmed_start) {
+                if let Some((old_start, new_start)) = parse_hunk_starts(trimmed_start) {
+                    old_line_no = old_start as u32;
+                    new_line_no = new_start as u32;
+                }
                 line.push_segment(hunk_style, trimmed);
+                line.set_line_background(hunk_background);
             } else if is_diff_addition_line(trimmed_start) {
+                let gutter = format!("{:>gutter_width$} │ ", new_line_no);
+                new_line_no = new_line_no.saturating_add(1);
                 line.push_segment(added_marker_style, "+");
+                line.push_segment(added_gutter_style, &gutter);
                 push_highlighted_diff_body(
                     &mut line,
-                    &trimmed[1..],
+                    &trimmed_start[1..],
                     current_language.as_deref(),
                     added_style,
                     added_background,
                 );
+                line.set_line_background(added_background);
             } else if trimmed_start.starts_with("*** Update File:") {
                 line.push_segment(added_marker_style, "+");
                 line.push_segment(added_style, &trimmed[1..]);
+                line.set_line_background(added_background);
             } else if is_diff_deletion_line(trimmed_start) {
+                let gutter = format!("{:>gutter_width$} │ ", old_line_no);
+                old_line_no = old_line_no.saturating_add(1);
                 line.push_segment(removed_marker_style, "-");
+                line.push_segment(removed_gutter_style, &gutter);
                 push_highlighted_diff_body(
                     &mut line,
-                    &trimmed[1..],
+                    &trimmed_start[1..],
                     current_language.as_deref(),
                     removed_style,
                     removed_background,
                 );
+                line.set_line_background(removed_background);
+            } else if let Some(context_body) = trimmed.strip_prefix(' ') {
+                let gutter = format!("{:>gutter_width$} │ ", new_line_no);
+                old_line_no = old_line_no.saturating_add(1);
+                new_line_no = new_line_no.saturating_add(1);
+                line.push_segment(context_gutter_style, " ");
+                line.push_segment(context_gutter_style, &gutter);
+                line.push_segment(context_style, context_body);
+                line.set_line_background(None);
             } else {
                 line.push_segment(context_style, trimmed);
+                line.set_line_background(None);
             }
-        }
-        line.set_line_background(if is_diff_addition_line(trimmed_start) {
-            added_background
-        } else if is_diff_deletion_line(trimmed_start) {
-            removed_background
         } else {
-            None
-        });
+            line.set_line_background(None);
+        }
         lines.push(line);
     }
 
     lines
+}
+
+/// Estimate the gutter number width for a normalized diff block.
+///
+/// Simulates hunk counters so large files widen the gutter instead of
+/// misaligning; falls back to the overlay width (4) for header-only diffs.
+fn diff_gutter_width(normalized: &[String]) -> usize {
+    // Mirror the render counters' 1-based start so width matches the
+    // displayed numbers at digit boundaries (e.g. 99999 vs 100000).
+    let mut old_line_no = 1u32;
+    let mut new_line_no = 1u32;
+    let mut max_no = 0u32;
+    for line in normalized {
+        let trimmed_start = line.trim_start();
+        if is_diff_header_line(trimmed_start) {
+            if let Some((old_start, new_start)) = parse_hunk_starts(trimmed_start) {
+                old_line_no = old_start as u32;
+                new_line_no = new_start as u32;
+                max_no = max_no.max(old_line_no).max(new_line_no);
+            }
+            continue;
+        }
+        if is_diff_addition_line(trimmed_start) {
+            max_no = max_no.max(new_line_no);
+            new_line_no = new_line_no.saturating_add(1);
+        } else if is_diff_deletion_line(trimmed_start) {
+            max_no = max_no.max(old_line_no);
+            old_line_no = old_line_no.saturating_add(1);
+        } else if line.strip_prefix(' ').is_some() {
+            max_no = max_no.max(new_line_no);
+            old_line_no = old_line_no.saturating_add(1);
+            new_line_no = new_line_no.saturating_add(1);
+        }
+    }
+    let digits = max_no.max(1).to_string().len();
+    digits.max(4)
 }
 
 /// Push a `+`/`-` diff body with per-language syntax highlighting.
