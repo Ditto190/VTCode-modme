@@ -24,7 +24,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 ## Self-Debugging (VT Code fixing itself)
 
 - When a bug appears in VT Code's own behavior, **fix VT Code — do not work around it yourself.** Patch the VT Code source that caused the bug; never substitute a manual workaround, wrapper script, or config shim in place of a source fix.
-- Before proposing a fix, read the trajectory log at `.vtcode/logs/trajectory.jsonl` to see what actually happened (tool calls, errors, retries) rather than guessing from the symptom.
+- Before proposing a fix, read the trajectory log at `.vtcode/logs/trajectory.jsonl`, `.vtcode/checkpoints`, `/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions` to see what actually happened (tool calls, errors, retries) rather than guessing from the symptom.
 
 ## Detailed Guides
 
@@ -56,7 +56,7 @@ Cargo workspace, ~30 crates. Rust stable, MSRV 1.88, edition 2024. `default-memb
 | `crates/codegen/vtcode-auth`              | OAuth and credential storage                                                                                                           |
 | `crates/codegen/vtcode-indexer`           | Code indexing and search                                                                                                               |
 | `crates/common/vtcode-exec-events`        | `ThreadEvent` contract and ATIF export                                                                                                 |
-| `crates/codegen/vtcode-webmcp`            | Authenticated browser editor bridge, pairing, event replay, and bounded workspace adapter                                             |
+| `crates/codegen/vtcode-webmcp`            | Authenticated browser editor bridge, pairing, event replay, and bounded workspace adapter                                              |
 | `crates/common/vtcode-commons`            | Shared utilities                                                                                                                       |
 | `crates/common/vtcode-macros`             | Procedural macros                                                                                                                      |
 | `crates/common/vtcode-utility-tool-specs` | JSON schemas for utility, file, and collaboration/HITL tools                                                                           |
@@ -91,10 +91,10 @@ Every crate has its own AGENTS.md with crate-specific conventions:
 | `vtcode-commons`            | [crates/common/vtcode-commons/AGENTS.md](crates/common/vtcode-commons/AGENTS.md)                       |
 | `vtcode-macros`             | [crates/common/vtcode-macros/AGENTS.md](crates/common/vtcode-macros/AGENTS.md)                         |
 | `vtcode-utility-tool-specs` | [crates/common/vtcode-utility-tool-specs/AGENTS.md](crates/common/vtcode-utility-tool-specs/AGENTS.md) |
-| `vtcode-agent-plugins` | [crates/common/vtcode-agent-plugins/AGENTS.md](crates/common/vtcode-agent-plugins/AGENTS.md) |
+| `vtcode-agent-plugins`      | [crates/common/vtcode-agent-plugins/AGENTS.md](crates/common/vtcode-agent-plugins/AGENTS.md)           |
 | `vtcode-llm`                | [crates/codegen/vtcode-llm/AGENTS.md](crates/codegen/vtcode-llm/AGENTS.md)                             |
 | `vtcode-skills`             | [crates/codegen/vtcode-skills/AGENTS.md](crates/codegen/vtcode-skills/AGENTS.md)                       |
-| `vtcode-memory`             | [crates/codegen/vtcode-memory/AGENTS.md](crates/codegen/vtcode-memory/AGENTS.md)                        |
+| `vtcode-memory`             | [crates/codegen/vtcode-memory/AGENTS.md](crates/codegen/vtcode-memory/AGENTS.md)                       |
 | `vtcode-eval`               | [crates/codegen/vtcode-eval/AGENTS.md](crates/codegen/vtcode-eval/AGENTS.md)                           |
 | `vtcode-safety`             | [crates/codegen/vtcode-safety/AGENTS.md](crates/codegen/vtcode-safety/AGENTS.md)                       |
 | `vtcode-a2a`                | [crates/codegen/vtcode-a2a/AGENTS.md](crates/codegen/vtcode-a2a/AGENTS.md)                             |
