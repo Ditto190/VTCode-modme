@@ -10,12 +10,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
+use vtcode_utility_tool_specs::{DEFAULT_MAX_OUTPUT_TOKENS, MAX_MAX_OUTPUT_TOKENS, MIN_MAX_OUTPUT_TOKENS};
 
 use super::sandboxing::{Sandboxable, SandboxablePreference};
 use super::tool_handler::{
     ShellToolCallParams, ToolCallError, ToolHandler, ToolInvocation, ToolKind, ToolOutput, ToolPayload,
 };
 use crate::config::constants::tools;
+use crate::tools::output_limits::OUTPUT_PREVIEW_CHARS_PER_TOKEN;
 use crate::tools::shell::{ShellOutput as CoreShellOutput, ShellRunner};
 use crate::tools::validation::commands;
 
@@ -24,6 +26,13 @@ const DEFAULT_SHELL_TIMEOUT_MS: u64 = 30_000;
 
 /// Maximum timeout allowed (5 minutes).
 const MAX_SHELL_TIMEOUT_MS: u64 = 300_000;
+
+/// Resolved shell invocation: shared command params plus the model-visible
+/// preview budget for this call.
+struct ResolvedShellCall {
+    params: ShellToolCallParams,
+    max_output_tokens: usize,
+}
 
 /// Handler for shell command execution.
 pub struct ShellHandler {
@@ -52,7 +61,7 @@ impl ShellHandler {
     }
 
     /// Parse shell parameters from payload.
-    fn parse_params(&self, invocation: &ToolInvocation) -> Result<ShellToolCallParams, ToolCallError> {
+    fn parse_params(&self, invocation: &ToolInvocation) -> Result<ResolvedShellCall, ToolCallError> {
         match &invocation.payload {
             ToolPayload::Function { arguments } => {
                 // Parse as simple shell command string and wrap in ShellToolCallParams
@@ -61,18 +70,26 @@ impl ShellHandler {
                     command: String,
                     workdir: Option<String>,
                     timeout_ms: Option<u64>,
+                    max_output_tokens: Option<u64>,
                 }
                 let simple: SimpleShellArgs = serde_json::from_str(arguments)
                     .map_err(|e| ToolCallError::respond(format!("Invalid shell arguments: {e}")))?;
-                Ok(ShellToolCallParams {
-                    command: vec![simple.command],
-                    workdir: simple.workdir,
-                    timeout_ms: simple.timeout_ms,
-                    sandbox_permissions: None,
-                    justification: None,
+                let max_output_tokens = resolve_max_output_tokens(simple.max_output_tokens)?;
+                Ok(ResolvedShellCall {
+                    params: ShellToolCallParams {
+                        command: vec![simple.command],
+                        workdir: simple.workdir,
+                        timeout_ms: simple.timeout_ms,
+                        sandbox_permissions: None,
+                        justification: None,
+                    },
+                    max_output_tokens,
                 })
             }
-            ToolPayload::LocalShell { params } => Ok(params.clone()),
+            ToolPayload::LocalShell { params } => Ok(ResolvedShellCall {
+                params: params.clone(),
+                max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+            }),
             _ => Err(ToolCallError::respond("Invalid payload type for shell handler")),
         }
     }
@@ -159,72 +176,109 @@ impl ToolHandler for ShellHandler {
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<ToolOutput, ToolCallError> {
-        let params = self.parse_params(&invocation)?;
-        let output = self.execute_command(&params, &invocation.turn.cwd, None).await?;
+        let resolved = self.parse_params(&invocation)?;
+        let output = self.execute_command(&resolved.params, &invocation.turn.cwd, None).await?;
 
         // Sanitize output to remove any secrets before display/storage
         let sanitized = output.sanitize_secrets();
-
-        // Format output
-        use std::fmt::Write as _;
-        let mut content_text = String::with_capacity(sanitized.stdout.len() + sanitized.stderr.len() + 32);
-        if !sanitized.stdout.is_empty() {
-            content_text.push_str(&sanitized.stdout);
-        }
-        if !sanitized.stderr.is_empty() {
-            if !content_text.is_empty() {
-                content_text.push('\n');
-            }
-            content_text.push_str("[stderr]\n");
-            content_text.push_str(&sanitized.stderr);
-        }
-        if sanitized.exit_code != 0 {
-            if !content_text.is_empty() {
-                content_text.push('\n');
-            }
-            let _ = write!(content_text, "[exit code: {}]", sanitized.exit_code);
-        }
-
-        if content_text.is_empty() {
-            content_text = "(no output)".to_string();
-        }
+        let content_text = format_shell_output(&sanitized, resolved.max_output_tokens);
 
         Ok(ToolOutput::with_success(content_text, sanitized.exit_code == 0))
     }
+}
+
+/// Validate and resolve the caller-requested model-visible preview budget.
+fn resolve_max_output_tokens(requested: Option<u64>) -> Result<usize, ToolCallError> {
+    let Some(tokens) = requested else {
+        return Ok(DEFAULT_MAX_OUTPUT_TOKENS);
+    };
+    // u64 -> usize fails only on 32-bit targets where the value exceeds usize::MAX;
+    // the MAX_MAX_OUTPUT_TOKENS bound below is the real range check.
+    let Ok(tokens) = usize::try_from(tokens) else {
+        return Err(ToolCallError::respond(format!(
+            "max_output_tokens must be an integer between {MIN_MAX_OUTPUT_TOKENS} and {MAX_MAX_OUTPUT_TOKENS}"
+        )));
+    };
+    if !(MIN_MAX_OUTPUT_TOKENS..=MAX_MAX_OUTPUT_TOKENS).contains(&tokens) {
+        return Err(ToolCallError::respond(format!(
+            "max_output_tokens must be an integer between {MIN_MAX_OUTPUT_TOKENS} and {MAX_MAX_OUTPUT_TOKENS}"
+        )));
+    }
+    Ok(tokens)
+}
+
+/// Format sanitized shell output for the model, condensing oversized previews
+/// to a head/tail excerpt within the token budget.
+fn format_shell_output(sanitized: &CoreShellOutput, max_output_tokens: usize) -> String {
+    use std::fmt::Write as _;
+
+    let mut content_text = String::with_capacity(sanitized.stdout.len() + sanitized.stderr.len() + 32);
+    if !sanitized.stdout.is_empty() {
+        content_text.push_str(&sanitized.stdout);
+    }
+    if !sanitized.stderr.is_empty() {
+        if !content_text.is_empty() {
+            content_text.push('\n');
+        }
+        content_text.push_str("[stderr]\n");
+        content_text.push_str(&sanitized.stderr);
+    }
+    if sanitized.exit_code != 0 {
+        if !content_text.is_empty() {
+            content_text.push('\n');
+        }
+        let _ = write!(content_text, "[exit code: {}]", sanitized.exit_code);
+    }
+
+    if content_text.is_empty() {
+        return "(no output)".to_string();
+    }
+
+    let budget_bytes = max_output_tokens.saturating_mul(OUTPUT_PREVIEW_CHARS_PER_TOKEN).max(1);
+    if content_text.len() <= budget_bytes {
+        return content_text;
+    }
+
+    let head = budget_bytes / 2;
+    let tail = budget_bytes.saturating_sub(head);
+    vtcode_commons::preview::condense_text_bytes(&content_text, head, tail)
 }
 
 /// Create the shell tool specification.
 pub fn create_shell_tool() -> super::tool_handler::ToolSpec {
     use super::tool_handler::{ResponsesApiTool, ToolSpec};
 
+    let parameters = vtcode_utility_tool_specs::with_max_output_tokens_parameter(json!({
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The shell command to execute"
+            },
+            "workdir": {
+                "type": "string",
+                "description": "Working directory for the command (optional)"
+            },
+            "timeout_ms": {
+                "type": "number",
+                "description": "Timeout in milliseconds (default: 30000, max: 300000)"
+            }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+    }));
+
     ToolSpec::Function(ResponsesApiTool {
         name: tools::SHELL.to_string(),
         description: "Execute a shell command and return its output. Default timeout 30s (max 300s). All commands run through the active sandbox policy. Do NOT use for interactive/long-running processes (e.g., dev servers, watchers) — use spawn_background_subprocess instead.".to_string(),
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                },
-                "workdir": {
-                    "type": "string",
-                    "description": "Working directory for the command (optional)"
-                },
-                "timeout_ms": {
-                    "type": "number",
-                    "description": "Timeout in milliseconds (default: 30000, max: 300000)"
-                }
-            },
-            "required": ["command"],
-            "additionalProperties": false
-        }),
+        parameters,
         strict: false,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::tool_handler::ToolSpec;
     use super::*;
 
     #[test]
@@ -267,5 +321,76 @@ mod tests {
         let spec = create_shell_tool();
 
         assert_eq!(spec.name(), "shell");
+    }
+
+    #[test]
+    fn shell_tool_schema_advertises_max_output_tokens() {
+        let spec = create_shell_tool();
+        let ToolSpec::Function(tool) = spec else {
+            panic!("shell tool must be a function spec");
+        };
+        assert!(
+            tool.parameters["properties"]
+                .get("max_output_tokens")
+                .is_some_and(|field| field["default"] == json!(DEFAULT_MAX_OUTPUT_TOKENS)),
+            "shell schema must advertise max_output_tokens with the shared default"
+        );
+    }
+
+    #[test]
+    fn resolve_max_output_tokens_defaults_and_bounds() {
+        assert_eq!(resolve_max_output_tokens(None).unwrap(), DEFAULT_MAX_OUTPUT_TOKENS);
+        assert_eq!(resolve_max_output_tokens(Some(1)).unwrap(), 1);
+        assert_eq!(resolve_max_output_tokens(Some(50_000)).unwrap(), 50_000);
+        assert!(resolve_max_output_tokens(Some(0)).is_err());
+        assert!(resolve_max_output_tokens(Some(50_001)).is_err());
+    }
+
+    #[test]
+    fn format_shell_output_leaves_small_output_unchanged() {
+        let output = CoreShellOutput {
+            stdout: "hello\n".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        };
+        assert_eq!(format_shell_output(&output, DEFAULT_MAX_OUTPUT_TOKENS), "hello\n");
+    }
+
+    #[test]
+    fn format_shell_output_preserves_exit_code_on_small_failure() {
+        let output = CoreShellOutput {
+            stdout: "partial\n".to_string(),
+            stderr: "boom\n".to_string(),
+            exit_code: 2,
+        };
+        let formatted = format_shell_output(&output, DEFAULT_MAX_OUTPUT_TOKENS);
+        assert!(formatted.contains("[stderr]\n"));
+        assert!(formatted.contains("[exit code: 2]"));
+    }
+
+    #[test]
+    fn format_shell_output_condenses_oversized_content() {
+        let stdout = "x".repeat(10_000);
+        let output = CoreShellOutput {
+            stdout: stdout.clone(),
+            stderr: String::new(),
+            exit_code: 0,
+        };
+        // 10 tokens * 4 chars/token = 40 byte budget.
+        let formatted = format_shell_output(&output, 10);
+        assert!(formatted.len() < stdout.len());
+        assert!(formatted.contains("bytes omitted"));
+        assert!(formatted.starts_with("xxxx"));
+        assert!(formatted.ends_with("xxxx"));
+    }
+
+    #[test]
+    fn format_shell_output_empty_becomes_no_output_marker() {
+        let output = CoreShellOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        };
+        assert_eq!(format_shell_output(&output, DEFAULT_MAX_OUTPUT_TOKENS), "(no output)");
     }
 }
