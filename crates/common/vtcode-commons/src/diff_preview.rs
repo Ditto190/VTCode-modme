@@ -271,6 +271,12 @@ fn pair_word_level_ranges(dels: &mut [DiffDisplayLine], adds: &mut [DiffDisplayL
     }
 }
 
+/// Minimum shared-token ratio before word chips are useful.
+///
+/// Below this, the pair is effectively a replace of whole lines — chips would
+/// paint nearly every token and drown the clean full-width line tint.
+const MIN_WORD_SIMILARITY: f64 = 0.35;
+
 /// Split into word-ish atoms: identifier runs, whitespace runs, single other chars.
 fn tokenize_atoms(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
@@ -300,22 +306,16 @@ fn tokenize_atoms(text: &str) -> Vec<(usize, usize)> {
 }
 
 /// Compute byte ranges in `old`/`new` that are not part of a common token subsequence.
+///
+/// Returns empty ranges when the lines are too dissimilar (or one side is
+/// blank) so pure inserts/deletes keep a clean full-width tint without chips.
 pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
     let old_atoms = tokenize_atoms(old);
     let new_atoms = tokenize_atoms(new);
+    // Blank pair or pure insert/delete: line tint alone is the right signal.
+    // Highlighting an entire new/deleted body as a "chip" is just noise.
     if old_atoms.is_empty() || new_atoms.is_empty() {
-        // Fully insert/delete: highlight the whole non-empty side.
-        let old_ranges = if old.is_empty() {
-            Vec::new()
-        } else {
-            vec![(0, old.len())]
-        };
-        let new_ranges = if new.is_empty() {
-            Vec::new()
-        } else {
-            vec![(0, new.len())]
-        };
-        return (old_ranges, new_ranges);
+        return (Vec::new(), Vec::new());
     }
 
     // LCS over atom contents.
@@ -332,6 +332,15 @@ pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, 
                 dp[i + 1][j].max(dp[i][j + 1])
             };
         }
+    }
+
+    let lcs = dp[0][0];
+    let max_len = n.max(m);
+    let similarity = if max_len == 0 { 1.0 } else { lcs as f64 / max_len as f64 };
+    // Almost-everything-changed pairs (table → list, whole rewrites) stay
+    // line-only: chips would cover the full body and look messy.
+    if similarity < MIN_WORD_SIMILARITY {
+        return (Vec::new(), Vec::new());
     }
 
     let mut old_changed = vec![false; n];
@@ -360,10 +369,23 @@ pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, 
         j += 1;
     }
 
+    let old_changed_count = old_changed.iter().filter(|&&f| f).count();
+    let new_changed_count = new_changed.iter().filter(|&&f| f).count();
+    // If either side is mostly chips, drop both — the pair reads better as a
+    // solid replace band than as a wall of highlight boxes.
+    if mostly_changed(old_changed_count, n) || mostly_changed(new_changed_count, m) {
+        return (Vec::new(), Vec::new());
+    }
+
     (
         collapse_atom_flags(&old_atoms, &old_changed, old),
         collapse_atom_flags(&new_atoms, &new_changed, new),
     )
+}
+
+/// True when more than half the atoms on a side are marked changed.
+fn mostly_changed(changed_atoms: usize, atom_count: usize) -> bool {
+    atom_count > 0 && changed_atoms * 2 > atom_count
 }
 
 fn collapse_atom_flags(atoms: &[(usize, usize)], flags: &[bool], text: &str) -> Vec<(usize, usize)> {
@@ -591,6 +613,25 @@ diff --git a/file.txt b/file.txt
         // Shared prefix tokens stay outside the highlight.
         assert!(!old_changed.contains("bright_red"));
         assert!(!new_changed.contains("bright_red"));
+    }
+
+    #[test]
+    fn word_level_diff_skips_dissimilar_pairs() {
+        let old = "| Pillar | What it means |\n| --- | --- |\n| **Harness** | The model reasons; the harness composes tools. |";
+        let new = "- **The loop is the product.** Tool composition, context management, and\n  verification are engineered — not improvised around a chat completion.";
+        let (old_ranges, new_ranges) = word_level_changed_ranges(old, new);
+        assert!(old_ranges.is_empty(), "dissimilar del pair should stay line-only");
+        assert!(new_ranges.is_empty(), "dissimilar add pair should stay line-only");
+    }
+
+    #[test]
+    fn word_level_diff_skips_blank_sides() {
+        let (old_ranges, new_ranges) = word_level_changed_ranges("moved block", "");
+        assert!(old_ranges.is_empty());
+        assert!(new_ranges.is_empty());
+        let (old_ranges, new_ranges) = word_level_changed_ranges("", "moved block");
+        assert!(old_ranges.is_empty());
+        assert!(new_ranges.is_empty());
     }
 
     #[test]
