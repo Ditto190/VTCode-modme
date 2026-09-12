@@ -118,9 +118,9 @@ pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
     "Turn blocked after repeated unverified assistant responses; verification is still pending.";
 const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending. \
-    Inspection-only checks do not clear the verification gate; run `cargo check --locked`, \
-    `cargo fmt --all -- --check`, or the relevant `cargo nextest run` command (standalone or as a pure `&&` chain, \
-    no `| head` pipes and no `;`/`||`/`|` joins) to exit 0, then resume the request. \
+    Inspection-only checks do not clear the verification gate; run a verification command — your project's \
+    build/test/lint tool, e.g. `cargo check --locked`, `go test`, or `cargo nextest run` (standalone or as a pure \
+    `&&` chain, no `| head` pipes and no `;`/`||`/`|` joins) — to exit 0, then resume the request. \
     A failed verifier grants ";
 const PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX: &str = " fix-up edits before re-verify is required.";
 
@@ -1030,7 +1030,8 @@ pub(crate) async fn run_turn_loop(
                 MessageStyle::Warning,
                 "Recovery loop detected: capping repeated assistant responses to avoid wasted context.",
             );
-            if promote_latest_commentary_to_final(working_history, turn_history_start_len) {
+            let promoted_final = promote_latest_commentary_to_final(working_history, turn_history_start_len);
+            if promoted_final {
                 // Commentary has already crossed the renderer surface. Avoid
                 // rendering it a second time while still allowing the normal
                 // blocked-turn finalizer to publish the canonical event.
@@ -1041,9 +1042,21 @@ pub(crate) async fn run_turn_loop(
                     ctx.harness_state.mark_final_response_event_emitted();
                 }
             }
-            result = TurnLoopResult::Blocked {
-                reason: Some(ASSISTANT_TEXT_RESPONSE_CAP_REASON.to_string()),
-            };
+            // A preserved final answer with a clear verification gate is a
+            // completed turn: the model concluded and the loop merely
+            // re-prompted past its answer. Blocked/handoff semantics stay
+            // reserved for unverified work (checkpoint session-vtcode-20260912
+            // T083718Z: a verified recap was continued into the cap and the
+            // finished turn was published as Blocked).
+            let cap_ends_completed =
+                promoted_final && !repeated_tool_attempts.verification_is_pending() && !ctx.is_planning_active();
+            if cap_ends_completed {
+                result = TurnLoopResult::Completed { plan_approved_execution_pending: false };
+            } else {
+                result = TurnLoopResult::Blocked {
+                    reason: Some(ASSISTANT_TEXT_RESPONSE_CAP_REASON.to_string()),
+                };
+            }
             break;
         }
         if bounded_planning_follow_up {

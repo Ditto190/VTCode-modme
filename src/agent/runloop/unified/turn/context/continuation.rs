@@ -327,6 +327,17 @@ fn contains_user_input_request(lower: &str) -> bool {
         "awaiting your",
         "your choice",
         "your decision",
+        // Closing offers of optional follow-up work ("…say the word and I'll
+        // do a larger pass"): the model has finished and is waiting on the
+        // user, so the relaxed continuation paths must not re-prompt past the
+        // final answer (checkpoint session-vtcode-20260912T083718Z: a verified
+        // recap was continued twice and the turn blocked on the text cap).
+        "say the word",
+        "tell me and i'll",
+        "let me know if you want",
+        "if you want me to",
+        "just ask",
+        "happy to",
     ];
     if anywhere_patterns.iter().any(|pattern| lower.contains(pattern)) {
         return true;
@@ -1185,5 +1196,56 @@ mod tests {
         assert!(!contains_user_input_request("Let me check whether this should initialize the cache before use."));
         assert!(!contains_user_input_request("let me fix the next issue"));
         assert!(!contains_user_input_request("i'll apply these changes now"));
+    }
+
+    #[test]
+    fn contains_user_input_request_detects_closing_offers() {
+        assert!(contains_user_input_request(
+            "verified and done. if you want a deeper pass, say the word and i'll do a larger pass."
+        ));
+        assert!(contains_user_input_request("all checks pass; happy to iterate further."));
+        assert!(contains_user_input_request("the docs are updated — just ask if you want the full diff."));
+    }
+
+    #[test]
+    fn verified_recap_with_trailing_offer_does_not_continue() {
+        // Regression guard for session-vtcode-20260912T083718Z: a conclusive
+        // verification recap that closes by offering optional follow-up work
+        // ("say the word and I'll do a larger pass") was relaxed-continued,
+        // re-prompted into a second recap, and the turn ended Blocked on the
+        // text cap after the verification gate had already cleared.
+        let mut recap = String::from(
+            "Verification passed: `cargo fmt --all -- --check && cargo check --locked -p vtcode` → exit 0.\n\n\
+             **Recap**\n\n\
+             **Changed (README.md):** tightened Overview prose, sharpened the pillar table, \
+             streamlined Quick start phrasing, condensed the Documentation table, compacted the \
+             Providers paragraph, and fixed a hyphen→em-dash in the TUI tip. Contributor and \
+             sponsor HTML blocks preserved verbatim.\n\n\
+             **Verified:** all referenced doc paths exist; the fmt and check commands exit 0.\n\n",
+        );
+        while recap.len() <= 800 {
+            recap.push_str("Extra verified detail line that keeps the recap above the interim length cap.\n");
+        }
+        recap.push_str(
+            "**Remaining risk:** none functional. If you want a deeper revamp (restructured \
+             sections, feature highlights, refreshed screenshots), say the word and I'll do a \
+             larger pass.",
+        );
+        assert!(recap.len() > 800, "recap must exceed the interim length cap to reach the relaxed path");
+
+        let history = vec![
+            uni::Message::user("polish the README intro".to_string()),
+            uni::Message::assistant(String::new()).with_tool_calls(vec![uni::ToolCall::function(
+                "call_1".to_string(),
+                "exec_command".to_string(),
+                "{}".to_string(),
+            )]),
+            uni::Message::tool_response("call_1".to_string(), "Finished `dev` profile".to_string()),
+        ];
+
+        assert!(
+            !evaluate_interim_text_continuation(true, false, &history, &recap, 0).should_continue,
+            "a conclusive recap closing with an optional-work offer must end the turn"
+        );
     }
 }

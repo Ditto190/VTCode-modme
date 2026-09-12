@@ -271,11 +271,23 @@ exec session ended before the verifier's output was captured, reported by a
 `write_stdin` or non-run `unified_exec` session follow-up as a missing session)
 grants the same bounded fix-up window as a
 genuine failed verifier and surfaces a "Verification result lost" directive; the
-gate still only clears on a successful standalone verifier re-run. The
-`turn.blocked` event also populates `last_tool`, `consecutive_cap`, and
+gate still only clears on a successful standalone verifier re-run. The same
+feedback rule covers piped verifiers: while the gate is pending, an admitted
+`cargo check … 2>&1 | tail -5` success queues a one-shot "piped verifier did
+not clear the gate" directive, because the pipeline's exit status belongs to
+the tail command and the model would otherwise read the silence as verified.
+The `turn.blocked` event also populates `last_tool`, `consecutive_cap`, and
 `total_cap` from the blocked-tool-call fuse when it tripped, and transcript
 block reasons are truncated (~600 chars) with a pointer to the handoff file,
 which retains the full reason.
+
+The assistant text-response safety cap distinguishes finished work from a
+stalled loop. When the cap fires after the harness promoted the latest
+commentary to a final answer and the anti-blind checkpoint is clear (and
+planning is not active), the turn ends `Completed` — the model had concluded
+and the loop merely re-prompted past its answer. The cap ends `Blocked` only
+when no final answer could be preserved or the verification gate is still
+pending.
 
 The fork/branch history builder (`build_summarized_fork_history`) deliberately
 omits the continuity tail and produces a minimal resume artifact (envelope +

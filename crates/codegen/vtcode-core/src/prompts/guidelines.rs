@@ -156,6 +156,14 @@ pub fn generate_tool_guidelines_for_profile(
     }
     if has_exec {
         lines.push(shell_task_guidance(shell_profile).to_string());
+        // Verifier discipline ships with every exec-capable profile: the
+        // anti-blind-editing gate only clears on an unpiped exit 0, and a
+        // piped verifier leaves the model believing it verified (checkpoint
+        // session-vtcode-20260912T083718Z).
+        lines.push(
+            "- Run verifiers unpiped — standalone or pure `&&`; `|`/`;`/`||` masks the exit status so piped checks stay unverified; prefer `max_output_tokens`."
+                .to_string(),
+        );
     }
     // "Diagnose from evidence; never bypass safeguards" and the
     // completion-as-checkpoint line are already stated unconditionally in the
@@ -823,10 +831,16 @@ mod tests {
         let guidelines = generate_tool_guidelines_for_profile(&tools, None, ResolvedShellPromptProfile::UnixLike);
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("code_search"));
+        // Shipped verifier discipline: every exec-capable profile must carry
+        // the no-piping rule, and the budget test proves it fits.
+        assert!(guidelines.contains("piped checks stay unverified"));
+        assert!(guidelines.contains("max_output_tokens"));
         let approx_tokens = vtcode_commons::estimate_tokens(&guidelines);
-        // The batching and bounded-diff guardrails are intentionally part of
-        // the compact shared prompt; keep the budget below 400 tokens.
-        assert!(approx_tokens < 400, "got ~{approx_tokens} tokens");
+        // The batching, bounded-diff, and shipped verifier-discipline
+        // guardrails are intentionally part of the compact shared prompt; the
+        // budget moved 400 -> 430 for the deliberate no-pipe-verifier line
+        // (checkpoint session-vtcode-20260912T083718Z), not by drift.
+        assert!(approx_tokens < 430, "got ~{approx_tokens} tokens");
     }
 
     #[test]
@@ -853,6 +867,9 @@ mod tests {
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("`read_file` ranges"));
         assert!(guidelines.contains("serialize mutations"));
+        // No exec tools in this profile: the verifier no-pipe rule is
+        // exec-conditional and must not spend budget here.
+        assert!(!guidelines.contains("piped checks stay unverified"));
     }
 
     #[test]

@@ -2,8 +2,8 @@ use super::post_tool_recovery::complete_turn_after_failed_tool_free_recovery;
 use super::post_tool_recovery::prepare_post_tool_tool_free_recovery;
 use super::post_tool_recovery::{ensure_post_tool_resume_directive, has_tool_response_since};
 use super::{
-    ASSISTANT_TEXT_RESPONSE_CAP_REASON, COMPLETED_TURN_FALLBACK_RESPONSE, GENERIC_BLOCKED_FINAL_RESPONSE, HarnessUsage,
-    PENDING_VERIFICATION_BLOCK_REASON, PLANNING_COMPLETED_FALLBACK_RESPONSE, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
+    COMPLETED_TURN_FALLBACK_RESPONSE, GENERIC_BLOCKED_FINAL_RESPONSE, HarnessUsage, PENDING_VERIFICATION_BLOCK_REASON,
+    PLANNING_COMPLETED_FALLBACK_RESPONSE, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
     POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON, POST_TOOL_RECOVERY_REASON, POST_TOOL_RECOVERY_REASON_PLAN_MODE,
     POST_TOOL_RESUME_DIRECTIVE, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE, PostToolFailureRecovery,
     RECOVERY_CONTRACT_VIOLATION_REASON, RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER, accumulate_turn_usage,
@@ -1090,7 +1090,7 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
         message.role == uni::MessageRole::System
-            && message.content.as_text().contains("run `exec_command` to compile or test")
+            && message.content.as_text().contains("run one verifier with `exec_command`")
     }));
     assert!(
         !history
@@ -1100,7 +1100,7 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
 }
 
 #[tokio::test]
-async fn response_cap_preserves_commentary_as_one_blocked_final_harness_message() {
+async fn response_cap_preserves_commentary_as_one_completed_final_harness_message() {
     const FIRST_COMMENTARY: &str = "Let me continue analyzing the results from the first inspection.";
     const SECOND_COMMENTARY: &str = "Let me continue analyzing the results from the second inspection.";
 
@@ -1165,14 +1165,13 @@ async fn response_cap_preserves_commentary_as_one_blocked_final_harness_message(
     ];
     let outcome = run_turn_loop(&mut history, backing.turn_loop_context())
         .await
-        .expect("the capped recovery loop should produce a blocked handoff");
+        .expect("the capped recovery loop should preserve the final commentary");
 
-    assert!(matches!(
-        outcome.result,
-        TurnLoopResult::Blocked {
-            reason: Some(ref reason)
-        } if reason == ASSISTANT_TEXT_RESPONSE_CAP_REASON
-    ));
+    // The verification gate is clear and the latest commentary was promoted
+    // to the final answer, so the capped turn completes instead of blocking
+    // (session-vtcode-20260912T083718Z: a verified recap was continued into
+    // the cap and published as Blocked for finished work).
+    assert!(matches!(outcome.result, TurnLoopResult::Completed { plan_approved_execution_pending: false }));
     assert_eq!(requests.load(Ordering::SeqCst), 2, "the response cap must stop before a third request");
     assert!(!outcome.final_response_was_fallback);
     assert_eq!(final_answer_text(&history), SECOND_COMMENTARY);
@@ -1217,8 +1216,8 @@ async fn response_cap_preserves_commentary_as_one_blocked_final_harness_message(
         })
         .collect::<Vec<_>>();
     assert_eq!(agent_messages, vec![SECOND_COMMENTARY]);
-    assert!(events.iter().any(|event| matches!(event, ThreadEvent::TurnFailed(_))));
-    assert!(!events.iter().any(|event| matches!(event, ThreadEvent::TurnCompleted(_))));
+    assert!(events.iter().any(|event| matches!(event, ThreadEvent::TurnCompleted(_))));
+    assert!(!events.iter().any(|event| matches!(event, ThreadEvent::TurnFailed(_))));
 }
 
 #[tokio::test]

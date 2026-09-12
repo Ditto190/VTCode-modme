@@ -665,12 +665,21 @@ pub(crate) fn block_mutation_until_verification(
     let message = pending_mutations.map_or_else(
         || {
             format!(
-                "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a successful build, test, lint, or compile command.{fix_hint}"
+                "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain; no `|`, `;`, or `||`.{fix_hint}"
             )
         },
         |count| {
+            // `count` is consecutive mutating *commands* (fail-closed
+            // classification counts mutation-capable compounds too), not the
+            // number of files touched — say so instead of claiming "file
+            // changes" (session-vtcode-20260912T083718Z: counted 4 with one
+            // file edited). The clearing recipe belongs in `error` itself:
+            // piped or `;`-joined verifiers never clear the gate, and the
+            // model reading the rejection must not have to guess. Examples
+            // span ecosystems because `is_verification_invocation` admits
+            // cargo/go/npm/pytest/gradle/scripts/check.sh, not just cargo.
             format!(
-                "Mutation blocked until verification: {count} effective file changes are awaiting a successful build, test, lint, or compile command.{fix_hint}"
+                "Mutation blocked until verification: {count} mutating command(s) since the last successful verification are awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `pytest` — standalone or as a pure `&&` chain; no `|`, `;`, or `||`.{fix_hint}"
             )
         },
     );
@@ -692,7 +701,7 @@ pub(crate) fn block_mutation_until_verification(
             "pending_mutation_count_known": pending_mutations.is_some(),
             "fix_edits_remaining": repeated_tool_attempts.fix_edits_remaining,
             "error": message,
-            "next_action": format!("Run one verification command with exec_command to exit 0 before another workspace mutation: `cargo check --locked`, `cargo fmt --all -- --check`, or `cargo nextest run --locked -p <crate>`. A pure `&&` chain of verifiers also clears the gate. Do not pipe verifiers through `| head` and do not join with `;`/`||`/`|`; use `max_output_tokens` instead of pipes. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation, then requires re-verify."),
+            "next_action": format!("Run one verification command with exec_command to exit 0 before another workspace mutation: your project's build/test/lint tool (e.g. `cargo check --locked`, `go test`, `npm test`, or `pytest`). A pure `&&` chain of verifiers also clears the gate. Do not pipe verifiers through `| head` and do not join with `;`/`||`/`|`; use `max_output_tokens` instead of pipes. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation, then requires re-verify."),
             "retryable": true,
         })
         .to_string(),

@@ -25,6 +25,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 
 - When a bug appears in VT Code's own behavior, **fix VT Code — do not work around it yourself.** Patch the VT Code source that caused the bug; never substitute a manual workaround, wrapper script, or config shim in place of a source fix.
 - Before proposing a fix, read the trajectory log at `.vtcode/logs/trajectory.jsonl`, `.vtcode/checkpoints`, `/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions` to see what actually happened (tool calls, errors, retries) rather than guessing from the symptom.
+- Every self-bug fix must land in the **shipped surfaces** the release binary carries — runloop/tool logic and compiled prompts (`crates/codegen/vtcode-core/src/prompts/`) — not only in workspace-local files (AGENTS.md, docs), which affect this repository alone. Changing compiled guidance requires updating its budget/presence test.
 
 ## Detailed Guides
 
@@ -143,4 +144,4 @@ Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profil
 - LLM providers: use the `adding-llm-providers` skill. The `/model` picker uses `ModelId::all_models()`; `builtin_model_presets()` is used by `ModelsManager`. Both may need updates.
 - New workspace crates: use the `adding-workspace-crate` skill. This affects more than `Cargo.toml`; all workspace path dependencies need `version` fields.
 - Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters.
-- Cap large command output: `COMMAND 2>&1 | head -c 4000`.
+- Cap large command output: `COMMAND 2>&1 | head -c 4000` — but never pipe verifier commands (`cargo check --locked`, `cargo fmt --all -- --check`, `cargo nextest run`); pass `max_output_tokens` instead, since a pipe masks the verifier's exit status and never clears the verification gate.

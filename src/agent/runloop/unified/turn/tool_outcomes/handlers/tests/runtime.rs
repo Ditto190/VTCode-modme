@@ -1467,7 +1467,7 @@ async fn pending_verification_blocks_patch_before_filesystem_mutation() {
     assert!(content.contains("earlier turn"));
     assert!(content.contains("\"pending_mutations\":null"));
     assert!(content.contains("\"pending_mutation_count_known\":false"));
-    assert!(!content.contains("0 effective file changes"));
+    assert!(!content.contains("0 mutating command"), "the batch arm must not display a zero count");
 }
 
 #[tokio::test]

@@ -817,7 +817,7 @@ mod tests {
         assert!(
             ctx.working_history
                 .iter()
-                .any(|message| { message.content.as_text().contains("run `exec_command` to compile or test") })
+                .any(|message| { message.content.as_text().contains("run one verifier with `exec_command`") })
         );
     }
 

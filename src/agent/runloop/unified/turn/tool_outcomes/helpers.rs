@@ -15,8 +15,8 @@ use crate::agent::runloop::unified::turn::tool_outcomes::{is_grep_style_no_match
 /// Threshold: number of consecutive file mutations before the Anti-Blind-Editing
 /// warning fires. NL2Repo-Bench recommends verifying after every few edits.
 pub(crate) const BLIND_EDITING_THRESHOLD: usize = 4;
-pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: Pause to run verification/tests.";
-pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "CRITICAL: Multiple edits were made without verification. Stop editing and run `exec_command` to compile or test before proceeding.";
+pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let it exit 0 before further edits.";
+pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "CRITICAL: Multiple edits were made without verification. Stop editing and run one verifier with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, `npm test`, or `pytest` — standalone or as a pure `&&` chain (no `|`, `;`, or `||`; cap output with `max_output_tokens`), and let it exit 0 before another mutation. Piped checks do not clear the gate.";
 /// Fix-up window granted after a failed verification attempt. A failed
 /// `cargo check` / `cargo nextest run` must not deadlock the turn: the agent
 /// needs a bounded number of edits to address the reported failure before
@@ -41,6 +41,14 @@ pub(crate) const FAILED_VERIFICATION_FIX_WARNING: &str =
 /// reported failure and re-run a standalone verifier instead of claiming
 /// completion.
 pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verification command ran and FAILED. A bounded fix window is active: apply fixes for the reported failure, then re-run the standalone verification command (no pipes/truncation). Verification success is still required before the work can be accepted.";
+/// Warning rendered when a piped verifier (e.g. `cargo check 2>&1 | tail -5`)
+/// succeeded while the gate is pending: the pipeline's exit status belongs to
+/// the tail command, so the verifier's success cannot clear the gate.
+pub(crate) const PIPED_VERIFICATION_WARNING: &str = "[!] Piped verifier did not clear the verification gate: the pipeline exit status is the truncator's, not the verifier's.";
+/// Model-facing directive paired with [`PIPED_VERIFICATION_WARNING`]: without
+/// this feedback a piped success reads as "verified" to the model and the
+/// pending gate deadlocks the turn on unverified text responses.
+pub(crate) const PIPED_VERIFICATION_DIRECTIVE: &str = "The verification command ran inside a pipeline, so its exit status is the pipeline tail's (e.g. `tail`/`head`), not the verifier's, and it did not clear the verification gate. Re-run the verifier standalone or as a pure `&&` chain of verifiers without `|`, `;`, or `||` (pass `max_output_tokens` instead of piping) to clear verification.";
 
 /// Threshold: number of consecutive read/search operations before the Navigation
 /// Loop warning fires.
@@ -101,6 +109,13 @@ pub(crate) struct LoopTracker {
     /// tool-outcome handlers so the lost-result directive is surfaced after
     /// the tool response lands.
     pub verification_result_lost_notice_pending: bool,
+    /// Set when an admitted piped verifier (e.g. `cargo check 2>&1 | tail -5`)
+    /// succeeded while the gate was pending. A pipeline's exit status cannot
+    /// clear the gate, and without feedback the piped success reads as
+    /// "verified" to the model. Consumed once by the tool-outcome handlers;
+    /// never persisted in [`Self::verification_snapshot`] because it is
+    /// turn-scoped coaching, not gate state.
+    pub piped_verification_notice_pending: bool,
     /// Counter for consecutive read/search operations without action or synthesis
     pub consecutive_navigations: usize,
     /// Number of times navigation-loop recovery has fired in this session.
@@ -135,6 +150,7 @@ impl LoopTracker {
             verification_warning_emitted: false,
             verification_block_notice_emitted: false,
             verification_result_lost_notice_pending: false,
+            piped_verification_notice_pending: false,
             consecutive_navigations: 0,
             navigation_loop_recoveries: 0,
             consecutive_low_signal_navigations: 0,
@@ -293,6 +309,7 @@ impl LoopTracker {
         self.fix_edits_remaining = 0;
         self.verification_block_notice_emitted = false;
         self.verification_result_lost_notice_pending = false;
+        self.piped_verification_notice_pending = false;
         self.consecutive_navigations = 0;
         self.reset_low_signal_navigation_counters();
     }
@@ -318,6 +335,13 @@ impl LoopTracker {
     /// response lands so the directive never splits an assistant batch.
     pub(crate) fn take_verification_result_lost_notice(&mut self) -> bool {
         std::mem::take(&mut self.verification_result_lost_notice_pending)
+    }
+
+    /// One-shot accessor for the piped-verifier notice queued by
+    /// [`update_repetition_tracker`]. Handlers consume it after the tool
+    /// response lands so the directive never splits an assistant batch.
+    pub(crate) fn take_piped_verification_notice(&mut self) -> bool {
+        std::mem::take(&mut self.piped_verification_notice_pending)
     }
 
     /// Grant a bounded fix-up window after a failed verifier. The gate stays
@@ -348,6 +372,7 @@ impl LoopTracker {
         self.fix_edits_remaining = 0;
         self.verification_warning_emitted = false;
         self.verification_block_notice_emitted = false;
+        self.piped_verification_notice_pending = false;
     }
 }
 
@@ -1053,6 +1078,12 @@ pub(crate) fn mutation_blocked_until_verification(
 /// bounded window because the verifier never produced an observable
 /// verdict. In that case the tracker queues
 /// [`VERIFICATION_RESULT_LOST_DIRECTIVE`] for the handlers to surface.
+///
+/// A `true` return finally covers a *piped* verifier success while the gate
+/// is pending (`cargo check 2>&1 | tail -5`): the pipeline exit status
+/// cannot clear the gate, so the tracker queues
+/// [`PIPED_VERIFICATION_DIRECTIVE`] instead of leaving the model to believe
+/// the check verified the edits.
 pub(crate) fn update_repetition_tracker(
     loop_tracker: &mut LoopTracker,
     outcome: &ToolPipelineOutcome,
@@ -1178,6 +1209,21 @@ pub(crate) fn update_repetition_tracker(
                         matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. });
                     if ran_and_failed {
                         loop_tracker.record_failed_verification();
+                        loop_tracker.reset_navigation_window(low_signal_family.is_none());
+                        return true;
+                    }
+                    // A piped verifier's exit status belongs to the pipeline
+                    // tail, so a success cannot clear the gate. While the
+                    // gate is pending that silence reads as "verified" to
+                    // the model (checkpoint session-vtcode-20260912T083718Z:
+                    // `cargo check 2>&1 | tail -5` exited 0 and the turn
+                    // still deadlocked). Queue the one-shot piped-verifier
+                    // directive so the handlers surface it after the tool
+                    // response lands.
+                    if loop_tracker.verification_is_pending()
+                        && matches!(&outcome.status, ToolExecutionStatus::Success { command_success: true, .. })
+                    {
+                        loop_tracker.piped_verification_notice_pending = true;
                         loop_tracker.reset_navigation_window(low_signal_family.is_none());
                         return true;
                     }
@@ -1681,6 +1727,66 @@ mod tests {
             update_repetition_tracker(&mut tracker, &chained_success, tools::EXEC_COMMAND, &json!({"cmd": command}));
             assert!(tracker.verification_is_pending(), "`;`/`||`/`|` chains must not clear the gate: {command}");
         }
+    }
+
+    #[test]
+    fn piped_verifier_success_while_pending_queues_notice_once() {
+        // Regression guard for session-vtcode-20260912T083718Z: a piped
+        // verifier success exited 0 while the gate was pending, cleared
+        // nothing, and said nothing — the model believed it had verified and
+        // the turn deadlocked on unverified text responses.
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        let piped_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(update_repetition_tracker(
+            &mut tracker,
+            &piped_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked -p vtcode 2>&1 | tail -5"}),
+        ));
+        assert!(tracker.verification_is_pending(), "piped success must not clear the gate");
+        assert!(tracker.take_piped_verification_notice(), "piped success must queue the notice");
+        assert!(!tracker.take_piped_verification_notice(), "notice is one-shot");
+
+        // A standalone pure-`&&` verifier success afterwards clears the gate
+        // together with any queued piped notice.
+        let chained_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &chained_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo fmt --all -- --check && cargo check --locked"}),
+        ));
+        assert!(!tracker.verification_is_pending());
+        assert!(!tracker.take_piped_verification_notice());
+    }
+
+    #[test]
+    fn piped_verifier_success_without_pending_gate_stays_silent() {
+        let mut tracker = LoopTracker::new();
+        let piped_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        assert!(!update_repetition_tracker(
+            &mut tracker,
+            &piped_success,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "cargo check --locked 2>&1 | tail -5"}),
+        ));
+        assert!(!tracker.take_piped_verification_notice());
     }
 
     #[test]

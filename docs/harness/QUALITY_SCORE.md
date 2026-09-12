@@ -207,7 +207,7 @@ When updating an `Agent Legibility` row, make all three signals explicit in the 
 
 **Overall: B**
 **Priority action**: finish the compaction surface by splitting `turn/compaction/tests.rs` and pushing `turn/compaction/mod.rs` below the 500-line invariant, then continue the next TD-005 passes on `turn/turn_processing/llm_request/copilot_runtime.rs`, `turn/session/slash_commands/agents_authoring.rs`, and `turn/session_loop_runner/mod.rs`, while adding higher-level integration tests that exercise full inline loop interactions with modal flows and queue editing.
-**Verify**: `find src -name '*.rs' -type f -exec wc -l {} + | sort -nr | head -n 20 && find src/agent/runloop/unified/turn/compaction -name '*.rs' -type f -exec wc -l {} + | sort -nr && python3 scripts/check_agent_legibility.py --mode warn && cargo test -p vtcode --bin vtcode inline_events::tests`
+**Verify**: `find src -name '*.rs' -type f -exec wc -l {} + | sort -nr | head -n 20 && find src/agent/runloop/unified/turn/compaction -name '*.rs' -type f -exec wc -l {} + | sort -nr && python3 scripts/check_agent_legibility.py --mode warn` — then run the test verifier standalone (never piped or `;`/`||`-joined, so the anti-blind gate clears): `cargo nextest run -p vtcode -E 'test(inline_events)'`
 
 ---
 

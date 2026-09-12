@@ -16,28 +16,34 @@ use crate::agent::runloop::unified::turn::context::{
 };
 use crate::agent::runloop::unified::turn::tool_outcomes::execution_result::handle_tool_execution_result;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-    VERIFICATION_RESULT_LOST_DIRECTIVE, VERIFICATION_RESULT_LOST_WARNING, resolve_max_tool_retries,
-    update_repetition_tracker,
+    PIPED_VERIFICATION_DIRECTIVE, PIPED_VERIFICATION_WARNING, VERIFICATION_RESULT_LOST_DIRECTIVE,
+    VERIFICATION_RESULT_LOST_WARNING, resolve_max_tool_retries, update_repetition_tracker,
 };
 
 const DEFAULT_MAX_PARALLEL_TOOL_CALLS: usize = 4;
 
-/// Surface the lost-verification-result directive after the tool response
-/// lands. `update_repetition_tracker` queues it when a pending gate's
-/// verifier result was lost (verifier-level Failure/Timeout, or a dead exec
-/// session), so the model gets one diagnostic explanation and knows a
-/// standalone verifier re-run is required to clear the gate.
-fn flush_verification_result_lost_notice(
+/// Surface queued verification directives after the tool response lands.
+/// `update_repetition_tracker` queues them when a pending gate's verifier
+/// result was lost (verifier-level Failure/Timeout, or a dead exec session)
+/// or when an admitted piped verifier succeeded (its exit status belongs to
+/// the pipeline tail and cannot clear the gate), so the model gets one
+/// diagnostic explanation of what the pending gate still requires.
+fn flush_verification_notices(
     ctx: &mut TurnProcessingContext<'_>,
     loop_tracker: &mut super::super::helpers::LoopTracker,
 ) {
-    if !loop_tracker.take_verification_result_lost_notice() {
-        return;
+    if loop_tracker.take_verification_result_lost_notice() {
+        ctx.renderer
+            .line(vtcode_core::utils::ansi::MessageStyle::Warning, VERIFICATION_RESULT_LOST_WARNING)
+            .unwrap_or(());
+        ctx.push_system_message(VERIFICATION_RESULT_LOST_DIRECTIVE);
     }
-    ctx.renderer
-        .line(vtcode_core::utils::ansi::MessageStyle::Warning, VERIFICATION_RESULT_LOST_WARNING)
-        .unwrap_or(());
-    ctx.push_system_message(VERIFICATION_RESULT_LOST_DIRECTIVE);
+    if loop_tracker.take_piped_verification_notice() {
+        ctx.renderer
+            .line(vtcode_core::utils::ansi::MessageStyle::Warning, PIPED_VERIFICATION_WARNING)
+            .unwrap_or(());
+        ctx.push_system_message(PIPED_VERIFICATION_DIRECTIVE);
+    }
 }
 
 struct ValidatedToolCall<'a> {
@@ -261,7 +267,7 @@ async fn execute_parallel_group<'a, 'b>(
             // diagnostic explanation before the pending-verification text cap
             // re-applies instead of blocking the turn on the failure summary.
             t_ctx.ctx.harness_state.reset_assistant_text_response_streak();
-            flush_verification_result_lost_notice(t_ctx.ctx, t_ctx.repeated_tool_attempts);
+            flush_verification_notices(t_ctx.ctx, t_ctx.repeated_tool_attempts);
         }
         t_ctx
             .ctx
@@ -578,7 +584,7 @@ async fn execute_and_handle_tool_call_inner<'a>(
         // A failed verifier grants fix-up edits; reset the text streak so the
         // model can diagnose the failure before the text cap re-applies.
         ctx.harness_state.reset_assistant_text_response_streak();
-        flush_verification_result_lost_notice(ctx, repeated_tool_attempts);
+        flush_verification_notices(ctx, repeated_tool_attempts);
     }
     ctx.session_stats
         .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
