@@ -1225,6 +1225,8 @@ impl InlineSink {
 
             prepared.push(segments);
             plain.push(plain_line);
+            // Extend the tinted band on this same row (not a follow-up line)
+            // so empty/short add/del rows stay full-width.
             if let (Some(available_width), Some(background)) = (available_width, line.line_background) {
                 let padding_style = Style::new().bg_color(Some(background));
                 let rendered_width: usize = line
@@ -1233,12 +1235,25 @@ impl InlineSink {
                     .map(|segment| UnicodeWidthStr::width(segment.text.as_str()))
                     .sum();
                 let padding_width = available_width.saturating_sub(rendered_width);
-                if !line.segments.is_empty() {
-                    plain.push(String::new());
-                    prepared.push(vec![InlineSegment {
+                let Some(last_line) = prepared.last_mut() else {
+                    continue;
+                };
+                let Some(last_plain) = plain.last_mut() else {
+                    continue;
+                };
+                if padding_width > 0 {
+                    last_line.push(InlineSegment {
                         text: " ".repeat(padding_width),
                         style: Arc::new(convert_to_inline_style(padding_style)),
-                    }]);
+                    });
+                    last_plain.push_str(&" ".repeat(padding_width));
+                } else if last_line.is_empty() {
+                    // Empty add/del body: still paint a one-cell tint band.
+                    last_line.push(InlineSegment {
+                        text: " ".to_owned(),
+                        style: Arc::new(convert_to_inline_style(padding_style)),
+                    });
+                    last_plain.push(' ');
                 }
             }
         }

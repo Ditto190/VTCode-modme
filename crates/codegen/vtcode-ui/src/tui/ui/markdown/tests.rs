@@ -506,6 +506,20 @@ fn markdown_diff_code_block_stores_line_background() {
 }
 
 #[test]
+fn markdown_diff_empty_add_delete_rows_keep_full_width_tint() {
+    let markdown = "```diff\n@@ -1 +1 @@\n+\n- \n```\n";
+    let lines = render_markdown(markdown);
+    let tinted: Vec<_> = lines.iter().filter(|line| line.line_background.is_some()).collect();
+    assert!(tinted.len() >= 2, "empty + and - rows must stay tinted: {tinted:?}");
+    for line in tinted {
+        assert!(
+            line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()),
+            "tinted empty row needs a bg span so full-width fill works"
+        );
+    }
+}
+
+#[test]
 fn markdown_diff_header_styles_are_classified() {
     let markdown = "```diff\ndiff --git a/main.rs b/main.rs\nindex 1111111..2222222 100644\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n```\n";
     let lines = render_markdown(markdown);

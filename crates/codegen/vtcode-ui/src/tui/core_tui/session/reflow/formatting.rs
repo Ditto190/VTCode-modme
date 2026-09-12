@@ -155,7 +155,12 @@ impl Session {
         let trimmed_start = text.trim_start();
         // Body rows (`+`/`-`/` ` + dim gutter) and visual file/hunk headers
         // (`---`/`+++` red/green bands, `@@` neutral band) all paint full-width.
-        if trimmed_start.starts_with("--- ") || trimmed_start.starts_with("+++ ") || trimmed_start.starts_with("@@") {
+        if trimmed_start.starts_with("--- ")
+            || trimmed_start.starts_with("+++ ")
+            || trimmed_start.starts_with("@@")
+            || trimmed_start.starts_with('+')
+            || trimmed_start.starts_with('-')
+        {
             return true;
         }
 

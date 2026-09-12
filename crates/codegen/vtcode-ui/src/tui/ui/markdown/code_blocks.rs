@@ -392,13 +392,20 @@ fn render_diff_code_block(
                 line.set_line_background(hunk_background);
             } else if is_diff_addition_line(trimmed_start) {
                 line.push_segment(added_marker_style, "+");
-                push_highlighted_diff_body(
-                    &mut line,
-                    &trimmed_start[1..],
-                    current_language.as_deref(),
-                    added_style,
-                    added_background,
-                );
+                // Empty `+` bodies still need a tinted cell so the band is
+                // full-width (Paragraph paints only behind real spans).
+                let body = &trimmed_start[1..];
+                if body.is_empty() {
+                    line.push_segment(added_style, " ");
+                } else {
+                    push_highlighted_diff_body(
+                        &mut line,
+                        body,
+                        current_language.as_deref(),
+                        added_style,
+                        added_background,
+                    );
+                }
                 paint_line_background(&mut line, added_background);
                 line.set_line_background(added_background);
             } else if trimmed_start.starts_with("*** Update File:") {
@@ -408,13 +415,18 @@ fn render_diff_code_block(
                 line.set_line_background(added_background);
             } else if is_diff_deletion_line(trimmed_start) {
                 line.push_segment(removed_marker_style, "-");
-                push_highlighted_diff_body(
-                    &mut line,
-                    &trimmed_start[1..],
-                    current_language.as_deref(),
-                    removed_style,
-                    removed_background,
-                );
+                let body = &trimmed_start[1..];
+                if body.is_empty() {
+                    line.push_segment(removed_style, " ");
+                } else {
+                    push_highlighted_diff_body(
+                        &mut line,
+                        body,
+                        current_language.as_deref(),
+                        removed_style,
+                        removed_background,
+                    );
+                }
                 paint_line_background(&mut line, removed_background);
                 line.set_line_background(removed_background);
             } else if let Some(context_body) = trimmed.strip_prefix(' ') {
