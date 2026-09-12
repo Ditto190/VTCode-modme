@@ -6,9 +6,8 @@
 
 //! Shared helpers for rendering diff previews.
 //!
-//! Layout matches the JetBrains dual-gutter style:
-//! `{old_no} │ {new_no} │ {sign} content` with one uniform full-width
-//! add/del tint (no word-level chips).
+//! Layout: `{sign}{line_no} │ content` (single gutter) with one uniform
+//! full-width add/del tint (no word-level chips).
 
 use crate::diff::{DiffHunk, DiffLineKind};
 use crate::diff_paths::{
@@ -50,27 +49,25 @@ impl DiffDisplayLine {
         self.kind.is_diff()
     }
 
-    /// JetBrains-style gutter: `old │ new │ sign content`.
+    /// Single-gutter form: `sign + number + │ + content`.
     ///
-    /// Context shows both numbers; deletions only the old; additions only the
-    /// new. The `│` separators keep markdown bullets (`- foo`) distinct from
-    /// the diff marker.
+    /// Deletions show the old number, additions the new, context the new
+    /// (falling back to old). The `│` keeps markdown bullets (`- foo`)
+    /// distinct from the diff marker.
     pub fn numbered_text(&self, line_number_width: usize) -> String {
         let w = line_number_width;
         match self.kind {
             DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => self.text.clone(),
             DiffDisplayKind::Deletion => {
-                format!("{:>w$} │ {:>w$} │ - {}", self.old_line.unwrap_or_default(), "", self.text,)
+                format!("-{:>w$} │ {}", self.old_line.unwrap_or_default(), self.text)
             }
             DiffDisplayKind::Addition => {
-                format!("{:>w$} │ {:>w$} │ + {}", "", self.new_line.unwrap_or_default(), self.text,)
+                format!("+{:>w$} │ {}", self.new_line.unwrap_or_default(), self.text)
             }
-            DiffDisplayKind::Context => format!(
-                "{:>w$} │ {:>w$} │   {}",
-                self.old_line.unwrap_or_default(),
-                self.new_line.unwrap_or_default(),
-                self.text,
-            ),
+            DiffDisplayKind::Context => {
+                let no = self.new_line.or(self.old_line).unwrap_or_default();
+                format!(" {:>w$} │ {}", no, self.text)
+            }
         }
     }
 }
@@ -209,7 +206,7 @@ pub fn diff_display_line_number_width(lines: &[DiffDisplayLine]) -> usize {
         .map(digit_count)
         .max()
         .unwrap_or(4);
-    max_digits.clamp(4, 6)
+    max_digits.clamp(5, 6)
 }
 
 fn digit_count(mut value: u32) -> usize {
@@ -299,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn formats_numbered_unified_diff_with_dual_gutter() {
+    fn formats_numbered_unified_diff_with_single_gutter() {
         let diff = "\
 @@ -10,2 +10,2 @@
  old
@@ -308,12 +305,12 @@ mod tests {
 ";
         let lines = format_numbered_unified_diff(diff);
         assert!(lines.iter().any(|line| line == "@@ -10 +10 @@"));
-        // Context: both numbers, blank sign (width clamps to 4).
-        assert!(lines.iter().any(|line| line.contains("  10 │   10 │   old")));
-        // Deletion: old number only (blank new column).
-        assert!(lines.iter().any(|line| line.contains("  11 │      │ - old")));
-        // Addition: new number only (blank old column is 4 spaces).
-        assert!(lines.iter().any(|line| line.contains("    │   11 │ + new")));
+        // Context: blank sign + new number (width clamps to 5).
+        assert!(lines.iter().any(|line| line.contains("    10 │ old")));
+        // Deletion: old number.
+        assert!(lines.iter().any(|line| line.contains("-   11 │ old")));
+        // Addition: new number.
+        assert!(lines.iter().any(|line| line.contains("+   11 │ new")));
     }
 
     #[test]
@@ -322,11 +319,10 @@ mod tests {
             DiffDisplayKind::Addition,
             None,
             Some(53),
-            "- **Agent-first by design**: prose".to_string(),
+            "- **Agent-first by design*: prose".to_string(),
         );
         let text = line.numbered_text(5);
-        assert!(text.contains("53 │ + - **Agent-first"));
-        assert!(text.contains("│ + "));
+        assert_eq!(text, "+   53 │ - **Agent-first by design*: prose");
     }
 
     #[test]
@@ -405,7 +401,7 @@ mod tests {
             Some(1),
             "text".to_string(),
         )];
-        assert_eq!(diff_display_line_number_width(&small), 4);
+        assert_eq!(diff_display_line_number_width(&small), 5);
 
         let large = vec![DiffDisplayLine::body(
             DiffDisplayKind::Context,

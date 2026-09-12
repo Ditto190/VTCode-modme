@@ -116,22 +116,20 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
                     DiffLineType::Context => " ",
                 };
 
-                // JetBrains dual gutter: `old │ new │ sign content`.
-                let old_txt = display_line
-                    .old_line
-                    .map(|n| format!("{n:>4}"))
-                    .unwrap_or_else(|| "    ".to_owned());
-                let new_txt = display_line
-                    .new_line
-                    .map(|n| format!("{n:>4}"))
-                    .unwrap_or_else(|| "    ".to_owned());
+                // Single gutter: `sign + number + │`.
+                let line_no = match display_line.kind {
+                    DiffDisplayKind::Deletion => display_line.old_line,
+                    DiffDisplayKind::Addition => display_line.new_line,
+                    _ => display_line.new_line.or(display_line.old_line),
+                };
+                let line_num_str = match line_no {
+                    Some(n) => format!("{n:>4}"),
+                    None => "    ".to_owned(),
+                };
                 let mut spans = vec![
-                    Span::styled(old_txt, gutter_style),
-                    Span::styled(" │ ".to_owned(), gutter_style),
-                    Span::styled(new_txt, gutter_style),
-                    Span::styled(" │ ".to_owned(), gutter_style),
                     Span::styled(prefix.to_owned(), sign_style),
-                    Span::styled(" ".to_owned(), sign_style),
+                    Span::styled(line_num_str, gutter_style),
+                    Span::styled(" │ ".to_owned(), gutter_style),
                 ];
 
                 // Prose diffs (md/txt) skip syntax highlighting: solid content

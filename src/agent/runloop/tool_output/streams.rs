@@ -267,25 +267,25 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
             .effects(Effects::DIMMED),
     };
     let reset = Reset;
-    out.reserve(line.text.len() + 48);
-    // JetBrains dual gutter: `old │ new │ sign content`. Blank columns keep
-    // the two line-number tracks aligned; `│` also keeps markdown bullets
-    // (`- foo`) distinct from the diff marker (`+`/`-`).
-    let w = line_number_width;
-    let old_no = line.old_line;
-    let new_no = line.new_line;
-    let old_txt = old_no.map(|n| format!("{n:>w$}")).unwrap_or_else(|| " ".repeat(w));
-    let new_txt = new_no.map(|n| format!("{n:>w$}")).unwrap_or_else(|| " ".repeat(w));
-    let _ = write!(out, "{}", gutter_style.render());
-    let _ = write!(out, "{old_txt} │ {new_txt} │ ");
-    let _ = write!(out, "{reset}");
+    out.reserve(line.text.len() + 32);
+    // Single gutter: `sign + number + │ + content`. The `│` keeps markdown
+    // bullets (`- foo`) distinct from the diff marker (`+`/`-`). Every span
+    // carries the line tint so the band is full-width.
+    let line_no = match marker {
+        '+' => line.new_line,
+        '-' => line.old_line,
+        _ => line.new_line.or(line.old_line),
+    }
+    .unwrap_or_default();
     let _ = write!(out, "{}", marker_style.render());
     out.push_str(match marker {
         '+' => "+",
         '-' => "-",
         _ => " ",
     });
-    out.push(' ');
+    let _ = write!(out, "{reset}");
+    let _ = write!(out, "{}", gutter_style.render());
+    let _ = write!(out, "{line_no:>line_number_width$} │ ");
     let _ = write!(out, "{reset}");
     if let Some(highlighted) = highlight_diff_content(content, language_hint, bg) {
         out.push_str(&highlighted);
@@ -741,7 +741,7 @@ mod tests {
         assert!(rendered.contains("\u{1b}["));
         let stripped = strip_ansi_codes(rendered);
         // Blank old column (5) + ` │ ` + ` 1377` + ` │ ` + `+ content`.
-        assert!(stripped.contains("     │  1377 │ + let x = 1;"), "got: {stripped:?}");
+        assert!(stripped.contains("+ 1377 │ let x = 1;"), "got: {stripped:?}");
     }
 
     #[test]
@@ -755,7 +755,7 @@ mod tests {
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
-        assert!(stripped.contains("+     line,"));
+        assert!(stripped.contains("+ 1384 │     line,"));
     }
 
     #[test]
@@ -769,7 +769,7 @@ mod tests {
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
-        assert!(stripped.contains("│ + "));
+        assert!(stripped.contains("+   42 │ "), "got: {stripped:?}");
     }
 
     #[test]
@@ -804,15 +804,15 @@ mod tests {
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
-        assert!(stripped.contains("│ + - **Agent-first"));
+        assert!(stripped.contains("+   53 │ - **Agent-first"), "got: {stripped:?}");
     }
 
     #[test]
     fn format_diff_line_truncates_long_addition() {
         let mut buf = String::new();
         let long_text = "y".repeat(MAX_LINE_LENGTH * 2);
-        // Dual gutter: old(5) + sep(3) + new(5) + sep(3) + sign(2) = 18.
-        let gutter_width = 18;
+        // Single gutter: sign(1) + number(5) + " │ "(3) = 9.
+        let gutter_width = 9;
         let rendered = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Addition, None, Some(9), &long_text),
             None,
