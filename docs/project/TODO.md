@@ -84,3 +84,56 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 
 - P7: keep facade (session.rs:30-80 + 20 submodules); fix transition table (activity.rs:4-60), reflow invalidation (transcript.rs:28-311, state.rs:139-147,477-512), introduce InputOwner enum (replace input_enabled bools), keep Tick/PTY coalescing (events.rs:12-211, drive.rs:199-512), WCAG 4.5:1 (theme/tests.rs:58-125). Verify nextest -p vtcode-ui -E 'test(theme)' + transcript_rendering + overlay_list.
 - P8: true pass@k=1-C(n-c,k)/C(n,k), pass^k=(c/n)^k + attempts>=1 guard in suite.rs; keep executor.rs:33-44 sequential, parallelize at caller with cost/latency join to trace_analyzer/; eviction→summarize hook, BM25 replace substring (query.rs:141-227), LRU invalidate (query.rs:11-14); cross-model regression suite (Astra executes, Claude/Gemini pass).
+
+---
+
+implement enter to steer the agent loop when press "enter". current behavior is only append to queue. find a way or new shortcut to steer the new message after next toolcall.
+
+---
+
+check and improve "[!] Turn balancer: repeated low-signal navigation detected; scheduling an early recovery pass" detection and recovery
+
+---
+
+check TODO/tasks rendering, it should not use trailing and leading "|" anymore. also do not rendering repeated tasks in the same TUI to prevent clutter and confusion. also for the tasks header, maybe remove it, don't show the tasks plan file random name. or just use a quick tasks summarization as the task header.
+
+check image as current status and improve: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-11 at 15.51.03.png'
+
+---
+
+CRITICAL: fix Tool execution completed, but the model follow-up failed (transient; bounded retry
+scheduled). Output above is valid.
+Follow-up error category: Request timed out
+[!] Follow-up failed transiently after tool execution; compacting context and
+scheduling one tool-enabled recovery pass.
+
+==> this is after vtcode agent ask user for input, then it failed to follow up due to a transient error.
+
+===
+
+Improve vtcode TUI startup to just launch the program instantly and defer loading. check deepwiki mcp for https://deepwiki.com/openai/codex for reference.
+
+===
+
+CRICIAL:
+• The turn is blocked because verification is still pending. Inspection-only checks do not clear the verification gate; run cargo check --locked, cargo fmt --all -- --check,
+or the relevant cargo nextest run command (standalone or as a pure && chain, no | head pipes and no ;/||/| joins) to exit 0, then resume the request. A failed verifier
+grants 2 fix-up edits before re-verify is required.
+Turn blocked after repeated unverified assistant responses; verification is still pending.
+Turn blocked: Turn blocked after repeated unverified assistant responses; verification is still pending.
+What you can do:
+• In this session: Type 'continue' to resume, or describe alternative instructions
+• From terminal: Run `vtcode --resume session-vtcode-20260912T083718Z_791464-83673`
+• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260912t083718z_791464-83673-20260912T083840Z-95940bd0-80c1-4375-8810-6120d64dda10.md
+
+Recovery loop detected: capping repeated assistant responses to avoid wasted context.
+Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.
+Turn blocked: Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.
+What you can do:
+• In this session: Type 'continue' to resume, or describe alternative instructions
+• From terminal: Run `vtcode --resume session-vtcode-20260912T083718Z_791464-83673`
+• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260912t083718z_791464-83673-20260912T083950Z-02aaa499-96ed-
+4b33-9790-dcea0b5eedb6.md
+Repeated follow-up after stalled turn detected; enforcing autonomous recovery and conclusion.
