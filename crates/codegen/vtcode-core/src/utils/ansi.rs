@@ -1084,6 +1084,12 @@ impl InlineSink {
         {
             resolved.color = Some(color);
         }
+        // Explicit backgrounds (e.g. diff add/del/hunk tints, already chosen
+        // for the detected theme at render time) must survive: without them
+        // ANSI-rendered diff rows lose their tint and render half-painted.
+        if let Some(bg) = style.bg.and_then(Self::ansi_from_ratatui_color) {
+            resolved.bg_color = Some(bg);
+        }
 
         let added = style.add_modifier;
 
@@ -1702,6 +1708,32 @@ mod tests {
         assert_eq!(segments[0].style.color, Some(AnsiColorEnum::Ansi(AnsiColor::Red)));
         assert_eq!(segments[1].text, " plain");
         assert_eq!(segments[1].style.color, None);
+    }
+
+    #[test]
+    fn convert_plain_lines_preserves_explicit_backgrounds() {
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let sink = InlineSink::new(InlineHandle::new_for_tests(sender), SyntaxHighlightingConfig::default());
+        let fallback = InlineTextStyle {
+            color: Some(AnsiColorEnum::Ansi(AnsiColor::Green)),
+            bg_color: None,
+            effects: Effects::new(),
+        };
+
+        // Diff rows arrive as ANSI with an explicit tinted bg (e.g. 48;2;…).
+        // Dropping it paints half-tinted rows in the transcript.
+        let (converted, plain) =
+            sink.convert_plain_lines("\u{1b}[1m\u{1b}[91m\u{1b}[48;2;70;38;42m- old\u{1b}[0m tail", &fallback);
+
+        assert_eq!(plain, vec!["- old tail".to_owned()]);
+        let segments = &converted[0];
+        assert_eq!(segments[0].text, "- old");
+        assert_eq!(
+            segments[0].style.bg_color,
+            Some(AnsiColorEnum::Rgb(RgbColor(70, 38, 42))),
+            "explicit ANSI background must survive into transcript segments"
+        );
+        assert_eq!(segments[1].style.bg_color, None);
     }
 
     #[test]

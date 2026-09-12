@@ -110,6 +110,25 @@ pub fn diff_del_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
     }
 }
 
+/// Stronger addition-chip background for word-level (intra-line) highlights.
+///
+/// Sits on top of the subtle full-width add tint so only the tokens that
+/// actually changed pop (IntelliJ / GitHub two-level background).
+pub fn diff_add_word_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+    match theme {
+        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(36, 100, 70)),
+        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(168, 230, 190)),
+    }
+}
+
+/// Stronger deletion-chip background for word-level (intra-line) highlights.
+pub fn diff_del_word_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+    match theme {
+        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(140, 52, 58)),
+        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(255, 186, 186)),
+    }
+}
+
 /// Get background color for hunk header (`@@ -old +new @@`) lines.
 ///
 /// Neutral blue-grey tint (not red/green) so hunk separators stay visually

@@ -5,8 +5,8 @@
 
 // Re-export diff theme from vtcode-commons
 pub use vtcode_commons::diff_theme::{
-    DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg, diff_gutter_bg_add_light, diff_gutter_bg_del_light,
-    diff_gutter_fg_light, diff_hunk_bg,
+    DiffColorLevel, DiffTheme, diff_add_bg, diff_add_word_bg, diff_del_bg, diff_del_word_bg, diff_gutter_bg_add_light,
+    diff_gutter_bg_del_light, diff_gutter_fg_light, diff_hunk_bg,
 };
 pub use vtcode_commons::styling::DiffColorPalette;
 
@@ -63,6 +63,26 @@ pub struct DiffRenderStyleContext {
     theme: DiffTheme,
     level: DiffColorLevel,
     backgrounds: ResolvedDiffBackgrounds,
+}
+
+impl DiffRenderStyleContext {
+    pub fn theme(self) -> DiffTheme {
+        self.theme
+    }
+
+    pub fn level(self) -> DiffColorLevel {
+        self.level
+    }
+
+    /// Stronger addition-chip background for word-level highlights.
+    pub fn add_word_bg(self) -> Option<AnstyleColor> {
+        (self.level != DiffColorLevel::Ansi16).then(|| diff_add_word_bg(self.theme, self.level))
+    }
+
+    /// Stronger deletion-chip background for word-level highlights.
+    pub fn del_word_bg(self) -> Option<AnstyleColor> {
+        (self.level != DiffColorLevel::Ansi16).then(|| diff_del_word_bg(self.theme, self.level))
+    }
 }
 
 /// Resolve the current terminal and syntax-theme styling into one context.
@@ -250,21 +270,19 @@ pub(crate) fn style_file_header_new(style_context: DiffRenderStyleContext) -> Ra
 }
 
 /// Content style for plain (non-syntax-highlighted) diff lines.
+///
+/// IntelliJ-style body: default foreground on the full-width tint so code
+/// stays readable. Bright red/green lives only on the gutter marker.
 pub(crate) fn style_content(kind: DiffLineType, style_context: DiffRenderStyleContext) -> RatatuiStyle {
     let bg = content_background(kind, style_context);
     let fg = indicator_fg(kind, style_context.theme);
-    match (kind, style_context.theme, style_context.level, bg) {
-        (DiffLineType::Context, _, _, _) => RatatuiStyle::default(),
-        // Light theme: bg-only tinting; foreground stays as rendered default.
-        (_, DiffTheme::Light, _, Some(bg)) => RatatuiStyle::default().bg(bg),
-        (_, DiffTheme::Light, _, None) => RatatuiStyle::default(),
+    match (kind, style_context.level, bg) {
+        (DiffLineType::Context, _, _) => RatatuiStyle::default(),
         // ANSI16: foreground-only — no background support.
-        (_, _, DiffColorLevel::Ansi16, _) => fg.map(|c| RatatuiStyle::default().fg(c)).unwrap_or_default(),
-        // TrueColor/256 + tinted bg: coloured text on tinted background.
-        (_, _, _, Some(bg)) => fg
-            .map(|c| RatatuiStyle::default().fg(c).bg(bg))
-            .unwrap_or_else(|| RatatuiStyle::default().bg(bg)),
-        (_, _, _, None) => fg.map(|c| RatatuiStyle::default().fg(c)).unwrap_or_default(),
+        (_, DiffColorLevel::Ansi16, _) => fg.map(|c| RatatuiStyle::default().fg(c)).unwrap_or_default(),
+        // TrueColor/256 + tinted bg: default fg so content is not green-on-green.
+        (_, _, Some(bg)) => RatatuiStyle::default().bg(bg),
+        (_, _, None) => RatatuiStyle::default(),
     }
 }
 
@@ -272,11 +290,10 @@ pub(crate) fn style_content(kind: DiffLineType, style_context: DiffRenderStyleCo
 pub(crate) fn style_content_ansi(kind: DiffLineType, style_context: DiffRenderStyleContext) -> AnstyleStyle {
     let background = content_background(kind, style_context).map(ratatui_color_to_anstyle);
     let foreground = indicator_fg(kind, style_context.theme).map(ratatui_color_to_anstyle);
-    match (kind, style_context.theme, style_context.level, background) {
-        (DiffLineType::Context, _, _, _) => AnstyleStyle::new(),
-        (_, DiffTheme::Light, _, background) => AnstyleStyle::new().fg_color(foreground).bg_color(background),
-        (_, _, DiffColorLevel::Ansi16, _) => AnstyleStyle::new().fg_color(foreground),
-        (_, _, _, background) => AnstyleStyle::new().fg_color(foreground).bg_color(background),
+    match (kind, style_context.level, background) {
+        (DiffLineType::Context, _, _) => AnstyleStyle::new(),
+        (_, DiffColorLevel::Ansi16, _) => AnstyleStyle::new().fg_color(foreground),
+        (_, _, background) => AnstyleStyle::new().bg_color(background),
     }
 }
 
@@ -445,6 +462,20 @@ mod tests {
         let style = style_content(DiffLineType::Insert, test_style_context(DiffTheme::Dark, DiffColorLevel::Ansi16));
         assert_eq!(style.fg, Some(RatatuiColor::LightGreen));
         assert_eq!(style.bg, None);
+    }
+
+    #[test]
+    fn truecolor_content_uses_default_fg_on_tint() {
+        let ctx = test_style_context(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let add = style_content(DiffLineType::Insert, ctx);
+        let del = style_content(DiffLineType::Delete, ctx);
+        assert_eq!(add.fg, None);
+        assert_eq!(del.fg, None);
+        assert!(add.bg.is_some());
+        assert!(del.bg.is_some());
+        let sign = style_sign(DiffLineType::Insert, ctx);
+        assert_eq!(sign.fg, Some(RatatuiColor::LightGreen));
+        assert_ne!(sign.fg, add.fg);
     }
 
     #[test]

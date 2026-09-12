@@ -159,12 +159,20 @@ fn render_preview_line(
     renderer.line_with_override_style(fallback_style, override_style.unwrap_or(fallback_style.style()), &text)
 }
 
-fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option<anstyle::Color>) -> Option<String> {
-    // Prose (markdown/text) diffs stay solid diff colors: syntax tokens on a
-    // tinted add/del background fail contrast and fight diff semantics
-    // (e.g. `**bold**` / `` `code` `` fragments glowing on green/red).
+fn highlight_diff_content(
+    content: &str,
+    language_hint: Option<&str>,
+    bg: Option<anstyle::Color>,
+    word_ranges: &[(usize, usize)],
+    word_bg: Option<anstyle::Color>,
+) -> Option<String> {
+    // Prose (markdown/text) diffs stay solid: syntax tokens on a tinted
+    // add/del background fail contrast. Word chips still paint when present.
     if is_prose_language_hint(language_hint) {
-        return None;
+        if word_ranges.is_empty() || word_bg.is_none() {
+            return None;
+        }
+        return Some(render_plain_with_word_chips(content, bg, word_ranges, word_bg));
     }
     let leading_ws_len = content
         .char_indices()
@@ -172,8 +180,14 @@ fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option
         .map(|(idx, _)| idx)
         .unwrap_or(content.len());
     let (leading_ws, code_content) = content.split_at(leading_ws_len);
+    let code_offset = leading_ws_len;
 
-    let segments = markdown::highlight_line_for_diff(code_content, language_hint)?;
+    let Some(segments) = markdown::highlight_line_for_diff(code_content, language_hint) else {
+        if word_ranges.is_empty() || word_bg.is_none() {
+            return None;
+        }
+        return Some(render_plain_with_word_chips(content, bg, word_ranges, word_bg));
+    };
     if segments.is_empty() {
         return None;
     }
@@ -190,21 +204,65 @@ fn highlight_diff_content(content: &str, language_hint: Option<&str>, bg: Option
             out.push_str(&Reset.to_string());
         }
     }
+    let mut cursor = code_offset;
     for (style, text) in segments {
         if text.is_empty() {
             continue;
         }
         // Force the diff tint: syntect theme backgrounds must never punch
-        // holes in the full-width add/del background.
+        // holes in the full-width add/del background. Word-changed spans get
+        // the stronger chip colour on top of that tint.
         let mut token_style = style;
-        if let Some(bg_color) = bg {
+        let seg_end = cursor + text.len();
+        let is_word_changed = word_bg.is_some() && word_ranges.iter().any(|&(s, e)| cursor < e && seg_end > s);
+        let paint_bg = if is_word_changed { word_bg } else { bg };
+        if let Some(bg_color) = paint_bg {
             token_style = token_style.bg_color(Some(bg_color));
         }
         out.push_str(&token_style.render().to_string());
         out.push_str(&text);
         out.push_str(&Reset.to_string());
+        cursor = seg_end;
     }
     if out.is_empty() { None } else { Some(out) }
+}
+
+/// Paint line tint on unchanged spans and stronger word chips on changed ranges.
+fn render_plain_with_word_chips(
+    content: &str,
+    bg: Option<anstyle::Color>,
+    word_ranges: &[(usize, usize)],
+    word_bg: Option<anstyle::Color>,
+) -> String {
+    let mut out = String::with_capacity(content.len() + 16);
+    let mut cursor = 0usize;
+    for &(start, end) in word_ranges {
+        let start = start.min(content.len());
+        let end = end.min(content.len()).max(start);
+        if start > cursor {
+            let unchanged = &content[cursor..start];
+            let style = AnsiStyle::new().bg_color(bg);
+            out.push_str(&style.render().to_string());
+            out.push_str(unchanged);
+            out.push_str(&Reset.to_string());
+        }
+        if end > start {
+            let changed = &content[start..end];
+            let style = AnsiStyle::new().bg_color(word_bg.or(bg));
+            out.push_str(&style.render().to_string());
+            out.push_str(changed);
+            out.push_str(&Reset.to_string());
+        }
+        cursor = end.max(cursor);
+    }
+    if cursor < content.len() {
+        let tail = &content[cursor..];
+        let style = AnsiStyle::new().bg_color(bg);
+        out.push_str(&style.render().to_string());
+        out.push_str(tail);
+        out.push_str(&Reset.to_string());
+    }
+    out
 }
 
 fn format_diff_line_with_gutter_and_syntax<'a>(
@@ -212,6 +270,7 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     base_style: Option<AnsiStyle>,
     language_hint: Option<&str>,
     line_number_width: usize,
+    word_bg: Option<anstyle::Color>,
     out: &'a mut String,
 ) -> &'a str {
     use std::fmt::Write as _;
@@ -285,7 +344,14 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     let _ = write!(out, "{}", gutter_style.render());
     let _ = write!(out, "{line_no:>line_number_width$} │ ");
     let _ = write!(out, "{reset}");
-    if let Some(highlighted) = highlight_diff_content(content, language_hint, bg) {
+    // Two-level background: full-width line tint + stronger word chips for
+    // tokens that actually differ from the paired opposite line.
+    let word_ranges: &[(usize, usize)] = if matches!(marker, '+' | '-') && !content.is_empty() {
+        &line.changed
+    } else {
+        &[]
+    };
+    if let Some(highlighted) = highlight_diff_content(content, language_hint, bg, word_ranges, word_bg) {
         out.push_str(&highlighted);
     } else if let Some(style) = base_style {
         let _ = write!(out, "{}", style.render());
@@ -428,16 +494,20 @@ pub(crate) fn render_diff_content_block(
         }
 
         let line_style = select_line_style(tool_name, &display_buffer, git_styles, ls_styles);
-        let prose = current_language_hint
-            .as_deref()
-            .map(|hint| is_prose_language_hint(Some(hint)))
-            .unwrap_or_default();
-        let rendered_owned = if color_enabled && !was_truncated && !prose {
+        let word_bg = match line.kind {
+            DiffDisplayKind::Addition => git_styles.add_word.and_then(|s| s.get_bg_color()),
+            DiffDisplayKind::Deletion => git_styles.remove_word.and_then(|s| s.get_bg_color()),
+            _ => None,
+        };
+        // Always route add/del through the gutter formatter so word-level
+        // chips can paint; prose simply falls back to solid line tint.
+        let rendered_owned = if color_enabled && !was_truncated {
             Some(format_diff_line_with_gutter_and_syntax(
                 line,
                 line_style,
                 current_language_hint.as_deref(),
                 line_number_width,
+                word_bg,
                 &mut formatted_buffer,
             ))
         } else {
@@ -718,19 +788,25 @@ mod tests {
         assert!(inline_output.ends_with("..."));
     }
 
+    fn test_diff_line(kind: DiffDisplayKind, line_number: Option<u32>, text: &str) -> DiffDisplayLine {
+        DiffDisplayLine {
+            kind,
+            line_number,
+            text: text.to_string(),
+            changed: Vec::new(),
+        }
+    }
+
     #[test]
     fn format_diff_line_styles_gutter_for_additions() {
         let style = anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::Green)));
         let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Addition,
-                line_number: Some(1377),
-                text: "let x = 1;".to_string(),
-            },
+            &test_diff_line(DiffDisplayKind::Addition, Some(1377), "let x = 1;"),
             Some(style),
             None,
             5,
+            None,
             &mut buf,
         );
         assert!(rendered.contains("\u{1b}["));
@@ -743,14 +819,11 @@ mod tests {
     fn format_diff_line_preserves_code_indentation() {
         let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Addition,
-                line_number: Some(1384),
-                text: "    line,".to_string(),
-            },
+            &test_diff_line(DiffDisplayKind::Addition, Some(1384), "    line,"),
             None,
             None,
             5,
+            None,
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -761,14 +834,11 @@ mod tests {
     fn format_diff_line_keeps_blank_line_spacing() {
         let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Addition,
-                line_number: Some(42),
-                text: String::new(),
-            },
+            &test_diff_line(DiffDisplayKind::Addition, Some(42), ""),
             None,
             None,
             5,
+            None,
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -779,25 +849,19 @@ mod tests {
     fn format_diff_line_clears_reused_buffer_for_metadata() {
         let mut buf = String::new();
         let _ = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Addition,
-                line_number: Some(1),
-                text: "let x = 1;".to_string(),
-            },
+            &test_diff_line(DiffDisplayKind::Addition, Some(1), "let x = 1;"),
             None,
             None,
             5,
+            None,
             &mut buf,
         );
         let rendered = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Metadata,
-                line_number: None,
-                text: "diff --git a/src/lib.rs b/src/lib.rs".to_string(),
-            },
+            &test_diff_line(DiffDisplayKind::Metadata, None, "diff --git a/src/lib.rs b/src/lib.rs"),
             None,
             None,
             5,
+            None,
             &mut buf,
         );
 
@@ -808,14 +872,11 @@ mod tests {
     fn format_diff_line_keeps_markdown_bullet_distinct_from_marker() {
         let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Addition,
-                line_number: Some(53),
-                text: "- **Agent-first by design**: prose".to_string(),
-            },
+            &test_diff_line(DiffDisplayKind::Addition, Some(53), "- **Agent-first by design**: prose"),
             None,
             Some("md"),
             5,
+            None,
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -829,14 +890,11 @@ mod tests {
         // Gutter overhead: marker(1) + space(1) + 5 number columns + " │ " (3) = 10.
         let gutter_width = 10;
         let rendered = format_diff_line_with_gutter_and_syntax(
-            &DiffDisplayLine {
-                kind: DiffDisplayKind::Addition,
-                line_number: Some(9),
-                text: long_text,
-            },
+            &test_diff_line(DiffDisplayKind::Addition, Some(9), &long_text),
             None,
             None,
             5,
+            None,
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -850,9 +908,21 @@ mod tests {
     #[test]
     fn prose_diff_content_skips_syntax_highlighting() {
         let bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
-        assert!(highlight_diff_content("- **bold** and `code`", Some("md"), bg).is_none());
-        assert!(highlight_diff_content("plain prose", Some("txt"), bg).is_none());
-        assert!(highlight_diff_content("plain prose", Some("markdown"), bg).is_none());
+        assert!(highlight_diff_content("- **bold** and `code`", Some("md"), bg, &[], None).is_none());
+        assert!(highlight_diff_content("plain prose", Some("txt"), bg, &[], None).is_none());
+        assert!(highlight_diff_content("plain prose", Some("markdown"), bg, &[], None).is_none());
+    }
+
+    #[test]
+    fn word_chips_paint_stronger_bg_on_changed_spans() {
+        let content = "let a = 1;";
+        let word_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(36, 100, 70)));
+        let line_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
+        let rendered = highlight_diff_content(content, Some("rs"), line_bg, &[(8, 9)], word_bg).expect("rendered");
+        // Stronger chip escape (48;2;36;100;70) appears for the changed `1`.
+        assert!(rendered.contains("48;2;36;100;70"));
+        // Line tint remains for unchanged spans.
+        assert!(rendered.contains("48;2;20;58;45"));
     }
 
     #[test]

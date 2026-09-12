@@ -4,7 +4,9 @@ use anstyle::{AnsiColor, Color, Style as AnsiStyle};
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line, is_diff_header_line};
 use vtcode_core::config::constants::tools;
 use vtcode_core::tools::tool_intent;
-use vtcode_core::utils::diff_styles::{DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg, diff_hunk_bg};
+use vtcode_core::utils::diff_styles::{
+    DiffColorLevel, DiffTheme, diff_add_bg, diff_add_word_bg, diff_del_bg, diff_del_word_bg, diff_hunk_bg,
+};
 use vtcode_core::utils::style_helpers::bold_color;
 
 /// Get background color for diff lines based on detected theme and color level.
@@ -35,27 +37,36 @@ pub(crate) struct GitStyles {
     pub(crate) file_old: Option<AnsiStyle>,
     pub(crate) file_new: Option<AnsiStyle>,
     pub(crate) hunk: Option<AnsiStyle>,
+    /// Stronger chips for word-level (intra-line) highlights on add rows.
+    pub(crate) add_word: Option<AnsiStyle>,
+    /// Stronger chips for word-level (intra-line) highlights on del rows.
+    pub(crate) remove_word: Option<AnsiStyle>,
 }
 
 impl GitStyles {
     pub(crate) fn new() -> Self {
-        // Bright fg on the tinted diff bg keeps WCAG-readable contrast on dark
-        // terminals; deletions must NOT be DIMMED (dim red on maroon is
-        // unreadable, see README prose diff). Bold lives on the gutter marker
-        // in `format_diff_line_with_gutter_and_syntax`, not on content.
+        // IntelliJ-style body rows: full-width add/del tint, default content
+        // fg (syntax tokens keep their own colours), bright `+`/`-` only on
+        // the gutter marker. Content never uses green-on-green / red-on-red.
+        // Ansi16 cannot paint the tint, so content falls back to bright fg.
         // File/hunk headers are bold bands: `---` red, `+++` green, `@@` cyan
         // on a neutral tint — all full-width via line backgrounds.
+        let ansi16 = DiffColorLevel::detect() == DiffColorLevel::Ansi16;
+        let body_style = |is_addition: bool| {
+            if ansi16 {
+                let fg = if is_addition {
+                    Color::Ansi(AnsiColor::BrightGreen)
+                } else {
+                    Color::Ansi(AnsiColor::BrightRed)
+                };
+                AnsiStyle::new().fg_color(Some(fg))
+            } else {
+                AnsiStyle::new().bg_color(diff_line_bg_color(is_addition))
+            }
+        };
         Self {
-            add: Some(
-                AnsiStyle::new()
-                    .fg_color(Some(Color::Ansi(AnsiColor::BrightGreen)))
-                    .bg_color(diff_line_bg_color(true)),
-            ),
-            remove: Some(
-                AnsiStyle::new()
-                    .fg_color(Some(Color::Ansi(AnsiColor::BrightRed)))
-                    .bg_color(diff_line_bg_color(false)),
-            ),
+            add: Some(body_style(true)),
+            remove: Some(body_style(false)),
             header: Some(
                 AnsiStyle::new()
                     .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
@@ -79,8 +90,24 @@ impl GitStyles {
                     .bg_color(diff_hunk_bg_color())
                     .effects(anstyle::Effects::BOLD),
             ),
+            add_word: diff_word_bg_style(true),
+            remove_word: diff_word_bg_style(false),
         }
     }
+}
+
+fn diff_word_bg_style(is_addition: bool) -> Option<AnsiStyle> {
+    if DiffColorLevel::detect() == DiffColorLevel::Ansi16 {
+        return None;
+    }
+    let theme = DiffTheme::detect();
+    let level = DiffColorLevel::detect();
+    let bg = if is_addition {
+        diff_add_word_bg(theme, level)
+    } else {
+        diff_del_word_bg(theme, level)
+    };
+    Some(AnsiStyle::new().bg_color(Some(bg)))
 }
 
 pub(crate) struct LsStyles {
@@ -232,17 +259,26 @@ mod tests {
     }
 
     #[test]
-    fn diff_content_styles_use_bright_fg_without_dimming() {
+    fn diff_content_styles_keep_default_fg_on_tint() {
         let git = GitStyles::new();
         let remove = git.remove.expect("remove style should exist");
         let add = git.add.expect("add style should exist");
         // DIMMED red on the maroon tint is unreadable; both sides stay solid.
         assert!(!remove.get_effects().contains(Effects::DIMMED));
         assert!(!add.get_effects().contains(Effects::DIMMED));
-        assert_eq!(remove.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightRed)));
-        assert_eq!(add.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightGreen)));
-        assert!(remove.get_bg_color().is_some());
-        assert!(add.get_bg_color().is_some());
+        // TrueColor/256: content keeps theme-default fg so code stays readable
+        // on the tint; bright red/green lives only on the gutter marker.
+        if DiffColorLevel::detect() == DiffColorLevel::Ansi16 {
+            assert_eq!(remove.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightRed)));
+            assert_eq!(add.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightGreen)));
+            assert_eq!(remove.get_bg_color(), None);
+            assert_eq!(add.get_bg_color(), None);
+        } else {
+            assert_eq!(remove.get_fg_color(), None);
+            assert_eq!(add.get_fg_color(), None);
+            assert!(remove.get_bg_color().is_some());
+            assert!(add.get_bg_color().is_some());
+        }
     }
 
     #[test]

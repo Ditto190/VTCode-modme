@@ -93,7 +93,9 @@ find a way to visual agent's message (the one being pushed indentation much larg
 
 ---
 
-improve diff view with full-width background color and better visiual diff elements for easier comparison and readability. dim gutter, visual diff head with proper red/green for
+improve diff view with full-width background color and better visiual diff elements for easier comparison and readability. dim gutter, visual diff head with proper red/green. ref: '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-01-22 at 4.43.30 PM.png'
+
+ for
 example: "
 --- a/README.md
 +++ b/README.md
@@ -132,7 +134,3 @@ Apply lessons from "A Design Space Exploration of Async/Await" (arXiv 2608.20677
 - Consolidating ~12 ad-hoc RAII abort guards into a shared TaskGuard (vtcode-commons): wide refactor, follow-up.
 - Full cancellation/fairness pass over all select! sites: audit doc's own backlog item.
 - Retiring stale docs/async/ASYNC_ARCHITECTURE.md.
-
-===
-
-should we remove [!] Anti-Blind-Editing it keep blocking the edits.

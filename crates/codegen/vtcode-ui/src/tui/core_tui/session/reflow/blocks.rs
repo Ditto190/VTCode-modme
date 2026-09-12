@@ -16,6 +16,41 @@ use super::helpers::{
 };
 use crate::tui::config::constants::ui;
 
+/// Background of a diff content row, if it carries a tinted band.
+///
+/// Requires both a painted background and a diff marker (`+`/`-`/space body
+/// marker, `---`/`+++` file header, or `@@` hunk header) so ordinary tool
+/// output that happens to be styled never gets diff treatment.
+fn diff_row_bg(spans: &[Span<'_>]) -> Option<Color> {
+    let bg = spans.iter().find_map(|span| span.style.bg)?;
+    let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("--- ")
+        || trimmed.starts_with("+++ ")
+        || trimmed.starts_with("@@")
+        || matches!(spans.first().and_then(|span| span.content.chars().next()), Some('+' | '-' | ' '))
+    {
+        Some(bg)
+    } else {
+        None
+    }
+}
+
+/// Pad a tinted diff row with bg-colored spaces to the full viewport width.
+///
+/// Non-diff rows are left at exact content width (no right border/padding).
+fn pad_diff_row_to_width(line: &mut Line<'static>, max_width: usize) {
+    let Some(bg) = diff_row_bg(&line.spans) else {
+        return;
+    };
+    let width: usize = line.spans.iter().map(Span::width).sum();
+    let padding = max_width.saturating_sub(width);
+    if padding == 0 {
+        return;
+    }
+    line.spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
+}
+
 impl Session {
     fn opaque_tool_header_text_style(&self, style: Style) -> Style {
         let mut style = style.remove_modifier(Modifier::DIM);
@@ -160,20 +195,37 @@ impl Session {
 
         // Add the gutter prefix to each wrapped line
         for (idx, line) in wrapped.iter_mut().enumerate() {
+            // Diff rows keep their tinted band edge-to-edge: paint the gutter
+            // prefixes with the row bg so wrapped rows don't start with an
+            // unpainted strip.
+            let row_diff_bg = diff_row_bg(&line.spans);
+            let mut gutter_style = border_style;
+            if let Some(bg) = row_diff_bg {
+                gutter_style = gutter_style.bg(bg);
+            }
             let active_prefix = if idx == 0 { first_prefix } else { continuation_prefix };
-            let mut new_spans = vec![Span::styled(active_prefix.to_owned(), border_style)];
+            let mut new_spans = vec![Span::styled(active_prefix.to_owned(), gutter_style)];
 
             // For diff lines, preserve hanging indent/prefix on continuation lines.
             if idx > 0
                 && let Some(ref prefix) = diff_continuation_prefix
             {
                 // Add the diff prefix with dimmed style to match diff appearance
-                let prefix_style = border_style.add_modifier(Modifier::DIM);
+                let prefix_style = gutter_style.add_modifier(Modifier::DIM);
                 new_spans.push(Span::styled(prefix.clone(), prefix_style));
             }
 
             new_spans.append(&mut line.spans);
             line.spans = new_spans;
+        }
+
+        // Diff rows extend their tinted band to the full viewport width so
+        // short rows don't end mid-line. Non-diff rows keep exact content
+        // width (no right border/padding by design).
+        if max_width != usize::MAX {
+            for line in wrapped.iter_mut() {
+                pad_diff_row_to_width(line, max_width);
+            }
         }
 
         wrapped
@@ -289,9 +341,13 @@ impl Session {
                 // Dim tool output and avoid right-side padding borders.
                 // Detail rows are nested under their header with an extra indent,
                 // and wrapped lines keep the tree marker aligned via hanging indent.
+                // Diff rows keep their explicit bright styling (the tinted band
+                // already sets them apart); dimming them dulls the red/green.
                 let mut detail_spans = line_spans;
-                for span in &mut detail_spans {
-                    span.style = span.style.add_modifier(Modifier::DIM);
+                if diff_row_bg(&detail_spans).is_none() {
+                    for span in &mut detail_spans {
+                        span.style = span.style.add_modifier(Modifier::DIM);
+                    }
                 }
                 lines.extend(self.wrap_block_lines_no_right_border(
                     detail_prefix,
@@ -573,4 +629,52 @@ fn line_is_tool_command_header(line: &Line<'_>) -> bool {
     let text: String = line.spans.iter().map(|span| span.content.as_ref()).collect();
     let stripped = text_utils::strip_ansi_codes(&text);
     parse_tool_call_prefix(stripped.trim_start()).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(text: &str, bg: Option<Color>) -> Span<'static> {
+        let mut style = Style::default();
+        if let Some(bg) = bg {
+            style = style.bg(bg);
+        }
+        Span::styled(text.to_owned(), style)
+    }
+
+    #[test]
+    fn diff_row_bg_detects_body_and_headers() {
+        let add_bg = Some(Color::Rgb(20, 58, 45));
+        assert_eq!(diff_row_bg(&[span("+ 12 │ + new", add_bg)]), add_bg);
+        assert_eq!(diff_row_bg(&[span("- 10 │ - old", add_bg)]), add_bg);
+        assert_eq!(diff_row_bg(&[span(" 11 │ ctx", add_bg)]), add_bg);
+        assert_eq!(diff_row_bg(&[span("--- a/README.md", add_bg)]), add_bg);
+        assert_eq!(diff_row_bg(&[span("+++ b/README.md", add_bg)]), add_bg);
+        assert_eq!(diff_row_bg(&[span("@@ -100 +100 @@", add_bg)]), add_bg);
+    }
+
+    #[test]
+    fn diff_row_bg_ignores_unstyled_or_non_diff_text() {
+        assert_eq!(diff_row_bg(&[span("hello world", None)]), None);
+        assert_eq!(diff_row_bg(&[span("bolt normal output", Some(Color::Black))]), None);
+    }
+
+    #[test]
+    fn pad_diff_row_extends_tint_to_full_width() {
+        let bg = Some(Color::Rgb(20, 58, 45));
+        let mut line = Line::from(vec![span("+ 1 │ hi", bg), span("", bg)]);
+        pad_diff_row_to_width(&mut line, 20);
+        let width: usize = line.spans.iter().map(Span::width).sum();
+        assert_eq!(width, 20);
+        assert_eq!(line.spans.last().and_then(|s| s.style.bg), bg);
+    }
+
+    #[test]
+    fn pad_diff_row_leaves_non_diff_lines_alone() {
+        let mut line = Line::from(vec![span("plain tool output", None)]);
+        pad_diff_row_to_width(&mut line, 40);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(UnicodeWidthStr::width(line.spans[0].content.as_ref()), "plain tool output".len());
+    }
 }

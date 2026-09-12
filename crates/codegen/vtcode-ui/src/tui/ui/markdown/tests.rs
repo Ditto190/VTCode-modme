@@ -520,19 +520,13 @@ fn markdown_diff_header_styles_are_classified() {
     };
     let metadata = anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack);
     let cyan = anstyle::Color::Ansi(anstyle::AnsiColor::Cyan);
-    let removed = style_content_ansi(
-        DiffLineType::Delete,
-        diff_render_style_context_for(DiffTheme::Dark, DiffColorLevel::TrueColor, Default::default()),
-    );
-    let added = style_content_ansi(
-        DiffLineType::Insert,
-        diff_render_style_context_for(DiffTheme::Dark, DiffColorLevel::TrueColor, Default::default()),
-    );
+    let bright_red = anstyle::Color::Rgb(anstyle::RgbColor(255, 90, 90));
+    let bright_green = anstyle::Color::Ansi(anstyle::AnsiColor::BrightGreen);
 
     assert_eq!(text_and_style("diff --git").get_fg_color(), Some(metadata));
     assert_eq!(text_and_style("index 1111111").get_fg_color(), Some(metadata));
-    assert_eq!(text_and_style("--- a/main.rs").get_fg_color(), removed.get_fg_color());
-    assert_eq!(text_and_style("+++ b/main.rs").get_fg_color(), added.get_fg_color());
+    assert_eq!(text_and_style("--- a/main.rs").get_fg_color(), Some(bright_red));
+    assert_eq!(text_and_style("+++ b/main.rs").get_fg_color(), Some(bright_green));
     assert_eq!(text_and_style("@@ -1 +1 @@").get_fg_color(), Some(cyan));
 }
 
@@ -559,6 +553,11 @@ fn markdown_diff_lines_use_background_and_strong_markers() {
     assert_ne!(removed_line.segments[0].style, removed_line.segments[1].style);
     // The sign stays bold for scannability.
     assert!(added_line.segments[0].style.get_effects().contains(anstyle::Effects::BOLD));
+    // Content keeps default fg on the tint (not green-on-green / red-on-red).
+    assert_eq!(added_line.segments[1].style.get_fg_color(), None);
+    assert_eq!(removed_line.segments[1].style.get_fg_color(), None);
+    assert!(added_line.segments[1].style.get_bg_color().is_some());
+    assert!(removed_line.segments[1].style.get_bg_color().is_some());
 }
 
 #[test]
@@ -571,9 +570,9 @@ fn diff_style_helpers_set_line_background_and_marker() {
             let marker = style_sign_ansi(kind, context);
             assert!(style.get_bg_color().is_some());
             assert!(marker.get_fg_color().is_some());
-            if theme == DiffTheme::Dark {
-                assert_eq!(style.get_fg_color(), marker.get_fg_color());
-            }
+            // Content is default fg on the tint; only the marker carries red/green.
+            assert_eq!(style.get_fg_color(), None);
+            assert_ne!(style.get_fg_color(), marker.get_fg_color());
         }
     }
 }
@@ -664,10 +663,11 @@ fn markdown_diff_rows_paint_every_segment_for_solid_fill() {
                     .contains(needle)
             })
             .unwrap_or_else(|| panic!("{needle} line exists"));
-        let bg = line.line_background.expect("tinted rows need full-width bg");
+        let _bg = line.line_background.expect("tinted rows need full-width bg");
         assert!(!line.segments.is_empty());
         for segment in &line.segments {
-            assert_eq!(segment.style.get_bg_color(), Some(bg), "unpainted hole in {needle}");
+            // Segments must be painted: either the line tint or a stronger word chip.
+            assert!(segment.style.get_bg_color().is_some(), "unpainted hole in {needle}");
         }
     }
 }
@@ -697,13 +697,31 @@ fn markdown_diff_body_uses_file_language_syntax_highlight() {
     assert!(removed_line.segments.len() > 2, "removed body should be syntax highlighted");
     // Marker keeps the diff sign style; body tokens carry distinct syntax colors.
     assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
-    // Forced diff tint covers every body token (no syntect background holes).
+    // Every body token is painted (line tint or stronger word chip).
     for segment in added_line.segments.iter().skip(1) {
-        assert_eq!(segment.style.get_bg_color(), added_line.line_background);
+        assert!(segment.style.get_bg_color().is_some());
     }
     for segment in removed_line.segments.iter().skip(1) {
-        assert_eq!(segment.style.get_bg_color(), removed_line.line_background);
+        assert!(segment.style.get_bg_color().is_some());
     }
+    // Word chips: `new`/`old` differ, so at least one token on each side gets
+    // the stronger background (two-level highlight).
+    let added_line_bg = added_line.line_background.expect("add line has tint");
+    let removed_line_bg = removed_line.line_background.expect("del line has tint");
+    assert!(
+        added_line
+            .segments
+            .iter()
+            .any(|s| s.style.get_bg_color().is_some_and(|bg| bg != added_line_bg)),
+        "add row should carry a stronger word chip"
+    );
+    assert!(
+        removed_line
+            .segments
+            .iter()
+            .any(|s| s.style.get_bg_color().is_some_and(|bg| bg != removed_line_bg)),
+        "del row should carry a stronger word chip"
+    );
 }
 
 #[test]
