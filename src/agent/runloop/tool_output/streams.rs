@@ -44,7 +44,6 @@ use std::borrow::Cow;
 use anstyle::{AnsiColor, Effects, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use smallvec::SmallVec;
-use vtcode_commons::diff_paths::{language_hint_from_path, parse_diff_git_path, parse_diff_marker_path};
 use vtcode_commons::diff_preview::{
     DiffDisplayKind, DiffDisplayLine, diff_display_line_number_width, display_lines_from_unified_diff,
 };
@@ -158,14 +157,12 @@ fn render_preview_line(
 
 fn highlight_diff_content(
     content: &str,
-    language_hint: Option<&str>,
     bg: Option<anstyle::Color>,
     word_ranges: &[(usize, usize)],
     word_bg: Option<anstyle::Color>,
 ) -> Option<String> {
     // Add/del bodies stay solid on the line tint (default fg). Syntax tokens
     // leak brightness onto the band; only word chips use a stronger bg.
-    let _ = language_hint;
     if content.is_empty() {
         return None;
     }
@@ -210,7 +207,6 @@ fn highlight_diff_content(
 fn format_diff_line_with_gutter_and_syntax<'a>(
     line: &DiffDisplayLine,
     base_style: Option<AnsiStyle>,
-    language_hint: Option<&str>,
     line_number_width: usize,
     word_bg: Option<anstyle::Color>,
     out: &'a mut String,
@@ -234,9 +230,11 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     // Add/delete content is truncated to a single line at MAX_LINE_LENGTH so
     // these rows never wrap or get padded into continuation rows.
     let content_owned;
+    let mut truncated = false;
     let content: &str = if !matches!(marker, ' ') {
         if display_width(content) > MAX_LINE_LENGTH {
             content_owned = truncate_with_ellipsis(content, MAX_LINE_LENGTH, "...");
+            truncated = true;
             &content_owned
         } else {
             content
@@ -285,12 +283,14 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     let _ = write!(out, "{line_no:>line_number_width$} │ ");
     let _ = write!(out, "{reset}");
     // Two-level body: line tint + word chips on tokens that differ from the pair.
-    let word_ranges: &[(usize, usize)] = if matches!(marker, '+' | '-') && !content.is_empty() {
+    // Skip chips on truncated rows — `changed` offsets are into the original
+    // text and would highlight the wrong slice after ellipsis truncation.
+    let word_ranges: &[(usize, usize)] = if matches!(marker, '+' | '-') && !content.is_empty() && !truncated {
         &line.changed
     } else {
         &[]
     };
-    if let Some(highlighted) = highlight_diff_content(content, language_hint, bg, word_ranges, word_bg) {
+    if let Some(highlighted) = highlight_diff_content(content, bg, word_ranges, word_bg) {
         out.push_str(&highlighted);
     } else if base_style.is_some() {
         let body = AnsiStyle::new().bg_color(bg);
@@ -354,16 +354,6 @@ async fn render_run_command_preview(
     Ok(())
 }
 
-fn update_diff_language_hint(line: &DiffDisplayLine, current_language_hint: &mut Option<String>) {
-    if !matches!(line.kind, DiffDisplayKind::Metadata) {
-        return;
-    }
-
-    if let Some(path) = parse_diff_git_path(&line.text).or_else(|| parse_diff_marker_path(&line.text)) {
-        *current_language_hint = language_hint_from_path(&path);
-    }
-}
-
 #[allow(
     clippy::too_many_arguments,
     reason = "Intentional compatibility, platform, or test-only suppression."
@@ -401,12 +391,10 @@ pub(crate) fn render_diff_content_block(
 
     let line_number_width = diff_display_line_number_width(lines_slice);
     let color_enabled = renderer.capabilities().supports_color();
-    let mut current_language_hint: Option<String> = None;
     let mut formatted_buffer = String::with_capacity(256);
     let mut display_buffer = String::with_capacity(256);
 
     for line in lines_slice {
-        update_diff_language_hint(line, &mut current_language_hint);
         display_buffer.clear();
         let raw_line = line.numbered_text(line_number_width);
         if raw_line.is_empty() {
@@ -446,7 +434,6 @@ pub(crate) fn render_diff_content_block(
             Some(format_diff_line_with_gutter_and_syntax(
                 line,
                 line_style,
-                current_language_hint.as_deref(),
                 line_number_width,
                 word_bg,
                 &mut formatted_buffer,
@@ -674,14 +661,13 @@ mod tests {
     use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
     use anstyle::AnsiColor;
-    use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine, display_lines_from_unified_diff};
+    use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine};
 
     use crate::agent::runloop::tool_output::collect_inline_output;
 
     use super::{
         HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, format_diff_line_with_gutter_and_syntax,
-        hidden_lines_notice, highlight_diff_content, language_hint_from_path, render_preview_line, strip_ansi_codes,
-        update_diff_language_hint,
+        hidden_lines_notice, highlight_diff_content, render_preview_line, strip_ansi_codes,
     };
 
     #[test]
@@ -751,7 +737,6 @@ mod tests {
         let rendered = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Addition, None, Some(1377), "let x = 1;"),
             Some(style),
-            None,
             5,
             None,
             &mut buf,
@@ -768,7 +753,6 @@ mod tests {
         let rendered = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Addition, None, Some(1384), "    line,"),
             None,
-            None,
             5,
             None,
             &mut buf,
@@ -782,7 +766,6 @@ mod tests {
         let mut buf = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Addition, None, Some(42), ""),
-            None,
             None,
             5,
             None,
@@ -798,14 +781,12 @@ mod tests {
         let _ = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Addition, None, Some(1), "let x = 1;"),
             None,
-            None,
             5,
             None,
             &mut buf,
         );
         let rendered = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Metadata, None, None, "diff --git a/src/lib.rs b/src/lib.rs"),
-            None,
             None,
             5,
             None,
@@ -821,7 +802,6 @@ mod tests {
         let rendered = format_diff_line_with_gutter_and_syntax(
             &test_diff_line(DiffDisplayKind::Addition, None, Some(53), "- **Agent-first by design*: prose"),
             None,
-            Some("md"),
             5,
             None,
             &mut buf,
@@ -836,33 +816,32 @@ mod tests {
         let long_text = "y".repeat(MAX_LINE_LENGTH * 2);
         // Single gutter: sign(1) + number(5) + " │ "(3) = 9.
         let gutter_width = 9;
-        let rendered = format_diff_line_with_gutter_and_syntax(
-            &test_diff_line(DiffDisplayKind::Addition, None, Some(9), &long_text),
-            None,
-            None,
-            5,
-            None,
-            &mut buf,
-        );
+        let mut line = test_diff_line(DiffDisplayKind::Addition, None, Some(9), &long_text);
+        // Simulate a chip that would be invalid after truncation.
+        line.changed = vec![(0, long_text.len())];
+        let word_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(36, 100, 70)));
+        let rendered = format_diff_line_with_gutter_and_syntax(&line, None, 5, word_bg, &mut buf);
         let stripped = strip_ansi_codes(rendered);
         assert!(
             vtcode_commons::preview::display_width(&stripped) <= MAX_LINE_LENGTH + gutter_width,
             "rendered diff line must not exceed MAX_LINE_LENGTH + gutter width"
         );
         assert!(stripped.contains("..."));
+        // Truncated rows must not paint word chips with stale offsets.
+        assert!(!rendered.contains("48;2;36;100;70"), "no chip on truncated line");
     }
 
     #[test]
     fn diff_bodies_stay_solid_no_syntax_brightness() {
         let bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
-        let rendered = highlight_diff_content("- **bold** and `code`", Some("md"), bg, &[], None).expect("solid body");
+        let rendered = highlight_diff_content("- **bold** and `code`", bg, &[], None).expect("solid body");
         // Solid tint only: no bright syntax SGR, no bold, no extra fg.
         assert!(rendered.contains("48;2;20;58;45"));
         assert!(!rendered.contains("38;2;"));
         assert!(!rendered.contains("\u{1b}[1m"));
         assert!(!rendered.contains("\u{1b}[91m"));
         assert!(!rendered.contains("\u{1b}[92m"));
-        assert!(highlight_diff_content("plain", Some("txt"), None, &[], None).is_none());
+        assert!(highlight_diff_content("plain", None, &[], None).is_none());
     }
 
     #[test]
@@ -870,30 +849,10 @@ mod tests {
         let content = "let a = 1;";
         let word_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(36, 100, 70)));
         let line_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
-        let rendered = highlight_diff_content(content, Some("rs"), line_bg, &[(8, 9)], word_bg).expect("rendered");
+        let rendered = highlight_diff_content(content, line_bg, &[(8, 9)], word_bg).expect("rendered");
         assert!(rendered.contains("48;2;36;100;70"));
         assert!(rendered.contains("48;2;20;58;45"));
         // Default fg on both spans: no bright syntax leak.
         assert!(!rendered.contains("38;2;"));
-    }
-
-    #[test]
-    fn language_hint_from_path_extracts_extension() {
-        assert_eq!(language_hint_from_path("vtcode-tui/src/ui/markdown.rs").as_deref(), Some("rs"));
-        assert_eq!(language_hint_from_path("Makefile"), None);
-    }
-
-    #[test]
-    fn diff_metadata_sets_language_hint_for_body_lines() {
-        let diff = "diff --git a/src/lib.rs b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
-        let lines = display_lines_from_unified_diff(diff);
-        let mut current_language_hint = None;
-
-        for line in &lines {
-            update_diff_language_hint(line, &mut current_language_hint);
-            if line.is_diff() {
-                assert_eq!(current_language_hint.as_deref(), Some("rs"));
-            }
-        }
     }
 }

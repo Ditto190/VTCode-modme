@@ -345,16 +345,12 @@ fn render_diff_code_block(
     let word_bg_enabled = level != DiffColorLevel::Ansi16;
     let added_word = word_bg_enabled.then(|| diff_add_word_bg(theme, level));
     let removed_word = word_bg_enabled.then(|| diff_del_word_bg(theme, level));
-    let mut current_language: Option<String> = None;
     let normalized = normalize_diff_lines(code);
     let word_ranges_by_line = word_level_ranges_for_normalized(&normalized);
 
     for (line_index, line) in normalized.iter().enumerate() {
         let trimmed = line.trim_end_matches('\n');
         let trimmed_start = trimmed.trim_start();
-        if let Some(path) = parse_diff_git_path(trimmed_start).or_else(|| parse_diff_marker_path(trimmed_start)) {
-            current_language = language_hint_from_path(&path);
-        }
         if let Some((path, additions, deletions)) = parse_diff_summary_line(trimmed_start) {
             let leading_len = trimmed.len().saturating_sub(trimmed_start.len());
             let leading = &trimmed[..leading_len];
@@ -407,15 +403,7 @@ fn render_diff_code_block(
                 if body.is_empty() {
                     line.push_segment(added_style, " ");
                 } else {
-                    push_highlighted_diff_body(
-                        &mut line,
-                        body,
-                        current_language.as_deref(),
-                        added_style,
-                        added_background,
-                        &word_ranges,
-                        added_word,
-                    );
+                    push_highlighted_diff_body(&mut line, body, added_background, &word_ranges, added_word);
                 }
                 paint_line_background(&mut line, added_background);
                 line.set_line_background(added_background);
@@ -431,15 +419,7 @@ fn render_diff_code_block(
                 if body.is_empty() {
                     line.push_segment(removed_style, " ");
                 } else {
-                    push_highlighted_diff_body(
-                        &mut line,
-                        body,
-                        current_language.as_deref(),
-                        removed_style,
-                        removed_background,
-                        &word_ranges,
-                        removed_word,
-                    );
+                    push_highlighted_diff_body(&mut line, body, removed_background, &word_ranges, removed_word);
                 }
                 paint_line_background(&mut line, removed_background);
                 line.set_line_background(removed_background);
@@ -483,14 +463,10 @@ fn paint_line_background(line: &mut MarkdownLine, bg: Option<anstyle::Color>) {
 fn push_highlighted_diff_body(
     line: &mut MarkdownLine,
     body: &str,
-    language: Option<&str>,
-    fallback: Style,
     forced_bg: Option<anstyle::Color>,
     word_ranges: &[(usize, usize)],
     word_bg: Option<anstyle::Color>,
 ) {
-    let _ = language;
-    let _ = fallback;
     if body.is_empty() {
         let solid = match forced_bg {
             Some(bg) => Style::new().bg_color(Some(bg)),

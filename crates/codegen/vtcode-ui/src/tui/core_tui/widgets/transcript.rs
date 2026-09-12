@@ -217,8 +217,24 @@ fn replace_indicator_icon(line: &mut Line<'static>, frame: &str) -> bool {
     replaced
 }
 
+/// Full-row tint for a diff line.
+///
+/// Uses the most common span background so a word chip that happens to be the
+/// first span cannot become the fill colour for the whole row.
 fn line_background(line: &Line<'_>) -> Option<Color> {
-    line.spans.iter().find_map(|span| span.style.bg)
+    let mut best: Option<(Color, usize)> = None;
+    let mut counts = std::collections::HashMap::new();
+    for span in &line.spans {
+        if let Some(bg) = span.style.bg {
+            *counts.entry(bg).or_insert(0usize) += 1;
+        }
+    }
+    for (bg, count) in counts {
+        if best.is_none_or(|(_, best_count)| count > best_count) {
+            best = Some((bg, count));
+        }
+    }
+    best.map(|(bg, _)| bg)
 }
 
 /// Fill untinted cells on a diff row with the line tint.

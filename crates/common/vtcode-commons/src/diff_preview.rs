@@ -2,7 +2,6 @@
     clippy::string_slice,
     clippy::cast_possible_truncation,
     clippy::indexing_slicing,
-    clippy::type_complexity,
     reason = "Word-level LCS walks atom indices by design; offsets are bounded to the source line."
 )]
 
@@ -16,6 +15,12 @@ use crate::diff::{DiffHunk, DiffLineKind};
 use crate::diff_paths::{
     format_start_only_hunk_header, is_diff_addition_line, is_diff_deletion_line, parse_hunk_starts,
 };
+
+/// Intra-line highlight: list of `(start, end)` byte ranges in a line body.
+pub type WordChangedRanges = Vec<(usize, usize)>;
+
+/// Cap atoms so the LCS DP stays O(n·m) with a hard memory bound on huge lines.
+const MAX_WORD_ATOMS: usize = 512;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DiffChangeCounts {
@@ -42,7 +47,7 @@ pub struct DiffDisplayLine {
     pub text: String,
     /// Byte ranges inside `text` that differ from the paired opposite line
     /// (word-level / intra-line highlight). Empty when no pair or no overlap.
-    pub changed: Vec<(usize, usize)>,
+    pub changed: WordChangedRanges,
 }
 
 impl DiffDisplayLine {
@@ -338,11 +343,15 @@ fn tokenize_atoms(text: &str) -> Vec<(usize, usize)> {
 ///
 /// Returns empty ranges when the lines are too dissimilar (or one side is
 /// blank) so pure inserts/deletes keep a clean full-width tint without chips.
-pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+pub fn word_level_changed_ranges(old: &str, new: &str) -> (WordChangedRanges, WordChangedRanges) {
     let old_atoms = tokenize_atoms(old);
     let new_atoms = tokenize_atoms(new);
     if old_atoms.is_empty() || new_atoms.is_empty() {
-        return (Vec::new(), Vec::new());
+        return (WordChangedRanges::new(), WordChangedRanges::new());
+    }
+    // Pathological long lines: skip chips rather than run a huge LCS DP.
+    if old_atoms.len() > MAX_WORD_ATOMS || new_atoms.len() > MAX_WORD_ATOMS {
+        return (WordChangedRanges::new(), WordChangedRanges::new());
     }
 
     let n = old_atoms.len();
@@ -364,7 +373,7 @@ pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, 
     let max_len = n.max(m);
     let similarity = if max_len == 0 { 1.0 } else { lcs as f64 / max_len as f64 };
     if similarity < MIN_WORD_SIMILARITY {
-        return (Vec::new(), Vec::new());
+        return (WordChangedRanges::new(), WordChangedRanges::new());
     }
 
     let mut old_changed = vec![false; n];
@@ -396,7 +405,7 @@ pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, 
     let old_changed_count = old_changed.iter().filter(|&&f| f).count();
     let new_changed_count = new_changed.iter().filter(|&&f| f).count();
     if mostly_changed(old_changed_count, n) || mostly_changed(new_changed_count, m) {
-        return (Vec::new(), Vec::new());
+        return (WordChangedRanges::new(), WordChangedRanges::new());
     }
 
     (
@@ -618,6 +627,15 @@ mod tests {
     #[test]
     fn word_level_diff_skips_blank_sides() {
         let (old_ranges, new_ranges) = word_level_changed_ranges("moved block", "");
+        assert!(old_ranges.is_empty());
+        assert!(new_ranges.is_empty());
+    }
+
+    #[test]
+    fn word_level_diff_skips_oversized_atom_lists() {
+        let long_a = "a ".repeat(MAX_WORD_ATOMS + 10);
+        let long_b = "b ".repeat(MAX_WORD_ATOMS + 10);
+        let (old_ranges, new_ranges) = word_level_changed_ranges(&long_a, &long_b);
         assert!(old_ranges.is_empty());
         assert!(new_ranges.is_empty());
     }
