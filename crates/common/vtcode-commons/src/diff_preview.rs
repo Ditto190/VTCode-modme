@@ -637,4 +637,15 @@ mod tests {
         assert_eq!(&del.text[del.changed[0].0..del.changed[0].1], "1");
         assert_eq!(&add.text[add.changed[0].0..add.changed[0].1], "2");
     }
+
+    #[test]
+    fn word_chip_user_example_pair() {
+        let old = "wrong, these are the defaults you were missing.";
+        let new = "wrong, these are the defaults you were missing — built in, not bolted on.";
+        let (old_ranges, new_ranges) = word_level_changed_ranges(old, new);
+        assert!(old_ranges.is_empty(), "shared prefix should stay line-only");
+        assert!(!new_ranges.is_empty(), "addition suffix should be a chip");
+        let new_changed: String = new_ranges.iter().map(|&(s, e)| &new[s..e]).collect();
+        assert!(new_changed.contains("built"), "got {new_changed:?}");
+    }
 }

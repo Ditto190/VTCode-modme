@@ -130,11 +130,12 @@ impl<'a> Widget for TranscriptWidget<'a> {
         // Paint full-width line tints AFTER Paragraph. Paragraph::render
         // first fills the whole area with `default_style` (terminal bg),
         // which would wipe a pre-painted band on cells past the line text.
+        let default_bg = self.session.styles.default_style().bg;
         let paragraph = Paragraph::new(visible_lines.clone())
             .style(self.session.styles.default_style())
             .wrap(Wrap { trim: false });
         paragraph.render(scroll_area, buf);
-        apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines);
+        apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines, default_bg);
     }
 }
 
@@ -220,16 +221,29 @@ fn line_background(line: &Line<'_>) -> Option<Color> {
     line.spans.iter().find_map(|span| span.style.bg)
 }
 
-fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line<'_>]) {
+/// Fill untinted cells on a diff row with the line tint.
+///
+/// Only cells still on the terminal default background are painted. Word-chip
+/// cells (stronger red/green) must keep their colour so the two-level band
+/// survives the full-width fill.
+fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line<'_>], default_bg: Option<Color>) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
     let max_rows = usize::from(area.height).min(lines.len());
     for (row, line) in lines.iter().take(max_rows).enumerate() {
-        if let Some(bg) = line_background(line) {
-            let row_rect = Rect::new(area.x, area.y + row as u16, area.width, 1);
-            buf.set_style(row_rect, Style::default().bg(bg));
+        let Some(bg) = line_background(line) else {
+            continue;
+        };
+        let y = area.y + row as u16;
+        for x in area.left()..area.right() {
+            let cell = &mut buf[(x, y)];
+            // Reset / terminal default → line tint. Any explicit paint
+            // (word chip, already-tinted span, etc.) is left alone.
+            if cell.bg == Color::Reset || Some(cell.bg) == default_bg {
+                cell.bg = bg;
+            }
         }
     }
 }
@@ -259,11 +273,35 @@ mod tests {
         let line = RatLine::from(vec![RatSpan::styled("+ hi", RatStyle::default().bg(Color::Rgb(20, 58, 45)))]);
         let lines = vec![line];
         // Correct order: Paragraph (already simulated) then full-width tint.
-        apply_full_width_line_backgrounds(&mut buf, area, &lines);
+        apply_full_width_line_backgrounds(&mut buf, area, &lines, Some(Color::Black));
 
         let bg = Color::Rgb(20, 58, 45);
         assert_eq!(buf[(0, 0)].bg, bg, "left edge must keep the tint");
         assert_eq!(buf[(19, 0)].bg, bg, "right edge must be full-width tinted");
+    }
+
+    #[test]
+    fn full_width_fill_preserves_word_chip_backgrounds() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let line_bg = Color::Rgb(20, 58, 45);
+        let chip_bg = Color::Rgb(36, 100, 70);
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        // Simulate Paragraph writing: line tint on part, chip on "words".
+        buf[(3, 0)].bg = chip_bg;
+        buf[(4, 0)].bg = chip_bg;
+        buf[(5, 0)].bg = line_bg;
+
+        let line = RatLine::from(vec![RatSpan::styled("ab", RatStyle::default().bg(line_bg))]);
+        apply_full_width_line_backgrounds(&mut buf, area, &[line], Some(Color::Black));
+
+        assert_eq!(buf[(3, 0)].bg, chip_bg, "word chip must not be overwritten");
+        assert_eq!(buf[(4, 0)].bg, chip_bg, "word chip must not be overwritten");
+        assert_eq!(buf[(19, 0)].bg, line_bg, "empty cells fill with line tint");
+        assert_eq!(buf[(0, 0)].bg, line_bg);
     }
 
     fn row_text(buf: &Buffer, area: Rect, row: u16) -> String {
