@@ -127,11 +127,14 @@ impl<'a> Widget for TranscriptWidget<'a> {
             Clear.render(scroll_area, buf);
             self.session.transcript_clear_required = false;
         }
-        apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines);
-        let paragraph = Paragraph::new(visible_lines)
+        // Paint full-width line tints AFTER Paragraph. Paragraph::render
+        // first fills the whole area with `default_style` (terminal bg),
+        // which would wipe a pre-painted band on cells past the line text.
+        let paragraph = Paragraph::new(visible_lines.clone())
             .style(self.session.styles.default_style())
             .wrap(Wrap { trim: false });
         paragraph.render(scroll_area, buf);
+        apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines);
     }
 }
 
@@ -242,6 +245,25 @@ mod tests {
             text: text.to_string(),
             style: Arc::new(InlineTextStyle::default()),
         }
+    }
+
+    #[test]
+    fn full_width_diff_tint_survives_paragraph_default_bg() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        // Simulate Paragraph painting the whole area with the terminal default.
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        let line = RatLine::from(vec![RatSpan::styled("+ hi", RatStyle::default().bg(Color::Rgb(20, 58, 45)))]);
+        let lines = vec![line];
+        // Correct order: Paragraph (already simulated) then full-width tint.
+        apply_full_width_line_backgrounds(&mut buf, area, &lines);
+
+        let bg = Color::Rgb(20, 58, 45);
+        assert_eq!(buf[(0, 0)].bg, bg, "left edge must keep the tint");
+        assert_eq!(buf[(19, 0)].bg, bg, "right edge must be full-width tinted");
     }
 
     fn row_text(buf: &Buffer, area: Rect, row: u16) -> String {
