@@ -46,10 +46,12 @@ pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verificatio
 /// Loop warning fires.
 pub(crate) const NAVIGATION_LOOP_THRESHOLD: usize = 15;
 
-/// Trip count for same-binary directory listings (`ls`/`find`/`fd`) before the
-/// turn balancer schedules recovery. Each binary keeps its own coarse family
-/// (`exec::inspection::<base>`) across argument variations, so repeating one
-/// of them three times signals churn even when no exact request repeats.
+/// Trip count for same-binary, same-root directory listings (`ls`/`find`/`fd`)
+/// before the turn balancer schedules recovery. Each binary+root pair keeps
+/// its own coarse family (`exec::inspection::<base>::<root>`) across argument
+/// variations, so rescanning one target three times signals churn even when
+/// no exact request repeats, while scans of distinct trees stay below the
+/// tripwire (legitimate exploration).
 pub(crate) const LISTING_LOOP_TRIP_COUNT: usize = 3;
 
 /// Planning listing tripwire: planning owns dedicated convergence guards (6
@@ -67,6 +69,14 @@ pub(crate) const PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD: u8 = 10;
 /// synthesize before it narrows the search indefinitely. This catches
 /// successful reads that are not low-signal by payload shape.
 pub(crate) const PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD: usize = 12;
+
+/// Execution-mode total low-signal guard. Planning converges via its adaptive
+/// thresholds (6 consecutive / 10 total); execution mode previously converged
+/// only through per-family repeats, the 15-step navigation loop, or the final
+/// balancer window, so diverse churn (a new query each time) ran until the
+/// turn budget. The counter's window resets on any mutation or verification,
+/// so this fires only for churn uninterrupted by productive work.
+pub(crate) const EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD: u8 = 12;
 
 /// Optimized loop detection with bounded signature keys and exponential backoff.
 pub(crate) struct LoopTracker {
@@ -104,6 +114,9 @@ pub(crate) struct LoopTracker {
     pub low_signal_tool_calls: u32,
     /// At most one adaptive planning synthesis pass is scheduled per turn.
     pub planning_low_signal_synthesis_triggered: bool,
+    /// At most one execution-mode total low-signal synthesis pass per turn.
+    /// Like the planning latch, this survives [`Self::reset_after_balancer_recovery`].
+    pub execution_total_low_signal_triggered: bool,
     /// Unique normalized navigation signatures in the current consecutive
     /// window. Non-semantic output controls (for example, a preview budget)
     /// must not make the same inspection look like a new request.
@@ -128,6 +141,7 @@ impl LoopTracker {
             total_low_signal_navigations: 0,
             low_signal_tool_calls: 0,
             planning_low_signal_synthesis_triggered: false,
+            execution_total_low_signal_triggered: false,
             nav_signatures: FxHashSet::default(),
         }
     }
@@ -176,24 +190,51 @@ impl LoopTracker {
     }
 
     /// Highest repeat count among coarse directory-listing families
-    /// (`exec::inspection::ls|find|fd`), taking the max across binaries.
-    /// Repeated bare listings with the same tool carry no new semantic
-    /// question (unlike distinct `rg`/`grep` queries), so one tool used three
-    /// times counts as loop churn even when every command string differs.
-    /// Mixed binaries (`ls` + `find` + `fd`) stay below the trip count: each
-    /// binary is tracked in its own family.
+    /// (`exec::inspection::<base>::<root>` with base `ls`/`find`/`fd`), taking
+    /// the max across binary+root pairs. Repeated bare listings of the same
+    /// target carry no new semantic question (unlike distinct `rg`/`grep`
+    /// queries or scans of different trees), so one tool rescanning a root
+    /// three times counts as loop churn even when every command string
+    /// differs. Mixed targets (`ls src` + `ls crates` + `ls tests`) stay
+    /// below the trip count: each root is tracked in its own family.
     pub(crate) fn max_coarse_listing_count(&self) -> usize {
         self.coarse_inspection_attempts
             .iter()
             .filter_map(|(family, (count, _))| {
+                // Family shape: exec::inspection::<base>::<root>
                 family
-                    .rsplit("::")
-                    .next()
+                    .split("::")
+                    .nth(2)
                     .is_some_and(|base| matches!(base, "ls" | "find" | "fd"))
                     .then_some(*count)
             })
             .max()
             .unwrap_or(0)
+    }
+
+    /// Dominant churn signature for recovery-reason annotations: the highest
+    /// repeat count across the low-signal ledger and the coarse listing
+    /// ledger, preferring whichever is larger so listing-triggered recovery
+    /// still names the looped family even though the low-signal promotion
+    /// only records the final repeat. Returns owned data so callers can keep
+    /// the annotation alive while mutating the tracker.
+    pub(crate) fn dominant_churn(&self) -> Option<(String, usize)> {
+        let low_signal = self
+            .low_signal_attempts
+            .iter()
+            .max_by_key(|(_, (count, _))| *count)
+            .map(|(family, (count, _))| (family.clone(), *count));
+        let coarse = self
+            .coarse_inspection_attempts
+            .iter()
+            .max_by_key(|(_, (count, _))| *count)
+            .map(|(family, (count, _))| (family.clone(), *count));
+        match (low_signal, coarse) {
+            (Some(low), Some(coarse)) if coarse.1 > low.1 => Some(coarse),
+            (Some(low), _) => Some(low),
+            (None, Some(coarse)) => Some(coarse),
+            (None, None) => None,
+        }
     }
 
     /// Number of redundant navigations (total - unique) in the current window.
@@ -670,16 +711,20 @@ fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &st
 
 /// Coarse inspection family for duplicate-listing detection. Unlike the exact
 /// `low_signal_family_key` (full normalized command), this groups overlapping
-/// scans such as three `find` invocations with different paths so successful
-/// but redundant exploration still counts toward diagnostics.
+/// scans such as three `find` invocations over the same tree with different
+/// flags, so successful but redundant rescans of one target still count
+/// toward diagnostics. The family is scoped by binary AND search root:
+/// `ls src` / `find src …` / `ls -1 src` share a target and count together,
+/// while scans of distinct trees (`ls src` / `ls crates` / `ls tests`) are
+/// legitimate exploration and never group.
 fn coarse_inspection_family_key(canonical_tool_name: &str, args: &serde_json::Value) -> Option<String> {
     use vtcode_core::config::constants::tools;
     // Only shell listing/scanning commands suffer from overlapping-but-distinct
-    // invocations (e.g. three `find` calls with different paths) that the
-    // exact family key never groups. File reads (`cat`/`head`/`tail` via shell
-    // included) and semantic search already carry precise family keys;
-    // grouping them coarsely would mislabel diverse productive exploration
-    // (different files/queries) as looping.
+    // invocations (e.g. three `find` calls over the same tree with different
+    // flags) that the exact family key never groups. File reads (`cat`/`head`/
+    // `tail` via shell included) and semantic search already carry precise
+    // family keys; grouping them coarsely would mislabel diverse productive
+    // exploration (different files/queries) as looping.
     match canonical_tool_name {
         tools::UNIFIED_EXEC | tools::EXEC_COMMAND => {
             let command = vtcode_core::tools::command_args::command_text(args).ok()??;
@@ -691,13 +736,29 @@ fn coarse_inspection_family_key(canonical_tool_name: &str, args: &serde_json::Va
                 .trim_matches(|ch| ch == '\'' || ch == '"')
                 .to_ascii_lowercase();
             if matches!(base.as_str(), "find" | "ls" | "rg" | "grep" | "fd") {
-                Some(format!("exec::inspection::{base}"))
+                Some(format!("exec::inspection::{base}::{}", coarse_inspection_root(&command)))
             } else {
                 None
             }
         }
         _ => None,
     }
+}
+
+/// Extract the search-root segment of a listing/scan command: the first
+/// non-flag argument, with surrounding quotes and trailing slashes stripped.
+/// Deliberately heuristic — an option value (`rg -A 2 pat src` → root "2")
+/// can be picked up and fragment a family, which only makes detection more
+/// conservative. Commands with no positional argument (`ls -la`) scan the
+/// working directory and map to ".".
+fn coarse_inspection_root(command: &str) -> String {
+    let root = command
+        .split_whitespace()
+        .skip(1)
+        .find(|token| !token.starts_with('-'))
+        .unwrap_or(".");
+    let root = root.trim_matches(|ch| ch == '\'' || ch == '"').trim_end_matches('/');
+    if root.is_empty() { "." } else { root }.to_string()
 }
 
 /// Upsert a tool result into `history`, keyed on `tool_call_id`.
@@ -3332,10 +3393,11 @@ mod tests {
     }
 
     #[test]
-    fn coarse_listing_count_groups_same_binary_across_paths() {
+    fn coarse_listing_count_groups_same_root_rescans() {
         let mut tracker = LoopTracker::new();
         assert_eq!(tracker.max_coarse_listing_count(), 0);
-        for command in ["ls src", "ls crates", "ls tests"] {
+        // Same root across flag and quote variations: one coarse family.
+        for command in ["ls src", "ls \"src\"", "ls -1 src/"] {
             update_repetition_tracker(
                 &mut tracker,
                 &successful_exec_output(),
@@ -3344,6 +3406,22 @@ mod tests {
             );
         }
         assert_eq!(tracker.max_coarse_listing_count(), 3);
+        assert_eq!(tracker.dominant_churn(), Some(("exec::inspection::ls::src".to_string(), 3)));
+    }
+
+    #[test]
+    fn coarse_listing_count_separates_distinct_roots() {
+        let mut tracker = LoopTracker::new();
+        // Distinct trees are legitimate exploration, not churn.
+        for command in ["ls src", "ls crates", "ls tests"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 1);
     }
 
     #[test]
@@ -3372,5 +3450,38 @@ mod tests {
             );
         }
         assert_eq!(tracker.max_coarse_listing_count(), 0);
+    }
+
+    #[test]
+    fn coarse_inspection_root_extracts_first_positional_token() {
+        assert_eq!(coarse_inspection_root("ls src/"), "src");
+        assert_eq!(coarse_inspection_root("ls \"src/\""), "src");
+        assert_eq!(coarse_inspection_root("find src-tauri/ -maxdepth 1"), "src-tauri");
+        assert_eq!(coarse_inspection_root("ls -la"), ".");
+        assert_eq!(coarse_inspection_root("ls"), ".");
+        // Heuristic: an option value can be picked up as the root, which only
+        // fragments families and keeps detection conservative.
+        assert_eq!(coarse_inspection_root("rg -A 2 pat src"), "2");
+    }
+
+    #[test]
+    fn promoted_listing_repeat_counts_toward_low_signal_telemetry() {
+        // Three same-root successful listings: the third is promoted into the
+        // low-signal ledger, so telemetry records exactly one low-signal call
+        // even though every listing succeeded (the old
+        // `low_signal_tool_calls:0 on 3×find` diagnostics gap).
+        let mut tracker = LoopTracker::new();
+        for command in ["ls src", "ls -1 src", "ls src/"] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.low_signal_tool_calls, 1);
+        assert_eq!(tracker.total_low_signal_navigations, 1);
+        assert_eq!(tracker.consecutive_low_signal_navigations, 1);
+        assert_eq!(tracker.max_coarse_listing_count(), 3);
     }
 }

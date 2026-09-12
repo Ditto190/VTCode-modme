@@ -180,12 +180,12 @@ impl<'a> TurnProcessingContext<'a> {
         self.harness_state.reset_preflight_failure_streak();
     }
 
-    pub(crate) fn activate_recovery(&mut self, reason: impl Into<String>) {
-        self.harness_state.activate_recovery(reason);
+    pub(crate) fn activate_recovery(&mut self, reason: impl Into<String>) -> bool {
+        self.harness_state.activate_recovery(reason)
     }
 
-    pub(crate) fn activate_recovery_with_mode(&mut self, reason: impl Into<String>, mode: RecoveryMode) {
-        self.harness_state.activate_recovery_with_mode(reason, mode);
+    pub(crate) fn activate_recovery_with_mode(&mut self, reason: impl Into<String>, mode: RecoveryMode) -> bool {
+        self.harness_state.activate_recovery_with_mode(reason, mode)
     }
 
     pub(crate) fn is_recovery_active(&self) -> bool {

@@ -321,6 +321,59 @@ fn navigation_loop_guidance(planning_active: bool, repetition: usize) -> &'stati
     }
 }
 
+/// Diagnostic suffix for recovery reasons: names the family the model looped
+/// on so the synthesis prompt (and session archives) record what converged.
+/// Suppressed below two repeats: diverse churn (a new query each time) has no
+/// dominant family to name.
+fn churn_reason_note(churn: Option<&(String, usize)>) -> String {
+    churn
+        .filter(|(_, count)| *count >= 2)
+        .map_or(String::new(), |(family, count)| format!(" Top churn: {family} ×{count}."))
+}
+
+/// Compact renderer-line annotation for the dominant churn family.
+fn churn_line_label(churn: Option<&(String, usize)>) -> String {
+    churn
+        .filter(|(_, count)| *count >= 2)
+        .map_or(String::new(), |(family, count)| format!(" ({family} ×{count})"))
+}
+
+/// Arm the early tool-free synthesis pass and, only when actually armed,
+/// announce it in the UI, history, and decision ledger. Returns `false` when
+/// a recovery was already armed (e.g. by the blocked-tool fuse in the same
+/// batch) so the intervention is never claimed twice.
+async fn arm_and_announce_early_recovery(
+    ctx: &mut TurnProcessingContext<'_>,
+    recovery_reason: String,
+    churn: Option<&(String, usize)>,
+) -> bool {
+    if !ctx.activate_recovery(recovery_reason.clone()) {
+        return false;
+    }
+    ctx.renderer
+        .line(
+            MessageStyle::Info,
+            &format!(
+                "[!] Turn balancer: repeated low-signal navigation detected{}; scheduling an early recovery pass.",
+                churn_line_label(churn)
+            ),
+        )
+        .unwrap_or(());
+    ctx.working_history
+        .push(vtcode_core::llm::provider::Message::system(recovery_reason));
+    let mut ledger = ctx.decision_ledger.write().await;
+    ledger.record_decision(
+        "Turn balancer: Early recovery intervention".to_string(),
+        vtcode_core::core::decision_tracker::Action::Response {
+            content: "Repeated low-signal navigation was detected; an early tool-free recovery pass was scheduled."
+                .to_string(),
+            response_type: vtcode_core::core::decision_tracker::ResponseType::ContextSummary,
+        },
+        None,
+    );
+    true
+}
+
 pub(crate) async fn handle_turn_balancer(
     ctx: &mut TurnProcessingContext<'_>,
     step_count: usize,
@@ -331,9 +384,9 @@ pub(crate) async fn handle_turn_balancer(
     use vtcode_core::llm::provider as uni;
 
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, LISTING_LOOP_TRIP_COUNT, NAVIGATION_LOOP_THRESHOLD,
-        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_LISTING_LOOP_TRIP_COUNT,
-        PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
+        ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD,
+        LISTING_LOOP_TRIP_COUNT, NAVIGATION_LOOP_THRESHOLD, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD,
+        PLANNING_LISTING_LOOP_TRIP_COUNT, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
     };
 
     // NL2Repo-Bench checks run on every step (no backoff) since they
@@ -362,20 +415,24 @@ pub(crate) async fn handle_turn_balancer(
         && (repeated_tool_attempts.consecutive_low_signal_navigations >= PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD
             || repeated_tool_attempts.total_low_signal_navigations >= PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD)
     {
-        repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         let recovery_reason = format!(
             "Planning navigation produced {} consecutive and {} total low-signal results. Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}",
             repeated_tool_attempts.consecutive_low_signal_navigations,
             repeated_tool_attempts.total_low_signal_navigations
         );
-        ctx.activate_recovery(recovery_reason.clone());
-        ctx.renderer
-            .line(
-                MessageStyle::Info,
-                "[!] Planning recovery: low-signal research reached the adaptive synthesis threshold.",
-            )
-            .unwrap_or(());
-        ctx.working_history.push(uni::Message::system(recovery_reason));
+        // Only claim the intervention when a pass was actually armed: a
+        // recovery already pending from another guard or the blocked-tool
+        // fuse would make the "[!]" line and duplicate reason a lie.
+        if ctx.activate_recovery(recovery_reason.clone()) {
+            repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+            ctx.renderer
+                .line(
+                    MessageStyle::Info,
+                    "[!] Planning recovery: low-signal research reached the adaptive synthesis threshold.",
+                )
+                .unwrap_or(());
+            ctx.working_history.push(uni::Message::system(recovery_reason));
+        }
         return apply_balancer_recovery(repeated_tool_attempts);
     }
 
@@ -392,18 +449,19 @@ pub(crate) async fn handle_turn_balancer(
         && !repeated_tool_attempts.planning_low_signal_synthesis_triggered
         && ctx.harness_state.model_visible_preview_budget_exhausted()
     {
-        repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         let recovery_reason = format!(
             "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass. Trust preserved outcome metadata (tool, spool_path, byte_count, completion_state), do NOT re-read or repeat exhausted calls. Verification, task_tracker, session polling, spool paging, and plan-draft re-reads stay open until the synthesis pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
         );
-        ctx.activate_recovery(recovery_reason.clone());
-        ctx.renderer
-            .line(
-                MessageStyle::Info,
-                "[!] Planning recovery: tool preview budget exhausted; synthesizing plan from collected evidence.",
-            )
-            .unwrap_or(());
-        ctx.working_history.push(uni::Message::system(recovery_reason));
+        if ctx.activate_recovery(recovery_reason.clone()) {
+            repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+            ctx.renderer
+                .line(
+                    MessageStyle::Info,
+                    "[!] Planning recovery: tool preview budget exhausted; synthesizing plan from collected evidence.",
+                )
+                .unwrap_or(());
+            ctx.working_history.push(uni::Message::system(recovery_reason));
+        }
         return apply_balancer_recovery(repeated_tool_attempts);
     }
 
@@ -418,20 +476,21 @@ pub(crate) async fn handle_turn_balancer(
         && repeated_tool_attempts.consecutive_navigations >= PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD
         && repeated_tool_attempts.repeated_navigation_count() >= 1
     {
-        repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         let recovery_reason = format!(
             "Planning research reached {} consecutive read/search steps with {} repeated navigation request(s). Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}",
             repeated_tool_attempts.consecutive_navigations,
             repeated_tool_attempts.repeated_navigation_count(),
         );
-        ctx.activate_recovery(recovery_reason.clone());
-        ctx.renderer
-            .line(
-                MessageStyle::Info,
-                "[!] Planning recovery: repeated inspection reached the bounded synthesis checkpoint.",
-            )
-            .unwrap_or(());
-        ctx.working_history.push(uni::Message::system(recovery_reason));
+        if ctx.activate_recovery(recovery_reason.clone()) {
+            repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+            ctx.renderer
+                .line(
+                    MessageStyle::Info,
+                    "[!] Planning recovery: repeated inspection reached the bounded synthesis checkpoint.",
+                )
+                .unwrap_or(());
+            ctx.working_history.push(uni::Message::system(recovery_reason));
+        }
         return apply_balancer_recovery(repeated_tool_attempts);
     }
 
@@ -454,15 +513,16 @@ pub(crate) async fn handle_turn_balancer(
             "Navigation loop detected after {} consecutive read/search steps (recurrence #{recurrence}). Tools are disabled on the next pass; summarize findings and propose the next concrete action.",
             repeated_tool_attempts.consecutive_navigations
         );
-        ctx.activate_recovery(recovery_reason.clone());
-        ctx.renderer
-            .line(MessageStyle::Warning, "[!] Navigation Loop: scheduling a recovery synthesis pass.")
-            .unwrap_or(());
-        ctx.working_history.push(uni::Message::system(format!(
-            "{} {}",
-            recovery_reason,
-            navigation_loop_guidance(ctx.is_planning_active(), recurrence)
-        )));
+        if ctx.activate_recovery(recovery_reason.clone()) {
+            ctx.renderer
+                .line(MessageStyle::Warning, "[!] Navigation Loop: scheduling a recovery synthesis pass.")
+                .unwrap_or(());
+            ctx.working_history.push(uni::Message::system(format!(
+                "{} {}",
+                recovery_reason,
+                navigation_loop_guidance(ctx.is_planning_active(), recurrence)
+            )));
+        }
         return apply_balancer_recovery(repeated_tool_attempts);
     }
 
@@ -476,15 +536,16 @@ pub(crate) async fn handle_turn_balancer(
 
     let effective_repeat_limit = tool_repeat_limit.max(3);
     let repeated_low_signal = repeated_tool_attempts.max_low_signal_count();
-    // Same-base directory listings (`ls`/`find`/`fd`) share one coarse family
-    // across argument variations, so three of them trip recovery even when no
-    // exact request repeats and the low-signal ledger stays quiet.
+    // Same-target directory listings (`ls`/`find`/`fd`) share one coarse
+    // family per binary+root across flag variations, so three rescans of one
+    // tree trip recovery even when no exact request repeats; scans of
+    // distinct trees stay below the tripwire (legitimate exploration).
     // Planning gets a higher tripwire: it owns dedicated convergence guards
     // (6 consecutive / 10 total low-signal, 12-step nav synthesis) and a
     // generous research ceiling, so three successful listings are legitimate
     // exploration there rather than churn worth killing tools over.
-    let planning_active_for_listing = ctx.is_planning_active();
-    let listing_trip_count = if planning_active_for_listing {
+    let planning_active = ctx.is_planning_active();
+    let listing_trip_count = if planning_active {
         PLANNING_LISTING_LOOP_TRIP_COUNT
     } else {
         LISTING_LOOP_TRIP_COUNT
@@ -493,39 +554,43 @@ pub(crate) async fn handle_turn_balancer(
     if (repeated_low_signal >= effective_repeat_limit || repeated_listings >= listing_trip_count)
         && repeated_tool_attempts.consecutive_navigations >= effective_repeat_limit
     {
-        let planning_active = planning_active_for_listing;
+        let churn = repeated_tool_attempts.dominant_churn();
         let recovery_reason = if planning_active {
             format!(
-                "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+                "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}{}",
+                churn_reason_note(churn.as_ref())
             )
         } else {
             format!(
-                "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass; summarize only from collected evidence."
+                "Repeated low-signal navigation calls reached the per-turn fast-path cap ({effective_repeat_limit}). Tools are disabled on the next pass; summarize only from collected evidence.{}",
+                churn_reason_note(churn.as_ref())
             )
         };
-        if planning_active {
+        let armed = arm_and_announce_early_recovery(ctx, recovery_reason, churn.as_ref()).await;
+        if armed && planning_active {
             repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         }
-        ctx.activate_recovery(recovery_reason.clone());
-        ctx.renderer
-            .line(
-                MessageStyle::Info,
-                "[!] Turn balancer: repeated low-signal navigation detected; scheduling an early recovery pass.",
-            )
-            .unwrap_or(());
-        ctx.working_history.push(uni::Message::system(recovery_reason));
-        {
-            let mut ledger = ctx.decision_ledger.write().await;
-            ledger.record_decision(
-                "Turn balancer: Early recovery intervention".to_string(),
-                vtcode_core::core::decision_tracker::Action::Response {
-                    content:
-                        "Repeated low-signal navigation was detected; an early tool-free recovery pass was scheduled."
-                            .to_string(),
-                    response_type: vtcode_core::core::decision_tracker::ResponseType::ContextSummary,
-                },
-                None,
-            );
+        return apply_balancer_recovery(repeated_tool_attempts);
+    }
+
+    // Execution-mode total low-signal guard: diverse churn (a new query each
+    // time) never trips the per-family fast-path above and previously ran
+    // until the navigation-loop guard (15 steps) or the final balancer
+    // window. The counter's window resets on any mutation or verification,
+    // so this fires only for churn uninterrupted by productive work.
+    if !planning_active
+        && !repeated_tool_attempts.execution_total_low_signal_triggered
+        && repeated_tool_attempts.total_low_signal_navigations >= EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD
+    {
+        let churn = repeated_tool_attempts.dominant_churn();
+        let recovery_reason = format!(
+            "Diverse low-signal navigation reached {} outcomes without a mutation or verification resetting the window. Tools are disabled on the next pass; summarize only from collected evidence.{}",
+            repeated_tool_attempts.total_low_signal_navigations,
+            churn_reason_note(churn.as_ref())
+        );
+        let armed = arm_and_announce_early_recovery(ctx, recovery_reason, churn.as_ref()).await;
+        if armed {
+            repeated_tool_attempts.execution_total_low_signal_triggered = true;
         }
         return apply_balancer_recovery(repeated_tool_attempts);
     }
@@ -545,36 +610,45 @@ pub(crate) async fn handle_turn_balancer(
         max_repeated,
         tool_repeat_limit,
     ) {
-        let planning_active = ctx.is_planning_active();
+        let churn = repeated_tool_attempts.dominant_churn();
         let recovery_reason = if planning_active {
             format!(
-                "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+                "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass. {PLANNING_SYNTHESIS_FORMAT_HINT}{}",
+                churn_reason_note(churn.as_ref())
             )
         } else {
-            "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass; summarize only from collected evidence.".to_string()
-        };
-        if planning_active {
-            repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
-        }
-        ctx.activate_recovery(recovery_reason.clone());
-        ctx.renderer
-            .line(
-                MessageStyle::Info,
-                "[!] Turn balancer: repeated low-signal calls detected; scheduling a final recovery pass.",
+            format!(
+                "Turn balancer detected repeated low-signal tool churn. Tools are disabled on the next pass; summarize only from collected evidence.{}",
+                churn_reason_note(churn.as_ref())
             )
-            .unwrap_or(());
-        ctx.working_history.push(uni::Message::system(recovery_reason));
-        // Record in ledger
-        {
-            let mut ledger = ctx.decision_ledger.write().await;
-            ledger.record_decision(
-                "Turn balancer: Recovery intervention".to_string(),
-                vtcode_core::core::decision_tracker::Action::Response {
-                    content: "Low-signal churn detected; a final tool-free recovery pass was scheduled.".to_string(),
-                    response_type: vtcode_core::core::decision_tracker::ResponseType::ContextSummary,
-                },
-                None,
-            );
+        };
+        if ctx.activate_recovery(recovery_reason.clone()) {
+            if planning_active {
+                repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
+            }
+            ctx.renderer
+                .line(
+                    MessageStyle::Info,
+                    &format!(
+                        "[!] Turn balancer: repeated low-signal calls detected{}; scheduling a final recovery pass.",
+                        churn_line_label(churn.as_ref())
+                    ),
+                )
+                .unwrap_or(());
+            ctx.working_history.push(uni::Message::system(recovery_reason));
+            // Record in ledger
+            {
+                let mut ledger = ctx.decision_ledger.write().await;
+                ledger.record_decision(
+                    "Turn balancer: Recovery intervention".to_string(),
+                    vtcode_core::core::decision_tracker::Action::Response {
+                        content: "Low-signal churn detected; a final tool-free recovery pass was scheduled."
+                            .to_string(),
+                        response_type: vtcode_core::core::decision_tracker::ResponseType::ContextSummary,
+                    },
+                    None,
+                );
+            }
         }
         return apply_balancer_recovery(repeated_tool_attempts);
     }
@@ -600,8 +674,9 @@ mod tests {
     use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
     use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        BLIND_EDITING_THRESHOLD, LoopTracker, NAVIGATION_LOOP_THRESHOLD, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD,
-        PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD, update_repetition_tracker,
+        BLIND_EDITING_THRESHOLD, EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD, LoopTracker, NAVIGATION_LOOP_THRESHOLD,
+        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD,
+        PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD, update_repetition_tracker,
     };
     use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
 
@@ -1256,10 +1331,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn early_balancer_trips_on_listings_below_low_signal_limit() {
-        // With a lenient repeat limit (5), three same-binary listings stay
-        // below the low-signal cap but still trip recovery through the
-        // coarse-listing branch once consecutive navigations reach the limit.
+    async fn early_balancer_trips_on_same_root_listings_below_low_signal_limit() {
+        // With a lenient repeat limit (5), three same-binary same-root
+        // listings stay below the low-signal cap but still trip recovery
+        // through the coarse-listing branch once consecutive navigations
+        // reach the limit. The armed reason names the looped family.
         let mut backing = TestTurnProcessingBacking::new(20).await;
         let mut ctx = backing.turn_processing_context();
         let mut tracker = LoopTracker::new();
@@ -1276,7 +1352,7 @@ mod tests {
             command_success: true,
         });
 
-        for command in ["ls src", "ls crates", "ls tests"] {
+        for command in ["ls src", "ls -1 src", "ls src/"] {
             update_repetition_tracker(&mut tracker, &success, tool_names::EXEC_COMMAND, &json!({"cmd":command}));
         }
         for query in ["TurnLoop", "LoopTracker"] {
@@ -1292,5 +1368,185 @@ mod tests {
         let balancer_outcome = super::handle_turn_balancer(&mut ctx, 5, &mut tracker, 20, 5).await;
         assert!(matches!(balancer_outcome, TurnHandlerOutcome::Continue));
         assert!(ctx.is_recovery_active());
+        let reason = ctx.recovery_reason().unwrap_or_default();
+        assert!(reason.contains("Top churn: exec::inspection::ls::src ×3."));
+    }
+
+    #[tokio::test]
+    async fn diverse_root_listings_stay_below_early_recovery() {
+        // Scans of distinct trees are legitimate exploration: three
+        // same-binary listings of different roots must not schedule the early
+        // recovery pass, because the coarse family is scoped by search root.
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for command in ["ls src", "ls crates", "ls tests"] {
+            update_repetition_tracker(&mut tracker, &success, tool_names::EXEC_COMMAND, &json!({"cmd":command}));
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 1);
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 20, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
+    }
+
+    #[tokio::test]
+    async fn balancer_does_not_reclaim_an_already_pending_recovery() {
+        // When the blocked-tool fuse armed a recovery earlier in the same
+        // batch, the balancer condition can still trip on the same tracker
+        // state. It must not announce a second "scheduling" pass or overwrite
+        // the armed reason — `activate_recovery` reports the no-op and the
+        // messaging stays silent.
+        let mut backing = TestTurnProcessingBacking::new(120).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.activate_recovery("blocked-tool recovery");
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for command in ["ls src", "ls -1 src", "ls src/"] {
+            update_repetition_tracker(&mut tracker, &success, tool_names::EXEC_COMMAND, &json!({"cmd":command}));
+        }
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 6, &mut tracker, 120, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        assert_eq!(ctx.recovery_reason(), Some("blocked-tool recovery"));
+        assert!(
+            !ctx.working_history
+                .iter()
+                .any(|message| message.content.as_text().contains("summarize only from collected evidence"))
+        );
+        assert!(!ctx.working_history.iter().any(|message| {
+            message
+                .content
+                .as_text()
+                .contains("Repeated low-signal navigation calls reached")
+        }));
+    }
+
+    #[tokio::test]
+    async fn execution_total_low_signal_guard_trips_at_threshold() {
+        // Diverse empty searches (a new query each time) never trip the
+        // per-family fast-path; the execution-mode total guard converges the
+        // turn at 12 low-signal outcomes without productive work.
+        let mut backing = TestTurnProcessingBacking::new(40).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"results":[]}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for step in 0..(EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD - 1) {
+            update_repetition_tracker(
+                &mut tracker,
+                &miss,
+                tool_names::CODE_SEARCH,
+                &json!({"query": format!("q{step}"), "path": "src"}),
+            );
+        }
+        let outcome = super::handle_turn_balancer(&mut ctx, 12, &mut tracker, 40, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
+
+        update_repetition_tracker(
+            &mut tracker,
+            &miss,
+            tool_names::CODE_SEARCH,
+            &json!({"query": "q-final", "path": "src"}),
+        );
+        let outcome = super::handle_turn_balancer(&mut ctx, 13, &mut tracker, 40, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.is_recovery_active());
+        let reason = ctx.recovery_reason().unwrap_or_default();
+        assert!(reason.contains("Diverse low-signal navigation reached 12"));
+    }
+
+    #[tokio::test]
+    async fn execution_total_low_signal_guard_fires_once_per_turn() {
+        let mut backing = TestTurnProcessingBacking::new(40).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        tracker.execution_total_low_signal_triggered = true;
+        let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"results":[]}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for step in 0..(EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD + 3) {
+            update_repetition_tracker(
+                &mut tracker,
+                &miss,
+                tool_names::CODE_SEARCH,
+                &json!({"query": format!("r{step}"), "path": "src"}),
+            );
+        }
+
+        let outcome = super::handle_turn_balancer(&mut ctx, 16, &mut tracker, 40, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
+    }
+
+    #[tokio::test]
+    async fn execution_total_low_signal_window_resets_on_mutation() {
+        // A productive mutation resets the low-signal window, so churn
+        // interrupted by real work must not accumulate across the reset.
+        let mut backing = TestTurnProcessingBacking::new(40).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        let miss = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"results":[]}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for step in 0..(EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD - 1) {
+            update_repetition_tracker(
+                &mut tracker,
+                &miss,
+                tool_names::CODE_SEARCH,
+                &json!({"query": format!("a{step}"), "path": "src"}),
+            );
+        }
+        update_repetition_tracker(
+            &mut tracker,
+            &ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+                output: json!({}),
+                stdout: None,
+                modified_files: vec!["src/main.rs".to_string()],
+                command_success: true,
+            }),
+            tool_names::EDIT_FILE,
+            &json!({"path":"src/main.rs","old_string":"a","new_string":"b"}),
+        );
+        assert_eq!(tracker.total_low_signal_navigations, 0);
+
+        for step in 0..(EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD - 1) {
+            update_repetition_tracker(
+                &mut tracker,
+                &miss,
+                tool_names::CODE_SEARCH,
+                &json!({"query": format!("b{step}"), "path": "src"}),
+            );
+        }
+        let outcome = super::handle_turn_balancer(&mut ctx, 24, &mut tracker, 40, 3).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!ctx.is_recovery_active());
     }
 }

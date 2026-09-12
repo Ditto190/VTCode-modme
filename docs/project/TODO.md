@@ -55,7 +55,7 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
   Locked: 7 findings → 7 small issues; scope = docs + High fixes; P1 160k default; P5 fail-closed + allow_unpriced=false; P8 run_suite stays sequential.
 
 1. File 7 small issues (no code)
-   Restore deleted diagnosis as tracked issues: cold cache, preview_budget_exhausted+spool_path:null, completion_state:unknown on exit-0, 19k/44k visible/spooled gap, low_signal_tool_calls:0 on 3×find, elapsed_ms:null, files:[].
+   Restore deleted diagnosis as tracked issues: cold cache, preview_budget_exhausted+spool_path:null, completion_state:unknown on exit-0, 19k/44k visible/spooled gap, low_signal_tool_calls:0 on 3×find (RESOLVED 2026-09-12: the coarse-listing promotion increments it on the third same-root scan — pinned by `promoted_listing_repeat_counts_toward_low_signal_telemetry` in tool_outcomes/helpers.rs), elapsed_ms:null, files:[].
 2. P3 cache + P1 budget denominator (first, parallelizable)
 
 - core/agent/hash_utils.rs:19-62,229-251: keep PromptCapabilityIdentity; replace raw model string with capability digest (model_id canonical + ResolvedModel::context_window + reasoning_tag + catalog_epoch + parallel/cache/tools bools) via FNV-1a hash_value; strip [Harness Limits]/Environment/ShellProfile from stable prefix or freeze per segment (request_envelope.rs:12-21,45-108, state.rs:206-282, request_builder.rs:230-253).

@@ -311,11 +311,13 @@ fn emit_loop_hard_cap_break_metric(
 /// itself; the recovery request disables tools at the provider boundary, so
 /// this does not weaken the ordinary hard cap or permit another tool batch.
 fn arm_tool_loop_synthesis_recovery(harness_state: &mut HarnessTurnState, current_max_tool_loops: &mut usize) -> bool {
-    if harness_state.is_recovery_active() || harness_state.recovery_pass_used() {
+    // `activate_recovery` only arms from the `Inactive` phase and reports
+    // whether it did, so a pending/in-flight pass never widens the loop
+    // allowance here.
+    if !harness_state.activate_recovery(TOOL_LOOP_LIMIT_RECOVERY_REASON) {
         return false;
     }
 
-    harness_state.activate_recovery(TOOL_LOOP_LIMIT_RECOVERY_REASON);
     *current_max_tool_loops = UNLIMITED_TOOL_LOOPS;
     true
 }

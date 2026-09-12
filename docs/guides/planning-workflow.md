@@ -418,15 +418,23 @@ compile, test, build, and clippy commands count as verification progress.
 Successful reads can still drift into a loop, so twelve consecutive planning
 inspections containing even one repeated semantic request schedule the same
 synthesis pass. Output controls such as `max_output_tokens` do not make an
-otherwise identical inspection count as new research; twelve genuinely
+ otherwise identical inspection count as new research; twelve genuinely
 distinct inspections remain eligible for continued research. The generic
  turn-balancer caps apply as well; in planning mode they converge on the same
  plan-synthesis pass (with the `<proposed_plan>` contract) and consume the same
- once-per-turn slot. In execution mode, three listings with the same tool (`ls`,
- `find`, or `fd`, regardless of arguments) schedule the same single tool-free
- recovery pass; planning mode uses a higher tripwire of five so three
- successful listings remain legitimate exploration under the dedicated 6/10
- low-signal and 12-step synthesis guards. A planning tool-free violation that
+ once-per-turn slot. In execution mode, three same-target listings — one tool
+ (`ls`, `find`, or `fd`) rescanning the same search root across argument
+ variations — schedule the same single tool-free recovery pass; scans of
+ distinct trees never group. Planning mode uses a higher tripwire of five so
+ three successful listings remain legitimate exploration under the dedicated
+ 6/10 low-signal and 12-step synthesis guards. Execution mode also converges
+ when diverse low-signal churn reaches twelve outcomes in one window (a new
+ query each time never repeats a family); the window resets on any mutation or
+ verification, so churn interrupted by real work does not accumulate. When a
+ recovery pass is armed this way, the balancer names the dominant churn family
+ (for example `exec::inspection::ls::src ×3`) in the injected reason, and a
+ pass that is already pending from another guard or the blocked-tool fuse is
+ never re-announced. A planning tool-free violation that
  still carries plan-like salvage consumes one validation-repair budget and
  retries tool-free before the resumable handoff, and every failed-closed turn budget (`tool_calls`,
  `tool_loop`, `session_calls`) is recorded as a `budget_exhausted` trajectory
