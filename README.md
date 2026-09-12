@@ -53,15 +53,11 @@
 
 </div>
 
-VT Code is an open-source Rust terminal coding agent for interactive and
-long-running autonomous work. It is a **harness, not just an LLM wrapper**:
-the model provides reasoning, while the runtime provides the tools, context,
-sandbox, state, evaluation, and verification needed to turn that reasoning into
-safe, reviewable progress.
-
-A responsive TUI, multi-provider LLM support, durable sessions, open protocols,
-and extensible Skills take you from question to reviewed change without leaving
-the terminal.
+VT Code is an open-source Rust terminal coding agent for interactive sessions
+and long-running autonomous work. It is a **harness, not just an LLM wrapper**:
+the model reasons, while the runtime supplies the tools, context, sandbox,
+state, evaluation, and verification that turn reasoning into safe, reviewable
+progress — without ever leaving the terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows are
@@ -76,15 +72,18 @@ the terminal.
 
 ## Why VT Code
 
-| Pillar                     | What it means                                                                                                                                 |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evaluations to enforce progress.                                  |
-| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses for injection, path/symlink escape, and environment leakage. |
-| **Long-run reliability**   | Durable session memory, task tracking, spooled output, checkpoints, automatic compaction, resumable handoffs, and verification before "done". |
-| **Observable by design**   | A canonical `ThreadEvent` runtime contract supports replay, archives, checkpoints, memory views, and trajectory export.                       |
-| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without core forks.                            |
-| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, full automation, and cost guardrails scale autonomy safely.          |
-| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                     |
+Most coding agents stop at "call the model, run the tool." VT Code treats the
+agent loop itself as an engineering problem:
+
+| Pillar                     | What it means                                                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.                          |
+| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection, path/symlink escape, and env leakage.  |
+| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction, resumable handoffs — verified before "done".                |
+| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.                             |
+| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.                    |
+| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.                         |
+| **Runs anywhere**          | 31 providers plus local Ollama, LM Studio, and llama.cpp.                                                                                   |
 
 ## Quick start
 
@@ -104,14 +103,15 @@ vtcode init         # scaffolds config + AGENTS.md; review before committing
 ```
 
 Set your API key — the TUI's `/secret` command stores it in your OS keyring
-(never in a workspace `.env` or shell history), which is the most secure option:
+(never in a workspace `.env` or shell history), which is the most secure
+option:
 
 ```bash
 vtcode secret add openai   # headless; or run /secret add openai inside the TUI
 ```
 
-`vtcode login` works for OAuth providers (ChatGPT, GitHub Copilot). Plain env
-vars and workspace `.env` still work and remain useful for CI — see
+`vtcode login` covers OAuth providers (ChatGPT, GitHub Copilot). Plain env vars
+and workspace `.env` still work — useful for CI. See
 [Getting started](./docs/user-guide/getting-started.md) for the credential
 resolution order.
 
@@ -125,7 +125,7 @@ vtcode review                  # review uncommitted changes
 ```
 
 See [Installation](./docs/installation/README.md) and
-[Getting Started](./docs/user-guide/getting-started.md).
+[Getting Started](./docs/user-guide/getting-started.md) for the full tour.
 
 > [!CAUTION]
 > Never commit API keys or put them in `vtcode.toml`.
@@ -153,19 +153,19 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 
 ## Documentation
 
-| Area    | Guides                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) · [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in) · [Podcast companion](https://www.youtube.com/watch?v=XLoswcd5rH0) · [Video companion](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
-| Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md)                                                                                                          |
-| Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors](./docs/guides/zed-acp.md)                                                                                                                                                                                                                               |
-| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                                                                                                                              |
+| Area    | Guides                                                                                                                                                                                                                                                              |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) · [Blog: Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in) · [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) · [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o) |
+| Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
+| Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) |
+| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
 
 ## Providers
 
-31 built-in providers — including multi-model gateways like OpenRouter,
-Merge Gateway, and Vercel AI Gateway — custom OpenAI-compatible endpoints, and
-local backends. [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the
-source of truth for credentials and model defaults.
+31 built-in providers — including multi-model gateways (OpenRouter, Merge
+Gateway, Vercel AI Gateway), custom OpenAI-compatible endpoints, and local
+backends. [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source
+of truth for credentials and model defaults.
 
 ```bash
 vtcode models list
@@ -175,7 +175,7 @@ vtcode models config
 > [!TIP]
 > Restrict providers per workspace with `providers_whitelist` in `vtcode.toml`.
 > Local inference (experimental) via Ollama, LM Studio, and llama.cpp is managed
-> with `/local` in the TUI - see [Local Models](./docs/guides/local-models.md).
+> with `/local` in the TUI — see [Local Models](./docs/guides/local-models.md).
 
 ## Development
 
