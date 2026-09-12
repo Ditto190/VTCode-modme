@@ -319,6 +319,20 @@ fn apply_task_tracker_block(
     harness_state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
     lines: Vec<String>,
 ) {
+    // Identical repeats (approval handoff followed by the same pipeline
+    // result, or unchanged `list` calls) must not stack a second full block
+    // in the transcript. The docked panel already reflects the latest state.
+    if harness_state.is_same_as_remembered_task_tracker_block(&lines) {
+        return;
+    }
+    // The approval handoff appends directly without updating `HarnessTurnState`,
+    // so an identical pipeline replay would otherwise stack a second block.
+    // Remember it here so later updates still replace this block instead of
+    // appending.
+    if transcript::tail_matches(&lines) {
+        harness_state.remember_task_tracker_block(lines);
+        return;
+    }
     let replace_count = harness_state.replaceable_task_tracker_count();
     let segments = task_tracker_block_segments(&lines);
 
@@ -1573,6 +1587,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(transcript_state)]
     fn successful_task_tracker_replacement_contains_only_compact_tree_rows() {
         // Successful updates replace the prior tracker block as one compact
         // tree. Tool-call arguments are operational detail, not task-panel or
@@ -1618,12 +1633,81 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "• Task tracker",
+                "• Tasks 3/3",
                 "  └ Release",
                 "    [x] Update version",
                 "    [x] Run checks",
             ]
         );
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn identical_task_tracker_block_is_not_appended_twice() {
+        // Approval handoff + pipeline replay (or repeated `list` calls) emit
+        // the same payload. The transcript must keep one block, not two.
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let mut harness_state = build_harness_state();
+        let payload = serde_json::json!({
+            "status": "updated",
+            "checklist": {
+                "completed": 1,
+                "total": 3,
+                "items": [
+                    { "index_path": "1", "description": "Release", "status": "in_progress" },
+                    { "index_path": "1.1", "description": "Update version", "status": "completed" },
+                    { "index_path": "1.2", "description": "Run checks", "status": "pending" }
+                ]
+            }
+        });
+        let lines = task_tracker_block_lines(&payload);
+
+        apply_task_tracker_block(&handle, &mut harness_state, lines.clone());
+        // Drain the initial append so only post-repeat commands remain.
+        while receiver.try_recv().is_ok() {}
+        apply_task_tracker_block(&handle, &mut harness_state, lines);
+
+        assert!(receiver.try_recv().is_err(), "identical tracker repeat must not emit another transcript command");
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn pipeline_replay_after_approval_handoff_is_not_appended_twice() {
+        // `render_created_task_tracker` appends the approval block without
+        // updating `HarnessTurnState`. The pipeline replay of the identical
+        // payload must still collapse to one block, and the replayed block
+        // must be remembered so the next update replaces it.
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let payload = serde_json::json!({
+            "status": "updated",
+            "checklist": {
+                "completed": 1,
+                "total": 3,
+                "items": [
+                    { "index_path": "1", "description": "Release", "status": "in_progress" },
+                    { "index_path": "1.1", "description": "Update version", "status": "completed" },
+                    { "index_path": "1.2", "description": "Run checks", "status": "pending" }
+                ]
+            }
+        });
+        let lines = task_tracker_block_lines(&payload);
+        // Simulate the approval handoff's transcript write.
+        for line in &lines {
+            transcript::append(line);
+        }
+
+        let mut harness_state = build_harness_state();
+        apply_task_tracker_block(&handle, &mut harness_state, lines.clone());
+
+        assert!(
+            receiver.try_recv().is_err(),
+            "pipeline replay after approval handoff must not emit another transcript command"
+        );
+        assert!(harness_state.is_same_as_remembered_task_tracker_block(&lines));
+        transcript::clear();
     }
 
     #[test]

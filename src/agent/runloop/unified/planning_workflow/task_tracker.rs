@@ -24,6 +24,11 @@ fn render_created_task_tracker(handle: &InlineHandle, output: &serde_json::Value
         crate::agent::runloop::tool_output::tracker_panel_metadata(output),
     );
     handle.show_task_panel();
+    // Skip the transcript append when the same block is already visible so the
+    // approval handoff and its pipeline replay do not stack identical lists.
+    if vtcode_core::utils::transcript::tail_matches(&lines) {
+        return;
+    }
     handle.append_pasted_message(InlineMessageKind::Tool, lines.join("\n"), lines.len());
 }
 

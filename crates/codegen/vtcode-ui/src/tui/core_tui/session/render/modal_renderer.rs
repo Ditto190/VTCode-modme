@@ -159,7 +159,9 @@ pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<R
         if modal.secure_prompt.is_some() {
             lines = lines.saturating_add(2);
         }
-        if modal.list.is_some() && modal.search.is_some() {
+        if modal.list.is_some() {
+            // Match `render_modal_body`: the instructions→list divider renders
+            // whenever a list is present, with or without a search field.
             lines = lines.saturating_add(1); // divider before list
         }
         if let Some(list) = modal.list.as_ref() {

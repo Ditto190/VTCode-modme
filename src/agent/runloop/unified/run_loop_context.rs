@@ -1495,6 +1495,10 @@ impl HarnessTurnState {
         vtcode_core::utils::transcript::tail_matches(lines).then_some(lines.len())
     }
 
+    pub(crate) fn is_same_as_remembered_task_tracker_block(&self, lines: &[String]) -> bool {
+        self.replaceable_task_tracker_block.as_deref() == Some(lines)
+    }
+
     pub(crate) fn remember_task_tracker_block(&mut self, lines: Vec<String>) {
         self.replaceable_task_tracker_block = (!lines.is_empty()).then_some(lines);
     }

@@ -365,7 +365,7 @@ fn modal_section_header_uses_foreground_contrast_on_light_theme() {
 }
 
 #[test]
-fn untitled_floating_modal_skips_title_chrome_rows() {
+fn untitled_floating_modal_skips_title_chrome_but_keeps_section_divider() {
     let mut session = AppSession::new(InlineTheme::default(), None, 30);
     show_list_modal(&mut session, "", vec!["Choose an option"], vec![make_list_item("Option A", "a")]);
 
@@ -374,13 +374,49 @@ fn untitled_floating_modal_skips_title_chrome_rows() {
         lines.get(15).is_some_and(|line| line.contains("Choose an option")),
         "untitled modal body should begin at the floating modal origin"
     );
-    assert!(
-        (15..30).all(|row| !lines.get(row).is_some_and(|line| is_horizontal_rule(line))),
-        "untitled modal should not render title chrome divider rows"
-    );
+
+    // Title chrome (title row plus its surrounding dividers) is skipped, but
+    // the intentional instructions→list section divider still renders exactly
+    // once between the instructions and the list items.
+    let rule_rows: Vec<usize> = (15..30)
+        .filter(|row| lines.get(*row).is_some_and(|line| is_horizontal_rule(line)))
+        .collect();
+    assert_eq!(rule_rows, vec![16], "untitled modal should render only the section divider");
+    let instructions_row = lines
+        .iter()
+        .position(|line| line.contains("Choose an option"))
+        .expect("instructions row");
+    let item_row = lines.iter().position(|line| line.contains("Option A")).expect("list item row");
+    assert!(instructions_row < rule_rows[0] && rule_rows[0] < item_row);
 
     let modal_area = session.core.modal_list_area().expect("modal list area");
-    assert_eq!(modal_area.y, 16);
+    assert_eq!(modal_area.y, 17);
+}
+
+#[test]
+fn inline_modal_height_budgets_list_divider_without_search() {
+    use super::super::render::split_inline_modal_area;
+
+    let mut session = Session::new(InlineTheme::default(), None, 30);
+    // Sixteen two-line items sit under the 20-row multiline cap, so the exact
+    // height below is sensitive to the divider row: 1 instructions +
+    // 1 divider + 16 list + 0 summary + 3 title chrome = 21.
+    let items = (0..16)
+        .map(|index| InlineListItem {
+            title: format!("Option {index}"),
+            subtitle: Some(format!("detail {index}")),
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::SlashCommand(format!("cmd{index}"))),
+            search_value: Some(format!("option {index}")),
+        })
+        .collect::<Vec<_>>();
+    show_overlay(&mut session, "Pick", vec!["Choose"], items, None);
+
+    let area = Rect::new(0, 0, 80, 40);
+    let (_transcript_area, modal_area) = split_inline_modal_area(&session, area);
+    let modal_area = modal_area.expect("list modal should claim a bottom panel area");
+    assert_eq!(modal_area.height, 21, "modal height must budget the always-rendered list divider");
 }
 
 #[test]

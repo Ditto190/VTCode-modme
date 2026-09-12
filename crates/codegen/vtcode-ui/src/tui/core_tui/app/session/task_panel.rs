@@ -45,6 +45,14 @@ pub(super) fn body_lines<'a>(lines: &'a [String], metadata: Option<&TaskPanelMet
         return lines;
     };
 
+    // Transcript blocks start with a summary header (`• Tasks 3/8 — next: …`)
+    // while the panel header already shows title + progress. Strip either the
+    // summary header or a legacy `• {title}` duplicate so tree rows are shown
+    // once without repetition.
+    if first.starts_with("• Tasks") {
+        return &lines[1..];
+    }
+
     first
         .strip_prefix("• ")
         .filter(|title| *title == metadata.title)
@@ -129,6 +137,21 @@ mod tests {
 
         assert_eq!(body_lines(&lines, Some(&metadata)), &lines[1..]);
         assert_eq!(body_lines(&lines, None), &lines[..]);
+    }
+
+    #[test]
+    fn body_lines_strips_summary_header_since_panel_shows_progress() {
+        let lines = vec![
+            "• Tasks 1/4 — next: Prepare release".to_string(),
+            "  └ □ Prepare release".to_string(),
+        ];
+        let metadata = TaskPanelMetadata {
+            title: "Release".to_string(),
+            completed: 1,
+            total: 4,
+        };
+
+        assert_eq!(body_lines(&lines, Some(&metadata)), &lines[1..]);
     }
 
     #[test]

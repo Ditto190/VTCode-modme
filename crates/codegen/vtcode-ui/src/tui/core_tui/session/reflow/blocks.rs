@@ -107,19 +107,11 @@ impl Session {
         Some(" ".repeat(prefix_width))
     }
 
-    /// Wrap content with left and right borders
-    fn wrap_block_lines(
-        &self,
-        first_prefix: &str,
-        continuation_prefix: &str,
-        content: Vec<Span<'static>>,
-        max_width: usize,
-        border_style: Style,
-    ) -> Vec<Line<'static>> {
-        self.wrap_block_lines_with_options(first_prefix, continuation_prefix, content, max_width, border_style, true)
-    }
-
-    /// Wrap content with left border only (no right border)
+    /// Wrap content without block borders (no leading/trailing `│`).
+    ///
+    /// Tool blocks render borderless so task trees and command summaries never
+    /// show trailing/leading pipe framing; tree `│` inside task content is
+    /// semantic hierarchy and is preserved.
     fn wrap_block_lines_no_right_border(
         &self,
         first_prefix: &str,
@@ -128,46 +120,18 @@ impl Session {
         max_width: usize,
         border_style: Style,
     ) -> Vec<Line<'static>> {
-        self.wrap_block_lines_with_options(first_prefix, continuation_prefix, content, max_width, border_style, false)
-    }
-
-    /// Wrap content with configurable border options
-    fn wrap_block_lines_with_options(
-        &self,
-        first_prefix: &str,
-        continuation_prefix: &str,
-        content: Vec<Span<'static>>,
-        max_width: usize,
-        border_style: Style,
-        show_right_border: bool,
-    ) -> Vec<Line<'static>> {
         if max_width < 2 {
-            let fallback = if show_right_border {
-                format!("{first_prefix}││")
-            } else {
-                format!("{first_prefix}│")
-            };
-            return vec![Line::from(fallback).style(border_style)];
+            return vec![Line::from(first_prefix.to_string()).style(border_style)];
         }
 
-        let right_border = if show_right_border {
-            ui::INLINE_BLOCK_BODY_RIGHT
-        } else {
-            ""
-        };
         let first_prefix_width = UnicodeWidthStr::width(first_prefix);
         let continuation_prefix_width = UnicodeWidthStr::width(continuation_prefix);
         let prefix_width = first_prefix_width.max(continuation_prefix_width);
-        let border_width = UnicodeWidthStr::width(right_border);
-        let consumed_width = prefix_width.saturating_add(border_width);
-        let content_width = max_width.saturating_sub(consumed_width);
+        let content_width = max_width.saturating_sub(prefix_width);
 
         if max_width == usize::MAX {
             let mut spans = vec![Span::styled(first_prefix.to_owned(), border_style)];
             spans.extend(content);
-            if show_right_border {
-                spans.push(Span::styled(right_border.to_owned(), border_style));
-            }
             return vec![Line::from(spans)];
         }
 
@@ -194,15 +158,8 @@ impl Session {
             wrapped.push(Line::default());
         }
 
-        // Add borders to each wrapped line
+        // Add the gutter prefix to each wrapped line
         for (idx, line) in wrapped.iter_mut().enumerate() {
-            let line_width = line.spans.iter().map(|s| s.width()).sum::<usize>();
-            let padding = if show_right_border {
-                content_width.saturating_sub(line_width)
-            } else {
-                0
-            };
-
             let active_prefix = if idx == 0 { first_prefix } else { continuation_prefix };
             let mut new_spans = vec![Span::styled(active_prefix.to_owned(), border_style)];
 
@@ -216,12 +173,6 @@ impl Session {
             }
 
             new_spans.append(&mut line.spans);
-            if padding > 0 {
-                new_spans.push(Span::styled(" ".repeat(padding), Style::default()));
-            }
-            if show_right_border {
-                new_spans.push(Span::styled(right_border.to_owned(), border_style));
-            }
             line.spans = new_spans;
         }
 
@@ -327,7 +278,7 @@ impl Session {
                         ));
                     }
                 }
-                lines.extend(self.wrap_block_lines(
+                lines.extend(self.wrap_block_lines_no_right_border(
                     summary_prefix,
                     summary_continuation,
                     styled_spans,

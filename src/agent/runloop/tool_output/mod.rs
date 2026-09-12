@@ -28,7 +28,7 @@ use vtcode_core::config::mcp::McpRendererProfile;
 use vtcode_core::tools::continuation::{
     NEXT_CONTINUE_PROMPT, NEXT_READ_PROMPT, PtyContinuationArgs, ReadChunkContinuationArgs,
 };
-use vtcode_core::tools::handlers::task_tracking::compact_task_tree_view_from_items;
+use vtcode_core::tools::handlers::task_tracking::{compact_task_tree_view_from_items, strip_task_description_metadata};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_core::utils::style_helpers::{ColorPalette, render_styled};
 use vtcode_ui::tui::app::TaskPanelMetadata;
@@ -360,18 +360,90 @@ pub(crate) fn tracker_view_lines(val: &Value) -> Vec<String> {
         return Vec::new();
     }
 
-    let title = view
-        .and_then(|obj| obj.get("title"))
-        .and_then(Value::as_str)
-        .or_else(|| val.get("checklist").and_then(|c| c.get("title")).and_then(Value::as_str))
-        .map(humanize_tracker_title)
-        .unwrap_or_else(|| "Task tracker".to_string());
-
     let mut lines = Vec::with_capacity(view_rows.len() + summary_lines.len() + 1);
-    lines.push(format!("• {title}"));
+    lines.push(tracker_summary_header(val));
     lines.extend(summary_lines);
     lines.extend(view_rows);
     lines
+}
+
+/// Build the transcript header for a task-tracker block.
+///
+/// The docked panel keeps the humanized plan title plus `completed/total`
+/// progress; the transcript uses a compact live summary instead so random
+/// plan-file slugs never appear inline (`• Tasks 3/8 — next: …`).
+fn tracker_summary_header(val: &Value) -> String {
+    const NEXT_SNIPPET_MAX_CHARS: usize = 60;
+
+    let Some((completed, total)) = tracker_progress_counts(val) else {
+        return "• Tasks".to_string();
+    };
+    let Some(next) = tracker_next_pending(val).map(|desc| truncate_tracker_snippet(&desc, NEXT_SNIPPET_MAX_CHARS))
+    else {
+        return format!("• Tasks {completed}/{total}");
+    };
+    if next.is_empty() {
+        return format!("• Tasks {completed}/{total}");
+    }
+    format!("• Tasks {completed}/{total} — next: {next}")
+}
+
+fn tracker_progress_counts(val: &Value) -> Option<(usize, usize)> {
+    let checklist = val.get("checklist")?.as_object()?;
+    if let (Some(completed), Some(total)) =
+        (checklist.get("completed").and_then(Value::as_u64), checklist.get("total").and_then(Value::as_u64))
+    {
+        return Some((usize::try_from(completed).unwrap_or(usize::MAX), usize::try_from(total).unwrap_or(usize::MAX)));
+    }
+    let items = checklist.get("items")?.as_array()?;
+    // Only count renderable tasks (non-empty description/text). Malformed
+    // entries without descriptions must not produce misleading `0/N` counts.
+    let renderable = items
+        .iter()
+        .filter(|item| {
+            item.get("description")
+                .and_then(Value::as_str)
+                .or_else(|| item.get("text").and_then(Value::as_str))
+                .is_some_and(|desc| !desc.trim().is_empty())
+        })
+        .collect::<Vec<_>>();
+    if renderable.is_empty() {
+        return None;
+    }
+    let total = renderable.len();
+    let completed = renderable
+        .iter()
+        .filter(|item| item.get("status").and_then(Value::as_str) == Some("completed"))
+        .count();
+    Some((completed, total))
+}
+
+fn tracker_next_pending(val: &Value) -> Option<String> {
+    let items = val.get("checklist")?.as_object()?.get("items")?.as_array()?;
+    items.iter().find_map(|item| {
+        if item.get("status").and_then(Value::as_str) == Some("completed") {
+            return None;
+        }
+        let raw = item
+            .get("description")
+            .and_then(Value::as_str)
+            .or_else(|| item.get("text").and_then(Value::as_str))?;
+        // Reuse the canonical metadata splitter so only real `-> files:` /
+        // `-> verify:` / `-> outcome:` suffixes are stripped. A naive
+        // `split("->")` would also truncate legitimate arrows (`A -> B`) and
+        // inline code (`` `a -> files: b` ``), and would miss `→`.
+        let clean = strip_task_description_metadata(raw);
+        (!clean.is_empty()).then_some(clean)
+    })
+}
+
+fn truncate_tracker_snippet(text: &str, max_chars: usize) -> String {
+    let trimmed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if trimmed.chars().count() <= max_chars {
+        return trimmed;
+    }
+    let truncated: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{truncated}…")
 }
 
 /// Humanize generated tracker titles (`1789108823046-kind-lagoon` → `Kind
@@ -1203,7 +1275,7 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "• Release",
+                "• Tasks 1/4 — next: Investigate",
                 "  ├ □ Investigate",
                 "  ├ [-] Implement",
                 "  ├ [x] Verify",
@@ -1239,7 +1311,63 @@ mod tests {
 
         let rows = tracker_view_lines(&payload);
 
-        assert_eq!(rows, vec!["• Kind Lagoon", "  └ □ Investigate"]);
+        assert_eq!(rows, vec!["• Tasks 0/1 — next: Investigate", "  └ □ Investigate"]);
+    }
+
+    #[test]
+    fn tracker_summary_header_prefers_counts_and_next_pending() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "1789108823046-kind-lagoon",
+                "completed": 2,
+                "total": 5,
+                "items": [
+                    { "index_path": "1", "description": "Done one", "status": "completed" },
+                    { "index_path": "2", "description": "Done two", "status": "completed" },
+                    { "index_path": "3", "description": "Audit heavy-crate linkage", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_view_lines(&payload);
+
+        assert_eq!(rows[0], "• Tasks 2/5 — next: Audit heavy-crate linkage");
+        // Random plan slugs stay in panel metadata, never in the transcript.
+        assert!(!rows[0].contains("Kind Lagoon"));
+        assert!(!rows[0].contains("1789108823046"));
+    }
+
+    #[test]
+    fn tracker_summary_header_keeps_arrows_and_strips_only_metadata_suffix() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "items": [
+                    { "index_path": "1", "description": "Deploy A -> B -> files: [src/a.rs]", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_view_lines(&payload);
+
+        assert_eq!(rows[0], "• Tasks 0/1 — next: Deploy A -> B");
+    }
+
+    #[test]
+    fn tracker_summary_header_keeps_arrows_inside_inline_code() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "items": [
+                    { "index_path": "1", "description": "Use `a -> files: b` in code", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_view_lines(&payload);
+
+        assert_eq!(rows[0], "• Tasks 0/1 — next: Use `a -> files: b` in code");
     }
 
     #[test]
@@ -1273,7 +1401,7 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "• Release",
+                "• Tasks 1/4 — next: Prepare release",
                 "  ├ Prepare release",
                 "  │ [x] Update version",
                 "  │ [-] Run checks",
@@ -1320,7 +1448,7 @@ mod tests {
         assert_eq!(
             tracker_view_lines(&malformed),
             vec![
-                "• Task tracker",
+                "• Tasks",
                 "  Tracker status: error",
                 "  Update: Tracker response did not include checklist items.",
             ]
@@ -1328,7 +1456,7 @@ mod tests {
         assert_eq!(
             tracker_view_lines(&malformed_items),
             vec![
-                "• Task tracker",
+                "• Tasks",
                 "  Tracker status: error",
                 "  Update: Tracker response contained invalid checklist items.",
             ]
@@ -1346,7 +1474,7 @@ mod tests {
         assert_eq!(
             tracker_view_lines(&partial_failure),
             vec![
-                "• Task tracker",
+                "• Tasks 1/1",
                 "  Tracker status: error",
                 "  Update: Tracker response was only partially applied.",
                 "  └ [x] Still present",
