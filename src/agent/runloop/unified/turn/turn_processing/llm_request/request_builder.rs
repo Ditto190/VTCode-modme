@@ -23,6 +23,7 @@ use vtcode_core::core::agent::harness_kernel::{
     HarnessRequestPlanInput, build_harness_request_plan, stable_system_prefix_hash,
 };
 use vtcode_core::llm::provider::{self as uni, ParallelToolConfig};
+use vtcode_core::utils::ansi::MessageStyle;
 
 use super::context_management::resolve_context_management;
 use super::metrics::{
@@ -275,6 +276,13 @@ pub(super) async fn build_turn_request(
     let prefix_change_reason =
         ctx.session_stats
             .record_prompt_cache_fingerprint(request_model, stable_prefix_hash, tool_catalog_hash);
+    // Model-change advisory: prompt caches are unique per model, so a
+    // mid-session switch rebuilds the cache at full input cost even when the
+    // rest of the prefix is unchanged.
+    if let Some(message) = ctx.session_stats.model_change_advisory() {
+        tracing::warn!("{message}");
+        let _ = ctx.renderer.line(MessageStyle::Warning, &message);
+    }
     emit_tool_catalog_cache_metrics(
         ctx,
         ToolCatalogCacheMetrics {

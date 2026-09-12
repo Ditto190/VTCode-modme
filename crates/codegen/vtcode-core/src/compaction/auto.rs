@@ -18,11 +18,12 @@ use crate::compaction::memory_envelope::{
 };
 use crate::compaction::two_pass::fingerprint_prefix;
 use crate::compaction::{
-    CompactionConfig, CompactionStrategy, ManualCompactionOptions, SUPPRESS_NONE, build_local_compacted_history,
-    build_summary_prompt, classify_suppress_reason, compact_history_manual_with_budget, manual_compaction_strategy,
+    CompactionConfig, CompactionParentContext, CompactionStrategy, ManualCompactionOptions, SUPPRESS_NONE,
+    build_local_compacted_history, build_summary_prompt, classify_suppress_reason,
+    compact_history_manual_with_parent_context, manual_compaction_strategy,
 };
 use crate::exec::events::CompactionMode;
-use crate::llm::provider::{LLMProvider, LLMRequest, Message};
+use crate::llm::provider::{LLMProvider, LLMRequest, Message, ToolChoice};
 use vtcode_config::loader::VTCodeConfig;
 
 /// Result of a successful automatic compaction pass.
@@ -68,6 +69,11 @@ pub struct AutoCompactionInput<'a> {
     pub force_compaction: bool,
     /// Live steering state to snapshot with the compaction envelope.
     pub steering_update: Option<&'a SessionMemoryEnvelopeUpdate>,
+    /// Parent segment prefix for cache-safe forking (system prompt + ordered
+    /// tools from the live request envelope). When supplied, the local-summary
+    /// fork reuses the parent's cached prefix instead of re-paying full input
+    /// cost. Native strategies ignore it.
+    pub parent_context: Option<CompactionParentContext>,
 }
 
 /// Compress `history` in place when automatic compaction should fire.
@@ -97,6 +103,7 @@ pub async fn auto_compact_messages(
         auto_compact_suppressed,
         force_compaction,
         steering_update,
+        parent_context,
     } = input;
 
     if !vt_cfg.is_some_and(|cfg| cfg.agent.harness.auto_compaction_enabled) {
@@ -137,6 +144,7 @@ pub async fn auto_compact_messages(
                 &original_history,
                 &engine_cfg,
                 context_budget,
+                parent_context.as_ref(),
             )
             .await?
             {
@@ -189,13 +197,14 @@ pub async fn auto_compact_messages(
             return Ok(None);
         }
 
-        let (mut compacted, mode) = compact_history_manual_with_budget(
+        let (mut compacted, mode) = compact_history_manual_with_parent_context(
             provider,
             model,
             &compaction_history,
             &engine_cfg,
             &manual_options,
             context_budget,
+            parent_context.as_ref(),
         )
         .await?;
 
@@ -255,6 +264,10 @@ pub async fn auto_compact_messages(
 /// Returns `Some(compacted_history)` if the cache is valid and pass-2 produces
 /// a non-degenerate summary. `None` means the caller should fall back to
 /// single-pass compaction.
+///
+/// The pass-2 history already reuses the conversation prefix verbatim; the
+/// parent system/tools prefix is attached as well so the fork hits the
+/// provider prompt cache.
 async fn try_two_pass_with_prefire(
     prefire: &crate::compaction::PrefireState,
     provider: &dyn LLMProvider,
@@ -262,6 +275,7 @@ async fn try_two_pass_with_prefire(
     history: &[Message],
     config: &CompactionConfig,
     context_budget: Option<usize>,
+    parent: Option<&CompactionParentContext>,
 ) -> Result<Option<Vec<Message>>> {
     let cache = match prefire.take() {
         Some(cache) => cache,
@@ -288,6 +302,9 @@ async fn try_two_pass_with_prefire(
     let request = LLMRequest {
         messages: std::sync::Arc::new(pass2_history),
         model: model.to_string(),
+        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
+        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
+        tool_choice: Some(ToolChoice::none()),
         ..Default::default()
     };
 
@@ -320,8 +337,10 @@ async fn try_two_pass_with_prefire(
 mod tests {
     use super::*;
     use crate::compaction::SUPPRESS_STICKY;
-    use crate::llm::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, Message};
+    use crate::compaction::two_pass::fingerprint_prefix;
+    use crate::llm::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, Message, ToolChoice};
     use async_trait::async_trait;
+    use std::sync::Mutex;
 
     struct FailingProvider;
 
@@ -376,6 +395,34 @@ mod tests {
         }
     }
 
+    struct CapturingProvider {
+        last_request: Mutex<Option<LLMRequest>>,
+    }
+
+    #[async_trait]
+    impl LLMProvider for CapturingProvider {
+        fn name(&self) -> &str {
+            "capturing"
+        }
+
+        async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            *self.last_request.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(request);
+            Ok(LLMResponse::new("capturing-model", "summary"))
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["capturing-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+            Ok(())
+        }
+
+        fn effective_context_size(&self, _model: &str) -> usize {
+            4_096
+        }
+    }
+
     #[tokio::test]
     async fn suppressed_state_skips_compaction() {
         let provider = FailingProvider;
@@ -401,6 +448,7 @@ mod tests {
                 auto_compact_suppressed: &mut suppressed,
                 force_compaction: false,
                 steering_update: None,
+                parent_context: None,
             },
             &mut history,
         )
@@ -440,6 +488,7 @@ mod tests {
                 auto_compact_suppressed: &mut suppressed,
                 force_compaction: false,
                 steering_update: None,
+                parent_context: None,
             },
             &mut history,
         )
@@ -490,6 +539,7 @@ mod tests {
                 auto_compact_suppressed: &mut suppressed,
                 force_compaction: false,
                 steering_update: Some(&steering_update),
+                parent_context: None,
             },
             &mut history,
         )
@@ -500,5 +550,68 @@ mod tests {
         let envelope = result.envelope.expect("compaction should produce an envelope");
         assert_eq!(envelope.pending_intents, vec![intent]);
         assert_eq!(envelope.applied_intent_ids, vec!["applied-1"]);
+    }
+
+    #[tokio::test]
+    async fn prefire_pass2_fork_reuses_parent_prefix() {
+        use crate::compaction::{AsyncCompactionCache, PrefireState};
+
+        let provider = CapturingProvider { last_request: Mutex::new(None) };
+        let mut vt_cfg = VTCodeConfig::default();
+        vt_cfg.agent.harness.auto_compaction_enabled = true;
+        let workspace = tempfile::tempdir().expect("tempdir");
+        let history = (0..12)
+            .map(|index| Message::user(format!("request {index}")))
+            .collect::<Vec<_>>();
+        let mut history = history;
+        let prefix_len = 10;
+        let prefire = PrefireState::default();
+        prefire.store(AsyncCompactionCache {
+            note1: "prior summary".to_string(),
+            prefix_len,
+            fingerprint: fingerprint_prefix(&history[..prefix_len]),
+            model_slug: "capturing-model".to_string(),
+            pass1_latency_ms: 5,
+        });
+        let mut suppressed = SUPPRESS_NONE;
+
+        let result = auto_compact_messages(
+            AutoCompactionInput {
+                provider: &provider,
+                model: "capturing-model",
+                session_id: "session-1",
+                workspace_root: workspace.path(),
+                vt_cfg: Some(&vt_cfg),
+                reserved_output_tokens: 0,
+                // Crosses the effective threshold (provider capacity 4_096,
+                // zero reserve) so automatic compaction runs.
+                current_token_usage: 4_100,
+                touched_files: &[],
+                engine_cfg: CompactionConfig {
+                    keep_last_messages: 0,
+                    ..CompactionConfig::default()
+                },
+                manual_options: ManualCompactionOptions::default(),
+                placement: MemoryEnvelopePlacement::BeforeLastUserOrSummary,
+                prefire: Some(&prefire),
+                auto_compact_suppressed: &mut suppressed,
+                force_compaction: false,
+                steering_update: None,
+                parent_context: Some(CompactionParentContext {
+                    system_prompt: Some(std::sync::Arc::from("parent system")),
+                    tools: None,
+                }),
+            },
+            &mut history,
+        )
+        .await
+        .expect("automatic compaction should succeed")
+        .expect("prefire two-pass compaction should run");
+
+        assert_eq!(result.mode, CompactionMode::Local);
+        let captured = provider.last_request.lock().unwrap().clone().expect("captured pass-2 request");
+        assert_eq!(captured.system_prompt.as_deref(), Some("parent system"));
+        assert!(matches!(captured.tool_choice, Some(ToolChoice::None)));
+        assert!(!captured.messages.is_empty());
     }
 }

@@ -2,12 +2,16 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use std::fmt::Write;
+use std::sync::Arc;
 use vtcode_commons::llm::FinishReason;
 use vtcode_config::constants::context::DEFAULT_COMPACTION_TRIGGER_RATIO;
 
 use crate::config::types::{ReasoningEffortLevel, VerbosityLevel};
 use crate::exec::events::CompactionMode;
-use crate::llm::provider::{LLMProvider, LLMRequest, Message, MessageContent, MessageRole, ResponsesCompactionOptions};
+use crate::llm::provider::{
+    LLMProvider, LLMRequest, Message, MessageContent, MessageRole, ResponsesCompactionOptions, ToolChoice,
+    ToolDefinition,
+};
 use crate::llm::reasoning_effort::ReasoningEffortMapper;
 use crate::llm::utils::truncate_to_token_limit;
 
@@ -135,6 +139,67 @@ impl Default for CompactionConfig {
     }
 }
 
+/// Parent request prefix for cache-safe compaction forking.
+///
+/// Prompt caching is a prefix match: a compaction request only reuses the
+/// parent conversation's cached prefix when it carries the *exact same*
+/// system prompt, tool definitions, and history prefix, with the compaction
+/// instruction appended as the final new turn. A standalone single-message
+/// summary prompt pays the full uncached input rate for the entire history.
+#[derive(Debug, Clone, Default)]
+pub struct CompactionParentContext {
+    /// Exact system prompt of the parent segment (`request_envelope.system_prompt()`).
+    pub system_prompt: Option<Arc<str>>,
+    /// Exact ordered tool catalog of the parent segment
+    /// (`request_envelope.ordered_tools()`). Empty catalogs should be `None`.
+    pub tools: Option<Arc<Vec<ToolDefinition>>>,
+}
+
+impl CompactionParentContext {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.system_prompt.is_none() && self.tools.is_none()
+    }
+}
+
+/// Build a cache-safe compaction history: the parent's full conversation
+/// prefix verbatim, plus the compaction instruction as the only new turn.
+/// From the provider's perspective this looks nearly identical to the
+/// parent's last request, so the cached prefix is reused.
+#[must_use]
+pub fn build_cache_safe_compaction_history(history: &[Message], compaction_prompt: &str) -> Vec<Message> {
+    let mut forked = Vec::with_capacity(history.len().saturating_add(1));
+    forked.extend(history.iter().cloned());
+    forked.push(Message::user(compaction_prompt.to_string()));
+    forked
+}
+
+/// Build a cache-safe local-summary request that reuses the parent prefix.
+/// `tool_choice` is forced to `none` so the summarizer cannot spend the
+/// compaction pass on tool calls while the system/tools/messages prefix
+/// stays identical to the parent's last request.
+fn compaction_summary_request(
+    model: &str,
+    history: &[Message],
+    instructions: &str,
+    max_output_tokens: Option<u32>,
+    reasoning_effort: Option<ReasoningEffortLevel>,
+    verbosity: Option<VerbosityLevel>,
+    parent: Option<&CompactionParentContext>,
+) -> LLMRequest {
+    LLMRequest {
+        messages: Arc::new(build_cache_safe_compaction_history(history, instructions)),
+        model: model.to_string(),
+        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
+        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
+        tool_choice: Some(ToolChoice::none()),
+        max_tokens: max_output_tokens,
+        reasoning_effort,
+        verbosity,
+        ..Default::default()
+    }
+}
+
 /// Compact conversation history using the configured summarizer.
 #[cfg_attr(feature = "profiling", hotpath::measure)]
 pub async fn compact_history(
@@ -182,13 +247,13 @@ pub async fn compact_history_with_budget(
     }
 
     let effective_config = context_bounded_compaction_config(provider, model, history, config, context_budget);
-    let (summary_history, _) = split_continuity_history(history);
-    let summary_prompt = build_summary_prompt(summary_history, &effective_config.summary_prompt);
-    let request = LLMRequest {
-        messages: std::sync::Arc::new(vec![Message::user(summary_prompt)]),
-        model: model.to_string(),
-        ..Default::default()
-    };
+    // Cache-safe forking: prepend the parent's full conversation prefix and
+    // append the compaction instruction, instead of reformatting the entire
+    // history into a single new user message (which would pay the full
+    // uncached input rate). No parent system/tools are available on this
+    // legacy path; callers with a request envelope should prefer
+    // `compact_history_manual_with_parent_context`.
+    let request = compaction_summary_request(model, history, &effective_config.summary_prompt, None, None, None, None);
 
     let response = provider
         .generate(request)
@@ -330,6 +395,23 @@ pub async fn compact_history_manual_with_budget(
     options: &ManualCompactionOptions,
     context_budget: Option<usize>,
 ) -> Result<(Vec<Message>, CompactionMode)> {
+    compact_history_manual_with_parent_context(provider, model, history, config, options, context_budget, None).await
+}
+
+/// Manual compaction that reuses the parent segment's cached prefix.
+///
+/// Pass the live request envelope's system prompt + ordered tools as `parent`
+/// so the local-summary fork (`summarize_locally`) hits the provider prompt
+/// cache instead of re-paying full input cost for the entire history.
+pub async fn compact_history_manual_with_parent_context(
+    provider: &dyn LLMProvider,
+    model: &str,
+    history: &[Message],
+    config: &CompactionConfig,
+    options: &ManualCompactionOptions,
+    context_budget: Option<usize>,
+    parent: Option<&CompactionParentContext>,
+) -> Result<(Vec<Message>, CompactionMode)> {
     if history.is_empty() {
         return Ok((Vec::new(), CompactionMode::Local));
     }
@@ -352,10 +434,11 @@ pub async fn compact_history_manual_with_budget(
             ))
         }
         CompactionStrategy::NativeInline => {
-            compact_history_native_inline(provider, model, history, config, &options, context_budget).await
+            compact_history_native_inline(provider, model, history, config, &options, context_budget, parent).await
         }
         CompactionStrategy::Local => {
-            let compacted = summarize_locally(provider, model, history, config, &options, context_budget).await?;
+            let compacted =
+                summarize_locally(provider, model, history, config, &options, context_budget, parent).await?;
             Ok((compacted, CompactionMode::Local))
         }
     }
@@ -401,6 +484,11 @@ fn resolve_manual_compaction_options(
 /// block. If compaction does not fire (history below the provider's minimum
 /// trigger, currently 50k tokens for Anthropic), transparently falls back to
 /// local summarization so the manual command always succeeds.
+///
+/// The inline request already carries the full parent history; the parent
+/// system/tools prefix is attached as well so the fork hits the provider
+/// prompt cache. `tool_choice` stays `none` so the pass cannot be spent on
+/// tool calls, and both local fallbacks forward `parent` for the same reason.
 async fn compact_history_native_inline(
     provider: &dyn LLMProvider,
     model: &str,
@@ -408,6 +496,7 @@ async fn compact_history_native_inline(
     config: &CompactionConfig,
     options: &ManualCompactionOptions,
     context_budget: Option<usize>,
+    parent: Option<&CompactionParentContext>,
 ) -> Result<(Vec<Message>, CompactionMode)> {
     const ANTHROPIC_COMPACT_TRIGGER_FLOOR: u64 = 50_000;
 
@@ -426,8 +515,11 @@ async fn compact_history_native_inline(
     }
 
     let request = LLMRequest {
-        messages: std::sync::Arc::new(history.to_vec()),
+        messages: Arc::new(history.to_vec()),
         model: model.to_string(),
+        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
+        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
+        tool_choice: Some(ToolChoice::none()),
         context_management: Some(json!({ "edits": [Value::Object(compact_edit)] })),
         max_tokens: options.max_output_tokens,
         reasoning_effort: options.reasoning_effort,
@@ -449,7 +541,8 @@ async fn compact_history_native_inline(
                 "provider-native inline compaction request failed; \
                  falling back to local summarization"
             );
-            let compacted = summarize_locally(provider, model, history, config, options, context_budget).await?;
+            let compacted =
+                summarize_locally(provider, model, history, config, options, context_budget, parent).await?;
             return Ok((compacted, CompactionMode::Local));
         }
     };
@@ -471,16 +564,17 @@ async fn compact_history_native_inline(
 
     // Compaction did not fire (e.g. history below the minimum trigger threshold);
     // fall back to local summarization so the manual command always succeeds.
-    let compacted = summarize_locally(provider, model, history, config, options, context_budget).await?;
+    let compacted = summarize_locally(provider, model, history, config, options, context_budget, parent).await?;
     Ok((compacted, CompactionMode::Local))
 }
 
 /// Local (provider-agnostic) summarization compaction.
 ///
-/// Builds a summary prompt from the history, asks the provider to summarize via
-/// `generate`, and rebuilds the history as a summary system message plus the
-/// retained recent user messages. Applies the manual options to the summary
-/// request.
+/// Forks the parent conversation cache-safely: same history prefix plus the
+/// compaction instruction appended, with the parent system/tools prefix when
+/// supplied (`None` keeps the legacy standalone shape). Rebuilds the history
+/// as a summary system message plus the retained recent user messages.
+/// Applies the manual options to the summary request.
 ///
 /// When `config.hierarchical` is `true`, delegates to
 /// [`summarize_locally_hierarchical`] which produces a multi-tier pyramid
@@ -492,9 +586,10 @@ async fn summarize_locally(
     config: &CompactionConfig,
     options: &ManualCompactionOptions,
     context_budget: Option<usize>,
+    parent: Option<&CompactionParentContext>,
 ) -> Result<Vec<Message>> {
     if config.hierarchical {
-        return summarize_locally_hierarchical(provider, model, history, config, options, context_budget).await;
+        return summarize_locally_hierarchical(provider, model, history, config, options, context_budget, parent).await;
     }
 
     let effective_config = context_bounded_compaction_config(
@@ -504,16 +599,15 @@ async fn summarize_locally(
         &config.clone().with_manual_overrides(options),
         context_budget,
     );
-    let (summary_history, _) = split_continuity_history(history);
-    let summary_prompt = build_summary_prompt(summary_history, &effective_config.summary_prompt);
-    let request = LLMRequest {
-        messages: std::sync::Arc::new(vec![Message::user(summary_prompt)]),
-        model: model.to_string(),
-        max_tokens: options.max_output_tokens,
-        reasoning_effort: options.reasoning_effort,
-        verbosity: options.verbosity,
-        ..Default::default()
-    };
+    let request = compaction_summary_request(
+        model,
+        history,
+        &effective_config.summary_prompt,
+        options.max_output_tokens,
+        options.reasoning_effort,
+        options.verbosity,
+        parent,
+    );
 
     let response = provider
         .generate(request)
@@ -540,6 +634,11 @@ async fn summarize_locally(
 /// This follows the hierarchical summarization strategy from the context window
 /// management literature: recent turns verbatim, older turns as paragraph
 /// summaries, oldest turns as a single abstract.
+///
+/// Band requests carry only their band's messages (not the full history
+/// prefix), so message-prefix reuse does not apply; the parent system/tools
+/// prefix is still reused, and `tool_choice` stays `none` so neither pass can
+/// spend the compaction budget on tool calls.
 async fn summarize_locally_hierarchical(
     provider: &dyn LLMProvider,
     model: &str,
@@ -547,6 +646,7 @@ async fn summarize_locally_hierarchical(
     config: &CompactionConfig,
     options: &ManualCompactionOptions,
     context_budget: Option<usize>,
+    parent: Option<&CompactionParentContext>,
 ) -> Result<Vec<Message>> {
     let effective_config = context_bounded_compaction_config(
         provider,
@@ -571,8 +671,11 @@ async fn summarize_locally_hierarchical(
         build_summary_prompt(abstract_band, ""),
     );
     let abstract_request = LLMRequest {
-        messages: std::sync::Arc::new(vec![Message::user(abstract_prompt)]),
+        messages: Arc::new(vec![Message::user(abstract_prompt)]),
         model: model.to_string(),
+        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
+        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
+        tool_choice: Some(ToolChoice::none()),
         max_tokens: Some(150),
         reasoning_effort: options.reasoning_effort,
         verbosity: options.verbosity,
@@ -588,8 +691,11 @@ async fn summarize_locally_hierarchical(
     let detail_band = &summary_history[abstract_end..detail_end];
     let detail_prompt = build_summary_prompt(detail_band, &effective_config.summary_prompt);
     let detail_request = LLMRequest {
-        messages: std::sync::Arc::new(vec![Message::user(detail_prompt)]),
+        messages: Arc::new(vec![Message::user(detail_prompt)]),
         model: model.to_string(),
+        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
+        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
+        tool_choice: Some(ToolChoice::none()),
         max_tokens: options.max_output_tokens,
         reasoning_effort: options.reasoning_effort,
         verbosity: options.verbosity,
@@ -1287,6 +1393,7 @@ mod tests {
         LLMError, LLMProvider, LLMRequest, LLMResponse, Message, MessageRole, ResponsesCompactionOptions,
     };
     use async_trait::async_trait;
+    use std::sync::Arc;
     use std::sync::Mutex;
     use vtcode_commons::llm::{FinishReason, ToolCall};
 
@@ -1800,6 +1907,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_inline_fork_reuses_parent_prefix_when_supplied() {
+        use super::{CompactionParentContext, compact_history_manual_with_parent_context};
+
+        let history = sample_history();
+        let config = CompactionConfig::default();
+        let options = ManualCompactionOptions::default();
+
+        // Asymmetric arms on the same history: without a parent the inline
+        // request carries no fork fields; with one it carries all three while
+        // the compaction edit stays intact in both.
+        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let (_compacted, mode) = compact_history_manual_with_parent_context(
+            &provider,
+            "stub-model",
+            &history,
+            &config,
+            &options,
+            None,
+            None,
+        )
+        .await
+        .expect("manual compaction");
+        assert_eq!(mode, CompactionMode::Provider);
+        let bare = provider.last_request.lock().unwrap().clone().expect("captured inline request");
+        assert!(bare.system_prompt.is_none());
+        assert!(bare.tools.is_none());
+        assert!(bare.context_management.is_some());
+
+        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let parent = CompactionParentContext {
+            system_prompt: Some(Arc::from("parent system")),
+            tools: None,
+        };
+        let (_compacted, mode) = compact_history_manual_with_parent_context(
+            &provider,
+            "stub-model",
+            &history,
+            &config,
+            &options,
+            None,
+            Some(&parent),
+        )
+        .await
+        .expect("manual compaction");
+        assert_eq!(mode, CompactionMode::Provider);
+        let forked = provider.last_request.lock().unwrap().clone().expect("captured inline request");
+        assert_eq!(forked.system_prompt.as_deref(), Some("parent system"));
+        assert!(forked.tools.is_none(), "empty parent catalog must stay off the wire");
+        assert!(matches!(forked.tool_choice, Some(crate::llm::provider::ToolChoice::None)));
+        let edit = &forked.context_management.as_ref().expect("context_management")["edits"][0];
+        assert_eq!(edit["type"].as_str(), Some("compact_20260112"));
+        assert_eq!(edit["pause_after_compaction"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
     async fn compact_history_manual_falls_back_to_local_when_inline_compaction_not_fired() {
         let history = sample_history();
         let config = CompactionConfig::default();
@@ -1871,10 +2033,18 @@ mod tests {
         assert_eq!(captured.max_tokens, Some(128));
         assert_eq!(captured.reasoning_effort, Some(ReasoningEffortLevel::Minimal));
         assert_eq!(captured.verbosity, Some(VerbosityLevel::High));
-        // The custom instructions override the default summary prompt.
-        let prompt = captured.messages[0].content.as_text();
+        // Cache-safe forking: the parent history prefix is reused verbatim and
+        // the custom instructions are appended as the only new turn.
+        assert_eq!(captured.messages.len(), history.len() + 1);
+        for (sent, original) in captured.messages.iter().zip(history.iter()) {
+            assert_eq!(sent.content.as_text(), original.content.as_text());
+        }
+        let prompt = captured.messages.last().expect("compaction prompt").content.as_text();
         assert!(prompt.contains("KEEP DECISIONS ONLY"));
         assert!(!prompt.contains("acceptance criteria"));
+        // The fork must not invite tool calls: same tools may be present for
+        // prefix reuse, but the choice disables invocation.
+        assert!(matches!(captured.tool_choice, Some(crate::llm::provider::ToolChoice::None)));
         assert_eq!(compacted[0].content.as_text(), "Previous conversation summary:\nsummary");
     }
 
@@ -2359,5 +2529,107 @@ mod tests {
 
         assert_eq!(result.len(), 1, "orphaned tool result must be dropped");
         assert_eq!(result[0].0, 0);
+    }
+
+    #[test]
+    fn cache_safe_fork_reuses_parent_prefix_with_appended_prompt() {
+        use super::{CompactionParentContext, build_cache_safe_compaction_history, compaction_summary_request};
+
+        let history = sample_history();
+        let forked = build_cache_safe_compaction_history(&history, "Summarize now.");
+        assert_eq!(forked.len(), history.len() + 1);
+        for (forked_msg, original) in forked.iter().zip(history.iter()) {
+            assert_eq!(forked_msg.content.as_text(), original.content.as_text());
+            assert_eq!(forked_msg.role, original.role);
+        }
+        let last = forked.last().expect("appended compaction prompt");
+        assert_eq!(last.role, MessageRole::User);
+        assert_eq!(last.content.as_text(), "Summarize now.");
+
+        // Parent prefix reuse: same system/tools, tool calls disabled.
+        let parent = CompactionParentContext {
+            system_prompt: Some(Arc::from("stable system")),
+            tools: Some(Arc::new(vec![crate::llm::provider::ToolDefinition::function(
+                "read".to_string(),
+                "read".to_string(),
+                serde_json::json!({"type": "object"}),
+            )])),
+        };
+        let request =
+            compaction_summary_request("stub-model", &history, "Summarize now.", None, None, None, Some(&parent));
+        assert_eq!(request.system_prompt.as_deref(), Some("stable system"));
+        assert_eq!(request.tools.as_deref().map(Vec::len), Some(1));
+        assert_eq!(request.messages.len(), history.len() + 1);
+        assert!(matches!(request.tool_choice, Some(crate::llm::provider::ToolChoice::None)));
+        assert!(!parent.is_empty());
+        assert!(CompactionParentContext::default().is_empty());
+    }
+
+    #[tokio::test]
+    async fn manual_compaction_with_parent_context_reuses_prefix() {
+        use super::{CompactionParentContext, compact_history_manual_with_parent_context};
+
+        let history = sample_history();
+        let config = CompactionConfig {
+            always_summarize: true,
+            ..CompactionConfig::default()
+        };
+        let provider = CapturingProvider { last_request: Mutex::new(None) };
+        let parent = CompactionParentContext {
+            system_prompt: Some(Arc::from("parent system")),
+            tools: None,
+        };
+        let (compacted, mode) = compact_history_manual_with_parent_context(
+            &provider,
+            "stub-model",
+            &history,
+            &config,
+            &ManualCompactionOptions::default(),
+            None,
+            Some(&parent),
+        )
+        .await
+        .expect("parent-aware compaction");
+        assert_eq!(mode, CompactionMode::Local);
+        let captured = provider.last_request.lock().unwrap().clone().expect("captured request");
+        assert_eq!(captured.system_prompt.as_deref(), Some("parent system"));
+        assert_eq!(captured.messages.len(), history.len() + 1);
+        assert_eq!(compacted[0].content.as_text(), "Previous conversation summary:\nsummary");
+    }
+
+    #[tokio::test]
+    async fn hierarchical_bands_reuse_parent_prefix_without_tool_calls() {
+        use super::{CompactionParentContext, compact_history_manual_with_parent_context};
+
+        let history = (0..12)
+            .map(|index| Message::user(format!("hierarchical request {index}")))
+            .collect::<Vec<_>>();
+        let config = CompactionConfig {
+            always_summarize: true,
+            hierarchical: true,
+            ..CompactionConfig::default()
+        };
+        let provider = CapturingProvider { last_request: Mutex::new(None) };
+        let parent = CompactionParentContext {
+            system_prompt: Some(Arc::from("parent system")),
+            tools: None,
+        };
+        let (compacted, mode) = compact_history_manual_with_parent_context(
+            &provider,
+            "stub-model",
+            &history,
+            &config,
+            &ManualCompactionOptions::default(),
+            None,
+            Some(&parent),
+        )
+        .await
+        .expect("hierarchical compaction");
+        assert_eq!(mode, CompactionMode::Local);
+        // CapturingProvider keeps the last request, which is the detail band.
+        let captured = provider.last_request.lock().unwrap().clone().expect("captured detail request");
+        assert_eq!(captured.system_prompt.as_deref(), Some("parent system"));
+        assert!(matches!(captured.tool_choice, Some(crate::llm::provider::ToolChoice::None)));
+        assert!(!compacted.is_empty());
     }
 }

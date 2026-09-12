@@ -971,7 +971,14 @@ impl AgentRuntime {
         self.state.record_turn(&start_time, &mut turn_recorded);
 
         if final_usage.prompt_tokens > 0 || final_usage.completion_tokens > 0 {
-            self.state.stats.merge_usage(&final_usage);
+            // `merge_usage` also feeds the session prompt-cache health
+            // monitor; a sustained hit-rate collapse warns once per session
+            // (SEV-style) instead of silently re-paying full input cost.
+            if let Some(alert) = self.state.stats.merge_usage(&final_usage) {
+                let message = alert.message();
+                tracing::warn!("{message}");
+                self.state.push_warning(message);
+            }
         }
 
         aggregated_tool_calls = aggregated_tool_calls.filter(|calls| !calls.is_empty());

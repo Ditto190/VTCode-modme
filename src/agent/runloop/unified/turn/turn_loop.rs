@@ -1249,6 +1249,15 @@ pub(crate) async fn run_turn_loop(
         let provider_name = turn_processing_ctx.provider_client.name().to_string();
         accumulate_turn_usage(&provider_name, &mut turn_usage, &response_usage);
         turn_processing_ctx.session_stats.record_usage(&provider_name, &response_usage);
+        // SEV-style prompt-cache health: a sustained hit-rate collapse warns
+        // once per session instead of silently re-paying full input cost.
+        if let Some(message) = turn_processing_ctx
+            .session_stats
+            .record_cache_turn_health(&provider_name, &response_usage)
+        {
+            tracing::warn!("{message}");
+            let _ = turn_processing_ctx.renderer.line(MessageStyle::Warning, &message);
+        }
         turn_processing_ctx
             .session_stats
             .set_stop_reason(Some(stop_reason_from_finish_reason(&response.finish_reason)));

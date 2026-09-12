@@ -61,12 +61,53 @@ Prompt caching on Responses-style providers only hits when the new request keeps
 -   Changing `model`, `tools`, or sandbox/environment instruction blocks mid-session.
 -   Reordering tools between requests.
 -   Injecting new dynamic context above existing prompt items.
+-   Putting a per-second timestamp in the static system prompt.
+-   Sending compaction/summarization as a fresh single-message prompt instead of forking the parent prefix.
 
 To reduce avoidable misses, VT Code keeps tool ordering deterministic and defers MCP `tools/list_changed` refreshes to turn boundaries so an active turn sees a stable tool catalog.
 VT Code enables `prompt_cache.cache_friendly_prompt_shaping = true` by default. When it is enabled, VT Code applies provider-aware shaping:
 
 - OpenAI, Gemini, DeepSeek, OpenRouter, Moonshot, Z.AI: move volatile counters to a trailing `[Runtime Context]` block.
 - Anthropic and MiniMax: same trailing runtime block, plus Anthropic-format system prompt splitting so runtime context is sent as an uncached block.
+
+### Static first, dynamic last
+
+The harness lays out every prompt so stable pieces stay cached and only the conversation grows turn by turn:
+
+1.  Static system prompt and tool definitions (globally cached).
+2.  Project instruction layers (`AGENTS.md` / `CLAUDE.md`, cached within a project).
+3.  Session-stable routing (`## Skills` before the more volatile `## Active Tools`).
+4.  Dynamic suffix: `## Environment` (date-only, never clock time), planning/full-auto notices, `[Harness Limits]`, `[Runtime Tool Catalog]`, conversation messages.
+
+Planning and full-auto transitions are runtime mode changes: they are conveyed in the uncached dynamic suffix (and gated at execution), never by rewriting the stable prefix or swapping the tool set mid-segment. A planning toggle ends the current cache-stable segment once by design (logged as `planning_workflow_enabled/disabled`); the next request re-establishes the prefix and subsequent turns hit again.
+
+Temporal context in the system prompt is date-only (`- Date:`). Precise clock time belongs in a `<system-reminder>` history message on turns that actually need it, so the cached prefix stays stable all day.
+
+### Cache-safe compaction forking
+
+When the context window fills, compaction forks the cached call: the request reuses the parent segment's exact system prompt, ordered tools, and conversation prefix, with only the compaction instruction appended as the new final turn. The summary is then installed and a new immutable segment begins (`thread.compact_boundary` records the before/after prefix and catalog hashes). Standalone single-message summarization (no parent prefix) is only a fallback and pays full input cost.
+
+All local summarization paths fork this way: flat single-pass summaries, hierarchical abstract/detail band requests (which reuse the parent system/tools prefix with `tool_choice: none`), and prefire two-pass pass-2 requests. Native inline compaction (`compact_20260112`) likewise attaches the parent system/tools prefix with `tool_choice: none`, and its local fallbacks forward the parent so a rejected inline attempt does not lose the fork. Provider-native standalone compaction (OpenAI `/responses/compact`) is server-side and needs no fork.
+
+### Cache health monitoring
+
+Beyond per-event advisories (reasoning-effort changes, idle-gap expiry, planning transitions), both runloops feed every turn's normalized usage into a shared session health monitor (`core::agent::cache_health::PromptCacheHealthMonitor`). Turns without provider cache metrics or below 1,024 input tokens are ignored as noise. Two session-scoped alerts fire at most once each, via `tracing::warn` plus the runloop's user-warning channel:
+
+-   **Sustained misses** — 3 consecutive measured turns each reusing under 50% of cache. Indicates the session is re-paying full input cost turn after turn.
+-   **Low hit rate** — after 8 measured turns, the cumulative hit rate is under 25%.
+
+Either alert names the likely causes to check: prompt/tool-catalog churn (model switches, MCP refreshes, planning toggles) or idle gaps expiring the provider cache.
+
+### Mid-session model switches
+
+Prompt caches are unique per model: switching rebuilds the cache at full input cost even when the rest of the prefix is unchanged, so it is the most expensive single cache event in a session. Both runloops emit a one-line advisory on the first request carrying a new model (headless: tracing warning plus session warning; interactive: tracing warning plus renderer warning line), mirroring the existing reasoning-effort-change advisory. Prefer resolving the model up front; when a switch is unavoidable (e.g. escalation or `/model`), expect one full-price request before hits resume. For cheap exploratory work, prefer delegating to a subagent on the cheaper model with a handoff summary over switching the main session's model.
+
+### Why mode content stays in the prompt (triage note)
+
+Two further article prescriptions were researched and deliberately deferred:
+
+-   **Planning/full-auto via `<system-reminder>` messages instead of system-prompt sections.** Snapshots are deterministic per mode, so the wire prefix is already stable turn-to-turn within a mode on every provider; the only residual cost is the single toggle-transition miss (zero on Anthropic, where the wire split keeps the cached stable prefix across the toggle). Moving the full planning contract — read-only enforcement, plan-quality spec, research floor — out of the system prompt risks planning behavior with no eval to verify, and would require reworking the prompt/catalog alignment guard that pins the interview-policy line. Revisit only with eval coverage for planning adherence.
+-   **Always exposing the full tool catalog (no planning filtering).** Same steady-state analysis: deterministic per-mode filtering means no per-turn churn today; always-expose would save only the toggle-transition miss while showing mutating tools on every planning turn, trading rare one-time savings for per-turn model-confusion risk and denied-call waste across all supported models (including small ones). The fail-closed execution gate stays as the safety net, and tool hiding stays as defense-in-depth. Revisit only with eval evidence that target models obey read-only instructions reliably when mutating tools are visible.
 
 OpenAI additionally keeps `prompt_cache_key` stable per session (unless `prompt_cache_key_mode = "off"`).
 

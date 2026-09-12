@@ -115,6 +115,11 @@ pub struct AgentSessionState {
     /// Reasoning effort used for the last dispatched request, used to detect
     /// mid-task changes that invalidate the provider prompt cache.
     last_reasoning_effort: Option<crate::config::types::ReasoningEffortLevel>,
+    /// Model used for the last dispatched request, used to detect mid-task
+    /// model switches. Prompt caches are unique per model, so switching
+    /// rebuilds the cache at full input cost even when the rest of the
+    /// prefix is unchanged.
+    last_model: Option<String>,
 }
 
 /// Statistics tracked during an agent session.
@@ -129,12 +134,23 @@ pub struct SessionStats {
     /// empty string is treated as a non-exclusive-input provider, which
     /// preserves existing behavior for callers that never set it.
     pub provider_name: String,
+    /// Rolling prompt-cache health fed by every merged turn. Fires at most
+    /// two session-scoped alerts (sustained misses, low hit rate) mirroring
+    /// the "monitor cache hit rate like uptime" discipline.
+    pub prompt_cache_health: super::cache_health::PromptCacheHealthMonitor,
 }
 
 impl SessionStats {
-    pub fn merge_usage(&mut self, usage: &crate::llm::provider::Usage) {
-        self.total_usage
-            .add(&crate::llm::usage_cost::normalized_turn_usage(&self.provider_name, usage));
+    /// Merge one turn's provider usage into the session totals and feed the
+    /// prompt-cache health monitor. Returns a health alert the first time a
+    /// degraded pattern is confirmed, `None` otherwise.
+    pub fn merge_usage(
+        &mut self,
+        usage: &crate::llm::provider::Usage,
+    ) -> Option<super::cache_health::CacheHealthAlert> {
+        let normalized = crate::llm::usage_cost::normalized_turn_usage(&self.provider_name, usage);
+        self.total_usage.add(&normalized);
+        self.prompt_cache_health.record_turn(&normalized)
     }
 }
 
@@ -186,6 +202,7 @@ impl AgentSessionState {
             cached_total_tokens: 0,
             request_gap: RequestGapTracker::default(),
             last_reasoning_effort: None,
+            last_model: None,
         }
     }
 
@@ -215,6 +232,18 @@ impl AgentSessionState {
             (Some(previous), Some(current)) if previous != current
         );
         self.last_reasoning_effort = effort;
+        changed
+    }
+
+    /// Checks whether `model` differs from the model used for the previous
+    /// request in this session, then stores `model` as the new baseline.
+    /// Returns `true` only when a prior model was recorded and it differs
+    /// from `model` (i.e. this is a genuine mid-task switch, not the first
+    /// request of the session). Prompt caches are unique per model, so a
+    /// switch re-pays full input cost even for an otherwise identical prefix.
+    pub fn note_model_change(&mut self, model: &str) -> bool {
+        let changed = self.last_model.as_deref().is_some_and(|previous| previous != model);
+        self.last_model = Some(model.to_string());
         changed
     }
 
@@ -667,6 +696,28 @@ mod tests {
         assert!(state.note_reasoning_effort_change(Some(ReasoningEffortLevel::High)));
         // Baseline is now High; requesting High again is not a change.
         assert!(!state.note_reasoning_effort_change(Some(ReasoningEffortLevel::High)));
+    }
+
+    #[test]
+    fn note_model_change_is_false_on_first_request() {
+        let mut state = AgentSessionState::new("session".to_string(), 4, 4, 16_000);
+        assert!(!state.note_model_change("gpt-5.6"));
+    }
+
+    #[test]
+    fn note_model_change_is_false_when_unchanged() {
+        let mut state = AgentSessionState::new("session".to_string(), 4, 4, 16_000);
+        assert!(!state.note_model_change("gpt-5.6"));
+        assert!(!state.note_model_change("gpt-5.6"));
+    }
+
+    #[test]
+    fn note_model_change_is_true_when_changed() {
+        let mut state = AgentSessionState::new("session".to_string(), 4, 4, 16_000);
+        assert!(!state.note_model_change("gpt-5.6"));
+        assert!(state.note_model_change("claude-opus-4-6"));
+        // Baseline is now Opus; requesting Opus again is not a change.
+        assert!(!state.note_model_change("claude-opus-4-6"));
     }
 
     #[test]

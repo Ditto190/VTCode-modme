@@ -388,6 +388,14 @@ async fn build_prompt_sections(
     });
 
     if let Some(ctx) = prompt_context {
+        // Prompt-caching discipline: static content first, dynamic last.
+        // `Skills` is session-stable routing metadata while `ToolGuidelines`
+        // derives from the live tool catalog (planning toggles, MCP refreshes),
+        // so skills must precede tool guidelines. Otherwise every catalog
+        // change would invalidate the cached skills section that follows it.
+        if let Some(skills_section) = render_prompt_skills_section(&ctx.available_skill_metadata) {
+            sections.push(PromptSection { kind: SectionKind::Skills, text: skills_section });
+        }
         let guidelines =
             generate_tool_guidelines_for_profile(&ctx.available_tools, ctx.capability_level, shell_profile);
         if !guidelines.is_empty() {
@@ -395,9 +403,6 @@ async fn build_prompt_sections(
                 kind: SectionKind::ToolGuidelines,
                 text: guidelines.trim_start_matches('\n').to_string(),
             });
-        }
-        if let Some(skills_section) = render_prompt_skills_section(&ctx.available_skill_metadata) {
-            sections.push(PromptSection { kind: SectionKind::Skills, text: skills_section });
         }
     }
 
@@ -1528,9 +1533,9 @@ mod tests {
         let skills_pos = result.find("## Skills").expect("skills section");
         let env_pos = result.find("## Environment").expect("environment section");
 
-        assert!(appendix_pos < tools_pos);
-        assert!(tools_pos < skills_pos);
-        assert!(skills_pos < env_pos);
+        assert!(appendix_pos < skills_pos);
+        assert!(skills_pos < tools_pos);
+        assert!(tools_pos < env_pos);
     }
 
     #[tokio::test]
@@ -1542,9 +1547,10 @@ mod tests {
 
         let result = compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
 
-        assert!(result.contains("Time:"), "Should include temporal context when enabled");
+        assert!(result.contains("Date:"), "Should include date context when enabled");
+        assert!(!result.contains("Current date and time"), "System prompt must stay date-only for cache stability");
         let env_pos = result.find("## Environment");
-        let temporal_pos = result.find("Time:");
+        let temporal_pos = result.find("Date:");
         if let (Some(t), Some(e)) = (temporal_pos, env_pos) {
             assert!(t > e, "Temporal context should appear inside the environment section");
         }
@@ -1560,7 +1566,7 @@ mod tests {
         let result = compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
 
         assert!(result.contains("UTC"), "Should indicate UTC when temporal_context_use_utc is true");
-        assert!(result.contains("T") && result.contains("Z"), "Should use RFC3339 format for UTC (contains T and Z)");
+        assert!(result.contains("Date"), "Should carry the cache-friendly date label");
     }
 
     #[tokio::test]
@@ -1570,7 +1576,7 @@ mod tests {
 
         let result = compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
 
-        assert!(!result.contains("Time:"), "Should not include temporal context when disabled");
+        assert!(!result.contains("Date:"), "Should not include temporal context when disabled");
     }
 
     #[tokio::test]
@@ -1581,7 +1587,7 @@ mod tests {
 
         let result = compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
 
-        assert!(result.contains("Time:"), "Session-start time should be frozen in the cached prompt");
+        assert!(result.contains("Date:"), "Session-start date should be frozen in the cached prompt");
     }
 
     #[tokio::test]
@@ -1704,7 +1710,7 @@ mod tests {
         assert!(result.contains("## Active Tools"), "Should have dynamic guidelines");
         assert!(result.contains("## Skills"), "Should have lean skills routing");
         assert!(result.contains("## Environment"), "Should have environment addenda");
-        assert!(result.contains("Time:"), "Should have temporal context");
+        assert!(result.contains("Date:"), "Should have date context");
         assert!(result.contains("Working directory"), "Should have working directory");
         assert!(result.contains("/workspace"), "Should show workspace path");
 
@@ -1742,9 +1748,9 @@ mod tests {
         let skills_pos = result.find("## Skills").expect("skills section");
         let env_pos = result.find("## Environment").expect("environment section");
 
-        assert!(mode_pos < tools_pos, "operating profile should precede tools");
-        assert!(tools_pos < skills_pos, "tools should precede skills");
-        assert!(skills_pos < env_pos, "skills should precede environment");
+        assert!(mode_pos < skills_pos, "operating profile should precede skills");
+        assert!(skills_pos < tools_pos, "stable skills should precede dynamic tools");
+        assert!(tools_pos < env_pos, "tools should precede environment");
     }
 
     #[tokio::test]
@@ -2022,6 +2028,10 @@ Use tags when helpful: `<analysis>` facts/options, `<reasoning_plan>` advisory s
 - The shell profile controls prompt examples and expected command syntax only; command policy, sandboxing, and approvals remain separate runtime checks.
 - VT Code does not translate GNU-to-BSD, BSD-to-GNU, Unix-to-PowerShell, or PowerShell-to-Unix command flags.
 
+## Skills
+Use a skill only when the user names it or the task clearly matches. Load details on demand.
+- skill-creator: Create skills
+
 ## Active Tools
 - Use `exec_command.cmd` with `ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing.
 - Batch independent read-only calls; order dependent reads, and serialize mutations.
@@ -2031,10 +2041,6 @@ Use tags when helpful: `<analysis>` facts/options, `<reasoning_plan>` advisory s
 - Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{"query":"TurnLoop","path":"src","result_types":["definition"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`. Use `exec_command` or a skill for syntax patterns.
 - On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call. Run one verifier (`&&` chain, no pipes), then synthesize.
 - Run independent tools in parallel when inputs do not depend on each other.
-
-## Skills
-Use a skill only when the user names it or the task clearly matches. Load details on demand.
-- skill-creator: Create skills
 
 ## Environment
 - Working directory: /workspace"#;

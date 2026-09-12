@@ -2,7 +2,7 @@
 
 use crate::config::VTCodeConfig;
 use crate::prompts::context::PromptContext;
-use crate::prompts::temporal::generate_temporal_context;
+use crate::prompts::temporal::generate_temporal_date_context;
 
 /// Assemble the environment addenda section for the system prompt.
 pub fn render_environment_addenda(
@@ -31,14 +31,18 @@ pub fn render_environment_addenda(
 
         // The system-prompt cache freezes this value at segment/session start.
         // Do not move temporal context into a per-turn runtime appendix: doing
-        // so changes the cache prefix on every request.
+        // so changes the cache prefix on every request. Date-only (no clock
+        // time) keeps the cached prefix stable all day; precise time belongs
+        // in a `<system-reminder>` history message when a task needs it.
         if cfg.agent.include_temporal_context {
-            lines.push(
-                generate_temporal_context(cfg.agent.temporal_context_use_utc)
-                    .trim()
-                    .replacen("Current date and time", "- Time", 1)
-                    .to_string(),
-            );
+            let date_context = generate_temporal_date_context(cfg.agent.temporal_context_use_utc);
+            let trimmed = date_context.trim();
+            let line = if let Some(rest) = trimmed.strip_prefix("Current date (UTC):") {
+                format!("- Date (UTC): {}", rest.trim())
+            } else {
+                trimmed.replacen("Current date:", "- Date:", 1).to_string()
+            };
+            lines.push(line);
         }
 
         if cfg.agent.include_working_directory

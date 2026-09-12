@@ -124,6 +124,10 @@ mod capability_tests {
             "\n\n[Runtime Context]\n- turns: 1",
             "\n\n[History Directives]\n- reuse prior tool outputs",
             "\n\n[Context]\n- workspace: /tmp",
+            "\n\n# PLANNING WORKFLOW (READ-ONLY)\nMutating file edits are blocked.",
+            "\n\n# FULL-AUTO: Complete task autonomously until done or blocked.\n- Stay within the exposed tool list.",
+            "\n\n# FULL-AUTO (PLANNING WORKFLOW): Work autonomously within planning workflow constraints.\n- Stay read-only.",
+            "\n\n## Active Primary Agent Runtime State\n- Active agent: Build",
         ] {
             let with_section = format!("{base}{suffix}");
             assert_eq!(
@@ -132,6 +136,36 @@ mod capability_tests {
                 "runtime section should not affect prefix hash: {suffix:?}"
             );
         }
+    }
+
+    #[test]
+    fn stable_prefix_hash_keeps_stable_content_after_dynamic_appendix() {
+        // Static-first/dynamic-last discipline: stable sections after a dynamic
+        // appendix must still contribute (explicit classification, not
+        // earliest-header truncation). Planning notices themselves stay dynamic.
+        let base = "# VT Code\nBase contract";
+        let with_planning = format!(
+            "{base}\n\n# PLANNING WORKFLOW (READ-ONLY)\nread-only notice\n\n[Harness Limits]\n- max_tool_calls_per_turn: 5"
+        );
+        assert_eq!(
+            stable_system_prefix_hash(base),
+            stable_system_prefix_hash(&with_planning),
+            "planning/full-auto notices must not perturb the stable prefix"
+        );
+    }
+
+    #[test]
+    fn stable_prefix_hash_ignores_hash_body_lines_inside_dynamic_section() {
+        // Body lines starting with `#` but without a header space (e.g.
+        // `#comment`) must not end the dynamic section and leak dynamic
+        // content into the stable hash.
+        let base = "Base prompt";
+        let dynamic = format!("{base}\n\n[Harness Limits]\n- max_tool_calls_per_turn: 5\n#comment body\n- more");
+        assert_eq!(
+            stable_system_prefix_hash(base),
+            stable_system_prefix_hash(&dynamic),
+            "hash-prefixed body lines must not reset the dynamic section"
+        );
     }
 
     #[test]
@@ -261,11 +295,19 @@ pub fn hash_tool_definitions(tools: Option<&[ToolDefinition]>) -> Option<u64> {
 /// after a dynamic appendix and excludes each runtime section independently.
 /// Keep the dynamic list aligned with prompt assembly and provider cache
 /// breakpoints.
+///
+/// Prompt-caching discipline (prefix match): static content first, dynamic
+/// last. Planning/full-auto notices are runtime mode transitions and must
+/// never perturb the stable prefix hash; they belong in the uncached suffix
+/// (or, better, in a `<system-reminder>` message appended to the history).
 pub fn stable_system_prefix_hash(system_prompt: &str) -> u64 {
     const DYNAMIC_HEADERS: &[&str] = &[
         "## Active Tools",
         "## Environment",
         "## Active Primary Agent Runtime State",
+        "# PLANNING WORKFLOW (READ-ONLY)",
+        "# FULL-AUTO: Complete task autonomously until done or blocked.",
+        "# FULL-AUTO (PLANNING WORKFLOW): Work autonomously within planning workflow constraints.",
         "[Harness Limits]",
         "[Runtime Tool Catalog]",
         "[Deferred Tools]",
@@ -278,7 +320,14 @@ pub fn stable_system_prefix_hash(system_prompt: &str) -> u64 {
     let mut dynamic = false;
     for line in system_prompt.lines() {
         let trimmed = line.trim();
-        let is_header = trimmed.starts_with("## ") || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+        // Only section headers toggle the dynamic flag. Require the space
+        // after `#`/`##` so body lines like `#comment` or `#123` inside a
+        // dynamic section cannot prematurely end it and leak dynamic content
+        // into the stable hash.
+        let is_header = trimmed.starts_with("## ")
+            || trimmed.starts_with("# ")
+            || trimmed == "#"
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'));
         if is_header {
             dynamic = DYNAMIC_HEADERS.contains(&trimmed);
         }

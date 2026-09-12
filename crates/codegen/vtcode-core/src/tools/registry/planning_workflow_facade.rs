@@ -38,6 +38,13 @@ impl ToolRegistry {
             *self.cached_available_tools.write() = None;
             // Invalidate the tool catalog cache so the next snapshot reflects the
             // planning-workflow-filtered tool set rather than serving a stale pre-transition entry.
+            // Note: this intentionally ends the cache-stable segment. Prompt
+            // caches are prefix-matched, so a tool-catalog change re-pays full
+            // input cost on the next request; the read-only planning notice in
+            // the (uncached) dynamic suffix keeps the stable prefix reusable.
+            tracing::info!(
+                "planning workflow enabled; tool catalog epoch bumped (provider prompt cache will miss once)"
+            );
             self.tool_catalog_state.note_explicit_refresh("planning_workflow_enabled");
         }
     }
@@ -49,6 +56,11 @@ impl ToolRegistry {
         if was_active {
             *self.cached_available_tools.write() = None;
             // Invalidate the catalog cache so mutating tools reappear immediately.
+            // Same cache-segment note as `enable_planning`: one uncached
+            // request, then the stable prefix hits again.
+            tracing::info!(
+                "planning workflow disabled; tool catalog epoch bumped (provider prompt cache will miss once)"
+            );
             self.tool_catalog_state.note_explicit_refresh("planning_workflow_disabled");
         }
     }

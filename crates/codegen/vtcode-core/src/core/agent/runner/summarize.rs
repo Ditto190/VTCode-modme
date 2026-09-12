@@ -1,4 +1,5 @@
 use super::AgentRunner;
+use crate::compaction::CompactionParentContext;
 use crate::compaction::auto::{AutoCompactionInput, auto_compact_messages};
 use crate::compaction::memory_envelope::{MemoryEnvelopePlacement, local_compaction_config};
 use crate::core::agent::compaction_checkpoint::write_compaction_checkpoint_async;
@@ -50,6 +51,16 @@ impl AgentRunner {
                 auto_compact_suppressed: &mut session_state.auto_compact_suppressed,
                 force_compaction: false,
                 steering_update: None,
+                // Cache-safe forking: reuse the live segment's exact system
+                // prompt + ordered tools so the compaction fork hits the
+                // provider prompt cache instead of re-paying full input cost.
+                parent_context: Some(CompactionParentContext {
+                    system_prompt: Some(request_envelope.system_prompt()),
+                    tools: {
+                        let tools = request_envelope.ordered_tools();
+                        (!tools.is_empty()).then_some(tools)
+                    },
+                }),
             },
             Arc::make_mut(&mut session_state.messages),
         )

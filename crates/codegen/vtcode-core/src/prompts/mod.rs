@@ -48,3 +48,4 @@ pub use system::{
 };
 pub use system_prompt_cache::{PROMPT_CACHE, SystemPromptCache};
 pub use temporal::generate_temporal_context;
+pub use temporal::generate_temporal_date_context;

@@ -907,6 +907,40 @@ mod request_builder_tests {
     }
 
     #[test]
+    fn test_convert_to_anthropic_format_keeps_planning_notices_out_of_cached_prefix() {
+        // Prompt-caching discipline: planning/full-auto transitions must live
+        // in the uncached suffix so toggling them never invalidates the stable
+        // prefix cache.
+        let request = LLMRequest {
+            model: models::CLAUDE_SONNET_5.to_string(),
+            system_prompt: Some(Arc::from(
+                "stable system instructions\n# PLANNING WORKFLOW (READ-ONLY)\nread-only\n[Harness Limits]\n- max_tool_calls_per_turn: 5",
+            )),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+        let cache_settings = AnthropicPromptCacheSettings::default();
+        let anthropic_config = AnthropicConfig::default();
+        let ctx = RequestBuilderContext {
+            prompt_cache_enabled: true,
+            prompt_cache_settings: &cache_settings,
+            anthropic_config: &anthropic_config,
+            model: models::anthropic::DEFAULT_MODEL,
+        };
+
+        let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
+
+        assert!(payload["system"].is_array());
+        assert_eq!(payload["system"][0]["cache_control"]["ttl"], "1h");
+        assert!(payload["system"][0]["text"].as_str().unwrap_or("").contains("stable system"));
+        assert!(!payload["system"][0]["text"].as_str().unwrap_or("").contains("PLANNING"));
+        let tail = payload["system"][1]["text"].as_str().unwrap_or("");
+        assert!(tail.contains("# PLANNING WORKFLOW (READ-ONLY)"));
+        assert!(tail.contains("[Harness Limits]"));
+        assert!(payload["system"][1].get("cache_control").is_none());
+    }
+
+    #[test]
     fn test_convert_to_anthropic_format_uses_extended_message_ttl_for_budget_continuations() {
         let request = LLMRequest {
             model: models::CLAUDE_SONNET_5.to_string(),

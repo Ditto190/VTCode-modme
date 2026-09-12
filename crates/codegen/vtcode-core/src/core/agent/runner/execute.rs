@@ -751,6 +751,20 @@ impl AgentRunner {
                     runtime.state.push_warning(message);
                 }
 
+                // Model-change advisory: prompt caches are unique per model,
+                // so a mid-task switch rebuilds the cache at full input cost
+                // even when the rest of the prefix is unchanged. Prefer
+                // resolving the model up front; when a switch is unavoidable,
+                // expect one full-price request before hits resume.
+                if runtime.state.note_model_change(&turn_model) {
+                    let message = "Model changed mid-task; provider prompt cache \
+                                    will be invalidated and the next request re-pays full \
+                                    input cost."
+                        .to_string();
+                    tracing::warn!("{message}");
+                    runtime.state.push_warning(message);
+                }
+
                 let anthropic_shaped = matches!(provider_kind, ModelProvider::Anthropic | ModelProvider::Minimax);
                 let temperature = if sampling_overrides.suppresses_sampling(anthropic_shaped, reasoning_active) {
                     None

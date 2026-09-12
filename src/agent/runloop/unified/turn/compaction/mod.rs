@@ -850,6 +850,10 @@ pub(crate) async fn maybe_auto_compact_history(
             auto_compact_suppressed: &mut session_stats.auto_compact_suppressed,
             force_compaction,
             steering_update: steering_update.as_ref(),
+            // Binary runloop does not carry the live request envelope here;
+            // history-prefix forking still applies, full system/tools prefix
+            // reuse is a follow-up.
+            parent_context: None,
         },
         &mut compacted_history,
     )

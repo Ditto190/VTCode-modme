@@ -87,53 +87,50 @@ Engine gpt-6-astra, whole harness model-agnostic. No if model=="..."; only Resol
 
 ---
 
-implement enter to steer the agent loop when press "enter". current behavior is only append to queue. find a way or new shortcut to steer the new message after next toolcall.
+Improve HITL confirmation popup UI/UX: currently it being too clutter and noisy '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.41.14.png'. Highlight the command with code syntax highlight and provide a clear separation between different sections of the popup.
 
 ---
 
-check and improve "[!] Turn balancer: repeated low-signal navigation detected; scheduling an early recovery pass" detection and recovery
+find a way to visual agent's message (the one being pushed indentation much larger than other cells) '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-11 at 14.39.28.png'. maybe find away to unify all of the indentation styles across different message types. or use a different visual cue to distinguish agent messages from user messages and tool call outputs.
 
 ---
 
-check TODO/tasks rendering, it should not use trailing and leading "|" anymore. also do not rendering repeated tasks in the same TUI to prevent clutter and confusion. also for the tasks header, maybe remove it, don't show the tasks plan file random name. or just use a quick tasks summarization as the task header.
+improve diff view with full-width background color and better visiual diff elements for easier comparison and readability. dim gutter, visual diff head with proper red/green for
+example: "
+--- a/README.md
++++ b/README.md
+@@ -100 +100 @@"
 
-check image as current status and improve: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-11 at 15.51.03.png'
-
----
-
-CRITICAL: fix Tool execution completed, but the model follow-up failed (transient; bounded retry
-scheduled). Output above is valid.
-Follow-up error category: Request timed out
-[!] Follow-up failed transiently after tool execution; compacting context and
-scheduling one tool-enabled recovery pass.
-
-==> this is after vtcode agent ask user for input, then it failed to follow up due to a transient error.
+current status need improvement: '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot2026-09-11 at 14.48.06.png'
 
 ===
 
-Improve vtcode TUI startup to just launch the program instantly and defer loading. check deepwiki mcp for https://deepwiki.com/openai/codex for reference.
+Apply lessons from "A Design Space Exploration of Async/Await" (arXiv 2608.20677) to VT Code. The paper's Rust-relevant dimensions: indefinite task extent, unaware cancellation (Drop-only cleanup), never-propagated errors from unawaited tasks, and cancel-unsafety of select!/timeout.
 
-===
+## 1. Code fixes (surgical)
 
-CRICIAL:
-• The turn is blocked because verification is still pending. Inspection-only checks do not clear the verification gate; run cargo check --locked, cargo fmt --all -- --check,
-or the relevant cargo nextest run command (standalone or as a pure && chain, no | head pipes and no ;/||/| joins) to exit 0, then resume the request. A failed verifier
-grants 2 fix-up edits before re-verify is required.
-Turn blocked after repeated unverified assistant responses; verification is still pending.
-Turn blocked: Turn blocked after repeated unverified assistant responses; verification is still pending.
-What you can do:
-• In this session: Type 'continue' to resume, or describe alternative instructions
-• From terminal: Run `vtcode --resume session-vtcode-20260912T083718Z_791464-83673`
-• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
-• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260912t083718z_791464-83673-20260912T083840Z-95940bd0-80c1-4375-8810-6120d64dda10.md
+- src/agent/runloop/unified/session_setup/signal.rs — Exit path (double Ctrl+C): replace the fire-and-forget tokio::spawn of the 500ms MCP shutdown with an inline `tokio::time::timeout(500ms, mcp.shutdown()).await` before `emergency_terminal_cleanup()`. Today `process::exit(130)` kills the spawned task ~0ms later, so MCP shutdown never runs and MCP children are orphaned; inlining is bounded (exit delay ≤500ms) and actually lets children shut down. Cancel path (first Ctrl+C) keeps its detached 2s shutdown with a comment marking it a deliberately detached, bounded task.
+- crates/codegen/vtcode-webmcp/src/remote_mcp.rs — `LegacyStreamGuard::drop` (line ~854) spawns inside Drop (documented anti-pattern). Make `expire_when_idle`'s cancellation branch call `self.remove(...)` before returning, so sync Drop only needs `cancellation.cancel()`; cleanup is driven by the already-owned expiry task.
+- src/agent/runloop/unified/turn/session_loop_runner/orchestration.rs (~:1623) — persistent-memory finalization task stays detached by design, but wrap it so its outcome is logged (observable failure path) instead of silently dropping the handle.
 
-Recovery loop detected: capping repeated assistant responses to avoid wasted context.
-Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.
-Turn blocked: Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.
-What you can do:
-• In this session: Type 'continue' to resume, or describe alternative instructions
-• From terminal: Run `vtcode --resume session-vtcode-20260912T083718Z_791464-83673`
-• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
-• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260912t083718z_791464-83673-20260912T083950Z-02aaa499-96ed-
-4b33-9790-dcea0b5eedb6.md
-Repeated follow-up after stalled turn detected; enforcing autonomous recovery and conclusion.
+## 2. Codify the lessons into guidance (docs)
+
+- docs/guides/async-architecture.md — new "Task extent, error propagation, and cancel-safety" section: (a) every tokio::spawn has an owner — awaited, held behind a Drop guard, or documented as detached with bounded work + observable failure; (b) unawaited JoinErrors are silent — detached tasks must log or channel their outcome; (c) select!/timeout cancel at every .await — work inside must be resumable or cleaned up externally (token/Drop guard). Also fix the "Spawning Long-Running Operations" example that drops the JoinHandle and contradicts the doc's own Anti-Pattern 2.
+- docs/harness/ARCHITECTURAL_INVARIANTS.md — add one invariant in existing violation/remediation format: every spawned task has an owner.
+- docs/guides/code-organization-patterns.md — extend "Background Task Lifecycle" with detachment criteria and error-propagation rule.
+
+## 3. Tests
+
+- vtcode-webmcp: test that dropping LegacyStreamGuard (token cancelled) results in the session being removed by the expiry loop, proving cleanup works without spawn-in-Drop.
+- Signal-handler change validated via existing harness/interrupt tests if feasible.
+
+## 4. Validation
+
+./scripts/check-dev.sh fast gate + cargo fmt; targeted `cargo nextest run -p vtcode-webmcp` and touched-crate tests (avoid full check-dev --test, known to SIGKILL here).
+
+## Skipped (follow-ups)
+
+- a2a server webhook detaches: best-effort by design; cited in new docs as canonical "documented detached" example.
+- Consolidating ~12 ad-hoc RAII abort guards into a shared TaskGuard (vtcode-commons): wide refactor, follow-up.
+- Full cancellation/fairness pass over all select! sites: audit doc's own backlog item.
+- Retiring stale docs/async/ASYNC_ARCHITECTURE.md.

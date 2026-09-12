@@ -107,6 +107,10 @@ pub(crate) struct SessionStats {
     last_tool_catalog_observability: Option<ToolCatalogObservabilityIdentity>,
     recent_touched_files: VecDeque<String>,
     total_usage: HarnessUsage,
+    /// Rolling prompt-cache health fed by every recorded turn. Shared
+    /// `vtcode-core` monitor so thresholds and wording match the headless
+    /// runloop; fires at most two session-scoped hit-rate alerts.
+    prompt_cache_health: vtcode_core::core::agent::cache_health::PromptCacheHealthMonitor,
     /// Cache-aware and conservative cost totals for the whole interactive
     /// session. This must live with the persistent session statistics rather
     /// than inside one `run_turn_loop` invocation, because each user turn
@@ -351,6 +355,19 @@ impl SessionStats {
             return;
         };
         self.total_usage.add(&usage_cost::normalized_turn_usage(provider, usage));
+    }
+
+    /// Record one turn's usage for prompt-cache health and return a
+    /// session-scoped hit-rate alert message the first time a degraded
+    /// pattern is confirmed. Returns `None` on healthy or unmeasured turns.
+    pub(crate) fn record_cache_turn_health(
+        &mut self,
+        provider: &str,
+        usage: &Option<vtcode_core::llm::provider::Usage>,
+    ) -> Option<String> {
+        let usage = usage.as_ref()?;
+        let normalized = usage_cost::normalized_turn_usage(provider, usage);
+        self.prompt_cache_health.record_turn(&normalized).map(|alert| alert.message())
     }
 
     pub(crate) fn total_usage(&self) -> HarnessUsage {
@@ -612,6 +629,23 @@ impl SessionStats {
         self.last_prompt_cache_change_reason = Some(reason.to_string());
 
         reason
+    }
+
+    /// Advisory for mid-session model switches, derived from the last
+    /// recorded fingerprint. Prompt caches are unique per model, so a switch
+    /// rebuilds the cache at full input cost even when the rest of the prefix
+    /// is unchanged. Returns `Some` exactly on the first request carrying a
+    /// new model (the session-start recording is excluded via the
+    /// observations guard); callers should surface the message and keep
+    /// going — no state is consumed.
+    pub(crate) fn model_change_advisory(&self) -> Option<String> {
+        (self.prompt_cache_observations > 1
+            && self.last_prompt_cache_change_reason.as_deref() == Some("model"))
+        .then(|| {
+            "Model changed mid-session; provider prompt cache will be invalidated and the next request re-pays full \
+             input cost. Prefer resolving the model up front; expect one full-price request before hits resume."
+                .to_string()
+        })
     }
 
     fn counter_for_reason(&mut self, reason: &str) -> &mut usize {
@@ -1173,6 +1207,28 @@ mod tests {
         assert!(stats.note_tool_catalog_observability_change(&tools, 5, 2, 3, &skills));
         assert!(!stats.note_tool_catalog_observability_change(&tools, 5, 2, 3, &skills));
         assert!(stats.note_tool_catalog_observability_change(&tools, 6, 2, 4, &skills));
+    }
+
+    #[test]
+    fn model_change_advisory_fires_once_per_switch() {
+        let mut stats = SessionStats::default();
+        // Session start records "model" but must not advise: there is no
+        // prior cache to invalidate.
+        assert_eq!(stats.record_prompt_cache_fingerprint("model-a", 1, Some(2)), "model");
+        assert_eq!(stats.model_change_advisory(), None);
+        // Same model, stable prefix: no advisory.
+        assert_eq!(stats.record_prompt_cache_fingerprint("model-a", 1, Some(2)), "unchanged");
+        assert_eq!(stats.model_change_advisory(), None);
+        // Genuine switch: advisory fires on the first request carrying it.
+        assert_eq!(stats.record_prompt_cache_fingerprint("model-b", 1, Some(2)), "model");
+        let advisory = stats.model_change_advisory().expect("switch must advise");
+        assert!(advisory.contains("Model changed mid-session"));
+        // Settled on the new model: advisory clears without any flag.
+        assert_eq!(stats.record_prompt_cache_fingerprint("model-b", 1, Some(2)), "unchanged");
+        assert_eq!(stats.model_change_advisory(), None);
+        // Switching back advises again: each genuine change re-pays.
+        assert_eq!(stats.record_prompt_cache_fingerprint("model-a", 1, Some(2)), "model");
+        assert!(stats.model_change_advisory().is_some());
     }
 
     #[test]

@@ -3,6 +3,7 @@
 pub mod beliefs;
 pub mod blocked_handoff;
 pub mod bootstrap;
+pub mod cache_health;
 pub mod compaction_checkpoint;
 pub mod completion;
 pub mod context_reset;
