@@ -217,3 +217,7 @@ Follow-up error category: Request timed out
 scheduling one tool-enabled recovery pass.
 
 ==> this is after vtcode agent ask user for input, then it failed to follow up due to a transient error.
+
+===
+
+Improve vtcode TUI startup to just launch the program instantly and defer loading. check deepwiki mcp for https://deepwiki.com/openai/codex for reference.

@@ -1079,18 +1079,26 @@ impl HarnessTurnState {
         self.tool_budget_exhausted_emitted = true;
     }
 
-    pub(crate) fn activate_recovery(&mut self, reason: impl Into<String>) {
-        self.activate_recovery_with_mode(reason, RecoveryMode::ToolFreeSynthesis);
+    #[must_use]
+    pub(crate) fn activate_recovery(&mut self, reason: impl Into<String>) -> bool {
+        self.activate_recovery_with_mode(reason, RecoveryMode::ToolFreeSynthesis)
     }
 
-    pub(crate) fn activate_recovery_with_mode(&mut self, reason: impl Into<String>, mode: RecoveryMode) {
+    /// Arm a recovery pass. Returns `false` when a pass is already armed or in
+    /// flight (`Pending`/`InPass`/`Completed`), so callers can skip the
+    /// user-facing "scheduling" feedback instead of claiming a pass they did
+    /// not schedule.
+    #[must_use]
+    pub(crate) fn activate_recovery_with_mode(&mut self, reason: impl Into<String>, mode: RecoveryMode) -> bool {
         if matches!(self.recovery_phase, RecoveryPhase::Inactive) {
             self.recovery_activations = self.recovery_activations.saturating_add(1);
             self.recovery_reason = Some(reason.into());
             self.recovery_phase = RecoveryPhase::Pending;
             self.recovery_mode = Some(mode);
             self.recovery_retry_count = 0;
+            return true;
         }
+        false
     }
 
     /// Arm the single tool-enabled retry used after a provider failure follows
