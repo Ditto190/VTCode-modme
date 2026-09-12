@@ -54,12 +54,13 @@
 
 </div>
 
-VT Code is an open-source terminal coding agent written in Rust, built for
-interactive sessions and long-running autonomous work alike. It is a
-**harness, not just an LLM wrapper**: the model reasons, while the runtime
-supplies the tools, context, sandbox, state, evaluation, and verification that
-turn reasoning into safe, reviewable progress — without ever leaving the
-terminal.
+VT Code is an open-source terminal coding agent written in Rust — built for
+quick interactive sessions and long-running autonomous work alike.
+
+It is a **harness, not just an LLM wrapper**. The model reasons; the runtime
+supplies everything else: tools, context, sandboxing, state, evaluation, and
+verification. That separation is what turns raw model output into safe,
+reviewable progress — without ever leaving the terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows are
@@ -77,19 +78,19 @@ terminal.
 - **One interface, every backend** — cloud gateways, OpenAI-compatible
   endpoints, and local inference (Ollama, LM Studio, llama.cpp) behind a single
   streaming provider abstraction.
-- **Sandboxed execution by default** — command policies, workspace approvals,
-  and fail-closed defenses against injection, path/symlink escape, and
-  environment leakage.
+- **Sandboxed by default** — command policies, workspace approvals, and
+  fail-closed defenses against injection, path/symlink escape, and environment
+  leakage.
 - **Durable long-run sessions** — checkpoints, auto-compaction, spooled tool
   output, task tracking, and resumable handoffs.
-- **One canonical event contract** — `ThreadEvent` powers replay, archives,
-  memory views, and trajectory export.
+- **One event contract** — a canonical `ThreadEvent` stream powers replay,
+  archives, memory views, and trajectory export.
 - **Extensible without forking** — MCP servers, Agent Skills, Agent Plugins,
   ACP (Zed), A2A, and the WebMCP browser bridge.
 - **Measured, not vibes** — a built-in eval framework with pass@k / pass^k
   metrics and environment-based outcome verification.
-- **A TUI worth living in** — themes validated against WCAG AA contrast,
-  markdown rendering, and diff previews.
+- **A TUI worth living in** — WCAG AA-validated themes, markdown rendering,
+  and diff previews.
 
 ## Why VT Code
 
@@ -98,13 +99,13 @@ agent loop itself as an engineering problem:
 
 | Pillar                     | What it means                                                                                                                              |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.                           |
-| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection, path/symlink escape, and env leakage.   |
-| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction, resumable handoffs — verified before "done".                 |
-| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.                             |
-| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.                     |
-| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.                         |
-| **Runs anywhere**          | Cloud gateways, OpenAI-compatible endpoints, and local runtimes — one streaming interface.                                                  |
+| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.         |
+| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection and escape.            |
+| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction — verified before "done".                   |
+| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.            |
+| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.   |
+| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.        |
+| **Runs anywhere**          | Cloud gateways, OpenAI-compatible endpoints, and local runtimes — one streaming interface.                                 |
 
 ## Quick start
 
@@ -139,10 +140,11 @@ resolution order.
 ### 3. Run
 
 ```bash
-vtcode                         # interactive TUI
-vtcode ask "explain Rc vs Arc" # one-shot question
-vtcode exec "refactor main.rs" # headless task
-vtcode review                  # review uncommitted changes
+vtcode                          # interactive TUI
+vtcode ask "explain Rc vs Arc"  # one-shot question
+vtcode exec "refactor main.rs"  # headless task
+vtcode review                   # review uncommitted changes
+vtcode continue                 # resume the last session
 ```
 
 See [Installation](./docs/installation/README.md) and
@@ -186,8 +188,8 @@ The full catalog lives in the [Documentation Index](./docs/INDEX.md).
 ## Providers
 
 Built-in providers span first-party APIs (OpenAI, Anthropic, Gemini, DeepSeek,
-Qwen, Mistral, xAI, and more), multi-model gateways (OpenRouter, Merge Gateway,
-Vercel AI Gateway), custom OpenAI-compatible endpoints, and local backends.
+Qwen, Mistral, xAI, and more), multi-model gateways (OpenRouter, Vercel AI
+Gateway), custom OpenAI-compatible endpoints, and local backends.
 [Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
 for credentials and model defaults.
 
