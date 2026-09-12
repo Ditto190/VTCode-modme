@@ -5,8 +5,8 @@
 
 // Re-export diff theme from vtcode-commons
 pub use vtcode_commons::diff_theme::{
-    DiffColorLevel, DiffTheme, diff_add_bg, diff_add_word_bg, diff_del_bg, diff_del_word_bg, diff_gutter_bg_add_light,
-    diff_gutter_bg_del_light, diff_gutter_fg_light, diff_hunk_bg,
+    DiffColorLevel, DiffTheme, diff_add_bg, diff_del_bg, diff_gutter_bg_add_light, diff_gutter_bg_del_light,
+    diff_gutter_fg_light, diff_hunk_bg,
 };
 pub use vtcode_commons::styling::DiffColorPalette;
 
@@ -72,16 +72,6 @@ impl DiffRenderStyleContext {
 
     pub fn level(self) -> DiffColorLevel {
         self.level
-    }
-
-    /// Stronger addition-chip background for word-level highlights.
-    pub fn add_word_bg(self) -> Option<AnstyleColor> {
-        (self.level != DiffColorLevel::Ansi16).then(|| diff_add_word_bg(self.theme, self.level))
-    }
-
-    /// Stronger deletion-chip background for word-level highlights.
-    pub fn del_word_bg(self) -> Option<AnstyleColor> {
-        (self.level != DiffColorLevel::Ansi16).then(|| diff_del_word_bg(self.theme, self.level))
     }
 }
 

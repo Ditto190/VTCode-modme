@@ -17,7 +17,6 @@ use vtcode_commons::diff_paths::{
     is_diff_new_file_marker_line, is_prose_language_hint, language_hint_from_path, looks_like_diff_content,
     parse_diff_git_path, parse_diff_marker_path,
 };
-use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine, annotate_word_level_diffs};
 
 const DIFF_SUMMARY_PREFIX: &str = "• Diff ";
 
@@ -339,13 +338,10 @@ fn render_diff_code_block(
     let file_new_background = file_new_style.get_bg_color();
     let added_background = added_style.get_bg_color();
     let removed_background = removed_style.get_bg_color();
-    let added_word = style_context.add_word_bg();
-    let removed_word = style_context.del_word_bg();
     let mut current_language: Option<String> = None;
     let normalized = normalize_diff_lines(code);
-    let word_ranges_by_line = word_level_ranges_for_normalized(&normalized);
 
-    for (line_index, line) in normalized.iter().enumerate() {
+    for line in &normalized {
         let trimmed = line.trim_end_matches('\n');
         let trimmed_start = trimmed.trim_start();
         if let Some(path) = parse_diff_git_path(trimmed_start).or_else(|| parse_diff_marker_path(trimmed_start)) {
@@ -396,15 +392,12 @@ fn render_diff_code_block(
                 line.set_line_background(hunk_background);
             } else if is_diff_addition_line(trimmed_start) {
                 line.push_segment(added_marker_style, "+");
-                let word_ranges = word_ranges_by_line.get(line_index).cloned().unwrap_or_default();
                 push_highlighted_diff_body(
                     &mut line,
                     &trimmed_start[1..],
                     current_language.as_deref(),
                     added_style,
                     added_background,
-                    &word_ranges,
-                    added_word,
                 );
                 paint_line_background(&mut line, added_background);
                 line.set_line_background(added_background);
@@ -415,15 +408,12 @@ fn render_diff_code_block(
                 line.set_line_background(added_background);
             } else if is_diff_deletion_line(trimmed_start) {
                 line.push_segment(removed_marker_style, "-");
-                let word_ranges = word_ranges_by_line.get(line_index).cloned().unwrap_or_default();
                 push_highlighted_diff_body(
                     &mut line,
                     &trimmed_start[1..],
                     current_language.as_deref(),
                     removed_style,
                     removed_background,
-                    &word_ranges,
-                    removed_word,
                 );
                 paint_line_background(&mut line, removed_background);
                 line.set_line_background(removed_background);
@@ -466,68 +456,20 @@ fn paint_line_background(line: &mut MarkdownLine, bg: Option<anstyle::Color>) {
 /// so prose/unknown languages render exactly as before. Highlighted token
 /// foregrounds are kept and the diff tint is forced as background so syntect
 /// theme holes can't punch through the full-width add/del background.
-/// Word-level chips (stronger bg) paint on ranges that differ from the pair.
 fn push_highlighted_diff_body(
     line: &mut MarkdownLine,
     body: &str,
     language: Option<&str>,
     fallback: Style,
     forced_bg: Option<anstyle::Color>,
-    word_ranges: &[(usize, usize)],
-    word_bg: Option<anstyle::Color>,
 ) {
-    let segments = render_diff_content_segments(body, language, fallback);
-    if word_ranges.is_empty() || word_bg.is_none() {
-        for segment in segments {
-            let style = match forced_bg {
-                Some(bg) => segment.style.bg_color(Some(bg)),
-                None => segment.style,
-            };
-            line.push_segment(style, &segment.text);
-        }
-        return;
-    }
-
-    // Walk segments tracking body offsets so word chips can override bg.
-    let mut cursor = 0usize;
-    let word_bg = word_bg.expect("checked above");
-    for segment in segments {
-        let seg_end = cursor + segment.text.len();
-        let is_changed = word_ranges.iter().any(|&(s, e)| cursor < e && seg_end > s);
-        let style = if is_changed {
-            segment.style.bg_color(Some(word_bg))
-        } else if let Some(bg) = forced_bg {
-            segment.style.bg_color(Some(bg))
-        } else {
-            segment.style
+    for segment in render_diff_content_segments(body, language, fallback) {
+        let style = match forced_bg {
+            Some(bg) => segment.style.bg_color(Some(bg)),
+            None => segment.style,
         };
         line.push_segment(style, &segment.text);
-        cursor = seg_end;
     }
-}
-
-/// Map each normalized body line to word-level changed ranges against its pair.
-fn word_level_ranges_for_normalized(normalized: &[String]) -> Vec<Vec<(usize, usize)>> {
-    let mut display = Vec::with_capacity(normalized.len());
-    for line in normalized {
-        let trimmed = line.trim_end_matches('\n');
-        let kind = if is_diff_addition_line(trimmed) {
-            DiffDisplayKind::Addition
-        } else if is_diff_deletion_line(trimmed) {
-            DiffDisplayKind::Deletion
-        } else {
-            DiffDisplayKind::Context
-        };
-        let body = match kind {
-            DiffDisplayKind::Addition | DiffDisplayKind::Deletion => {
-                trimmed.strip_prefix(['+', '-']).unwrap_or("").to_string()
-            }
-            _ => trimmed.to_string(),
-        };
-        display.push(DiffDisplayLine::body(kind, None, body));
-    }
-    annotate_word_level_diffs(&mut display);
-    display.into_iter().map(|line| line.changed).collect()
 }
 
 fn parse_diff_summary_line(line: &str) -> Option<(&str, usize, usize)> {

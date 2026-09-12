@@ -1,12 +1,14 @@
 #![expect(
     clippy::string_slice,
     clippy::cast_possible_truncation,
-    clippy::indexing_slicing,
-    clippy::type_complexity,
-    reason = "Word-level LCS walks atom indices by design; offsets are bounded to the source line."
+    reason = "Preview offsets are derived from bounded diff lines and converted to the documented display width."
 )]
 
 //! Shared helpers for rendering diff previews.
+//!
+//! Layout matches the JetBrains dual-gutter style:
+//! `{old_no} │ {new_no} │ {sign} content` with one uniform full-width
+//! add/del tint (no word-level chips).
 
 use crate::diff::{DiffHunk, DiffLineKind};
 use crate::diff_paths::{
@@ -31,16 +33,45 @@ pub enum DiffDisplayKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiffDisplayLine {
     pub kind: DiffDisplayKind,
-    pub line_number: Option<u32>,
+    /// Line number in the old file (context/deletion), when known.
+    pub old_line: Option<u32>,
+    /// Line number in the new file (context/addition), when known.
+    pub new_line: Option<u32>,
     pub text: String,
-    /// Byte ranges inside `text` that differ from the paired opposite line
-    /// (word-level / intra-line highlight). Empty when no pair or no overlap.
-    pub changed: Vec<(usize, usize)>,
 }
 
 impl DiffDisplayLine {
-    pub fn body(kind: DiffDisplayKind, line_number: Option<u32>, text: String) -> Self {
-        Self { kind, line_number, text, changed: Vec::new() }
+    pub fn body(kind: DiffDisplayKind, old_line: Option<u32>, new_line: Option<u32>, text: String) -> Self {
+        Self { kind, old_line, new_line, text }
+    }
+
+    /// Whether this line carries diff content, without re-parsing its text.
+    pub fn is_diff(&self) -> bool {
+        self.kind.is_diff()
+    }
+
+    /// JetBrains-style gutter: `old │ new │ sign content`.
+    ///
+    /// Context shows both numbers; deletions only the old; additions only the
+    /// new. The `│` separators keep markdown bullets (`- foo`) distinct from
+    /// the diff marker.
+    pub fn numbered_text(&self, line_number_width: usize) -> String {
+        let w = line_number_width;
+        match self.kind {
+            DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => self.text.clone(),
+            DiffDisplayKind::Deletion => {
+                format!("{:>w$} │ {:>w$} │ - {}", self.old_line.unwrap_or_default(), "", self.text,)
+            }
+            DiffDisplayKind::Addition => {
+                format!("{:>w$} │ {:>w$} │ + {}", "", self.new_line.unwrap_or_default(), self.text,)
+            }
+            DiffDisplayKind::Context => format!(
+                "{:>w$} │ {:>w$} │   {}",
+                self.old_line.unwrap_or_default(),
+                self.new_line.unwrap_or_default(),
+                self.text,
+            ),
+        }
     }
 }
 
@@ -49,32 +80,6 @@ impl DiffDisplayKind {
     /// deletion) rather than metadata or a hunk header.
     pub fn is_diff(self) -> bool {
         matches!(self, Self::Context | Self::Addition | Self::Deletion)
-    }
-}
-
-impl DiffDisplayLine {
-    /// Whether this line carries diff content, without re-parsing its text.
-    pub fn is_diff(&self) -> bool {
-        self.kind.is_diff()
-    }
-
-    /// Render with an unambiguous gutter: `marker + number + │ + content`.
-    ///
-    /// The `│` separator keeps markdown bullets (`- foo`) and list markers
-    /// visually distinct from the diff marker (`+`/`-`/` `).
-    pub fn numbered_text(&self, line_number_width: usize) -> String {
-        match self.kind {
-            DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => self.text.clone(),
-            DiffDisplayKind::Addition => {
-                format!("+{:>line_number_width$} │ {}", self.line_number.unwrap_or_default(), self.text)
-            }
-            DiffDisplayKind::Deletion => {
-                format!("-{:>line_number_width$} │ {}", self.line_number.unwrap_or_default(), self.text)
-            }
-            DiffDisplayKind::Context => {
-                format!(" {:>line_number_width$} │ {}", self.line_number.unwrap_or_default(), self.text)
-            }
-        }
     }
 }
 
@@ -110,6 +115,7 @@ pub fn display_lines_from_hunks(hunks: &[DiffHunk]) -> Vec<DiffDisplayLine> {
         lines.push(DiffDisplayLine::body(
             DiffDisplayKind::HunkHeader,
             None,
+            None,
             format!("@@ -{} +{} @@", hunk.old_start, hunk.new_start),
         ));
 
@@ -118,7 +124,6 @@ pub fn display_lines_from_hunks(hunks: &[DiffHunk]) -> Vec<DiffDisplayLine> {
         }
     }
 
-    annotate_word_level_diffs(&mut lines);
     lines
 }
 
@@ -138,30 +143,46 @@ pub fn display_lines_from_unified_diff(diff_content: &str) -> Vec<DiffDisplayLin
             lines.push(DiffDisplayLine::body(
                 DiffDisplayKind::HunkHeader,
                 None,
+                None,
                 format_start_only_hunk_header(line).unwrap_or_else(|| format!("@@ -{old_start} +{new_start} @@")),
             ));
             continue;
         }
 
         if !in_hunk {
-            lines.push(DiffDisplayLine::body(DiffDisplayKind::Metadata, None, line.to_string()));
+            lines.push(DiffDisplayLine::body(DiffDisplayKind::Metadata, None, None, line.to_string()));
             continue;
         }
 
         if is_diff_addition_line(line) {
-            lines.push(DiffDisplayLine::body(DiffDisplayKind::Addition, Some(new_line_no), line[1..].to_string()));
+            lines.push(DiffDisplayLine::body(
+                DiffDisplayKind::Addition,
+                None,
+                Some(new_line_no),
+                line[1..].to_string(),
+            ));
             new_line_no = new_line_no.saturating_add(1);
             continue;
         }
 
         if is_diff_deletion_line(line) {
-            lines.push(DiffDisplayLine::body(DiffDisplayKind::Deletion, Some(old_line_no), line[1..].to_string()));
+            lines.push(DiffDisplayLine::body(
+                DiffDisplayKind::Deletion,
+                Some(old_line_no),
+                None,
+                line[1..].to_string(),
+            ));
             old_line_no = old_line_no.saturating_add(1);
             continue;
         }
 
         if let Some(context_line) = line.strip_prefix(' ') {
-            lines.push(DiffDisplayLine::body(DiffDisplayKind::Context, Some(new_line_no), context_line.to_string()));
+            lines.push(DiffDisplayLine::body(
+                DiffDisplayKind::Context,
+                Some(old_line_no),
+                Some(new_line_no),
+                context_line.to_string(),
+            ));
             old_line_no = old_line_no.saturating_add(1);
             new_line_no = new_line_no.saturating_add(1);
             continue;
@@ -170,25 +191,25 @@ pub fn display_lines_from_unified_diff(diff_content: &str) -> Vec<DiffDisplayLin
         if let Some(omitted) = parse_omitted_line_count(line) {
             old_line_no = old_line_no.saturating_add(omitted);
             new_line_no = new_line_no.saturating_add(omitted);
-            lines.push(DiffDisplayLine::body(DiffDisplayKind::Metadata, None, line.to_string()));
+            lines.push(DiffDisplayLine::body(DiffDisplayKind::Metadata, None, None, line.to_string()));
             continue;
         }
 
-        lines.push(DiffDisplayLine::body(DiffDisplayKind::Metadata, None, line.to_string()));
+        lines.push(DiffDisplayLine::body(DiffDisplayKind::Metadata, None, None, line.to_string()));
     }
 
-    annotate_word_level_diffs(&mut lines);
     lines
 }
 
 pub fn diff_display_line_number_width(lines: &[DiffDisplayLine]) -> usize {
     let max_digits = lines
         .iter()
-        .filter_map(|line| line.line_number)
+        .flat_map(|line| [line.old_line, line.new_line])
+        .flatten()
         .map(digit_count)
         .max()
         .unwrap_or(4);
-    max_digits.clamp(5, 6)
+    max_digits.clamp(4, 6)
 }
 
 fn digit_count(mut value: u32) -> usize {
@@ -222,186 +243,10 @@ fn parse_omitted_line_count(line: &str) -> Option<u32> {
 fn display_line_from_diff_line(line: &crate::diff::DiffLine) -> DiffDisplayLine {
     let text = line.text.trim_end_matches('\n').to_string();
     match line.kind {
-        DiffLineKind::Context => DiffDisplayLine::body(DiffDisplayKind::Context, line.new_line, text),
-        DiffLineKind::Addition => DiffDisplayLine::body(DiffDisplayKind::Addition, line.new_line, text),
-        DiffLineKind::Deletion => DiffDisplayLine::body(DiffDisplayKind::Deletion, line.old_line, text),
+        DiffLineKind::Context => DiffDisplayLine::body(DiffDisplayKind::Context, line.old_line, line.new_line, text),
+        DiffLineKind::Addition => DiffDisplayLine::body(DiffDisplayKind::Addition, line.old_line, line.new_line, text),
+        DiffLineKind::Deletion => DiffDisplayLine::body(DiffDisplayKind::Deletion, line.old_line, line.new_line, text),
     }
-}
-
-/// Annotate word-level (intra-line) changed ranges on consecutive `-`/`+` pairs.
-///
-/// Groups consecutive Deletion lines followed by consecutive Addition lines,
-/// pairs them index-wise, and stores byte ranges of tokens that differ. This
-/// powers the two-level background: full-width line tint + stronger word chips.
-pub fn annotate_word_level_diffs(lines: &mut [DiffDisplayLine]) {
-    let mut i = 0;
-    while i < lines.len() {
-        if lines[i].kind != DiffDisplayKind::Deletion {
-            i += 1;
-            continue;
-        }
-        let del_start = i;
-        while i < lines.len() && lines[i].kind == DiffDisplayKind::Deletion {
-            i += 1;
-        }
-        let del_end = i;
-        let add_start = i;
-        while i < lines.len() && lines[i].kind == DiffDisplayKind::Addition {
-            i += 1;
-        }
-        let add_end = i;
-        // Split the two ranges so they never overlap as mutable borrows.
-        let (before, rest) = lines.split_at_mut(add_start);
-        let dels = &mut before[del_start..del_end];
-        let adds = &mut rest[..(add_end - add_start)];
-        pair_word_level_ranges(dels, adds);
-    }
-}
-
-fn pair_word_level_ranges(dels: &mut [DiffDisplayLine], adds: &mut [DiffDisplayLine]) {
-    let pairs = dels.len().min(adds.len());
-    // Collect ranges first so we never hold overlapping mutable borrows.
-    let mut computed = Vec::with_capacity(pairs);
-    for idx in 0..pairs {
-        computed.push(word_level_changed_ranges(&dels[idx].text, &adds[idx].text));
-    }
-    for (idx, (old_ranges, new_ranges)) in computed.into_iter().enumerate() {
-        dels[idx].changed = old_ranges;
-        adds[idx].changed = new_ranges;
-    }
-}
-
-/// Minimum shared-token ratio before word chips are useful.
-///
-/// Below this, the pair is effectively a replace of whole lines — chips would
-/// paint nearly every token and drown the clean full-width line tint.
-const MIN_WORD_SIMILARITY: f64 = 0.35;
-
-/// Split into word-ish atoms: identifier runs, whitespace runs, single other chars.
-fn tokenize_atoms(text: &str) -> Vec<(usize, usize)> {
-    let bytes = text.as_bytes();
-    let mut spans = Vec::with_capacity(text.len() / 2 + 1);
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        let start = i;
-        if b.is_ascii_whitespace() {
-            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-        } else if b.is_ascii_alphanumeric() || b == b'_' {
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                i += 1;
-            }
-        } else {
-            // Multi-byte UTF-8: advance one character.
-            let ch_len = text[i..].chars().next().map(char::len_utf8).unwrap_or(1);
-            i += ch_len;
-        }
-        if i > start {
-            spans.push((start, i));
-        }
-    }
-    spans
-}
-
-/// Compute byte ranges in `old`/`new` that are not part of a common token subsequence.
-///
-/// Returns empty ranges when the lines are too dissimilar (or one side is
-/// blank) so pure inserts/deletes keep a clean full-width tint without chips.
-pub fn word_level_changed_ranges(old: &str, new: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
-    let old_atoms = tokenize_atoms(old);
-    let new_atoms = tokenize_atoms(new);
-    // Blank pair or pure insert/delete: line tint alone is the right signal.
-    // Highlighting an entire new/deleted body as a "chip" is just noise.
-    if old_atoms.is_empty() || new_atoms.is_empty() {
-        return (Vec::new(), Vec::new());
-    }
-
-    // LCS over atom contents.
-    let n = old_atoms.len();
-    let m = new_atoms.len();
-    let mut dp = vec![vec![0usize; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            let old_tok = &old[old_atoms[i].0..old_atoms[i].1];
-            let new_tok = &new[new_atoms[j].0..new_atoms[j].1];
-            dp[i][j] = if old_tok == new_tok {
-                dp[i + 1][j + 1] + 1
-            } else {
-                dp[i + 1][j].max(dp[i][j + 1])
-            };
-        }
-    }
-
-    let lcs = dp[0][0];
-    let max_len = n.max(m);
-    let similarity = if max_len == 0 { 1.0 } else { lcs as f64 / max_len as f64 };
-    // Almost-everything-changed pairs (table → list, whole rewrites) stay
-    // line-only: chips would cover the full body and look messy.
-    if similarity < MIN_WORD_SIMILARITY {
-        return (Vec::new(), Vec::new());
-    }
-
-    let mut old_changed = vec![false; n];
-    let mut new_changed = vec![false; m];
-    let (mut i, mut j) = (0usize, 0usize);
-    while i < n && j < m {
-        let old_tok = &old[old_atoms[i].0..old_atoms[i].1];
-        let new_tok = &new[new_atoms[j].0..new_atoms[j].1];
-        if old_tok == new_tok {
-            i += 1;
-            j += 1;
-        } else if dp[i + 1][j] >= dp[i][j + 1] {
-            old_changed[i] = true;
-            i += 1;
-        } else {
-            new_changed[j] = true;
-            j += 1;
-        }
-    }
-    while i < n {
-        old_changed[i] = true;
-        i += 1;
-    }
-    while j < m {
-        new_changed[j] = true;
-        j += 1;
-    }
-
-    let old_changed_count = old_changed.iter().filter(|&&f| f).count();
-    let new_changed_count = new_changed.iter().filter(|&&f| f).count();
-    // If either side is mostly chips, drop both — the pair reads better as a
-    // solid replace band than as a wall of highlight boxes.
-    if mostly_changed(old_changed_count, n) || mostly_changed(new_changed_count, m) {
-        return (Vec::new(), Vec::new());
-    }
-
-    (
-        collapse_atom_flags(&old_atoms, &old_changed, old),
-        collapse_atom_flags(&new_atoms, &new_changed, new),
-    )
-}
-
-/// True when more than half the atoms on a side are marked changed.
-fn mostly_changed(changed_atoms: usize, atom_count: usize) -> bool {
-    atom_count > 0 && changed_atoms * 2 > atom_count
-}
-
-fn collapse_atom_flags(atoms: &[(usize, usize)], flags: &[bool], text: &str) -> Vec<(usize, usize)> {
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    for (idx, (start, end)) in atoms.iter().enumerate() {
-        if !flags[idx] {
-            continue;
-        }
-        match ranges.last_mut() {
-            Some(last) if last.1 == *start => last.1 = *end,
-            _ => ranges.push((*start, *end)),
-        }
-    }
-    // Drop whitespace-only ranges: they create invisible chips.
-    ranges.retain(|(start, end)| text[*start..*end].chars().any(|c| !c.is_ascii_whitespace()));
-    ranges
 }
 
 #[cfg(test)]
@@ -445,31 +290,43 @@ mod tests {
     }
 
     #[test]
-    fn formats_numbered_unified_diff_with_start_only_headers() {
+    fn is_diff_discriminates_content_lines() {
+        assert!(DiffDisplayKind::Context.is_diff());
+        assert!(DiffDisplayKind::Addition.is_diff());
+        assert!(DiffDisplayKind::Deletion.is_diff());
+        assert!(!DiffDisplayKind::Metadata.is_diff());
+        assert!(!DiffDisplayKind::HunkHeader.is_diff());
+    }
+
+    #[test]
+    fn formats_numbered_unified_diff_with_dual_gutter() {
         let diff = "\
-diff --git a/file.txt b/file.txt
 @@ -10,2 +10,2 @@
+ old
 -old
 +new
- context
 ";
-
         let lines = format_numbered_unified_diff(diff);
-        assert_eq!(lines[0], "diff --git a/file.txt b/file.txt");
         assert!(lines.iter().any(|line| line == "@@ -10 +10 @@"));
-        assert!(lines.iter().any(|line| line.starts_with("-   10 │ old")));
-        assert!(lines.iter().any(|line| line.starts_with("+   10 │ new")));
-        assert!(lines.iter().any(|line| line.starts_with("    11 │ context")));
+        // Context: both numbers, blank sign (width clamps to 4).
+        assert!(lines.iter().any(|line| line.contains("  10 │   10 │   old")));
+        // Deletion: old number only (blank new column).
+        assert!(lines.iter().any(|line| line.contains("  11 │      │ - old")));
+        // Addition: new number only (blank old column is 4 spaces).
+        assert!(lines.iter().any(|line| line.contains("    │   11 │ + new")));
     }
 
     #[test]
     fn numbered_text_uses_pipe_separator_for_markdown_bullets() {
         let line = DiffDisplayLine::body(
             DiffDisplayKind::Addition,
+            None,
             Some(53),
             "- **Agent-first by design**: prose".to_string(),
         );
-        assert_eq!(line.numbered_text(5), "+   53 │ - **Agent-first by design**: prose");
+        let text = line.numbered_text(5);
+        assert!(text.contains("53 │ + - **Agent-first"));
+        assert!(text.contains("│ + "));
     }
 
     #[test]
@@ -505,82 +362,14 @@ diff --git a/file.txt b/file.txt
         assert_eq!(lines[0].kind, DiffDisplayKind::HunkHeader);
         assert_eq!(lines[0].text, "@@ -10 +10 @@");
         assert_eq!(lines[1].kind, DiffDisplayKind::Deletion);
-        assert_eq!(lines[1].line_number, Some(10));
-        assert_eq!(lines[1].text, "old");
+        assert_eq!(lines[1].old_line, Some(10));
+        assert_eq!(lines[1].new_line, None);
         assert_eq!(lines[2].kind, DiffDisplayKind::Addition);
-        assert_eq!(lines[2].line_number, Some(10));
+        assert_eq!(lines[2].old_line, None);
+        assert_eq!(lines[2].new_line, Some(10));
         assert_eq!(lines[3].kind, DiffDisplayKind::Context);
-        assert_eq!(lines[3].line_number, Some(11));
-    }
-
-    #[test]
-    fn diff_display_line_number_width_tracks_max_digits() {
-        let lines = vec![
-            DiffDisplayLine::body(DiffDisplayKind::Addition, Some(99), "let a = 1;".to_string()),
-            DiffDisplayLine::body(DiffDisplayKind::Context, Some(10_420), "let b = 2;".to_string()),
-        ];
-
-        assert_eq!(diff_display_line_number_width(&lines), 5);
-    }
-
-    #[test]
-    fn preserves_plain_text_when_not_diff() {
-        let lines = format_numbered_unified_diff("plain text output");
-        assert_eq!(lines, vec!["plain text output".to_string()]);
-    }
-
-    #[test]
-    fn is_diff_discriminates_content_lines() {
-        let diff = "\
-diff --git a/file.txt b/file.txt
-@@ -1 +1 @@
--old
-+new
- context
-";
-        let lines = display_lines_from_unified_diff(diff);
-        assert_eq!(lines[0].kind, DiffDisplayKind::Metadata);
-        assert!(!lines[0].is_diff());
-        assert_eq!(lines[1].kind, DiffDisplayKind::HunkHeader);
-        assert!(!lines[1].is_diff());
-        assert!(lines[2].is_diff());
-        assert!(lines[3].is_diff());
-        assert!(lines[4].is_diff());
-    }
-
-    #[test]
-    fn omitted_marker_advances_both_counters() {
-        let diff = "\
-@@ -1,5 +1,5 @@
--one
-... 3 lines omitted ...
- old tail
-";
-
-        let lines = display_lines_from_unified_diff(diff);
-        assert_eq!(lines[1].kind, DiffDisplayKind::Deletion);
-        assert_eq!(lines[1].line_number, Some(1));
-        assert_eq!(lines[2].kind, DiffDisplayKind::Metadata);
-        assert_eq!(lines[2].line_number, None);
-        assert_eq!(lines[3].kind, DiffDisplayKind::Context);
-        assert_eq!(lines[3].line_number, Some(4));
-    }
-
-    #[test]
-    fn diff_display_line_number_width_clamps_to_bounds() {
-        let small = vec![DiffDisplayLine::body(
-            DiffDisplayKind::Context,
-            Some(1),
-            "text".to_string(),
-        )];
-        assert_eq!(diff_display_line_number_width(&small), 5);
-
-        let large = vec![DiffDisplayLine::body(
-            DiffDisplayKind::Context,
-            Some(100_000),
-            "text".to_string(),
-        )];
-        assert_eq!(diff_display_line_number_width(&large), 6);
+        assert_eq!(lines[3].old_line, Some(11));
+        assert_eq!(lines[3].new_line, Some(11));
     }
 
     #[test]
@@ -594,59 +383,36 @@ diff --git a/file.txt b/file.txt
 
         let lines = display_lines_from_unified_diff(diff);
         assert_eq!(lines[2].kind, DiffDisplayKind::Metadata);
-        assert_eq!(lines[2].line_number, None);
         assert_eq!(lines[3].kind, DiffDisplayKind::Addition);
-        assert_eq!(lines[3].line_number, Some(1));
+        assert_eq!(lines[3].new_line, Some(1));
     }
 
     #[test]
-    fn word_level_diff_highlights_only_changed_tokens() {
-        let old = "let bright_red = anstyle::Color::Ansi(anstyle::AnsiColor::BrightRed);";
-        let new = "let bright_red = anstyle::Color::Rgb(anstyle::RgbColor(255, 90, 90));";
-        let (old_ranges, new_ranges) = word_level_changed_ranges(old, new);
-        assert!(!old_ranges.is_empty());
-        assert!(!new_ranges.is_empty());
-        let old_changed: String = old_ranges.iter().map(|&(s, e)| &old[s..e]).collect();
-        let new_changed: String = new_ranges.iter().map(|&(s, e)| &new[s..e]).collect();
-        assert!(old_changed.contains("Ansi"));
-        assert!(new_changed.contains("Rgb"));
-        // Shared prefix tokens stay outside the highlight.
-        assert!(!old_changed.contains("bright_red"));
-        assert!(!new_changed.contains("bright_red"));
+    fn diff_display_line_number_width_tracks_max_digits() {
+        let lines = vec![
+            DiffDisplayLine::body(DiffDisplayKind::Addition, None, Some(99), "let a = 1;".to_string()),
+            DiffDisplayLine::body(DiffDisplayKind::Context, Some(1), Some(10_420), "let b = 2;".to_string()),
+        ];
+
+        assert_eq!(diff_display_line_number_width(&lines), 5);
     }
 
     #[test]
-    fn word_level_diff_skips_dissimilar_pairs() {
-        let old = "| Pillar | What it means |\n| --- | --- |\n| **Harness** | The model reasons; the harness composes tools. |";
-        let new = "- **The loop is the product.** Tool composition, context management, and\n  verification are engineered — not improvised around a chat completion.";
-        let (old_ranges, new_ranges) = word_level_changed_ranges(old, new);
-        assert!(old_ranges.is_empty(), "dissimilar del pair should stay line-only");
-        assert!(new_ranges.is_empty(), "dissimilar add pair should stay line-only");
-    }
+    fn diff_display_line_number_width_clamps_to_bounds() {
+        let small = vec![DiffDisplayLine::body(
+            DiffDisplayKind::Context,
+            Some(1),
+            Some(1),
+            "text".to_string(),
+        )];
+        assert_eq!(diff_display_line_number_width(&small), 4);
 
-    #[test]
-    fn word_level_diff_skips_blank_sides() {
-        let (old_ranges, new_ranges) = word_level_changed_ranges("moved block", "");
-        assert!(old_ranges.is_empty());
-        assert!(new_ranges.is_empty());
-        let (old_ranges, new_ranges) = word_level_changed_ranges("", "moved block");
-        assert!(old_ranges.is_empty());
-        assert!(new_ranges.is_empty());
-    }
-
-    #[test]
-    fn annotate_pairs_consecutive_del_add_runs() {
-        let diff = "\
-@@ -1 +1 @@
--let a = 1;
-+let a = 2;
-";
-        let lines = display_lines_from_unified_diff(diff);
-        let del = lines.iter().find(|l| l.kind == DiffDisplayKind::Deletion).unwrap();
-        let add = lines.iter().find(|l| l.kind == DiffDisplayKind::Addition).unwrap();
-        assert!(!del.changed.is_empty());
-        assert!(!add.changed.is_empty());
-        assert_eq!(&del.text[del.changed[0].0..del.changed[0].1], "1");
-        assert_eq!(&add.text[add.changed[0].0..add.changed[0].1], "2");
+        let large = vec![DiffDisplayLine::body(
+            DiffDisplayKind::Context,
+            Some(100_000),
+            Some(100_000),
+            "text".to_string(),
+        )];
+        assert_eq!(diff_display_line_number_width(&large), 6);
     }
 }

@@ -704,24 +704,13 @@ fn markdown_diff_body_uses_file_language_syntax_highlight() {
     for segment in removed_line.segments.iter().skip(1) {
         assert!(segment.style.get_bg_color().is_some());
     }
-    // Word chips: `new`/`old` differ, so at least one token on each side gets
-    // the stronger background (two-level highlight).
-    let added_line_bg = added_line.line_background.expect("add line has tint");
-    let removed_line_bg = removed_line.line_background.expect("del line has tint");
-    assert!(
-        added_line
-            .segments
-            .iter()
-            .any(|s| s.style.get_bg_color().is_some_and(|bg| bg != added_line_bg)),
-        "add row should carry a stronger word chip"
-    );
-    assert!(
-        removed_line
-            .segments
-            .iter()
-            .any(|s| s.style.get_bg_color().is_some_and(|bg| bg != removed_line_bg)),
-        "del row should carry a stronger word chip"
-    );
+    // Every body token shares the line tint (uniform, no word chips).
+    for segment in added_line.segments.iter().skip(1) {
+        assert_eq!(segment.style.get_bg_color(), added_line.line_background);
+    }
+    for segment in removed_line.segments.iter().skip(1) {
+        assert_eq!(segment.style.get_bg_color(), removed_line.line_background);
+    }
 }
 
 #[test]

@@ -97,7 +97,6 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
                 lines.push(Line::from(Span::styled(display_line.text, Style::default().fg(Color::DarkGray))));
             }
             DiffDisplayKind::Context | DiffDisplayKind::Addition | DiffDisplayKind::Deletion => {
-                let line_num_str = format!("{:>4} ", display_line.line_number.unwrap_or(0));
                 let line_type = if display_line.kind == DiffDisplayKind::Context {
                     DiffLineType::Context
                 } else if display_line.kind == DiffDisplayKind::Addition {
@@ -117,15 +116,25 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
                     DiffLineType::Context => " ",
                 };
 
-                // Gutter shape `marker + number + │` keeps markdown bullets
-                // (`- foo`) distinct from the diff marker.
+                // JetBrains dual gutter: `old │ new │ sign content`.
+                let old_txt = display_line
+                    .old_line
+                    .map(|n| format!("{n:>4}"))
+                    .unwrap_or_else(|| "    ".to_owned());
+                let new_txt = display_line
+                    .new_line
+                    .map(|n| format!("{n:>4}"))
+                    .unwrap_or_else(|| "    ".to_owned());
                 let mut spans = vec![
-                    Span::styled(prefix.to_string(), sign_style),
-                    Span::styled(line_num_str, gutter_style),
-                    Span::styled("│ ".to_string(), gutter_style),
+                    Span::styled(old_txt, gutter_style),
+                    Span::styled(" │ ".to_owned(), gutter_style),
+                    Span::styled(new_txt, gutter_style),
+                    Span::styled(" │ ".to_owned(), gutter_style),
+                    Span::styled(prefix.to_owned(), sign_style),
+                    Span::styled(" ".to_owned(), sign_style),
                 ];
 
-                // Prose diffs (md/txt) skip syntax highlighting: solid diff fg
+                // Prose diffs (md/txt) skip syntax highlighting: solid content
                 // on the tinted bg. Code diffs keep syntax fg but are forced
                 // onto the diff bg so syntect theme holes can't show through.
                 let prose = is_prose_language_hint(language.as_deref());
