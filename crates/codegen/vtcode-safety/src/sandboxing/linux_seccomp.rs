@@ -101,7 +101,7 @@ fn primary_rules(profile: &SeccompProfile) -> Result<BTreeMap<i64, Vec<SeccompRu
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
 
     for name in profile.blocked_syscalls() {
-        match syscall_number(&name) {
+        match syscall_number(name) {
             Some(nr) => {
                 rules.entry(nr).or_default().push(SeccompRule::new(vec![])?);
             }

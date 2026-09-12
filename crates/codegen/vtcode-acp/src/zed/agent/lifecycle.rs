@@ -215,11 +215,31 @@ impl ZedAgent {
             .await
             .map_err(|error| SdkError::internal_error().data(error.to_string()))?;
         let compacted_len = compacted.len();
-        if let Ok(data) = session.data.lock() {
-            data.thread.replace_messages(compacted);
-        }
+        let Ok(data) = session.data.lock() else {
+            return Err(SdkError::internal_error());
+        };
+        // The lock was released during the LLM call, so a concurrent
+        // `session/prompt` or `session/rollback` may have mutated the history
+        // the summary was built from. Replacing it wholesale would silently
+        // drop those turns — fail closed instead of compacting stale state.
+        ensure_history_unchanged(&data.thread.messages(), &history)?;
+        data.thread.replace_messages(compacted);
         Ok((original, compacted_len))
     }
+}
+
+/// Verify `current` still equals the `snapshot` a long-running operation was
+/// built from, so the operation can safely replace the history in place.
+/// Returns an error naming the concurrent mutation when they diverge.
+fn ensure_history_unchanged(current: &[Message], snapshot: &[Message]) -> Result<(), SdkError> {
+    if current == snapshot {
+        return Ok(());
+    }
+    Err(SdkError::internal_error().data(json!({
+        "reason": "session_changed_during_operation",
+        "snapshot_messages": snapshot.len(),
+        "current_messages": current.len(),
+    })))
 }
 
 /// Index of the first message of the trailing `keep_last_turns` user turns.
@@ -509,6 +529,36 @@ mod tests {
                 .is_some_and(|data| data["reason"] == "unknown_session"),
             "rollback must report unknown_session: {rollback_error:?}"
         );
+    }
+
+    #[test]
+    fn history_unchanged_guard_accepts_only_exact_snapshots() {
+        let snapshot = vec![
+            message(MessageRole::User, "one"),
+            message(MessageRole::Assistant, "reply"),
+        ];
+
+        // Identical history: the operation may replace it in place.
+        assert!(ensure_history_unchanged(&snapshot, &snapshot).is_ok());
+
+        // Appended turn: replacing would drop the new messages.
+        let appended = {
+            let mut messages = snapshot.clone();
+            messages.push(message(MessageRole::User, "two"));
+            messages
+        };
+        assert!(ensure_history_unchanged(&appended, &snapshot).is_err());
+
+        // Rolled-back history: replacing would resurrect dropped turns.
+        let truncated = vec![message(MessageRole::User, "one")];
+        assert!(ensure_history_unchanged(&truncated, &snapshot).is_err());
+
+        // Same length, different content: a length-only check would miss this.
+        let mutated = vec![
+            message(MessageRole::User, "one"),
+            message(MessageRole::Assistant, "different reply"),
+        ];
+        assert!(ensure_history_unchanged(&mutated, &snapshot).is_err());
     }
 
     #[test]

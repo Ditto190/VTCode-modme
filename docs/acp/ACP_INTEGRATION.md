@@ -360,6 +360,10 @@ Codex's proprietary app-server exposes:
 | `session/compact` | `{session_id}` | `{original_messages, compacted_messages}` — LLM summarization in place |
 
 Standard ACP clients (Zed) are unaffected — they never call the extensions.
+`session/compact` fails closed (JSON-RPC internal error with reason
+`session_changed_during_operation`) if the session history changes while its
+summarization request is in flight, instead of overwriting turns processed
+concurrently.
 The machine-readable wire contract, including JSON Schemas for every request
 and response, is exportable:
 

@@ -362,9 +362,14 @@ external binary that accepts the same protocol.
 Enforcement (see `vtcode-safety/src/sandboxing/linux.rs`):
 
 -   **Landlock** (kernel 5.13+): reads granted everywhere except sensitive
-    credential paths; writes granted only for writable roots (read-only
-    policies may write `/dev/null` only). Execute paths stay unrestricted,
-    matching the macOS profile. Landlock has no deny rules, so `.git`/`.vtcode`
+    credential paths (including via symlinks whose target is or contains a
+    sensitive path); writes granted only for writable roots (read-only
+    policies may write `/dev/null` only). Execute paths and device ioctls stay
+    unrestricted, matching the macOS profile: `Execute` and `IoctlDev` are
+    excluded from the handled rights set (`from_read` includes `Execute`, and
+    `from_write` includes `IoctlDev` from kernel ABI v5 on), rather than
+    granted — handling `IoctlDev` would deny TTY ioctls to PTY-attached
+    commands. Landlock has no deny rules, so `.git`/`.vtcode`
     write protection inside writable roots remains at the preflight layer on
     Linux (macOS enforces it in the kernel).
 -   **seccomp-BPF** (`PR_SET_NO_NEW_PRIVS` + filters): blocks dangerous

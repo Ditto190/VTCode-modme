@@ -119,9 +119,7 @@ fn apply_resource_limits(limits: &ResourceLimits) -> Result<()> {
 
 /// Apply the Landlock filesystem restrictions of `policy` to this process.
 pub fn apply_landlock(policy: &SandboxPolicy, policy_cwd: &Path) -> Result<()> {
-    use landlock::{
-        ABI, AccessFs, BitFlags, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
-    };
+    use landlock::{ABI, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus};
 
     let Some(version) = probe_landlock_abi() else {
         bail!("Landlock is not supported by this kernel (Linux 5.13+ required); refusing to run unsandboxed");
@@ -133,11 +131,8 @@ pub fn apply_landlock(policy: &SandboxPolicy, policy_cwd: &Path) -> Result<()> {
         bail!("Landlock ABI version {version} is not usable");
     }
 
-    // Handle read + write rights but not Execute (exec paths stay unrestricted,
-    // matching Seatbelt's broad process-exec) and not IoctlDev (PTY terminals
-    // depend on device ioctls).
-    let handled: BitFlags<AccessFs> = AccessFs::from_read(abi) | AccessFs::from_write(abi);
-    let rules = compute_rules(policy, policy_cwd, abi)?;
+    let handled = handled_fs_access(abi);
+    let rules = compute_rules(policy, policy_cwd, abi, handled)?;
 
     let mut created = Ruleset::default()
         .handle_access(handled)
@@ -166,15 +161,45 @@ struct LandlockRule {
     access: landlock::BitFlags<landlock::AccessFs>,
 }
 
+/// Filesystem access rights this sandbox handles: everything the probed ABI
+/// supports for read and write, minus two deliberate exclusions.
+///
+/// - `Execute` stays unhandled so exec paths remain unrestricted, matching the
+///   Seatbelt profile's broad `(allow process-exec)` (`from_read` includes it).
+/// - `IoctlDev` stays unhandled so PTY terminals keep working (`from_write`
+///   includes it from ABI v5 on); writable-root grants never cover `/dev/pts`,
+///   so handling it would deny TTY ioctls to every sandboxed command.
+///
+/// Rule grants must stay within this set (`add_rule` rejects rights the
+/// ruleset does not handle), so callers intersect grant rights with the value
+/// this function returns.
+fn handled_fs_access(abi: landlock::ABI) -> landlock::BitFlags<landlock::AccessFs> {
+    use landlock::{AccessFs, BitFlags};
+
+    let abi_access: BitFlags<AccessFs> = AccessFs::from_read(abi) | AccessFs::from_write(abi);
+    abi_access & !(AccessFs::Execute | AccessFs::IoctlDev)
+}
+
 /// Compute the full grant set for `policy`: read grants everywhere except
 /// sensitive paths, plus write grants for writable roots (or `/dev/null`).
-fn compute_rules(policy: &SandboxPolicy, policy_cwd: &Path, abi: landlock::ABI) -> Result<Vec<LandlockRule>> {
+fn compute_rules(
+    policy: &SandboxPolicy,
+    policy_cwd: &Path,
+    abi: landlock::ABI,
+    handled: landlock::BitFlags<landlock::AccessFs>,
+) -> Result<Vec<LandlockRule>> {
     let mut rules = Vec::new();
     for path in compute_read_rule_paths(policy, policy_cwd)? {
-        rules.push(LandlockRule { path, access: landlock::AccessFs::from_read(abi) });
+        rules.push(LandlockRule {
+            path,
+            access: landlock::AccessFs::from_read(abi) & handled,
+        });
     }
     for path in compute_write_rule_paths(policy, policy_cwd) {
-        rules.push(LandlockRule { path, access: landlock::AccessFs::from_write(abi) });
+        rules.push(LandlockRule {
+            path,
+            access: landlock::AccessFs::from_write(abi) & handled,
+        });
     }
     Ok(rules)
 }
@@ -223,9 +248,11 @@ fn path_within(path: &Path, ancestor: &Path) -> bool {
 ///
 /// Descends only along chains that lead to a sensitive path, so the grant set
 /// stays small; everything else is granted wholesale as one directory rule.
-/// Symlink entries are granted only when their canonical target is not
-/// sensitive (Landlock rule paths are opened with `O_PATH`, which follows
-/// symlinks).
+/// Symlink entries are granted only when their canonical target neither is a
+/// sensitive path nor lies *above* one (Landlock rule paths are opened with
+/// `O_PATH`, which follows symlinks, so a grant on a link is a grant on its
+/// target — and an ancestor grant would re-admit the excluded subtree beneath
+/// it, since Landlock allows access granted by any ancestor rule).
 fn enumerate_read_grants(roots: &[PathBuf], sensitive: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut grants = Vec::new();
     let mut queued: HashSet<PathBuf> = HashSet::new();
@@ -256,8 +283,12 @@ fn enumerate_read_grants(roots: &[PathBuf], sensitive: &[PathBuf]) -> Result<Vec
                     grants.push(path);
                 }
             } else if file_type.is_symlink() {
+                // Exclude targets that are sensitive OR ancestors of a
+                // sensitive path: an ancestor grant would re-admit the
+                // excluded subtree beneath it (e.g. a link to `$HOME` or `/`
+                // would re-admit `~/.ssh`).
                 if let Ok(target) = std::fs::canonicalize(&path)
-                    && !sensitive.iter().any(|sp| path_within(&target, sp))
+                    && !sensitive.iter().any(|sp| path_within(&target, sp) || path_within(sp, &target))
                 {
                     grants.push(path);
                 }
@@ -344,6 +375,66 @@ mod tests {
         );
         assert!(grants.iter().any(|g| g.ends_with("work")));
         assert!(grants.iter().any(|g| g.ends_with("work-link")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_grants_exclude_symlinks_to_sensitive_ancestors() {
+        let root = TempDir::new().unwrap();
+        let root = root.path();
+        fs::create_dir_all(root.join(".ssh")).unwrap();
+        fs::create_dir_all(root.join("work")).unwrap();
+        // `root-link` resolves to the sensitive path's parent directory itself;
+        // `parent-link` resolves to an even higher ancestor. Granting either
+        // would re-admit `.ssh` beneath the target.
+        std::os::unix::fs::symlink(root, root.join("root-link")).unwrap();
+        std::os::unix::fs::symlink(root.parent().unwrap(), root.join("parent-link")).unwrap();
+        // Positive control: a sibling subtree and a link into it stay granted.
+        std::os::unix::fs::symlink(root.join("work"), root.join("work-link")).unwrap();
+
+        let sensitive = vec![root.join(".ssh")];
+        let grants = sorted(enumerate_read_grants(&[root.to_path_buf()], &sensitive).unwrap());
+
+        assert!(
+            !grants.iter().any(|g| g.ends_with("root-link") || g.ends_with("parent-link")),
+            "symlink to a sensitive ancestor must be excluded: {grants:?}"
+        );
+        assert!(grants.iter().any(|g| g.ends_with("work")));
+        assert!(grants.iter().any(|g| g.ends_with("work-link")));
+    }
+
+    #[test]
+    fn handled_fs_access_excludes_execute_and_ioctl_dev() {
+        use landlock::{ABI, AccessFs};
+
+        let abis = [
+            ABI::V1,
+            ABI::V2,
+            ABI::V3,
+            ABI::V4,
+            ABI::V5,
+            ABI::V6,
+            ABI::V7,
+            ABI::V8,
+            ABI::V9,
+        ];
+        for abi in abis {
+            let handled = handled_fs_access(abi);
+            assert!(!handled.contains(AccessFs::Execute), "Execute must stay unhandled at {abi:?}");
+            assert!(!handled.contains(AccessFs::IoctlDev), "IoctlDev must stay unhandled at {abi:?}");
+            assert!(handled.contains(AccessFs::ReadFile), "read handling lost at {abi:?}");
+            assert!(handled.contains(AccessFs::WriteFile), "write handling lost at {abi:?}");
+            // Only the two exclusions may be dropped: later-ABI rights such as
+            // Truncate (v3+) must stay handled.
+            if matches!(abi, ABI::V3 | ABI::V4 | ABI::V5 | ABI::V6 | ABI::V7 | ABI::V8 | ABI::V9) {
+                assert!(handled.contains(AccessFs::Truncate), "Truncate must stay handled at {abi:?}");
+            }
+            // Rule grants are intersected with the handled set, so they must
+            // never carry a right the ruleset does not handle (add_rule fails
+            // on such rules).
+            assert!(!(AccessFs::from_read(abi) & handled).contains(AccessFs::Execute));
+            assert!(!(AccessFs::from_write(abi) & handled).contains(AccessFs::IoctlDev));
+        }
     }
 
     #[test]
