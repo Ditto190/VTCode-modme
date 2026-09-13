@@ -239,6 +239,19 @@ synchronous libraries. `code_search` follows this split: independent backend
 processes overlap with `tokio::join!`, then filesystem and parser aggregation
 is isolated in one blocking task.
 
+`tokio::fs` runs blocking syscalls on `spawn_blocking` behind the scenes, so
+tune for few pool hops (see `tokio::fs` "Tuning your file IO"):
+batch into as few calls as possible, prefer whole-file `read`/`write` over
+chunked `File` loops, coalesce streaming writes with `BufWriter` + `flush`
+only when the file is not concurrently read (downloads), use `std::fs`
+inside one `spawn_blocking` for multi-step sequences (open + write + flush,
+checksum + extract), remember `flush()` before `sync_all()` on async files,
+and note `File::set_max_buf_size` (default 2 MiB) caps bytes per blocking
+call. Never use `tokio::fs` for special files (pipes); use `AsyncFd` or
+`tokio::net::unix::pipe` instead. Live-read spool files must stay unbuffered
+so every chunk reaches disk immediately; buffering would hide output from
+concurrent readers until `flush`.
+
 ### Pattern 7: Actor Pattern (Handle + Background Task)
 
 The actor pattern separates the handle (what callers interact with) from the background task (which owns state and performs I/O). This is the recommended pattern when a component needs to own exclusive access to a resource while accepting messages from multiple callers.

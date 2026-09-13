@@ -320,6 +320,9 @@ impl PipeSessionManager {
                     spool_hasher.update(sanitized.as_bytes());
                     spool_byte_count = spool_byte_count.saturating_add(sanitized.len() as u64);
                 }
+                // Spool files are live-read while the session runs, so every
+                // chunk must reach disk immediately; buffering would hide
+                // output from concurrent readers until `flush`.
                 if write_failed || file.sync_all().await.is_err() {
                     spool_failed_for_task.store(true, Ordering::Release);
                 } else {

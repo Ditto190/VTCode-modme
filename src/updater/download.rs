@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 use super::github::{self, ReleaseAsset};
 
@@ -26,9 +26,14 @@ where
         .with_context(|| format!("GitHub asset download returned an error for {}", asset.name))?;
     let total = response.content_length();
     let mut stream = response;
-    let mut file = tokio::fs::File::create(destination)
+    // Batch streaming network chunks through a `BufWriter` so many small
+    // `write_all` calls coalesce into a few large `spawn_blocking` writes
+    // (see `tokio::fs` "Tuning your file IO"). The buffer flushes on `flush()`
+    // below; each flush stays well under `File::set_max_buf_size` (2 MiB).
+    let file = tokio::fs::File::create(destination)
         .await
         .with_context(|| format!("failed to create downloaded archive {}", destination.display()))?;
+    let mut file = BufWriter::with_capacity(64 * 1024, file);
     let mut downloaded = 0_u64;
     let mut last_percent: Option<u8> = None;
     let mut last_report = std::time::Instant::now();

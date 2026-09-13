@@ -218,7 +218,13 @@ impl Updater {
         .with_context(|| format!("failed to download checksum metadata for update archive {}", asset.name))?;
         let expected = download::parse_checksum_metadata(&metadata, &asset.name)
             .with_context(|| format!("checksum metadata did not contain update archive {}", asset.name))?;
-        download::verify_file_checksum(&archive_path, &expected)
+        // `verify_file_checksum` does blocking `std::fs::read` + hashing; run it
+        // on the blocking pool so the async runtime is not stalled (tokio `fs`
+        // tuning: batch blocking file IO into `spawn_blocking`).
+        let archive_path_for_checksum = archive_path.clone();
+        tokio::task::spawn_blocking(move || download::verify_file_checksum(&archive_path_for_checksum, &expected))
+            .await
+            .context("Update checksum task join failed")?
             .context("downloaded update archive failed checksum verification")?;
 
         on_progress(UpdateProgress::Extracting);

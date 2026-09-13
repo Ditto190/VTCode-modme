@@ -15,30 +15,32 @@ use serde_json::{Value, json};
 use std::borrow::Cow;
 use std::future::Future;
 use std::io::ErrorKind;
-use tokio::io::AsyncWriteExt;
 
 const MAX_WRITE_BYTES: usize = 64_000;
 
 async fn write_text_file(path: &std::path::Path, content: &str) -> Result<()> {
-    let mut file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
+    // Single `spawn_blocking` write (tokio `fs` tuning: prefer `write` over
+    // `open` + `write_all` + `flush`, which costs 3 blocking-pool hops).
+    tokio::fs::write(path, content.as_bytes())
         .await
-        .with_context(|| format!("Failed to open file for writing: {}", path.display()))?;
-    file.write_all(content.as_bytes())
-        .await
-        .with_context(|| format!("Failed to write file content: {}", path.display()))?;
-    file.flush()
-        .await
-        .with_context(|| format!("Failed to flush file content: {}", path.display()))
+        .with_context(|| format!("Failed to write file content: {}", path.display()))
 }
 
 async fn create_text_file(path: &std::path::Path, content: &str) -> Result<(), std::io::Error> {
-    let mut file = tokio::fs::OpenOptions::new().create_new(true).write(true).open(path).await?;
-    file.write_all(content.as_bytes()).await?;
-    file.flush().await
+    // Preserve `create_new` semantics in one blocking-pool hop: `std::fs`
+    // inside `spawn_blocking` (tokio `fs` tuning for multi-step sequences).
+    let path = path.to_path_buf();
+    let bytes = content.as_bytes().to_vec();
+    tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        let mut file = options.open(&path)?;
+        file.write_all(&bytes)?;
+        file.flush()
+    })
+    .await
+    .map_err(|err| std::io::Error::other(format!("write task join failed: {err}")))?
 }
 
 impl FileOpsTool {
@@ -158,9 +160,19 @@ impl FileOpsTool {
                 write_text_file(&file_path, &input.content).await?;
             }
             "append" => {
-                let mut file = tokio::fs::OpenOptions::new().create(true).append(true).open(&file_path).await?;
-                file.write_all(input.content.as_bytes()).await?;
-                file.flush().await?;
+                // One blocking-pool hop via `std::fs` (tokio `fs` tuning for
+                // open + write + flush sequences instead of 3 async hops).
+                let path = file_path.clone();
+                let bytes = input.content.as_bytes().to_vec();
+                tokio::task::spawn_blocking(move || {
+                    use std::io::Write;
+                    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+                    file.write_all(&bytes)?;
+                    file.flush()
+                })
+                .await
+                .map_err(|err| anyhow!("append task join failed: {err}"))?
+                .with_context(|| format!("Failed to append file content: {}", file_path.display()))?;
             }
             "skip_if_exists" => {
                 if let Err(err) = create_text_file(&file_path, &input.content).await {

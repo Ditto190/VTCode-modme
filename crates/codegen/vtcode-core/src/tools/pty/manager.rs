@@ -596,6 +596,9 @@ impl PtyManager {
         let output_spool_integrity_for_task = Arc::clone(&output_spool_integrity);
 
         let output_spool_task = async move {
+            // Spool files are live-read while the session runs, so every
+            // chunk must reach disk immediately; buffering would hide output
+            // from concurrent readers until `flush`.
             let mut spool_file = output_spool_file.map(tokio::fs::File::from_std);
 
             if spool_file.is_none() {
@@ -631,6 +634,9 @@ impl PtyManager {
                     spool_hasher.update(sanitized.as_bytes());
                     spool_byte_count = spool_byte_count.saturating_add(sanitized.len() as u64);
                 }
+                // Spool files are live-read while the session runs, so every
+                // chunk must reach disk immediately; buffering would hide
+                // output from concurrent readers until `flush`.
                 if write_failed || file.sync_all().await.is_err() {
                     output_spool_failed_for_task.store(true, Ordering::Release);
                 } else {
