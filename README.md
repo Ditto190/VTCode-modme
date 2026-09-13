@@ -33,10 +33,18 @@
 - [What's inside](#whats-inside)
   - [Commands](#commands)
   - [Four pillars](#four-pillars)
+    - [Agent core](#agent-core)
+    - [Safety](#safety)
+    - [Extensibility](#extensibility)
+    - [Interface \& quality](#interface--quality)
 - [Documentation](#documentation)
 - [Development](#development)
 - [Contributing](#contributing)
+  - [Ways to contribute](#ways-to-contribute)
+  - [Getting started](#getting-started)
+  - [Contributors](#contributors)
 - [Support](#support)
+  - [Sponsorship](#sponsorship)
 - [License](#license)
 
 </details>
@@ -51,22 +59,18 @@
 
 </div>
 
-VT Code is an open-source terminal coding agent written in Rust: one binary
-for quick interactive sessions and long-running autonomous work alike. No IDE
-required, no context left behind.
+VT Code is an open-source terminal coding agent written in Rust: one static binary for quick interactive sessions and long-running autonomous work alike. No IDE required, no context left behind.
 
-It is a **harness, not just an LLM wrapper**. The model reasons; the runtime
-supplies everything else: tools, context, sandboxing, state, and verification.
-That separation is what turns raw model output into safe, reviewable progress,
-entirely in your terminal.
+It is a **harness, not just an LLM wrapper**. The model reasons; the runtime supplies everything else — tools, context, sandboxing, state, and **verification**. That separation is what turns raw model output into safe, reviewable progress, entirely in your terminal.
 
 > [!NOTE]
-> **Status:** Active development. Local inference and some automation flows are
-> experimental and may change between releases.
+> **Status:** Active development. Local inference and some automation flows
+> are experimental and may change between releases.
 
 > [!TIP]
 > **Behind the build:** [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
-> covering harness design, evals, security, and lessons from a year of building.
+> covers harness design, evals, security, and lessons from a year of
+> building.
 >
 > **Video companions:** [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
 > [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o).
@@ -77,12 +81,12 @@ Most agents are a model plus a tool call. That gets you a demo, not a
 teammate. Real work breaks them in predictable ways, and VT Code answers
 each one with a structural default, not a prompt tweak:
 
-| When agents fail at… | VT Code's structural answer |
-| --- | --- |
-| **Sessions drift** | Dynamic context assembly and auto-compaction keep long sessions grounded: the model reasons over current state, not a stale transcript. [Runtime guidance](./docs/development/runtime-guidance.md) |
-| **Tool output floods the window** | Results are spooled to disk and summarized into the model's view on demand: signal stays in context, noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md) |
-| **One unreviewed command** | Sandboxed execution and approvals fail closed, with adversarial regression coverage for the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **"Done" is a claim** | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md) |
+| When agents fail at…              | VT Code's structural answer                                                                                                                                                                                                                           |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded: the model reasons over current state, not a stale transcript. [Runtime guidance](./docs/development/runtime-guidance.md)                                                    |
+| **Tool output floods the window** | Results are spooled to disk and summarized into the model's view on demand: signal stays in context, noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md)                                                                      |
+| **One unreviewed command**        | Sandboxed execution and approvals fail closed, with adversarial regression coverage for the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **"Done" is a claim**             | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                                                                   |
 
 None of this is emergent.
 [`ThreadEvent`](./crates/common/vtcode-exec-events) is the single source of
@@ -92,10 +96,7 @@ checkpoints, memory, and trajectory export. The
 turns, tool results, and recovery behave. The behavior you rely on is
 written down, not accidental.
 
-If you have been burned by agents that look impressive until something goes
-wrong, these are the defaults you were missing, built in rather than bolted
-on. The [four pillars](#four-pillars) below cover the full surface, or skip to
-[Quick start](#quick-start) and see it work.
+If you have been burned by agents that look impressive until something goes wrong, these are the defaults you were missing — built in, not bolted on. The [four pillars](#four-pillars) below cover the full surface, or skip to [Quick start](#quick-start) and see it work.
 
 ## Quick start
 
@@ -122,10 +123,7 @@ option:
 vtcode secret add openai   # headless; or run /secret add openai inside the TUI
 ```
 
-`vtcode login` covers OAuth providers (ChatGPT, GitHub Copilot). Plain env vars
-and workspace `.env` still work, useful for CI. See
-[Getting started](./docs/user-guide/getting-started.md) for the credential
-resolution order.
+`vtcode login` covers OAuth providers (ChatGPT, GitHub Copilot). Plain env vars and workspace `.env` still work, useful for CI. See [Getting started](./docs/user-guide/getting-started.md) for the credential resolution order.
 
 > [!CAUTION]
 > Never commit API keys or put them in `vtcode.toml`.
@@ -133,16 +131,13 @@ resolution order.
 ### 3. Run
 
 ```bash
-vtcode                          # interactive TUI
-vtcode ask "explain Rc vs Arc"  # one-shot question
-vtcode exec "refactor main.rs"  # headless task
-vtcode review                   # review uncommitted changes
-vtcode continue                 # resume the last session
+vtcode                  # interactive TUI
+vtcode ask "…"          # one-shot question, no session, no tools
+vtcode exec "…"         # headless task with the full tool loop
+vtcode continue         # resume the last session
 ```
 
-See [Installation](./docs/installation/README.md) and
-[Getting Started](./docs/user-guide/getting-started.md) for the full tour,
-and [Commands](#commands) for the complete CLI surface.
+That is the whole loop: install, init, run. See [Commands](#commands) for the complete CLI surface, and [Getting Started](./docs/user-guide/getting-started.md) for the full tour.
 
 ### WebMCP browser bridge (opt-in)
 
@@ -183,15 +178,15 @@ vtcode eval --suite suite.json    # verify behavior with pass@k metrics
 
 A second tier handles session lifecycle and day-to-day operations:
 
-| Command | Purpose |
-| --- | --- |
-| `vtcode continue` | Resume the last session, or fork it into a new one with `--session-id` |
-| `vtcode schedule` | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts |
-| `vtcode secret` | Store provider API keys in your OS keyring, never in shell history or workspace files |
-| `vtcode models` | Inspect, test, and compare providers and models |
-| `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots |
-| `vtcode tool-policy` | Allow or deny specific tools per workspace |
-| `vtcode trajectory` | Pretty-print run logs for debugging and audits |
+| Command                              | Purpose                                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------- |
+| `vtcode continue`                    | Resume the last session, or fork it into a new one with `--session-id`                |
+| `vtcode schedule`                    | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts   |
+| `vtcode secret`                      | Store provider API keys in your OS keyring, never in shell history or workspace files |
+| `vtcode models`                      | Inspect, test, and compare providers and models                                       |
+| `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots                                             |
+| `vtcode tool-policy`                 | Allow or deny specific tools per workspace                                            |
+| `vtcode trajectory`                  | Pretty-print run logs for debugging and audits                                        |
 
 `vtcode analyze`, `vtcode check`, `vtcode schema tools`, `vtcode man`, and
 `vtcode update` round out the operator surface. See `vtcode --help` for the
@@ -199,16 +194,16 @@ full list.
 
 ### Four pillars
 
-| Pillar | In one line |
-| --- | --- |
-| **[Agent core](#agent-core)** | The loop that turns model output into reviewable progress |
-| **[Safety](#safety)** | Fail-closed execution, from sandbox to policy |
-| **[Extensibility](#extensibility)** | Every model and protocol, no fork |
-| **[Interface & quality](#interface--quality)** | Terminal-native UX, verified by default |
+| Pillar                                         | In one line                                               |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| **[Agent core](#agent-core)**                  | The loop that turns model output into reviewable progress |
+| **[Safety](#safety)**                          | Fail-closed execution, from sandbox to policy             |
+| **[Extensibility](#extensibility)**            | Every model and protocol, no fork                         |
+| **[Interface & quality](#interface--quality)** | Terminal-native UX, verified by default                   |
 
 #### Agent core
 
-*The loop that turns model output into reviewable progress.*
+_The loop that turns model output into reviewable progress._
 
 - **Durable sessions:** checkpoints, auto-compaction, and spooled tool
   output keep hour-long runs grounded. `continue` resumes; `revert` rolls
@@ -229,7 +224,7 @@ full list.
 
 #### Safety
 
-*Fail closed by default, with coverage for the attacks that actually happen.*
+_Fail closed by default, with coverage for the attacks that actually happen._
 
 - **Sandboxed execution:** command policies and workspace approvals fail
   closed: injection, path/symlink escape, and environment leakage are blocked
@@ -248,7 +243,7 @@ full list.
 
 #### Extensibility
 
-*Plug in without forking; your setup survives upgrades.*
+_Plug in without forking; your setup survives upgrades._
 
 - **Every model, one abstraction:** first-party APIs (OpenAI, Anthropic,
   Gemini, DeepSeek, Qwen, Mistral, xAI, …), gateways (OpenRouter, Vercel AI
@@ -279,7 +274,7 @@ full list.
 
 #### Interface & quality
 
-*Native to the terminal, verified by default.*
+_Native to the terminal, verified by default._
 
 - **Terminal-native TUI:** WCAG AA-validated themes, markdown rendering,
   diff previews, and customizable output styles and status line. Built for
@@ -301,12 +296,12 @@ full list.
 
 ## Documentation
 
-| Area    | Guides                                                                                                                              |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki) |
+| Area    | Guides                                                                                                                                                                                                                                                                                   |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                                                                                  |
 | Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
-| Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) |
-| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
+| Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md)                                                                                                                |
+| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
 
 The full catalog lives in the [Documentation Index](./docs/INDEX.md).
 
@@ -343,8 +338,7 @@ See [Development setup](./docs/development/DEVELOPMENT_SETUP.md) and
 - **Bug fixes and patches**: Small or large, every fix counts.
 - **Documentation**: Guides, examples, and corrections help everyone.
 - **Features and ideas**: Open an issue or start a discussion.
-- **Code reviews and testing**: Trying things out and reporting breakage keeps
-  the project healthy.
+- **Code reviews and testing**: Trying things out and reporting breakage keeps the project healthy.
 
 ### Getting started
 
@@ -394,9 +388,7 @@ Thank you to everyone who shaped VT Code.
 
 ### Sponsorship
 
-VT Code is built and maintained in spare time. If it helped you ship or learn
-something, a [sponsorship](https://github.com/sponsors/vinhnx) keeps the
-project independent.
+VT Code is built and maintained in spare time. If it helped you ship or learn something, a [sponsorship](https://github.com/sponsors/vinhnx) keeps the project independent.
 
 <div align="center">
   <a href="https://github.com/dnhn"><img src="https://avatars.githubusercontent.com/u/2561973" width="80" height="80" alt="@dnhn" style="border-radius: 50%" /></a>
@@ -415,7 +407,7 @@ project independent.
 ## License
 
 First-party code is **MIT OR Apache-2.0**. See [LICENSE](LICENSE).
-Third-party code keeps its original licenses: see [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
+Third-party code keeps its original licenses: see[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
 
 <div align="right">
 
