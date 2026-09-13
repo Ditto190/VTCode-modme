@@ -6,23 +6,8 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use vtcode_core::notifications::set_global_terminal_focused;
 
-pub(crate) struct SignalHandlerGuard {
-    handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl SignalHandlerGuard {
-    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
-        Self { handle: Some(handle) }
-    }
-}
-
-impl Drop for SignalHandlerGuard {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-        }
-    }
-}
+/// Owned signal-handler task handle; aborts on drop via the shared guard.
+pub(crate) type SignalHandlerGuard = vtcode_commons::TaskGuard;
 
 /// Spawn a signal handler task that listens for SIGINT and SIGTERM.
 ///

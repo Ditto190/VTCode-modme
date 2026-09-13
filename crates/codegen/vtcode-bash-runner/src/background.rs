@@ -65,7 +65,11 @@ impl<E: CommandExecutor + 'static> BackgroundCommandManager<E> {
         // Update status to running
         self.update_task_status(&task_id, BackgroundTaskStatus::Running).await;
 
-        // Spawn the background task
+        // Spawn the background task.
+        // Documented detached: bounded by the command execution itself and
+        // terminated early via `cancel_rx`; the outcome is observable through
+        // the task map (`status`/`result`), which readers poll via
+        // `get_task`/`get_task_output`.
         let executor = self.executor.clone();
         let tasks = self.tasks.clone();
         let id = task_id.clone();

@@ -1,42 +1,15 @@
-# VT Code Async Architecture Documentation
+# VT Code Async Documentation (Retired)
 
-## Quick Links
+`ASYNC_ARCHITECTURE.md` was retired on 2026-09-13: its December 2024 content
+duplicated and contradicted the canonical guide (stale file paths, superseded
+patterns, no task-ownership or cancel-safety rules).
 
--   **[Architecture Reference](./ASYNC_ARCHITECTURE.md)** - How the async system works
+The authoritative reference is now:
 
-## TL;DR
-
-The VT Code system has **100% async I/O operations**. All file operations use `tokio::fs`, PTY operations use `tokio::task::spawn_blocking`, and HTTP requests use `reqwest` async.
-
-Authoritative session events use bounded backpressure and stop accepting new
-events when persistence fails; diagnostic trajectory logs use bounded
-best-effort buffering with periodic and shutdown flushes. See the [async
-architecture guide](../guides/async-architecture.md) for the pipeline decision
-rules and capacity policy.
-
-## Architecture Overview
-
-```
-User Interface (TUI)
-        ↓
-Agent Turn Loop (Async)
-        ↓
-Tool Execution Pipeline (Async)
-        ↓
-Tool Registry (Async)
-        ↓
-
-
-PTY Operations    File Operations   HTTP Requests
-(spawn_blocking)  (tokio::fs)      (reqwest async)
-```
-
-**All layers are fully async**
-
-## Related Documentation
-
--   [Main README](../../README.md)
-
----
-
-**Status**: Complete
+- **[Async Architecture Guide](../guides/async-architecture.md)** — Tokio
+  runtime, event loop, task extent/error-propagation/cancel-safety rules,
+  actor pattern, and pipeline decision criteria.
+- [Architectural Invariant #21](../harness/ARCHITECTURAL_INVARIANTS.md) —
+  every spawned task has an owner.
+- [Code Organization Patterns](../guides/code-organization-patterns.md) —
+  background task lifecycle.

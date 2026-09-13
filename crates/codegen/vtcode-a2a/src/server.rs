@@ -241,6 +241,30 @@ async fn handle_rpc(
     }
 }
 
+/// Spawn a best-effort webhook delivery task.
+///
+/// Documented detached: the delivery is bounded (10s client timeout, max 3
+/// retries with backoff in `WebhookNotifier`), self-terminating, and its
+/// outcome is observable via `tracing::warn` on failure. Detachment is safe
+/// because webhook delivery must never block the SSE stream or agent turn;
+/// see "Task Extent, Error Propagation, and Cancel-Safety" in
+/// `docs/guides/async-architecture.md`.
+fn spawn_webhook_delivery(
+    notifier: Arc<WebhookNotifier>,
+    task_manager: Arc<TaskManager>,
+    task_id: String,
+    event: StreamingEvent,
+) {
+    drop(tokio::spawn(async move {
+        let Some(cfg) = task_manager.get_webhook_config(&task_id).await else {
+            return;
+        };
+        if let Err(error) = notifier.send_event(&cfg, event).await {
+            tracing::warn!(task_id = %task_id, error = %error, "A2A webhook delivery failed");
+        }
+    }));
+}
+
 /// Handle Server-Sent Events streaming
 async fn handle_stream(State(state): State<A2aServerState>, Json(request): Json<JsonRpcRequest>) -> impl IntoResponse {
     if request.jsonrpc != JSONRPC_VERSION {
@@ -293,16 +317,7 @@ async fn handle_stream(State(state): State<A2aServerState>, Json(request): Json<
             };
 
             if matches {
-                // Fire webhook asynchronously (best-effort)
-                let notifier = notifier.clone();
-                let task_manager = task_manager.clone();
-                let task_id_for_hook = task_id_clone.clone();
-                let event_for_hook = event.clone();
-                drop(tokio::spawn(async move {
-                    if let Some(cfg) = task_manager.get_webhook_config(&task_id_for_hook).await {
-                        drop(notifier.send_event(&cfg, event_for_hook).await);
-                    }
-                }));
+                spawn_webhook_delivery(notifier.clone(), task_manager.clone(), task_id_clone.clone(), event.clone());
 
                 let is_final = event.is_final();
                 let json = serde_json::to_string(&SendStreamingMessageResponse { event })
@@ -316,7 +331,10 @@ async fn handle_stream(State(state): State<A2aServerState>, Json(request): Json<
         }
     };
 
-    // Start background task to process and emit events
+    // Start background task to process and emit events.
+    // Documented detached: bounded demo pipeline (~600ms of sleeps plus
+    // channel sends), terminated by completion, with outcomes fanned out over
+    // the broadcast channel; webhook legs use `spawn_webhook_delivery`.
     let state_clone = state.clone();
     let task_id_clone = task_id.clone();
     drop(tokio::spawn(async move {
@@ -341,15 +359,12 @@ async fn handle_stream(State(state): State<A2aServerState>, Json(request): Json<
         };
         drop(state_clone.event_tx.send(status_event.clone()));
 
-        // Fire webhook if configured
-        let notifier = state_clone.webhook_notifier.clone();
-        let task_manager = state_clone.task_manager.clone();
-        let task_id_for_hook = task_id_clone.clone();
-        drop(tokio::spawn(async move {
-            if let Some(cfg) = task_manager.get_webhook_config(&task_id_for_hook).await {
-                drop(notifier.send_event(&cfg, status_event).await);
-            }
-        }));
+        spawn_webhook_delivery(
+            state_clone.webhook_notifier.clone(),
+            state_clone.task_manager.clone(),
+            task_id_clone.clone(),
+            status_event,
+        );
 
         // Simulate generating a response message
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -362,15 +377,12 @@ async fn handle_stream(State(state): State<A2aServerState>, Json(request): Json<
         };
         drop(state_clone.event_tx.send(message_event.clone()));
 
-        // Fire webhook if configured
-        let notifier = state_clone.webhook_notifier.clone();
-        let task_manager = state_clone.task_manager.clone();
-        let task_id_for_hook = task_id_clone.clone();
-        drop(tokio::spawn(async move {
-            if let Some(cfg) = task_manager.get_webhook_config(&task_id_for_hook).await {
-                drop(notifier.send_event(&cfg, message_event).await);
-            }
-        }));
+        spawn_webhook_delivery(
+            state_clone.webhook_notifier.clone(),
+            state_clone.task_manager.clone(),
+            task_id_clone.clone(),
+            message_event,
+        );
 
         // Complete the task
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -391,15 +403,12 @@ async fn handle_stream(State(state): State<A2aServerState>, Json(request): Json<
         };
         drop(state_clone.event_tx.send(final_status_event.clone()));
 
-        // Fire webhook if configured
-        let notifier = state_clone.webhook_notifier.clone();
-        let task_manager = state_clone.task_manager.clone();
-        let task_id_for_hook = final_status_event.task_id().unwrap_or_default().to_string();
-        drop(tokio::spawn(async move {
-            if let Some(cfg) = task_manager.get_webhook_config(&task_id_for_hook).await {
-                drop(notifier.send_event(&cfg, final_status_event).await);
-            }
-        }));
+        spawn_webhook_delivery(
+            state_clone.webhook_notifier.clone(),
+            state_clone.task_manager.clone(),
+            final_status_event.task_id().unwrap_or_default().to_string(),
+            final_status_event,
+        );
     }));
 
     Ok(Sse::new(Box::pin(stream)).keep_alive(

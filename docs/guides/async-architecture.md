@@ -553,15 +553,19 @@ A `tokio::spawn`/`spawn_blocking` call site must satisfy exactly one of:
 
 1. **Awaited** — the handle is joined before the spawning scope exits.
 2. **Guarded** — the handle is stored in a Drop-abort guard or an owned field
-   with a shutdown path (see the existing RAII guards:
-   `BackgroundTaskGuard`, `SignalHandlerGuard`, `TimeoutWarningGuard`,
-   `ProcessHandle::Drop`).
+   with a shutdown path (see the shared `vtcode_commons::TaskGuard` and its
+   current adopters `BackgroundTaskGuard`, `SignalHandlerGuard`, and
+   `ProgressUpdateGuard`, plus the cooperative-cancel `TimeoutWarningGuard`
+   and `ProcessHandle::Drop`).
 3. **Documented detached** — the handle is dropped *only* with a comment
    stating why detachment is safe: the work is bounded, terminated by a token
    or channel drop, and its outcome is observable (logged or sent over a
    channel). Example: the legacy WebMCP session expiry loop
-   (`crates/codegen/vtcode-webmcp/src/remote_mcp.rs`) and the cancel-path MCP
-   shutdown in `src/agent/runloop/unified/session_setup/signal.rs`.
+   (`crates/codegen/vtcode-webmcp/src/remote_mcp.rs`), the cancel-path MCP
+   shutdown in `src/agent/runloop/unified/session_setup/signal.rs`, and the
+   best-effort A2A webhook deliveries (`spawn_webhook_delivery` in
+   `crates/codegen/vtcode-a2a/src/server.rs`, bounded by the webhook client
+   timeout/retry budget with failures logged).
 
 "Fire-and-forget" without all three properties is a bug: on process exit the
 task is killed mid-flight (nothing joins it), and its error is invisible.

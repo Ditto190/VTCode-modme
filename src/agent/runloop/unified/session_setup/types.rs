@@ -26,23 +26,8 @@ use vtcode_ui::tui::app::{InlineHandle, InlineHeaderContext, InlineSession};
 
 use crate::updater::{StartupUpdateCheck, StartupUpdateNotice};
 
-pub(crate) struct BackgroundTaskGuard {
-    handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl BackgroundTaskGuard {
-    pub(crate) fn new(handle: tokio::task::JoinHandle<()>) -> Self {
-        Self { handle: Some(handle) }
-    }
-}
-
-impl Drop for BackgroundTaskGuard {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-        }
-    }
-}
+/// Owned background task handle; aborts on drop via the shared guard.
+pub(crate) type BackgroundTaskGuard = vtcode_commons::TaskGuard;
 
 pub(crate) struct ToolExecutionContext {
     pub tool_result_cache: Arc<RwLock<ToolResultCache>>,
