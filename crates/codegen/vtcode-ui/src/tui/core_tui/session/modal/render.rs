@@ -1260,6 +1260,27 @@ mod tests {
     }
 
     #[test]
+    fn narrow_modal_keeps_command_tail_and_omission_evidence() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 32, 16),
+            &[
+                "Tool: exec_command".to_string(),
+                "## Command".to_string(),
+                "`python3 -c 'print(1)' … --output ../../critical.txt`".to_string(),
+                "… +5 more lines (full command runs on approval)".to_string(),
+                "`rm -- target/last-line`".to_string(),
+            ],
+            &styles,
+        );
+
+        let rendered = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(rendered.contains("../../critical.txt"), "trailing destination must remain visible: {rendered}");
+        assert!(rendered.contains("+5 more lines"), "omission count must remain visible: {rendered}");
+        assert!(rendered.contains("target/last-line"), "multiline tail must remain visible: {rendered}");
+    }
+
+    #[test]
     fn modal_instruction_context_row_splits_label_and_value() {
         let styles = modal_render_styles();
         let lines = modal_instruction_lines(

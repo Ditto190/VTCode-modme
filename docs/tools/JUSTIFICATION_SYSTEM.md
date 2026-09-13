@@ -116,8 +116,10 @@ pub struct JustificationExtractor;
          Expected outcome and auto-approval suggestions remain in logs only.
          `format_for_dialog()` remains the verbose log/test format.
     d. Show approval dialog with:
-       - Tool name plus the one-line action summary (the only place the
-         command is shown; there is no separate command block)
+       - A bounded shell-command preview for command tools. Long lines retain
+         their beginning and end; multiline commands retain head and tail rows
+         with an explicit omitted-line count.
+       - Tool name plus a one-line action summary for non-command tools
        - Agent reason + risk level under a separated `WHY` section
        - Concise options; the permanent option truncates long command labels to 60 chars
     e. Wait for user decision
