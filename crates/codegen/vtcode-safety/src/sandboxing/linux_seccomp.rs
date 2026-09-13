@@ -27,12 +27,12 @@ use seccompiler::{
 
 use super::policy::SeccompProfile;
 
-// Syscall numbers absent from some supported architectures: `umount` was
-// replaced by `umount2`, and port-I/O (`iopl`, `ioperm`) is x86-only.
-#[cfg(target_arch = "x86_64")]
-const SYS_UMOUNT: Option<i64> = Some(libc::SYS_umount);
-#[cfg(not(target_arch = "x86_64"))]
-const SYS_UMOUNT: Option<i64> = None;
+// Syscall numbers absent from some supported architectures: legacy `umount`
+// was replaced by `umount2` (`SYS_umount` exists only on 32-bit/legacy
+// targets — none of x86_64, aarch64, riscv64 expose it in libc 0.2.189),
+// and port-I/O (`iopl`, `ioperm`) is x86-only. Alias legacy `umount`
+// profiles to `umount2` so they still block the real syscall.
+const SYS_UMOUNT: Option<i64> = Some(libc::SYS_umount2);
 #[cfg(target_arch = "x86_64")]
 const SYS_IOPL: Option<i64> = Some(libc::SYS_iopl);
 #[cfg(not(target_arch = "x86_64"))]
@@ -77,7 +77,7 @@ pub fn apply_seccomp_filter(profile: &SeccompProfile) -> Result<()> {
     // while everything else returns EPERM.
     if !profile.allow_namespaces() {
         let mut clone3 = BTreeMap::new();
-        clone3.insert(libc::SYS_clone3, vec![SeccompRule::new(vec![])?]);
+        let _ = clone3.insert(libc::SYS_clone3, vec![SeccompRule::new(vec![])?]);
         let filter = SeccompFilter::new(
             clone3,
             SeccompAction::Allow,

@@ -7577,6 +7577,7 @@ dependencies = [
  "vtcode-core",
  "vtcode-eval",
  "vtcode-memory",
+ "vtcode-safety",
  "vtcode-ui",
  "vtcode-webmcp",
  "webbrowser",

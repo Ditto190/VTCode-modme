@@ -12,6 +12,7 @@
 //! fast and never depend on config loading.
 
 use std::ffi::OsString;
+use std::os::unix::process::CommandExt as _;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -152,10 +153,9 @@ fn exec_wrapped_command(command: Vec<OsString>) -> ! {
     let program = parts.next().unwrap_or_else(|| unreachable!("parser rejects empty commands"));
     let mut cmd = std::process::Command::new(&program);
     cmd.args(parts);
-    let error = match cmd.exec() {
-        Err(error) => error,
-        Ok(()) => unreachable!("std::process::Command::exec never returns Ok"),
-    };
+    // `CommandExt::exec` replaces the process on success and returns the
+    // `io::Error` directly on failure (it never returns `Ok`).
+    let error = cmd.exec();
     let exit_code = match error.kind() {
         std::io::ErrorKind::NotFound => EXIT_COMMAND_NOT_FOUND,
         _ => EXIT_COMMAND_NOT_EXECUTABLE,

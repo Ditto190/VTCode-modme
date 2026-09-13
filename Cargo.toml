@@ -336,6 +336,8 @@ mimalloc = { version = "0.1", default-features = false }
 tikv-jemallocator = { version = "0.6", optional = true, features = ["background_threads"] }
 hotpath = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+vtcode-safety = { workspace = true }
 
 [features]
 default = ["tool-chat", "desktop-notifications"]

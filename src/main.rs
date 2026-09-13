@@ -192,7 +192,7 @@ fn bootstrap_main() -> Result<BootstrapOutcome> {
     // sandboxed spawns stay fast and independent of config loading.
     #[cfg(target_os = "linux")]
     {
-        if crate::cli::sandbox_exec::try_run_sandbox_exec_mode() {
+        if cli::sandbox_exec::try_run_sandbox_exec_mode() {
             return Ok(BootstrapOutcome::ExitEarly);
         }
     }
