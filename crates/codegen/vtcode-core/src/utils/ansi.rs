@@ -115,6 +115,7 @@ pub struct AnsiRenderer {
     screen_reader_mode: bool,
     show_diagnostics_in_transcript: bool,
     tool_display_mode: ToolDisplayMode,
+    diff_preview_mode: vtcode_commons::ui_protocol::DiffPreviewMode,
     compact_command_group: Option<CompactActivityMetadata>,
     next_compact_group_id: u64,
     pending_tool_output_anchor: Option<ToolOutputId>,
@@ -160,6 +161,7 @@ impl AnsiRenderer {
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
             tool_display_mode: ToolDisplayMode::Compact,
+            diff_preview_mode: vtcode_commons::ui_protocol::DiffPreviewMode::Inline,
             compact_command_group: None,
             next_compact_group_id: 0,
             pending_tool_output_anchor: None,
@@ -249,6 +251,14 @@ impl AnsiRenderer {
 
     pub fn tool_display_mode(&self) -> ToolDisplayMode {
         self.tool_display_mode
+    }
+
+    pub fn set_diff_preview_mode(&mut self, mode: vtcode_commons::ui_protocol::DiffPreviewMode) {
+        self.diff_preview_mode = mode;
+    }
+
+    pub fn diff_preview_mode(&self) -> vtcode_commons::ui_protocol::DiffPreviewMode {
+        self.diff_preview_mode
     }
 
     pub fn toggle_tool_display_mode(&mut self) -> ToolDisplayMode {
@@ -2070,6 +2080,7 @@ mod tests {
             screen_reader_mode: false,
             show_diagnostics_in_transcript: false,
             tool_display_mode: ToolDisplayMode::default(),
+            diff_preview_mode: vtcode_commons::ui_protocol::DiffPreviewMode::Inline,
             compact_command_group: None,
             next_compact_group_id: 0,
             pending_tool_output_anchor: None,

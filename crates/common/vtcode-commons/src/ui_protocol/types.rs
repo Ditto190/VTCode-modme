@@ -133,6 +133,18 @@ pub enum WizardModalMode {
     TabbedList,
 }
 
+/// Diff preview layout for file-edit approval overlays.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum DiffPreviewMode {
+    /// Single-column unified view (default).
+    #[default]
+    Inline,
+    /// Old/new columns side by side.
+    SideBySide,
+}
+
 // ---------------------------------------------------------------------------
 // Plan types
 // ---------------------------------------------------------------------------

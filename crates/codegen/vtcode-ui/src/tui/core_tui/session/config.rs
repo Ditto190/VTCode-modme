@@ -27,7 +27,9 @@ pub struct SessionConfig {
 }
 
 // Re-export shared enums from vtcode-commons.
-pub use vtcode_commons::ui_protocol::{LayoutModeOverride, ReasoningDisplayMode, ThinkingBlockState, UiMode};
+pub use vtcode_commons::ui_protocol::{
+    DiffPreviewMode, LayoutModeOverride, ReasoningDisplayMode, ThinkingBlockState, UiMode,
+};
 
 /// UI appearance configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +126,10 @@ pub struct AppearanceConfig {
     #[serde(default = "default_transcript_review_control")]
     pub show_transcript_review_close_button: bool,
 
+    /// Diff preview layout for file-edit approval overlays.
+    #[serde(default)]
+    pub diff_preview_mode: DiffPreviewMode,
+
     /// Customization settings
     pub customization: CustomizationConfig,
 }
@@ -157,6 +163,7 @@ impl Default for AppearanceConfig {
             show_transcript_review_hints: default_transcript_review_control(),
             show_transcript_review_shortcut_guide: default_transcript_review_control(),
             show_transcript_review_close_button: default_transcript_review_control(),
+            diff_preview_mode: DiffPreviewMode::Inline,
             customization: CustomizationConfig::default(),
         }
     }

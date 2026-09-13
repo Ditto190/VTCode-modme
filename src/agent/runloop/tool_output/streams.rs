@@ -45,7 +45,8 @@ use anstyle::{AnsiColor, Effects, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use smallvec::SmallVec;
 use vtcode_commons::diff_preview::{
-    DiffDisplayKind, DiffDisplayLine, diff_display_line_number_width, display_lines_from_unified_diff,
+    DiffDisplayKind, DiffDisplayLine, SideBySideRow, diff_display_line_number_width, display_lines_from_unified_diff,
+    side_by_side_rows,
 };
 use vtcode_commons::preview::{
     display_width, excerpt_text_lines, format_hidden_lines_summary as shared_hidden_lines_summary,
@@ -389,6 +390,10 @@ pub(crate) fn render_diff_content_block(
         }
     }
 
+    if renderer.diff_preview_mode() == vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide {
+        return render_diff_content_side_by_side(renderer, lines_slice, git_styles, fallback_style);
+    }
+
     let line_number_width = diff_display_line_number_width(lines_slice);
     let color_enabled = renderer.capabilities().supports_color();
     let mut formatted_buffer = String::with_capacity(256);
@@ -454,6 +459,256 @@ pub(crate) fn render_diff_content_block(
     }
 
     Ok(())
+}
+
+/// Render diff display lines as dual-pane (old | new) rows.
+///
+/// Context lines appear on both sides. Consecutive deletion/addition runs are
+/// zipped index-wise. Hunk headers and metadata span the full width.
+fn render_diff_content_side_by_side(
+    renderer: &mut AnsiRenderer,
+    lines_slice: &[DiffDisplayLine],
+    git_styles: &GitStyles,
+    fallback_style: MessageStyle,
+) -> Result<()> {
+    let rows = side_by_side_rows(lines_slice);
+    let line_number_width = diff_display_line_number_width(lines_slice);
+    let color_enabled = renderer.capabilities().supports_color();
+    let mut formatted_buffer = String::with_capacity(512);
+    let mut display_buffer = String::with_capacity(512);
+
+    // Target pane width: leave room for gutter + divider within MAX_LINE_LENGTH.
+    let pane_width = ((MAX_LINE_LENGTH.saturating_sub(3)) / 2).max(20);
+
+    for row in rows {
+        display_buffer.clear();
+        let raw_line = format_side_by_side_row_plain(&row, line_number_width, pane_width);
+        if raw_line.is_empty() {
+            continue;
+        }
+        let was_truncated = display_width(&raw_line) > MAX_LINE_LENGTH;
+        if was_truncated {
+            display_buffer.push_str(&truncate_with_ellipsis(&raw_line, MAX_LINE_LENGTH, "..."));
+        } else {
+            display_buffer.push_str(&raw_line);
+        }
+
+        if let Some(summary_line) =
+            colorize_diff_summary_line(&display_buffer, renderer.capabilities().supports_color())
+        {
+            render_preview_line(
+                renderer,
+                &display_buffer,
+                Some(&summary_line),
+                None,
+                false,
+                fallback_style,
+                Some(fallback_style.style()),
+            )?;
+            continue;
+        }
+
+        // Side-by-side rows carry their own per-pane ANSI backgrounds.
+        // Pass a bg-less override so an empty left/right cell cannot inherit
+        // the sibling pane's tint via the line-level style.
+        let rendered_owned = if color_enabled && !was_truncated {
+            Some(format_side_by_side_row_ansi(&row, line_number_width, pane_width, git_styles, &mut formatted_buffer))
+        } else {
+            None
+        };
+
+        render_preview_line(
+            renderer,
+            &display_buffer,
+            rendered_owned.filter(|r| *r != display_buffer.as_str()),
+            None,
+            false,
+            fallback_style,
+            Some(AnsiStyle::new()),
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Plain-text dual-pane row for fallback / truncation.
+fn format_side_by_side_row_plain(row: &SideBySideRow, number_width: usize, pane_width: usize) -> String {
+    if row.is_full_width() {
+        return row.left.as_ref().map(|l| l.text.clone()).unwrap_or_default();
+    }
+    let left = pane_cell_plain(row.left.as_ref(), number_width, pane_width);
+    let right = pane_cell_plain(row.right.as_ref(), number_width, pane_width);
+    format!("{left}│{right}")
+}
+
+fn pane_cell_plain(line: Option<&DiffDisplayLine>, number_width: usize, pane_width: usize) -> String {
+    let Some(line) = line else {
+        return " ".repeat(pane_width);
+    };
+    let (marker, number) = match line.kind {
+        DiffDisplayKind::Addition => ('+', line.new_line),
+        DiffDisplayKind::Deletion => ('-', line.old_line),
+        _ => (' ', line.new_line.or(line.old_line)),
+    };
+    let no = number.map(|n| n.to_string()).unwrap_or_default();
+    let gutter = format!("{marker}{no:>number_width$}│");
+    let body_width = pane_width.saturating_sub(gutter.chars().count());
+    let body = truncate_chars_to_width(&line.text, body_width);
+    let pad = body_width.saturating_sub(display_width(&body));
+    format!("{gutter}{body}{}", " ".repeat(pad))
+}
+
+/// ANSI-styled dual-pane row with per-pane backgrounds.
+fn format_side_by_side_row_ansi<'a>(
+    row: &SideBySideRow,
+    number_width: usize,
+    pane_width: usize,
+    git_styles: &GitStyles,
+    out: &'a mut String,
+) -> &'a str {
+    out.clear();
+    use std::fmt::Write as _;
+
+    if row.is_full_width() {
+        let text = row.left.as_ref().map(|l| l.text.as_str()).unwrap_or("");
+        let _ = write!(out, "{Reset}");
+        out.push_str(text);
+        return out.as_str();
+    }
+
+    let left = format_side_by_side_pane_ansi(row.left.as_ref(), number_width, pane_width, git_styles);
+    let right = format_side_by_side_pane_ansi(row.right.as_ref(), number_width, pane_width, git_styles);
+    // Start the row with a full reset + default bg so nothing carries over
+    // from the previous line.
+    let _ = write!(out, "\x1b[0m\x1b[49m");
+    out.push_str(&left);
+    let divider = AnsiStyle::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)));
+    let _ = write!(out, "{divider}│\x1b[0m\x1b[49m");
+    out.push_str(&right);
+    // End with full reset so the next line starts clean.
+    let _ = write!(out, "\x1b[0m");
+    out.as_str()
+}
+
+fn format_side_by_side_pane_ansi(
+    line: Option<&DiffDisplayLine>,
+    number_width: usize,
+    pane_width: usize,
+    git_styles: &GitStyles,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(pane_width + 16);
+    let Some(line) = line else {
+        // SGR 49 = default background. More reliable than SGR 0 (full reset)
+        // for clearing an inherited bg in ansi-to-tui / terminal parsers.
+        let _ = write!(out, "\x1b[0m\x1b[49m");
+        out.push_str(&" ".repeat(pane_width));
+        return out;
+    };
+    let base_style = select_line_style_for_kind(line, git_styles);
+    let bg = base_style.and_then(|s| s.get_bg_color());
+    let word_bg = match line.kind {
+        DiffDisplayKind::Addition => git_styles.add_word.and_then(|s| s.get_bg_color()),
+        DiffDisplayKind::Deletion => git_styles.remove_word.and_then(|s| s.get_bg_color()),
+        _ => None,
+    };
+    let (marker, number) = match line.kind {
+        DiffDisplayKind::Addition => ('+', line.new_line),
+        DiffDisplayKind::Deletion => ('-', line.old_line),
+        _ => (' ', line.new_line.or(line.old_line)),
+    };
+    let no = number.map(|n| n.to_string()).unwrap_or_default();
+
+    // One continuous tint through the whole pane: marker + number + │ + body
+    // + pad. No Reset between cells — that would carve out an unstyled gutter
+    // strip next to the coloured body.
+    let marker_style = match marker {
+        '+' => AnsiStyle::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
+            .bg_color(bg),
+        '-' => AnsiStyle::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightRed)))
+            .bg_color(bg),
+        _ => AnsiStyle::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
+            .bg_color(bg),
+    };
+    // Dim the gutter line numbers so they recede behind the content.
+    let gutter_style = AnsiStyle::new()
+        .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
+        .bg_color(bg)
+        .effects(Effects::DIMMED);
+    // Body fg matches the pane's signal colour. Additions use BrightGreen
+    // (brighter than default) on the green tint; deletions use default fg
+    // with DIM so they read quieter than additions.
+    let body_style = match marker {
+        '+' => AnsiStyle::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
+            .bg_color(bg),
+        '-' => AnsiStyle::new().bg_color(bg).effects(Effects::DIMMED),
+        _ => AnsiStyle::new().bg_color(bg),
+    };
+
+    let _ = write!(out, "{marker_style}{marker}");
+    let _ = write!(out, "{gutter_style}{no:>number_width$}│");
+    // Gutter is 1 (sign) + number_width + 1 (│).
+    let body_width = pane_width.saturating_sub(2 + number_width);
+    let truncated = display_width(&line.text) > body_width;
+    let body = truncate_chars_to_width(&line.text, body_width);
+    // Two-level diff: line tint on the body + stronger word chips on changed
+    // tokens (same as the inline renderer). Falls back to solid tint when
+    // there are no word ranges or no word_bg. Skip chips on truncated rows —
+    // `changed` offsets are into the original text and would highlight the
+    // wrong slice after truncation.
+    let word_ranges: &[(usize, usize)] = if truncated { &[] } else { &line.changed };
+    let highlighted = highlight_diff_content(&body, bg, word_ranges, word_bg);
+    match highlighted {
+        Some(hl) => {
+            out.push_str(&hl);
+        }
+        None => {
+            let _ = write!(out, "{body_style}{body}");
+        }
+    }
+    // Pad to exact remaining cells so the tint always spans the full pane.
+    // Track used width in display cells, not chars, to handle wide glyphs.
+    let mut used = 1 + number_width + 1; // sign + number + │
+    for ch in body.chars() {
+        used += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+    }
+    let pad = pane_width.saturating_sub(used);
+    if pad > 0 {
+        let _ = write!(out, "{body_style}{}", " ".repeat(pad));
+    }
+    // End the pane with a reset so the next pane starts clean.
+    let _ = write!(out, "{Reset}");
+    out
+}
+
+/// Truncate to at most `max_width` display cells without an ellipsis marker.
+fn truncate_chars_to_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if used + w > max_width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out
+}
+
+fn select_line_style_for_kind(line: &DiffDisplayLine, git_styles: &GitStyles) -> Option<AnsiStyle> {
+    match line.kind {
+        DiffDisplayKind::Addition => git_styles.add,
+        DiffDisplayKind::Deletion => git_styles.remove,
+        _ => None,
+    }
 }
 
 #[allow(

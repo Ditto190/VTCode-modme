@@ -91,6 +91,30 @@ impl Default for ShellLineStyles {
     }
 }
 
+/// Muted approval-popup variant: only the leading command keeps accent color;
+/// options, strings, variables, and keywords collapse to the body foreground
+/// so multi-line `python3 -c` blocks read as one code block instead of rainbow
+/// noise. Separators stay dimmed to preserve the token hierarchy.
+impl ShellLineStyles {
+    pub fn muted_for_approval(&self) -> Self {
+        Self {
+            output: Arc::clone(&self.output),
+            bullet: Arc::clone(&self.bullet),
+            glyph: Arc::clone(&self.glyph),
+            verb: Arc::clone(&self.verb),
+            command: Arc::clone(&self.command),
+            args: Arc::clone(&self.args),
+            keyword: Arc::clone(&self.args),
+            variable: Arc::clone(&self.args),
+            string: Arc::clone(&self.args),
+            option: Arc::clone(&self.args),
+            truncation: Arc::clone(&self.truncation),
+            separator: Arc::clone(&self.separator),
+            count: Arc::clone(&self.count),
+        }
+    }
+}
+
 fn is_bash_keyword(token: &str) -> bool {
     matches!(
         token,
@@ -434,6 +458,17 @@ mod tests {
         assert_eq!(option.style.color, styles.option.color);
         assert_eq!(separator.style.color, styles.separator.color);
         assert!(separator.style.effects.contains(Effects::DIMMED));
+    }
+
+    #[test]
+    fn approval_muted_palette_collapses_option_and_string_to_body() {
+        let base = ShellLineStyles::new();
+        let styles = base.muted_for_approval();
+        assert_eq!(styles.option.color, styles.args.color);
+        assert_eq!(styles.string.color, styles.args.color);
+        assert_eq!(styles.variable.color, styles.args.color);
+        assert_eq!(styles.keyword.color, styles.args.color);
+        assert_eq!(styles.command.color, base.command.color);
     }
 
     #[test]

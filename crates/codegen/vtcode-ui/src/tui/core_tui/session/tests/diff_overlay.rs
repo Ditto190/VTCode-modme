@@ -18,6 +18,34 @@ fn diff_overlay_defaults_to_edit_approval_mode() {
 }
 
 #[test]
+fn diff_overlay_renders_side_by_side_when_configured() {
+    use vtcode_commons::ui_protocol::DiffPreviewMode as DiffLayoutMode;
+
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let mut appearance = session.core.appearance.clone();
+    appearance.diff_preview_mode = DiffLayoutMode::SideBySide;
+    session.handle_command(app_types::InlineCommand::SetAppearance { appearance });
+
+    show_diff_overlay(&mut session, app_types::DiffPreviewMode::EditApproval);
+    let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
+    let joined = lines.join("\n");
+
+    assert!(joined.contains("side-by-side"), "header should mark side-by-side layout");
+    assert!(joined.contains("Old"), "left column header should appear");
+    assert!(joined.contains("New"), "right column header should appear");
+}
+
+#[test]
+fn diff_overlay_renders_inline_by_default() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    show_diff_overlay(&mut session, app_types::DiffPreviewMode::EditApproval);
+    let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
+    let joined = lines.join("\n");
+
+    assert!(!joined.contains("side-by-side"), "inline layout should not show the side-by-side badge");
+}
+
+#[test]
 fn diff_overlay_edit_approval_keys_remain_unchanged() {
     let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
 

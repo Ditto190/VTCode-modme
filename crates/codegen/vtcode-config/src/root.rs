@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::status_line::StatusLineConfig;
 use crate::terminal_title::TerminalTitleConfig;
+use vtcode_commons::ui_protocol::DiffPreviewMode;
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -440,6 +441,11 @@ pub struct UiConfig {
     #[serde(default = "default_hide_header")]
     pub hide_header: bool,
 
+    /// Diff preview layout for file-edit approval overlays.
+    /// Options: "inline" (default) or "side-by-side".
+    #[serde(default = "default_diff_preview_mode")]
+    pub diff_preview_mode: DiffPreviewMode,
+
     /// Transcript Review presentation controls.
     #[serde(default)]
     pub transcript_review: UiTranscriptReviewConfig,
@@ -607,6 +613,10 @@ fn default_hide_header() -> bool {
     true
 }
 
+fn default_diff_preview_mode() -> DiffPreviewMode {
+    DiffPreviewMode::Inline
+}
+
 fn default_transcript_review_control() -> bool {
     true
 }
@@ -656,6 +666,7 @@ impl Default for UiConfig {
             reduce_motion_mode: default_reduce_motion_mode(),
             reduce_motion_keep_progress_animation: default_reduce_motion_keep_progress_animation(),
             hide_header: default_hide_header(),
+            diff_preview_mode: default_diff_preview_mode(),
             transcript_review: UiTranscriptReviewConfig::default(),
         }
     }
@@ -726,6 +737,27 @@ mod tests {
         assert!(ui.transcript_review.show_hints);
         assert!(ui.transcript_review.show_shortcut_guide);
         assert!(ui.transcript_review.show_close_button);
+    }
+
+    #[test]
+    fn diff_preview_mode_defaults_to_inline_and_parses_side_by_side() {
+        assert_eq!(UiConfig::default().diff_preview_mode, DiffPreviewMode::Inline);
+        assert_eq!(toml::from_str::<UiConfig>("").expect("empty parses").diff_preview_mode, DiffPreviewMode::Inline);
+
+        let side: UiConfig = toml::from_str("diff_preview_mode = \"side-by-side\"").expect("side-by-side mode parses");
+        assert_eq!(side.diff_preview_mode, DiffPreviewMode::SideBySide);
+
+        let inline: UiConfig = toml::from_str("diff_preview_mode = \"inline\"").expect("inline mode parses");
+        assert_eq!(inline.diff_preview_mode, DiffPreviewMode::Inline);
+
+        let round_trip = toml::to_string(&side).expect("side-by-side serializes");
+        assert!(round_trip.contains("diff_preview_mode = \"side-by-side\""));
+        assert_eq!(
+            toml::from_str::<UiConfig>(&round_trip)
+                .expect("side-by-side round trips")
+                .diff_preview_mode,
+            DiffPreviewMode::SideBySide
+        );
     }
 
     #[test]

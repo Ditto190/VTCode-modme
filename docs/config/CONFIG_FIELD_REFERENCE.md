@@ -833,6 +833,7 @@ python3 scripts/generate_config_field_reference.py
 | `ui.bold_is_bright` | `boolean` | no | `false` | Compatibility mode for legacy terminals that map bold to bright colors. When enabled, avoids using bold styling on text that would become bright colors, preventing visibility issues in terminals with "bold is bright" behavior. |
 | `ui.color_scheme_mode` | `string` | no | `"auto"` | Color scheme mode for automatic light/dark theme switching. - "auto": Detect from terminal (via the Contour dark/light query where supported, else OSC 11, or the COLORFGBG env var) and follow live palette changes - "light": Force light mode theme selection - "dark": Force dark mode theme selection |
 | `ui.dim_completed_todos` | `boolean` | no | `true` | Dim completed todo items (- \[x\]) in agent output |
+| `ui.diff_preview_mode` | `string` | no | `"inline"` | Diff preview layout for file-edit approval overlays and tool-output diffs. Options: "inline" (stacked unified diff, default) or "side-by-side" (old/new panes). Falls back to inline when the terminal is too narrow. |
 | `ui.display_mode` | `string` | no | `"minimal"` | UI display mode preset (full, minimal, focused) |
 | `ui.fullscreen.copy_on_select` | `boolean` | no | `true` | Copy selected transcript text immediately when the mouse selection ends. Can also be controlled via VTCODE_FULLSCREEN_COPY_ON_SELECT=0/1. |
 | `ui.fullscreen.mouse_capture` | `boolean` | no | `true` | Capture mouse events inside the fullscreen UI. Can also be controlled via VTCODE_FULLSCREEN_MOUSE_CAPTURE=0/1. |

@@ -107,19 +107,22 @@ pub struct JustificationExtractor;
    a. Extract justification from decision ledger
       - Use JustificationExtractor on latest decision
       - Fall back to suggested defaults if no explicit reasoning
-   b. Check approval patterns (ApprovalRecorder)
-      - If high-approval-rate → auto-approve
-      - If has history → show suggestion in dialog
+    b. Check approval patterns (ApprovalRecorder)
+       - If high-approval-rate → auto-approve (no dialog shown)
     c. Format justification for TUI display
-       - Approval dialog uses compact single-row fields (`Reason:` / `Expected:` / `Risk:`),
+       - Approval dialog uses minimal single-row fields (`Reason:` / `Risk:` only),
          first logical line only + middle-truncation (160 chars, 32 for risk), via
          `compact_justification_lines()` in `permission_prompt.rs` so the HITL popup stays scannable.
+         Expected outcome and auto-approval suggestions remain in logs only.
          `format_for_dialog()` remains the verbose log/test format.
-   d. Show approval dialog with:
-      - Tool name and arguments
-      - Agent reasoning (if available)
-      - Risk level and approval history
-   e. Wait for user decision
+    d. Show approval dialog with:
+       - Tool name (bare header; the one-line action summary is omitted when a
+         highlighted `COMMAND` / `PREVIEW` block follows to avoid duplication)
+       - Syntax-highlighted command block (`│` gutter, muted 2-tone shell palette,
+         8-row head/tail budget, 120-char middle-truncation per line)
+       - Agent reason + risk level under a separated `WHY` section
+       - Concise options; the permanent option truncates long command labels to 60 chars
+    e. Wait for user decision
    ↓
 5. Record decision (if learning enabled)
    - ApprovalRecorder::record_approval()
@@ -165,7 +168,7 @@ Stored in the user cache directory's approval-pattern file:
 
 -   `prompt_tool_permission()` - Extended with optional justification parameter
 -   `ensure_tool_permission()` - Routes justification to approval dialog
--   Dialog displays the compact justification (`Reason:` / `Expected:` / `Risk:` single rows);
+-   Dialog displays the minimal justification (`Reason:` / `Risk:` single rows);
     the verbose `format_for_dialog()` output remains for logs/tests
 
 ### 2. Session Management (`src/agent/runloop/unified/turn/session.rs`)
@@ -199,22 +202,21 @@ User requests: "Run the build and check for errors"
 3. Justification extraction:
    - Decision ledger contains: "Need to verify code compiles before refactoring"
    - Extracted reason: "Need to verify code compiles before refactoring"
-4. Approval dialog shows (compact single-row fields):
+4. Approval dialog shows (minimal single-row fields):
 
     Tool Permission Required
     Tool: exec_command
     ## Command
-    `cargo build`
-    ## Intent
-    Reason: Need to verify code compiles before refactoring
-    Expected: Will capture command output for analysis
-    Risk: High
-    Suggestion: Approved 3 times previously (100%)
+      │ cargo build            ← syntax-highlighted, │ gutter, no bullet
+    ## Why
+      Reason: Need to verify code compiles before refactoring
+      Risk: High
 
-     Approve Once
-     Allow for Session
-     Always Allow ← (if high history)
-     Deny
+     Approve Once               Allow this time only
+     Allow for Session          For the current session
+     Always approve…            Remember `cargo build` in this workspace
+     ──────────────────────────
+     Deny Once                  Ask again next time
 
 
 5. User selects "Always Allow"

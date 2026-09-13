@@ -142,6 +142,82 @@ pub fn display_lines_from_hunks(hunks: &[DiffHunk]) -> Vec<DiffDisplayLine> {
     lines
 }
 
+/// One rendered row in a side-by-side diff view.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SideBySideRow {
+    /// Full-width band (hunk header / metadata) stored on `left`; otherwise
+    /// the old-file pane. `None` means an empty left cell.
+    pub left: Option<DiffDisplayLine>,
+    /// New-file pane. `None` means an empty right cell.
+    pub right: Option<DiffDisplayLine>,
+}
+
+impl SideBySideRow {
+    /// True when this row is a full-width band rather than a split pair.
+    pub fn is_full_width(&self) -> bool {
+        self.left
+            .as_ref()
+            .is_some_and(|l| matches!(l.kind, DiffDisplayKind::HunkHeader | DiffDisplayKind::Metadata))
+            && self.right.is_none()
+    }
+}
+
+/// Pair display lines into side-by-side rows.
+///
+/// Context lines appear on both sides. Consecutive deletion/addition runs are
+/// zipped index-wise so old and new lines sit on the same visual row. Hunk
+/// headers and metadata span the full width (stored on `left`).
+pub fn side_by_side_rows(lines: &[DiffDisplayLine]) -> Vec<SideBySideRow> {
+    let mut rows = Vec::with_capacity(lines.len());
+    let mut i = 0usize;
+
+    while i < lines.len() {
+        match lines[i].kind {
+            DiffDisplayKind::HunkHeader | DiffDisplayKind::Metadata => {
+                rows.push(SideBySideRow { left: Some(lines[i].clone()), right: None });
+                i += 1;
+            }
+            DiffDisplayKind::Context => {
+                rows.push(SideBySideRow {
+                    left: Some(lines[i].clone()),
+                    right: Some(lines[i].clone()),
+                });
+                i += 1;
+            }
+            DiffDisplayKind::Deletion => {
+                let del_start = i;
+                while i < lines.len() && lines[i].kind == DiffDisplayKind::Deletion {
+                    i += 1;
+                }
+                let dels = &lines[del_start..i];
+                let add_start = i;
+                while i < lines.len() && lines[i].kind == DiffDisplayKind::Addition {
+                    i += 1;
+                }
+                let adds = &lines[add_start..i];
+                let pairs = dels.len().max(adds.len());
+                for pair in 0..pairs {
+                    rows.push(SideBySideRow {
+                        left: dels.get(pair).cloned(),
+                        right: adds.get(pair).cloned(),
+                    });
+                }
+            }
+            DiffDisplayKind::Addition => {
+                let add_start = i;
+                while i < lines.len() && lines[i].kind == DiffDisplayKind::Addition {
+                    i += 1;
+                }
+                for line in &lines[add_start..i] {
+                    rows.push(SideBySideRow { left: None, right: Some(line.clone()) });
+                }
+            }
+        }
+    }
+
+    rows
+}
+
 pub fn display_lines_from_unified_diff(diff_content: &str) -> Vec<DiffDisplayLine> {
     // Upper-bound the capacity to the line count — the double scan is cheap
     // (L1-bound byte search) and avoids 10+ reallocations on large diffs.
@@ -638,6 +714,78 @@ mod tests {
         let (old_ranges, new_ranges) = word_level_changed_ranges(&long_a, &long_b);
         assert!(old_ranges.is_empty());
         assert!(new_ranges.is_empty());
+    }
+
+    #[test]
+    fn side_by_side_pairs_context_on_both_columns() {
+        let lines = display_lines_from_hunks(&[DiffHunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![DiffLine {
+                kind: DiffLineKind::Context,
+                old_line: Some(1),
+                new_line: Some(1),
+                text: "same\n".to_string(),
+            }],
+        }]);
+        let rows = side_by_side_rows(&lines);
+        assert_eq!(rows.len(), 2);
+        let context = &rows[1];
+        assert_eq!(context.left.as_ref().map(|l| l.text.as_str()), Some("same"));
+        assert_eq!(context.right.as_ref().map(|l| l.text.as_str()), Some("same"));
+    }
+
+    #[test]
+    fn side_by_side_zips_del_add_runs() {
+        let lines = display_lines_from_unified_diff(
+            "\
+@@ -1,2 +1,2 @@
+-old a
+-old b
++new a
++new b
+",
+        );
+        let rows = side_by_side_rows(&lines);
+        assert!(rows[0].is_full_width());
+        assert_eq!(rows[1].left.as_ref().map(|l| l.text.as_str()), Some("old a"));
+        assert_eq!(rows[1].right.as_ref().map(|l| l.text.as_str()), Some("new a"));
+        assert_eq!(rows[2].left.as_ref().map(|l| l.text.as_str()), Some("old b"));
+        assert_eq!(rows[2].right.as_ref().map(|l| l.text.as_str()), Some("new b"));
+    }
+
+    #[test]
+    fn side_by_side_keeps_unpaired_additions_on_right_only() {
+        let lines = display_lines_from_unified_diff(
+            "\
+@@ -1 +1,2 @@
+ keep
++added
+",
+        );
+        let rows = side_by_side_rows(&lines);
+        assert!(
+            rows.iter()
+                .any(|row| row.left.is_none() && row.right.as_ref().is_some_and(|r| r.text == "added"))
+        );
+    }
+
+    #[test]
+    fn side_by_side_keeps_unpaired_deletions_on_left_only() {
+        let lines = display_lines_from_unified_diff(
+            "\
+@@ -2,1 +1 @@
+ keep
+-removed
+",
+        );
+        let rows = side_by_side_rows(&lines);
+        assert!(
+            rows.iter()
+                .any(|row| row.right.is_none() && row.left.as_ref().is_some_and(|l| l.text == "removed"))
+        );
     }
 
     #[test]

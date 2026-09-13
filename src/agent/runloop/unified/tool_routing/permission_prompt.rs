@@ -319,24 +319,39 @@ fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Op
 /// Max logical rows shown for the approved command block; longer commands
 /// collapse behind an overflow count so the popup fits its viewport budget.
 const MAX_COMMAND_PREVIEW_LINES: usize = 8;
+/// Max chars per command line; longer lines collapse middle so a long
+/// single-line `python3 -c` invocation stays one scannable row.
+const MAX_COMMAND_LINE_CHARS: usize = 120;
+/// Max chars for persistent-approval display labels embedded in option
+/// subtitles; the full command remains visible in the `COMMAND` block.
+const MAX_APPROVAL_LABEL_CHARS: usize = 60;
+
+fn format_command_preview_line(line: &str) -> String {
+    format!("`{}`", vtcode_commons::formatting::truncate_middle(line, MAX_COMMAND_LINE_CHARS))
+}
 
 /// Format command lines for the approval dialog, collapsing long commands to
 /// head + tail so a dangerous suffix can't hide behind the overflow.
 fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
     if command_lines.len() <= MAX_COMMAND_PREVIEW_LINES {
-        return command_lines.into_iter().map(|line| format!("`{line}`")).collect();
+        return command_lines.iter().map(|line| format_command_preview_line(line)).collect();
     }
     const HEAD_LINES: usize = 5;
     const TAIL_LINES: usize = 2;
     let hidden = command_lines.len().saturating_sub(HEAD_LINES + TAIL_LINES);
     let mut preview = Vec::with_capacity(HEAD_LINES + TAIL_LINES + 1);
-    preview.extend(command_lines.iter().take(HEAD_LINES).map(|line| format!("`{line}`")));
+    preview.extend(
+        command_lines
+            .iter()
+            .take(HEAD_LINES)
+            .map(|line| format_command_preview_line(line)),
+    );
     preview.push(format!("… +{hidden} more lines (full command runs on approval)"));
     preview.extend(
         command_lines
             .iter()
             .skip(command_lines.len().saturating_sub(TAIL_LINES))
-            .map(|line| format!("`{line}`")),
+            .map(|line| format_command_preview_line(line)),
     );
     preview
 }
@@ -355,24 +370,14 @@ fn push_capped_context_line(description_lines: &mut Vec<String>, label: &str, va
     }
 }
 
-/// Compact agent-justification lines for the approval dialog: one logical row
-/// per field so the popup stays scannable. Full reasoning remains in logs.
+/// Compact agent-justification lines for the approval dialog: `Reason` + `Risk`
+/// only so the popup stays minimal and scannable. Full reasoning (including
+/// expected outcome) remains in logs.
 fn compact_justification_lines(just: &vtcode_core::tools::ToolJustification) -> Vec<String> {
     let mut lines = Vec::new();
     let reason = just.reason.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
     if !reason.is_empty() {
         lines.push(format!("Reason: {}", vtcode_commons::formatting::truncate_middle(reason, MAX_CONTEXT_LINE_CHARS)));
-    }
-    let outcome = just
-        .expected_outcome
-        .as_deref()
-        .map(|outcome| outcome.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or(""))
-        .filter(|outcome| !outcome.is_empty());
-    if let Some(outcome) = outcome {
-        lines.push(format!(
-            "Expected: {}",
-            vtcode_commons::formatting::truncate_middle(outcome, MAX_CONTEXT_LINE_CHARS)
-        ));
     }
     let risk = just.risk_level.trim();
     if !risk.is_empty() {
@@ -458,6 +463,27 @@ fn tool_args_diff_preview(tool_name: &str, tool_args: Option<&Value>) -> Option<
     Some(preview)
 }
 
+/// Header rows for the approval popup: bare `Tool: {tool}` plus the one-line
+/// action summary — unless a highlighted command block follows, in which case
+/// the summary would duplicate the block. Diff previews only carry hunk
+/// metadata (`--- a/path` rows), so the `Edit file <path>` summary is still
+/// needed to identify the target file.
+fn tool_permission_header_lines(
+    tool_name: &str,
+    display_name: &str,
+    has_command_preview: bool,
+    source_thread_label: Option<&str>,
+) -> Vec<String> {
+    let mut lines = vec![format!("Tool: {tool_name}")];
+    if let Some(source_label) = source_thread_label {
+        lines.push(format!("Source: {source_label}"));
+    }
+    if !has_command_preview && !display_name.trim().is_empty() {
+        lines.push(display_name.trim().to_string());
+    }
+    lines
+}
+
 fn build_tool_permission_options(
     prompt_kind: ToolPermissionPromptKind,
     persistent_approval_target: Option<&PersistentApprovalTarget>,
@@ -467,7 +493,7 @@ fn build_tool_permission_options(
     let mut options = vec![
         InlineListItem {
             title: "Approve Once".to_string(),
-            subtitle: Some("Allow this tool to execute this time only".to_string()),
+            subtitle: Some("Allow this time only".to_string()),
             badge: None,
             indent: 0,
             selection: Some(InlineListSelection::ToolApproval(true)),
@@ -480,9 +506,9 @@ fn build_tool_permission_options(
                 "Allow for Session".to_string()
             },
             subtitle: if prompt_kind == ToolPermissionPromptKind::Mcp {
-                Some("Run the tool and remember this choice for this session".to_string())
+                Some("Remember for this session".to_string())
             } else {
-                Some("Allow this tool for the current session".to_string())
+                Some("For the current session".to_string())
             },
             badge: Some("Session".to_string()),
             indent: 0,
@@ -492,15 +518,14 @@ fn build_tool_permission_options(
     ];
 
     if let Some(target) = persistent_approval_target {
-        let subtitle = match target {
-            PersistentApprovalTarget::ToolLevel => "Remember approval for this tool in this workspace".to_string(),
-            PersistentApprovalTarget::ExactInvocation { display_label } => {
-                format!("Remember approval for {display_label} in this workspace")
-            }
-            PersistentApprovalTarget::PrefixRule { display_label, .. } => {
-                format!("Remember approval for {display_label} in this workspace")
+        let short_label = match target {
+            PersistentApprovalTarget::ToolLevel => "this tool".to_string(),
+            PersistentApprovalTarget::ExactInvocation { display_label }
+            | PersistentApprovalTarget::PrefixRule { display_label, .. } => {
+                vtcode_commons::modal_hints::truncate_modal_text(display_label, MAX_APPROVAL_LABEL_CHARS)
             }
         };
+        let subtitle = format!("Remember {short_label} in this workspace");
         options.push(InlineListItem {
             title: "Always approve and save to policy cache".to_string(),
             subtitle: Some(subtitle),
@@ -529,7 +554,7 @@ fn build_tool_permission_options(
         subtitle: if prompt_kind == ToolPermissionPromptKind::Mcp {
             Some("Cancel this tool call".to_string())
         } else {
-            Some("Reject this tool for now (ask again next time)".to_string())
+            Some("Ask again next time".to_string())
         },
         badge: None,
         indent: 0,
@@ -590,55 +615,48 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
             }
         }
     }
-    let approval_learning_key = learning_target.approval_key.as_str();
-    let approval_learning_label = learning_target.display_label.as_str();
-
     let prompt_kind = tool_permission_prompt_kind(tool_name);
-    let mut description_lines = vec![format!("Tool: {tool_name} — {display_name}")];
+    let command_preview = shell_command_preview_lines(tool_name, tool_args);
+    let diff_preview = if command_preview.is_none() {
+        tool_args_diff_preview(tool_name, tool_args)
+    } else {
+        None
+    };
+    let mut description_lines =
+        tool_permission_header_lines(tool_name, display_name, command_preview.is_some(), source_thread_label);
 
-    if let Some(source_label) = source_thread_label {
-        description_lines[0].push_str(&format!(" • Source: {source_label}"));
-    }
-
-    if let Some(command_lines) = shell_command_preview_lines(tool_name, tool_args) {
+    if let Some(command_lines) = command_preview {
         description_lines.push("## Command".to_string());
         description_lines.extend(format_command_preview_lines(command_lines));
-    } else if let Some(diff_lines) = tool_args_diff_preview(tool_name, tool_args) {
+    } else if let Some(diff_lines) = diff_preview {
         description_lines.push("## Preview".to_string());
         description_lines.extend(diff_lines);
     }
 
-    let has_context = approval_reason.is_some()
-        || justification.is_some()
-        || extract_shell_approval_justification(tool_name, tool_args).is_some();
+    let shell_justification = extract_shell_approval_justification(tool_name, tool_args);
+    let has_context = approval_reason.is_some() || justification.is_some() || shell_justification.is_some();
     if has_context {
-        description_lines.push("## Intent".to_string());
+        description_lines.push("## Why".to_string());
     }
 
     if let Some(reason) = approval_reason {
         push_context_line(&mut description_lines, "Reason", reason);
-    }
-
-    if let Some(shell_justification) = extract_shell_approval_justification(tool_name, tool_args) {
-        push_context_line(&mut description_lines, "Justification", &shell_justification);
+    } else if let Some(shell_reason) = shell_justification {
+        push_context_line(&mut description_lines, "Reason", &shell_reason);
     }
 
     if let Some(just) = justification {
-        description_lines.extend(compact_justification_lines(just));
+        // `compact_justification_lines` emits Reason + Risk only; skip a
+        // duplicate Reason row when an explicit approval reason already covers it.
+        for line in compact_justification_lines(just) {
+            if line.starts_with("Reason:") && approval_reason.is_some() {
+                continue;
+            }
+            description_lines.push(line);
+        }
     }
 
-    if let Some(recorder) = approval_recorder
-        && let Some(suggestion) = recorder
-            .get_auto_approval_suggestion(approval_learning_key, approval_learning_label)
-            .await
-    {
-        description_lines.push(format!(
-            "Suggestion: {}",
-            vtcode_commons::formatting::truncate_middle(&suggestion, MAX_CONTEXT_LINE_CHARS)
-        ));
-    }
-
-    description_lines.push(choose_handling_line("this tool execution"));
+    description_lines.push(choose_handling_line("this run"));
     let mut navigation_hint = if prompt_kind == ToolPermissionPromptKind::Mcp {
         APPROVAL_NAVIGATE_CANCEL.to_string()
     } else {
@@ -758,12 +776,12 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
         }
     }
 
-    description_lines.push(choose_handling_line("this tool"));
+    description_lines.push(choose_handling_line("this run"));
 
     let options = vec![
         InlineListItem {
             title: "Enable tool".to_string(),
-            subtitle: Some("Update tool policy to 'allow' and continue execution".to_string()),
+            subtitle: Some("Allow and continue execution".to_string()),
             badge: Some("Fix Policy".to_string()),
             indent: 0,
             selection: Some(InlineListSelection::ToolApprovalEnable),
@@ -779,7 +797,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
         },
         InlineListItem {
             title: "Deny Once".to_string(),
-            subtitle: Some("Skip this tool call (ask again next time)".to_string()),
+            subtitle: Some("Ask again next time".to_string()),
             badge: None,
             indent: 0,
             selection: Some(InlineListSelection::ToolApprovalDenyOnce),
@@ -829,7 +847,7 @@ mod tests {
         extract_shell_approval_scope_signature, extract_shell_command_text,
         extract_shell_persistent_approval_prefix_rule, format_command_preview_lines, push_capped_context_line,
         render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions, shell_command_preview_lines,
-        shell_permission_cache_suffix, tool_permission_prompt_kind, truncate_arg_preview,
+        shell_permission_cache_suffix, tool_permission_header_lines, tool_permission_prompt_kind, truncate_arg_preview,
     };
     use crate::agent::runloop::unified::tool_routing::shell_approval::PersistentApprovalTarget;
 
@@ -1156,6 +1174,24 @@ mod tests {
     }
 
     #[test]
+    fn header_omits_action_summary_when_command_block_follows() {
+        let lines = tool_permission_header_lines("exec_command", "python3 -c 'hi'", true, None);
+        assert_eq!(lines, vec!["Tool: exec_command"]);
+    }
+
+    #[test]
+    fn header_keeps_action_summary_for_diff_preview_file_identity() {
+        let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", false, None);
+        assert_eq!(lines, vec!["Tool: edit_file", "Edit file src/main.rs"]);
+    }
+
+    #[test]
+    fn header_lists_source_above_action_summary() {
+        let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", false, Some("agent-1"));
+        assert_eq!(lines, vec!["Tool: edit_file", "Source: agent-1", "Edit file src/main.rs"]);
+    }
+
+    #[test]
     fn mcp_prompt_cancellation_is_non_persistent() {
         assert_eq!(cancelled_prompt_decision(ToolPermissionPromptKind::Mcp), super::HitlDecision::DeniedOnce);
     }
@@ -1172,7 +1208,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_justification_lines_stay_single_row_per_field() {
+    fn compact_justification_lines_keep_reason_and_risk_only() {
         let just = vtcode_core::tools::ToolJustification {
             tool_name: "exec_command".to_string(),
             reason: "Build the project\nwith more detail on a second line".to_string(),
@@ -1181,11 +1217,11 @@ mod tests {
             timestamp: "now".to_string(),
         };
         let lines = compact_justification_lines(&just);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("Reason: Build the project"));
         assert!(!lines[0].contains('\n'));
-        assert!(lines[1].starts_with("Expected: Binary compiles"));
-        assert_eq!(lines[2], "Risk: High");
+        assert!(!lines.iter().any(|line| line.starts_with("Expected:")));
+        assert_eq!(lines[1], "Risk: High");
     }
 
     #[test]
@@ -1220,5 +1256,31 @@ mod tests {
         let command_lines = vec!["cargo test".to_string(), "second line".to_string()];
         let preview = format_command_preview_lines(command_lines);
         assert_eq!(preview, vec!["`cargo test`", "`second line`"]);
+    }
+
+    #[test]
+    fn command_preview_truncates_long_single_line() {
+        let long = format!("python3 -c '{}'", "x".repeat(400));
+        let preview = format_command_preview_lines(vec![long]);
+        assert_eq!(preview.len(), 1);
+        assert!(preview[0].starts_with('`') && preview[0].ends_with('`'));
+        assert!(preview[0].contains('…'));
+        assert!(preview[0].chars().count() <= super::MAX_COMMAND_LINE_CHARS + 2);
+    }
+
+    #[test]
+    fn permanent_option_subtitle_truncates_long_command_label() {
+        let long_label = format!("command `python3 -c '{}'`", "y".repeat(200));
+        let items = build_tool_permission_options(
+            ToolPermissionPromptKind::Standard,
+            Some(&PersistentApprovalTarget::ExactInvocation { display_label: long_label }),
+        );
+        let permanent = items
+            .iter()
+            .find(|item| item.title == "Always approve and save to policy cache")
+            .expect("permanent option");
+        let subtitle = permanent.subtitle.as_deref().expect("subtitle");
+        assert!(subtitle.contains('…'), "long label should be truncated, got: {subtitle}");
+        assert!(subtitle.chars().count() <= "Remember  in this workspace".len() + super::MAX_APPROVAL_LABEL_CHARS + 8);
     }
 }

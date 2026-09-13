@@ -221,20 +221,28 @@ fn replace_indicator_icon(line: &mut Line<'static>, frame: &str) -> bool {
 ///
 /// Uses the most common span background so a word chip that happens to be the
 /// first span cannot become the fill colour for the whole row.
+///
+/// Returns `None` for side-by-side rows — those mix coloured panes with an
+/// uncoloured sibling (or two different colours), and full-width fill would
+/// paint the empty pane with the other side's tint.
 fn line_background(line: &Line<'_>) -> Option<Color> {
-    let mut best: Option<(Color, usize)> = None;
     let mut counts = std::collections::HashMap::new();
+    let mut has_uncolored = false;
     for span in &line.spans {
-        if let Some(bg) = span.style.bg {
-            *counts.entry(bg).or_insert(0usize) += 1;
+        match span.style.bg {
+            Some(bg) => {
+                *counts.entry(bg).or_insert(0usize) += 1;
+            }
+            None => has_uncolored = true,
         }
     }
-    for (bg, count) in counts {
-        if best.is_none_or(|(_, best_count)| count > best_count) {
-            best = Some((bg, count));
-        }
+    // Side-by-side rows either mix a coloured pane with an uncoloured sibling
+    // (orphan add/del) or have two distinct colours (paired red+green).
+    // Full-width fill would bleed the dominant tint into the other pane.
+    if counts.len() > 1 || (has_uncolored && !counts.is_empty()) {
+        return None;
     }
-    best.map(|(bg, _)| bg)
+    counts.into_iter().next().map(|(bg, _)| bg)
 }
 
 /// Fill untinted cells on a diff row with the line tint.

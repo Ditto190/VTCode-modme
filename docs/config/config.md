@@ -603,6 +603,23 @@ All three review controls default to enabled, while `ui.tool_display_mode`
 defaults to `"compact"`. These settings affect only presentation; complete
 captures and raw exports remain unchanged.
 
+## Diff preview layout
+
+Interactive file-edit approval overlays and tool-output diffs support two
+layouts via `ui.diff_preview_mode`:
+
+```toml
+[ui]
+# "inline" (default): stacked unified diff
+# "side-by-side": old pane on the left, new pane on the right
+diff_preview_mode = "side-by-side"
+```
+
+Side-by-side falls back to the inline view when the terminal is too narrow
+for two usable panes. The mode applies to both the file-edit approval overlay
+and expanded tool-output diffs in the transcript (write_file, apply_patch,
+and detected `git diff` shell output).
+
 For the full shortcut list and tmux notes, see [Interactive Mode Reference](../user-guide/interactive-mode.md).
 
 ## Execution environment

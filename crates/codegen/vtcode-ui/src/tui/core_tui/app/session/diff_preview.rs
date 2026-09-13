@@ -7,10 +7,13 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 use vtcode_commons::diff_paths::{is_prose_language_hint, language_hint_from_path};
-use vtcode_commons::diff_preview::{DiffDisplayKind, count_diff_changes, display_lines_from_hunks};
+use vtcode_commons::diff_preview::{
+    DiffDisplayKind, DiffDisplayLine, count_diff_changes, display_lines_from_hunks, side_by_side_rows,
+};
+use vtcode_commons::ui_protocol::DiffPreviewMode as DiffLayoutMode;
 
 use super::Session;
 use crate::tui::core_tui::app::types::{DiffPreviewMode, DiffPreviewState, TrustMode};
@@ -22,10 +25,17 @@ use crate::tui::utils::diff_styles::{
     style_line_bg, style_sign,
 };
 
+/// Below this width, side-by-side falls back to the single-column view.
+const MIN_SIDE_BY_SIDE_WIDTH: u16 = 60;
+
 pub(crate) fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area: Rect) {
     let Some(preview) = session.diff_preview_state() else {
         return;
     };
+
+    // Clear the full overlay area so empty side-by-side cells cannot show
+    // through to the transcript underneath.
+    frame.render_widget(Clear, area);
 
     let palette = DiffColorPalette::default();
     let diff_bundle = compute_diff_with_theme(
@@ -44,8 +54,14 @@ pub(crate) fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area
         .try_layout(&Layout::vertical([Constraint::Length(2), Constraint::Min(5), Constraint::Length(4)]))
         .unwrap_or([Rect::ZERO; 3]);
 
-    render_file_header(frame, header, preview, &palette, counts.additions, counts.deletions);
-    render_diff_content(frame, content, preview, &diff_bundle);
+    let layout_mode = session.core.appearance.diff_preview_mode;
+    render_file_header(frame, header, preview, &palette, counts.additions, counts.deletions, layout_mode);
+    match layout_mode {
+        DiffLayoutMode::SideBySide if content.width >= MIN_SIDE_BY_SIDE_WIDTH => {
+            render_diff_content_side_by_side(frame, content, preview, &diff_bundle);
+        }
+        _ => render_diff_content(frame, content, preview, &diff_bundle),
+    }
     render_controls(frame, controls, preview);
 }
 
@@ -56,9 +72,10 @@ fn render_file_header(
     palette: &DiffColorPalette,
     additions: usize,
     deletions: usize,
+    layout_mode: DiffLayoutMode,
 ) {
     let header_style = Style::default().fg(ratatui_color_from_ansi(palette.header_fg));
-    let header = Line::from(vec![
+    let mut spans = vec![
         Span::styled(header_action_label(preview.mode), header_style),
         Span::styled(&preview.file_path, header_style),
         Span::styled(" (", header_style),
@@ -66,8 +83,11 @@ fn render_file_header(
         Span::styled(" ", header_style),
         Span::styled(format!("-{deletions}"), Style::default().fg(ratatui_color_from_ansi(palette.removed_fg))),
         Span::styled(")", header_style),
-    ]);
-    frame.render_widget(Paragraph::new(header), area);
+    ];
+    if layout_mode == DiffLayoutMode::SideBySide {
+        spans.push(Span::styled("  [side-by-side]", Style::default().fg(Color::DarkGray)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState, diff_bundle: &DiffBundle) {
@@ -97,61 +117,7 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
                 lines.push(Line::from(Span::styled(display_line.text, Style::default().fg(Color::DarkGray))));
             }
             DiffDisplayKind::Context | DiffDisplayKind::Addition | DiffDisplayKind::Deletion => {
-                let line_type = if display_line.kind == DiffDisplayKind::Context {
-                    DiffLineType::Context
-                } else if display_line.kind == DiffDisplayKind::Addition {
-                    DiffLineType::Insert
-                } else {
-                    DiffLineType::Delete
-                };
-
-                let gutter_style = style_gutter(line_type, style_context);
-                let sign_style = style_sign(line_type, style_context);
-                let line_bg = style_line_bg(line_type, style_context);
-                let content_style = style_content(line_type, style_context);
-
-                let prefix = match line_type {
-                    DiffLineType::Insert => "+",
-                    DiffLineType::Delete => "-",
-                    DiffLineType::Context => " ",
-                };
-
-                // Single gutter: `sign + number + │`.
-                let line_no = match display_line.kind {
-                    DiffDisplayKind::Deletion => display_line.old_line,
-                    DiffDisplayKind::Addition => display_line.new_line,
-                    _ => display_line.new_line.or(display_line.old_line),
-                };
-                let line_num_str = match line_no {
-                    Some(n) => format!("{n:>4}"),
-                    None => "    ".to_owned(),
-                };
-                let mut spans = vec![
-                    Span::styled(prefix.to_owned(), sign_style),
-                    Span::styled(line_num_str, gutter_style),
-                    Span::styled(" │ ".to_owned(), gutter_style),
-                ];
-
-                // Prose diffs (md/txt) skip syntax highlighting: solid content
-                // on the tinted bg. Code diffs keep syntax fg but are forced
-                // onto the diff bg so syntect theme holes can't show through.
-                let prose = is_prose_language_hint(language.as_deref());
-                if prose {
-                    spans.push(Span::styled(display_line.text.clone(), content_style));
-                } else {
-                    let forced_bg = content_style.bg.or(line_bg.bg);
-                    for segment in
-                        render_diff_content_segments(&display_line.text, language.as_deref(), anstyle::Style::new())
-                    {
-                        let mut style = content_style.patch(ratatui_style_from_ansi(segment.style));
-                        if forced_bg.is_some() {
-                            style.bg = forced_bg;
-                        }
-                        spans.push(Span::styled(segment.text, style));
-                    }
-                }
-
-                lines.push(pad_line_to_width(Line::from(spans).style(line_bg), width, line_bg));
+                lines.push(build_inline_diff_line(&display_line, language.as_deref(), style_context, width));
             }
         }
     }
@@ -161,6 +127,347 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
     }
 
     frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::NONE)), area);
+}
+
+fn render_diff_content_side_by_side(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    preview: &DiffPreviewState,
+    diff_bundle: &DiffBundle,
+) {
+    let language = language_hint_from_path(&preview.file_path);
+    let style_context = current_diff_render_style_context();
+
+    // Split into three independent areas so pane backgrounds physically
+    // cannot bleed across the divider. Left gets floor((w-1)/2), right gets
+    // the rest — together with the 1-col divider they always fill `area`.
+    let total_w = area.width.max(3);
+    let left_w = (total_w.saturating_sub(1)) / 2;
+    let right_w = total_w.saturating_sub(left_w + 1);
+    let left_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: left_w,
+        height: area.height,
+    };
+    let divider_area = Rect {
+        x: area.x + left_w,
+        y: area.y,
+        width: 1,
+        height: area.height,
+    };
+    let right_area = Rect {
+        x: area.x + left_w + 1,
+        y: area.y,
+        width: right_w,
+        height: area.height,
+    };
+
+    // Column headers row (top 1 row of the content area).
+    let header_h = 1u16.min(area.height);
+    let header_left = Rect { height: header_h, ..left_area };
+    let header_div = Rect { height: header_h, ..divider_area };
+    let header_right = Rect { height: header_h, ..right_area };
+    let body_left = Rect {
+        y: area.y + header_h,
+        height: area.height.saturating_sub(header_h),
+        ..left_area
+    };
+    let body_div = Rect {
+        y: area.y + header_h,
+        height: area.height.saturating_sub(header_h),
+        ..divider_area
+    };
+    let body_right = Rect {
+        y: area.y + header_h,
+        height: area.height.saturating_sub(header_h),
+        ..right_area
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("Old", Style::default().fg(Color::DarkGray)))),
+        header_left,
+    );
+    frame
+        .render_widget(Paragraph::new(Line::from(Span::styled("│", Style::default().fg(Color::DarkGray)))), header_div);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("New", Style::default().fg(Color::DarkGray)))),
+        header_right,
+    );
+
+    let display_lines = display_lines_from_hunks(&diff_bundle.hunks);
+    let rows = side_by_side_rows(&display_lines);
+    let max_display = body_left.height as usize;
+
+    let mut left_lines: Vec<Line> = Vec::new();
+    let mut right_lines: Vec<Line> = Vec::new();
+    let mut full_width_lines: Vec<(usize, Line)> = Vec::new();
+
+    for row in rows.iter() {
+        if left_lines.len() >= max_display {
+            break;
+        }
+
+        if row.is_full_width() {
+            let full = row.left.as_ref().expect("full-width row stores the band on left");
+            let line = if full.kind == DiffDisplayKind::HunkHeader {
+                let header_style = style_hunk_header(style_context);
+                pad_line_to_width(
+                    Line::from(Span::styled(full.text.clone(), header_style)).style(header_style),
+                    area.width as usize,
+                    header_style,
+                )
+            } else {
+                Line::from(Span::styled(full.text.clone(), Style::default().fg(Color::DarkGray)))
+            };
+            // Track full-width rows separately; both panes show a blank spacer.
+            full_width_lines.push((left_lines.len(), line));
+            // Line::default() has no spans — paints nothing, buffer stays default.
+            left_lines.push(Line::default());
+            right_lines.push(Line::default());
+            continue;
+        }
+
+        // Left pane
+        match &row.left {
+            Some(line) if line.kind.is_diff() => {
+                left_lines.push(build_side_pane_line(line, language.as_deref(), style_context, left_w as usize));
+            }
+            _ => {
+                // Empty left: no spans — terminal default bg, no bleed.
+                left_lines.push(Line::default());
+            }
+        }
+
+        // Right pane
+        match &row.right {
+            Some(line) if line.kind.is_diff() => {
+                right_lines.push(build_side_pane_line(line, language.as_deref(), style_context, right_w as usize));
+            }
+            _ => {
+                right_lines.push(Line::default());
+            }
+        }
+    }
+
+    if left_lines.is_empty() {
+        left_lines.push(Line::from(Span::styled("(no changes)", Style::default().fg(Color::DarkGray))));
+    }
+
+    // Render panes independently — no shared Line means no bg bleed.
+    // The divider needs one row per body line; a single-Line Paragraph would
+    // only paint the top row and leave the rest of the column blank.
+    let divider_lines: Vec<Line> = (0..body_div.height)
+        .map(|_| Line::from(Span::styled("│", Style::default().fg(Color::DarkGray))))
+        .collect();
+    frame.render_widget(Paragraph::new(left_lines), body_left);
+    frame.render_widget(Paragraph::new(divider_lines), body_div);
+    frame.render_widget(Paragraph::new(right_lines), body_right);
+
+    // Overlay full-width bands (hunk headers) on top of both panes.
+    for (row_index, line) in full_width_lines {
+        let y = body_left.y + row_index as u16;
+        if y >= body_left.y + body_left.height {
+            continue;
+        }
+        let band = Rect { x: area.x, y, width: area.width, height: 1 };
+        frame.render_widget(Paragraph::new(line), band);
+    }
+}
+
+/// Build a single pane line with full-width tint (gutter + content + pad).
+fn build_side_pane_line(
+    display_line: &DiffDisplayLine,
+    language: Option<&str>,
+    style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
+    width: usize,
+) -> Line<'static> {
+    let mut spans = build_side_pane_spans(display_line, language, style_context, width);
+    let line_type = match display_line.kind {
+        DiffDisplayKind::Addition => DiffLineType::Insert,
+        DiffDisplayKind::Deletion => DiffLineType::Delete,
+        _ => DiffLineType::Context,
+    };
+    let line_bg = style_line_bg(line_type, style_context);
+    // Force the line tint onto every span (gutter + body) so the pane is one
+    // continuous band — no unstyled gutter strip next to the coloured body.
+    if let Some(bg) = line_bg.bg {
+        for span in &mut spans {
+            span.style.bg = Some(bg);
+        }
+    }
+    // Deletion body reads dimmer than addition: apply DIM to body spans
+    // (skip the first 3 gutter spans: sign + number + │).
+    if line_type == DiffLineType::Delete {
+        for span in spans.iter_mut().skip(3) {
+            span.style = span.style.add_modifier(Modifier::DIM);
+        }
+    }
+    pad_line_to_width(Line::from(spans), width, line_bg)
+}
+
+fn build_inline_diff_line(
+    display_line: &DiffDisplayLine,
+    language: Option<&str>,
+    style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
+    width: usize,
+) -> Line<'static> {
+    let line_type = if display_line.kind == DiffDisplayKind::Context {
+        DiffLineType::Context
+    } else if display_line.kind == DiffDisplayKind::Addition {
+        DiffLineType::Insert
+    } else {
+        DiffLineType::Delete
+    };
+
+    let gutter_style = style_gutter(line_type, style_context);
+    let sign_style = style_sign(line_type, style_context);
+    let line_bg = style_line_bg(line_type, style_context);
+    let content_style = style_content(line_type, style_context);
+
+    let prefix = match line_type {
+        DiffLineType::Insert => "+",
+        DiffLineType::Delete => "-",
+        DiffLineType::Context => " ",
+    };
+
+    // Single gutter: `sign + number + │`.
+    let line_no = match display_line.kind {
+        DiffDisplayKind::Deletion => display_line.old_line,
+        DiffDisplayKind::Addition => display_line.new_line,
+        _ => display_line.new_line.or(display_line.old_line),
+    };
+    let line_num_str = match line_no {
+        Some(n) => format!("{n:>4}"),
+        None => "    ".to_owned(),
+    };
+    let mut spans = vec![
+        Span::styled(prefix.to_owned(), sign_style),
+        Span::styled(line_num_str, gutter_style),
+        Span::styled(" │ ".to_owned(), gutter_style),
+    ];
+
+    // Prose diffs (md/txt) skip syntax highlighting: solid content
+    // on the tinted bg. Code diffs keep syntax fg but are forced
+    // onto the diff bg so syntect theme holes can't show through.
+    let prose = is_prose_language_hint(language);
+    if prose {
+        spans.push(Span::styled(display_line.text.clone(), content_style));
+    } else {
+        let forced_bg = content_style.bg.or(line_bg.bg);
+        for segment in render_diff_content_segments(&display_line.text, language, anstyle::Style::new()) {
+            let mut style = content_style.patch(ratatui_style_from_ansi(segment.style));
+            if forced_bg.is_some() {
+                style.bg = forced_bg;
+            }
+            spans.push(Span::styled(segment.text, style));
+        }
+    }
+
+    pad_line_to_width(Line::from(spans).style(line_bg), width, line_bg)
+}
+
+/// Build one side-by-side pane: `sign + number + │ + content`, truncated to `width`.
+fn build_side_pane_spans(
+    display_line: &DiffDisplayLine,
+    language: Option<&str>,
+    style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let line_type = if display_line.kind == DiffDisplayKind::Context {
+        DiffLineType::Context
+    } else if display_line.kind == DiffDisplayKind::Addition {
+        DiffLineType::Insert
+    } else {
+        DiffLineType::Delete
+    };
+
+    let gutter_style = style_gutter(line_type, style_context);
+    let sign_style = style_sign(line_type, style_context);
+    let line_bg = style_line_bg(line_type, style_context);
+    let content_style = style_content(line_type, style_context);
+
+    let prefix = match line_type {
+        DiffLineType::Insert => "+",
+        DiffLineType::Delete => "-",
+        DiffLineType::Context => " ",
+    };
+    let line_no = match display_line.kind {
+        DiffDisplayKind::Deletion => display_line.old_line,
+        DiffDisplayKind::Addition => display_line.new_line,
+        _ => display_line.new_line.or(display_line.old_line),
+    };
+    let line_num_str = match line_no {
+        Some(n) => format!("{n:>3}"),
+        None => "   ".to_owned(),
+    };
+
+    let mut spans = vec![
+        Span::styled(prefix.to_owned(), sign_style),
+        Span::styled(line_num_str.clone(), gutter_style),
+        Span::styled("│".to_owned(), gutter_style),
+    ];
+    // Gutter width grows with large line numbers (`{n:>3}` widens past 3
+    // digits), so measure it instead of assuming 5 cells.
+    let mut used = 1usize
+        .saturating_add(unicode_width::UnicodeWidthStr::width(line_num_str.as_str()))
+        .saturating_add(1);
+
+    let prose = is_prose_language_hint(language);
+    let forced_bg = content_style.bg.or(line_bg.bg);
+    if prose {
+        if used < width {
+            let body = truncate_to_width(&display_line.text, width - used);
+            let cell_width = unicode_width::UnicodeWidthStr::width(body.as_str());
+            spans.push(Span::styled(body, content_style));
+            used += cell_width;
+        }
+    } else if used < width {
+        for segment in render_diff_content_segments(&display_line.text, language, anstyle::Style::new()) {
+            if used >= width {
+                break;
+            }
+            let remaining = width - used;
+            let text = truncate_to_width(&segment.text, remaining);
+            if text.is_empty() {
+                continue;
+            }
+            let cell_width = unicode_width::UnicodeWidthStr::width(text.as_str());
+            let mut style = content_style.patch(ratatui_style_from_ansi(segment.style));
+            if forced_bg.is_some() {
+                style.bg = forced_bg;
+            }
+            spans.push(Span::styled(text, style));
+            used += cell_width;
+            if cell_width >= remaining {
+                break;
+            }
+        }
+    }
+
+    // Empty pane content still needs a cell so the divider stays aligned.
+    if used < width && spans.len() == 3 {
+        spans.push(Span::styled(" ".repeat(width - used), content_style));
+    }
+
+    spans
+}
+
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if used + w > max_width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out
 }
 
 /// Pad a diff row with tinted spaces so the background spans the full width.

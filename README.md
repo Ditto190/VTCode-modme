@@ -24,13 +24,13 @@
 <summary><strong>Contents</strong></summary>
 
 - [Overview](#overview)
-- [Highlights](#highlights)
 - [Why VT Code](#why-vt-code)
 - [Quick start](#quick-start)
   - [1. Install](#1-install)
   - [2. Configure](#2-configure)
   - [3. Run](#3-run)
   - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
+- [What's inside](#whats-inside)
 - [Documentation](#documentation)
 - [Providers](#providers)
 - [Development](#development)
@@ -54,58 +54,65 @@
 
 </div>
 
-VT Code is an open-source terminal coding agent written in Rust — built for
-quick interactive sessions and long-running autonomous work alike.
+VT Code is an open-source terminal coding agent written in Rust — one tool for
+quick interactive sessions and long-running autonomous work alike. No IDE
+required, no context left behind.
 
 It is a **harness, not just an LLM wrapper**. The model reasons; the runtime
-supplies everything else: tools, context, sandboxing, state, evaluation, and
-verification. That separation is what turns raw model output into safe,
-reviewable progress — without ever leaving the terminal.
+supplies everything else — tools, context, sandboxing, state, and verification.
+That separation is what turns raw model output into safe, reviewable progress,
+entirely in your terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows are
 > experimental and may change between releases.
 
 > [!TIP]
-> **Behind the build:** [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in):
-> harness design, evals, security, and lessons from a year of building.
+> **Behind the build:** [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
+> — harness design, evals, security, and lessons from a year of building.
 >
 > **Video companions:** [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
 > [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o).
 
-## Highlights
-
-- **One interface, every backend** — cloud gateways, OpenAI-compatible
-  endpoints, and local inference (Ollama, LM Studio, llama.cpp) behind a single
-  streaming provider abstraction.
-- **Sandboxed by default** — command policies, workspace approvals, and
-  fail-closed defenses against injection, path/symlink escape, and environment
-  leakage.
-- **Durable long-run sessions** — checkpoints, auto-compaction, spooled tool
-  output, task tracking, and resumable handoffs.
-- **One event contract** — a canonical `ThreadEvent` stream powers replay,
-  archives, memory views, and trajectory export.
-- **Extensible without forking** — MCP servers, Agent Skills, Agent Plugins,
-  ACP (Zed), A2A, and the WebMCP browser bridge.
-- **Measured, not vibes** — a built-in eval framework with pass@k / pass^k
-  metrics and environment-based outcome verification.
-- **A TUI worth living in** — WCAG AA-validated themes, markdown rendering,
-  and diff previews.
-
 ## Why VT Code
 
-Most coding agents stop at "call the model, run the tool." VT Code treats the
-agent loop itself as an engineering problem:
+Most agents are a model plus a tool call. That gets you a demo, not a
+teammate. Real work breaks them in predictable ways:
 
-| Pillar                     | What it means                                                                                                                              |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Harness, not a wrapper** | The model reasons; the harness composes tools, context, sandbox, state, and evals into safe, reviewable progress.         |
-| **Safety-first execution** | Sandboxed shell, command policies, workspace approvals, and fail-closed defenses against injection and escape.            |
-| **Long-run reliability**   | Durable sessions, task tracking, spooled output, checkpoints, auto-compaction — verified before "done".                   |
-| **Observable by design**   | One canonical `ThreadEvent` contract powers replay, archives, checkpoints, memory views, and trajectory export.            |
-| **Protocol-native**        | MCP, Skills, Agent Plugins, ACP (Zed), A2A, WebMCP, Open Responses, and ATIF extend the system without forking the core.   |
-| **Controlled autonomy**    | Planning, human approval, isolated worktrees, propose/verify sub-agents, and cost guardrails scale autonomy safely.        |
-| **Runs anywhere**          | Cloud gateways, OpenAI-compatible endpoints, and local runtimes — one streaming interface.                                 |
+- **Sessions drift.** After an hour of edits, the model reasons over stale
+  context and redoes work you already finished.
+- **Tool output floods the window.** One verbose command pushes the parts that
+  mattered out of the model's view.
+- **One unreviewed command** can take out your working tree — or worse.
+- **"Done" is a claim, not a fact.** Without verification, you find out the
+  agent failed the same way your users would.
+
+VT Code treats the agent loop itself as the product. The model reasons; the
+harness supplies everything else — tools, context, sandboxing, state, and
+verification — and answers each failure mode with a structural default, not a
+prompt tweak:
+
+| When agents fail at… | VT Code's structural answer |
+| --- | --- |
+| **Sessions drift** | Dynamic context assembly, spooled tool output, and auto-compaction keep long sessions grounded. One canonical `ThreadEvent` contract feeds replay, checkpoints, memory, and trajectory export — no parallel state machines drifting apart. [Runtime guidance](./docs/development/runtime-guidance.md) |
+| **Tool output floods the window** | Tool results are spooled to disk and summarized into the model's view on demand — the signal stays in context, the noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md) |
+| **One unreviewed command** | Sandboxed execution and approvals fail closed. Adversarial regression coverage targets the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **"Done" is a claim** | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md) |
+
+The same discipline shapes everything else. The [four pillars](#four-pillars)
+below cover it in depth: extensibility without forking, autonomy earned with
+evidence, every model behind one abstraction, and a terminal-native interface
+verified by default.
+
+Under the hood, the loop contract is explicit and testable.
+[`ThreadEvent`](./crates/common/vtcode-exec-events) is the single source of
+truth for what happened during a run, and the
+[agent loop contract](./docs/guides/agent-loop-contract.md) specifies exactly
+how turns, tool results, and recovery behave. The behavior you rely on is
+written down — not accidental.
+
+If you have been burned by agents that look impressive until something goes
+wrong, these are the defaults you were missing — built in, not bolted on.
 
 ## Quick start
 
@@ -137,6 +144,9 @@ and workspace `.env` still work — useful for CI. See
 [Getting started](./docs/user-guide/getting-started.md) for the credential
 resolution order.
 
+> [!CAUTION]
+> Never commit API keys or put them in `vtcode.toml`.
+
 ### 3. Run
 
 ```bash
@@ -148,16 +158,10 @@ vtcode continue                 # resume the last session
 ```
 
 See [Installation](./docs/installation/README.md) and
-[Getting Started](./docs/user-guide/getting-started.md) for the full tour.
-
-> [!CAUTION]
-> Never commit API keys or put them in `vtcode.toml`.
+[Getting Started](./docs/user-guide/getting-started.md) for the full tour,
+and [Commands](#commands) for the complete CLI surface.
 
 ### WebMCP browser bridge (opt-in)
-
-> [!NOTE]
-> Pair a running session from the TUI or serve a bounded workspace for
-> authenticated browser editing.
 
 ```bash
 # Inside the TUI:
@@ -174,6 +178,146 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 | User guide | [WebMCP user guide](./docs/user-guide/webmcp.md)          |
 | Deployment | [WebMCP deployment reference](./docs/reference/webmcp.md) |
 
+## What's inside
+
+One static Rust binary — no runtime dependencies, no plugins to install,
+nothing to wire up. Everything below ships in the default build.
+
+**At a glance:** durable sessions · sandboxed execution · every major model ·
+MCP, Skills & plugins · terminal-native TUI · built-in evals
+
+### Commands
+
+Bare `vtcode` opens the interactive TUI. Four subcommands cover most of the
+work:
+
+```bash
+vtcode ask "explain Rc vs Arc"    # one-shot answer — no session, no tools
+vtcode exec "refactor main.rs"    # headless task with the full tool loop
+vtcode review                     # agent review of uncommitted changes
+vtcode eval --suite suite.json    # verify behavior with pass@k metrics
+```
+
+A second tier handles session lifecycle and day-to-day operations:
+
+| Command | Purpose |
+| --- | --- |
+| `vtcode continue` | Resume the last session — or fork it into a new one with `--session-id` |
+| `vtcode schedule` | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts |
+| `vtcode secret` | Store provider API keys in your OS keyring — never in shell history or workspace files |
+| `vtcode models` | Inspect, test, and compare providers and models |
+| `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots |
+| `vtcode tool-policy` | Allow or deny specific tools per workspace |
+| `vtcode trajectory` | Pretty-print run logs for debugging and audits |
+
+`vtcode analyze`, `vtcode check`, `vtcode schema tools`, `vtcode man`, and
+`vtcode update` round out the operator surface. See `vtcode --help` for the
+full list.
+
+### Four pillars
+
+The rest of this section expands each pillar in turn:
+
+| Pillar | In one line |
+| --- | --- |
+| **[Agent core](#agent-core)** | The loop that turns model output into reviewable progress |
+| **[Safety](#safety)** | Fail-closed execution, from sandbox to policy |
+| **[Extensibility](#extensibility)** | Every model and protocol, no fork |
+| **[Interface & quality](#interface--quality)** | Terminal-native UX, verified by default |
+
+### Agent core
+
+*The loop that turns model output into reviewable progress.*
+
+- **Durable sessions** — checkpoints, auto-compaction, and spooled tool
+  output keep hour-long runs grounded. `continue` resumes; `revert` rolls
+  back to a snapshot. ([Runtime
+  guidance](./docs/development/runtime-guidance.md) · [Session
+  persistence](./docs/development/session-persistence.md))
+- **One event contract** — a single `ThreadEvent` stream drives replay, the
+  session store, memory, and trajectory export. One history, never divergent
+  copies. ([Agent loop contract](./docs/guides/agent-loop-contract.md))
+- **Planning & autonomy** — planning gates, propose/verify sub-agents,
+  isolated worktrees, and cost guardrails. Autonomy is earned with evidence,
+  not granted up front.
+  ([Planning workflow](./docs/guides/planning-workflow.md) ·
+  [Full automation](./docs/guides/full-automation.md))
+- **Persistent memory** — gotchas, decisions, and library notes survive across
+  runs, so the agent stops re-learning your project every session.
+  ([Memory management](./docs/guides/memory-management.md))
+
+### Safety
+
+*Fail closed by default, with coverage for the attacks that actually happen.*
+
+- **Sandboxed execution** — command policies and workspace approvals fail
+  closed: injection, path/symlink escape, and environment leakage are blocked
+  before anything runs. ([Security
+  model](./docs/development/COMMAND_SECURITY_MODEL.md) ·
+  [Permissions](./docs/guides/permissions.md))
+- **Syntax-aware command parsing** — tree-sitter decomposes shell pipelines
+  into sub-commands, so every piece is validated against policy — not just
+  the first word. ([Tree-sitter
+  integration](./docs/user-guide/tree-sitter-integration.md))
+- **Hooks & tool policies** — lifecycle hooks gate tool calls before they
+  run; per-tool allow/deny rules run common dev tools automatically and
+  require confirmation for dangerous operations. ([Hooks
+  guide](./docs/guides/hooks-guide.md) · [Execution
+  policy](./docs/development/EXECUTION_POLICY.md))
+
+### Extensibility
+
+*Plug in without forking — your setup survives upgrades.*
+
+- **Every model, one abstraction** — first-party APIs (OpenAI, Anthropic,
+  Gemini, DeepSeek, Qwen, Mistral, xAI, …), gateways (OpenRouter, Vercel AI
+  Gateway), OpenAI-compatible endpoints, and local inference (Ollama, LM
+  Studio, llama.cpp) behind one streaming interface. Switching models never
+  changes your workflow. ([Provider
+  guides](./docs/providers/PROVIDER_GUIDES.md) · [Local
+  models](./docs/guides/local-models.md))
+- **Integrations** — MCP servers, Agent Skills, Agent Plugins, ACP (Zed),
+  A2A, and the WebMCP browser bridge all attach to the core without patching
+  it. ([MCP](./docs/guides/mcp-integration.md) ·
+  [Skills](./docs/skills/SKILLS_GUIDE.md) ·
+  [Plugins](./docs/guides/agent-plugins.md) ·
+  [ACP](./docs/guides/zed-acp.md) · [A2A](./docs/a2a/a2a-protocol.md) ·
+  [WebMCP](./docs/user-guide/webmcp.md))
+- **Embed VT Code** — serve the agent over ACP for editors, expose an
+  Anthropic-compatible API with `vtcode anthropic-api`, or proxy to the Codex
+  app-server. VT Code works as a backend, not just a CLI.
+  ([ACP](./docs/guides/zed-acp.md) ·
+  [Protocols](./docs/protocols/OPEN_RESPONSES.md))
+
+> [!TIP]
+> Manage models with `vtcode models list|config|test|compare|info`, restrict
+> providers per workspace via `providers_whitelist` in `vtcode.toml`, and
+> control local inference with `/local` in the TUI.
+> [Provider guides](./docs/providers/PROVIDER_GUIDES.md) are the source of
+> truth for credentials and model defaults.
+
+### Interface & quality
+
+*Native to the terminal, verified by default.*
+
+- **Terminal-native TUI** — WCAG AA-validated themes, markdown rendering,
+  diff previews, and customizable output styles and status line. Built for
+  the terminal, not ported to it. ([Interactive
+  mode](./docs/user-guide/interactive-mode.md) · [Output
+  styles](./docs/guides/output_styles.md))
+- **Headless & automation** — `exec` mode, scheduled tasks, and sub-agents
+  cover scripted, parallel, and unattended work.
+  ([Exec mode](./docs/user-guide/exec-mode.md) ·
+  [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) ·
+  [Sub-agents](./docs/user-guide/subagents.md))
+- **Evals** — pass@k / pass^k metrics with environment-based verification.
+  The agent's own report never counts as success.
+  ([Eval guide](./docs/guides/eval.md))
+
+> [!TIP]
+> Optional search accelerators (ripgrep, ast-grep) install with
+> `vtcode dependencies install search-tools`.
+
 ## Documentation
 
 | Area    | Guides                                                                                                                              |
@@ -184,24 +328,6 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 | Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
 
 The full catalog lives in the [Documentation Index](./docs/INDEX.md).
-
-## Providers
-
-Built-in providers span first-party APIs (OpenAI, Anthropic, Gemini, DeepSeek,
-Qwen, Mistral, xAI, and more), multi-model gateways (OpenRouter, Vercel AI
-Gateway), custom OpenAI-compatible endpoints, and local backends.
-[Provider Guides](./docs/providers/PROVIDER_GUIDES.md) is the source of truth
-for credentials and model defaults.
-
-```bash
-vtcode models list
-vtcode models config
-```
-
-> [!TIP]
-> Restrict providers per workspace with `providers_whitelist` in `vtcode.toml`.
-> Local inference (experimental) via Ollama, LM Studio, and llama.cpp is managed
-> with `/local` in the TUI — see [Local Models](./docs/guides/local-models.md).
 
 ## Development
 
@@ -220,7 +346,7 @@ cd vtcode
 cargo nextest run        # tests (never `cargo test`)
 ```
 
-Rust stable, edition 2024. ~30 crates layered as
+Rust stable, edition 2024, MSRV 1.93. ~30 crates layered as
 `types → config → core → tools → agent → TUI`, with `ThreadEvent` as the
 authoritative runtime contract.
 

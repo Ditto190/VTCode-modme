@@ -290,6 +290,7 @@ mod headless {
         pub show_transcript_review_hints: bool,
         pub show_transcript_review_shortcut_guide: bool,
         pub show_transcript_review_close_button: bool,
+        pub diff_preview_mode: vtcode_commons::ui_protocol::DiffPreviewMode,
         pub customization: (),
     }
 

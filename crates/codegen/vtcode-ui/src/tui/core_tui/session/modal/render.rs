@@ -694,6 +694,20 @@ fn diff_line_style(kind: &DiffLineKind) -> Style {
     }
 }
 
+/// Split `Label: value` metadata rows (`Reason`, `Risk`, `Source`, …) so the
+/// label can render dimmed and the value in body style. Returns the trimmed
+/// label and value; `Tool:` stays a header and never matches here.
+fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
+    const CONTEXT_LABELS: &[&str] = &["Reason", "Risk", "Expected", "Suggestion", "Impact", "Fix", "Source"];
+    let (label, value) = trimmed.split_once(':')?;
+    let label = label.trim();
+    let value = value.trim();
+    if !CONTEXT_LABELS.contains(&label) || value.is_empty() {
+        return None;
+    }
+    Some((label, value))
+}
+
 fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRenderStyles) -> Vec<Line<'static>> {
     fn parse_instruction_highlight_markup(text: &str) -> (String, bool) {
         let trimmed = text.trim();
@@ -750,6 +764,10 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
     let bullet_prefix = format!("{} ", ui::MODAL_INSTRUCTIONS_BULLET);
     let bullet_indent = " ".repeat(UnicodeWidthStr::width(bullet_prefix.as_str()));
     let shell_styles = ShellLineStyles::new();
+    let approval_shell_styles = shell_styles.muted_for_approval();
+    // Gutter marking highlighted command rows as one code block; distinct
+    // from the `•` bullet used for prose so sections stay scannable.
+    let code_gutter = "  │ ";
 
     for line in instructions {
         let trimmed = line.trim();
@@ -759,6 +777,11 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
         }
 
         if let Some(header) = trimmed.strip_prefix("## ") {
+            // Blank row before each new section gives COMMAND / WHY /
+            // PREVIEW clear visual separation without extra chrome.
+            if first_content_rendered {
+                items.push(vec![Line::default()]);
+            }
             first_content_rendered = true;
             items.push(vec![Line::from(Span::styled(
                 header.to_uppercase(),
@@ -770,11 +793,8 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
         if let Some(code) = trimmed.strip_prefix('`').and_then(|value| value.strip_suffix('`')) {
             let command = code.trim();
             first_content_rendered = true;
-            let mut spans = vec![Span::styled(
-                ui::MODAL_INSTRUCTIONS_BULLET.to_string(),
-                styles.instruction_bullet,
-            )];
-            for segment in shell_syntax_segments(command, &shell_styles, true) {
+            let mut spans = vec![Span::styled(code_gutter.to_string(), styles.divider)];
+            for segment in shell_syntax_segments(command, &approval_shell_styles, true) {
                 spans.push(Span::styled(segment.text, ratatui_style_from_inline(&segment.style, None)));
             }
             items.push(vec![Line::from(spans)]);
@@ -795,6 +815,32 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
                 Span::styled(bullet_indent.clone(), Style::default()),
                 Span::styled(display_text, style),
             ])]);
+        } else if let Some((label, value)) = split_context_row(trimmed) {
+            // `Reason:` / `Risk:` / `Source:` rows render as dim label +
+            // body value with a hanging indent — no bullet — so metadata
+            // reads as subordinate to the COMMAND code block above.
+            first_content_rendered = true;
+            let wrapped_value = wrap_instruction_lines(value, content_width.saturating_sub(2).max(1));
+            let mut lines = Vec::new();
+            for (index, segment) in wrapped_value.into_iter().enumerate() {
+                if index == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled("  ".to_string(), Style::default()),
+                        Span::styled(format!("{label}:"), styles.detail),
+                        Span::raw(" ".to_string()),
+                        Span::styled(segment, styles.instruction_body),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ".to_string(), Style::default()),
+                        Span::styled(segment, styles.instruction_body),
+                    ]));
+                }
+            }
+            if lines.is_empty() {
+                lines.push(Line::default());
+            }
+            items.push(lines);
         } else if !first_content_rendered {
             let mut lines = Vec::new();
             for (index, segment) in wrapped.into_iter().enumerate() {
@@ -1169,6 +1215,67 @@ mod tests {
         assert!(rendered.contains("CONTEXT"));
         assert!(rendered.contains("cargo nextest run"));
         assert!(lines.iter().any(|line| line.spans.len() > 1));
+    }
+
+    #[test]
+    fn modal_instruction_lines_separate_sections_with_blank_row() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 10),
+            &[
+                "Tool: exec_command".to_string(),
+                "## Command".to_string(),
+                "`cargo test`".to_string(),
+                "## Why".to_string(),
+                "Reason: verify build".to_string(),
+            ],
+            &styles,
+        );
+
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+        let why_idx = texts.iter().position(|text| text == "WHY").expect("WHY header");
+        assert_eq!(texts[why_idx - 1], "", "section header needs a blank separator row");
+    }
+
+    #[test]
+    fn modal_instruction_command_uses_code_gutter_without_bullet() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 6),
+            &[
+                "Tool: exec_command".to_string(),
+                "## Command".to_string(),
+                "`cargo test`".to_string(),
+            ],
+            &styles,
+        );
+
+        let command_line = lines
+            .iter()
+            .find(|line| line_text(line).contains("cargo"))
+            .expect("command row");
+        let text = line_text(command_line);
+        assert!(text.contains('│'), "command row should use code gutter, got: {text}");
+        assert!(!text.contains('•'), "command row must not use prose bullet, got: {text}");
+    }
+
+    #[test]
+    fn modal_instruction_context_row_splits_label_and_value() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 6),
+            &[
+                "Tool: exec_command".to_string(),
+                "## Why".to_string(),
+                "Risk: High".to_string(),
+            ],
+            &styles,
+        );
+
+        let risk_line = lines.iter().find(|line| line_text(line).contains("High")).expect("risk row");
+        let text = line_text(risk_line);
+        assert!(!text.contains('•'), "context row must not use bullet, got: {text}");
+        assert!(risk_line.spans.len() > 1, "label and value should be separate spans");
     }
 
     fn render_modal_lines(search: ModalSearchState) -> Vec<String> {
