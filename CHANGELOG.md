@@ -2,6 +2,16 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.162.2 - 2026-09-13
+
+### Highlights
+#### Documentation
+
+- Streamline README structure and tighten prose (b239ee36) 
+### Other Changes
+#### Other
+
+- Update README (7ee7bd19) 
 ## 0.162.1 - 2026-09-13
 
 ### Highlights
