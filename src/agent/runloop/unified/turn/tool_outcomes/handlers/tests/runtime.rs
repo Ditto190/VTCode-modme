@@ -1529,6 +1529,114 @@ fn exhaust_preview_budget_for_test(ctx: &mut TurnProcessingContext<'_>) {
 }
 
 #[tokio::test]
+async fn registry_exhaustion_latches_runloop_and_blocks_the_next_inspection() {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::ValidationResult;
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
+
+    let mut backing = TestContextBacking::new(32).await;
+    backing.select_build_primary_agent();
+    let workspace = backing.sample_file.parent().expect("sample parent").to_path_buf();
+    let sample_file = backing.sample_file.clone();
+    let paths = (0..8)
+        .map(|index| {
+            let path = workspace.join(format!("preview-{index}.txt"));
+            std::fs::write(&path, format!("line-{index}-{}\n", "x".repeat(120)).repeat(2_000))
+                .expect("write preview fixture");
+            path
+        })
+        .collect::<Vec<_>>();
+
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut ctx = backing.turn_processing_context();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+
+    for (index, path) in paths.iter().enumerate() {
+        outcome_ctx.ctx.harness_state.record_requested_tool_calls(1);
+        handle_single_tool_call(
+            &mut outcome_ctx,
+            &format!("registry-read-{index}"),
+            tool_names::READ_FILE,
+            json!({
+                "path": path,
+                "limit": 2_000,
+                "condense": false
+            }),
+        )
+        .await
+        .expect("registry read should be handled");
+        if outcome_ctx.ctx.harness_state.model_visible_preview_budget_exhausted() {
+            break;
+        }
+    }
+
+    let diagnostics = outcome_ctx.ctx.harness_state.snapshot_turn_diagnostics(Default::default(), 0);
+    let tool_payloads = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .filter(|message| message.role == uni::MessageRole::Tool)
+        .map(|message| {
+            let content = message.content.as_text();
+            (content.len(), content.chars().take(160).collect::<String>())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        diagnostics.model_visible_tool_preview_budget_exhausted,
+        "registry should emit enough provider-visible body to exhaust the upstream budget; diagnostics={diagnostics:?}, tool_payloads={tool_payloads:?}"
+    );
+    assert!(
+        outcome_ctx.ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::Tool
+                && serde_json::from_str::<serde_json::Value>(&message.content.as_text())
+                    .ok()
+                    .and_then(|value| value.get("preview_budget_exhausted").and_then(serde_json::Value::as_bool))
+                    == Some(true)
+        }),
+        "the real registry path must publish its authoritative exhaustion marker; tool_payloads={tool_payloads:?}"
+    );
+    assert!(diagnostics.suppressed_tool_previews > 0);
+    assert!(diagnostics.requested_tool_calls < 32, "exhaustion must converge before the tool-call ceiling");
+
+    // Registry markers remain authoritative when an in-progress response is
+    // replaced by its terminal update: suppression is counted once per call.
+    let suppressed_before_replacement = diagnostics.suppressed_tool_previews;
+    outcome_ctx.ctx.push_tool_response(
+        "registry-read-0",
+        Some(tool_names::READ_FILE),
+        json!({
+            "total_output_bytes": 80_000,
+            "preview_budget_exhausted": true
+        })
+        .to_string(),
+    );
+    let after_replacement = outcome_ctx.ctx.harness_state.snapshot_turn_diagnostics(Default::default(), 0);
+    assert_eq!(
+        after_replacement.suppressed_tool_previews, suppressed_before_replacement,
+        "replacing one registry-suppressed response must not double-count it"
+    );
+
+    for (id, command) in [
+        ("post-exhaustion-read", format!("sed -n '1,20p' {}", sample_file.display())),
+        ("post-exhaustion-search", format!("rg -n 'line' {}", sample_file.display())),
+        ("post-exhaustion-diff", "git diff -- sample.txt".to_string()),
+    ] {
+        let blocked = enforce_preview_exhaustion_inspection_gate(
+            outcome_ctx.ctx,
+            id,
+            tool_names::EXEC_COMMAND,
+            &json!({"cmd": command}),
+            true,
+        );
+        assert!(matches!(blocked, Some(ValidationResult::Blocked)), "{command}");
+    }
+}
+
+#[tokio::test]
 async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channels_open() {
     use crate::agent::runloop::unified::turn::tool_outcomes::handlers::ValidationResult;
     use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
@@ -1580,6 +1688,17 @@ async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channe
         true,
     );
     assert!(matches!(blocked_grep, Some(ValidationResult::Blocked)));
+
+    // A tiny ordinary inspection is still an inspection: output size must not
+    // turn it into a verifier or bypass the post-exhaustion gate.
+    let blocked_tiny = enforce_preview_exhaustion_inspection_gate(
+        &mut ctx,
+        "call-blind-tiny",
+        tool_names::EXEC_COMMAND,
+        &json!({"cmd": "printf tiny"}),
+        true,
+    );
+    assert!(matches!(blocked_tiny, Some(ValidationResult::Blocked)));
 
     // Verification verdicts survive in stub metadata: checks keep running.
     let check = enforce_preview_exhaustion_inspection_gate(

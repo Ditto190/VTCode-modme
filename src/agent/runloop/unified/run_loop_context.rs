@@ -463,6 +463,10 @@ pub(crate) struct HarnessTurnState {
     model_visible_tool_metadata_bytes: usize,
     model_visible_tool_preview_budget_exhausted: bool,
     suppressed_tool_previews: u32,
+    /// Tool calls whose provider-visible preview was suppressed by either
+    /// budget layer. Shared identity tracking keeps diagnostics idempotent
+    /// when an in-progress response is replaced by its terminal result.
+    suppressed_tool_call_ids: HashSet<String>,
     /// Remaining bytes of spool-page preview credit. Admitted spool-page reads
     /// grant credit so the designed paged-reading workflow stays model-visible
     /// even after the aggregate preview budget is exhausted. Capped per turn;
@@ -643,6 +647,7 @@ impl HarnessTurnState {
             model_visible_tool_metadata_bytes: 0,
             model_visible_tool_preview_budget_exhausted: false,
             suppressed_tool_previews: 0,
+            suppressed_tool_call_ids: HashSet::new(),
             spool_page_preview_credit_bytes: 0,
             recovery_activations: 0,
             blocked_tool_calls: 0,
@@ -817,7 +822,8 @@ impl HarnessTurnState {
         )
     }
 
-    /// Bound the tool response before it enters provider-facing history.
+    /// Test-only wrapper for exercising the local limiter without a registry
+    /// tool-call identifier.
     ///
     /// Tool output processing already applies a per-result preview limit, but
     /// a turn can still accumulate many independent previews (or repeatedly
@@ -828,8 +834,36 @@ impl HarnessTurnState {
     /// Callers pass the effective turn budget (`turn_preview_budget_bytes`)
     /// so planning (`96 KiB`) and execution (`32 KiB`) share one accounting
     /// path instead of duplicated ledgers.
+    #[cfg(test)]
     pub(crate) fn bound_model_visible_tool_preview_with_budget(
         &mut self,
+        tool_name: Option<&str>,
+        content: String,
+        budget_bytes: usize,
+    ) -> String {
+        self.bound_model_visible_tool_preview_inner(None, tool_name, content, budget_bytes)
+    }
+
+    /// Call-aware provider-history boundary. Registry markers are observed
+    /// before body-size bypasses, while locally generated suppression shares
+    /// the same call-id ledger so an interim response and its replacement are
+    /// counted once.
+    pub(crate) fn bound_model_visible_tool_preview_for_call_with_budget(
+        &mut self,
+        tool_call_id: &str,
+        tool_name: Option<&str>,
+        content: String,
+        budget_bytes: usize,
+    ) -> String {
+        if self.observe_upstream_preview_budget_exhaustion(tool_call_id, &content, budget_bytes) {
+            return content;
+        }
+        self.bound_model_visible_tool_preview_inner(Some(tool_call_id), tool_name, content, budget_bytes)
+    }
+
+    fn bound_model_visible_tool_preview_inner(
+        &mut self,
+        tool_call_id: Option<&str>,
         tool_name: Option<&str>,
         content: String,
         budget_bytes: usize,
@@ -870,7 +904,7 @@ impl HarnessTurnState {
 
         self.model_visible_tool_preview_bytes = budget;
         self.model_visible_tool_preview_budget_exhausted = true;
-        self.suppressed_tool_previews = self.suppressed_tool_previews.saturating_add(1);
+        self.record_suppressed_tool_preview(tool_call_id);
         let metadata_remaining =
             MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES.saturating_sub(self.model_visible_tool_metadata_bytes);
         if metadata_remaining == 0 {
@@ -890,6 +924,51 @@ impl HarnessTurnState {
             // for all fits-budget cases.
             generic_tool_preview_metadata(content.len())
         }
+    }
+
+    fn record_suppressed_tool_preview(&mut self, tool_call_id: Option<&str>) {
+        let should_count = match tool_call_id {
+            Some(tool_call_id) => self.suppressed_tool_call_ids.insert(tool_call_id.to_string()),
+            None => true,
+        };
+        if should_count {
+            self.suppressed_tool_previews = self.suppressed_tool_previews.saturating_add(1);
+        }
+    }
+
+    /// Merge the registry's authoritative aggregate-budget transition into
+    /// the runloop state before provider-history body checks can return early.
+    ///
+    /// Registry exhaustion strips payload bodies and leaves the
+    /// `preview_budget_exhausted` control marker. Treating the resulting JSON
+    /// as "no visible body" before observing that marker left the inspection
+    /// gate, recovery balancer, checkpoints, and ATIF diagnostics unaware of
+    /// the exhaustion (turn 1163). The transition is monotonic and suppression
+    /// accounting is keyed by tool-call id so response replacement is
+    /// idempotent.
+    pub(crate) fn observe_upstream_preview_budget_exhaustion(
+        &mut self,
+        tool_call_id: &str,
+        content: &str,
+        budget_bytes: usize,
+    ) -> bool {
+        // Registry responses are already bounded. Refuse to parse an
+        // oversized marker candidate here so arbitrary local/MCP output cannot
+        // force a second unbounded JSON parse before the local limiter runs.
+        let exhausted = content.len() <= TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES
+            && content.contains("\"preview_budget_exhausted\"")
+            && serde_json::from_str::<serde_json::Value>(content)
+                .ok()
+                .and_then(|value| value.get("preview_budget_exhausted").and_then(serde_json::Value::as_bool))
+                == Some(true);
+        if !exhausted {
+            return false;
+        }
+
+        self.model_visible_tool_preview_bytes = self.model_visible_tool_preview_bytes.max(budget_bytes.max(1));
+        self.model_visible_tool_preview_budget_exhausted = true;
+        self.record_suppressed_tool_preview(Some(tool_call_id));
+        true
     }
 
     /// Whether the per-turn model-visible tool preview budget is exhausted.
@@ -1600,6 +1679,11 @@ fn tool_preview_body_value_is_visible(value: &serde_json::Value) -> bool {
 }
 
 fn tool_preview_has_visible_body(content: &str) -> bool {
+    if content.len() > TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES {
+        // Oversized plain text and JSON both consume the preview budget. Do
+        // not parse an untrusted body merely to discover that it is large.
+        return true;
+    }
     let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
         // Non-JSON previews (plain text) always consume budget.
         return true;
@@ -2083,6 +2167,79 @@ mod tests {
         assert!(!state.model_visible_preview_budget_exhausted());
         state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(TURN_PREVIEW_BUDGET_BYTES + 1));
         assert!(state.model_visible_preview_budget_exhausted());
+    }
+
+    #[test]
+    fn upstream_preview_exhaustion_latches_before_body_checks_and_is_idempotent() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 32, 10, 1);
+        let registry_stub = serde_json::json!({
+            "content_type": "git_diff",
+            "exit_code": 0,
+            "total_output_bytes": 5_212,
+            "preview_budget_exhausted": true,
+        })
+        .to_string();
+
+        assert!(state.observe_upstream_preview_budget_exhaustion(
+            "call-diff",
+            &registry_stub,
+            TURN_PREVIEW_BUDGET_BYTES,
+        ));
+        assert!(state.model_visible_preview_budget_exhausted());
+        assert_eq!(state.suppressed_tool_previews, 1);
+
+        // A terminal update for the same call must not inflate diagnostics.
+        assert!(state.observe_upstream_preview_budget_exhaustion(
+            "call-diff",
+            &registry_stub,
+            TURN_PREVIEW_BUDGET_BYTES,
+        ));
+        assert_eq!(state.suppressed_tool_previews, 1);
+
+        // A distinct suppressed result is counted independently.
+        assert!(state.observe_upstream_preview_budget_exhaustion(
+            "call-diff-2",
+            &registry_stub,
+            TURN_PREVIEW_BUDGET_BYTES,
+        ));
+        let diagnostics = state.snapshot_turn_diagnostics(Default::default(), 0);
+        assert!(diagnostics.model_visible_tool_preview_budget_exhausted);
+        assert_eq!(diagnostics.suppressed_tool_previews, 2);
+    }
+
+    #[test]
+    fn replacement_suppression_is_idempotent_across_both_budget_layers() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 32, 10, 1);
+        let locally_suppressed = state.bound_model_visible_tool_preview_for_call_with_budget(
+            "call-read",
+            Some("read_file"),
+            "x".repeat(TURN_PREVIEW_BUDGET_BYTES + 1),
+            TURN_PREVIEW_BUDGET_BYTES,
+        );
+        assert!(locally_suppressed.contains("preview_budget_exhausted"));
+        assert_eq!(state.suppressed_tool_previews, 1);
+
+        let registry_stub = serde_json::json!({
+            "total_output_bytes": 80_000,
+            "preview_budget_exhausted": true,
+        })
+        .to_string();
+        let preserved = state.bound_model_visible_tool_preview_for_call_with_budget(
+            "call-read",
+            Some("read_file"),
+            registry_stub.clone(),
+            TURN_PREVIEW_BUDGET_BYTES,
+        );
+        assert_eq!(preserved, registry_stub);
+        assert_eq!(state.suppressed_tool_previews, 1);
+
+        state.bound_model_visible_tool_preview_for_call_with_budget(
+            "call-read-2",
+            Some("read_file"),
+            "y".repeat(TURN_PREVIEW_BUDGET_BYTES + 1),
+            TURN_PREVIEW_BUDGET_BYTES,
+        );
+        assert_eq!(state.suppressed_tool_previews, 2);
     }
 
     #[test]

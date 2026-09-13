@@ -1328,7 +1328,7 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
                         "blocked-mutation".to_string(),
                         tool_names::APPLY_PATCH.to_string(),
                         json!({
-                            "patch": "*** Begin Patch\n*** Add File: must-not-exist.txt\n+blocked\n*** End Patch\n"
+                            "patch": "*** Begin Patch\n*** Add File: must-not-exist.rs\n+blocked\n*** End Patch\n"
                         })
                         .to_string(),
                     )]),
@@ -1373,7 +1373,7 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
 
     assert!(matches!(outcome.result, TurnLoopResult::Blocked { .. }));
     assert_eq!(requests.load(Ordering::SeqCst), 3, "the second text response must reach the cap");
-    assert!(!backing.workspace_path().join("must-not-exist.txt").exists());
+    assert!(!backing.workspace_path().join("must-not-exist.rs").exists());
 }
 
 #[tokio::test]
@@ -1669,6 +1669,239 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
         ]
     );
     assert_blocked_response_surfaces(&mut backing, &history, &harness_path, PENDING_VERIFICATION_RESPONSE_MARKER);
+}
+
+#[tokio::test]
+async fn exhausted_previews_pending_verification_done_claim_is_blocked() {
+    #[derive(Clone)]
+    struct DoneProvider {
+        requests: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for DoneProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            Ok(uni::LLMResponse {
+                content: Some("Done — the requested change is complete.".to_string()),
+                model: request.model,
+                tool_calls: None,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    let harness_path = backing.enable_harness_emitter();
+    backing.set_provider(Box::new(DoneProvider { requests: requests.clone() }));
+
+    // This is the bodyless registry response that crossed the upstream
+    // aggregate budget. Keep it in history and seed the state through the
+    // same marker observer used by provider-history insertion.
+    let marker = json!({
+        "tool": tool_names::READ_FILE,
+        "preview_budget_exhausted": true,
+        "total_output_bytes": 131_072,
+        "exit_code": 0
+    })
+    .to_string();
+    let mut history = vec![
+        uni::Message::user("apply the change and report when Done".to_string()),
+        uni::Message::tool_response("registry-read-0".to_string(), marker.clone()),
+    ];
+    {
+        let context = backing.turn_loop_context();
+        let budget = vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES;
+        assert!(
+            context
+                .harness_state
+                .observe_upstream_preview_budget_exhaustion("registry-read-0", &marker, budget)
+        );
+        context.session_stats.set_verification_snapshot((true, 0));
+    }
+
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("pending verification must block repeated Done claims");
+
+    assert!(matches!(
+        outcome.result,
+        TurnLoopResult::Blocked {
+            reason: Some(ref reason)
+        } if reason == PENDING_VERIFICATION_BLOCK_REASON
+    ));
+    assert_eq!(requests.load(Ordering::SeqCst), 2, "the two Done claims are the bounded text-response cap");
+    assert!(outcome.turn_diagnostics.model_visible_tool_preview_budget_exhausted);
+    assert!(outcome.turn_diagnostics.suppressed_tool_previews >= 1);
+    assert_blocked_response_surfaces(&mut backing, &history, &harness_path, PENDING_VERIFICATION_RESPONSE_MARKER);
+}
+
+#[tokio::test]
+async fn exhausted_previews_pending_verification_completes_after_standalone_verifier() {
+    #[derive(Clone)]
+    struct VerifierThenDoneProvider {
+        requests: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for VerifierThenDoneProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            let request_number = self.requests.fetch_add(1, Ordering::SeqCst);
+            if request_number == 0 {
+                return Ok(uni::LLMResponse {
+                    content: None,
+                    model: request.model,
+                    tool_calls: Some(vec![uni::ToolCall::function(
+                        "standalone-verifier".to_string(),
+                        tool_names::EXEC_COMMAND.to_string(),
+                        json!({"cmd": "cargo check --quiet"}).to_string(),
+                    )]),
+                    usage: None,
+                    finish_reason: uni::FinishReason::Stop,
+                    reasoning: None,
+                    reasoning_details: None,
+                    organization_id: None,
+                    request_id: None,
+                    tool_references: Vec::new(),
+                    compaction: None,
+                });
+            }
+
+            Ok(uni::LLMResponse {
+                content: Some("Done — the requested change is complete.".to_string()),
+                model: request.model,
+                tool_calls: None,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    let harness_path = backing.enable_harness_emitter();
+    let workspace = backing.workspace_path().to_path_buf();
+    fs::create_dir_all(workspace.join("src")).expect("create verifier fixture source directory");
+    fs::write(
+        workspace.join("Cargo.toml"),
+        "[package]\nname = \"preview-budget-verifier\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("write verifier fixture manifest");
+    fs::write(workspace.join("src/lib.rs"), "pub fn verified() -> bool { true }\n")
+        .expect("write verifier fixture source");
+    backing.set_provider(Box::new(VerifierThenDoneProvider { requests: requests.clone() }));
+
+    let marker = json!({
+        "tool": tool_names::READ_FILE,
+        "preview_budget_exhausted": true,
+        "total_output_bytes": 131_072,
+        "exit_code": 0
+    })
+    .to_string();
+    let mut history = vec![
+        uni::Message::user("apply the change and report when Done".to_string()),
+        uni::Message::tool_response("registry-read-0".to_string(), marker.clone()),
+    ];
+    {
+        let context = backing.turn_loop_context();
+        let budget = vtcode_config::constants::output_limits::TURN_PREVIEW_BUDGET_BYTES;
+        assert!(
+            context
+                .harness_state
+                .observe_upstream_preview_budget_exhaustion("registry-read-0", &marker, budget)
+        );
+        context.session_stats.set_verification_snapshot((true, 0));
+    }
+
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("successful standalone verifier should permit the final Done claim");
+
+    assert!(matches!(outcome.result, TurnLoopResult::Completed { plan_approved_execution_pending: false }));
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        2,
+        "the verifier and final Done response should be the only requests"
+    );
+    assert!(outcome.turn_diagnostics.model_visible_tool_preview_budget_exhausted);
+    assert!(
+        history.iter().any(|message| {
+            message.role == uni::MessageRole::Tool
+                && serde_json::from_str::<serde_json::Value>(&message.content.as_text())
+                    .ok()
+                    .and_then(|value| value.get("exit_code").and_then(serde_json::Value::as_i64))
+                    == Some(0)
+        }),
+        "standalone verifier exit status must remain visible after preview exhaustion: {history:?}"
+    );
+    let harness = fs::read_to_string(harness_path).expect("read successful verifier harness events");
+    let events = harness
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<VersionedThreadEvent>(line)
+                .expect("successful verifier harness output should use the versioned event contract")
+                .into_event()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ThreadEvent::TurnCompleted(_)))
+            .count(),
+        1,
+        "successful standalone verifier must publish turn.completed: {harness}"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(event, ThreadEvent::TurnFailed(_))),
+        "successful standalone verifier must not publish turn.failed: {harness}"
+    );
+    assert!(final_answer_text(&history).contains("Done"));
 }
 
 #[tokio::test]

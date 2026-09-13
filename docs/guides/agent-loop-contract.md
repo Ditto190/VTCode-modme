@@ -342,7 +342,12 @@ Across a turn, provider-visible tool previews are capped at 32 KiB execution
 budget is enforced twice: at the tool-registry output boundary (which charges
 each response's payload bodies and truncates or strips them, marked with
 `preview_budget_exhausted`) and again by the unified runloop when responses
-enter provider-facing history. Once that
+enter provider-facing history. The registry marker is an authoritative,
+monotonic state transition: the history boundary observes it before checking
+whether any payload body remains, so inspection admission, recovery,
+checkpoint diagnostics, and ATIF export cannot disagree with the result the
+model received. Replacing an in-progress result with its terminal result does
+not double-count suppression. Once that
 aggregate budget is exhausted, VTCode retains bounded outcome and control
 metadata while omitting payload bodies. A successful verifier therefore stays
 authoritative without encouraging duplicate reads or checks. Blocker live
@@ -351,6 +356,11 @@ files remain self-contained, append a durable resolution marker before pointer
 cleanup, and do not claim ownership of the workspace-global task tracker. An
 ordinary user exit after a completed non-fallback turn is reported as successful
 thread completion; an exit that terminates active work remains cancellation.
+
+Turn-balancer recovery resets navigation/repetition evidence only. It preserves
+the anti-blind mutation count, `verification_pending`, and any failed-verifier
+fix allowance; only a successful standalone or pure-`&&` verifier clears that
+checkpoint.
 
 Workspace-aware tool responses and execution summaries render paths inside the
 active workspace relative to that workspace (for example,

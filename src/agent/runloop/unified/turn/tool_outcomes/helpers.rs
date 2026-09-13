@@ -299,17 +299,10 @@ impl LoopTracker {
         self.attempts.clear();
         self.reset_low_signal_attempts();
         self.nav_signatures.clear();
-        self.consecutive_mutations = 0;
-        // The mutation history is wiped, so a still-pending gate would demand
-        // verification for edits the tracker can no longer attribute — and
-        // with the fix window intact it stays empty. Resetting only the
-        // counters while keeping the gate left the turn deadlocked; clear the
-        // gate together with the history it was derived from.
-        self.verification_pending = false;
-        self.fix_edits_remaining = 0;
-        self.verification_block_notice_emitted = false;
-        self.verification_result_lost_notice_pending = false;
-        self.piped_verification_notice_pending = false;
+        // Navigation recovery is not verification. Preserve mutation pressure,
+        // an active verification checkpoint, its bounded fix window, and the
+        // associated one-shot notices. Only a successful standalone verifier
+        // may clear those fields.
         self.consecutive_navigations = 0;
         self.reset_low_signal_navigation_counters();
     }
@@ -372,6 +365,7 @@ impl LoopTracker {
         self.fix_edits_remaining = 0;
         self.verification_warning_emitted = false;
         self.verification_block_notice_emitted = false;
+        self.verification_result_lost_notice_pending = false;
         self.piped_verification_notice_pending = false;
     }
 }
@@ -1766,6 +1760,8 @@ mod tests {
     fn pure_and_chained_verifiers_are_admitted_and_clear_gate() {
         let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
         tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        tracker.verification_result_lost_notice_pending = true;
+        tracker.piped_verification_notice_pending = true;
         for command in [
             "cargo fmt --all -- --check && cargo check --locked",
             "cargo check --locked && cargo nextest run --locked -p vtcode-ui",
@@ -1791,6 +1787,8 @@ mod tests {
         ));
         assert!(!tracker.verification_is_pending());
         assert_eq!(tracker.consecutive_mutations, 0);
+        assert!(!tracker.take_verification_result_lost_notice());
+        assert!(!tracker.take_piped_verification_notice());
     }
 
     #[test]
@@ -2567,13 +2565,17 @@ mod tests {
     }
 
     #[test]
-    fn reset_after_balancer_recovery_clears_attempts_and_counters() {
+    fn reset_after_balancer_recovery_preserves_anti_blind_state() {
         let mut tracker = LoopTracker::new();
         tracker.record("code_search:{\"query\":\"Widget\"}".to_string());
         tracker.record("code_search:{\"query\":\"Widget\"}".to_string());
         tracker.consecutive_mutations = 2;
         tracker.verification_pending = true;
         tracker.fix_edits_remaining = FAILED_VERIFICATION_FIX_ALLOWANCE;
+        tracker.verification_warning_emitted = true;
+        tracker.verification_block_notice_emitted = true;
+        tracker.verification_result_lost_notice_pending = true;
+        tracker.piped_verification_notice_pending = true;
         tracker.consecutive_navigations = 4;
         tracker.consecutive_low_signal_navigations = 3;
         tracker.total_low_signal_navigations = 7;
@@ -2584,17 +2586,33 @@ mod tests {
 
         assert_eq!(tracker.max_count_filtered(|_| false), 0);
         assert_eq!(tracker.max_low_signal_count(), 0);
-        assert_eq!(tracker.consecutive_mutations, 0);
-        // The mutation history is wiped, so the pending gate must be cleared
-        // with it: an untracked pending gate has an empty fix window and
-        // deadlocks the turn.
-        assert!(!tracker.verification_pending);
-        assert!(!tracker.verification_is_pending());
-        assert_eq!(tracker.fix_edits_remaining, 0);
+        assert_eq!(tracker.consecutive_mutations, 2);
+        assert!(tracker.verification_pending);
+        assert!(tracker.verification_is_pending());
+        assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+        assert!(tracker.verification_warning_emitted);
+        assert!(tracker.verification_block_notice_emitted);
+        assert!(tracker.verification_result_lost_notice_pending);
+        assert!(tracker.piped_verification_notice_pending);
         assert_eq!(tracker.consecutive_navigations, 0);
         assert_eq!(tracker.consecutive_low_signal_navigations, 0);
         assert_eq!(tracker.total_low_signal_navigations, 0);
         assert_eq!(tracker.navigation_loop_recoveries, 3);
+    }
+
+    #[test]
+    fn balancer_recovery_cannot_postpone_the_mutation_threshold() {
+        let mut tracker = LoopTracker::new();
+        for _ in 0..(BLIND_EDITING_THRESHOLD - 1) {
+            tracker.record_successful_mutation();
+        }
+        assert!(!tracker.verification_is_pending());
+
+        tracker.reset_after_balancer_recovery();
+        tracker.record_successful_mutation();
+
+        assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+        assert!(tracker.verification_is_pending());
     }
 
     #[test]

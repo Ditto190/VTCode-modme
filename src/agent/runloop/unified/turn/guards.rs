@@ -764,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn balancer_recovery_continues_and_resets_tracker() {
+    fn balancer_recovery_continues_and_preserves_mutation_pressure() {
         let mut tracker = LoopTracker::new();
         let sig = r#"command_session:{"action":"run","command":"cargo test"}"#.to_string();
         tracker.record(sig.clone());
@@ -777,7 +777,7 @@ mod tests {
 
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
         assert_eq!(tracker.max_count_filtered(|_| false), 0);
-        assert_eq!(tracker.consecutive_mutations, 0);
+        assert_eq!(tracker.consecutive_mutations, 3);
         assert_eq!(tracker.consecutive_navigations, 0);
     }
 
