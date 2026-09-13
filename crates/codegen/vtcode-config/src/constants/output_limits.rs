@@ -43,6 +43,19 @@ pub const fn turn_preview_budget_bytes(planning_active: bool) -> usize {
     }
 }
 
+/// Verifier-sized payloads bypass the per-turn preview budget (1 KiB).
+///
+/// Session `session-vtcode-20260913T074747Z_225432-45397` exhausted its 32 KiB
+/// budget on a 24 KiB README read, then stripped 25/45 later outputs — even
+/// 5-byte `grep -c` / link-check verifiers — blinding the model into repeated
+/// identical shell runs. Small outcome payloads (exit codes, counts, short
+/// `BROKEN:` lists) are the evidence verifiers need; hiding them forces the
+/// retry spiral the budget is meant to prevent. Both preview layers
+/// (`ToolRegistry::enforce_turn_preview_budget` and
+/// `HarnessTurnState::bound_model_visible_tool_preview_with_budget`) must use
+/// this shared threshold so Layer1/Layer2 accounting stays in sync.
+pub const TINY_PREVIEW_BYPASS_BYTES: usize = 1024;
+
 /// Truncation marker appended when content is cut off.
 const TRUNCATION_MARKER: &str = "\n[... content truncated due to size limit ...]";
 

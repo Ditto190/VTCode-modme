@@ -178,6 +178,12 @@ impl ToolRegistry {
         if body_bytes == 0 {
             return value;
         }
+        // Verifier-sized payloads stay visible even after exhaustion so
+        // `grep -c`, exit-code checks, and short link-check lists cannot be
+        // blinded by earlier large reads (session-vtcode-20260913T074747Z).
+        if body_bytes <= vtcode_config::constants::output_limits::TINY_PREVIEW_BYPASS_BYTES {
+            return value;
+        }
 
         let previous = self.charge_turn_preview_bytes(body_bytes);
         if previous >= budget_bytes {
@@ -522,6 +528,26 @@ mod tests {
         assert!(sixth.get("output").is_none(), "payload body should be stripped once exhausted");
         assert_eq!(sixth["preview_budget_exhausted"], true);
         assert_eq!(sixth["success"], true, "outcome metadata must survive the strip");
+    }
+
+    #[tokio::test]
+    async fn turn_preview_budget_keeps_verifier_sized_payloads_visible() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+        // Exhaust the 32 KiB execution budget with 8 KiB research payloads.
+        let body = "x".repeat(8_000);
+        for _ in 0..5 {
+            registry
+                .process_tool_output("grep_file", json!({ "success": true, "output": body.clone() }), false, 100_000)
+                .await;
+        }
+        // Verifier-sized outputs (session-vtcode-20260913T074747Z blinded
+        // 5-byte `grep -c` and short `BROKEN:` lists) must stay visible.
+        let tiny = registry
+            .process_tool_output("grep_file", json!({ "success": true, "exit_code": 0, "output": "3" }), false, 100_000)
+            .await;
+        assert_eq!(tiny["output"], "3");
+        assert!(tiny.get("preview_budget_exhausted").is_none());
     }
 
     #[tokio::test]

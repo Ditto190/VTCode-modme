@@ -116,10 +116,8 @@ pub struct JustificationExtractor;
          Expected outcome and auto-approval suggestions remain in logs only.
          `format_for_dialog()` remains the verbose log/test format.
     d. Show approval dialog with:
-       - Tool name (bare header; the one-line action summary is omitted when a
-         highlighted `COMMAND` / `PREVIEW` block follows to avoid duplication)
-       - Syntax-highlighted command block (`│` gutter, muted 2-tone shell palette,
-         8-row head/tail budget, 120-char middle-truncation per line)
+       - Tool name plus the one-line action summary (the only place the
+         command is shown; there is no separate command block)
        - Agent reason + risk level under a separated `WHY` section
        - Concise options; the permanent option truncates long command labels to 60 chars
     e. Wait for user decision
@@ -206,8 +204,7 @@ User requests: "Run the build and check for errors"
 
     Tool Permission Required
     Tool: exec_command
-    ## Command
-      │ cargo build            ← syntax-highlighted, │ gutter, no bullet
+    cargo build                ← command shown here only, no command block
     ## Why
       Reason: Need to verify code compiles before refactoring
       Risk: High

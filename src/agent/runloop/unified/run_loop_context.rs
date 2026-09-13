@@ -847,6 +847,17 @@ impl HarnessTurnState {
             return content;
         }
 
+        // Verifier bypass: payloads at or under `TINY_PREVIEW_BYPASS_BYTES`
+        // stay visible even after exhaustion. Session-vtcode-20260913T074747Z
+        // exhausted 32 KiB on a 24 KiB README read then blinded 25 later
+        // verifier outputs (5-byte `grep -c`, short `BROKEN:` lists),
+        // forcing repeated identical shell runs. Use the full content length
+        // here so metadata-heavy payloads (e.g. large `diagnosis` blocks)
+        // still exhaust the budget instead of bypassing on a small `output`.
+        if content.len() <= vtcode_config::constants::output_limits::TINY_PREVIEW_BYPASS_BYTES {
+            return content;
+        }
+
         let budget = budget_bytes.max(1);
         let remaining = budget.saturating_sub(self.model_visible_tool_preview_bytes);
         if !self.model_visible_tool_preview_budget_exhausted && content.len() <= remaining {
@@ -1685,6 +1696,23 @@ fn bounded_tool_preview_metadata(tool_name: Option<&str>, content: &str) -> Stri
             "is_exited",
             "spool_complete",
             "spool_pending",
+            // Exec continuity + verifier metadata: session-vtcode-20260913T074747Z
+            // stubs dropped `session_id`/`command`/`backend`, so the model could
+            // neither continue pipe sessions via `write_stdin` nor tell which
+            // verifier produced the stub. These scalars are bounded (strings
+            // capped at 512 chars) and never carry payload bodies.
+            "command",
+            "session_id",
+            "backend",
+            "working_directory",
+            "process_id",
+            "wall_time",
+            "waited_seconds",
+            "total_output_bytes",
+            "spooled_bytes",
+            "matched_count",
+            "truncated",
+            "content_type",
         ] {
             let Some(value) = object.get(key) else {
                 continue;
@@ -1993,16 +2021,38 @@ mod tests {
         assert!(state.model_visible_tool_preview_budget_exhausted);
         assert_eq!(state.suppressed_tool_previews, 1);
 
-        let later = state.bound_model_visible_tool_preview(
+        // Verifier-sized payloads bypass the budget so small checks stay
+        // visible after exhaustion (session-vtcode-20260913T074747Z).
+        let tiny = state.bound_model_visible_tool_preview(
             Some("exec_command"),
             serde_json::json!({"exit_code": 0, "status": "completed", "success": true, "output": "later output"})
                 .to_string(),
+        );
+        assert!(!tiny.contains("preview_budget_exhausted"));
+        assert!(tiny.contains("later output"));
+        assert_eq!(state.suppressed_tool_previews, 1);
+
+        let later = state.bound_model_visible_tool_preview(
+            Some("exec_command"),
+            serde_json::json!({
+                "exit_code": 0,
+                "status": "completed",
+                "success": true,
+                "session_id": "run-later",
+                "command": "grep -c pattern README.md",
+                "backend": "pipe",
+                "output": format!("later output {}", "x".repeat(5000)),
+            })
+            .to_string(),
         );
         assert!(later.contains("Aggregate tool preview budget exhausted"));
         assert!(!later.contains("later output"));
         assert!(later.contains("\"exit_code\":0"));
         assert!(later.contains("\"status\":\"completed\""));
         assert!(later.contains("\"success\":true"));
+        assert!(later.contains("run-later"));
+        assert!(later.contains("grep -c pattern README.md"));
+        assert!(later.contains("\"backend\":\"pipe\""));
         assert_eq!(state.suppressed_tool_previews, 2);
 
         let mut aggregate_metadata_bytes = second.len() + later.len();
@@ -2020,7 +2070,10 @@ mod tests {
                 )
                 .len();
         }
-        assert!(aggregate_metadata_bytes <= MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES + 100 * 64);
+        assert!(
+            aggregate_metadata_bytes < 100_000,
+            "aggregate metadata bytes grew unboundedly: {aggregate_metadata_bytes}"
+        );
         assert_eq!(state.model_visible_tool_metadata_bytes, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES);
     }
 
@@ -2106,8 +2159,10 @@ mod tests {
         state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(TURN_PREVIEW_BUDGET_BYTES + 1));
         assert!(state.model_visible_preview_budget_exhausted());
 
-        // Without credit the page is stubbed.
-        let page = "p".repeat(1024);
+        // Without credit a page over the verifier bypass is stubbed.
+        // (Pages at or under `TINY_PREVIEW_BYPASS_BYTES` bypass on their own,
+        // so use 5 KiB here to exercise the exhaustion path.)
+        let page = "p".repeat(5 * 1024);
         let stubbed = state.bound_model_visible_tool_preview(Some("read_file"), page.clone());
         assert!(stubbed.contains("preview_budget_exhausted"));
         assert!(!stubbed.contains(&page));

@@ -31,15 +31,12 @@
   - [3. Run](#3-run)
   - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
 - [What's inside](#whats-inside)
+  - [Commands](#commands)
+  - [Four pillars](#four-pillars)
 - [Documentation](#documentation)
-- [Providers](#providers)
 - [Development](#development)
 - [Contributing](#contributing)
-  - [Ways to contribute](#ways-to-contribute)
-  - [Getting started](#getting-started)
-  - [Contributors](#contributors)
 - [Support](#support)
-  - [Sponsorship](#sponsorship)
 - [License](#license)
 
 </details>
@@ -54,12 +51,12 @@
 
 </div>
 
-VT Code is an open-source terminal coding agent written in Rust — one tool for
-quick interactive sessions and long-running autonomous work alike. No IDE
+VT Code is an open-source terminal coding agent written in Rust: one binary
+for quick interactive sessions and long-running autonomous work alike. No IDE
 required, no context left behind.
 
 It is a **harness, not just an LLM wrapper**. The model reasons; the runtime
-supplies everything else — tools, context, sandboxing, state, and verification.
+supplies everything else: tools, context, sandboxing, state, and verification.
 That separation is what turns raw model output into safe, reviewable progress,
 entirely in your terminal.
 
@@ -69,7 +66,7 @@ entirely in your terminal.
 
 > [!TIP]
 > **Behind the build:** [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
-> — harness design, evals, security, and lessons from a year of building.
+> covering harness design, evals, security, and lessons from a year of building.
 >
 > **Video companions:** [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
 > [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o).
@@ -77,42 +74,28 @@ entirely in your terminal.
 ## Why VT Code
 
 Most agents are a model plus a tool call. That gets you a demo, not a
-teammate. Real work breaks them in predictable ways:
-
-- **Sessions drift.** After an hour of edits, the model reasons over stale
-  context and redoes work you already finished.
-- **Tool output floods the window.** One verbose command pushes the parts that
-  mattered out of the model's view.
-- **One unreviewed command** can take out your working tree — or worse.
-- **"Done" is a claim, not a fact.** Without verification, you find out the
-  agent failed the same way your users would.
-
-VT Code treats the agent loop itself as the product. The model reasons; the
-harness supplies everything else — tools, context, sandboxing, state, and
-verification — and answers each failure mode with a structural default, not a
-prompt tweak:
+teammate. Real work breaks them in predictable ways, and VT Code answers
+each one with a structural default, not a prompt tweak:
 
 | When agents fail at… | VT Code's structural answer |
 | --- | --- |
-| **Sessions drift** | Dynamic context assembly, spooled tool output, and auto-compaction keep long sessions grounded. One canonical `ThreadEvent` contract feeds replay, checkpoints, memory, and trajectory export — no parallel state machines drifting apart. [Runtime guidance](./docs/development/runtime-guidance.md) |
-| **Tool output floods the window** | Tool results are spooled to disk and summarized into the model's view on demand — the signal stays in context, the noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md) |
-| **One unreviewed command** | Sandboxed execution and approvals fail closed. Adversarial regression coverage targets the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **Sessions drift** | Dynamic context assembly and auto-compaction keep long sessions grounded: the model reasons over current state, not a stale transcript. [Runtime guidance](./docs/development/runtime-guidance.md) |
+| **Tool output floods the window** | Results are spooled to disk and summarized into the model's view on demand: signal stays in context, noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md) |
+| **One unreviewed command** | Sandboxed execution and approvals fail closed, with adversarial regression coverage for the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
 | **"Done" is a claim** | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md) |
 
-The same discipline shapes everything else. The [four pillars](#four-pillars)
-below cover it in depth: extensibility without forking, autonomy earned with
-evidence, every model behind one abstraction, and a terminal-native interface
-verified by default.
-
-Under the hood, the loop contract is explicit and testable.
+None of this is emergent.
 [`ThreadEvent`](./crates/common/vtcode-exec-events) is the single source of
-truth for what happened during a run, and the
-[agent loop contract](./docs/guides/agent-loop-contract.md) specifies exactly
-how turns, tool results, and recovery behave. The behavior you rely on is
-written down — not accidental.
+truth for what happened during a run: one event stream feeds replay,
+checkpoints, memory, and trajectory export. The
+[agent loop contract](./docs/guides/agent-loop-contract.md) specifies how
+turns, tool results, and recovery behave. The behavior you rely on is
+written down, not accidental.
 
 If you have been burned by agents that look impressive until something goes
-wrong, these are the defaults you were missing — built in, not bolted on.
+wrong, these are the defaults you were missing, built in rather than bolted
+on. The [four pillars](#four-pillars) below cover the full surface, or skip to
+[Quick start](#quick-start) and see it work.
 
 ## Quick start
 
@@ -131,7 +114,7 @@ cd path/to/your/project
 vtcode init         # scaffolds config + AGENTS.md; review before committing
 ```
 
-Set your API key — the TUI's `/secret` command stores it in your OS keyring
+Set your API key: the TUI's `/secret` command stores it in your OS keyring
 (never in a workspace `.env` or shell history), which is the most secure
 option:
 
@@ -140,7 +123,7 @@ vtcode secret add openai   # headless; or run /secret add openai inside the TUI
 ```
 
 `vtcode login` covers OAuth providers (ChatGPT, GitHub Copilot). Plain env vars
-and workspace `.env` still work — useful for CI. See
+and workspace `.env` still work, useful for CI. See
 [Getting started](./docs/user-guide/getting-started.md) for the credential
 resolution order.
 
@@ -180,7 +163,7 @@ vtcode webmcp serve --origin <origin> --allowed-root <dir>
 
 ## What's inside
 
-One static Rust binary — no runtime dependencies, no plugins to install,
+One static Rust binary: no runtime dependencies, no plugins to install,
 nothing to wire up. Everything below ships in the default build.
 
 **At a glance:** durable sessions · sandboxed execution · every major model ·
@@ -192,7 +175,7 @@ Bare `vtcode` opens the interactive TUI. Four subcommands cover most of the
 work:
 
 ```bash
-vtcode ask "explain Rc vs Arc"    # one-shot answer — no session, no tools
+vtcode ask "explain Rc vs Arc"    # one-shot answer, no session, no tools
 vtcode exec "refactor main.rs"    # headless task with the full tool loop
 vtcode review                     # agent review of uncommitted changes
 vtcode eval --suite suite.json    # verify behavior with pass@k metrics
@@ -202,9 +185,9 @@ A second tier handles session lifecycle and day-to-day operations:
 
 | Command | Purpose |
 | --- | --- |
-| `vtcode continue` | Resume the last session — or fork it into a new one with `--session-id` |
+| `vtcode continue` | Resume the last session, or fork it into a new one with `--session-id` |
 | `vtcode schedule` | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts |
-| `vtcode secret` | Store provider API keys in your OS keyring — never in shell history or workspace files |
+| `vtcode secret` | Store provider API keys in your OS keyring, never in shell history or workspace files |
 | `vtcode models` | Inspect, test, and compare providers and models |
 | `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots |
 | `vtcode tool-policy` | Allow or deny specific tools per workspace |
@@ -216,8 +199,6 @@ full list.
 
 ### Four pillars
 
-The rest of this section expands each pillar in turn:
-
 | Pillar | In one line |
 | --- | --- |
 | **[Agent core](#agent-core)** | The loop that turns model output into reviewable progress |
@@ -225,65 +206,65 @@ The rest of this section expands each pillar in turn:
 | **[Extensibility](#extensibility)** | Every model and protocol, no fork |
 | **[Interface & quality](#interface--quality)** | Terminal-native UX, verified by default |
 
-### Agent core
+#### Agent core
 
 *The loop that turns model output into reviewable progress.*
 
-- **Durable sessions** — checkpoints, auto-compaction, and spooled tool
+- **Durable sessions:** checkpoints, auto-compaction, and spooled tool
   output keep hour-long runs grounded. `continue` resumes; `revert` rolls
   back to a snapshot. ([Runtime
   guidance](./docs/development/runtime-guidance.md) · [Session
   persistence](./docs/development/session-persistence.md))
-- **One event contract** — a single `ThreadEvent` stream drives replay, the
+- **One event contract:** a single `ThreadEvent` stream drives replay, the
   session store, memory, and trajectory export. One history, never divergent
   copies. ([Agent loop contract](./docs/guides/agent-loop-contract.md))
-- **Planning & autonomy** — planning gates, propose/verify sub-agents,
+- **Planning & autonomy:** planning gates, propose/verify sub-agents,
   isolated worktrees, and cost guardrails. Autonomy is earned with evidence,
   not granted up front.
   ([Planning workflow](./docs/guides/planning-workflow.md) ·
   [Full automation](./docs/guides/full-automation.md))
-- **Persistent memory** — gotchas, decisions, and library notes survive across
+- **Persistent memory:** gotchas, decisions, and library notes survive across
   runs, so the agent stops re-learning your project every session.
   ([Memory management](./docs/guides/memory-management.md))
 
-### Safety
+#### Safety
 
 *Fail closed by default, with coverage for the attacks that actually happen.*
 
-- **Sandboxed execution** — command policies and workspace approvals fail
+- **Sandboxed execution:** command policies and workspace approvals fail
   closed: injection, path/symlink escape, and environment leakage are blocked
   before anything runs. ([Security
   model](./docs/development/COMMAND_SECURITY_MODEL.md) ·
   [Permissions](./docs/guides/permissions.md))
-- **Syntax-aware command parsing** — tree-sitter decomposes shell pipelines
-  into sub-commands, so every piece is validated against policy — not just
+- **Syntax-aware command parsing:** tree-sitter decomposes shell pipelines
+  into sub-commands, so every piece is validated against policy, not just
   the first word. ([Tree-sitter
   integration](./docs/user-guide/tree-sitter-integration.md))
-- **Hooks & tool policies** — lifecycle hooks gate tool calls before they
+- **Hooks & tool policies:** lifecycle hooks gate tool calls before they
   run; per-tool allow/deny rules run common dev tools automatically and
   require confirmation for dangerous operations. ([Hooks
   guide](./docs/guides/hooks-guide.md) · [Execution
   policy](./docs/development/EXECUTION_POLICY.md))
 
-### Extensibility
+#### Extensibility
 
-*Plug in without forking — your setup survives upgrades.*
+*Plug in without forking; your setup survives upgrades.*
 
-- **Every model, one abstraction** — first-party APIs (OpenAI, Anthropic,
+- **Every model, one abstraction:** first-party APIs (OpenAI, Anthropic,
   Gemini, DeepSeek, Qwen, Mistral, xAI, …), gateways (OpenRouter, Vercel AI
   Gateway), OpenAI-compatible endpoints, and local inference (Ollama, LM
   Studio, llama.cpp) behind one streaming interface. Switching models never
   changes your workflow. ([Provider
   guides](./docs/providers/PROVIDER_GUIDES.md) · [Local
   models](./docs/guides/local-models.md))
-- **Integrations** — MCP servers, Agent Skills, Agent Plugins, ACP (Zed),
+- **Integrations:** MCP servers, Agent Skills, Agent Plugins, ACP (Zed),
   A2A, and the WebMCP browser bridge all attach to the core without patching
   it. ([MCP](./docs/guides/mcp-integration.md) ·
   [Skills](./docs/skills/SKILLS_GUIDE.md) ·
   [Plugins](./docs/guides/agent-plugins.md) ·
   [ACP](./docs/guides/zed-acp.md) · [A2A](./docs/a2a/a2a-protocol.md) ·
   [WebMCP](./docs/user-guide/webmcp.md))
-- **Embed VT Code** — serve the agent over ACP for editors, expose an
+- **Embed VT Code:** serve the agent over ACP for editors, expose an
   Anthropic-compatible API with `vtcode anthropic-api`, or proxy to the Codex
   app-server. VT Code works as a backend, not just a CLI.
   ([ACP](./docs/guides/zed-acp.md) ·
@@ -296,21 +277,21 @@ The rest of this section expands each pillar in turn:
 > [Provider guides](./docs/providers/PROVIDER_GUIDES.md) are the source of
 > truth for credentials and model defaults.
 
-### Interface & quality
+#### Interface & quality
 
 *Native to the terminal, verified by default.*
 
-- **Terminal-native TUI** — WCAG AA-validated themes, markdown rendering,
+- **Terminal-native TUI:** WCAG AA-validated themes, markdown rendering,
   diff previews, and customizable output styles and status line. Built for
   the terminal, not ported to it. ([Interactive
   mode](./docs/user-guide/interactive-mode.md) · [Output
   styles](./docs/guides/output_styles.md))
-- **Headless & automation** — `exec` mode, scheduled tasks, and sub-agents
+- **Headless & automation:** `exec` mode, scheduled tasks, and sub-agents
   cover scripted, parallel, and unattended work.
   ([Exec mode](./docs/user-guide/exec-mode.md) ·
   [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) ·
   [Sub-agents](./docs/user-guide/subagents.md))
-- **Evals** — pass@k / pass^k metrics with environment-based verification.
+- **Evals:** pass@k / pass^k metrics with environment-based verification.
   The agent's own report never counts as success.
   ([Eval guide](./docs/guides/eval.md))
 
@@ -383,7 +364,7 @@ Thank you to everyone who shaped VT Code.
 
 <div align="center">
   <a href="https://github.com/kernitus"><img src="https://avatars.githubusercontent.com/u/2789734?s=60" width="40" height="40" alt="@kernitus" title="@kernitus Main Contributor (52 commits)" style="border-radius: 50%; border: 2px solid #FFD700;" /></a>&nbsp;
-  <a href="https://github.com/7jrxt42BxFZo4iAnN4CX"><img src="https://avatars.githubusercontent.com/u/72938937?s=60" width="40" height="40" alt="@7jrxt42BxFZo4iAnN4CX" title="@7jrxt42BxFZo4iAnN4CX Core contributor (40 commits) - subagents, hooks, config & TUI fixes (#737, #738, #740-#742+)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
+  <a href="https://github.com/7jrxt42BxFZo4iAnN4CX"><img src="https://avatars.githubusercontent.com/u/72938937?s=60" width="40" height="40" alt="@7jrxt42BxFZo4iAnN4CX" title="@7jrxt42BxFZo4iAnN4CX Core contributor (44 commits) - subagents, hooks, config & TUI fixes (#737, #738, #740-#742+)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
   <a href="https://github.com/oiwn"><img src="https://avatars.githubusercontent.com/u/398035?s=60" width="40" height="40" alt="@oiwn" title="@oiwn Core contributor (6 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
   <a href="https://github.com/Sachin-Bhat"><img src="https://avatars.githubusercontent.com/u/25080916?s=60" width="40" height="40" alt="@Sachin-Bhat" title="@Sachin-Bhat Core contributor (3 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
   <a href="https://github.com/chenrui333"><img src="https://avatars.githubusercontent.com/u/1580956?s=60" width="40" height="40" alt="@chenrui333" title="@chenrui333 Core contributor (3 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
@@ -391,12 +372,13 @@ Thank you to everyone who shaped VT Code.
   <a href="https://github.com/leonj1"><img src="https://avatars.githubusercontent.com/u/5171829?s=60" width="40" height="40" alt="@leonj1" title="@leonj1 Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
   <a href="https://github.com/netbrah"><img src="https://avatars.githubusercontent.com/u/162479981?s=60" width="40" height="40" alt="@netbrah" title="@netbrah Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
   <a href="https://github.com/xcrong"><img src="https://avatars.githubusercontent.com/u/46434477?s=60" width="40" height="40" alt="@xcrong" title="@xcrong Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
-  <a href="https://github.com/lucaszhu-hue"><img src="https://avatars.githubusercontent.com/u/278269343?s=60" width="40" height="40" alt="@lucaszhu-hue" title="@lucaszhu-hue Core contributor (2 commits) - Atlas Cloud (#648, #662)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
+  <a href="https://github.com/mouse-value-add"><img src="https://avatars.githubusercontent.com/u/263469348?v=4&s=60" width="40" height="40" alt="@mouse-value-add" title="@mouse-value-add Core contributor (2 commits)" style="border-radius: 50%; border: 2px solid #50C878;" /></a>&nbsp;
   <a href="https://github.com/raphamorim"><img src="https://avatars.githubusercontent.com/u/3630346?s=60" width="40" height="40" alt="@raphamorim" title="@raphamorim PR #708, rio-vt migration (1 commit)" style="border-radius: 50%; border: 2px solid #4A90D9;" /></a>&nbsp;
   <a href="https://github.com/nnfrog"><img src="https://avatars.githubusercontent.com/u/142202920?s=60" width="40" height="40" alt="@nnfrog" title="@nnfrog GHSA-r249-hpfx-x2w7 (security advisory)" style="border-radius: 50%; border: 2px solid #FF6B6B;" /></a>&nbsp;
   <a href="https://github.com/glmgbj233"><img src="https://avatars.githubusercontent.com/u/115564047?s=60" width="40" height="40" alt="@glmgbj233" title="@glmgbj233 GHSA-wqgw-crr5-cr2p (security advisory)" style="border-radius: 50%; border: 2px solid #FF6B6B;" /></a>&nbsp;
   <a href="https://github.com/EvoLinkAI"><img src="https://avatars.githubusercontent.com/u/253253881?s=60" width="40" height="40" alt="@EvoLinkAI" title="@EvoLinkAI Contributor (1 commit) - Evolink provider (#664)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
   <a href="https://github.com/diegosouzapw"><img src="https://avatars.githubusercontent.com/u/8016841?s=60" width="40" height="40" alt="@diegosouzapw" title="@diegosouzapw Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
+  <a href="https://github.com/ericcurtin"><img src="https://avatars.githubusercontent.com/u/1694275?v=4&s=60" width="40" height="40" alt="@ericcurtin" title="@ericcurtin Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
   <a href="https://github.com/ForrestThump"><img src="https://avatars.githubusercontent.com/u/44280834?s=60" width="40" height="40" alt="@ForrestThump" title="@ForrestThump Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
   <a href="https://github.com/morler"><img src="https://avatars.githubusercontent.com/u/478444?s=60" width="40" height="40" alt="@morler" title="@morler Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
   <a href="https://github.com/poelzi"><img src="https://avatars.githubusercontent.com/u/66107?s=60" width="40" height="40" alt="@poelzi" title="@poelzi Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;

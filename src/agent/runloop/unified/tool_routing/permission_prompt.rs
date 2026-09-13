@@ -310,51 +310,10 @@ fn truncate_arg_preview(value: &str) -> String {
     }
 }
 
-fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Option<Vec<String>> {
-    let command = extract_shell_command_text(tool_name, tool_args)?;
-    let command = command.trim();
-    (!command.is_empty()).then(|| command.lines().map(str::to_string).collect())
-}
-
-/// Max logical rows shown for the approved command block; longer commands
-/// collapse behind an overflow count so the popup fits its viewport budget.
-const MAX_COMMAND_PREVIEW_LINES: usize = 8;
-/// Max chars per command line; longer lines collapse middle so a long
-/// single-line `python3 -c` invocation stays one scannable row.
-const MAX_COMMAND_LINE_CHARS: usize = 120;
 /// Max chars for persistent-approval display labels embedded in option
-/// subtitles; the full command remains visible in the `COMMAND` block.
+/// subtitles; the one-line action summary in the popup header already shows
+/// the command.
 const MAX_APPROVAL_LABEL_CHARS: usize = 60;
-
-fn format_command_preview_line(line: &str) -> String {
-    format!("`{}`", vtcode_commons::formatting::truncate_middle(line, MAX_COMMAND_LINE_CHARS))
-}
-
-/// Format command lines for the approval dialog, collapsing long commands to
-/// head + tail so a dangerous suffix can't hide behind the overflow.
-fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
-    if command_lines.len() <= MAX_COMMAND_PREVIEW_LINES {
-        return command_lines.iter().map(|line| format_command_preview_line(line)).collect();
-    }
-    const HEAD_LINES: usize = 5;
-    const TAIL_LINES: usize = 2;
-    let hidden = command_lines.len().saturating_sub(HEAD_LINES + TAIL_LINES);
-    let mut preview = Vec::with_capacity(HEAD_LINES + TAIL_LINES + 1);
-    preview.extend(
-        command_lines
-            .iter()
-            .take(HEAD_LINES)
-            .map(|line| format_command_preview_line(line)),
-    );
-    preview.push(format!("… +{hidden} more lines (full command runs on approval)"));
-    preview.extend(
-        command_lines
-            .iter()
-            .skip(command_lines.len().saturating_sub(TAIL_LINES))
-            .map(|line| format_command_preview_line(line)),
-    );
-    preview
-}
 /// Max chars per context row (modal wrapping handles visual width).
 const MAX_CONTEXT_LINE_CHARS: usize = 160;
 const MAX_RISK_LINE_CHARS: usize = 32;
@@ -464,21 +423,15 @@ fn tool_args_diff_preview(tool_name: &str, tool_args: Option<&Value>) -> Option<
 }
 
 /// Header rows for the approval popup: bare `Tool: {tool}` plus the one-line
-/// action summary — unless a highlighted command block follows, in which case
-/// the summary would duplicate the block. Diff previews only carry hunk
-/// metadata (`--- a/path` rows), so the `Edit file <path>` summary is still
-/// needed to identify the target file.
-fn tool_permission_header_lines(
-    tool_name: &str,
-    display_name: &str,
-    has_command_preview: bool,
-    source_thread_label: Option<&str>,
-) -> Vec<String> {
+/// action summary, which is the only place the command is shown — there is no
+/// separate command block. For diff previews the `Edit file <path>` summary
+/// identifies the target file alongside the hunk rows.
+fn tool_permission_header_lines(tool_name: &str, display_name: &str, source_thread_label: Option<&str>) -> Vec<String> {
     let mut lines = vec![format!("Tool: {tool_name}")];
     if let Some(source_label) = source_thread_label {
         lines.push(format!("Source: {source_label}"));
     }
-    if !has_command_preview && !display_name.trim().is_empty() {
+    if !display_name.trim().is_empty() {
         lines.push(display_name.trim().to_string());
     }
     lines
@@ -616,19 +569,10 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
         }
     }
     let prompt_kind = tool_permission_prompt_kind(tool_name);
-    let command_preview = shell_command_preview_lines(tool_name, tool_args);
-    let diff_preview = if command_preview.is_none() {
-        tool_args_diff_preview(tool_name, tool_args)
-    } else {
-        None
-    };
-    let mut description_lines =
-        tool_permission_header_lines(tool_name, display_name, command_preview.is_some(), source_thread_label);
+    let diff_preview = tool_args_diff_preview(tool_name, tool_args);
+    let mut description_lines = tool_permission_header_lines(tool_name, display_name, source_thread_label);
 
-    if let Some(command_lines) = command_preview {
-        description_lines.push("## Command".to_string());
-        description_lines.extend(format_command_preview_lines(command_lines));
-    } else if let Some(diff_lines) = diff_preview {
+    if let Some(diff_lines) = diff_preview {
         description_lines.push("## Preview".to_string());
         description_lines.extend(diff_lines);
     }
@@ -845,8 +789,8 @@ mod tests {
         ToolPermissionPromptKind, build_tool_permission_options, cancelled_prompt_decision,
         compact_justification_lines, extract_shell_approval_command_prefix_words, extract_shell_approval_justification,
         extract_shell_approval_scope_signature, extract_shell_command_text,
-        extract_shell_persistent_approval_prefix_rule, format_command_preview_lines, push_capped_context_line,
-        render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions, shell_command_preview_lines,
+        extract_shell_persistent_approval_prefix_rule, push_capped_context_line,
+        render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions,
         shell_permission_cache_suffix, tool_permission_header_lines, tool_permission_prompt_kind, truncate_arg_preview,
     };
     use crate::agent::runloop::unified::tool_routing::shell_approval::PersistentApprovalTarget;
@@ -896,27 +840,6 @@ mod tests {
         let truncated = truncate_arg_preview(&value);
         assert!(truncated.ends_with("..."));
         assert!(truncated.chars().count() <= 60);
-    }
-
-    #[test]
-    fn shell_command_preview_uses_highlightable_lines() {
-        let args = json!({
-            "action": "run",
-            "command": "cargo nextest run -p vtcode-ui"
-        });
-
-        let lines = shell_command_preview_lines(tools::UNIFIED_EXEC, Some(&args)).unwrap();
-        assert_eq!(lines, vec!["cargo nextest run -p vtcode-ui"]);
-    }
-
-    #[test]
-    fn shell_command_preview_ignores_non_run_actions() {
-        let args = json!({
-            "action": "poll",
-            "session_id": "run-123"
-        });
-
-        assert_eq!(shell_command_preview_lines(tools::UNIFIED_EXEC, Some(&args)), None);
     }
 
     #[test]
@@ -1174,20 +1097,20 @@ mod tests {
     }
 
     #[test]
-    fn header_omits_action_summary_when_command_block_follows() {
-        let lines = tool_permission_header_lines("exec_command", "python3 -c 'hi'", true, None);
-        assert_eq!(lines, vec!["Tool: exec_command"]);
+    fn header_shows_command_as_action_summary_without_command_block() {
+        let lines = tool_permission_header_lines("exec_command", "python3 -c 'hi'", None);
+        assert_eq!(lines, vec!["Tool: exec_command", "python3 -c 'hi'"]);
     }
 
     #[test]
     fn header_keeps_action_summary_for_diff_preview_file_identity() {
-        let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", false, None);
+        let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", None);
         assert_eq!(lines, vec!["Tool: edit_file", "Edit file src/main.rs"]);
     }
 
     #[test]
     fn header_lists_source_above_action_summary() {
-        let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", false, Some("agent-1"));
+        let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", Some("agent-1"));
         assert_eq!(lines, vec!["Tool: edit_file", "Source: agent-1", "Edit file src/main.rs"]);
     }
 
@@ -1236,36 +1159,6 @@ mod tests {
         let lines = compact_justification_lines(&just);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].chars().count() <= "Reason: ".len() + super::MAX_CONTEXT_LINE_CHARS);
-    }
-
-    #[test]
-    fn command_preview_collapse_keeps_head_and_tail() {
-        let command_lines: Vec<String> = (1..=12).map(|n| format!("line{n}")).collect();
-        let preview = format_command_preview_lines(command_lines);
-        // 5 head + overflow + 2 tail = 8 rows, fitting the viewport budget.
-        assert_eq!(preview.len(), 8);
-        assert!(preview[0].contains("line1"));
-        assert!(preview[4].contains("line5"));
-        assert!(preview[5].contains("+5 more lines"));
-        assert!(preview[6].contains("line11"));
-        assert!(preview[7].contains("line12"));
-    }
-
-    #[test]
-    fn command_preview_short_command_stays_full() {
-        let command_lines = vec!["cargo test".to_string(), "second line".to_string()];
-        let preview = format_command_preview_lines(command_lines);
-        assert_eq!(preview, vec!["`cargo test`", "`second line`"]);
-    }
-
-    #[test]
-    fn command_preview_truncates_long_single_line() {
-        let long = format!("python3 -c '{}'", "x".repeat(400));
-        let preview = format_command_preview_lines(vec![long]);
-        assert_eq!(preview.len(), 1);
-        assert!(preview[0].starts_with('`') && preview[0].ends_with('`'));
-        assert!(preview[0].contains('…'));
-        assert!(preview[0].chars().count() <= super::MAX_COMMAND_LINE_CHARS + 2);
     }
 
     #[test]

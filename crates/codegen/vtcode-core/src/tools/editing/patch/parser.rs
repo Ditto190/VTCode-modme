@@ -92,7 +92,11 @@ fn check_patch_boundaries(lines: &[&str]) -> Result<(), PatchError> {
             };
             Err(PatchError::InvalidFormat(hint.to_string()))
         }
-        _ => Err(PatchError::InvalidFormat("missing '*** End Patch' marker".to_string())),
+        _ => Err(PatchError::InvalidFormat(
+            "missing '*** End Patch' marker. End every patch with `*** End Patch` on its own line; \
+             for large new files prefer `write_file` or split into smaller `*** Add File`/`*** Update File` chunks"
+                .to_string(),
+        )),
     }
 }
 

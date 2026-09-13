@@ -753,7 +753,9 @@ pub(crate) fn split_shell_segments(command: &str) -> Result<Vec<String>> {
                         bail!("Command injection pattern detected");
                     }
                     ';' => bail!("Unquoted command chaining detected"),
-                    '\n' => bail!("Command injection pattern detected"),
+                    '\n' => bail!(
+                        "multi-line shell commands are not allowed; use file tools (write_file/apply_patch) for multi-line content instead of heredocs"
+                    ),
                     '|' | '&' => {
                         push_segment(command, segment_start, idx, &mut segments);
                         segment_start = idx + ch.len_utf8();
