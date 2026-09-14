@@ -103,3 +103,48 @@ IMPROVE todo task list, make it shorter and more concise in the TUI. only need d
 ===
 
 audit and double check and self test all TUI's commands for up to date and correctness and ensure they function as expected in various scenarios.
+
+===
+
+remove commands: /suggest, /advisor, /command. merge /agents with /agent.
+
+---
+
+add /feedback to open new issues on github: https://github.com/vinhnx/VTCode/issues/new/choose
+
+---
+
+quality of life improvement idea: when the plan mode Turn blocked, Mutation blocked => suggest or ask user to switch to build/auto modes(agents) to use the system effectively without being hindered by blocked states and blocked permissions. also, try to trigger user HITL popup to let user choose and switch modes or stay at the current plan mode. explain the reasoning behind the suggestion and provide clear guidance to the user.
+
+---
+
+help me improve for long output stdio tool call. the vtcode harness often hits the tool-call limit, causing incomplete execution of scripts and tests.
+
+```
+•   The turn hit the tool-call limit while
+./scripts/check-dev.sh was still running (session run-
+2b7098be). The check may still be running in the
+background — I'll pick it up next turn.
+  Status:
+  • All plan steps (1–4) implemented and verified: cargo
+    check -p vtcode-core ✅ , cargo nextest run -p vtcode
+    -core -E 'test(analyze)' ✅  (5/5 tests pass)
+  • Two follow-up fixes from the smoke test applied:
+    max_items: 200 (root cause of the 20-entry cap) and
+    the duplicated Detected literal removed
+  • ./scripts/check-dev.sh was re-run after those fixes
+    but the turn ended before it completed
+  Next turn: confirm check-dev.sh result, re-run the
+smoke test, then commit as requested.
+  Tool budget for this turn is exhausted — I can't run
+./scripts/check-dev.sh right now. All code changes are
+complete and previously verified (cargo check ✅ , cargo
+nextest run -p vtcode-core -E 'test(analyze)' ✅  5/5).
+The remaining step is re-running the fast gate after the
+last two small fixes (max_items: 200, Detected literal),
+then the smoke test and commit.
+  Please send any message (e.g. "continue") to start a
+  fresh turn so I can run the final gate and commit.
+```
+
+==> find a solution to handle long output from stdio tool calls more effectively, ensuring that the VTCode harness can continue execution without hitting the tool-call limit prematurely.
