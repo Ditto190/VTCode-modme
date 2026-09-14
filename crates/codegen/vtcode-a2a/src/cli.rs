@@ -30,7 +30,7 @@ pub enum A2aCommands {
         host: String,
 
         /// Port to listen on
-        #[arg(short, long, default_value_t = 8080)]
+        #[arg(long, default_value_t = 8080)]
         port: u16,
 
         /// Base URL for the agent (used in agent card)
@@ -137,7 +137,7 @@ pub struct A2aServeConfig {
     host: String,
 
     /// Port to listen on
-    #[arg(short, long, default_value_t = 8080)]
+    #[arg(long, default_value_t = 8080)]
     port: u16,
 
     /// Base URL for the agent (used in agent card)

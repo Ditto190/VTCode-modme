@@ -98,7 +98,7 @@ pub struct AddMcpTransportArgs {
 #[derive(Debug, Clone, Args)]
 pub struct AddMcpStdioArgs {
     /// Command to launch the MCP server. Use `--url` for HTTP servers.
-    #[arg(trailing_var_arg = true, num_args = 0..)]
+    #[arg(num_args = 0.., allow_hyphen_values = true)]
     pub command: Vec<String>,
 
     /// Environment variables to export when launching the server.

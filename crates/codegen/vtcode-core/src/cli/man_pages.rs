@@ -1,601 +1,176 @@
-//! Man page generation for VT Code CLI using roff-rs
+//! Man page generation for VT Code CLI.
 //!
-//! This module provides functionality to generate Unix man pages for VT Code
-//! commands and subcommands using the roff-rs library.
+//! Structural sections (NAME, SYNOPSIS, DESCRIPTION, OPTIONS, SUBCOMMANDS,
+//! VERSION) are generated from the clap [`Cli`] command tree via
+//! [`clap_mangen`], so they cannot drift from `--help` output. VT Code
+//! specific sections (ENVIRONMENT, FILES, SAFETY, EXAMPLES) are appended on
+//! top with [`roff`].
 
-use anyhow::{Result, bail};
-use roff::{Roff, bold, italic, roman};
+use std::io::Write;
+
+use anyhow::{Context, Result, bail};
+use clap::CommandFactory;
+use clap_mangen::Man;
+use roff::{Roff, bold, roman};
+
+use crate::cli::args::{Cli, long_version};
 
 /// Man page generator for VT Code CLI
 pub struct ManPageGenerator;
 
 impl ManPageGenerator {
-    /// Get current date in YYYY-MM-DD format
-    fn current_date() -> String {
-        use chrono::Utc;
-        Utc::now().format("%Y-%m-%d").to_string()
-    }
-
     /// Generate man page for the main VT Code command
     pub fn generate_main_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode - Advanced coding agent with Decision Ledger")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] ["),
-                bold("COMMAND"),
-                roman("] ["),
-                bold("ARGS"),
-                roman("]"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("VT Code is an advanced coding agent with single-agent architecture and Decision Ledger that provides"),
-                roman(" intelligent code generation, analysis, and modification capabilities. It supports"),
-                roman(" multiple LLM providers including Gemini, OpenAI, Anthropic, DeepSeek, Meta AI, Z.AI,"),
-                roman(" Moonshot AI, OpenRouter, Merge Gateway, NVIDIA NIM, Vercel AI Gateway, and Ollama, and includes LLM-native semantic code understanding."),
-                roman(" Rust, Python, JavaScript, TypeScript, Go, and Java."),
-            ])
-            .control("SH", ["OPTIONS"])
-            .control("TP", [])
-            .text([bold("-m"), roman(", "), bold("--model"), roman(" "), italic("MODEL")])
-            .text([roman("Specify the LLM model to use (default: gemini-3-flash-preview)")])
-            .control("TP", [])
-            .text([bold("-p"), roman(", "), bold("--provider"), roman(" "), italic("PROVIDER")])
-            .text([
-                roman(
-                    "Specify the LLM provider (gemini, openai, anthropic, deepseek, meta, zai, moonshot, openrouter, merge-gateway, nvidia, vercel, ollama, lmstudio)",
-                ),
-            ])
-            .control("TP", [])
-            .text([bold("--workspace"), roman(" "), italic("PATH")])
-            .text([roman("Set the workspace root directory for file operations")])
-            .control("TP", [])
-            .text([bold("--performance-monitoring")])
-            .text([roman("Enable performance monitoring and metrics")])
-            .control("TP", [])
-            .text([bold("--research-preview")])
-            .text([roman("Enable research-preview features")])
-            .control("TP", [])
-            .text([bold("--debug")])
-            .text([roman("Enable debug output")])
-            .control("TP", [])
-            .text([bold("--verbose")])
-            .text([roman("Enable verbose logging")])
-            .control("TP", [])
-            .text([bold("-h"), roman(", "), bold("--help")])
-            .text([roman("Display help information")])
-            .control("TP", [])
-            .text([bold("-V"), roman(", "), bold("--version")])
-            .text([roman("Display version information")])
-            .control("SH", ["COMMANDS"])
-            .control("TP", [])
-            .text([bold("chat")])
-            .text([roman("Start interactive AI coding assistant")])
-            .control("TP", [])
-            .text([bold("ask"), roman(" "), italic("PROMPT")])
-            .text([roman("Single prompt mode without tools")])
-            .control("TP", [])
-            .text([bold("exec"), roman(" "), italic("PROMPT")])
-            .text([roman("Headless execution mode (runs tools, exits when done)")])
-            .control("TP", [])
-            .text([bold("eval")])
-            .text([roman("Run an evaluation suite (shorthand for vtcode exec eval)")])
-            .control("TP", [])
-            .text([bold("continue")])
-            .text([roman("Resume the most recent conversation automatically")])
-            .control("TP", [])
-            .text([bold("schedule")])
-            .text([roman("Manage durable scheduled tasks")])
-            .control("TP", [])
-            .text([bold("review")])
-            .text([roman("Headless code review for the current diff or a git target")])
-            .control("TP", [])
-            .text([bold("schema")])
-            .text([roman("Runtime schema introspection for built-in tools")])
-            .control("TP", [])
-            .text([bold("analyze")])
-            .text([roman("Analyze workspace (structure, security, performance)")])
-            .control("TP", [])
-            .text([bold("notify")])
-            .text([roman("Send a VT Code notification using the built-in notification system")])
-            .control("TP", [])
-            .text([bold("benchmark")])
-            .text([roman("Benchmark against SWE-bench evaluation framework")])
-            .control("TP", [])
-            .text([bold("bench-allocator")])
-            .text([roman("Measure allocator RSS behavior under a bursty/sparse Tokio workload")])
-            .control("TP", [])
-            .text([bold("create-project"), roman(" "), italic("NAME")])
-            .text([roman("Create complete Rust project")])
-            .control("TP", [])
-            .text([bold("init")])
-            .text([roman("Initialize project guidance and workspace scaffolding")])
-            .control("TP", [])
-            .text([bold("init-project")])
-            .text([roman("Initialize project in the user state directory's projects path")])
-            .control("TP", [])
-            .text([bold("config")])
-            .text([roman("Generate or manage configuration files")])
-            .control("TP", [])
-            .text([bold("login")])
-            .text([roman("Authenticate with a supported provider")])
-            .control("TP", [])
-            .text([bold("logout")])
-            .text([roman("Clear stored authentication credentials for a provider")])
-            .control("TP", [])
-            .text([bold("auth")])
-            .text([roman("Show authentication status for one provider or all supported providers")])
-            .control("TP", [])
-            .text([bold("secret")])
-            .text([roman("Manage API keys in secure storage (OS keyring or encrypted file)")])
-            .control("TP", [])
-            .text([bold("skills")])
-            .text([roman("Manage Agent Skills")])
-            .control("TP", [])
-            .text([bold("plugins")])
-            .text([roman("Manage Agent Plugins")])
-            .control("TP", [])
-            .text([bold("dependencies")])
-            .text([roman("Manage optional VT Code dependencies (alias: deps)")])
-            .control("TP", [])
-            .text([bold("update")])
-            .text([roman("Check for and install binary updates from GitHub Releases")])
-            .control("TP", [])
-            .text([bold("session-store")])
-            .text([roman("Unified per-session state store (single source of truth for state, context, and history)")])
-            .control("TP", [])
-            .text([bold("a2a")])
-            .text([roman("Agent2Agent (A2A) Protocol")])
-            .control("TP", [])
-            .text([bold("webmcp")])
-            .text([roman("Authenticated browser editor bridge")])
-            .control("TP", [])
-            .text([bold("app-server")])
-            .text([roman("Proxy to the official Codex app-server")])
-            .control("TP", [])
-            .text([bold("pods")])
-            .text([roman("Manage GPU pod deployments")])
-            .control("TP", [])
-            .text([bold("anthropic-api")])
-            .text([roman("Start Anthropic API compatibility server")])
-            .control("TP", [])
-            .text([bold("man"), roman(" "), italic("COMMAND")])
-            .text([roman("Generate or display man pages for commands")])
-            .control("TP", [])
-            .text([bold("check"), roman(" "), italic("SUBCOMMAND")])
-            .text([roman("Run built-in repository checks")])
-            .control("TP", [])
-            .text([bold("acp")])
-            .text([roman("Start Agent Client Protocol bridge for IDE integrations")])
-            .control("TP", [])
-            .text([bold("chat-verbose")])
-            .text([roman("Verbose interactive chat with debug output")])
-            .control("TP", [])
-            .text([bold("trajectory")])
-            .text([roman("Pretty-print trajectory logs")])
-            .control("TP", [])
-            .text([bold("revert"), roman(" "), italic("turn")])
-            .text([roman("Revert agent to a previous snapshot")])
-            .control("TP", [])
-            .text([bold("snapshots")])
-            .text([roman("List all available snapshots")])
-            .control("TP", [])
-            .text([bold("cleanup-snapshots")])
-            .text([roman("Clean up old snapshots")])
-            .control("TP", [])
-            .text([bold("tool-policy")])
-            .text([roman("Manage tool execution policies")])
-            .control("TP", [])
-            .text([bold("mcp")])
-            .text([roman("Manage Model Context Protocol providers")])
-            .control("TP", [])
-            .text([bold("models")])
-            .text([roman("Manage models and providers")])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Start interactive chat:")])
-            .text([bold("  vtcode chat")])
-            .text([roman("Ask a question:")])
-            .text([bold("  vtcode ask \"Explain Rust ownership\"")])
-            .text([roman("Create a web project:")])
-            .text([bold("  vtcode create-project myapp --feature web --feature auth")])
-            .text([roman("Generate man page:")])
-            .text([bold("  vtcode man chat")])
-            .text([roman("Run ast-grep checks for the current workspace:")])
-            .text([bold("  vtcode check ast-grep")])
-            .control("SH", ["ENVIRONMENT"])
-            .control("TP", [])
-            .text([bold("GEMINI_API_KEY")])
-            .text([roman("API key for Google Gemini (default provider)")])
-            .control("TP", [])
-            .text([bold("OPENAI_API_KEY")])
-            .text([roman("API key for OpenAI GPT models")])
-            .control("TP", [])
-            .text([bold("ANTHROPIC_API_KEY")])
-            .text([roman("API key for Anthropic Claude models")])
-            .control("TP", [])
-            .text([bold("DEEPSEEK_API_KEY")])
-            .text([roman("API key for DeepSeek models")])
-            .control("TP", [])
-            .text([bold("META_API_KEY")])
-            .text([roman("API key for Meta AI Muse models")])
-            .control("TP", [])
-            .text([bold("MODEL_API_KEY")])
-            .text([roman("Meta AI's documented API key variable")])
-            .control("TP", [])
-            .text([bold("ZAI_API_KEY")])
-            .text([roman("API key for Z.AI GLM models")])
-            .control("TP", [])
-            .text([bold("MOONSHOT_API_KEY")])
-            .text([roman("API key for Moonshot AI Kimi models")])
-            .control("TP", [])
-            .text([bold("OPENROUTER_API_KEY")])
-            .text([roman("API key for OpenRouter models")])
-            .control("TP", [])
-            .text([bold("NVIDIA_API_KEY")])
-            .text([roman("API key for NVIDIA NIM models")])
-            .control("TP", [])
-            .text([bold("MERGE_GATEWAY_API_KEY")])
-            .text([roman("API key for Merge Gateway routes")])
-            .control("TP", [])
-            .text([bold("MERGE_GATEWAY_BASE_URL")])
-            .text([roman("Optional Merge Gateway endpoint override; /v1/openai selects legacy compatibility")])
-            .control("TP", [])
-            .text([bold("AI_GATEWAY_API_KEY")])
-            .text([roman("API key for Vercel AI Gateway models")])
-            .control("TP", [])
-            .text([bold("VERCEL_AI_GATEWAY_BASE_URL")])
-            .text([roman("Optional Vercel AI Gateway endpoint override (default: https://ai-gateway.vercel.sh/v1)")])
-            .control("SH", ["FILES"])
-            .control("TP", [])
-            .text([bold("vtcode.toml")])
-            .text([roman("Configuration file (current directory or the canonical user config directory)")])
-            .control("TP", [])
-            .text([bold(".vtcode/")])
-            .text([roman("Project cache and context directory")])
-            .control("SH", ["SAFETY"])
-            .control("TP", [])
-            .text([roman(
-                "apply_patch: reserve for reviewed diffs or small batches. For large refactors or critical files, stage local backups and prefer edit_file/write_file to avoid partial rewrites if a patch fails.",
-            )])
-            .control("TP", [])
-            .text([roman(
-                "Timeout governance: tune [timeouts] in vtcode.toml to clamp tool duration. VT Code warns once execution passes the configured warning threshold so you can cancel runaway commands.",
-            )])
-            .control("SH", ["SEE ALSO"])
-            .text([roman("Full documentation: https://github.com/vinhnx/vtcode")])
-            .text([roman("Related commands: cargo(1), rustc(1), git(1)")])
-            .render();
-
-        Ok(page)
+        let mut cmd = Cli::command();
+        cmd = cmd.name("vtcode");
+        if cmd.get_about().is_none() && cmd.get_long_about().is_none() {
+            cmd = cmd.about("Advanced coding agent with Decision Ledger");
+        }
+        if cmd.get_version().is_none() {
+            let version: &'static str = Box::leak(long_version().into_boxed_str());
+            cmd = cmd.version(version);
+        }
+        Self::render_page(cmd, None, &|buf| Self::append_main_sections(buf))
     }
 
     /// Generate man page for a specific command
     pub fn generate_command_man_page(command: &str) -> Result<String> {
-        match command {
-            "chat" => Self::generate_chat_man_page(),
-            "ask" => Self::generate_ask_man_page(),
-            "benchmark" => Self::generate_benchmark_man_page(),
-            "check" => Self::generate_check_man_page(),
-            "create-project" => Self::generate_create_project_man_page(),
-            "init" => Self::generate_init_man_page(),
-            "man" => Self::generate_man_man_page(),
-            _ => bail!("Unknown command: {command}"),
+        let mut cmd = Cli::command();
+        cmd.build();
+        let Some(sub) = cmd.find_subcommand(command).filter(|sub| !sub.is_hide_set()).cloned() else {
+            bail!("Unknown command: {command}");
+        };
+        let name = sub.get_name().to_owned();
+        let examples: &[&str] = match name.as_str() {
+            "ask" => &[
+                "vtcode ask \"what is a monad?\"",
+                "echo \"summarize this\" | vtcode ask",
+                "vtcode ask --output-format json \"explain ownership in Rust\"",
+            ],
+            "benchmark" => &["vtcode benchmark"],
+            "check" => &["vtcode check ast-grep"],
+            "chat" => &["vtcode chat"],
+            "create-project" => &[
+                "vtcode create-project myapp --feature web --feature auth",
+                "vtcode create-project simple_app",
+            ],
+            "init" => &["vtcode init", "vtcode init --force"],
+            "man" => &["vtcode man", "vtcode man chat", "vtcode man chat --output chat.1"],
+            _ => &[],
+        };
+        let title = format!("vtcode-{name}");
+        let sub = sub.display_name(&title);
+        Self::render_page(sub, Some(title), &|buf| Self::append_command_sections(buf, examples))
+    }
+
+    /// Render a clap-derived man page and append VT Code-specific sections.
+    fn render_page(
+        cmd: clap::Command,
+        title: Option<String>,
+        append: &dyn Fn(&mut Vec<u8>) -> Result<()>,
+    ) -> Result<String> {
+        let mut man = Man::new(cmd);
+        if let Some(title) = title {
+            man = man.title(title.to_uppercase());
         }
+        let man = man
+            .date(chrono::Utc::now().format("%Y-%m-%d").to_string())
+            .manual("VT Code")
+            .source("VT Code");
+
+        let mut buf = Vec::new();
+        man.render(&mut buf).context("failed to render clap-derived man page")?;
+        append(&mut buf)?;
+        String::from_utf8(buf).context("man page output is not valid UTF-8")
     }
 
-    /// Generate man page for the chat command
-    fn generate_chat_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-CHAT", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-chat - Interactive AI coding assistant")])
-            .control("SH", ["SYNOPSIS"])
-            .text([bold("vtcode"), roman(" ["), bold("OPTIONS"), roman("] "), bold("chat")])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Start an interactive AI coding assistant session."),
-                roman(" The chat command provides intelligent code generation, analysis, and modification"),
-                roman(" with support for multiple LLM providers and semantic code analysis."),
-            ])
-            .control("SH", ["OPTIONS"])
-            .text([
-                roman("All global options are supported. See "),
-                bold("vtcode(1)"),
-                roman(" for details."),
-            ])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Start basic chat session:")])
-            .text([bold("  vtcode chat")])
-            .text([roman("Start with specific model:")])
-            .text([bold("  vtcode --model gemini-3.1-pro-preview chat")])
-            .control("SH", ["SEE ALSO"])
-            .text([
-                bold("vtcode(1)"),
-                roman(", "),
-                bold("vtcode-ask(1)"),
-                roman(", "),
-                bold("vtcode-analyze(1)"),
-            ])
-            .render();
+    /// Append VT Code-specific sections to the main man page.
+    fn append_main_sections(buf: &mut Vec<u8>) -> Result<()> {
+        let mut roff = Roff::new();
+        roff.control("SH", ["ENVIRONMENT"]);
+        for (name, description) in [
+            ("GEMINI_API_KEY", "API key for Google Gemini (default provider)"),
+            ("OPENAI_API_KEY", "API key for OpenAI GPT models"),
+            ("ANTHROPIC_API_KEY", "API key for Anthropic Claude models"),
+            ("DEEPSEEK_API_KEY", "API key for DeepSeek models"),
+            ("META_API_KEY", "API key for Meta AI Muse models"),
+            ("MODEL_API_KEY", "Meta AI's documented API key variable"),
+            ("ZAI_API_KEY", "API key for Z.AI GLM models"),
+            ("MOONSHOT_API_KEY", "API key for Moonshot AI Kimi models"),
+            ("OPENROUTER_API_KEY", "API key for OpenRouter models"),
+            ("NVIDIA_API_KEY", "API key for NVIDIA NIM models"),
+            ("MERGE_GATEWAY_API_KEY", "API key for Merge Gateway routes"),
+            (
+                "MERGE_GATEWAY_BASE_URL",
+                "Optional Merge Gateway endpoint override; /v1/openai selects legacy compatibility",
+            ),
+            ("AI_GATEWAY_API_KEY", "API key for Vercel AI Gateway models"),
+            (
+                "VERCEL_AI_GATEWAY_BASE_URL",
+                "Optional Vercel AI Gateway endpoint override (default: https://ai-gateway.vercel.sh/v1)",
+            ),
+        ] {
+            roff.control("TP", []).text([bold(name)]).text([roman(description)]);
+        }
 
-        Ok(page)
+        roff.control("SH", ["FILES"]);
+        roff.control("TP", []).text([bold("vtcode.toml")]).text([roman(
+            "Configuration file (current directory or the canonical user config directory)",
+        )]);
+        roff.control("TP", [])
+            .text([bold(".vtcode/")])
+            .text([roman("Project cache and context directory")]);
+
+        roff.control("SH", ["SAFETY"]);
+        roff.control("TP", []).text([roman(
+            "apply_patch: reserve for reviewed diffs or small batches. For large refactors or critical files, stage local backups and prefer edit_file/write_file to avoid partial rewrites if a patch fails.",
+        )]);
+        roff.control("TP", []).text([roman(
+            "Timeout governance: tune [timeouts] in vtcode.toml to clamp tool duration. VT Code warns once execution passes the configured warning threshold so you can cancel runaway commands.",
+        )]);
+
+        roff.control("SH", ["EXAMPLES"]);
+        for (label, example) in [
+            ("Start interactive chat:", "vtcode chat"),
+            ("Ask a question:", "vtcode ask \"Explain Rust ownership\""),
+            ("Create a web project:", "vtcode create-project myapp --feature web --feature auth"),
+            ("Generate man page:", "vtcode man chat"),
+            ("Run ast-grep checks for the current workspace:", "vtcode check ast-grep"),
+        ] {
+            roff.text([roman(label)]);
+            roff.text([bold(format!("  {example}"))]);
+        }
+
+        roff.control("SH", ["SEE ALSO"]);
+        roff.text([roman("Full documentation: https://github.com/vinhnx/vtcode")]);
+        roff.text([roman("Related commands: cargo(1), rustc(1), git(1)")]);
+
+        Self::append_roff(buf, &roff)
     }
 
-    /// Generate man page for the ask command
-    fn generate_ask_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-ASK", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-ask - Single prompt mode without tools")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("ask"),
-                roman(" "),
-                italic("PROMPT"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Execute a single prompt without tool usage. This is perfect for quick questions,"),
-                roman(" code explanations, and simple queries that don't require file operations or"),
-                roman(" complex tool interactions."),
-            ])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Ask about Rust ownership:")])
-            .text([bold("  vtcode ask \"Explain Rust ownership\"")])
-            .text([roman("Get code explanation:")])
-            .text([bold("  vtcode ask \"What does this regex do: \\w+@\\w+\\.\\w+\"")])
-            .control("SH", ["SEE ALSO"])
-            .text([bold("vtcode(1)"), roman(", "), bold("vtcode-chat(1)")])
-            .render();
-
-        Ok(page)
+    /// Append curated examples and a SEE ALSO section to a command man page.
+    fn append_command_sections(buf: &mut Vec<u8>, examples: &[&str]) -> Result<()> {
+        let mut roff = Roff::new();
+        if !examples.is_empty() {
+            roff.control("SH", ["EXAMPLES"]);
+            for example in examples {
+                roff.text([bold(format!("  {example}"))]);
+            }
+        }
+        roff.control("SH", ["SEE ALSO"]);
+        roff.text([bold("vtcode(1)")]);
+        Self::append_roff(buf, &roff)
     }
 
-    /// Generate man page for the benchmark command
-    fn generate_benchmark_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-BENCHMARK", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-benchmark - Run SWE-bench evaluation framework")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("benchmark"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Run automated performance testing against the SWE-bench evaluation framework."),
-                roman(" Provides comparative analysis across different models, benchmark scoring,"),
-                roman(" and optimization insights for coding tasks."),
-            ])
-            .control("SH", ["FEATURES"])
-            .control("TP", [])
-            .text([bold("Automated Testing")])
-            .text([roman("Run standardized coding tasks and challenges")])
-            .control("TP", [])
-            .text([bold("Comparative Analysis")])
-            .text([roman("Compare performance across different models")])
-            .control("TP", [])
-            .text([bold("Benchmark Scoring")])
-            .text([roman("Quantitative performance metrics and scores")])
-            .control("TP", [])
-            .text([bold("Optimization Insights")])
-            .text([roman("Recommendations for performance improvements")])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Run benchmark suite:")])
-            .text([bold("  vtcode benchmark")])
-            .control("SH", ["SEE ALSO"])
-            .text([bold("vtcode(1)"), roman(", "), bold("vtcode-performance(1)")])
-            .render();
-
-        Ok(page)
-    }
-
-    /// Generate man page for the create-project command
-    fn generate_create_project_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-CREATE-PROJECT", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-create-project - Create complete Rust project")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("create-project"),
-                roman(" "),
-                italic("NAME"),
-                roman(" [--feature FEATURE]..."),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Create a complete Rust project with advanced features and integrations."),
-                roman(" Supports web frameworks, database integration, authentication systems,"),
-                roman(" testing setup, and security policies."),
-            ])
-            .control("SH", ["AVAILABLE FEATURES"])
-            .text([roman("• web - Web framework (Axum, Rocket, Warp)")])
-            .text([roman("• auth - Authentication system")])
-            .text([roman("• db - Database integration")])
-            .text([roman("• test - Testing setup")])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Create web app with auth and database:")])
-            .text([bold("  vtcode create-project myapp --feature web --feature auth")])
-            .text([roman("Create basic project:")])
-            .text([bold("  vtcode create-project simple_app")])
-            .control("SH", ["SEE ALSO"])
-            .text([bold("vtcode(1)"), roman(", "), bold("vtcode-init(1)")])
-            .render();
-
-        Ok(page)
-    }
-
-    /// Generate man page for the init command
-    fn generate_init_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-INIT", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-init - Guided AGENTS.md and workspace setup")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("init"),
-                roman(" ["),
-                bold("--force"),
-                roman("]"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Bootstrap vtcode.toml, repository memory scaffolding, indexing,"),
-                roman(" and a guided root AGENTS.md generated from repository signals."),
-                roman(" Existing AGENTS.md files prompt for confirmation unless --force is used."),
-            ])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Initialize current directory:")])
-            .text([bold("  vtcode init")])
-            .text([roman("Overwrite an existing AGENTS.md without prompting:")])
-            .text([bold("  vtcode init --force")])
-            .control("SH", ["SEE ALSO"])
-            .text([bold("vtcode(1)"), roman(", "), bold("vtcode-create-project(1)")])
-            .render();
-
-        Ok(page)
-    }
-
-    /// Generate man page for the check command
-    fn generate_check_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-CHECK", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-check - Run built-in repository checks")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("check"),
-                roman(" "),
-                bold("ast-grep"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Run built-in checks against the current workspace. The "),
-                bold("ast-grep"),
-                roman(" subcommand runs "),
-                bold("ast-grep test --config sgconfig.yml"),
-                roman(" followed by "),
-                bold("ast-grep scan --config sgconfig.yml"),
-                roman("."),
-            ])
-            .control("SH", ["PREREQUISITES"])
-            .text([roman("Install ast-grep with:")])
-            .text([bold("  vtcode dependencies install ast-grep")])
-            .text([roman("Materialize the local scaffold with:")])
-            .text([bold("  vtcode init")])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Run ast-grep rule tests and scan:")])
-            .text([bold("  vtcode check ast-grep")])
-            .control("SH", ["SEE ALSO"])
-            .text([
-                bold("vtcode(1)"),
-                roman(", "),
-                bold("vtcode-init(1)"),
-                roman(", "),
-                bold("vtcode-man(1)"),
-            ])
-            .render();
-
-        Ok(page)
-    }
-
-    /// Generate man page for the man command itself
-    fn generate_man_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-MAN", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman("vtcode-man - Generate or display man pages for VT Code commands")])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("man"),
-                roman(" ["),
-                italic("COMMAND"),
-                roman("] ["),
-                bold("--output"),
-                roman(" "),
-                italic("FILE"),
-                roman("]"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Generate or display Unix man pages for VT Code commands. Man pages provide"),
-                roman(" detailed documentation for all VT Code functionality including usage examples,"),
-                roman(" option descriptions, and feature explanations."),
-            ])
-            .control("SH", ["OPTIONS"])
-            .control("TP", [])
-            .text([bold("--output"), roman(" "), italic("FILE")])
-            .text([roman("Write man page to specified file instead of displaying")])
-            .control("SH", ["AVAILABLE COMMANDS"])
-            .text([roman("• chat - Interactive AI coding assistant")])
-            .text([roman("• ask - Single prompt mode")])
-            .text([roman("• analyze - Workspace analysis")])
-            .text([roman("• performance - Performance metrics")])
-            .text([roman("• trajectory - Pretty-print trajectory logs and analytics")])
-            .text([roman("• benchmark - SWE-bench evaluation framework")])
-            .text([roman("• create-project - Create complete Rust project with features")])
-            .text([roman("• revert - Revert agent to a previous snapshot")])
-            .text([roman("• snapshots - List available snapshots")])
-            .text([roman("• cleanup-snapshots - Clean up old snapshots")])
-            .text([roman("• init - Initialize project with enhanced structure")])
-            .text([roman("• init-project - Initialize project with dot-folder structure")])
-            .text([roman("• config - Generate configuration file")])
-            .text([roman("• tool-policy - Manage tool execution policies")])
-            .text([roman("• mcp - Manage Model Context Protocol providers")])
-            .text([roman("• models - Manage models and providers")])
-            .text([roman("• acp - Agent Client Protocol bridge for IDE integrations")])
-            .text([roman("• chat-verbose - Verbose interactive chat with transparency")])
-            .text([roman("• man - Man page generation (this command)")])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Display main VT Code man page:")])
-            .text([bold("  vtcode man")])
-            .text([roman("Display chat command man page:")])
-            .text([bold("  vtcode man chat")])
-            .text([roman("Save man page to file:")])
-            .text([bold("  vtcode man chat --output chat.1")])
-            .control("SH", ["SEE ALSO"])
-            .text([bold("vtcode(1)"), roman(", "), bold("man(1)")])
-            .render();
-
-        Ok(page)
+    /// Append rendered roff content, stripping the duplicate preamble that
+    /// [`Roff::render`] emits (clap_mangen already wrote one).
+    fn append_roff(buf: &mut Vec<u8>, roff: &Roff) -> Result<()> {
+        let rendered = roff.render();
+        let body = match rendered.find(".SH ") {
+            Some(index) => &rendered[index..],
+            None => return Ok(()),
+        };
+        buf.write_all(body.as_bytes()).context("failed to append man page sections")?;
+        Ok(())
     }
 }

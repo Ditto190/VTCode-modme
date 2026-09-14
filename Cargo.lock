@@ -1106,6 +1106,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "clap_mangen"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "211d617eaa4b735c96c9e0228fcbdb5120ef623f2b8cb67ffb84c3e02dbc28a4"
+dependencies = [
+ "clap",
+ "roff",
+]
+
+[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3078,7 +3088,7 @@ checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
 dependencies = [
  "console 0.16.4",
  "once_cell",
- "similar",
+ "similar 2.7.0",
  "tempfile",
 ]
 
@@ -6250,6 +6260,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7575,6 +7595,7 @@ dependencies = [
  "vtcode-commons",
  "vtcode-config",
  "vtcode-core",
+ "vtcode-diff",
  "vtcode-eval",
  "vtcode-memory",
  "vtcode-safety",
@@ -7740,6 +7761,7 @@ dependencies = [
  "tracing",
  "unicode-width 0.2.2",
  "url",
+ "vtcode-diff",
 ]
 
 [[package]]
@@ -7793,6 +7815,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "clap",
+ "clap_mangen",
  "colorchoice-clap",
  "compact_str 0.10.0",
  "criterion",
@@ -7872,6 +7895,7 @@ dependencies = [
  "vtcode-bash-runner",
  "vtcode-commons",
  "vtcode-config",
+ "vtcode-diff",
  "vtcode-exec-events",
  "vtcode-indexer",
  "vtcode-llm",
@@ -7887,6 +7911,17 @@ dependencies = [
  "windows-sys 0.61.2",
  "xattr",
  "zip",
+]
+
+[[package]]
+name = "vtcode-diff"
+version = "0.162.3"
+dependencies = [
+ "anstyle",
+ "ratatui",
+ "serde",
+ "similar 3.2.0",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -8151,6 +8186,7 @@ dependencies = [
  "unicode-width 0.2.2",
  "vtcode-commons",
  "vtcode-config",
+ "vtcode-diff",
 ]
 
 [[package]]
@@ -8189,6 +8225,7 @@ dependencies = [
  "url",
  "uuid",
  "vtcode-commons",
+ "vtcode-diff",
  "vtcode-exec-events",
  "vtcode-safety",
 ]
