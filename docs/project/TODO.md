@@ -83,3 +83,15 @@ help me check and fix on control+g to edit/review plan proposal in external edit
 check VT Code notification from terminal/ghostty etc doesn't showing in the notification center properly. Bug: notifications are not appearing as expected, making it difficult for the user to stay informed about important events and updates. Currently, only the terminal get pinged, and the notification center remains empty and I am missing critical notifications. (Note: currently tested on macOS and ghostty, other platforms may have similar issues.)
 
 ===
+
+Change keyboard shortcut to switch modes/agents from single tab to shift+tab.
+
+===
+
+Help me check this session run log and harness atif trajectory. Even though it very stable and good now, more than I expected, I want to ensure that there are no hidden issues or potential improvements that can be made. Check for potential optimizations, edge cases, and any anomalies that might affect long-term stability and performance. Eg: memory leaks, race conditions, unexpected errors, performance bottlenecks, and unusual patterns in the logs, context and tool calls optimzation that might need attention and can further improve the system. Also check if VT Code prompt caching is functioning correctly and efficiently. check for cache hit / miss ratio and any potential improvements in caching strategy. Make sure cost efficiency is maintained and any unnecessary resource usage is minimized.
+
+log: session-vtcode-20260914T084315Z_111294-82729.
+Path: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260914T084315Z_111294-82729
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260914t084315z_111294-82729-20260914T091125Z-3f8578c8-e1da-44ca-8158-543d86056f32.md
+
+use relevant session logs and task blockers to analyze the system's behavior and identify potential improvements. use skills and distil insights from the logs to make informed recommendations for enhancing stability, performance, and overall efficiency.
