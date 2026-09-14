@@ -306,6 +306,12 @@ before implementation — and omit them when nothing material exists. The
 validator tolerates additional sections; only `Summary`, `Implementation Steps`,
 `Test Cases and Validation`, and `Assumptions and Defaults` are required.
 
+Each comma-separated `verify:` entry must itself be a concrete command or
+observable check. Commas inside single or double quotes stay inside one item,
+so a quoted shell pattern such as `rg -n 'a,b' README.md` remains a single
+check. Prefer concrete `cargo` or `rg` gates over fragile `sed` address ranges
+with embedded commas when a simpler check expresses the same outcome.
+
 `Next open decision` and `Open question` entries are explicit reopen markers for follow-up planning; use a resolved statement such as `No remaining scope decisions` when none remain.
 
 ### Reasoning and Evidence

@@ -52,7 +52,7 @@ pub const PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE: &str = "Emit exactly o
 /// optional `## Expected Outcomes` / `## Dependencies and Prerequisites`
 /// sections are requested only "when material" so plans carry outcomes and
 /// prerequisites without inflating every plan past the token budget.
-pub const PLANNING_WORKFLOW_PLAN_QUALITY_LINE: &str = "Keep the final proposed plan compact and spec-like, with these sections: `## Summary`; `## Implementation Steps` (or `## Steps`); `## Test Cases and Validation` (or `## Validation`); `## Assumptions and Defaults` (or `## Assumptions`). When material to the request, add `## Expected Outcomes` (observable end states the implementation must produce) and `## Dependencies and Prerequisites` (tooling, configuration, or prior work required before implementation); omit them when nothing material exists. Every numbered implementation step must name a concrete file, symbol, behavior, or other repository target and include one concrete `verify:`/`verification:` command or observable check, written in the canonical one-line form `1. Action -> files: [path/to/file.rs] -> verify: [cargo check]`; generic `1. Do the work` steps, vague prose, and comma-separated verify entries that are not commands or observable checks are not plans. Prefer file:symbol references over prose, written as plain text or inline code (e.g. `src/main.rs:42`) — never as markdown links or editor/IDE URIs (no `[label](url)`, no `vscode-file://`/`file://` schemes). Resolve placeholders and open decisions before approval; use `Next open decision:` or `Open question:` only when a decision remains unresolved.";
+pub const PLANNING_WORKFLOW_PLAN_QUALITY_LINE: &str = "Keep the final proposed plan compact and spec-like, with these sections: `## Summary`; `## Implementation Steps` (or `## Steps`); `## Test Cases and Validation` (or `## Validation`); `## Assumptions and Defaults` (or `## Assumptions`). When material to the request, add `## Expected Outcomes` (observable end states the implementation must produce) and `## Dependencies and Prerequisites` (tooling, configuration, or prior work required before implementation); omit them when nothing material exists. Every numbered implementation step must name a concrete file, symbol, behavior, or other repository target and include one concrete `verify:`/`verification:` command or observable check, written in the canonical one-line form `1. Action -> files: [path/to/file.rs] -> verify: [cargo check]`; generic `1. Do the work` steps, vague prose, and comma-separated verify entries that are not commands or observable checks are not plans. Commas inside single or double quotes stay inside one verify item. Prefer file:symbol references over prose, written as plain text or inline code (e.g. `src/main.rs:42`) — never as markdown links or editor/IDE URIs (no `[label](url)`, no `vscode-file://`/`file://` schemes). Resolve placeholders and open decisions before approval; use `Next open decision:` or `Open question:` only when a decision remains unresolved.";
 /// Scale research effort to the request instead of always exhaustively
 /// enumerating the repository. Checkpoint turn_647 showed a "make a simple
 /// plan to improve launch time" request burn 70+ tool calls across dozens of
@@ -989,6 +989,10 @@ mod tests {
         assert!(line.contains("one concrete `verify:`/`verification:` command or observable check"));
         assert!(line.contains("vague prose"));
         assert!(line.contains("comma-separated verify entries that are not commands or observable checks"));
+        assert!(
+            line.contains("Commas inside single or double quotes stay inside one verify item"),
+            "quality line must state the quoted-comma bracket rule so first-attempt plans do not fragment shell patterns"
+        );
     }
 
     #[test]
