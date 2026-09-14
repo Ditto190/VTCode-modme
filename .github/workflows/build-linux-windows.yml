@@ -169,12 +169,18 @@ jobs:
             echo "✗ Binary not found!" && exit 1
           fi
 
+      - name: Generate man pages
+        shell: bash
+        run: |
+          cargo run --locked -p xtask -- gen-man --out-dir man/man1
+
       - name: Package
         shell: bash
         run: |
-          cd target/${{ matrix.target }}/release-fast
-          tar -czf ../../../vtcode-${{ inputs.tag }}-${{ matrix.target }}.tar.gz vtcode
-          cd ../../../
+          mkdir -p stage
+          cp "target/${{ matrix.target }}/release-fast/vtcode" stage/
+          cp -R man stage/
+          tar -C stage -czf "vtcode-${{ inputs.tag }}-${{ matrix.target }}.tar.gz" .
           if command -v sha256sum &> /dev/null; then
             sha256sum vtcode-${{ inputs.tag }}-${{ matrix.target }}.tar.gz > vtcode-${{ inputs.tag }}-${{ matrix.target }}.sha256
           elif command -v shasum &> /dev/null; then
