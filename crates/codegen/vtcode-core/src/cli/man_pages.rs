@@ -278,7 +278,6 @@ impl ManPageGenerator {
         match command {
             "chat" => Self::generate_chat_man_page(),
             "ask" => Self::generate_ask_man_page(),
-            "performance" => Self::generate_performance_man_page(),
             "benchmark" => Self::generate_benchmark_man_page(),
             "check" => Self::generate_check_man_page(),
             "create-project" => Self::generate_create_project_man_page(),
@@ -362,56 +361,6 @@ impl ManPageGenerator {
         Ok(page)
     }
 
-    /// Generate man page for the analyze command
-    /// Generate man page for the performance command
-    fn generate_performance_man_page() -> Result<String> {
-        let current_date = Self::current_date();
-        let page = Roff::new()
-            .control("TH", ["VTCODE-PERFORMANCE", "1", &current_date, "VT Code", "User Commands"])
-            .control("SH", ["NAME"])
-            .text([roman(
-                "vtcode-performance - Display performance metrics and system status",
-            )])
-            .control("SH", ["SYNOPSIS"])
-            .text([
-                bold("vtcode"),
-                roman(" ["),
-                bold("OPTIONS"),
-                roman("] "),
-                bold("performance"),
-            ])
-            .control("SH", ["DESCRIPTION"])
-            .text([
-                roman("Display comprehensive performance metrics and system status information."),
-                roman(" Shows token usage, API costs, response times, tool execution statistics,"),
-                roman(" memory usage patterns, and agent performance metrics."),
-            ])
-            .control("SH", ["METRICS DISPLAYED"])
-            .control("TP", [])
-            .text([bold("Token Usage")])
-            .text([roman("Input/output token counts and API costs")])
-            .control("TP", [])
-            .text([bold("Response Times")])
-            .text([roman("API response latency and processing times")])
-            .control("TP", [])
-            .text([bold("Tool Execution")])
-            .text([roman("Tool call statistics and execution times")])
-            .control("TP", [])
-            .text([bold("Memory Usage")])
-            .text([roman("Memory consumption patterns")])
-            .control("TP", [])
-            .text([bold("Agent Performance")])
-            .text([roman("Single-agent execution metrics")])
-            .control("SH", ["EXAMPLES"])
-            .text([roman("Show performance metrics:")])
-            .text([bold("  vtcode performance")])
-            .control("SH", ["SEE ALSO"])
-            .text([bold("vtcode(1)"), roman(", "), bold("vtcode-benchmark(1)")])
-            .render();
-
-        Ok(page)
-    }
-
     /// Generate man page for the benchmark command
     fn generate_benchmark_man_page() -> Result<String> {
         let current_date = Self::current_date();
@@ -462,9 +411,7 @@ impl ManPageGenerator {
         let page = Roff::new()
             .control("TH", ["VTCODE-CREATE-PROJECT", "1", &current_date, "VT Code", "User Commands"])
             .control("SH", ["NAME"])
-            .text([roman(
-                "vtcode-create-project - Create complete Rust project with features",
-            )])
+            .text([roman("vtcode-create-project - Create complete Rust project")])
             .control("SH", ["SYNOPSIS"])
             .text([
                 bold("vtcode"),
@@ -474,8 +421,7 @@ impl ManPageGenerator {
                 bold("create-project"),
                 roman(" "),
                 italic("NAME"),
-                roman(" "),
-                italic("FEATURES"),
+                roman(" [--feature FEATURE]..."),
             ])
             .control("SH", ["DESCRIPTION"])
             .text([
@@ -490,7 +436,7 @@ impl ManPageGenerator {
             .text([roman("• test - Testing setup")])
             .control("SH", ["EXAMPLES"])
             .text([roman("Create web app with auth and database:")])
-            .text([bold("  vtcode create-project myapp web,auth,db")])
+            .text([bold("  vtcode create-project myapp --feature web --feature auth")])
             .text([roman("Create basic project:")])
             .text([bold("  vtcode create-project simple_app")])
             .control("SH", ["SEE ALSO"])
