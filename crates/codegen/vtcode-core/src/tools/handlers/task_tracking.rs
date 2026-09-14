@@ -303,11 +303,10 @@ fn parse_inline_bracket_list(raw: &str) -> Vec<String> {
         .strip_prefix('[')
         .and_then(|value| value.strip_suffix(']'))
         .unwrap_or(trimmed);
-    inner
-        .split(',')
-        .map(str::trim)
+    super::planning_workflow::split_bracket_items(inner)
+        .into_iter()
+        .map(|item| item.trim().to_owned())
         .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
         .collect()
 }
 
@@ -775,6 +774,16 @@ mod tests {
         assert_eq!(clean, "Just an action");
         assert!(files.is_empty());
         assert!(verify.is_empty());
+    }
+
+    #[test]
+    fn split_task_description_metadata_preserves_quoted_commas_in_files_and_verify() {
+        let (clean, files, verify) = split_task_description_metadata(
+            "Inspect range -> files: ['src/a.rs, b.rs', src/c.rs] -> verify: [sed -n '/^## A/,/^## B/p']",
+        );
+        assert_eq!(clean, "Inspect range");
+        assert_eq!(files, vec!["'src/a.rs, b.rs'".to_string(), "src/c.rs".to_string()]);
+        assert_eq!(verify, vec!["sed -n '/^## A/,/^## B/p'".to_string()]);
     }
 
     #[test]

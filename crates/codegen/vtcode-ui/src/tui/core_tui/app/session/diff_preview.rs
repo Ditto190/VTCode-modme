@@ -9,7 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use vtcode_commons::diff_paths::{is_prose_language_hint, language_hint_from_path};
+use vtcode_commons::diff_paths::language_hint_from_path;
 use vtcode_commons::diff_preview::{
     DiffDisplayKind, DiffDisplayLine, count_diff_changes, display_lines_from_hunks, side_by_side_rows,
 };
@@ -17,8 +17,7 @@ use vtcode_commons::ui_protocol::DiffPreviewMode as DiffLayoutMode;
 
 use super::Session;
 use crate::tui::core_tui::app::types::{DiffPreviewMode, DiffPreviewState, TrustMode};
-use crate::tui::core_tui::style::{ratatui_color_from_ansi, ratatui_style_from_ansi};
-use crate::tui::ui::markdown::render_diff_content_segments;
+use crate::tui::core_tui::style::ratatui_color_from_ansi;
 use crate::tui::utils::diff::{DiffBundle, DiffOptions, compute_diff_with_theme};
 use crate::tui::utils::diff_styles::{
     DiffColorPalette, DiffLineType, current_diff_render_style_context, style_content, style_gutter, style_hunk_header,
@@ -275,40 +274,35 @@ fn render_diff_content_side_by_side(
     }
 }
 
-/// Build a single pane line with full-width tint (gutter + content + pad).
+/// Build a single pane line with foreground-only styling (gutter + content + pad).
 fn build_side_pane_line(
     display_line: &DiffDisplayLine,
-    language: Option<&str>,
+    _language: Option<&str>,
     style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
     width: usize,
 ) -> Line<'static> {
-    let mut spans = build_side_pane_spans(display_line, language, style_context, width);
-    let line_type = match display_line.kind {
+    let mut spans = build_side_pane_spans(display_line, _language, style_context, width);
+    // Foreground-only: ensure no background leaks through. Gutter DIM is
+    // intentional (numbers recede); bodies carry no DIM so add/del fg stays
+    // at full brightness aligned with the marker.
+    for span in &mut spans {
+        span.style.bg = None;
+    }
+    let line_bg = style_line_bg(line_type_for_kind(display_line.kind), style_context);
+    pad_line_to_width(Line::from(spans), width, line_bg)
+}
+
+fn line_type_for_kind(kind: DiffDisplayKind) -> DiffLineType {
+    match kind {
         DiffDisplayKind::Addition => DiffLineType::Insert,
         DiffDisplayKind::Deletion => DiffLineType::Delete,
         _ => DiffLineType::Context,
-    };
-    let line_bg = style_line_bg(line_type, style_context);
-    // Force the line tint onto every span (gutter + body) so the pane is one
-    // continuous band — no unstyled gutter strip next to the coloured body.
-    if let Some(bg) = line_bg.bg {
-        for span in &mut spans {
-            span.style.bg = Some(bg);
-        }
     }
-    // Deletion body reads dimmer than addition: apply DIM to body spans
-    // (skip the first 3 gutter spans: sign + number + │).
-    if line_type == DiffLineType::Delete {
-        for span in spans.iter_mut().skip(3) {
-            span.style = span.style.add_modifier(Modifier::DIM);
-        }
-    }
-    pad_line_to_width(Line::from(spans), width, line_bg)
 }
 
 fn build_inline_diff_line(
     display_line: &DiffDisplayLine,
-    language: Option<&str>,
+    _language: Option<&str>,
     style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
     width: usize,
 ) -> Line<'static> {
@@ -347,22 +341,10 @@ fn build_inline_diff_line(
         Span::styled(" │ ".to_owned(), gutter_style),
     ];
 
-    // Prose diffs (md/txt) skip syntax highlighting: solid content
-    // on the tinted bg. Code diffs keep syntax fg but are forced
-    // onto the diff bg so syntect theme holes can't show through.
-    let prose = is_prose_language_hint(language);
-    if prose {
-        spans.push(Span::styled(display_line.text.clone(), content_style));
-    } else {
-        let forced_bg = content_style.bg.or(line_bg.bg);
-        for segment in render_diff_content_segments(&display_line.text, language, anstyle::Style::new()) {
-            let mut style = content_style.patch(ratatui_style_from_ansi(segment.style));
-            if forced_bg.is_some() {
-                style.bg = forced_bg;
-            }
-            spans.push(Span::styled(segment.text, style));
-        }
-    }
+    // Foreground-only bodies: solid red/green foreground aligned with the
+    // sign marker. No syntax highlighting here so code and prose share one
+    // fg and no theme background can leave holes.
+    spans.push(Span::styled(display_line.text.clone(), content_style));
 
     pad_line_to_width(Line::from(spans).style(line_bg), width, line_bg)
 }
@@ -370,7 +352,7 @@ fn build_inline_diff_line(
 /// Build one side-by-side pane: `sign + number + │ + content`, truncated to `width`.
 fn build_side_pane_spans(
     display_line: &DiffDisplayLine,
-    language: Option<&str>,
+    _language: Option<&str>,
     style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
     width: usize,
 ) -> Vec<Span<'static>> {
@@ -384,7 +366,6 @@ fn build_side_pane_spans(
 
     let gutter_style = style_gutter(line_type, style_context);
     let sign_style = style_sign(line_type, style_context);
-    let line_bg = style_line_bg(line_type, style_context);
     let content_style = style_content(line_type, style_context);
 
     let prefix = match line_type {
@@ -409,40 +390,17 @@ fn build_side_pane_spans(
     ];
     // Gutter width grows with large line numbers (`{n:>3}` widens past 3
     // digits), so measure it instead of assuming 5 cells.
-    let mut used = 1usize
+    let used = 1usize
         .saturating_add(unicode_width::UnicodeWidthStr::width(line_num_str.as_str()))
         .saturating_add(1);
 
-    let prose = is_prose_language_hint(language);
-    let forced_bg = content_style.bg.or(line_bg.bg);
-    if prose {
-        if used < width {
-            let body = truncate_to_width(&display_line.text, width - used);
-            let cell_width = unicode_width::UnicodeWidthStr::width(body.as_str());
-            spans.push(Span::styled(body, content_style));
-            used += cell_width;
-        }
-    } else if used < width {
-        for segment in render_diff_content_segments(&display_line.text, language, anstyle::Style::new()) {
-            if used >= width {
-                break;
-            }
-            let remaining = width - used;
-            let text = truncate_to_width(&segment.text, remaining);
-            if text.is_empty() {
-                continue;
-            }
-            let cell_width = unicode_width::UnicodeWidthStr::width(text.as_str());
-            let mut style = content_style.patch(ratatui_style_from_ansi(segment.style));
-            if forced_bg.is_some() {
-                style.bg = forced_bg;
-            }
-            spans.push(Span::styled(text, style));
-            used += cell_width;
-            if cell_width >= remaining {
-                break;
-            }
-        }
+    // Foreground-only: solid red/green body, truncated to the pane width.
+    // No syntax highlighting so the body fg stays aligned with the marker.
+    if used < width {
+        let body = truncate_to_width(&display_line.text, width - used);
+        let cell_width = unicode_width::UnicodeWidthStr::width(body.as_str());
+        spans.push(Span::styled(body, content_style));
+        let _ = cell_width;
     }
 
     // Empty pane content still needs a cell so the divider stays aligned.

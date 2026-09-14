@@ -9,7 +9,7 @@ use super::render_tree_detail;
 use super::streams::{render_diff_content_block, strip_ansi_codes};
 use super::styles::{GitStyles, LsStyles};
 pub(crate) use vtcode_commons::diff_preview::format_numbered_unified_diff as format_diff_content_lines_with_numbers;
-use vtcode_core::tools::file_ops::canonical_diff_previews;
+use vtcode_core::tools::file_ops::{canonical_diff_previews, diff_preview_user_message};
 
 /// Constants for line and content limits (compact display)
 const MAX_DISPLAYED_FILES: usize = 100; // Limit displayed files to reduce clutter
@@ -130,7 +130,7 @@ fn render_diff_preview_entries(
         render_file_heading(renderer, &heading)?;
 
         if get_bool(diff, "skipped") {
-            let reason = get_string(diff, "reason").unwrap_or("skipped");
+            let reason = diff_preview_user_message(diff);
             if let Some(detail) = get_string(diff, "detail") {
                 renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason} ({detail})"))?;
             } else {

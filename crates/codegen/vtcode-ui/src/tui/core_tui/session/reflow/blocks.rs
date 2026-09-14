@@ -11,34 +11,20 @@ use super::super::message::RenderedTranscriptLink;
 use super::super::styling::tool_inline_style_for;
 use super::super::{Session, TranscriptLine, render, text_utils};
 use super::helpers::{
-    has_summary_prefix, is_bullet_summary_text, is_tool_summary_line, is_tree_detail_text, parse_tool_call_prefix,
-    push_spacing_blanks, push_spacing_transcript_lines, split_tool_spans,
+    diff_row_bg, has_summary_prefix, is_bullet_summary_text, is_diff_row_spans, is_tool_summary_line,
+    is_tree_detail_text, parse_tool_call_prefix, push_spacing_blanks, push_spacing_transcript_lines, split_tool_spans,
 };
 use crate::tui::config::constants::ui;
 
-/// Background of a diff content row, if it carries a tinted band.
-///
-/// Requires both a painted background and a diff marker (`+`/`-`/space body
-/// marker, `---`/`+++` file header, or `@@` hunk header) so ordinary tool
-/// output that happens to be styled never gets diff treatment.
-fn diff_row_bg(spans: &[Span<'_>]) -> Option<Color> {
-    let bg = spans.iter().find_map(|span| span.style.bg)?;
-    let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
-    let trimmed = text.trim_start();
-    if trimmed.starts_with("--- ")
-        || trimmed.starts_with("+++ ")
-        || trimmed.starts_with("@@")
-        || matches!(spans.first().and_then(|span| span.content.chars().next()), Some('+' | '-' | ' '))
-    {
-        Some(bg)
-    } else {
-        None
-    }
+/// Whether spans form a diff row (header or body), foreground-only aware.
+/// Shared via `helpers::is_diff_row_spans` so reflow and formatting agree.
+fn is_diff_row(spans: &[Span<'_>]) -> bool {
+    is_diff_row_spans(spans)
 }
-
 /// Pad a tinted diff row with bg-colored spaces to the full viewport width.
 ///
 /// Non-diff rows are left at exact content width (no right border/padding).
+/// Foreground-only rows (no bg) need no padding by design.
 fn pad_diff_row_to_width(line: &mut Line<'static>, max_width: usize) {
     let Some(bg) = diff_row_bg(&line.spans) else {
         return;
@@ -341,10 +327,10 @@ impl Session {
                 // Dim tool output and avoid right-side padding borders.
                 // Detail rows are nested under their header with an extra indent,
                 // and wrapped lines keep the tree marker aligned via hanging indent.
-                // Diff rows keep their explicit bright styling (the tinted band
-                // already sets them apart); dimming them dulls the red/green.
+                // Diff rows keep their explicit bright styling (foreground-only
+                // red/green/cyan); dimming them dulls the fg alignment.
                 let mut detail_spans = line_spans;
-                if diff_row_bg(&detail_spans).is_none() {
+                if !is_diff_row(&detail_spans) {
                     for span in &mut detail_spans {
                         span.style = span.style.add_modifier(Modifier::DIM);
                     }
@@ -643,6 +629,10 @@ mod tests {
         Span::styled(text.to_owned(), style)
     }
 
+    fn fg_span(text: &str, fg: Color) -> Span<'static> {
+        Span::styled(text.to_owned(), Style::default().fg(fg))
+    }
+
     #[test]
     fn diff_row_bg_detects_body_and_headers() {
         let add_bg = Some(Color::Rgb(20, 58, 45));
@@ -658,6 +648,17 @@ mod tests {
     fn diff_row_bg_ignores_unstyled_or_non_diff_text() {
         assert_eq!(diff_row_bg(&[span("hello world", None)]), None);
         assert_eq!(diff_row_bg(&[span("bolt normal output", Some(Color::Black))]), None);
+    }
+
+    #[test]
+    fn is_diff_row_detects_foreground_only_headers_and_bodies() {
+        assert!(is_diff_row(&[fg_span("--- a/README.md", Color::LightRed)]));
+        assert!(is_diff_row(&[fg_span("+++ b/README.md", Color::LightGreen)]));
+        assert!(is_diff_row(&[fg_span("@@ -100 +100 @@", Color::Cyan)]));
+        assert!(is_diff_row(&[fg_span("+ new line", Color::LightGreen)]));
+        assert!(is_diff_row(&[fg_span("- old line", Color::Rgb(255, 90, 90))]));
+        assert!(!is_diff_row(&[fg_span("- bullet item", Color::Gray)]));
+        assert!(!is_diff_row(&[span("plain tool output", None)]));
     }
 
     #[test]

@@ -150,7 +150,7 @@ impl PlanValidationReport {
         result.push_str(CANONICAL_STEP_FORMAT);
         result.push_str(
             "\nEach step MUST name a concrete file path or symbol (not prose) and one concrete verify command or observable check. \
-             Comma-separated verify entries must each be a command or an observable check.",
+             Comma-separated verify entries must each be a command or an observable check; commas inside single or double quotes stay inside one item.",
         );
         result
     }
@@ -1347,12 +1347,54 @@ pub fn validate_plan_content(content: &str) -> PlanValidationReport {
 
 fn parse_bracket_list(raw: &str) -> Vec<String> {
     let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
-    trimmed
-        .split(',')
-        .map(str::trim)
+    split_bracket_items(trimmed)
+        .into_iter()
+        .map(|item| item.trim().to_owned())
         .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
         .collect()
+}
+
+/// Split a bracket-list body on commas that sit outside single/double quotes.
+///
+/// Shell verifications routinely embed commas inside quoted `sed` address
+/// ranges (`sed -n '/^## A/,/^## B/p'`) or `rg` alternations. A naive split
+/// turns one concrete command into two fragments, and the first fragment
+/// then fails verification as `verification item 1 must be a concrete
+/// command or check` (session `session-vtcode-20260914T031505Z_075199-09813`,
+/// step 4). Quote tracking keeps such commands intact.
+pub fn split_bracket_items(body: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut current = String::with_capacity(body.len());
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = body.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+            }
+            // Backslash escapes the next char outside single quotes (shell:
+            // literal inside `'…'`, escape inside `"…"` and unquoted so an
+            // escaped comma/quote never splits or toggles).
+            '\\' if !in_single => {
+                current.push(ch);
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            ',' if !in_single && !in_double => {
+                items.push(std::mem::take(&mut current));
+            }
+            _ => current.push(ch),
+        }
+    }
+    items.push(current);
+    items
 }
 
 pub(super) fn tracker_has_progress_or_notes(tracker: &str) -> bool {
@@ -1444,7 +1486,7 @@ pub fn generate_tracker_markdown_from_plan(plan_markdown: &str) -> Option<String
 
 #[cfg(test)]
 mod agentic_testing_tests {
-    use super::{is_independent_rederivation, validate_concrete_verification};
+    use super::{is_independent_rederivation, parse_bracket_list, split_bracket_items, validate_concrete_verification};
 
     #[test]
     fn independent_rederivation_counts_as_concrete_verification() {
@@ -1465,5 +1507,45 @@ mod agentic_testing_tests {
         // independent re-derivation oracle.
         assert!(!is_independent_rederivation("independent compare fresh context"));
         assert!(!is_independent_rederivation("independent rederive fresh"));
+    }
+
+    #[test]
+    fn bracket_split_keeps_quoted_commas_inside_one_item() {
+        let items = split_bracket_items("rg -n 'a,b' README.md, cargo check --locked");
+        assert_eq!(items.len(), 2);
+        assert!(items[0].contains("rg -n"));
+        assert!(items[1].contains("cargo check"));
+
+        // Session session-vtcode-20260914T031505Z_075199-09813 step 4: the
+        // comma inside the quoted sed range must not split the item.
+        let single = parse_bracket_list(
+            "[sed -n '/^## Documentation/,/^## Development/p' README.md | wc -l reports fewer lines]",
+        );
+        assert_eq!(single.len(), 1);
+
+        let concrete = parse_bracket_list("[rg -n 'a,b' README.md]");
+        assert_eq!(concrete.len(), 1);
+        assert!(validate_concrete_verification(&concrete[0]).is_ok());
+    }
+
+    #[test]
+    fn bracket_split_still_splits_unquoted_items_and_flags_vague_first_item() {
+        let items = parse_bracket_list("[review docs, cargo check --locked]");
+        assert_eq!(items.len(), 2);
+        assert!(validate_concrete_verification(&items[0]).is_err());
+        assert!(validate_concrete_verification(&items[1]).is_ok());
+    }
+
+    #[test]
+    fn bracket_split_handles_backslash_escapes_outside_single_quotes() {
+        // Escaped comma outside quotes stays inside one item.
+        let items = split_bracket_items("foo\\,bar, baz");
+        assert_eq!(items, vec!["foo\\,bar".to_string(), " baz".to_string()]);
+
+        // Escaped quote inside double quotes neither toggles nor splits.
+        let items = split_bracket_items("rg -n \"a\\\"b,c\", cargo check");
+        assert_eq!(items.len(), 2);
+        assert!(items[0].contains("rg -n"));
+        assert!(items[1].contains("cargo check"));
     }
 }

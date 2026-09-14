@@ -16,12 +16,18 @@ pub fn diff_preview_size_skip() -> Value {
     })
 }
 
+/// Stable machine-readable reason for suppressed diff previews.
+///
+/// Kept stable for `ThreadEvent`/API consumers. Renderers must show
+/// [`diff_preview_user_message`] instead of this code.
+pub const SUPPRESSED_PREVIEW_REASON: &str = "too_many_changes";
+
 /// Create a diff preview response when inline diffs are suppressed due to too many changes.
 pub fn diff_preview_suppressed(additions: usize, deletions: usize, line_count: usize) -> Value {
     json!({
         "skipped": true,
         "suppressed": true,
-        "reason": "too_many_changes",
+        "reason": SUPPRESSED_PREVIEW_REASON,
         "message": diff::SUPPRESSION_MESSAGE,
         "summary": {
             "additions": additions,
@@ -29,6 +35,44 @@ pub fn diff_preview_suppressed(additions: usize, deletions: usize, line_count: u
             "total_lines": line_count
         }
     })
+}
+
+/// User-facing one-line summary for a skipped/suppressed diff entry.
+///
+/// Prefers the producer-supplied `message`, maps known `reason` codes to
+/// friendly text, and humanizes unknown snake_case codes. The stable `reason`
+/// code itself is never surfaced for known cases.
+pub fn diff_preview_user_message(preview: &Value) -> String {
+    if let Some(message) = preview
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return message.to_owned();
+    }
+    let reason = preview.get("reason").and_then(Value::as_str).map(str::trim).unwrap_or_default();
+    match reason {
+        "too_many_changes" => {
+            let additions = preview
+                .get("additions")
+                .and_then(Value::as_u64)
+                .or_else(|| preview.get("summary").and_then(|s| s.get("additions")).and_then(Value::as_u64));
+            let deletions = preview
+                .get("deletions")
+                .and_then(Value::as_u64)
+                .or_else(|| preview.get("summary").and_then(|s| s.get("deletions")).and_then(Value::as_u64));
+            match (additions, deletions) {
+                (Some(a), Some(d)) => {
+                    format!("Large change — preview suppressed (+{a} -{d}); use `git diff` for the full view")
+                }
+                _ => "Large change — preview suppressed; use `git diff` for the full view".to_owned(),
+            }
+        }
+        "content_exceeds_preview_limit" => "Preview skipped — file exceeds the preview size limit".to_owned(),
+        "" => "preview skipped".to_owned(),
+        other => other.replace('_', " "),
+    }
 }
 
 /// Create a diff preview response when an error prevents diff generation.
@@ -321,6 +365,30 @@ mod tests {
             })),
             Some(true)
         );
+    }
+
+    #[test]
+    fn suppressed_preview_user_message_prefers_message_and_maps_reason_codes() {
+        let suppressed = diff_preview_suppressed(12, 3, 40);
+        assert_eq!(suppressed["reason"], SUPPRESSED_PREVIEW_REASON);
+        let rendered = diff_preview_user_message(&suppressed);
+        assert_eq!(rendered, diff::SUPPRESSION_MESSAGE);
+        assert!(!rendered.contains("too_many_changes"));
+
+        let reason_only = json!({
+            "skipped": true,
+            "reason": SUPPRESSED_PREVIEW_REASON,
+            "summary": {"additions": 12, "deletions": 3}
+        });
+        let fallback = diff_preview_user_message(&reason_only);
+        assert!(fallback.contains("+12 -3"), "fallback should keep counts: {fallback}");
+        assert!(!fallback.contains("too_many_changes"));
+
+        let oversized = json!({"skipped": true, "reason": "content_exceeds_preview_limit"});
+        assert_eq!(diff_preview_user_message(&oversized), "Preview skipped — file exceeds the preview size limit");
+
+        let unknown = json!({"skipped": true, "reason": "custom_retry_later"});
+        assert_eq!(diff_preview_user_message(&unknown), "custom retry later");
     }
 
     #[test]

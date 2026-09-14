@@ -237,11 +237,10 @@ fn parse_task_line(line: &str) -> Option<FlatTaskLine> {
 }
 
 fn parse_files_metadata(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(str::trim)
+    super::planning_workflow::split_bracket_items(value)
+        .into_iter()
+        .map(|item| item.trim().to_owned())
         .filter(|item| !item.is_empty())
-        .map(ToOwned::to_owned)
         .collect()
 }
 
@@ -1290,5 +1289,11 @@ mod tests {
             .expect_err("should fail outside planning workflow");
 
         assert!(err.to_string().contains("only available while planning"));
+    }
+
+    #[test]
+    fn parse_files_metadata_keeps_quoted_commas_as_single_item() {
+        let items = parse_files_metadata("'src/a.rs, b.rs', src/c.rs");
+        assert_eq!(items, vec!["'src/a.rs, b.rs'".to_string(), "src/c.rs".to_string()]);
     }
 }

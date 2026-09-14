@@ -1,5 +1,22 @@
 # Session Log Review
 
+## 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit
+
+### Baseline
+
+Reviewed `.vtcode/sessions/session-vtcode-20260914T031505Z_075199-09813/events.jsonl` (85 events, 2 turns), `.vtcode/logs/trajectory-20260914T031505Z.jsonl`, `.vtcode/checkpoints/turn_1171.json` / `turn_1172.json`, `.vtcode/tool-policy.json`, and `.vtcode/history/session-vtcode-20260914T031505Z_.memory.json`. Turn 1171 ended with `invalid plan artifact: invalid implementation steps: step 4: verification item 1 must be a concrete command or check`; turn 1172 hit the planning-gate `apply_patch` denial, then terminal rejection with the same reason.
+
+| Observation | Disposition |
+| --- | --- |
+| Step 4 verify `[sed -n '/^## Documentation/,/^## Development/p' README.md \| wc -l ...]` was split into two bracket items at the comma inside the quoted `sed` address range, so item 1 (`sed -n '/^## Documentation/`) failed as a fragment. | `parse_bracket_list` now splits only on commas outside single/double quotes (`split_bracket_items`); the quoted `sed` range stays one item. Regression tests: `bracket_split_keeps_quoted_commas_inside_one_item`, `validate_plan_content_keeps_quoted_comma_verify_as_single_item`. |
+| `repair_feedback` already required each comma-separated verify entry to be concrete but never stated the quoting rule. | Repair text now notes commas inside single/double quotes stay inside one item (validator-owned string, no raw echo). |
+| Dispatch/admission counters in turns 1171–1172 were sane; tool-policy gating was correct (mutating tools denied while unapproved). | No dispatch change — validation-only fix. |
+
+### Verification
+
+- `cargo nextest run -p vtcode-core -E 'test(planning_workflow) or test(validate_plan) or test(bracket) or test(quoted_comma) or test(agentic_testing)'`
+- `cargo check --locked -p vtcode-core`
+
 ## 2026-08-16 | Checkpoints 912–917 diagnostics audit
 
 ### Baseline

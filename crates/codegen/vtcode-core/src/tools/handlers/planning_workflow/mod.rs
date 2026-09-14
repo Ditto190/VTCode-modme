@@ -22,7 +22,7 @@ pub mod state;
 // `continuation.rs`, `turn/context.rs`, and `turn/.../plan_seed.rs`.
 pub use artifacts::{
     CANONICAL_STEP_FORMAT, PlanValidationReport, generate_tracker_markdown_from_plan, merge_plan_content,
-    plan_file_for_tracker_file, tracker_file_for_plan_file, validate_plan_content,
+    plan_file_for_tracker_file, split_bracket_items, tracker_file_for_plan_file, validate_plan_content,
 };
 pub use persistence::{PersistedPlanDraft, persist_plan_draft, sync_tracker_into_plan_file};
 pub use start::StartPlanningTool;
@@ -596,6 +596,32 @@ Keep the failed planning-session verification shape concrete.
         );
 
         assert!(report.is_ready(), "bracketed env-prefixed command should validate: {:?}", report.reasons());
+        assert_eq!(report.implementation_step_count, 1);
+    }
+
+    #[test]
+    fn validate_plan_content_keeps_quoted_comma_verify_as_single_item() {
+        // Regression for session-vtcode-20260914T031505Z_075199-09813 step 4:
+        // the comma inside the quoted pattern must not split the verify into
+        // fragments reported as `verification item 1 must be a concrete ...`.
+        let report = validate_plan_content(
+            r#"# Quoted comma verification
+
+## Summary
+Keep quoted-comma shell patterns intact during bracket splitting.
+
+## Steps
+1. Tighten documentation -> files: [README.md] -> verify: [rg -n 'a,b' README.md]
+
+## Validation
+1. Run cargo check.
+
+## Assumptions
+1. Keep existing behavior.
+"#,
+        );
+
+        assert!(report.is_ready(), "quoted-comma rg verify should validate: {:?}", report.reasons());
         assert_eq!(report.implementation_step_count, 1);
     }
 

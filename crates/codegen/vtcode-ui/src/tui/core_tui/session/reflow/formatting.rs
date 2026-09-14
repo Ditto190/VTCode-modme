@@ -3,6 +3,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::super::super::types::InlineMessageKind;
 use super::super::{Session, text_utils};
+use super::helpers::is_diff_row_spans;
 use crate::tui::config::constants::ui;
 
 impl Session {
@@ -27,7 +28,7 @@ impl Session {
     /// This method also applies visual styling for:
     /// - Todo/checkbox items (completed items are dimmed)
     /// - List items with consistent formatting
-    /// - Diff lines with background colors
+    /// - Diff rows (foreground-only aware, never justified as prose)
     pub(super) fn justify_wrapped_lines(
         &self,
         lines: Vec<Line<'static>>,
@@ -62,7 +63,8 @@ impl Session {
             // Check for todo/checkbox items
             let todo_state = text_utils::detect_todo_state(line_text);
 
-            // Extend diff line backgrounds to full width
+            // Extend diff line backgrounds to full width; foreground-only
+            // diff rows are still excluded from prose justification.
             let processed_line = if self.is_diff_line(&line) {
                 self.pad_diff_line(&line, max_width)
             } else if todo_state == text_utils::TodoState::Completed && self.appearance.dim_completed_todos {
@@ -140,37 +142,22 @@ impl Session {
         }
     }
 
-    /// Check if a line is a diff line (has diff markers and background color)
+    /// Check if a line is a diff row (markers plus tint or diff foreground).
+    ///
+    /// Shared with `blocks.rs` via `helpers::is_diff_row_spans` so
+    /// foreground-only diff rows are never justified as prose.
     fn is_diff_line(&self, line: &Line<'static>) -> bool {
-        if line.spans.is_empty() {
-            return false;
-        }
-
-        let has_bg_color = line.spans.iter().any(|span| span.style.bg.is_some());
-        if !has_bg_color {
-            return false;
-        }
-
-        let text: String = line.spans.iter().map(|span| span.content.as_ref()).collect();
-        let trimmed_start = text.trim_start();
-        // Body rows (`+`/`-`/` ` + dim gutter) and visual file/hunk headers
-        // (`---`/`+++` red/green bands, `@@` neutral band) all paint full-width.
-        if trimmed_start.starts_with("--- ")
-            || trimmed_start.starts_with("+++ ")
-            || trimmed_start.starts_with("@@")
-            || trimmed_start.starts_with('+')
-            || trimmed_start.starts_with('-')
-        {
-            return true;
-        }
-
-        let first_span_char = line.spans[0].content.chars().next();
-        matches!(first_span_char, Some('+') | Some('-') | Some(' '))
+        is_diff_row_spans(&line.spans)
     }
 
-    /// Pad a diff line to full width
+    /// Pad a diff line to full width.
+    ///
+    /// Foreground-only rows (no bg) need no padding by design.
     fn pad_diff_line(&self, line: &Line<'static>, max_width: usize) -> Line<'static> {
         if max_width == 0 || line.spans.is_empty() {
+            return line.clone();
+        }
+        if line.spans.iter().all(|span| span.style.bg.is_none()) {
             return line.clone();
         }
 

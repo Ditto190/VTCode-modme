@@ -177,6 +177,62 @@ fn numbered_code_gutter_prefix(text: &str) -> Option<String> {
     Some(" ".repeat(UnicodeWidthStr::width(&text[..prefix_end])))
 }
 
+/// Background of a diff content row, if it carries a tinted band.
+///
+/// Requires both a painted background and a diff marker (`+`/`-`/space body
+/// marker, `---`/`+++` file header, or `@@` hunk header) so ordinary tool
+/// output that happens to be styled never gets diff treatment.
+/// Foreground-only diff rows (no bg) return `None` by design.
+pub(super) fn diff_row_bg(spans: &[Span<'_>]) -> Option<Color> {
+    let bg = spans.iter().find_map(|span| span.style.bg)?;
+    let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("--- ")
+        || trimmed.starts_with("+++ ")
+        || trimmed.starts_with("@@")
+        || matches!(spans.first().and_then(|span| span.content.chars().next()), Some('+' | '-' | ' '))
+    {
+        Some(bg)
+    } else {
+        None
+    }
+}
+
+/// Whether spans form a diff row (header or body), foreground-only aware.
+///
+/// Matches `---`/`+++`/`@@` headers and `+`/`-` bodies by marker plus a diff
+/// foreground (red/green/cyan family) so fg-only rows stay exempt from DIM
+/// and prose justification. Ordinary bullets (`- foo`) or tool output
+/// without a diff fg never match.
+pub(super) fn is_diff_row_spans(spans: &[Span<'_>]) -> bool {
+    if diff_row_bg(spans).is_some() {
+        return true;
+    }
+    let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    let trimmed = text.trim_start();
+    let is_marker = trimmed.starts_with("--- ")
+        || trimmed.starts_with("+++ ")
+        || trimmed.starts_with("@@")
+        || matches!(spans.first().and_then(|span| span.content.chars().next()), Some('+' | '-'));
+    if !is_marker {
+        return false;
+    }
+    spans.iter().any(|span| {
+        matches!(
+            span.style.fg,
+            Some(
+                Color::Red
+                    | Color::LightRed
+                    | Color::Green
+                    | Color::LightGreen
+                    | Color::Cyan
+                    | Color::LightCyan
+                    | Color::Rgb(255, 90, 90)
+            )
+        )
+    })
+}
+
 pub(super) fn split_tool_spans(spans: Vec<Span<'static>>) -> Vec<Vec<Span<'static>>> {
     let mut lines: Vec<Vec<Span<'static>>> = Vec::with_capacity(spans.len());
     let mut current: Vec<Span<'static>> = Vec::with_capacity(spans.len());
@@ -267,6 +323,28 @@ mod tests {
         ];
         trim_trailing_blank_transcript_lines(&mut lines);
         assert_eq!(lines.len(), 1);
+    }
+
+    fn fg_span(text: &str, fg: Color) -> Span<'static> {
+        Span::styled(text.to_owned(), Style::default().fg(fg))
+    }
+
+    fn bg_span(text: &str, bg: Color) -> Span<'static> {
+        Span::styled(text.to_owned(), Style::default().bg(bg))
+    }
+
+    #[test]
+    fn is_diff_row_spans_matches_tint_and_foreground_only_rows() {
+        let tint = Color::Rgb(20, 58, 45);
+        assert!(is_diff_row_spans(&[bg_span("+ new line", tint)]));
+        assert!(is_diff_row_spans(&[fg_span("+ new line", Color::LightGreen)]));
+        assert!(is_diff_row_spans(&[fg_span("@@ -100 +100 @@", Color::Cyan)]));
+        assert!(is_diff_row_spans(&[fg_span("--- a/README.md", Color::LightRed)]));
+        // Asymmetric: same `-` marker, gray bullet fg must not match.
+        assert!(!is_diff_row_spans(&[fg_span("- bullet item", Color::Gray)]));
+        assert!(!is_diff_row_spans(&[bg_span("bolt normal output", Color::Black)]));
+        assert_eq!(diff_row_bg(&[fg_span("+ new line", Color::LightGreen)]), None);
+        assert_eq!(diff_row_bg(&[bg_span("+ new line", tint)]), Some(tint));
     }
 
     #[test]

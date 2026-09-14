@@ -3,7 +3,7 @@ use crate::exec::events::{
     ThreadItem, ThreadItemDetails, ToolCallStatus, ToolInvocationItem, ToolOutcome, ToolOutputItem,
     tool_outcome_from_status,
 };
-use crate::tools::file_ops::canonical_diff_previews;
+use crate::tools::file_ops::{canonical_diff_previews, diff_preview_user_message};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -95,7 +95,7 @@ fn diff_preview_output(output: &Value) -> Option<String> {
         }
 
         if diff.get("skipped").and_then(Value::as_bool) == Some(true) {
-            let reason = diff.get("reason").and_then(Value::as_str).unwrap_or("preview skipped");
+            let reason = diff_preview_user_message(diff);
             sections.push(format!("diff preview for {path}{operation}{counts}: {reason}"));
             continue;
         }

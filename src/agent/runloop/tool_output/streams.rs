@@ -162,8 +162,9 @@ fn highlight_diff_content(
     word_ranges: &[(usize, usize)],
     word_bg: Option<anstyle::Color>,
 ) -> Option<String> {
-    // Add/del bodies stay solid on the line tint (default fg). Syntax tokens
-    // leak brightness onto the band; only word chips use a stronger bg.
+    // Foreground-only mode passes `bg: None`, so there is no tint or word
+    // chip to paint. Return `None` so the caller falls through to the solid
+    // foreground-only body style.
     if content.is_empty() {
         return None;
     }
@@ -246,7 +247,7 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
 
     let bg = base_style.and_then(|style| style.get_bg_color());
     // Unified gutter: bright red/green only on the sign; numbers stay dim
-    // grey on the same full-width tint. No BOLD/DIM bleed into the body.
+    // grey. Foreground-only: no background band, body fg aligns with marker.
     let marker_style = match marker {
         '+' => AnsiStyle::new()
             .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
@@ -263,8 +264,8 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     let reset = Reset;
     out.reserve(line.text.len() + 32);
     // Single gutter: `sign + number + │ + content`. The `│` keeps markdown
-    // bullets (`- foo`) distinct from the diff marker (`+`/`-`). Every span
-    // carries the line tint so the band is full-width. Full Reset before
+    // bullets (`- foo`) distinct from the diff marker (`+`/`-`).
+    // Foreground-only: no background band. Full Reset before
     // each span so SGR state never leaks into the next.
     let line_no = match marker {
         '+' => line.new_line,
@@ -283,7 +284,7 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     let _ = write!(out, "{}", gutter_style.render());
     let _ = write!(out, "{line_no:>line_number_width$} │ ");
     let _ = write!(out, "{reset}");
-    // Two-level body: line tint + word chips on tokens that differ from the pair.
+    // Foreground-only body: solid red/green fg aligned with the marker.
     // Skip chips on truncated rows — `changed` offsets are into the original
     // text and would highlight the wrong slice after ellipsis truncation.
     let word_ranges: &[(usize, usize)] = if matches!(marker, '+' | '-') && !content.is_empty() && !truncated {
@@ -293,9 +294,8 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     };
     if let Some(highlighted) = highlight_diff_content(content, bg, word_ranges, word_bg) {
         out.push_str(&highlighted);
-    } else if base_style.is_some() {
-        let body = AnsiStyle::new().bg_color(bg);
-        let _ = write!(out, "{}", body.render());
+    } else if let Some(body_style) = base_style {
+        let _ = write!(out, "{}", body_style.render());
         out.push_str(content);
         let _ = write!(out, "{reset}");
     } else {
@@ -638,14 +638,14 @@ fn format_side_by_side_pane_ansi(
         .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
         .bg_color(bg)
         .effects(Effects::DIMMED);
-    // Body fg matches the pane's signal colour. Additions use BrightGreen
-    // (brighter than default) on the green tint; deletions use default fg
-    // with DIM so they read quieter than additions.
+    // Foreground-only body: solid red/green fg aligned with the marker.
     let body_style = match marker {
         '+' => AnsiStyle::new()
             .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
             .bg_color(bg),
-        '-' => AnsiStyle::new().bg_color(bg).effects(Effects::DIMMED),
+        '-' => AnsiStyle::new()
+            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightRed)))
+            .bg_color(bg),
         _ => AnsiStyle::new().bg_color(bg),
     };
 
@@ -655,11 +655,10 @@ fn format_side_by_side_pane_ansi(
     let body_width = pane_width.saturating_sub(2 + number_width);
     let truncated = display_width(&line.text) > body_width;
     let body = truncate_chars_to_width(&line.text, body_width);
-    // Two-level diff: line tint on the body + stronger word chips on changed
-    // tokens (same as the inline renderer). Falls back to solid tint when
-    // there are no word ranges or no word_bg. Skip chips on truncated rows —
-    // `changed` offsets are into the original text and would highlight the
-    // wrong slice after truncation.
+    // Foreground-only: word chips disabled (word_bg always None in this mode),
+    // so this falls through to the solid red/green body. Skip chips on
+    // truncated rows — `changed` offsets are into the original text and would
+    // highlight the wrong slice after truncation.
     let word_ranges: &[(usize, usize)] = if truncated { &[] } else { &line.changed };
     let highlighted = highlight_diff_content(&body, bg, word_ranges, word_bg);
     match highlighted {
@@ -670,7 +669,7 @@ fn format_side_by_side_pane_ansi(
             let _ = write!(out, "{body_style}{body}");
         }
     }
-    // Pad to exact remaining cells so the tint always spans the full pane.
+    // Pad to exact remaining cells so the pane stays aligned.
     // Track used width in display cells, not chars, to handle wide glyphs.
     let mut used = 1 + number_width + 1; // sign + number + │
     for ch in body.chars() {

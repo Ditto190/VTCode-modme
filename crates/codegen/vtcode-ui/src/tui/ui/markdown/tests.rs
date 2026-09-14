@@ -484,8 +484,9 @@ fn markdown_diff_code_block_stores_line_background() {
         .iter()
         .find(|line| joined(line).contains("+ new"))
         .expect("added line exists");
-    assert!(added_line.line_background.is_some());
-    assert!(added_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
+    assert_eq!(added_line.line_background, None);
+    assert!(added_line.segments.iter().any(|seg| seg.style.get_fg_color().is_some()));
+    assert!(added_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
     assert_eq!(added_line.segments[0].text, "+");
     assert!(!added_line.segments.iter().any(|seg| seg.text.contains('│')));
 
@@ -493,8 +494,9 @@ fn markdown_diff_code_block_stores_line_background() {
         .iter()
         .find(|line| joined(line).contains("- old"))
         .expect("removed line exists");
-    assert!(removed_line.line_background.is_some());
-    assert!(removed_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
+    assert_eq!(removed_line.line_background, None);
+    assert!(removed_line.segments.iter().any(|seg| seg.style.get_fg_color().is_some()));
+    assert!(removed_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
     assert_eq!(removed_line.segments[0].text, "-");
 
     let context_line = lines
@@ -506,15 +508,20 @@ fn markdown_diff_code_block_stores_line_background() {
 }
 
 #[test]
-fn markdown_diff_empty_add_delete_rows_keep_full_width_tint() {
+fn markdown_diff_empty_add_delete_rows_keep_foreground_only() {
     let markdown = "```diff\n@@ -1 +1 @@\n+\n- \n```\n";
     let lines = render_markdown(markdown);
-    let tinted: Vec<_> = lines.iter().filter(|line| line.line_background.is_some()).collect();
-    assert!(tinted.len() >= 2, "empty + and - rows must stay tinted: {tinted:?}");
-    for line in tinted {
+    let joined = |line: &MarkdownLine| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>();
+    let diff_rows: Vec<_> = lines
+        .iter()
+        .filter(|line| joined(line).contains('+') || joined(line).contains('-') || joined(line).contains("@@"))
+        .collect();
+    assert!(diff_rows.len() >= 2, "empty + and - rows must render: {diff_rows:?}");
+    for line in diff_rows {
+        assert_eq!(line.line_background, None);
         assert!(
-            line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()),
-            "tinted empty row needs a bg span so full-width fill works"
+            line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()),
+            "foreground-only empty row must carry no bg"
         );
     }
 }
@@ -545,7 +552,7 @@ fn markdown_diff_header_styles_are_classified() {
 }
 
 #[test]
-fn markdown_diff_lines_use_background_and_strong_markers() {
+fn markdown_diff_lines_use_foreground_only_and_strong_markers() {
     let markdown = "```diff\n-const value = 1;\n+const value = 2;\n```\n";
     let lines = render_markdown(markdown);
 
@@ -558,35 +565,34 @@ fn markdown_diff_lines_use_background_and_strong_markers() {
         .find(|line| lines_to_text(std::slice::from_ref(line))[0].contains("const value = 1;"))
         .expect("removed line exists");
 
-    // Marker-only reference shape: sign + body, solid full-width tint.
+    // Marker-only reference shape: sign + body, foreground-only (no bg band).
     assert_eq!(added_line.segments[0].text, "+");
     assert!(!added_line.segments.iter().any(|seg| seg.text.contains('│')));
-    assert_eq!(added_line.line_background, added_line.segments[0].style.get_bg_color());
-    assert_eq!(removed_line.line_background, removed_line.segments[0].style.get_bg_color());
-    assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
-    assert_ne!(removed_line.segments[0].style, removed_line.segments[1].style);
+    assert_eq!(added_line.line_background, None);
+    assert_eq!(removed_line.line_background, None);
     // The sign stays bold for scannability.
     assert!(added_line.segments[0].style.get_effects().contains(anstyle::Effects::BOLD));
-    // Content keeps default fg on the tint (not green-on-green / red-on-red).
-    assert_eq!(added_line.segments[1].style.get_fg_color(), None);
-    assert_eq!(removed_line.segments[1].style.get_fg_color(), None);
-    assert!(added_line.segments[1].style.get_bg_color().is_some());
-    assert!(removed_line.segments[1].style.get_bg_color().is_some());
+    // Body fg aligns with the marker (bright green/red), no background.
+    assert!(added_line.segments[1].style.get_fg_color().is_some());
+    assert!(removed_line.segments[1].style.get_fg_color().is_some());
+    assert_eq!(added_line.segments[1].style.get_bg_color(), None);
+    assert!(added_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
+    assert!(removed_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
 }
 
 #[test]
-fn diff_style_helpers_set_line_background_and_marker() {
+fn diff_style_helpers_use_foreground_only_marker_and_body() {
     let truecolor = DiffScopeBackgroundRgbs::default();
     for theme in [DiffTheme::Light, DiffTheme::Dark] {
         let context = diff_render_style_context_for(theme, DiffColorLevel::TrueColor, truecolor);
         for kind in [DiffLineType::Insert, DiffLineType::Delete] {
             let style = style_content_ansi(kind, context);
             let marker = style_sign_ansi(kind, context);
-            assert!(style.get_bg_color().is_some());
+            assert_eq!(style.get_bg_color(), None);
+            assert_eq!(marker.get_bg_color(), None);
             assert!(marker.get_fg_color().is_some());
-            // Content is default fg on the tint; only the marker carries red/green.
-            assert_eq!(style.get_fg_color(), None);
-            assert_ne!(style.get_fg_color(), marker.get_fg_color());
+            // Body fg aligns with the marker.
+            assert_eq!(style.get_fg_color(), marker.get_fg_color());
         }
     }
 }
@@ -605,8 +611,9 @@ fn test_markdown_unlabeled_diff_code_block_detects_diff() {
                 .contains("new")
         })
         .expect("added line exists");
-    assert!(added_line.line_background.is_some());
-    assert!(added_line.segments.iter().any(|seg| seg.style.get_bg_color().is_some()));
+    assert_eq!(added_line.line_background, None);
+    assert!(added_line.segments.iter().any(|seg| seg.style.get_fg_color().is_some()));
+    assert!(added_line.segments.iter().all(|seg| seg.style.get_bg_color().is_none()));
 }
 
 #[test]
@@ -627,36 +634,36 @@ fn markdown_diff_code_block_styles_additions_deletions_and_hunk_headers() {
         .iter()
         .find(|line| joined(line).contains("const value = 2;"))
         .expect("added line exists");
-    assert!(added_line.line_background.is_some());
+    assert_eq!(added_line.line_background, None);
 
     let removed_line = lines
         .iter()
         .find(|line| joined(line).contains("const value = 1;"))
         .expect("removed line exists");
-    assert!(removed_line.line_background.is_some());
+    assert_eq!(removed_line.line_background, None);
 
     let header_line = lines
         .iter()
         .find(|line| joined(line).contains("@@ -1 +1 @@"))
         .expect("hunk header exists");
     assert_eq!(header_line.segments[0].style.get_fg_color(), Some(anstyle::Color::Ansi(anstyle::AnsiColor::Cyan)));
-    assert!(header_line.line_background.is_some());
+    assert_eq!(header_line.line_background, None);
 
     let old_header = lines
         .iter()
         .find(|line| joined(line).contains("--- a/main.rs"))
         .expect("old file header exists");
-    assert!(old_header.line_background.is_some());
+    assert_eq!(old_header.line_background, None);
 
     let new_header = lines
         .iter()
         .find(|line| joined(line).contains("+++ b/main.rs"))
         .expect("new file header exists");
-    assert!(new_header.line_background.is_some());
+    assert_eq!(new_header.line_background, None);
 }
 
 #[test]
-fn markdown_diff_rows_paint_every_segment_for_solid_fill() {
+fn markdown_diff_rows_use_foreground_only_without_holes() {
     let markdown = "```diff\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-const value = 1;\n+const value = 2;\n```\n";
     let lines = render_markdown(markdown);
 
@@ -677,17 +684,17 @@ fn markdown_diff_rows_paint_every_segment_for_solid_fill() {
                     .contains(needle)
             })
             .unwrap_or_else(|| panic!("{needle} line exists"));
-        let _bg = line.line_background.expect("tinted rows need full-width bg");
+        assert_eq!(line.line_background, None, "foreground-only rows need no bg in {needle}");
         assert!(!line.segments.is_empty());
         for segment in &line.segments {
-            // Segments must be painted: either the line tint or a stronger word chip.
-            assert!(segment.style.get_bg_color().is_some(), "unpainted hole in {needle}");
+            assert_eq!(segment.style.get_bg_color(), None, "bg hole in {needle}");
         }
+        assert!(line.segments.iter().any(|seg| seg.style.get_fg_color().is_some()), "missing fg in {needle}");
     }
 }
 
 #[test]
-fn markdown_diff_body_stays_solid_on_tint() {
+fn markdown_diff_body_uses_foreground_only() {
     let markdown = "```diff\ndiff --git a/main.rs b/main.rs\n--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}\n```\n";
     let lines = render_markdown(markdown);
 
@@ -706,26 +713,19 @@ fn markdown_diff_body_stays_solid_on_tint() {
     let added_line = find_body("fn new()");
     let removed_line = find_body("fn old()");
 
-    // Marker + body (word chips may split into tinted spans).
+    // Marker + body, both foreground-only with aligned fg, no bg or word chips.
     assert!(added_line.segments.len() >= 2, "added body needs marker + body");
     assert!(removed_line.segments.len() >= 2, "removed body needs marker + body");
-    assert_ne!(added_line.segments[0].style, added_line.segments[1].style);
     for segment in added_line.segments.iter().skip(1) {
-        assert_eq!(segment.style.get_fg_color(), None);
-        assert!(segment.style.get_bg_color().is_some());
+        assert!(segment.style.get_fg_color().is_some());
+        assert_eq!(segment.style.get_bg_color(), None);
     }
     for segment in removed_line.segments.iter().skip(1) {
-        assert_eq!(segment.style.get_fg_color(), None);
-        assert!(segment.style.get_bg_color().is_some());
+        assert!(segment.style.get_fg_color().is_some());
+        assert_eq!(segment.style.get_bg_color(), None);
     }
-    let add_line_bg = added_line.line_background.expect("add tint");
-    assert!(
-        added_line
-            .segments
-            .iter()
-            .any(|s| s.style.get_bg_color().is_some_and(|bg| bg != add_line_bg)),
-        "add row should carry a word chip"
-    );
+    assert_eq!(added_line.line_background, None);
+    assert_eq!(removed_line.line_background, None);
 }
 
 #[test]
@@ -749,7 +749,7 @@ fn markdown_diff_body_without_path_stays_solid() {
 }
 
 #[test]
-fn markdown_diff_prose_file_body_stays_solid() {
+fn markdown_diff_prose_file_body_uses_foreground_only() {
     let markdown = "```diff\ndiff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old **bold** text\n+new **bold** text\n```\n";
     let lines = render_markdown(markdown);
 
@@ -763,9 +763,9 @@ fn markdown_diff_prose_file_body_stays_solid() {
                 .contains("new **bold** text")
         })
         .expect("added line exists");
-    // Marker + body (word chips may split into tinted spans).
-    assert!(added_line.segments.len() >= 2, "prose body: marker + solid/chips");
-    assert!(added_line.line_background.is_some());
+    // Marker + body, foreground-only.
+    assert!(added_line.segments.len() >= 2, "prose body: marker + body");
+    assert_eq!(added_line.line_background, None);
 }
 
 #[test]
@@ -805,13 +805,13 @@ fn markdown_unlabeled_minimal_hunk_detects_diff() {
         .iter()
         .find(|line| joined(line).contains("old();"))
         .expect("removed line exists");
-    assert!(removed_segment.line_background.is_some());
+    assert_eq!(removed_segment.line_background, None);
 
     let added_segment = lines
         .iter()
         .find(|line| joined(line).contains("new();"))
         .expect("added line exists");
-    assert!(added_segment.line_background.is_some());
+    assert_eq!(added_segment.line_background, None);
 }
 
 #[test]
