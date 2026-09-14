@@ -33,7 +33,6 @@
   - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
 - [What's inside](#whats-inside)
   - [Commands](#commands)
-  - [Four pillars](#four-pillars)
   - [Everyday recipes](#everyday-recipes)
 - [Documentation](#documentation)
 - [Development](#development)
@@ -56,13 +55,11 @@
 </div>
 
 VT Code is an open-source terminal coding agent written in Rust: one static
-binary for quick interactive sessions and long-running autonomous work alike.
-No IDE required, no context left behind.
-
-It is a **harness, not just an LLM wrapper**. The model reasons; the runtime
-supplies everything else: tools, context, sandboxing, state, and
-**verification**. That separation is what turns raw model output into safe,
-reviewable progress, entirely in your terminal.
+binary for quick interactive sessions and long-running autonomous work alike —
+no IDE required, no context left behind. It is a **harness, not just an LLM
+wrapper**: the model reasons; the runtime supplies everything else — tools,
+context, sandboxing, state, and **verification** — turning raw model output
+into safe, reviewable progress, entirely in your terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows
@@ -93,7 +90,13 @@ mode with a **structural default in the runtime**, not a prompt tweak:
 Underneath all four: one [`ThreadEvent`](./crates/common/vtcode-exec-events)
 stream records everything a run did, and the
 [agent loop contract](./docs/guides/agent-loop-contract.md) specifies how
-turns, tool results, and recovery behave.
+turns, tool results, and recovery behave. Extensibility is structural too:
+every major model sits behind one interface, and MCP, Skills, Plugins, ACP,
+A2A, and WebMCP attach without forking
+([MCP](./docs/guides/mcp-integration.md) ·
+[Providers](./docs/providers/PROVIDER_GUIDES.md)). The interface is a
+keyboard-first TUI with WCAG AA themes, gated by `cargo nextest` and CI with
+`-D warnings` ([Testing](./docs/development/testing.md)).
 
 ## Architecture
 
@@ -171,31 +174,23 @@ resolution order.
 ### 3. Run
 
 ```bash
-vtcode                  # interactive TUI
-vtcode ask "…"          # one-shot question, no session, no tools
-vtcode exec "…"         # headless task with the full tool loop
-vtcode continue         # resume the last session
+vtcode                  # interactive TUI — the whole loop is install, init, run
 ```
 
-That is the whole loop: install, init, run. See [Commands](#commands) for the
-complete CLI surface.
+See [Commands](#commands) for the complete CLI surface, including headless
+`exec`, one-shot `ask`, and session resume.
 
 ### WebMCP browser bridge (opt-in)
 
-```bash
-# Inside the TUI:
-/webmcp pair <origin>
+Pair the TUI with a browser editor for authenticated, bounded workspace
+editing:
 
-# Or serve a bounded workspace:
-vtcode webmcp serve --origin <origin> --allowed-root <dir>
+```bash
+/webmcp pair <origin>    # inside the TUI
 ```
 
-| Host       | Link                                                      |
-| ---------- | --------------------------------------------------------- |
-| Hosted app | <https://vtcode.vinhnx.chatgpt.site/>                     |
-| Fallback   | <https://vinhnx.github.io/VTCode/>                        |
-| User guide | [WebMCP user guide](./docs/user-guide/webmcp.md)          |
-| Deployment | [WebMCP deployment reference](./docs/reference/webmcp.md) |
+See the [WebMCP user guide](./docs/user-guide/webmcp.md) for hosts and
+deployment.
 
 ## What's inside
 
@@ -233,21 +228,9 @@ A second tier handles session lifecycle and day-to-day operations:
 `vtcode update` round out the operator surface. See `vtcode --help` for the
 full list.
 
-### Four pillars
-
-| Pillar                  | What it means                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Agent core**          | Durable sessions, one `ThreadEvent` event stream, planning gates, persistent memory. [Agent loop contract](./docs/guides/agent-loop-contract.md) |
-| **Safety**              | Fail-closed sandbox, tree-sitter command parsing, hooks and per-tool policies. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **Extensibility**       | Every major model behind one interface; MCP, Skills, Plugins, ACP, A2A, WebMCP attach without forking. [MCP](./docs/guides/mcp-integration.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md) |
-| **Interface & quality** | Keyboard-first TUI with WCAG AA themes; fast gate, `cargo nextest`, CI with `-D warnings`. [Testing](./docs/development/testing.md) |
-
 ### Everyday recipes
 
 ```bash
-# Headless refactor with a budget and auto-approval for safe tools
-vtcode exec "migrate this crate to edition 2024" --max-turns 40
-
 # Review only the uncommitted diff, then exit with a verdict
 vtcode review
 
@@ -271,6 +254,11 @@ vtcode trajectory --last
 | Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
 
 The full catalog lives in the [Documentation Index](./docs/INDEX.md).
+
+The [WebMCP hosted app](https://vtcode.vinhnx.chatgpt.site/)
+([fallback mirror](https://vinhnx.github.io/VTCode/)) pairs with the TUI
+bridge; deployment details live in the
+[WebMCP deployment reference](./docs/reference/webmcp.md).
 
 ## Development
 
