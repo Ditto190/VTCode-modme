@@ -2,6 +2,17 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.162.3 - 2026-09-14
+
+### Highlights
+#### Documentation
+
+- Rewrite Why VT Code section around failure-mode framing (48297229) 
+- Restructure with architecture diagram and recipes (f78f4a71) 
+- Quote-aware comma splitting for bracket plan lists (d31ecf05) 
+- Keep quoted commas inside one verify item (646b380d) 
+- Consolidate pitch and deduplicate commands (3d31e07f) 
+### Other Changes
 ## 0.162.2 - 2026-09-13
 
 ### Highlights
