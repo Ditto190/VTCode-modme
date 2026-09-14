@@ -18,7 +18,7 @@ Options:
                      performing the real publish. This is the default when the
                      VT_RELEASE_DRY_RUN environment variable is set to 1.
   --start-from CRATE Resume publishing from the provided crate name. Valid
-                     crates: vtcode-commons, vtcode-auth, vtcode-exec-events,
+                     crates: vtcode-diff, vtcode-commons, vtcode-auth, vtcode-exec-events,
                      vtcode-memory, vtcode-macros, vtcode-config,
                      vtcode-indexer, vtcode-bash-runner, vtcode-utility-tool-specs,
                      vtcode-eval, vtcode-safety, vtcode-webmcp, vtcode-a2a, vtcode-llm,
@@ -94,6 +94,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 CRATES=(
+	vtcode-diff
 	vtcode-commons
 	vtcode-auth
 	vtcode-exec-events

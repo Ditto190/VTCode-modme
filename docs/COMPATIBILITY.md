@@ -34,6 +34,7 @@ All VT Code crates require Rust 1.88 or later due to dependencies (ratatui 0.30,
 | vtcode | 0.133.21 | 1.88 | 2024 | Yes | Binary crate |
 | vtcode-core | 0.133.21 | 1.88 | 2024 | Yes | Main runtime |
 | vtcode-config | 0.133.21 | 1.88 | 2024 | Yes | Configuration |
+| vtcode-diff | 0.162.3 | 1.93 | 2024 | Yes | Bounded structured diffs and semantic terminal rows |
 | vtcode-commons | 0.133.21 | 1.88 | 2024 | Yes | Shared primitives |
 | vtcode-indexer | 0.133.21 | 1.88 | 2024 | Yes | File indexing + markdown storage |
 | vtcode-bash-runner | 0.133.21 | 1.88 | 2024 | Yes | Shell execution |

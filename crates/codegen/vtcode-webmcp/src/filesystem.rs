@@ -16,8 +16,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
-use vtcode_commons::diff::{DiffHunk, DiffLineKind, DiffOptions, compute_diff};
 use vtcode_commons::exclusions::{SENSITIVE_FILES, is_sensitive_file};
+use vtcode_diff::{DiffDocument, DiffOptions, format_unified_hunks};
 use vtcode_safety::sandboxing::{
     CommandSpec, ExecExpiration, LinuxSandboxLauncher, SandboxManager, SandboxPolicy, SensitivePath,
     default_sensitive_paths,
@@ -346,76 +346,22 @@ impl FilesystemWorkspace {
     fn proposal_diff(before: &[FileSnapshot], changes: &[FileChange]) -> String {
         let mut diff = String::new();
         for (snapshot, change) in before.iter().zip(changes) {
-            let bundle = compute_diff(
-                &snapshot.content,
-                &change.content,
-                DiffOptions { context_lines: 3, ..DiffOptions::default() },
-                |hunks, _| format_unified_hunks(hunks),
-            );
-            if bundle.is_empty {
+            let old_label = format!("a/{}", snapshot.path);
+            let new_label = format!("b/{}", change.path);
+            let options = DiffOptions {
+                context_lines: 3,
+                old_label: Some(old_label.as_str()),
+                new_label: Some(new_label.as_str()),
+                ..DiffOptions::default()
+            };
+            let document = DiffDocument::between(&snapshot.content, &change.content, options.clone());
+            if document.hunks.is_empty() {
                 continue;
             }
-            diff.push_str("--- a/");
-            diff.push_str(&snapshot.path);
-            diff.push('\n');
-            diff.push_str("+++ b/");
-            diff.push_str(&change.path);
-            diff.push('\n');
-            diff.push_str(&bundle.formatted);
+            diff.push_str(&format_unified_hunks(&document.hunks, &options));
         }
         diff
     }
-}
-
-fn format_unified_hunks(hunks: &[DiffHunk]) -> String {
-    let mut output = String::new();
-    for hunk in hunks {
-        output.push_str("@@ -");
-        output.push_str(&format_diff_range(hunk.old_start, hunk.old_lines));
-        output.push_str(" +");
-        output.push_str(&format_diff_range(hunk.new_start, hunk.new_lines));
-        output.push_str(" @@\n");
-        for line in &hunk.lines {
-            let prefix = match line.kind {
-                DiffLineKind::Context => ' ',
-                DiffLineKind::Addition => '+',
-                DiffLineKind::Deletion => '-',
-            };
-            output.push(prefix);
-            let has_line_terminator = if let Some(content) = line.text.strip_suffix("\r\n") {
-                output.push_str(content);
-                output.push('\n');
-                true
-            } else if let Some(content) = line.text.strip_suffix('\n') {
-                output.push_str(content);
-                output.push('\n');
-                true
-            } else if let Some(content) = line.text.strip_suffix('\r') {
-                output.push_str(content);
-                output.push('\n');
-                true
-            } else {
-                output.push_str(&line.text);
-                output.push('\n');
-                false
-            };
-            if !has_line_terminator {
-                output.push_str(r"\ No newline at end of file");
-                output.push('\n');
-            }
-        }
-    }
-    output
-}
-
-fn format_diff_range(start: usize, count: usize) -> String {
-    if count == 0 {
-        return format!("{},0", start.saturating_sub(1));
-    }
-    if count == 1 {
-        return start.to_string();
-    }
-    format!("{start},{count}")
 }
 
 #[async_trait]

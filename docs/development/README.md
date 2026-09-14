@@ -30,6 +30,7 @@ Entry point for VT Code contributor workflows.
 - [Async Performance Audit](./async-performance-audit.md) - Async architecture performance findings.
 - [Session Event Persistence](./session-persistence.md) - Canonical session events, exporter boundaries, retention, and verification.
 - [Configuration reset and live reload](./configuration-reload.md) - Shared reset service, watcher contract, runtime application, and verification.
+- [Diff Preview Architecture](./diff-preview.md) - Reusable diff model, bounded layout, renderer boundaries, and compatibility behavior.
 
 ## Model Management
 

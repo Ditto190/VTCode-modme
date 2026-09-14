@@ -34,6 +34,7 @@ tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 vtcode-commons = { workspace = true }
+vtcode-diff = { workspace = true, features = ["serde"] }
 vtcode-exec-events = { workspace = true }
 vtcode-safety = { workspace = true }
 

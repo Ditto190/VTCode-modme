@@ -42,6 +42,7 @@ Last reviewed: 2026-08-28
 - [Signal Handling](signal_handling.md) - Ctrl+C / SIGINT priority guarantees and emergency exit.
 - [Indexer Notes](modules/vtcode_indexer.md) - Indexer behavior and usage.
 - [Development Guide](development/README.md) - Local dev workflows.
+- [Diff Preview Architecture](development/diff-preview.md) - Shared diff computation, bounded layout, and renderer boundaries.
 - [Roadmap](project/ROADMAP.md) - Planned work.
 - [Loop Engineering](loop-engineering.md) - Worktree isolation, propose/verify sub-agents, loop state, cost guardrails.
 

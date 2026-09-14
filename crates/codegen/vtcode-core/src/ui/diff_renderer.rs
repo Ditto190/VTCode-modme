@@ -10,6 +10,9 @@ use anstyle::{Reset, Style};
 use std::fmt::Write as _;
 use std::path::Path;
 use vtcode_commons::styling::DiffColorPalette;
+use vtcode_diff::{
+    DiffDocument, DiffLineKind as SharedDiffLineKind, DiffOptions as SharedDiffOptions, format_unified_diff,
+};
 
 struct GitDiffPalette {
     bullet: Style,
@@ -167,27 +170,15 @@ pub struct FileChangeStats {
     pub deletions: usize,
 }
 
-/// Cached diff entry to avoid recomputation
-#[derive(Debug)]
-struct DiffCacheEntry {
-    diff: FileDiff,
-}
-
-/// Result of a suppression check that may carry cached diffs for reuse.
+/// Result of a suppression check.
 pub struct SuppressionResult {
     /// The suppression check result with statistics.
     pub check: DiffSuppressionCheck,
-    /// Cached diffs if not suppressed (avoids recomputation).
-    cached_diffs: Option<Vec<DiffCacheEntry>>,
 }
 
 impl SuppressionResult {
     fn suppressed(check: DiffSuppressionCheck) -> Self {
-        Self { check, cached_diffs: None }
-    }
-
-    fn not_suppressed(check: DiffSuppressionCheck, diffs: Vec<DiffCacheEntry>) -> Self {
-        Self { check, cached_diffs: Some(diffs) }
+        Self { check }
     }
 }
 
@@ -339,6 +330,37 @@ impl DiffRenderer {
         output
     }
 
+    fn render_diff_bounded(&self, diff: &FileDiff, max_rows: usize) -> String {
+        let mut output = String::with_capacity(100 + max_rows.saturating_mul(80));
+        output.push_str("─ ");
+        output.push_str(&self.render_summary(diff));
+        output.push('\n');
+
+        let (head_count, tail_count, omitted) = bounded_window(diff.lines.len(), max_rows);
+        for line in &diff.lines[..head_count] {
+            self.render_line_into(&mut output, line);
+            output.push('\n');
+        }
+        if omitted > 0 {
+            let omission = DiffLine {
+                line_type: DiffLineType::Header,
+                content: format!("... {omitted} lines omitted ..."),
+                line_number_old: None,
+                line_number_new: None,
+            };
+            self.render_line_into(&mut output, &omission);
+            output.push('\n');
+        }
+        if tail_count > 0 {
+            for line in &diff.lines[diff.lines.len() - tail_count..] {
+                self.render_line_into(&mut output, line);
+                output.push('\n');
+            }
+        }
+
+        output
+    }
+
     fn render_summary(&self, diff: &FileDiff) -> String {
         if !self.use_colors {
             return format!("▸ Edit {} (+{} -{})", diff.file_path, diff.stats.additions, diff.stats.deletions);
@@ -438,14 +460,13 @@ impl DiffRenderer {
 
     /// Compute a diff between two file contents and return the structured result.
     pub fn generate_diff(&self, old_content: &str, new_content: &str, file_path: &str) -> FileDiff {
-        let bundle = crate::utils::diff::compute_diff_with_theme(
+        let document = DiffDocument::between(
             old_content,
             new_content,
-            crate::utils::diff::DiffOptions {
+            SharedDiffOptions {
                 context_lines: self.context_lines,
-                old_label: None,
-                new_label: None,
                 missing_newline_hint: false,
+                ..SharedDiffOptions::default()
             },
         );
 
@@ -453,7 +474,7 @@ impl DiffRenderer {
         let mut additions = 0;
         let mut deletions = 0;
 
-        for hunk in &bundle.hunks {
+        for hunk in &document.hunks {
             lines.push(DiffLine {
                 line_type: DiffLineType::Header,
                 content: format!("@@ -{} +{} @@", hunk.old_start, hunk.new_start),
@@ -462,20 +483,20 @@ impl DiffRenderer {
             });
             for line in &hunk.lines {
                 let line_type = match line.kind {
-                    crate::utils::diff::DiffLineKind::Addition => {
+                    SharedDiffLineKind::Addition => {
                         additions += 1;
                         DiffLineType::Added
                     }
-                    crate::utils::diff::DiffLineKind::Deletion => {
+                    SharedDiffLineKind::Deletion => {
                         deletions += 1;
                         DiffLineType::Removed
                     }
-                    crate::utils::diff::DiffLineKind::Context => DiffLineType::Context,
+                    SharedDiffLineKind::Context => DiffLineType::Context,
                 };
 
                 lines.push(DiffLine {
                     line_type,
-                    content: line.text.trim_end_matches('\n').to_string(),
+                    content: trim_line_ending(&line.text).to_owned(),
                     line_number_old: line.old_line,
                     line_number_new: line.new_line,
                 });
@@ -492,7 +513,8 @@ impl DiffRenderer {
     }
 }
 
-/// High-level renderer that wraps [`DiffRenderer`] and adds suppression logic for large diffs.
+/// High-level renderer that wraps [`DiffRenderer`] with bounded previews while
+/// retaining legacy suppression diagnostics for compatibility callers.
 pub struct DiffChatRenderer {
     diff_renderer: DiffRenderer,
 }
@@ -522,19 +544,14 @@ impl DiffChatRenderer {
         let diff = self
             .diff_renderer
             .generate_diff(old_content, new_content, &file_path.to_string_lossy());
-        self.diff_renderer.render_diff(&diff)
+        self.diff_renderer.render_diff_bounded(&diff, diff_constants::MAX_PREVIEW_LINES)
     }
 
-    /// Render multiple file changes, suppressing output when thresholds are exceeded.
+    /// Render multiple file changes with bounded per-file excerpts.
     pub fn render_multiple_changes(&self, changes: Vec<(String, String, String)>) -> String {
-        // Check suppression and get cached diffs if not suppressed
-        let result = self.check_suppression_with_cache(&changes);
-
-        if result.check.should_suppress {
-            return self.render_suppressed_summary(&result.check);
-        }
-
-        // Pre-allocate output buffer with estimated size
+        // Keep every file recognizable while bounding body rows across the
+        // complete multi-file preview. The legacy suppression APIs remain
+        // available to callers that need their compatibility diagnostics.
         let estimated_size = changes.len() * 512; // Rough estimate per file
         let mut output = String::with_capacity(estimated_size);
 
@@ -542,18 +559,18 @@ impl DiffChatRenderer {
         output.push_str(&"═".repeat(60));
         output.push_str("\n\n");
 
-        // Use cached diffs to avoid recomputation
-        if let Some(cached_diffs) = result.cached_diffs {
-            for entry in cached_diffs {
-                output.push_str(&self.diff_renderer.render_diff(&entry.diff));
-            }
+        let mut remaining_rows = diff_constants::MAX_TOTAL_DIFF_LINES;
+        for (file_path, old_content, new_content) in changes {
+            let diff = self.diff_renderer.generate_diff(&old_content, &new_content, &file_path);
+            let file_limit = remaining_rows.min(diff_constants::MAX_PREVIEW_LINES);
+            output.push_str(&self.diff_renderer.render_diff_bounded(&diff, file_limit));
+            remaining_rows = remaining_rows.saturating_sub(diff.lines.len().min(file_limit));
         }
 
         output
     }
 
-    /// Check if diffs should be suppressed based on size/count thresholds
-    /// Returns cached diffs if not suppressed to avoid recomputation
+    /// Check if diffs should be suppressed based on size/count thresholds.
     fn check_suppression_with_cache(&self, changes: &[(String, String, String)]) -> SuppressionResult {
         let file_count = changes.len();
 
@@ -575,7 +592,6 @@ impl DiffChatRenderer {
         let mut total_additions = 0usize;
         let mut total_deletions = 0usize;
         let mut file_stats = Vec::with_capacity(file_count);
-        let mut cached_diffs = Vec::with_capacity(file_count);
         let mut suppression_reason: Option<String> = None;
 
         for (file_path, old_content, new_content) in changes {
@@ -606,9 +622,6 @@ impl DiffChatRenderer {
                     ));
                 }
             }
-
-            // Cache diff for potential reuse
-            cached_diffs.push(DiffCacheEntry { diff });
         }
 
         if let Some(reason) = suppression_reason {
@@ -621,16 +634,15 @@ impl DiffChatRenderer {
                 file_stats,
             ))
         } else {
-            SuppressionResult::not_suppressed(
-                DiffSuppressionCheck::no_suppression(
+            SuppressionResult {
+                check: DiffSuppressionCheck::no_suppression(
                     file_count,
                     total_lines,
                     total_additions,
                     total_deletions,
                     file_stats,
                 ),
-                cached_diffs,
-            )
+            }
         }
     }
 
@@ -792,17 +804,35 @@ impl DiffChatRenderer {
     }
 }
 
+fn bounded_window(total: usize, max_rows: usize) -> (usize, usize, usize) {
+    if total <= max_rows {
+        return (total, 0, 0);
+    }
+    let retained = max_rows.saturating_sub(1);
+    let head = retained.saturating_add(1) / 2;
+    let tail = retained / 2;
+    (head, tail, total.saturating_sub(head + tail))
+}
+
+fn trim_line_ending(text: &str) -> &str {
+    text.strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .or_else(|| text.strip_suffix('\r'))
+        .unwrap_or(text)
+}
+
 /// Generate a standard unified diff string between two file contents.
 pub fn generate_unified_diff(old_content: &str, new_content: &str, filename: &str) -> String {
     let old_label = format!("a/{filename}");
     let new_label = format!("b/{filename}");
-    let options = crate::utils::diff::DiffOptions {
+    let options = SharedDiffOptions {
         context_lines: 3,
         old_label: Some(&old_label),
         new_label: Some(&new_label),
         missing_newline_hint: false,
+        ..SharedDiffOptions::default()
     };
-    crate::utils::diff::format_unified_diff(old_content, new_content, options)
+    format_unified_diff(old_content, new_content, options)
 }
 
 #[cfg(test)]
@@ -881,17 +911,18 @@ mod tests {
     }
 
     #[test]
-    fn test_render_multiple_changes_with_suppression() {
+    fn test_render_multiple_changes_uses_bounded_preview() {
         let renderer = DiffChatRenderer::new(true, 3, false);
 
-        // Create enough changes to trigger suppression
-        let mut changes = Vec::new();
-        for i in 0..(diff_constants::MAX_INLINE_DIFF_FILES + 2) {
-            changes.push((format!("file{i}.rs"), "old".to_string(), "new".to_string()));
-        }
+        let old = (0..300).map(|i| format!("old-{i}\n")).collect::<String>();
+        let new = (0..300).map(|i| format!("new-{i}\n")).collect::<String>();
+        let changes = vec![("large.rs".to_owned(), old, new)];
 
         let output = renderer.render_multiple_changes(changes);
-        assert!(output.contains(diff_constants::SUPPRESSION_MESSAGE));
+        assert!(!output.contains(diff_constants::SUPPRESSION_MESSAGE));
+        assert!(output.contains("old-0"));
+        assert!(output.contains("new-299"));
+        assert!(output.contains("lines omitted"));
     }
 
     #[test]
@@ -926,5 +957,28 @@ mod tests {
         );
 
         assert!(output.contains("\n+ \n+ [workspace]\n"));
+    }
+
+    #[test]
+    fn test_render_file_change_normalizes_carriage_return_line_endings() {
+        let renderer = DiffChatRenderer::new(false, 3, false);
+        let output = renderer.render_file_change(Path::new("file.rs"), "old\r\n", "new\r\n");
+
+        assert!(!output.contains('\r'));
+        assert!(output.contains("- old\n+ new\n"));
+    }
+
+    #[test]
+    fn test_render_file_change_bounds_large_preview() {
+        let renderer = DiffChatRenderer::new(false, 3, false);
+        let old = (0..300).map(|index| format!("old-{index}\n")).collect::<String>();
+        let new = (0..300).map(|index| format!("new-{index}\n")).collect::<String>();
+
+        let output = renderer.render_file_change(Path::new("large.rs"), &old, &new);
+
+        assert!(output.contains("old-0"));
+        assert!(output.contains("new-299"));
+        assert!(output.contains("lines omitted"));
+        assert!(output.lines().count() <= diff_constants::MAX_PREVIEW_LINES + 1);
     }
 }

@@ -1,11 +1,12 @@
 //! Diff preview utilities for file operations.
 
 use crate::config::constants::diff;
-use crate::utils::diff::{DiffOptions, compute_diff_with_theme};
 use serde_json::{Value, json};
 use std::time::Instant;
-use vtcode_commons::ansi::strip_ansi;
-use vtcode_commons::diff_preview::count_diff_changes;
+use vtcode_diff::{
+    DiffDisplayKind, DiffDisplayLine, DiffDocument, DiffHunk, DiffOptions, count_diff_changes,
+    display_lines_from_unified_diff, format_unified_hunks,
+};
 
 /// Create a diff preview response when content exceeds the size limit.
 pub fn diff_preview_size_skip() -> Value {
@@ -181,21 +182,19 @@ pub fn build_diff_preview(path: &str, before: Option<&str>, after: &str) -> Valu
     let old_label = format!("a/{path}");
     let new_label = format!("b/{path}");
 
-    let diff_bundle = compute_diff_with_theme(
-        previous,
-        after,
-        DiffOptions {
-            context_lines: diff::CONTEXT_RADIUS,
-            old_label: Some(old_label.as_str()),
-            new_label: Some(new_label.as_str()),
-            missing_newline_hint: true,
-        },
-    );
+    let options = DiffOptions {
+        context_lines: diff::CONTEXT_RADIUS,
+        old_label: Some(old_label.as_str()),
+        new_label: Some(new_label.as_str()),
+        missing_newline_hint: true,
+        ..DiffOptions::default()
+    };
+    let document = DiffDocument::between(previous, after, options.clone());
     // Tool responses carry a plain unified diff. The terminal/UI renderers
     // apply colors, gutters, and syntax highlighting after parsing the diff;
     // embedding ANSI here would hide hunk markers and line prefixes from that
     // parser and make apply_patch previews fall back to raw text.
-    let formatted = strip_ansi(&diff_bundle.formatted);
+    let formatted = format_unified_hunks(&document.hunks, &options);
 
     if formatted.trim().is_empty() {
         tracing::debug!(
@@ -224,52 +223,40 @@ pub fn build_diff_preview(path: &str, before: Option<&str>, after: &str) -> Valu
     }
 
     let line_count = formatted.lines().count();
-    let counts = count_diff_changes(&diff_bundle.hunks);
+    let counts = count_diff_changes(&document.hunks);
     let additions = counts.additions;
     let deletions = counts.deletions;
-    let total_changes = counts.total();
-
-    if total_changes > diff::MAX_SINGLE_FILE_CHANGES {
-        tracing::debug!(
-            target: "vtcode.tools.diff",
-            path,
-            before_bytes = previous.len(),
-            after_bytes = after.len(),
-            additions,
-            deletions,
-            line_count,
-            truncated = false,
-            suppressed = true,
-            elapsed_ms = started.elapsed().as_millis(),
-            "diff preview suppressed (too many changes)"
-        );
-
-        return diff_preview_suppressed(additions, deletions, line_count);
-    }
-
     if line_count > diff::MAX_PREVIEW_LINES {
         let lines: Vec<&str> = formatted.lines().collect();
         let head_count = diff::HEAD_LINE_COUNT.min(lines.len());
-        let tail_count = diff::TAIL_LINE_COUNT.min(lines.len().saturating_sub(head_count));
+        let base_tail_count = diff::TAIL_LINE_COUNT.min(lines.len().saturating_sub(head_count));
+        let full_display = (document.hunks.len() > 1).then(|| display_lines_from_unified_diff(&formatted));
+        let mut tail_count = base_tail_count;
+        let mut tail_hunk_header = full_display.as_ref().and_then(|display| {
+            bounded_tail_hunk_header(display, &document.hunks, lines.len().saturating_sub(tail_count))
+        });
+        if tail_hunk_header.is_some() && tail_count > 0 {
+            tail_count = tail_count.saturating_sub(1);
+            tail_hunk_header = full_display.as_ref().and_then(|display| {
+                bounded_tail_hunk_header(display, &document.hunks, lines.len().saturating_sub(tail_count))
+            });
+            if tail_hunk_header.is_none() {
+                tail_count = base_tail_count;
+            }
+        }
         let omitted = lines.len().saturating_sub(head_count + tail_count);
 
-        let mut condensed = Vec::with_capacity(head_count + tail_count + 1);
-        condensed.extend(lines[..head_count].iter().copied());
-        if omitted > 0 {
-            condensed.push("");
-        }
-        if tail_count > 0 {
-            let tail_start = lines.len().saturating_sub(tail_count);
-            condensed.extend(lines[tail_start..].iter().copied());
-        }
-
         let diff_output = if omitted > 0 {
-            let mut result = condensed[..head_count].join("\n");
+            let mut result = lines[..head_count].join("\n");
             result.push_str(&format!("\n... {omitted} lines omitted ...\n"));
-            result.push_str(&condensed[head_count + 1..].join("\n"));
+            if let Some(header) = tail_hunk_header {
+                result.push_str(&header);
+                result.push('\n');
+            }
+            result.push_str(&lines[lines.len().saturating_sub(tail_count)..].join("\n"));
             result
         } else {
-            condensed.join("\n")
+            lines.join("\n")
         };
 
         let elapsed = started.elapsed().as_millis();
@@ -323,6 +310,59 @@ pub fn build_diff_preview(path: &str, before: Option<&str>, after: &str) -> Valu
             "deletions": deletions
         })
     }
+}
+
+fn bounded_tail_hunk_header(display: &[DiffDisplayLine], hunks: &[DiffHunk], tail_start: usize) -> Option<String> {
+    let tail = display.get(tail_start..)?;
+    let first_body_offset = tail.iter().position(DiffDisplayLine::is_diff)?;
+    if tail[..first_body_offset]
+        .iter()
+        .any(|line| line.kind == DiffDisplayKind::HunkHeader)
+    {
+        return None;
+    }
+
+    let first_body_index = tail_start + first_body_offset;
+    let hunk_header_index = display[..first_body_index]
+        .iter()
+        .rposition(|line| line.kind == DiffDisplayKind::HunkHeader)?;
+    let hunk_index = display[..first_body_index]
+        .iter()
+        .filter(|line| line.kind == DiffDisplayKind::HunkHeader)
+        .count()
+        .checked_sub(1)?;
+    let hunk = hunks.get(hunk_index)?;
+    let prefix_line_count = display[hunk_header_index + 1..first_body_index]
+        .iter()
+        .filter(|line| line.is_diff())
+        .count();
+    let prefix = hunk.lines.get(..prefix_line_count)?;
+    let mut old_start = hunk.old_start;
+    let mut new_start = hunk.new_start;
+    for line in prefix {
+        if line.kind != vtcode_diff::DiffLineKind::Addition {
+            old_start = old_start.saturating_add(1);
+        }
+        if line.kind != vtcode_diff::DiffLineKind::Deletion {
+            new_start = new_start.saturating_add(1);
+        }
+    }
+
+    let tail_lines = tail[first_body_offset..]
+        .iter()
+        .take_while(|line| line.kind != DiffDisplayKind::HunkHeader)
+        .filter(|line| line.is_diff());
+    let mut old_lines = 0usize;
+    let mut new_lines = 0usize;
+    for line in tail_lines {
+        if line.kind != DiffDisplayKind::Addition {
+            old_lines = old_lines.saturating_add(1);
+        }
+        if line.kind != DiffDisplayKind::Deletion {
+            new_lines = new_lines.saturating_add(1);
+        }
+    }
+    (old_lines > 0 || new_lines > 0).then(|| format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@"))
 }
 
 #[cfg(test)]
@@ -402,5 +442,53 @@ mod tests {
         assert_eq!(content, strip_ansi(content));
         assert!(content.contains("-before"));
         assert!(content.contains("+after"));
+    }
+
+    #[test]
+    fn large_change_uses_bounded_head_tail_instead_of_suppression() {
+        let before = (0..=diff::MAX_SINGLE_FILE_CHANGES)
+            .map(|index| format!("old-{index}\n"))
+            .collect::<String>();
+        let after = (0..=diff::MAX_SINGLE_FILE_CHANGES)
+            .map(|index| format!("new-{index}\n"))
+            .collect::<String>();
+
+        let preview = build_diff_preview("large.txt", Some(&before), &after);
+
+        assert_eq!(preview["skipped"], false);
+        assert_eq!(preview["truncated"], true);
+        assert!(preview["omitted_line_count"].as_u64().is_some_and(|count| count > 0));
+        let content = preview["content"].as_str().expect("bounded diff content");
+        assert!(content.contains("lines omitted"));
+        assert!(content.contains("old-0"));
+        assert!(content.contains(&format!("new-{}", diff::MAX_SINGLE_FILE_CHANGES)));
+
+        let display_lines = display_lines_from_unified_diff(content);
+        let tail = display_lines
+            .iter()
+            .find(|line| line.text.starts_with("new-200"))
+            .expect("tail line");
+        assert_eq!(tail.new_line, Some(201));
+    }
+
+    #[test]
+    fn large_multi_hunk_preview_keeps_tail_hunk_numbers() {
+        let before = (0..600).map(|index| format!("old-{index}\n")).collect::<String>();
+        let mut after_lines = (0..600).map(|index| format!("old-{index}\n")).collect::<Vec<_>>();
+        for (index, line) in after_lines.iter_mut().enumerate().take(220).skip(100) {
+            *line = format!("new-{index}\n");
+        }
+        for (index, line) in after_lines.iter_mut().enumerate().take(520).skip(400) {
+            *line = format!("new-{index}\n");
+        }
+
+        let preview = build_diff_preview("large-multi.txt", Some(&before), &after_lines.concat());
+        let content = preview["content"].as_str().expect("bounded diff content");
+        let display_lines = display_lines_from_unified_diff(content);
+        let tail = display_lines
+            .iter()
+            .find(|line| line.text.starts_with("new-519"))
+            .expect("tail hunk line");
+        assert_eq!(tail.new_line, Some(520));
     }
 }

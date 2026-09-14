@@ -8,8 +8,8 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use super::render_tree_detail;
 use super::streams::{render_diff_content_block, strip_ansi_codes};
 use super::styles::{GitStyles, LsStyles};
-pub(crate) use vtcode_commons::diff_preview::format_numbered_unified_diff as format_diff_content_lines_with_numbers;
 use vtcode_core::tools::file_ops::{canonical_diff_previews, diff_preview_user_message};
+pub(crate) use vtcode_diff::format_numbered_unified_diff as format_diff_content_lines_with_numbers;
 
 /// Constants for line and content limits (compact display)
 const MAX_DISPLAYED_FILES: usize = 100; // Limit displayed files to reduce clutter

@@ -15,6 +15,7 @@ fn diff_overlay_defaults_to_edit_approval_mode() {
     );
 
     assert_eq!(preview.mode, app_types::DiffPreviewMode::EditApproval);
+    assert!(preview.current_hunk_ref().is_some());
 }
 
 #[test]
@@ -70,6 +71,62 @@ fn diff_overlay_edit_approval_keys_remain_unchanged() {
             app_types::TransientSubmission::DiffReject
         )))
     ));
+}
+
+#[test]
+fn diff_overlay_scrolls_and_hunk_navigation_updates_cached_position() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let before = (0..20).map(|index| format!("old-{index}\n")).collect::<String>();
+    let mut after_lines = (0..20).map(|index| format!("old-{index}\n")).collect::<Vec<_>>();
+    after_lines[1] = "new-1\n".to_string();
+    after_lines[18] = "new-18\n".to_string();
+    session.show_diff_overlay(app_types::DiffOverlayRequest {
+        file_path: "src/main.rs".to_string(),
+        before,
+        after: after_lines.concat(),
+        hunks: Vec::new(),
+        current_hunk: 0,
+        mode: app_types::DiffPreviewMode::ReadonlyReview,
+    });
+
+    let down = session.process_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert!(down.is_none());
+    assert_eq!(session.diff_preview_state().map(|state| state.scroll_offset), Some(1));
+
+    let tab = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(tab.is_none());
+    let state = session.diff_preview_state().expect("preview remains open");
+    assert_eq!(state.current_hunk, 1);
+    assert!(state.scroll_offset > 1, "second hunk should move the cached viewport");
+
+    let back = session.process_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert!(back.is_none());
+    let state = session.diff_preview_state().expect("preview remains open");
+    assert_eq!(state.current_hunk, 0);
+    assert_eq!(state.scroll_offset, 0);
+}
+
+#[test]
+fn diff_overlay_keeps_large_preview_visible_after_scrolling() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let before = (0..2_100).map(|index| format!("old-{index}\n")).collect::<String>();
+    let after = (0..2_100).map(|index| format!("new-{index}\n")).collect::<String>();
+    session.show_diff_overlay(app_types::DiffOverlayRequest {
+        file_path: "src/main.rs".to_string(),
+        before,
+        after,
+        hunks: Vec::new(),
+        current_hunk: 0,
+        mode: app_types::DiffPreviewMode::ReadonlyReview,
+    });
+
+    for index in 0..200 {
+        let event = session.process_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert!(event.is_none(), "unexpected event at {index}: {event:?}");
+    }
+
+    let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
+    assert!(!lines.iter().any(|line| line.contains("(no changes)")));
 }
 
 #[test]

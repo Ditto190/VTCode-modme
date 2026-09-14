@@ -1,4 +1,17 @@
+use crate::tui::ui::syntax_highlight;
+use anstyle::Style as AnsiStyle;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use vtcode_commons::diff_paths::{is_prose_language_hint, language_hint_from_path};
+use vtcode_diff::{
+    DiffDisplayKind, DiffDisplayLine, DiffDocument, DiffHunk as SharedDiffHunk, DiffOptions, display_lines_from_hunks,
+};
+
+type DiffLineKey = (DiffDisplayKind, Option<u32>, Option<u32>);
+type DiffSyntaxSegments = Vec<(AnsiStyle, String)>;
+
+const MAX_DIFF_SYNTAX_BYTES: usize = 512 * 1024;
+const MAX_DIFF_SYNTAX_LINES: usize = 10_000;
 
 /// A diff hunk representing a contiguous block of changes
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +92,10 @@ pub struct DiffPreviewState {
     pub(crate) current_hunk: usize,
     pub(crate) trust_mode: TrustMode,
     pub(crate) mode: DiffPreviewMode,
+    pub(crate) document: DiffDocument,
+    pub(crate) display_lines: Vec<DiffDisplayLine>,
+    pub(crate) syntax_lines: HashMap<DiffLineKey, DiffSyntaxSegments>,
+    pub(crate) scroll_offset: usize,
 }
 
 impl DiffPreviewState {
@@ -90,9 +107,23 @@ impl DiffPreviewState {
         file_path: String,
         before: String,
         after: String,
-        hunks: Vec<DiffHunk>,
+        _hunks: Vec<DiffHunk>,
         mode: DiffPreviewMode,
     ) -> Self {
+        let document = DiffDocument::between(&before, &after, DiffOptions::default());
+        let display_lines = display_lines_from_hunks(&document.hunks);
+        let syntax_lines = syntax_segments_for_hunks(&document.hunks, &file_path);
+        let hunks = document
+            .hunks
+            .iter()
+            .map(|hunk| DiffHunk {
+                old_start: hunk.old_start.saturating_sub(1),
+                new_start: hunk.new_start.saturating_sub(1),
+                old_lines: hunk.old_lines,
+                new_lines: hunk.new_lines,
+                display: format!("@@ -{} +{} @@", hunk.old_start, hunk.new_start),
+            })
+            .collect();
         Self {
             file_path,
             before,
@@ -101,6 +132,10 @@ impl DiffPreviewState {
             current_hunk: 0,
             trust_mode: TrustMode::Once,
             mode,
+            document,
+            display_lines,
+            syntax_lines,
+            scroll_offset: 0,
         }
     }
 
@@ -109,6 +144,82 @@ impl DiffPreviewState {
     }
 
     pub(crate) fn hunk_count(&self) -> usize {
-        self.hunks.len()
+        self.document.hunks.len()
     }
+
+    pub(crate) fn focus_hunk(&mut self, index: usize) {
+        if index >= self.hunk_count() {
+            return;
+        }
+        self.current_hunk = index;
+        self.scroll_offset = self
+            .display_lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.kind == DiffDisplayKind::HunkHeader)
+            .nth(index)
+            .map_or(0, |(row, _)| row);
+    }
+
+    pub(crate) fn scroll_by(&mut self, rows: isize) {
+        self.scroll_offset = self.scroll_offset.saturating_add_signed(rows);
+        self.scroll_offset = self.scroll_offset.min(self.display_lines.len().saturating_sub(1));
+    }
+
+    pub(crate) fn syntax_segments(
+        &self,
+        kind: DiffDisplayKind,
+        old_line: Option<u32>,
+        new_line: Option<u32>,
+    ) -> Option<&[(AnsiStyle, String)]> {
+        self.syntax_lines.get(&(kind, old_line, new_line)).map(Vec::as_slice)
+    }
+}
+
+fn syntax_segments_for_hunks(hunks: &[SharedDiffHunk], file_path: &str) -> HashMap<DiffLineKey, DiffSyntaxSegments> {
+    let language = language_hint_from_path(file_path);
+    if is_prose_language_hint(language.as_deref()) {
+        return HashMap::new();
+    }
+    let theme = syntax_highlight::get_active_syntax_theme();
+    let mut syntax_lines = HashMap::new();
+    let mut remaining_bytes = MAX_DIFF_SYNTAX_BYTES;
+    let mut remaining_lines = MAX_DIFF_SYNTAX_LINES;
+
+    for hunk in hunks {
+        let mut source = String::new();
+        for (index, line) in hunk.lines.iter().enumerate() {
+            source.push_str(trim_line_ending(&line.text));
+            if index + 1 < hunk.lines.len() {
+                source.push('\n');
+            }
+        }
+        if source.len() > remaining_bytes || hunk.lines.len() > remaining_lines {
+            break;
+        }
+        remaining_bytes = remaining_bytes.saturating_sub(source.len());
+        remaining_lines = remaining_lines.saturating_sub(hunk.lines.len());
+        let highlighted =
+            syntax_highlight::highlight_code_to_anstyle_line_segments(&source, language.as_deref(), theme, true);
+        for (line, segments) in hunk.lines.iter().zip(highlighted) {
+            syntax_lines.insert((diff_display_kind(line.kind), line.old_line, line.new_line), segments);
+        }
+    }
+
+    syntax_lines
+}
+
+fn diff_display_kind(kind: vtcode_diff::DiffLineKind) -> DiffDisplayKind {
+    match kind {
+        vtcode_diff::DiffLineKind::Context => DiffDisplayKind::Context,
+        vtcode_diff::DiffLineKind::Addition => DiffDisplayKind::Addition,
+        vtcode_diff::DiffLineKind::Deletion => DiffDisplayKind::Deletion,
+    }
+}
+
+fn trim_line_ending(text: &str) -> &str {
+    text.strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .or_else(|| text.strip_suffix('\r'))
+        .unwrap_or(text)
 }

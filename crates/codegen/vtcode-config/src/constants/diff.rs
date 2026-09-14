@@ -4,7 +4,7 @@ pub const MAX_PREVIEW_BYTES: usize = 200_000;
 /// Number of context lines to include around changes in unified diff output
 pub const CONTEXT_RADIUS: usize = 3;
 
-/// Maximum number of diff lines to keep in preview output before condensation
+/// Maximum number of diff lines to keep in a bounded preview before condensation
 pub const MAX_PREVIEW_LINES: usize = 160;
 
 /// Number of leading diff lines to retain when condensing previews
@@ -13,13 +13,13 @@ pub const HEAD_LINE_COUNT: usize = 96;
 /// Number of trailing diff lines to retain when condensing previews
 pub const TAIL_LINE_COUNT: usize = 32;
 
-/// Maximum number of files to show inline diffs for before suppression
+/// Legacy compatibility threshold for the suppression-check API.
 pub const MAX_INLINE_DIFF_FILES: usize = 10;
 
-/// Maximum total diff lines across all files before suppression
+/// Legacy compatibility threshold for the suppression-check API.
 pub const MAX_TOTAL_DIFF_LINES: usize = 500;
 
-/// Maximum additions + deletions in a single file before suppression
+/// Legacy compatibility threshold for the suppression-check API.
 pub const MAX_SINGLE_FILE_CHANGES: usize = 200;
 
 /// Maximum number of files to list in suppression summary

@@ -1,0 +1,35 @@
+[package]
+name = "vtcode-diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors = ["Vinh Nguyen <vinhnguyen2308@gmail.com>"]
+description = "Bounded structured text diffs and renderer-neutral terminal preview rows"
+license.workspace = true
+readme = "README.md"
+homepage = "https://github.com/vinhnx/vtcode"
+repository = "https://github.com/vinhnx/vtcode"
+documentation = "https://docs.rs/vtcode-diff"
+keywords = ["diff", "terminal", "unicode", "myers", "tui"]
+categories = ["development-tools", "text-processing"]
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+serde = ["dep:serde"]
+ratatui = ["dep:ratatui"]
+ansi = ["dep:anstyle"]
+
+[dependencies]
+anstyle = { workspace = true, optional = true }
+ratatui = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+similar = { workspace = true }
+unicode-width = { workspace = true }
+
+[lints]
+workspace = true

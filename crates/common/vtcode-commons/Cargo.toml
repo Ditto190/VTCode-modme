@@ -24,6 +24,7 @@ schema = ["dep:schemars"]
 default = []
 
 [dependencies]
+vtcode-diff = { workspace = true, features = ["serde"] }
 anyhow = { workspace = true }
 hashbrown = { workspace = true }
 rand = { workspace = true }

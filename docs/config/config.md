@@ -610,15 +610,20 @@ layouts via `ui.diff_preview_mode`:
 
 ```toml
 [ui]
-# "inline" (default): stacked unified diff
+# "inline" (default): unified diff; the value is retained for compatibility
 # "side-by-side": old pane on the left, new pane on the right
 diff_preview_mode = "side-by-side"
 ```
 
-Side-by-side falls back to the inline view when the terminal is too narrow
+Side-by-side falls back to the unified view when the terminal is too narrow
 for two usable panes. The mode applies to both the file-edit approval overlay
 and expanded tool-output diffs in the transcript (write_file, apply_patch,
 and detected `git diff` shell output).
+
+Large previews remain inspectable: VT Code bounds rendered rows with a
+head/tail omission marker and can skip expensive syntax or intraline work
+without suppressing the underlying diff. In a preview overlay, use Up/Down or
+PageUp/PageDown to scroll and Tab/Shift-Tab to jump between hunks.
 
 For the full shortcut list and tmux notes, see [Interactive Mode Reference](../user-guide/interactive-mode.md).
 

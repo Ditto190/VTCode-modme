@@ -58,6 +58,7 @@ tui-widget-list  = "0.15"
 unicode-segmentation = "1.13"
 unicode-width    = { workspace = true }
 vtcode-commons   = { workspace = true }
+vtcode-diff      = { workspace = true, features = ["serde", "ratatui"] }
 vtcode-config    = { workspace = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

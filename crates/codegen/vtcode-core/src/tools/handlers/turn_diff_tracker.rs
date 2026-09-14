@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use vtcode_diff::{DiffOptions, format_unified_diff};
 
 /// Attribution information for a file change (Agent Trace compatible).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -420,14 +421,15 @@ pub fn new_shared_tracker() -> SharedTurnDiffTracker {
 fn compute_unified_diff_with_labels(old: &str, new: &str, old_label: &str, new_label: &str) -> String {
     let old_label = format!("a/{old_label}");
     let new_label = format!("b/{new_label}");
-    crate::utils::diff::format_unified_diff(
+    format_unified_diff(
         old,
         new,
-        crate::utils::diff::DiffOptions {
+        DiffOptions {
             context_lines: 3,
             old_label: Some(&old_label),
             new_label: Some(&new_label),
             missing_newline_hint: false,
+            ..DiffOptions::default()
         },
     )
 }

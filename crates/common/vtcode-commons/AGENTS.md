@@ -5,8 +5,8 @@
 ## Module Groups
 
 - Traits: `paths/`, `errors/`, `telemetry/`.
-- Display: `ansi/`, `colors/`, `styling/`, `diff_preview/`, `color256_theme/`, `color_policy/`; LLM: `llm/`.
-- Filesystem: `fs/`, `paths/`, `vtcode_paths/`, `diff/`, `diff_paths/`, `vtcodegitignore/`, `workspace_snapshot/`; text: `tokens/`, `unicode/`, `sanitizer/`, `slug/`, `formatting/`.
+- Display: `ansi/`, `colors/`, `styling/`, `color256_theme/`, `color_policy/`; LLM: `llm/`; `diff/` and `diff_preview/` are one-release `vtcode-diff` compatibility re-exports.
+- Filesystem: `fs/`, `paths/`, `vtcode_paths/`, `diff_paths/`, `vtcodegitignore/`, `workspace_snapshot/`; text: `tokens/`, `unicode/`, `sanitizer/`, `slug/`, `formatting/`.
 - Async: `async_utils/`, `task_guard/`, `thread_safety/`; interjection: `interjection/`; UI protocol: `ui_protocol/` (including global activity state); other: `editor/`, `http/`, `project/`, `validation/`, `serde_helpers/`, `env_lock/`.
 ## Rules
 - Re-export key types from `lib.rs`: `WorkspacePaths`, `TelemetrySink`, `ErrorFormatter`, `BackendKind`, etc.
@@ -24,6 +24,6 @@
 - `utils/` contains `calculate_sha256()` used by `vtcode-indexer`.
 - `VtCodePaths::open_private_append_file` opens a symlink-safe `0600` read/write append handle for private logs that also need seek/read access.
 - `formatting/` owns the canonical middle-truncation helpers `truncate_middle` (head+tail, control chars sanitized) and `truncate_path_middle` (separator-aware, for path display). Downstream crates delegate here — do not re-implement per crate.
-- `ui_protocol::SessionSurface` defaults to `Inline`; callers requiring alternate-screen detection must request `Auto` or `Alternate` explicitly. `diff::compute_diff` preserves CR, CRLF, and LF line records and derives hunk starts from the first represented record; downstream formatters own newline normalization and EOF markers.
+- `ui_protocol::SessionSurface` defaults to `Inline`; callers requiring alternate-screen detection must request `Auto` or `Alternate` explicitly. New diff consumers use `vtcode-diff` directly; its computation preserves CR, CRLF, LF, hunk numbering, and byte-safe intraline ranges.
 - `ui_protocol::tool_summary` contains renderer-independent compact activity metadata; keep grouping/output boundaries independent of TUI/runtime types and out of `ThreadEvent`. `MessageMetadata.intent_id` is optional wire metadata for durable steering recovery; preserve it through message serialization.
 - `task_guard::TaskGuard` is the canonical abort-on-drop task owner — use it instead of adding per-crate guard structs; `disarm()` releases the handle for documented-detached handoff.

@@ -58,6 +58,7 @@ Cargo workspace, ~30 crates. Rust stable, MSRV 1.88, edition 2024. `default-memb
 | `crates/codegen/vtcode-auth`              | OAuth and credential storage                                                                                                           |
 | `crates/codegen/vtcode-indexer`           | Code indexing and search                                                                                                               |
 | `crates/common/vtcode-exec-events`        | `ThreadEvent` contract and ATIF export                                                                                                 |
+| `crates/common/vtcode-diff`               | Bounded structured diffs and renderer-neutral preview rows                                                                             |
 | `crates/codegen/vtcode-webmcp`            | Authenticated browser editor bridge, pairing, event replay, and bounded workspace adapter                                              |
 | `crates/common/vtcode-commons`            | Shared utilities                                                                                                                       |
 | `crates/common/vtcode-macros`             | Procedural macros                                                                                                                      |
@@ -89,6 +90,7 @@ Every crate has its own AGENTS.md with crate-specific conventions:
 | `vtcode-auth`               | [crates/codegen/vtcode-auth/AGENTS.md](crates/codegen/vtcode-auth/AGENTS.md)                           |
 | `vtcode-indexer`            | [crates/codegen/vtcode-indexer/AGENTS.md](crates/codegen/vtcode-indexer/AGENTS.md)                     |
 | `vtcode-exec-events`        | [crates/common/vtcode-exec-events/AGENTS.md](crates/common/vtcode-exec-events/AGENTS.md)               |
+| `vtcode-diff`               | [crates/common/vtcode-diff/AGENTS.md](crates/common/vtcode-diff/AGENTS.md)                             |
 | `vtcode-webmcp`             | [crates/codegen/vtcode-webmcp/AGENTS.md](crates/codegen/vtcode-webmcp/AGENTS.md)                       |
 | `vtcode-commons`            | [crates/common/vtcode-commons/AGENTS.md](crates/common/vtcode-commons/AGENTS.md)                       |
 | `vtcode-macros`             | [crates/common/vtcode-macros/AGENTS.md](crates/common/vtcode-macros/AGENTS.md)                         |

@@ -3,7 +3,7 @@
 //! This module contains shared UI functionality including loading indicators,
 //! markdown rendering, and terminal utilities.
 
-/// Unified diff rendering with ANSI styling and suppression logic.
+/// Unified diff rendering with ANSI styling and bounded excerpts.
 pub mod diff_renderer;
 /// Git color configuration parsing.
 pub mod git_config;

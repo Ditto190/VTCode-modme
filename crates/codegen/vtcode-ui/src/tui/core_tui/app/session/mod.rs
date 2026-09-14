@@ -433,7 +433,7 @@ impl AppSession {
             request.hunks,
             request.mode,
         );
-        state.current_hunk = request.current_hunk;
+        state.focus_hunk(request.current_hunk);
         self.diff_preview_state = Some(state);
         self.show_transient_surface(TransientSurface::DiffPreview);
         self.core.mark_dirty();

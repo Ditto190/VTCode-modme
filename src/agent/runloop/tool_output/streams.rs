@@ -44,10 +44,6 @@ use std::borrow::Cow;
 use anstyle::{AnsiColor, Effects, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use smallvec::SmallVec;
-use vtcode_commons::diff_preview::{
-    DiffDisplayKind, DiffDisplayLine, SideBySideRow, diff_display_line_number_width, display_lines_from_unified_diff,
-    side_by_side_rows,
-};
 use vtcode_commons::preview::{
     display_width, excerpt_text_lines, format_hidden_lines_summary as shared_hidden_lines_summary,
     truncate_with_ellipsis,
@@ -56,6 +52,10 @@ use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::tools::tool_intent;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
+use vtcode_diff::{
+    DiffDisplayKind, DiffDisplayLine, SideBySideRow, bounded_display_lines, diff_display_line_number_width,
+    display_lines_from_unified_diff, side_by_side_rows,
+};
 
 use super::files::colorize_diff_summary_line;
 use super::styles::{GitStyles, LsStyles, select_line_style};
@@ -370,25 +370,13 @@ pub(crate) fn render_diff_content_block(
     tail_limit: usize,
 ) -> Result<()> {
     let diff_lines = display_lines_from_unified_diff(diff_content);
-    let total = diff_lines.len();
     let effective_limit = if renderer.prefers_untruncated_output() || matches!(mode, ToolOutputMode::Full) {
         tail_limit.max(1000)
     } else {
         tail_limit
     };
-    let (lines_slice, truncated) = if total > effective_limit {
-        let start = total.saturating_sub(effective_limit);
-        (&diff_lines[start..], total > effective_limit)
-    } else {
-        (&diff_lines[..], false)
-    };
-
-    if truncated {
-        let hidden = total.saturating_sub(lines_slice.len());
-        if hidden > 0 {
-            renderer.line(MessageStyle::ToolDetail, &hidden_lines_notice(hidden, HiddenLinesNoticeKind::Generic))?;
-        }
-    }
+    let bounded_lines = bounded_display_lines(&diff_lines, effective_limit);
+    let lines_slice = bounded_lines.as_slice();
 
     if renderer.diff_preview_mode() == vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide {
         return render_diff_content_side_by_side(renderer, lines_slice, git_styles, fallback_style);
@@ -915,14 +903,16 @@ mod tests {
     use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
     use anstyle::AnsiColor;
-    use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine};
+    use vtcode_diff::{DiffDisplayKind, DiffDisplayLine};
 
     use crate::agent::runloop::tool_output::collect_inline_output;
 
+    use super::super::styles::{GitStyles, LsStyles};
     use super::{
         HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, format_diff_line_with_gutter_and_syntax,
-        hidden_lines_notice, highlight_diff_content, render_preview_line, strip_ansi_codes,
+        hidden_lines_notice, highlight_diff_content, render_diff_content_block, render_preview_line, strip_ansi_codes,
     };
+    use vtcode_core::config::ToolOutputMode;
 
     #[test]
     fn run_command_preview_uses_head_tail_three_lines() {
@@ -967,6 +957,34 @@ mod tests {
         let inline_output = collect_inline_output(&mut receiver);
         assert!(inline_output.starts_with("  "));
         assert!(inline_output.ends_with("..."));
+    }
+
+    #[test]
+    fn diff_stream_preview_keeps_head_tail_and_omission_marker() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let mut diff = String::from("@@ -1,600 +1,600 @@\n");
+        for index in 0..600 {
+            diff.push_str(&format!("-old-{index}\n+new-{index}\n"));
+        }
+
+        render_diff_content_block(
+            &mut renderer,
+            &diff,
+            Some("apply_patch"),
+            &GitStyles::new(),
+            &LsStyles::from_env(),
+            MessageStyle::ToolDetail,
+            ToolOutputMode::Compact,
+            5,
+        )
+        .expect("bounded diff should render");
+
+        let collected = collect_inline_output(&mut receiver);
+        let output = strip_ansi_codes(&collected);
+        assert!(output.contains("old-0"), "head should be retained: {output:?}");
+        assert!(output.contains("new-599"), "tail should be retained: {output:?}");
+        assert!(output.contains("lines omitted"), "omission marker should be rendered: {output:?}");
     }
 
     fn test_diff_line(

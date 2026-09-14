@@ -531,8 +531,10 @@ pub(super) fn process_key_with_clipboard_image_reader(
         ToolOutputViewerKeyResult::NotHandled => {}
     }
 
-    if let Some(event) = handle_diff_preview_key(session, &key) {
-        return Some(event);
+    match handle_diff_preview_key(session, &key) {
+        DiffPreviewKeyResult::Emit(event) => return Some(event),
+        DiffPreviewKeyResult::Handled => return None,
+        DiffPreviewKeyResult::NotHandled => {}
     }
 
     // Handle history picker (Ctrl+R) - Visual fuzzy search for command history
@@ -1682,30 +1684,74 @@ fn handle_scroll_up(
     emit_inline_event(&InlineEvent::ScrollLineUp, events, callback);
 }
 
-fn handle_diff_preview_key(session: &mut Session, key: &KeyEvent) -> Option<InlineEvent> {
-    let mode = session.diff_preview_state()?.mode;
+enum DiffPreviewKeyResult {
+    Emit(InlineEvent),
+    Handled,
+    NotHandled,
+}
+
+fn handle_diff_preview_key(session: &mut Session, key: &KeyEvent) -> DiffPreviewKeyResult {
+    let Some(mode) = session.diff_preview_state().map(|state| state.mode) else {
+        return DiffPreviewKeyResult::NotHandled;
+    };
 
     match key.code {
         KeyCode::Tab => {
-            let diff_state = session.diff_preview_state_mut()?;
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
             if diff_state.current_hunk + 1 < diff_state.hunk_count() {
-                diff_state.current_hunk += 1;
+                diff_state.focus_hunk(diff_state.current_hunk + 1);
             }
             session.mark_dirty();
-            None
+            DiffPreviewKeyResult::Handled
         }
         KeyCode::BackTab => {
-            let diff_state = session.diff_preview_state_mut()?;
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
             if diff_state.current_hunk > 0 {
-                diff_state.current_hunk -= 1;
+                diff_state.focus_hunk(diff_state.current_hunk - 1);
             }
             session.mark_dirty();
-            None
+            DiffPreviewKeyResult::Handled
+        }
+        KeyCode::Up => {
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
+            diff_state.scroll_by(-1);
+            session.mark_dirty();
+            DiffPreviewKeyResult::Handled
+        }
+        KeyCode::Down => {
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
+            diff_state.scroll_by(1);
+            session.mark_dirty();
+            DiffPreviewKeyResult::Handled
+        }
+        KeyCode::PageUp => {
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
+            diff_state.scroll_by(-10);
+            session.mark_dirty();
+            DiffPreviewKeyResult::Handled
+        }
+        KeyCode::PageDown => {
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
+            diff_state.scroll_by(10);
+            session.mark_dirty();
+            DiffPreviewKeyResult::Handled
         }
         KeyCode::Enter => {
             session.close_diff_overlay();
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::Submitted(match mode {
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::Submitted(match mode {
                 DiffPreviewMode::EditApproval => TransientSubmission::DiffApply,
                 DiffPreviewMode::FileConflict => TransientSubmission::DiffProceed,
                 DiffPreviewMode::ReadonlyReview => TransientSubmission::DiffAbort,
@@ -1714,54 +1760,64 @@ fn handle_diff_preview_key(session: &mut Session, key: &KeyEvent) -> Option<Inli
         KeyCode::Char('r') | KeyCode::Char('R') if matches!(mode, DiffPreviewMode::FileConflict) => {
             session.close_diff_overlay();
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::DiffReload)))
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::Submitted(
+                TransientSubmission::DiffReload,
+            )))
         }
         KeyCode::Esc => {
             session.close_diff_overlay();
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::Submitted(match mode {
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::Submitted(match mode {
                 DiffPreviewMode::EditApproval => TransientSubmission::DiffReject,
                 DiffPreviewMode::FileConflict => TransientSubmission::DiffAbort,
                 DiffPreviewMode::ReadonlyReview => TransientSubmission::DiffAbort,
             })))
         }
         KeyCode::Char('1') if matches!(mode, DiffPreviewMode::EditApproval) => {
-            let diff_state = session.diff_preview_state_mut()?;
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
             diff_state.trust_mode = crate::tui::core_tui::app::types::TrustMode::Once;
             let mode = diff_state.trust_mode;
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::SelectionChanged(TransientSelectionChange::DiffTrustMode {
-                mode,
-            })))
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::SelectionChanged(
+                TransientSelectionChange::DiffTrustMode { mode },
+            )))
         }
         KeyCode::Char('2') if matches!(mode, DiffPreviewMode::EditApproval) => {
-            let diff_state = session.diff_preview_state_mut()?;
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
             diff_state.trust_mode = crate::tui::core_tui::app::types::TrustMode::Session;
             let mode = diff_state.trust_mode;
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::SelectionChanged(TransientSelectionChange::DiffTrustMode {
-                mode,
-            })))
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::SelectionChanged(
+                TransientSelectionChange::DiffTrustMode { mode },
+            )))
         }
         KeyCode::Char('3') if matches!(mode, DiffPreviewMode::EditApproval) => {
-            let diff_state = session.diff_preview_state_mut()?;
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
             diff_state.trust_mode = crate::tui::core_tui::app::types::TrustMode::Always;
             let mode = diff_state.trust_mode;
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::SelectionChanged(TransientSelectionChange::DiffTrustMode {
-                mode,
-            })))
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::SelectionChanged(
+                TransientSelectionChange::DiffTrustMode { mode },
+            )))
         }
         KeyCode::Char('4') if matches!(mode, DiffPreviewMode::EditApproval) => {
-            let diff_state = session.diff_preview_state_mut()?;
+            let Some(diff_state) = session.diff_preview_state_mut() else {
+                return DiffPreviewKeyResult::NotHandled;
+            };
             diff_state.trust_mode = crate::tui::core_tui::app::types::TrustMode::AutoTrust;
             let mode = diff_state.trust_mode;
             session.mark_dirty();
-            Some(InlineEvent::Transient(TransientEvent::SelectionChanged(TransientSelectionChange::DiffTrustMode {
-                mode,
-            })))
+            DiffPreviewKeyResult::Emit(InlineEvent::Transient(TransientEvent::SelectionChanged(
+                TransientSelectionChange::DiffTrustMode { mode },
+            )))
         }
-        _ => None,
+        _ => DiffPreviewKeyResult::NotHandled,
     }
 }
 

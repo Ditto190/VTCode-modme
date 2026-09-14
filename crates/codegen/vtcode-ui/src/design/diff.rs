@@ -6,23 +6,42 @@
 
 use anstyle::{AnsiColor, Color, Reset, Style};
 use std::fmt::Write;
+use vtcode_diff::{DiffDocument, format_unified_hunks};
 
-// Re-export the core diff types from vtcode-commons.
-pub use vtcode_commons::diff::{
-    Chunk, DiffBundle, DiffHunk, DiffLine, DiffLineKind, DiffOptions, compute_diff, compute_diff_chunks,
-};
+// Keep the published UI facade's legacy options shape while exposing the
+// renderer-neutral types from the extracted implementation. New consumers
+// that need algorithm or timeout controls should depend on `vtcode-diff`.
+pub use vtcode_commons::diff::{DiffOptions, compute_diff};
+pub use vtcode_diff::{Chunk, DiffBundle, DiffHunk, DiffLine, DiffLineKind, compute_diff_chunks};
 
 /// Format a unified diff without ANSI color codes.
 pub fn format_unified_diff(old: &str, new: &str, options: DiffOptions<'_>) -> String {
-    let mut options = options;
+    let mut options = shared_options(&options);
     options.missing_newline_hint = false;
-    let bundle = compute_diff(old, new, options, format_colored_diff);
-    vtcode_commons::ansi::strip_ansi(&bundle.formatted)
+    let document = DiffDocument::between(old, new, options.clone());
+    format_unified_hunks(&document.hunks, &options)
 }
 
 /// Compute a structured diff bundle using the default theme-aware formatter.
 pub fn compute_diff_with_theme(old: &str, new: &str, options: DiffOptions<'_>) -> DiffBundle {
-    compute_diff(old, new, options, format_colored_diff)
+    let shared = shared_options(&options);
+    let document = DiffDocument::between(old, new, shared);
+    let formatted = format_colored_diff(&document.hunks, &options);
+    DiffBundle {
+        hunks: document.hunks,
+        formatted,
+        is_empty: old == new,
+    }
+}
+
+fn shared_options<'a>(options: &DiffOptions<'a>) -> vtcode_diff::DiffOptions<'a> {
+    vtcode_diff::DiffOptions {
+        context_lines: options.context_lines,
+        old_label: options.old_label,
+        new_label: options.new_label,
+        missing_newline_hint: options.missing_newline_hint,
+        ..vtcode_diff::DiffOptions::default()
+    }
 }
 
 /// Format diff hunks with standard ANSI colors for terminal display.
@@ -70,18 +89,19 @@ pub fn format_colored_diff(hunks: &[DiffHunk], options: &DiffOptions<'_>) -> Str
             display.push(prefix);
             display.push_str(&line.text);
 
-            // CRITICAL: Apply Reset before newline to prevent color bleeding
-            let has_newline = display.ends_with('\n');
-            let display_content = if has_newline {
-                &display[..display.len() - 1]
-            } else {
-                &display
-            };
+            // Apply Reset before the line terminator to prevent color
+            // bleeding, and normalize CR/CRLF for terminal output.
+            let display_content = display
+                .strip_suffix("\r\n")
+                .or_else(|| display.strip_suffix('\n'))
+                .or_else(|| display.strip_suffix('\r'))
+                .unwrap_or(&display);
 
             let _ = write!(output, "{}{} {}", style.render(), display_content, Reset.render());
             output.push('\n');
 
-            if options.missing_newline_hint && !line.text.ends_with('\n') {
+            let has_line_terminator = line.text.ends_with('\n') || line.text.ends_with('\r');
+            if options.missing_newline_hint && !has_line_terminator {
                 let eof_hint = r"\ No newline at end of file";
                 let _ = write!(output, "{}{} {}", context_style.render(), eof_hint, Reset.render());
                 output.push('\n');
@@ -137,5 +157,15 @@ mod tests {
         assert!(!result.contains('\x1b'));
         // But should contain the diff content
         assert!(result.contains('-') || result.contains('+'));
+    }
+
+    #[test]
+    fn format_colored_diff_normalizes_crlf_and_cr_terminators() {
+        let bundle = compute_diff_with_theme("old\r\n", "new\r\n", DiffOptions::default());
+        assert!(!bundle.formatted.contains("\r"));
+
+        let bundle = compute_diff_with_theme("old\r", "new\r", DiffOptions::default());
+        assert!(!bundle.formatted.contains("\r"));
+        assert!(!bundle.formatted.contains("No newline at end"));
     }
 }

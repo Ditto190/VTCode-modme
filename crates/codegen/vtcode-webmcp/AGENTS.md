@@ -8,7 +8,7 @@
 - `pairing` — expiring one-time codes, sessions, origin binding, revocation, and atomic replacement.
 - `event_hub` — bounded replay and slow-client handling for runtime events.
 - `runtime` — adapter traits and result types used by active and headless sessions.
-- `filesystem` — canonicalized, digest-checked headless workspace adapter.
+- `filesystem` — canonicalized, digest-checked headless workspace adapter using `vtcode-diff` for authoritative diffs.
 - `remote_mcp` — authenticated read-only Streamable HTTP and legacy SSE transports.
 - `server` — Axum WebSocket transport and request dispatch.
 

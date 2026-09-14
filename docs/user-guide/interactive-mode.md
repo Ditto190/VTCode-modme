@@ -79,6 +79,24 @@ When VT Code is running in alternate-screen mode, the transcript and composer us
 | `Ctrl+End`      | Jump to the latest transcript content and resume auto-follow. |
 | Mouse wheel     | Scroll the live transcript when mouse capture is enabled.     |
 
+### Diff Preview Navigation
+
+File-edit approval, conflict, and read-only review overlays use the unified
+layout by default. The configuration value remains `ui.diff_preview_mode =
+"inline"` for compatibility; set it to `"side-by-side"` for paired panes,
+which fall back to unified on narrow terminals. Preview controls do not change
+approval semantics:
+
+| Shortcut | Description |
+| :-- | :-- |
+| `Up` / `Down` | Scroll the preview one rendered row. |
+| `PgUp` / `PgDn` | Scroll the preview by a page-sized step. |
+| `Tab` / `Shift+Tab` | Jump to the next or previous hunk. |
+| `Enter` / `Esc` | Keep the overlay's documented approve/proceed/back or reject/abort action. |
+
+Long previews retain a bounded head/tail excerpt with an explicit omission
+marker instead of collapsing to a suppression reason.
+
 ### Transcript Review
 
 Press the configured review binding (default `Ctrl+T`) to open or close
