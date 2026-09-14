@@ -57,8 +57,8 @@
 VT Code is an open-source terminal coding agent written in Rust: one static
 binary for quick interactive sessions and long-running autonomous work alike —
 no IDE required, no context left behind. It is a **harness, not just an LLM
-wrapper**: the model reasons; the runtime supplies everything else — tools,
-context, sandboxing, state, and **verification** — turning raw model output
+wrapper**: the model reasons; the runtime supplies everything else: tools,
+context, sandboxing, state, and **verification**: turning raw model output
 into safe, reviewable progress, entirely in your terminal.
 
 > [!NOTE]
@@ -174,7 +174,7 @@ resolution order.
 ### 3. Run
 
 ```bash
-vtcode                  # interactive TUI — the whole loop is install, init, run
+vtcode                  # interactive TUI: the whole loop is install, init, run
 ```
 
 See [Commands](#commands) for the complete CLI surface, including headless
