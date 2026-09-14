@@ -113,10 +113,6 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: One-Time Setup, Credential identities, Daily Development Loop, Full Quality Gate, Common Commands
   - **User Questions**: "What can you tell me about Development Setup?", "How does One-Time Setup work?", "How does Credential identities work?"
 
-- **File**: `docs/development/diff-preview.md`
-  - **Content**: Diff Preview Architecture
-  - **User Questions**: "What can you tell me about Diff Preview Architecture?"
-
 - **File**: `docs/development/EXTENSION_BOUNDARIES.md`
   - **Content**: Extension Boundaries in VT Code
   - **Topics**: Why This Exists, Default Extension Order, What Counts As Internal, What Counts As External, Review Checklist

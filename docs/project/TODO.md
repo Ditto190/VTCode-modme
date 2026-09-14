@@ -95,3 +95,11 @@ Path: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/ses
 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260914t084315z_111294-82729-20260914T091125Z-3f8578c8-e1da-44ca-8158-543d86056f32.md
 
 use relevant session logs and task blockers to analyze the system's behavior and identify potential improvements. use skills and distil insights from the logs to make informed recommendations for enhancing stability, performance, and overall efficiency.
+
+===
+
+IMPROVE todo task list, make it shorter and more concise in the TUI. only need details internally to the harness. Keep the TUI clean and focused on essential information for the user. also improve the UI/UX of the TODO/task, replace □ with more intuitive UI and color coding for different task statuses.
+
+===
+
+audit and double check and self test all TUI's commands for up to date and correctness and ensure they function as expected in various scenarios.
