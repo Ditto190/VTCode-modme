@@ -78,25 +78,33 @@ It is a **harness, not just an LLM wrapper**. The model reasons; the runtime sup
 ## Why VT Code
 
 Most agents are a model plus a tool call. That gets you a demo, not a
-teammate. Real work breaks them in predictable ways, and VT Code answers
-each one with a structural default, not a prompt tweak:
+teammate: the first long session, large diff, or risky command breaks them
+in predictable ways. VT Code is built differently — every failure mode below
+is answered by a **structural default in the runtime**, not a prompt tweak
+you have to remember to write:
 
-| When agents fail at…              | VT Code's structural answer                                                                                                                                                                                                                           |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded: the model reasons over current state, not a stale transcript. [Runtime guidance](./docs/development/runtime-guidance.md)                                                    |
-| **Tool output floods the window** | Results are spooled to disk and summarized into the model's view on demand: signal stays in context, noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md)                                                                      |
-| **One unreviewed command**        | Sandboxed execution and approvals fail closed, with adversarial regression coverage for the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **"Done" is a claim**             | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                                                                   |
+| The failure mode                | VT Code's structural answer                                                                                                                                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sessions drift**              | Dynamic context assembly and auto-compaction keep long sessions grounded: the model reasons over current state, not a stale transcript. [Runtime guidance](./docs/development/runtime-guidance.md)                                                    |
+| **Tool output floods the window** | Results spool to disk and are summarized into the model's view on demand — signal stays in context, noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md)                                                                     |
+| **One unreviewed command**      | Sandboxed execution and approvals fail closed, with adversarial regression coverage for the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **"Done" is a claim**           | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                                                                   |
 
-None of this is emergent.
-[`ThreadEvent`](./crates/common/vtcode-exec-events) is the single source of
-truth for what happened during a run: one event stream feeds replay,
-checkpoints, memory, and trajectory export. The
-[agent loop contract](./docs/guides/agent-loop-contract.md) specifies how
-turns, tool results, and recovery behave. The behavior you rely on is
-written down, not accidental.
+The pattern behind all four: **state, safety, and verification live in the
+harness**, so they hold whether the model is having a good day or a bad one.
+And none of it is emergent or accidental:
 
-If you have been burned by agents that look impressive until something goes wrong, these are the defaults you were missing — built in, not bolted on. The [four pillars](#four-pillars) below cover the full surface, or skip to [Quick start](#quick-start) and see it work.
+- [`ThreadEvent`](./crates/common/vtcode-exec-events) is the single source of
+  truth for what happened during a run — one event stream feeds replay,
+  checkpoints, memory, and trajectory export.
+- The [agent loop contract](./docs/guides/agent-loop-contract.md) specifies
+  how turns, tool results, and recovery behave. The behavior you rely on is
+  written down, not accidental.
+
+If you have been burned by agents that look impressive until something goes
+wrong, these are the defaults you were missing — built in, not bolted on.
+The [four pillars](#four-pillars) below cover the full surface, or skip to
+[Quick start](#quick-start) and see it work.
 
 ## Quick start
 
