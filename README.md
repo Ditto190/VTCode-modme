@@ -25,6 +25,7 @@
 
 - [Overview](#overview)
 - [Why VT Code](#why-vt-code)
+- [Architecture](#architecture)
 - [Quick start](#quick-start)
   - [1. Install](#1-install)
   - [2. Configure](#2-configure)
@@ -33,15 +34,10 @@
 - [What's inside](#whats-inside)
   - [Commands](#commands)
   - [Four pillars](#four-pillars)
-    - [Agent core](#agent-core)
-    - [Safety](#safety)
-    - [Extensibility](#extensibility)
-    - [Interface \& quality](#interface--quality)
+  - [Everyday recipes](#everyday-recipes)
 - [Documentation](#documentation)
 - [Development](#development)
 - [Contributing](#contributing)
-  - [Ways to contribute](#ways-to-contribute)
-  - [Getting started](#getting-started)
   - [Contributors](#contributors)
 - [Support](#support)
   - [Sponsorship](#sponsorship)
@@ -59,52 +55,91 @@
 
 </div>
 
-VT Code is an open-source terminal coding agent written in Rust: one static binary for quick interactive sessions and long-running autonomous work alike. No IDE required, no context left behind.
+VT Code is an open-source terminal coding agent written in Rust: one static
+binary for quick interactive sessions and long-running autonomous work alike.
+No IDE required, no context left behind.
 
-It is a **harness, not just an LLM wrapper**. The model reasons; the runtime supplies everything else — tools, context, sandboxing, state, and **verification**. That separation is what turns raw model output into safe, reviewable progress, entirely in your terminal.
+It is a **harness, not just an LLM wrapper**. The model reasons; the runtime
+supplies everything else: tools, context, sandboxing, state, and
+**verification**. That separation is what turns raw model output into safe,
+reviewable progress, entirely in your terminal.
 
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows
 > are experimental and may change between releases.
 
-> [!TIP]
-> **Behind the build:** [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
-> covers harness design, evals, security, and lessons from a year of
-> building.
->
-> **Video companions:** [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
-> [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o).
+<details>
+<summary><strong>Behind the build</strong></summary>
+
+- [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
+  covering harness design, evals, security, and lessons learned.
+- [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
+  [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o)
+
+</details>
 
 ## Why VT Code
 
-Most agents are a model plus a tool call. That gets you a demo, not a
-teammate: the first long session, large diff, or risky command breaks them
-in predictable ways. VT Code is built differently — every failure mode below
-is answered by a **structural default in the runtime**, not a prompt tweak
-you have to remember to write:
+Most agents are a model plus a tool call. VT Code answers each common failure
+mode with a **structural default in the runtime**, not a prompt tweak:
 
-| The failure mode                | VT Code's structural answer                                                                                                                                                                                                                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sessions drift**              | Dynamic context assembly and auto-compaction keep long sessions grounded: the model reasons over current state, not a stale transcript. [Runtime guidance](./docs/development/runtime-guidance.md)                                                    |
-| **Tool output floods the window** | Results spool to disk and are summarized into the model's view on demand — signal stays in context, noise stays out. [Runtime guidance](./docs/development/runtime-guidance.md)                                                                     |
-| **One unreviewed command**      | Sandboxed execution and approvals fail closed, with adversarial regression coverage for the attacks that actually happen: command injection, path/symlink escape, environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **"Done" is a claim**           | Built-in evals with pass@k / pass^k metrics and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                                                                   |
+| Failure mode                     | Structural answer                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sessions drift**               | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)              |
+| **Tool output floods the window** | Results spool to disk and are summarized into context on demand; signal stays in, noise stays out.                                              |
+| **One unreviewed command**       | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **"Done" is a claim**            | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md) |
 
-The pattern behind all four: **state, safety, and verification live in the
-harness**, so they hold whether the model is having a good day or a bad one.
-And none of it is emergent or accidental:
+Underneath all four: one [`ThreadEvent`](./crates/common/vtcode-exec-events)
+stream records everything a run did, and the
+[agent loop contract](./docs/guides/agent-loop-contract.md) specifies how
+turns, tool results, and recovery behave.
 
-- [`ThreadEvent`](./crates/common/vtcode-exec-events) is the single source of
-  truth for what happened during a run — one event stream feeds replay,
-  checkpoints, memory, and trajectory export.
-- The [agent loop contract](./docs/guides/agent-loop-contract.md) specifies
-  how turns, tool results, and recovery behave. The behavior you rely on is
-  written down, not accidental.
+## Architecture
 
-If you have been burned by agents that look impressive until something goes
-wrong, these are the defaults you were missing — built in, not bolted on.
-The [four pillars](#four-pillars) below cover the full surface, or skip to
-[Quick start](#quick-start) and see it work.
+One binary, four layers. Everything the model touches goes through the
+harness; nothing bypasses it.
+
+```mermaid
+graph LR
+    subgraph entry [Entry points]
+        TUI[TUI]
+        CLI[CLI / exec / cron]
+        ACP[Editor via ACP]
+    end
+
+    subgraph harness [Harness]
+        LOOP[Agent loop]
+        CTX[Context assembly + compaction]
+        SEC[Tool policy + sandboxed exec]
+        EVT[(ThreadEvent log)]
+    end
+
+    subgraph ext [Extensions]
+        MCPX[MCP servers]
+        SKILLS[Skills]
+        PLUGINS[Plugins]
+    end
+
+    MODELS[OpenAI · Anthropic · Gemini · local]
+
+    TUI --> LOOP
+    CLI --> LOOP
+    ACP --> LOOP
+    LOOP --> CTX
+    LOOP --> SEC
+    LOOP <--> EVT
+    LOOP <--> ext
+    LOOP <--> MODELS
+```
+
+- **Entry points:** the TUI, headless `exec`/`ask`, cron schedules, and
+  editors over ACP all drive the same loop.
+- **Harness:** context assembly, policy checks, and sandboxing wrap every
+  model turn; the `ThreadEvent` log records everything for replay and
+  rollback.
+- **Extensions and models:** attach without patching the core; swap providers
+  without touching your workflow.
 
 ## Quick start
 
@@ -121,17 +156,14 @@ curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.
 ```bash
 cd path/to/your/project
 vtcode init         # scaffolds config + AGENTS.md; review before committing
+vtcode secret add openai   # stores the API key in your OS keyring
 ```
 
-Set your API key: the TUI's `/secret` command stores it in your OS keyring
-(never in a workspace `.env` or shell history), which is the most secure
-option:
-
-```bash
-vtcode secret add openai   # headless; or run /secret add openai inside the TUI
-```
-
-`vtcode login` covers OAuth providers (ChatGPT, GitHub Copilot). Plain env vars and workspace `.env` still work, useful for CI. See [Getting started](./docs/user-guide/getting-started.md) for the credential resolution order.
+`/secret add <provider>` inside the TUI does the same. `vtcode login` covers
+OAuth providers (ChatGPT, GitHub Copilot); plain env vars and workspace
+`.env` still work for CI. See
+[Getting started](./docs/user-guide/getting-started.md) for the credential
+resolution order.
 
 > [!CAUTION]
 > Never commit API keys or put them in `vtcode.toml`.
@@ -145,7 +177,8 @@ vtcode exec "…"         # headless task with the full tool loop
 vtcode continue         # resume the last session
 ```
 
-That is the whole loop: install, init, run. See [Commands](#commands) for the complete CLI surface, and [Getting Started](./docs/user-guide/getting-started.md) for the full tour.
+That is the whole loop: install, init, run. See [Commands](#commands) for the
+complete CLI surface.
 
 ### WebMCP browser bridge (opt-in)
 
@@ -202,109 +235,35 @@ full list.
 
 ### Four pillars
 
-| Pillar                                         | In one line                                               |
-| ---------------------------------------------- | --------------------------------------------------------- |
-| **[Agent core](#agent-core)**                  | The loop that turns model output into reviewable progress |
-| **[Safety](#safety)**                          | Fail-closed execution, from sandbox to policy             |
-| **[Extensibility](#extensibility)**            | Every model and protocol, no fork                         |
-| **[Interface & quality](#interface--quality)** | Terminal-native UX, verified by default                   |
+| Pillar                  | What it means                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Agent core**          | Durable sessions, one `ThreadEvent` event stream, planning gates, persistent memory. [Agent loop contract](./docs/guides/agent-loop-contract.md) |
+| **Safety**              | Fail-closed sandbox, tree-sitter command parsing, hooks and per-tool policies. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **Extensibility**       | Every major model behind one interface; MCP, Skills, Plugins, ACP, A2A, WebMCP attach without forking. [MCP](./docs/guides/mcp-integration.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md) |
+| **Interface & quality** | Keyboard-first TUI with WCAG AA themes; fast gate, `cargo nextest`, CI with `-D warnings`. [Testing](./docs/development/testing.md) |
 
-#### Agent core
+### Everyday recipes
 
-_The loop that turns model output into reviewable progress._
+```bash
+# Headless refactor with a budget and auto-approval for safe tools
+vtcode exec "migrate this crate to edition 2024" --max-turns 40
 
-- **Durable sessions:** checkpoints, auto-compaction, and spooled tool
-  output keep hour-long runs grounded. `continue` resumes; `revert` rolls
-  back to a snapshot. ([Runtime
-  guidance](./docs/development/runtime-guidance.md) · [Session
-  persistence](./docs/development/session-persistence.md))
-- **One event contract:** a single `ThreadEvent` stream drives replay, the
-  session store, memory, and trajectory export. One history, never divergent
-  copies. ([Agent loop contract](./docs/guides/agent-loop-contract.md))
-- **Planning & autonomy:** planning gates, propose/verify sub-agents,
-  isolated worktrees, and cost guardrails. Autonomy is earned with evidence,
-  not granted up front.
-  ([Planning workflow](./docs/guides/planning-workflow.md) ·
-  [Full automation](./docs/guides/full-automation.md))
-- **Persistent memory:** gotchas, decisions, and library notes survive across
-  runs, so the agent stops re-learning your project every session.
-  ([Memory management](./docs/guides/memory-management.md))
+# Review only the uncommitted diff, then exit with a verdict
+vtcode review
 
-#### Safety
+# Nightly dependency audit as a durable cron job
+vtcode schedule add --cron "0 9 * * 1" "check for outdated deps and open an issue if any have CVEs"
 
-_Fail closed by default, with coverage for the attacks that actually happen._
+# Resume yesterday's session and fork it for a new experiment
+vtcode continue --session-id <id>
 
-- **Sandboxed execution:** command policies and workspace approvals fail
-  closed: injection, path/symlink escape, and environment leakage are blocked
-  before anything runs. ([Security
-  model](./docs/development/COMMAND_SECURITY_MODEL.md) ·
-  [Permissions](./docs/guides/permissions.md))
-- **Syntax-aware command parsing:** tree-sitter decomposes shell pipelines
-  into sub-commands, so every piece is validated against policy, not just
-  the first word. ([Tree-sitter
-  integration](./docs/user-guide/tree-sitter-integration.md))
-- **Hooks & tool policies:** lifecycle hooks gate tool calls before they
-  run; per-tool allow/deny rules run common dev tools automatically and
-  require confirmation for dangerous operations. ([Hooks
-  guide](./docs/guides/hooks-guide.md) · [Execution
-  policy](./docs/development/EXECUTION_POLICY.md))
-
-#### Extensibility
-
-_Plug in without forking; your setup survives upgrades._
-
-- **Every model, one abstraction:** first-party APIs (OpenAI, Anthropic,
-  Gemini, DeepSeek, Qwen, Mistral, xAI, …), gateways (OpenRouter, Vercel AI
-  Gateway), OpenAI-compatible endpoints, and local inference (Ollama, LM
-  Studio, llama.cpp) behind one streaming interface. Switching models never
-  changes your workflow. ([Provider
-  guides](./docs/providers/PROVIDER_GUIDES.md) · [Local
-  models](./docs/guides/local-models.md))
-- **Integrations:** MCP servers, Agent Skills, Agent Plugins, ACP (Zed),
-  A2A, and the WebMCP browser bridge all attach to the core without patching
-  it. ([MCP](./docs/guides/mcp-integration.md) ·
-  [Skills](./docs/skills/SKILLS_GUIDE.md) ·
-  [Plugins](./docs/guides/agent-plugins.md) ·
-  [ACP](./docs/guides/zed-acp.md) · [A2A](./docs/a2a/a2a-protocol.md) ·
-  [WebMCP](./docs/user-guide/webmcp.md))
-- **Embed VT Code:** serve the agent over ACP for editors, expose an
-  Anthropic-compatible API with `vtcode anthropic-api`, or proxy to the Codex
-  app-server. VT Code works as a backend, not just a CLI.
-  ([ACP](./docs/guides/zed-acp.md) ·
-  [Protocols](./docs/protocols/OPEN_RESPONSES.md))
-
-> [!TIP]
-> Manage models with `vtcode models list|config|test|compare|info`, restrict
-> providers per workspace via `providers_whitelist` in `vtcode.toml`, and
-> control local inference with `/local` in the TUI.
-> [Provider guides](./docs/providers/PROVIDER_GUIDES.md) are the source of
-> truth for credentials and model defaults.
-
-#### Interface & quality
-
-_Native to the terminal, verified by default._
-
-- **Terminal-native TUI:** WCAG AA-validated themes, markdown rendering,
-  diff previews, and customizable output styles and status line. Built for
-  the terminal, not ported to it. ([Interactive
-  mode](./docs/user-guide/interactive-mode.md) · [Output
-  styles](./docs/guides/output_styles.md))
-- **Headless & automation:** `exec` mode, scheduled tasks, and sub-agents
-  cover scripted, parallel, and unattended work.
-  ([Exec mode](./docs/user-guide/exec-mode.md) ·
-  [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) ·
-  [Sub-agents](./docs/user-guide/subagents.md))
-- **Evals:** pass@k / pass^k metrics with environment-based verification.
-  The agent's own report never counts as success.
-  ([Eval guide](./docs/guides/eval.md))
-
-> [!TIP]
-> Optional search accelerators (ripgrep, ast-grep) install with
-> `vtcode dependencies install search-tools`.
+# See exactly what the agent did in the last run
+vtcode trajectory --last
+```
 
 ## Documentation
 
-| Area    | Guides                                                                                                                                                                                                                                                                                   |
+| Layer   | Guides                                                                                                                                                                                                                                                                                   |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                                                                                  |
 | Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
@@ -320,42 +279,36 @@ graph LR
     types --> config --> core --> tools --> agent --> TUI
 ```
 
-Clone and run the fast gate:
+Rust stable, edition 2024, MSRV 1.93. Clone and run the fast gate:
 
 ```bash
 git clone https://github.com/vinhnx/vtcode.git
 cd vtcode
-./scripts/run-debug.sh
-./scripts/check-dev.sh   # fast gate: clippy, fmt, check
-cargo nextest run        # tests (never `cargo test`)
+./scripts/run-debug.sh     # build and launch a debug binary
+./scripts/check-dev.sh     # fast gate: clippy, fmt, check (10-30s)
+cargo nextest run          # tests (never `cargo test`)
 ```
 
-Rust stable, edition 2024, MSRV 1.93. ~30 crates layered as
-`types → config → core → tools → agent → TUI`, with `ThreadEvent` as the
-authoritative runtime contract.
-
-See [Development setup](./docs/development/DEVELOPMENT_SETUP.md) and
-[Testing](./docs/development/testing.md).
+CI runs with `RUSTFLAGS="-D warnings"` and `--locked`; match locally with
+`cargo check --locked`. See the
+[development overview](./docs/development/README.md) and
+[testing guide](./docs/development/testing.md) for details.
 
 ## Contributing
 
-### Ways to contribute
+Contributions are welcome:
 
-- **Security**: Found a vulnerability? Follow the [Security
-  Policy](https://github.com/vinhnx/VTCode/security/policy).
-- **Bug fixes and patches**: Small or large, every fix counts.
-- **Documentation**: Guides, examples, and corrections help everyone.
-- **Features and ideas**: Open an issue or start a discussion.
-- **Code reviews and testing**: Trying things out and reporting breakage keeps the project healthy.
+- **Code**: pick an open issue or propose one; keep changes surgical and
+  covered by tests.
+- **Docs**: fixes and new guides in `docs/`; every user-facing feature should
+  land with its documentation.
+- **Evals**: new suites and regression cases are high-leverage contributions.
+- **Bug reports**: include `vtcode trajectory` output when possible; it makes
+  runs reproducible.
 
-### Getting started
-
-- Browse [good first issues](https://github.com/vinhnx/vtcode/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
-- Read [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for humans
-- Check [AGENTS.md](./AGENTS.md) for AI agents
-
-> [!NOTE]
-> Small, focused PRs merge fastest. If you get stuck, open an issue for help.
+Before opening a PR: follow [Conventional Commits](https://www.conventionalcommits.org)
+(`type(scope): subject`), run `./scripts/check-dev.sh` and `cargo nextest run`,
+and keep the diff focused.
 
 ### Contributors
 
@@ -392,11 +345,14 @@ Thank you to everyone who shaped VT Code.
 
 </details>
 
+
 ## Support
 
 ### Sponsorship
 
-VT Code is built and maintained in spare time. If it helped you ship or learn something, a [sponsorship](https://github.com/sponsors/vinhnx) keeps the project independent.
+VT Code is built and maintained in spare time. If it helped you ship or learn
+something, a [sponsorship](https://github.com/sponsors/vinhnx) keeps the
+project independent.
 
 <div align="center">
   <a href="https://github.com/dnhn"><img src="https://avatars.githubusercontent.com/u/2561973" width="80" height="80" alt="@dnhn" style="border-radius: 50%" /></a>
@@ -404,6 +360,7 @@ VT Code is built and maintained in spare time. If it helped you ship or learn so
   <a href="https://github.com/coderabbitai"><img src="https://avatars.githubusercontent.com/u/132028505" width="80" height="80" alt="@coderabbitai" style="border-radius: 50%" /></a>
   <a href="https://github.com/KhaiRyth"><img src="https://avatars.githubusercontent.com/u/273723951" width="80" height="80" alt="@KhaiRyth" style="border-radius: 50%" /></a>
 </div>
+
 
 <div align="center">
 
@@ -415,10 +372,5 @@ VT Code is built and maintained in spare time. If it helped you ship or learn so
 ## License
 
 First-party code is **MIT OR Apache-2.0**. See [LICENSE](LICENSE).
-Third-party code keeps its original licenses: see[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
-
-<div align="right">
-
-[Back to top](#readme)
-
-</div>
+Third-party code keeps its original licenses: see
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
