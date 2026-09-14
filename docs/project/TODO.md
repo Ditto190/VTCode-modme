@@ -90,9 +90,29 @@ Change keyboard shortcut to switch modes/agents from single tab to shift+tab.
 
 Help me check this session run log and harness atif trajectory. Even though it very stable and good now, more than I expected, I want to ensure that there are no hidden issues or potential improvements that can be made. Check for potential optimizations, edge cases, and any anomalies that might affect long-term stability and performance. Eg: memory leaks, race conditions, unexpected errors, performance bottlenecks, and unusual patterns in the logs, context and tool calls optimzation that might need attention and can further improve the system. Also check if VT Code prompt caching is functioning correctly and efficiently. check for cache hit / miss ratio and any potential improvements in caching strategy. Make sure cost efficiency is maintained and any unnecessary resource usage is minimized.
 
-log: session-vtcode-20260914T084315Z_111294-82729.
+```
+> VT Code (0.162.2)
+Safe tools
+Model: zai/glm-5.3-flash via Merge Gateway · high
+Session 1h 9m 14s | 23.5m in / 80.3k out | Code +6 / -0
+Resume: vtcode --resume session-vtcode-20260914T084315Z_111294-82729
+```
+
+log run 1:
+
+```
+session-vtcode-20260914T084315Z_111294-82729.
 Path: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260914T084315Z_111294-82729
 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260914t084315z_111294-82729-20260914T091125Z-3f8578c8-e1da-44ca-8158-543d86056f32.md
+```
+
+and
+
+run 2:
+
+```
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260914T085310Z_717264-90834 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260914t085310z_717264-90834-20260914T101118Z-9171e298-af42-47c0-91bb-5df2456fe1c5.md /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260914t085310z_717264-90834-20260914T100930Z-260d9d55-4447-4e34-992a-b10ad6830912.md
+```
 
 use relevant session logs and task blockers to analyze the system's behavior and identify potential improvements. use skills and distil insights from the logs to make informed recommendations for enhancing stability, performance, and overall efficiency.
 
