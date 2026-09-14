@@ -35,7 +35,17 @@ package_release_archive() {
 	local archive_path=$3
 	local release_dir="target/$target/release"
 
-	tar -C "$release_dir" -czf "$archive_path" "$binary_name"
+	# Stage the binary plus the shared man page set into a temp dir so the
+	# archive layout matches what install.sh expects (vtcode at root,
+	# man/man1/*.1 alongside).
+	local stage_dir
+	stage_dir=$(mktemp -d)
+	cp "$release_dir/$binary_name" "$stage_dir/"
+	if [[ -d "$binaries_dir/man" ]]; then
+		cp -R "$binaries_dir/man" "$stage_dir/"
+	fi
+	tar -C "$stage_dir" -czf "$archive_path" .
+	rm -rf "$stage_dir"
 }
 
 # Get GitHub username from commit author email
@@ -661,7 +671,7 @@ trigger_docs_rs_rebuild() {
 
 	print_distribution "Triggering docs.rs rebuild for version $version..."
 	local crates=(
-		vtcode-commons vtcode-auth vtcode-exec-events vtcode-webmcp vtcode-memory vtcode-macros
+		vtcode-diff vtcode-commons vtcode-auth vtcode-exec-events vtcode-webmcp vtcode-memory vtcode-macros
 		vtcode-config vtcode-indexer vtcode-bash-runner vtcode-utility-tool-specs vtcode-eval
 		vtcode-safety vtcode-a2a vtcode-llm vtcode-skills vtcode-agent-plugins vtcode-ui vtcode-mcp
 		vtcode-core vtcode-acp vtcode
@@ -1242,6 +1252,15 @@ main() {
 
 		local binaries_dir="/tmp/vtcode-release-$released_version"
 		mkdir -p "$binaries_dir"
+
+		# Generate the full man page set (main + every subcommand) once and
+		# include it in every platform archive.
+		local man_stage="$binaries_dir/man/man1"
+		if cargo run --locked -p xtask -- gen-man --out-dir "$man_stage" >/dev/null 2>&1; then
+			print_info "Generated $(ls "$man_stage" | wc -l | tr -d ' ') man pages"
+		else
+			print_warning "Man page generation failed; archives will ship without man pages"
+		fi
 
 		# Build macOS binaries in parallel
 		print_info "Building macOS binaries in parallel..."

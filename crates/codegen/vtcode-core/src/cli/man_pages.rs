@@ -63,6 +63,31 @@ impl ManPageGenerator {
         Self::render_page(sub, Some(title), &|buf| Self::append_command_sections(buf, examples))
     }
 
+    /// Generate the main man page plus one page per visible subcommand into
+    /// `dir` (`vtcode.1`, `vtcode-<command>.1`, ...). Returns the number of
+    /// pages written.
+    pub fn generate_all_man_pages(dir: &std::path::Path) -> Result<usize> {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("failed to create man page directory {}", dir.display()))?;
+
+        let mut cmd = Cli::command();
+        cmd.build();
+        let main_page = Self::generate_main_man_page()?;
+        let mut count = Self::write_page(dir, "vtcode", &main_page)?;
+        for sub in cmd.get_subcommands().filter(|sub| !sub.is_hide_set()) {
+            let name = sub.get_name();
+            count += Self::write_page(dir, &format!("vtcode-{name}"), &Self::generate_command_man_page(name)?)?;
+        }
+        Ok(count)
+    }
+
+    /// Write one man page to `dir/<name>.1`, returning 1 on success.
+    fn write_page(dir: &std::path::Path, name: &str, content: &str) -> Result<usize> {
+        let path = dir.join(format!("{name}.1"));
+        std::fs::write(&path, content).with_context(|| format!("failed to write man page {}", path.display()))?;
+        Ok(1)
+    }
+
     /// Render a clap-derived man page and append VT Code-specific sections.
     fn render_page(
         cmd: clap::Command,

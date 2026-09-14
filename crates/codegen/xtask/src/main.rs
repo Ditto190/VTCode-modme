@@ -19,6 +19,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Generate man pages (main + all subcommands) into a directory.
+    GenMan(GenManArgs),
     /// Build a release archive with man page and shell completions.
     PackageRelease(PackageReleaseArgs),
     /// Compute and write the next workspace version.
@@ -47,6 +49,13 @@ struct PackageReleaseArgs {
 }
 
 #[derive(Debug, Parser)]
+struct GenManArgs {
+    /// Directory to write man pages into (created if missing).
+    #[arg(long, default_value = "dist/man")]
+    out_dir: PathBuf,
+}
+
+#[derive(Debug, Parser)]
 struct BumpVersionArgs {
     /// Increment the given component (mutually exclusive with --set).
     #[arg(long, value_enum, conflicts_with = "set")]
@@ -68,11 +77,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::GenMan(args) => gen_man(args)?,
         Commands::PackageRelease(args) => package_release(args)?,
         Commands::BumpVersion(args) => bump_version(args)?,
         Commands::CheckVersions => check_versions()?,
     }
 
+    Ok(())
+}
+
+fn gen_man(args: GenManArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let count = vtcode_core::cli::ManPageGenerator::generate_all_man_pages(&args.out_dir)?;
+    println!("wrote {count} man pages to {}", args.out_dir.display());
     Ok(())
 }
 
@@ -95,8 +111,8 @@ fn package_release(args: PackageReleaseArgs) -> Result<(), Box<dyn std::error::E
     fs::create_dir_all(stage_dir.join("completions/fish"))?;
     fs::create_dir_all(stage_dir.join("completions/zsh"))?;
 
-    let man_page = vtcode_core::cli::ManPageGenerator::generate_main_man_page()?;
-    fs::write(stage_dir.join("man/man1/vtcode.1"), man_page)?;
+    let page_count = vtcode_core::cli::ManPageGenerator::generate_all_man_pages(&stage_dir.join("man/man1"))?;
+    println!("staged {page_count} man pages");
 
     match generate_completions(&stage_dir) {
         Ok(()) => {}

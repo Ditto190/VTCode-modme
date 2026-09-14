@@ -406,10 +406,10 @@ install_man_and_completions() {
     local archive_source="$1"
     local install_dir="$2"
 
-    local man_source="$archive_source/man/man1/vtcode.1"
+    local man_source_dir="$archive_source/man/man1"
     local completions_source="$archive_source/completions"
 
-    if [[ ! -f "$man_source" && ! -d "$completions_source" ]]; then
+    if [[ ! -d "$man_source_dir" && ! -d "$completions_source" ]]; then
         log_warning "Archive does not include man page or shell completions"
         return 0
     fi
@@ -417,11 +417,15 @@ install_man_and_completions() {
     local share_dir
     share_dir="$(dirname "$install_dir")/share"
 
-    if [[ -f "$man_source" ]]; then
+    if [[ -d "$man_source_dir" ]]; then
         local man_dir="$share_dir/man/man1"
         mkdir -p "$man_dir"
-        cp "$man_source" "$man_dir/vtcode.1"
-        log_success "Man page installed to $man_dir/vtcode.1"
+        local man_page
+        for man_page in "$man_source_dir"/*.1; do
+            [[ -f "$man_page" ]] || continue
+            cp "$man_page" "$man_dir/"
+        done
+        log_success "Installed $(ls "$man_dir" | wc -l | tr -d ' ') man pages to $man_dir"
     fi
 
     if [[ -d "$completions_source" ]]; then
