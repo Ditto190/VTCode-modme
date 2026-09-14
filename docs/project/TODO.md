@@ -20,219 +20,6 @@ improve git diff preview UI '/Users/vinhnguyenxuan/Documents/vtcode-resources/id
 
 open source vtcode-diff
 
----
-
-fix:
-
-vtcode man
-.ie \n(.g .ds Aq \(aq
-.el .ds Aq '
-.TH VTCODE 1 2026-09-14 "VT Code" "User Commands"
-.SH NAME
-vtcode \- Advanced coding agent with Decision Ledger
-.SH SYNOPSIS
-\fBvtcode\fR [\fBOPTIONS\fR] [\fBCOMMAND\fR] [\fBARGS\fR]
-.SH DESCRIPTION
-VT Code is an advanced coding agent with single\-agent architecture and Decision Ledger that provides intelligent code generation, analysis, and modification capabilities. It supports multiple LLM providers including Gemini, OpenAI, Anthropic, DeepSeek, Meta AI, Z.AI, Moonshot AI, OpenRouter, Merge Gateway, NVIDIA NIM, Vercel AI Gateway, and Ollama, and includes LLM\-native semantic code understanding. Rust, Python, JavaScript, TypeScript, Go, and Java.
-.SH OPTIONS
-.TP
-\fB\-m\fR, \fB\-\-model\fR \fIMODEL\fR
-Specify the LLM model to use (default: gemini\-3\-flash\-preview)
-.TP
-\fB\-p\fR, \fB\-\-provider\fR \fIPROVIDER\fR
-Specify the LLM provider (gemini, openai, anthropic, deepseek, meta, zai, moonshot, openrouter, merge\-gateway, nvidia, vercel, ollama, lmstudio)
-.TP
-\fB\-\-workspace\fR \fIPATH\fR
-Set the workspace root directory for file operations
-.TP
-\fB\-\-performance\-monitoring\fR
-Enable performance monitoring and metrics
-.TP
-\fB\-\-research\-preview\fR
-Enable research\-preview features
-.TP
-\fB\-\-debug\fR
-Enable debug output
-.TP
-\fB\-\-verbose\fR
-Enable verbose logging
-.TP
-\fB\-h\fR, \fB\-\-help\fR
-Display help information
-.TP
-\fB\-V\fR, \fB\-\-version\fR
-Display version information
-.SH COMMANDS
-.TP
-\fBchat\fR
-Start interactive AI coding assistant
-.TP
-\fBask\fR \fIPROMPT\fR
-Single prompt mode without tools
-.TP
-\fBperformance\fR
-Display performance metrics and system status
-.TP
-\fBbenchmark\fR
-Run SWE\-bench evaluation framework
-.TP
-\fBcreate\-project\fR \fINAME\fR \fIFEATURES\fR
-Create complete Rust project with features
-.TP
-\fBinit\fR
-Guided AGENTS.md and workspace setup
-.TP
-\fBman\fR \fICOMMAND\fR
-Generate or display man pages for commands
-.TP
-\fBcheck\fR \fISUBCOMMAND\fR
-Run built\-in repository checks
-.TP
-\fBacp\fR
-Start Agent Client Protocol bridge for IDE integrations
-.TP
-\fBchat\-verbose\fR
-Verbose interactive chat with enhanced transparency
-.TP
-\fBperformance\fR
-Display performance metrics and system status
-.TP
-\fBtrajectory\fR
-Pretty\-print trajectory logs and show basic analytics
-.TP
-\fBbenchmark\fR
-Benchmark against SWE\-bench evaluation framework
-.TP
-\fBcreate\-project\fR \fIname\fR \fIfeatures\fR
-Create complete Rust project with advanced features
-.TP
-.TP
-\fBrevert\fR \fIturn\fR
-Revert agent to a previous snapshot
-.TP
-\fBsnapshots\fR
-List all available snapshots
-.TP
-\fBcleanup\-snapshots\fR
-Clean up old snapshots
-.TP
-\fBinit\fR
-Initialize project with enhanced dot\-folder structure
-.TP
-\fBinit\-project\fR
-Initialize project with dot\-folder structure
-.TP
-\fBconfig\fR
-Generate configuration file
-.TP
-\fBtool\-policy\fR
-Manage tool execution policies
-.TP
-\fBmcp\fR
-Manage Model Context Protocol providers
-.TP
-\fBmodels\fR
-Manage models and providers
-.SH EXAMPLES
-Start interactive chat:
-\fB vtcode chat\fR
-Ask a question:
-\fB vtcode ask "Explain Rust ownership"\fR
-Create a web project:
-\fB vtcode create\-project myapp web,auth,db\fR
-Generate man page:
-\fB vtcode man chat\fR
-Run ast\-grep checks for the current workspace:
-\fB vtcode check ast\-grep\fR
-.SH ENVIRONMENT
-.TP
-\fBGEMINI_API_KEY\fR
-API key for Google Gemini (default provider)
-.TP
-\fBOPENAI_API_KEY\fR
-API key for OpenAI GPT models
-.TP
-\fBANTHROPIC_API_KEY\fR
-API key for Anthropic Claude models
-.TP
-\fBDEEPSEEK_API_KEY\fR
-API key for DeepSeek models
-.TP
-\fBMETA_API_KEY\fR
-API key for Meta AI Muse models
-.TP
-\fBMODEL_API_KEY\fR
-Meta AI\*(Aqs documented API key variable
-.TP
-\fBZAI_API_KEY\fR
-API key for Z.AI GLM models
-.TP
-\fBMOONSHOT_API_KEY\fR
-API key for Moonshot AI Kimi models
-.TP
-\fBOPENROUTER_API_KEY\fR
-API key for OpenRouter models
-.TP
-\fBNVIDIA_API_KEY\fR
-API key for NVIDIA NIM models
-.TP
-\fBMERGE_GATEWAY_API_KEY\fR
-API key for Merge Gateway routes
-.TP
-\fBMERGE_GATEWAY_BASE_URL\fR
-Optional Merge Gateway endpoint override; /v1/openai selects legacy compatibility
-.TP
-\fBAI_GATEWAY_API_KEY\fR
-API key for Vercel AI Gateway models
-.TP
-\fBVERCEL_AI_GATEWAY_BASE_URL\fR
-Optional Vercel AI Gateway endpoint override (default: https://ai\-gateway.vercel.sh/v1)
-.SH FILES
-.TP
-\fBvtcode.toml\fR
-Configuration file (current directory or the canonical user config directory)
-.TP
-\fB.vtcode/\fR
-Project cache and context directory
-.SH SAFETY
-.TP
-apply_patch: reserve for reviewed diffs or small batches. For large refactors or critical files, stage local backups and prefer edit_file/write_file to avoid partial rewrites if a patch fails.
-.TP
-Timeout governance: tune [timeouts] in vtcode.toml to clamp tool duration. VT Code warns once execution passes the configured warning threshold so you can cancel runaway commands.
-.SH "SEE ALSO"
-Full documentation: https://github.com/vinhnx/vtcode
-Related commands: cargo(1), rustc(1), git(1)
-
-===
-
-14:41:59 ~/developer/learn-by-doing/vtcode main\* ⇡
-❯ vtcode analyze
-Analyzing workspace...
-
-1. Getting workspace structure...
-   Failed to list root directory: tool denied by policy
-2. Identifying project type...
-3. Reading project configuration...
-   Read Read AGENTS.md (null bytes)
-   Read Read README.md (null bytes)
-   Read Read Cargo.toml (null bytes)
-   Read Read package.json (null bytes)
-4. Analyzing source code structure...
-   Deep analysis: use grep/search tools for detailed code inspection.
-   Workspace analysis complete!
-   You can now ask me specific questions about the codebase.
-
-===
-
-❯ vtcode trajectory --last
-error: unexpected argument '--last' found
-
-tip: to pass '--last' as a value, use '-- --last'
-
-Usage: vtcode trajectory [OPTIONS] [WORKSPACE]
-
-For more information, try '--help'.
-
 ===
 
 Implement keyboard shortcut enhancements in chat input text field:
@@ -240,3 +27,59 @@ Implement keyboard shortcut enhancements in chat input text field:
 1. command (macos:) or similar key on other platforms: a/ command+backspace should clear all text input in a single line of multi-line chat input. if it is single-line chat input, it should clear the entire input. also applied for compact [pasted content ... chars] block and image block.
 2. command+left or command+right should move the cursor to the beginning or end of the current line in multi-line chat input. if it is single-line chat input, it should move the cursor to the beginning or end of the entire input.
 3. if the cursor focus is active in chat input, pressing the double-escape key should clear the current line in multi-line chat input or the entire input in single-line chat input.
+4. if the cursor focus is active in chat input, pressing tab should enqueue the messages to queue list (similiar to control+enter).
+
+===
+
+reduce plan mode approval blank gap height '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-14 at 15.57.49.png'
+
+also remove the leading bullet "•" dots in the plan mode approval header section.
+
+Also, idea, in the plan mode approval modal, add a summarized section that provides an overview of the changes or actions to be approved => this will help users quickly understand what they are approving without having to go through all the details. Can add the summary paragraph from the proposed plan and display it in this section. keep it short and concise and fit modal text lenght limit.
+
+===
+
+CRITICAL: check the message queues system. currently when it picking messages from the queue, it only use the last message and ignores the rest and the queue get cleared. This is CRITICAL and needs immediate attention.
+
+===
+
+idea: improve both on the user experience and the VT Code harness system itself. when hitting:
+
+```
+[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`,
+`go test`, or `pytest`) and let it exit 0 before further edits.
+• The turn is blocked because verification is still pending. Inspection-
+only checks do not clear the verification gate; run a verification command
+— your project's build/test/lint tool, e.g. cargo check --locked, go test,
+or cargo nextest run (standalone or as a pure && chain, no | head pipes and
+no ;/||/| joins) — to exit 0, then resume the request. A failed verifier
+grants 2 fix-up edits before re-verify is required.
+Turn blocked after repeated unverified assistant responses; verification is
+still pending.
+Turn blocked: Turn blocked after repeated unverified assistant responses;
+verification is still pending.
+What you can do:
+• In this session: Type 'continue' to resume, or describe alternative
+instructions
+• From terminal: Run `vtcode --resume session-vtcode-
+    20260914T084315Z_111294-82729`
+• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.
+vtcode/tasks/current_blocked.md
+• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.
+vtcode/tasks/blockers/session-vtcode-20260914t084315z_111294-82729-
+20260914T091125Z-3f8578c8-e1da-44ca-8158-543d86056f32.md
+Repeated follow-up after stalled turn detected; enforcing autonomous recovery
+and conclusion.
+```
+
+====> without user having to manually intervene and ensuring the verification process is properly handled. and not blocking long-running tasks. THIS IS CRITICAL. Find a way to automatically manage the verification gate and recovery from stalled turns with actionable steps to help vtcode agent continue its operation smoothly. you can research on deepwiki mcp for how openai/codex handles similar scenarios.
+
+===
+
+help me check and fix on control+g to edit/review plan proposal in external editor. on pressing, the external editor should open with the current plan proposal loaded, allowing the user to make changes and save them. after saving and closing the editor, the changes should be reflected back in the vtcode interface seamlessly. Bug: currently it does not open the plan file in external editor and also the modal approval is disappeared.
+
+===
+
+check VT Code notification from terminal/ghostty etc doesn't showing in the notification center properly. Bug: notifications are not appearing as expected, making it difficult for the user to stay informed about important events and updates. Currently, only the terminal get pinged, and the notification center remains empty and I am missing critical notifications. (Note: currently tested on macOS and ghostty, other platforms may have similar issues.)
+
+===
