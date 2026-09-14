@@ -32,22 +32,29 @@ pub async fn handle_analyze_command(config: AgentConfig, depth: String, format: 
     };
 
     let registry = ToolRegistry::new(config.workspace.clone()).await;
+    registry.mark_tool_preapproved(tools::LIST_FILES).await;
 
     // Step 1: Get high-level directory structure
     println!("{}", style("1. Getting workspace structure...").dim());
     let root_files = registry
-        .execute_tool(tools::LIST_FILES, json!({"mode": "list", "path": ".", "per_page": 50}))
+        .execute_tool(
+            tools::LIST_FILES,
+            json!({"mode": "list", "path": ".", "per_page": 50, "max_items": 200, "include_hidden": false}),
+        )
         .await;
 
-    match root_files {
+    let entry_names = match root_files {
         Ok(result) => {
             println!("{}", style("Root directory structure obtained").green());
-            if let Some(files_array) = result.get("files") {
-                println!("   Found {} files/directories in root", files_array.as_array().unwrap_or(&vec![]).len());
-            }
+            let names = extract_entry_names(&result);
+            println!("   Found {} files/directories in root", names.len());
+            names
         }
-        Err(e) => println!("{} {}", style("Failed to list root directory:").red(), e),
-    }
+        Err(e) => {
+            println!("{} {}", style("Failed to list root directory:").red(), e);
+            Vec::new()
+        }
+    };
 
     // Step 2: Look for important project files
     println!("{}", style("2. Identifying project type...").dim());
@@ -61,21 +68,8 @@ pub async fn handle_analyze_command(config: AgentConfig, depth: String, format: 
     ];
 
     for file in important_files {
-        let check_file = registry
-            .execute_tool(tools::LIST_FILES, json!({"mode": "list", "path": ".", "include_hidden": false}))
-            .await;
-        if let Ok(result) = check_file
-            && let Some(files) = result.get("files")
-            && let Some(files_array) = files.as_array()
-        {
-            for file_obj in files_array {
-                if let Some(path) = file_obj.get("path")
-                    && path.as_str().unwrap_or("") == file
-                {
-                    println!("   {} Detected: {}", style("Detected").green(), file);
-                    break;
-                }
-            }
+        if entry_names.iter().any(|name| name == file) {
+            println!("   {} {}", style("Detected").green(), file);
         }
     }
 
@@ -84,20 +78,11 @@ pub async fn handle_analyze_command(config: AgentConfig, depth: String, format: 
     let config_files = vec!["AGENTS.md", "README.md", "Cargo.toml", "package.json"];
 
     for config_file in config_files {
-        let read_result = registry
-            .execute_tool(tools::READ_FILE, json!({"path": config_file, "max_bytes": 2000}))
-            .await;
-        if let Ok(result) = read_result {
-            println!(
-                "   {} Read {} ({} bytes)",
-                style("Read").green(),
-                config_file,
-                result
-                    .get("metadata")
-                    .and_then(|m| m.get("size"))
-                    .unwrap_or(&serde_json::json!(null))
-            );
-        }
+        let config_path = config.workspace.join(config_file);
+        let Ok(metadata) = tokio::fs::metadata(&config_path).await else {
+            continue;
+        };
+        println!("   {} {} ({} bytes)", style("Read").green(), config_file, metadata.len());
     }
 
     // Step 4: Analyze source code structure
@@ -106,21 +91,8 @@ pub async fn handle_analyze_command(config: AgentConfig, depth: String, format: 
     // Check for common source directories
     let src_dirs = vec!["src", "lib", "pkg", "internal", "cmd"];
     for dir in src_dirs {
-        let check_dir = registry
-            .execute_tool(tools::LIST_FILES, json!({"mode": "list", "path": ".", "include_hidden": false}))
-            .await;
-        if let Ok(result) = check_dir
-            && let Some(files) = result.get("files")
-            && let Some(files_array) = files.as_array()
-        {
-            for file_obj in files_array {
-                if let Some(path) = file_obj.get("path")
-                    && path.as_str().unwrap_or("") == dir
-                {
-                    println!("   {} Found source directory: {}", style("Found").green(), dir);
-                    break;
-                }
-            }
+        if entry_names.iter().any(|name| name == dir) {
+            println!("   {} source directory: {}", style("Found").green(), dir);
         }
     }
 
@@ -132,4 +104,53 @@ pub async fn handle_analyze_command(config: AgentConfig, depth: String, format: 
     println!("{}", style("You can now ask me specific questions about the codebase.").dim());
 
     Ok(())
+}
+
+/// Extract entry names from a `list_files` tool result payload.
+///
+/// The list tool emits its entries under the `items` field; each entry carries
+/// a `name` (and a `path`). Returns an empty vector for missing or malformed
+/// payloads.
+fn extract_entry_names(result: &serde_json::Value) -> Vec<String> {
+    result
+        .get("items")
+        .and_then(|items| items.as_array())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.get("name").and_then(|name| name.as_str()))
+                .map(|name| name.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_entry_names;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_names_from_items_payload() {
+        let result = json!({
+            "success": true,
+            "items": [
+                {"name": "src", "path": "src", "type": "directory"},
+                {"name": "README.md", "path": "README.md", "type": "file"}
+            ]
+        });
+        assert_eq!(extract_entry_names(&result), vec!["src", "README.md"]);
+    }
+
+    #[test]
+    fn returns_empty_for_empty_items() {
+        let result = json!({"success": true, "items": []});
+        assert!(extract_entry_names(&result).is_empty());
+    }
+
+    #[test]
+    fn returns_empty_when_items_field_missing() {
+        let result = json!({"success": true, "count": 0});
+        assert!(extract_entry_names(&result).is_empty());
+    }
 }
