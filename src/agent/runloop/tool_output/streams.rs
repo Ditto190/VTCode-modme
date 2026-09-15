@@ -59,6 +59,7 @@ use vtcode_diff::{
 
 use super::files::colorize_diff_summary_line;
 use super::styles::{GitStyles, LsStyles, select_line_style};
+use vtcode_commons::diff_paths::{is_prose_language_hint, parse_diff_git_path, parse_diff_marker_path};
 #[path = "streams_helpers.rs"]
 mod streams_helpers;
 pub(crate) use streams_helpers::{
@@ -222,6 +223,209 @@ fn highlight_diff_content_with_foreground(
     Some(out)
 }
 
+/// Infer a syntax language hint from unified diff file headers.
+///
+/// Scans `diff --git`, `---`/`+++` markers, and `*** Update/Add/Delete File:`
+/// apply-patch headers so generic diff rendering still gets per-language
+/// syntax colors. Returns the lowercase extension (`rs`, …). Quoted paths
+/// (`"a/my file.rs"`) are unquoted before inference.
+pub(crate) fn diff_language_hint_from_content(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(path) = git_b_path(trimmed) {
+            if let Some(hint) = vtcode_commons::diff_paths::language_hint_from_path(&path) {
+                return Some(hint);
+            }
+        }
+        if let Some(path) = marker_path(trimmed) {
+            if let Some(hint) = vtcode_commons::diff_paths::language_hint_from_path(&path) {
+                return Some(hint);
+            }
+        }
+        if let Some(path) = parse_apply_patch_path(trimmed) {
+            if let Some(hint) = vtcode_commons::diff_paths::language_hint_from_path(&path) {
+                return Some(hint);
+            }
+        }
+    }
+    None
+}
+
+/// New (`b/`) path from a `diff --git` line, handling quoted paths with
+/// spaces (`"a/my file.rs" "b/my file.rs"`) that whitespace splitting mangles.
+fn git_b_path(line: &str) -> Option<String> {
+    let quoted: Vec<&str> = line.split('"').collect();
+    if quoted.len() >= 4 {
+        let new_path = quoted[3].trim();
+        if !new_path.is_empty() {
+            return Some(new_path.trim_start_matches("b/").to_string());
+        }
+    }
+    parse_diff_git_path(line).map(unquote_diff_path)
+}
+
+/// Path from a `---`/`+++` marker, handling quoted paths with spaces.
+fn marker_path(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if trimmed.contains('"') {
+        let quoted: Vec<&str> = trimmed.split('"').collect();
+        if quoted.len() >= 3 {
+            let path = quoted[1].trim();
+            if !path.is_empty() && path != "/dev/null" {
+                return Some(path.trim_start_matches("a/").trim_start_matches("b/").to_string());
+            }
+        }
+    }
+    parse_diff_marker_path(trimmed).map(unquote_diff_path)
+}
+
+fn unquote_diff_path(path: String) -> String {
+    let trimmed = path.trim();
+    if trimmed.len() >= 2
+        && trimmed.starts_with('"')
+        && trimmed.ends_with('"')
+        && let Some(inner) = trimmed.get(1..trimmed.len().saturating_sub(1))
+    {
+        return inner.to_string();
+    }
+    trimmed.to_string()
+}
+
+fn parse_apply_patch_path(line: &str) -> Option<String> {
+    for prefix in ["*** Update File:", "*** Add File:", "*** Delete File:"] {
+        if let Some(path) = line.strip_prefix(prefix).map(str::trim).filter(|path| !path.is_empty()) {
+            return Some(unquote_diff_path(path.to_string()));
+        }
+    }
+    None
+}
+
+fn language_hint_for_display_line(line: &DiffDisplayLine) -> Option<String> {
+    let text = line.text.trim_start();
+    if let Some(path) = git_b_path(text) {
+        if let Some(hint) = vtcode_commons::diff_paths::language_hint_from_path(&path) {
+            return Some(hint);
+        }
+    }
+    if let Some(path) = marker_path(text) {
+        if let Some(hint) = vtcode_commons::diff_paths::language_hint_from_path(&path) {
+            return Some(hint);
+        }
+    }
+    if let Some(path) = parse_apply_patch_path(text) {
+        return vtcode_commons::diff_paths::language_hint_from_path(&path);
+    }
+    None
+}
+
+/// Syntax segments for a diff body line, or `None` when solid tint applies.
+///
+/// Prose (`md`/`txt`), unknown/plain grammars, and foreground-less results
+/// stay solid so the add/del row tint carries the semantics. Reuses the
+/// markdown pipeline's brightened `highlight_line_for_diff` so ANSI rows meet
+/// the same WCAG contrast as markdown diff rows on the same tint.
+fn syntax_segments_for_diff_body(content: &str, language: Option<&str>) -> Option<Vec<(AnsiStyle, String)>> {
+    let hint = language.map(str::trim).filter(|hint| !hint.is_empty())?;
+    if is_prose_language_hint(Some(hint)) {
+        return None;
+    }
+    if std::ptr::eq(
+        vtcode_ui::tui::ui::syntax_highlight::find_syntax_by_token(hint),
+        vtcode_ui::tui::ui::syntax_highlight::find_syntax_plain_text(),
+    ) {
+        return None;
+    }
+    let segments = vtcode_ui::tui::ui::markdown::highlight_line_for_diff(content, Some(hint))?;
+    if segments.is_empty() {
+        return None;
+    }
+    let reconstructed: String = segments.iter().map(|(_, text)| text.as_str()).collect();
+    if reconstructed != content {
+        return None;
+    }
+    // Require at least one explicit foreground; otherwise the grammar added
+    // no semantic value and the solid tint is more legible.
+    if segments
+        .iter()
+        .all(|(style, text)| style.get_fg_color().is_none() || text.trim().is_empty())
+    {
+        return None;
+    }
+    Some(segments)
+}
+
+/// Layer syntax foregrounds over the diff row tint + intraline chips.
+///
+/// Keeps the row background (`bg`) and stronger changed-span background
+/// (`word_bg`) while preserving per-token syntax foregrounds. Falls back to
+/// `foreground` when a syntax segment carries no explicit color.
+fn highlight_diff_body_with_syntax(
+    content: &str,
+    language: Option<&str>,
+    bg: Option<anstyle::Color>,
+    word_ranges: &[(usize, usize)],
+    word_bg: Option<anstyle::Color>,
+    foreground: Option<anstyle::Color>,
+) -> Option<String> {
+    let bg = bg?;
+    if content.is_empty() {
+        return None;
+    }
+    let segments = syntax_segments_for_diff_body(content, language)?;
+    let mut out = String::with_capacity(content.len() + segments.len() * 16);
+    out.push_str(&Reset.to_string());
+    let mut cursor = 0usize;
+    for (style, text) in &segments {
+        let segment_len = text.len();
+        let segment_end = cursor.saturating_add(segment_len);
+        let mut boundaries = Vec::with_capacity(word_ranges.len() * 2 + 2);
+        boundaries.push(0);
+        boundaries.push(segment_len);
+        for &(start, end) in word_ranges {
+            if start < segment_end && end > cursor {
+                let local_start = start.max(cursor).saturating_sub(cursor).min(segment_len);
+                let local_end = end.min(segment_end).saturating_sub(cursor).min(segment_len);
+                boundaries.push(local_start);
+                boundaries.push(local_end);
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+        for pair in boundaries.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            if start >= end {
+                continue;
+            }
+            // Clamp to UTF-8 boundaries instead of dropping bytes: word ranges
+            // from `vtcode-diff` are byte-safe today, but clamping keeps the
+            // row lossless if a producer ever emits a mid-char offset.
+            let start = text.floor_char_boundary(start).min(text.len());
+            let end = text.ceil_char_boundary(end).min(text.len());
+            if start >= end {
+                continue;
+            }
+            let global_start = cursor.saturating_add(start);
+            let global_end = cursor.saturating_add(end);
+            let changed = word_bg.is_some()
+                && word_ranges
+                    .iter()
+                    .any(|&(range_start, range_end)| global_start < range_end && global_end > range_start);
+            let background = if changed { word_bg } else { Some(bg) };
+            let mut effective = *style;
+            if effective.get_fg_color().is_none() {
+                effective = effective.fg_color(foreground);
+            }
+            effective = effective.bg_color(background);
+            out.push_str(&effective.render().to_string());
+            out.push_str(&text[start..end]);
+            out.push_str(&Reset.to_string());
+        }
+        cursor = segment_end;
+    }
+    Some(out)
+}
+
 fn semantic_diff_line_style(
     line: &DiffDisplayLine,
     style: Option<AnsiStyle>,
@@ -301,6 +505,7 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
         git_styles,
         None,
         true,
+        None,
         out,
     )
 }
@@ -313,6 +518,7 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
     git_styles: &GitStyles,
     target_width: Option<usize>,
     show_gutter: bool,
+    language: Option<&str>,
     out: &'a mut String,
 ) -> &'a str {
     use std::fmt::Write as _;
@@ -420,13 +626,15 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
     } else {
         &[]
     };
-    let highlighted = highlight_diff_content_with_foreground(
-        content,
-        bg,
-        word_ranges,
-        word_bg,
-        (!show_gutter).then(|| body_style.get_fg_color()).flatten(),
-    );
+    let fallback_fg = (!show_gutter).then(|| body_style.get_fg_color()).flatten();
+    // Syntax foregrounds layer over the row tint; prose and unknown grammars
+    // fall back to the solid tint so add/del semantics stay scannable.
+    let highlighted = if matches!(marker, '+' | '-') && !truncated {
+        highlight_diff_body_with_syntax(content, language, bg, word_ranges, word_bg, fallback_fg)
+            .or_else(|| highlight_diff_content_with_foreground(content, bg, word_ranges, word_bg, fallback_fg))
+    } else {
+        highlight_diff_content_with_foreground(content, bg, word_ranges, word_bg, fallback_fg)
+    };
     if let Some(highlighted) = highlighted {
         out.push_str(&highlighted);
     } else {
@@ -514,6 +722,35 @@ pub(crate) fn render_diff_content_block(
     mode: ToolOutputMode,
     tail_limit: usize,
 ) -> Result<()> {
+    let language = diff_language_hint_from_content(diff_content);
+    render_diff_content_block_with_language(
+        renderer,
+        diff_content,
+        tool_name,
+        git_styles,
+        ls_styles,
+        fallback_style,
+        mode,
+        tail_limit,
+        language.as_deref(),
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Intentional compatibility, platform, or test-only suppression."
+)]
+pub(crate) fn render_diff_content_block_with_language(
+    renderer: &mut AnsiRenderer,
+    diff_content: &str,
+    tool_name: Option<&str>,
+    git_styles: &GitStyles,
+    ls_styles: &LsStyles,
+    fallback_style: MessageStyle,
+    mode: ToolOutputMode,
+    tail_limit: usize,
+    language: Option<&str>,
+) -> Result<()> {
     let diff_lines = display_lines_from_unified_diff(diff_content);
     let effective_limit = if renderer.prefers_untruncated_output() || matches!(mode, ToolOutputMode::Full) {
         tail_limit.max(1000)
@@ -525,10 +762,21 @@ pub(crate) fn render_diff_content_block(
     let line_number_width = diff_display_line_number_width(lines_slice);
     let available_width = renderer.diff_content_width(fallback_style);
 
+    // Bound syntect cost: large previews fall back to solid tints so a
+    // 100-file `apply_patch` stays O(n) tinting instead of O(n) parses.
+    // `should_highlight`-style byte budget, applied once per block.
+    let language = if diff_content.len() > 50_000 { None } else { language };
+
     if renderer.diff_preview_mode() == vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide
         && diff_side_by_side_fits(available_width)
     {
-        return render_diff_content_side_by_side(renderer, lines_slice, git_styles, fallback_style);
+        return render_diff_content_side_by_side_with_language(
+            renderer,
+            lines_slice,
+            git_styles,
+            fallback_style,
+            language,
+        );
     }
 
     // Without ANSI styling the row tint and foreground fallback disappear,
@@ -541,7 +789,7 @@ pub(crate) fn render_diff_content_block(
         available_width,
         line_number_width,
     );
-    render_diff_content_inline(
+    render_diff_content_inline_with_language(
         renderer,
         lines_slice,
         tool_name,
@@ -550,10 +798,15 @@ pub(crate) fn render_diff_content_block(
         fallback_style,
         line_number_width,
         show_gutter,
+        language,
     )
 }
 
-fn render_diff_content_inline(
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Intentional compatibility, platform, or test-only suppression."
+)]
+fn render_diff_content_inline_with_language(
     renderer: &mut AnsiRenderer,
     lines_slice: &[DiffDisplayLine],
     tool_name: Option<&str>,
@@ -562,6 +815,7 @@ fn render_diff_content_inline(
     fallback_style: MessageStyle,
     line_number_width: usize,
     show_gutter: bool,
+    language: Option<&str>,
 ) -> Result<()> {
     let color_enabled = renderer.capabilities().supports_color();
     let target_width = renderer.diff_content_width(fallback_style);
@@ -571,8 +825,20 @@ fn render_diff_content_inline(
     let max_line_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
     let mut formatted_buffer = String::with_capacity(256);
     let mut display_buffer = String::with_capacity(256);
+    // Explicit `language` (single-file file-ops previews) wins for every row.
+    // Otherwise track the current file from `diff --git` / `---` / `+++`
+    // headers so multi-file diffs highlight each file with its own grammar
+    // instead of the first file's grammar.
+    let mut current_hint: Option<String> = None;
 
     for line in lines_slice {
+        if language.is_none()
+            && matches!(line.kind, DiffDisplayKind::Metadata)
+            && let Some(hint) = language_hint_for_display_line(line)
+        {
+            current_hint = Some(hint);
+        }
+        let effective_language = language.or(current_hint.as_deref());
         display_buffer.clear();
         let raw_line = diff_display_text(line, line_number_width, show_gutter);
         if raw_line.is_empty() {
@@ -619,6 +885,7 @@ fn render_diff_content_inline(
                 git_styles,
                 target_width,
                 show_gutter,
+                effective_language,
                 &mut formatted_buffer,
             ))
         } else {
@@ -643,11 +910,16 @@ fn render_diff_content_inline(
 ///
 /// Context lines appear on both sides. Consecutive deletion/addition runs are
 /// zipped index-wise. Hunk headers and metadata span the full width.
-fn render_diff_content_side_by_side(
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Intentional compatibility, platform, or test-only suppression."
+)]
+fn render_diff_content_side_by_side_with_language(
     renderer: &mut AnsiRenderer,
     lines_slice: &[DiffDisplayLine],
     git_styles: &GitStyles,
     fallback_style: MessageStyle,
+    language: Option<&str>,
 ) -> Result<()> {
     let rows = side_by_side_rows(lines_slice);
     let line_number_width = diff_display_line_number_width(lines_slice);
@@ -661,8 +933,20 @@ fn render_diff_content_side_by_side(
     let total_width = renderer.diff_content_width(fallback_style).unwrap_or(MAX_LINE_LENGTH);
     let pane_width = ((total_width.saturating_sub(3)) / 2).max(20);
     let full_width_limit = total_width.min(MAX_LINE_LENGTH);
+    let mut current_hint: Option<String> = None;
 
     for row in rows {
+        // Track the current file from full-width metadata so each pane
+        // highlights with its own grammar when no explicit hint is given.
+        if language.is_none()
+            && row.is_full_width()
+            && let Some(left) = row.left.as_ref()
+            && matches!(left.kind, DiffDisplayKind::Metadata)
+            && let Some(hint) = language_hint_for_display_line(left)
+        {
+            current_hint = Some(hint);
+        }
+        let effective_language = language.or(current_hint.as_deref());
         display_buffer.clear();
         let raw_line = format_side_by_side_row_plain(&row, line_number_width, pane_width);
         if raw_line.is_empty() {
@@ -697,7 +981,14 @@ fn render_diff_content_side_by_side(
         // Pass a bg-less override so an empty left/right cell cannot inherit
         // the sibling pane's tint via the line-level style.
         let rendered_owned = if color_enabled && !was_truncated {
-            Some(format_side_by_side_row_ansi(&row, line_number_width, pane_width, git_styles, &mut formatted_buffer))
+            Some(format_side_by_side_row_ansi(
+                &row,
+                line_number_width,
+                pane_width,
+                git_styles,
+                effective_language,
+                &mut formatted_buffer,
+            ))
         } else {
             None
         };
@@ -749,6 +1040,7 @@ fn format_side_by_side_row_ansi<'a>(
     number_width: usize,
     pane_width: usize,
     git_styles: &GitStyles,
+    language: Option<&str>,
     out: &'a mut String,
 ) -> &'a str {
     out.clear();
@@ -773,8 +1065,8 @@ fn format_side_by_side_row_ansi<'a>(
         return out.as_str();
     }
 
-    let left = format_side_by_side_pane_ansi(row.left.as_ref(), number_width, pane_width, git_styles);
-    let right = format_side_by_side_pane_ansi(row.right.as_ref(), number_width, pane_width, git_styles);
+    let left = format_side_by_side_pane_ansi(row.left.as_ref(), number_width, pane_width, git_styles, language);
+    let right = format_side_by_side_pane_ansi(row.right.as_ref(), number_width, pane_width, git_styles, language);
     // Start the row with a full reset + default bg so nothing carries over
     // from the previous line.
     out.push_str(reset_background);
@@ -800,6 +1092,7 @@ fn format_side_by_side_pane_ansi(
     number_width: usize,
     pane_width: usize,
     git_styles: &GitStyles,
+    language: Option<&str>,
 ) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(pane_width + 16);
@@ -853,7 +1146,12 @@ fn format_side_by_side_pane_ansi(
     // Skip chips on truncated rows — `changed` offsets are into the original
     // text and would highlight the wrong slice after truncation.
     let word_ranges: &[(usize, usize)] = if truncated { &[] } else { &line.changed };
-    let highlighted = highlight_diff_content(&body, bg, word_ranges, word_bg);
+    let highlighted = if truncated {
+        highlight_diff_content(&body, bg, word_ranges, word_bg)
+    } else {
+        highlight_diff_body_with_syntax(&body, language, bg, word_ranges, word_bg, None)
+            .or_else(|| highlight_diff_content(&body, bg, word_ranges, word_bg))
+    };
     match highlighted {
         Some(hl) => {
             out.push_str(&hl);
@@ -1115,10 +1413,11 @@ mod tests {
 
     use super::super::styles::{GitStyles, LsStyles};
     use super::{
-        HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, format_diff_line_with_gutter_and_syntax,
-        format_diff_line_with_gutter_and_syntax_to_width, format_side_by_side_row_ansi, hidden_lines_notice,
-        highlight_diff_content, render_diff_content_block, render_preview_line, select_render_line_style,
-        should_show_diff_gutter, strip_ansi_codes,
+        HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, diff_language_hint_from_content,
+        format_diff_line_with_gutter_and_syntax, format_diff_line_with_gutter_and_syntax_to_width,
+        format_side_by_side_row_ansi, hidden_lines_notice, highlight_diff_body_with_syntax, highlight_diff_content,
+        language_hint_for_display_line, render_diff_content_block, render_preview_line, select_render_line_style,
+        should_show_diff_gutter, strip_ansi_codes, syntax_segments_for_diff_body,
     };
     use vtcode_core::config::ToolOutputMode;
 
@@ -1331,6 +1630,57 @@ mod tests {
     }
 
     #[test]
+    fn diff_language_hint_infers_extension_from_headers() {
+        let diff = "diff --git a/src/main.rs b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        assert_eq!(diff_language_hint_from_content(diff).as_deref(), Some("rs"));
+        let markers = "--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new\n";
+        assert_eq!(diff_language_hint_from_content(markers).as_deref(), Some("ts"));
+        assert_eq!(diff_language_hint_from_content("@@ -1 +1 @@\n-old\n+new\n"), None);
+        let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n";
+        assert_eq!(diff_language_hint_from_content(patch).as_deref(), Some("rs"));
+        let quoted = "diff --git \"a/my file.rs\" \"b/my file.rs\"\n@@ -1 +1 @@\n-old\n+new\n";
+        assert_eq!(diff_language_hint_from_content(quoted).as_deref(), Some("rs"));
+    }
+
+    #[test]
+    fn per_file_language_tracking_switches_grammars() {
+        let git_line = DiffDisplayLine::body(
+            DiffDisplayKind::Metadata,
+            None,
+            None,
+            "diff --git a/src/main.rs b/src/main.rs".to_string(),
+        );
+        assert_eq!(language_hint_for_display_line(&git_line).as_deref(), Some("rs"));
+        let marker_line = DiffDisplayLine::body(DiffDisplayKind::Metadata, None, None, "+++ b/app.ts".to_string());
+        assert_eq!(language_hint_for_display_line(&marker_line).as_deref(), Some("ts"));
+        let hunk = DiffDisplayLine::body(DiffDisplayKind::HunkHeader, None, None, "@@ -1 +1 @@".to_string());
+        assert_eq!(language_hint_for_display_line(&hunk), None);
+    }
+
+    #[test]
+    fn syntax_segments_skip_prose_and_plain_but_keep_code() {
+        assert!(syntax_segments_for_diff_body("fn main() {}", Some("rs")).is_some());
+        assert!(syntax_segments_for_diff_body("hello", Some("md")).is_none());
+        assert!(syntax_segments_for_diff_body("hello", Some("txt")).is_none());
+        assert!(syntax_segments_for_diff_body("hello", None).is_none());
+        assert!(syntax_segments_for_diff_body("", Some("rs")).is_none());
+    }
+
+    #[test]
+    fn rust_diff_body_layers_syntax_over_row_tint() {
+        let bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 58, 45)));
+        let word_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(36, 100, 70)));
+        let content = "fn main() { let value = 2; }";
+        let rendered =
+            highlight_diff_body_with_syntax(content, Some("rs"), bg, &[], word_bg, None).expect("syntax body");
+        assert!(rendered.contains("48;2;20;58;45"), "row tint must survive syntax: {rendered:?}");
+        assert!(rendered.contains("38;2;"), "syntax foreground must layer over tint: {rendered:?}");
+        // ANSI16/no-color has no tint, so syntax must fall back to solid handling.
+        assert!(highlight_diff_body_with_syntax(content, Some("rs"), None, &[], word_bg, None).is_none());
+        assert!(highlight_diff_body_with_syntax(content, Some("md"), bg, &[], word_bg, None).is_none());
+    }
+
+    #[test]
     fn word_chips_apply_stronger_bg_on_changed_spans() {
         let content = "let a = 1;";
         let word_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(36, 100, 70)));
@@ -1377,6 +1727,7 @@ mod tests {
             &git,
             Some(48),
             true,
+            None,
             &mut buffer,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1400,6 +1751,7 @@ mod tests {
             &git,
             Some(28),
             false,
+            None,
             &mut buffer,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1427,6 +1779,7 @@ mod tests {
             &git,
             Some(28),
             false,
+            None,
             &mut buffer,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1627,17 +1980,29 @@ mod tests {
         added.changed = vec![(4, 9)];
 
         let mut buffer = String::new();
-        let left_only =
-            format_side_by_side_row_ansi(&SideBySideRow { left: Some(deleted), right: None }, 2, 24, &git, &mut buffer)
-                .to_owned();
+        let left_only = format_side_by_side_row_ansi(
+            &SideBySideRow { left: Some(deleted), right: None },
+            2,
+            24,
+            &git,
+            None,
+            &mut buffer,
+        )
+        .to_owned();
         assert!(left_only.contains("48;2;70;38;42"));
         assert!(left_only.contains("48;2;140;52;58"));
         assert!(!left_only.contains("48;2;20;58;45"));
         assert!(left_only.contains("\x1b[0m\x1b[49m"), "empty right pane must reset its background");
 
-        let right_only =
-            format_side_by_side_row_ansi(&SideBySideRow { left: None, right: Some(added) }, 2, 24, &git, &mut buffer)
-                .to_owned();
+        let right_only = format_side_by_side_row_ansi(
+            &SideBySideRow { left: None, right: Some(added) },
+            2,
+            24,
+            &git,
+            None,
+            &mut buffer,
+        )
+        .to_owned();
         assert!(right_only.contains("48;2;20;58;45"));
         assert!(right_only.contains("48;2;36;100;70"));
         assert!(!right_only.contains("48;2;70;38;42"));
@@ -1649,8 +2014,14 @@ mod tests {
         let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::Ansi16);
         let added = test_diff_line(DiffDisplayKind::Addition, None, Some(3), "new value");
         let mut buffer = String::new();
-        let rendered =
-            format_side_by_side_row_ansi(&SideBySideRow { left: None, right: Some(added) }, 2, 24, &git, &mut buffer);
+        let rendered = format_side_by_side_row_ansi(
+            &SideBySideRow { left: None, right: Some(added) },
+            2,
+            24,
+            &git,
+            None,
+            &mut buffer,
+        );
 
         assert!(!rendered.contains("48;"), "ANSI16 must not paint a background: {rendered:?}");
         assert!(!rendered.contains("49m"), "ANSI16 must not emit background resets: {rendered:?}");

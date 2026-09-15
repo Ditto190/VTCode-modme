@@ -1,12 +1,13 @@
 use anyhow::Result;
 use serde_json::Value;
+use vtcode_commons::diff_paths::language_hint_from_path;
 use vtcode_commons::preview;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::render_tree_detail;
-use super::streams::{render_diff_content_block, strip_ansi_codes};
+use super::streams::{diff_language_hint_from_content, render_diff_content_block_with_language, strip_ansi_codes};
 use super::styles::{GitStyles, LsStyles};
 use vtcode_core::tools::file_ops::{canonical_diff_previews, diff_preview_user_message};
 pub(crate) use vtcode_diff::format_numbered_unified_diff as format_diff_content_lines_with_numbers;
@@ -67,20 +68,57 @@ fn diff_counts(diff: &Value) -> (Option<u64>, Option<u64>) {
     (additions, deletions)
 }
 
-fn diff_count_suffix(additions: Option<u64>, deletions: Option<u64>) -> String {
-    if additions.is_some() || deletions.is_some() {
-        format!(" (+{} -{})", additions.unwrap_or_default(), deletions.unwrap_or_default())
-    } else {
-        String::new()
+/// Paint `text` bold when the renderer supports color, otherwise plain.
+///
+/// Uses the design-system foreground-only convention for file paths: bold
+/// without a background so headers stay legible on all themes. The caller
+/// passes `renderer.capabilities().supports_color()` so headings and diff
+/// bodies share one color gate (see M5).
+fn paint_bold(text: &str, color_enabled: bool) -> String {
+    if text.is_empty() || !color_enabled {
+        return text.to_string();
     }
+    let style = anstyle::Style::new().bold();
+    format!("{style}{text}{}", anstyle::Reset)
 }
 
-fn diff_heading(diff: &Value) -> String {
+/// Paint `text` with a diff foreground when the renderer supports color.
+fn paint_diff_count(text: &str, color: anstyle::Color, color_enabled: bool) -> String {
+    if text.is_empty() || !color_enabled {
+        return text.to_string();
+    }
+    let style = anstyle::Style::new().fg_color(Some(color));
+    format!("{style}{text}{}", anstyle::Reset)
+}
+
+fn styled_count_suffix(
+    additions: Option<u64>,
+    deletions: Option<u64>,
+    git_styles: &GitStyles,
+    color_enabled: bool,
+) -> String {
+    if additions.is_none() && deletions.is_none() {
+        return String::new();
+    }
+    let additions = additions.unwrap_or_default();
+    let deletions = deletions.unwrap_or_default();
+    let added = paint_diff_count(&format!("+{additions}"), git_styles.addition_fg, color_enabled);
+    let removed = paint_diff_count(&format!("-{deletions}"), git_styles.deletion_fg, color_enabled);
+    format!(" ({added} {removed})")
+}
+
+fn styled_diff_heading(diff: &Value, git_styles: &GitStyles, color_enabled: bool) -> String {
     let (additions, deletions) = diff_counts(diff);
-    format!("{} {}{}", diff_action(diff), diff_path(diff), diff_count_suffix(additions, deletions))
+    let path = paint_bold(diff_path(diff), color_enabled);
+    format!(
+        "{} {}{}",
+        diff_action(diff),
+        path,
+        styled_count_suffix(additions, deletions, git_styles, color_enabled)
+    )
 }
 
-fn aggregate_diff_summary(diffs: &[Value]) -> String {
+fn styled_aggregate_summary(diffs: &[Value], git_styles: &GitStyles, color_enabled: bool) -> String {
     let action = diffs
         .first()
         .map(diff_action)
@@ -96,11 +134,88 @@ fn aggregate_diff_summary(diffs: &[Value]) -> String {
     });
     let file_label = if diffs.len() == 1 { "file" } else { "files" };
     let suffix = if has_counts {
-        diff_count_suffix(Some(additions), Some(deletions))
+        styled_count_suffix(Some(additions), Some(deletions), git_styles, color_enabled)
     } else {
         String::new()
     };
     format!("{action} {} {file_label}{suffix}", diffs.len())
+}
+
+fn styled_child_row(diff: &Value, branch: &str, git_styles: &GitStyles, color_enabled: bool) -> String {
+    let (additions, deletions) = diff_counts(diff);
+    let path = paint_bold(diff_path(diff), color_enabled);
+    format!("  {branch} {path}{}", styled_count_suffix(additions, deletions, git_styles, color_enabled))
+}
+
+/// Remove redundant `diff --git` / `index` / `---` / `+++` file headers when
+/// the file path is already shown in the surrounding heading.
+///
+/// Canonical per-file previews carry one file's unified diff. Rendering both
+/// the heading (`• Edited path`) and the raw `--- a/path` / `+++ b/path`
+/// lines repeats the same path three times and reads as blank duplication.
+/// Hunk headers (`@@`) and `+/-` bodies are always preserved.
+///
+/// Only the leading header block (before the first `@@` hunk or `+/-` body)
+/// is stripped, and headers must start at column 0. Context lines such as
+/// `" index = 0"` (leading space) are body content and are never removed.
+fn strip_redundant_file_headers(content: &str, path: &str) -> String {
+    let mut kept = Vec::new();
+    let mut in_header = true;
+    for line in content.lines() {
+        if in_header {
+            // Hunk header ends the file-header block; everything after is body.
+            if line.starts_with("@@") {
+                in_header = false;
+                kept.push(line);
+                continue;
+            }
+            // `+/-` bodies (excluding `---`/`+++` markers handled below) also
+            // end the header block. Context lines start with a space.
+            if line.starts_with('+') && !line.starts_with("+++ ")
+                || line.starts_with('-') && !line.starts_with("--- ")
+                || line.starts_with(' ')
+            {
+                in_header = false;
+                kept.push(line);
+                continue;
+            }
+            if line.starts_with("diff --git ") || line.starts_with("index ") {
+                continue;
+            }
+            if line.starts_with("--- ") || line.starts_with("+++ ") {
+                let marker_path = line.split_whitespace().nth(1).unwrap_or_default().trim_matches('"');
+                if marker_path.is_empty() {
+                    kept.push(line);
+                    continue;
+                }
+                let normalized = marker_path.trim_start_matches("a/").trim_start_matches("b/");
+                if marker_path == "/dev/null" || normalized == path || path.ends_with(normalized) {
+                    continue;
+                }
+                kept.push(line);
+                continue;
+            }
+            if line.starts_with("new file mode ")
+                || line.starts_with("deleted file mode ")
+                || line.starts_with("old mode ")
+                || line.starts_with("new mode ")
+            {
+                continue;
+            }
+            kept.push(line);
+            continue;
+        }
+        kept.push(line);
+    }
+    // Drop leading blank lines left behind by header stripping so the first
+    // visible row is the hunk header, not empty whitespace.
+    let first_content = kept.iter().position(|line| !line.trim().is_empty()).unwrap_or(kept.len());
+    let mut result = kept[first_content..].join("\n");
+    // Preserve the trailing newline convention of unified diffs.
+    if content.ends_with('\n') && !result.is_empty() && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 fn render_diff_entry_details(
@@ -109,6 +224,8 @@ fn render_diff_entry_details(
     git_styles: &GitStyles,
     ls_styles: &LsStyles,
 ) -> Result<()> {
+    // Stable `reason` codes are never surfaced directly; render the friendly
+    // `diff_preview_user_message` instead (see `diff_preview.rs`).
     if get_bool(diff, "skipped") {
         let reason = diff_preview_user_message(diff);
         if let Some(detail) = get_string(diff, "detail") {
@@ -126,8 +243,18 @@ fn render_diff_entry_details(
     }
 
     if !diff_content.is_empty() {
+        let path = diff_path(diff);
+        let trimmed = strip_redundant_file_headers(diff_content, path);
+        // If stripping leaves only whitespace (e.g. a preview that contained
+        // solely file headers), fall back to the original content so the diff
+        // never renders as an unintuitive blank block.
+        let visible = if trimmed.trim().is_empty() {
+            diff_content
+        } else {
+            trimmed.as_str()
+        };
         renderer.line(MessageStyle::ToolDetail, "")?;
-        render_diff_content(renderer, diff_content, git_styles, ls_styles)?;
+        render_diff_content(renderer, visible, path, git_styles, ls_styles)?;
     }
 
     if get_bool(diff, "truncated") {
@@ -206,19 +333,18 @@ fn render_diff_preview_entries(
     git_styles: &GitStyles,
     ls_styles: &LsStyles,
 ) -> Result<()> {
+    let color_enabled = renderer.capabilities().supports_color();
     let visible_diffs = &diffs[..diffs.len().min(MAX_DISPLAYED_FILES)];
     if compact_file_glance_enabled(renderer) && visible_diffs.len() > 1 {
-        render_file_heading(renderer, &aggregate_diff_summary(visible_diffs))?;
+        render_file_heading(renderer, &styled_aggregate_summary(visible_diffs, git_styles, color_enabled))?;
         for (index, diff) in visible_diffs.iter().enumerate() {
             let branch = if index + 1 == visible_diffs.len() { "└" } else { "├" };
-            let (additions, deletions) = diff_counts(diff);
-            let child = format!("  {branch} {}{}", diff_path(diff), diff_count_suffix(additions, deletions));
-            renderer.line(MessageStyle::Info, &child)?;
+            renderer.line(MessageStyle::Info, &styled_child_row(diff, branch, git_styles, color_enabled))?;
             render_diff_entry_details(renderer, diff, git_styles, ls_styles)?;
         }
     } else {
         for diff in visible_diffs {
-            render_file_heading(renderer, &diff_heading(diff))?;
+            render_file_heading(renderer, &styled_diff_heading(diff, git_styles, color_enabled))?;
             render_diff_entry_details(renderer, diff, git_styles, ls_styles)?;
         }
     }
@@ -461,14 +587,23 @@ fn shorten_path(path: &str, max_len: usize) -> String {
 }
 
 /// Render diff content lines with proper truncation and styling (compact format)
+///
+/// `file_path` supplies the syntax language hint (`rs`, `ts`, …) so diff
+/// bodies keep their row tint while code tokens carry syntax foregrounds.
+/// Prose (`md`/`txt`) and unknown extensions stay solid-tinted by design.
+/// When the path carries no extension (e.g. `Makefile`, fallback `"file"`),
+/// fall back to inferring from the diff headers so pathless previews keep
+/// the syntax they previously had.
 fn render_diff_content(
     renderer: &mut AnsiRenderer,
     diff_content: &str,
+    file_path: &str,
     git_styles: &GitStyles,
     ls_styles: &LsStyles,
 ) -> Result<()> {
     let plain_diff = strip_ansi_codes(diff_content);
-    render_diff_content_block(
+    let language = language_hint_from_path(file_path).or_else(|| diff_language_hint_from_content(plain_diff.as_ref()));
+    render_diff_content_block_with_language(
         renderer,
         plain_diff.as_ref(),
         Some(tools::WRITE_FILE),
@@ -477,6 +612,7 @@ fn render_diff_content(
         MessageStyle::ToolDetail,
         ToolOutputMode::Compact,
         usize::MAX,
+        language.as_deref(),
     )
 }
 

@@ -177,3 +177,81 @@ fn standard_diff_formatter_handles_diff_without_diff_git_header() {
     assert!(lines.iter().any(|line| line.starts_with("-    2 │ before")));
     assert!(lines.iter().any(|line| line.starts_with("+    2 │ after")));
 }
+
+#[test]
+fn strip_redundant_file_headers_keeps_hunks_and_bodies() {
+    let content = "diff --git a/src/main.rs b/src/main.rs\nindex 1111111..2222222 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
+    let stripped = strip_redundant_file_headers(content, "src/main.rs");
+    assert!(!stripped.contains("diff --git"), "git header must be removed: {stripped:?}");
+    assert!(!stripped.contains("--- a/src/main.rs"), "old marker must be removed: {stripped:?}");
+    assert!(!stripped.contains("+++ b/src/main.rs"), "new marker must be removed: {stripped:?}");
+    assert!(stripped.contains("@@ -1 +1 @@"), "hunk must be kept: {stripped:?}");
+    assert!(stripped.contains("-old"), "deletion must be kept: {stripped:?}");
+    assert!(stripped.contains("+new"), "addition must be kept: {stripped:?}");
+}
+
+#[test]
+fn strip_redundant_file_headers_falls_back_when_only_headers() {
+    let content = "--- a/src/main.rs\n+++ b/src/main.rs\n";
+    let stripped = strip_redundant_file_headers(content, "src/main.rs");
+    assert!(stripped.trim().is_empty(), "header-only preview strips to blank: {stripped:?}");
+}
+
+#[test]
+fn styled_diff_heading_keeps_path_and_counts_as_plain_text() {
+    use serde_json::json;
+    use vtcode_commons::ansi::strip_ansi;
+
+    let diff = json!({
+        "path": "src/main.rs",
+        "operation": "updated",
+        "additions": 2,
+        "deletions": 1
+    });
+    let styled = styled_diff_heading(&diff, &GitStyles::new(), true);
+    let plain = strip_ansi(&styled);
+    assert!(plain.contains("Edited src/main.rs"), "heading must keep verb + path: {plain:?}");
+    assert!(plain.contains("+2"), "heading must keep additions: {plain:?}");
+    assert!(plain.contains("-1"), "heading must keep deletions: {plain:?}");
+}
+
+#[test]
+fn styled_headings_stay_plain_without_color() {
+    let diff = serde_json::json!({
+        "path": "src/main.rs",
+        "operation": "updated",
+        "additions": 2,
+        "deletions": 1
+    });
+    let styled = styled_diff_heading(&diff, &GitStyles::new(), false);
+    assert!(!styled.contains('\x1b'), "no-color headings must not leak ANSI: {styled:?}");
+    assert!(styled.contains("Edited src/main.rs (+2 -1)"));
+}
+
+#[test]
+fn strip_redundant_file_headers_keeps_context_and_body_markers() {
+    let content = "@@ -1,2 +1,2 @@\n index = 0\n-old\n+new\n";
+    let stripped = strip_redundant_file_headers(content, "src/main.rs");
+    assert!(stripped.contains("index = 0"), "context line must survive: {stripped:?}");
+
+    let body = "@@ -1 +1 @@\n--- foo\n+++ bar\n";
+    let stripped_body = strip_redundant_file_headers(body, "other.rs");
+    assert!(stripped_body.contains("--- foo"), "body marker must survive after hunk: {stripped_body:?}");
+    assert!(stripped_body.contains("+++ bar"), "body marker must survive after hunk: {stripped_body:?}");
+}
+
+#[test]
+fn styled_aggregate_summary_keeps_totals_as_plain_text() {
+    use serde_json::json;
+    use vtcode_commons::ansi::strip_ansi;
+
+    let diffs = vec![
+        json!({"path": "src/a.rs", "operation": "updated", "additions": 2, "deletions": 1}),
+        json!({"path": "src/b.rs", "operation": "updated", "additions": 1, "deletions": 2}),
+    ];
+    let styled = styled_aggregate_summary(&diffs, &GitStyles::new(), true);
+    let plain = strip_ansi(&styled);
+    assert!(plain.contains("Edited 2 files"), "aggregate must keep file count: {plain:?}");
+    assert!(plain.contains("+3"), "aggregate must sum additions: {plain:?}");
+    assert!(plain.contains("-3"), "aggregate must sum deletions: {plain:?}");
+}
