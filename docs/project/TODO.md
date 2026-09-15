@@ -6,11 +6,7 @@ Improve apply/edit patch UI
 4. Improve and streamline the overall UI of file ops UI/UX in the TUI
 5. Follow design system
 
----
-
-https://github.com/mitsuhiko/similar
-
-also check https://deepwiki.com/search/how-codex-implement-diff-previ_17050125-2468-4dce-94da-0a0ea6c0af6b?mode=fast and refer to the implementation details for rewrite the diff preview UI. and also consider open source it.
+current it look blank and seems unintuitive and duplicated '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 16.53.19.png'
 
 ===
 
@@ -240,11 +236,7 @@ Headline: functionally stable, but cost efficiency is broken and long-run stabil
 
 ===
 
-https://dial9-rs.github.io/blog/principles-for-fast-tokio-applications/
-
-===
-
-revamp /config modal
+revamp and rebuild the whole `/config` modal. For better user experience, ensure that all configuration options are easily accessible, clearly documented, and provide immediate feedback on changes. Provides inline UI hints and validation to guide users through the configuration process. Also group and manage related settings together logically, and allow for easy navigation between different sections of the configuration modal. Make sure the /config read and write to vtcode.toml and underlying configuration system correctly and consistently. Ensure fast performance and responsiveness of the modal, minimizing any delays or lag when interacting with configuration options. Provide a seamless and intuitive experience for users managing their configuration.
 
 ===
 
@@ -253,3 +245,8 @@ check error " I hit the tool-call safety fuse mid-verification and must stop iss
 ===
 
 add double escape to open /rewind commands
+
+===
+
+debug session and fix: "[!] Turn balancer: repeated low-signal navigation detected (exec::inspection:
+:rg::exit ×5); scheduling an early recovery pass."
