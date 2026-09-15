@@ -280,6 +280,8 @@ final extraction:
 
 ===
 
-remove trailing ... dot from diff preview find another way '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 17.56.04.png'
+remove trailing ... dot from diff preview find another way '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 17.56.04.png'. Maybe maximize the leading and trailing spaces, since there's not enough visual separation otherwise, the edges still usable to expand the diff preview container width. observe: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 18.04.01.png'
 
 ===
+
+when changing model mid-turn, find a way to run auto compaction and resume for continuation from previous model to new model seamlessly. This is important to maintain the integrity of the session and avoid data and context loss.
