@@ -2,6 +2,46 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.162.4 - 2026-09-15
+
+### Highlights
+#### Bug Fixes
+
+- Deduplicate and sync man page command list with CLI (5a27511d) 
+- Drop stale performance man page and fix create-project docs (104fca4d) 
+- Reuse single list_files call and report real sizes (2265b1b7) 
+#### Documentation
+
+- Add bench-allocator to man page command list (3a65185f) 
+- Fix schedule create syntax and drop nonexistent trajectory --last flag (b8fc6459) 
+- Add doc links and clarify architecture, commands, and eval guidance (b9d072c2) 
+- Document durable sessions and revert workflow (6ac62df5) 
+#### Features
+
+- Generate full man page set in release pipeline (540a29ae) 
+- Extract bounded diff preview pipeline (8b74f6c9) 
+### Other Changes
+#### CI
+
+- Include man pages in linux archives (7c53681c) 
+#### Other
+
+- Update agent guide (bff0c40f) (@vinhnx)
+- Update README (4f6ed58e) 
+- Update TODO (dafbfd5d) 
+- Update agent guide (1731bf68) 
+- Update TODO (daa7b5d3) 
+- Update TODO (f247795a) 
+- Update TODO (1365ae56) 
+- Update TODO (40e63438) 
+- Update TODO (7ac80b51) 
+- Update TODO (90159ac5) 
+- Update README (71c6ccc8) 
+- Update TODO (e03f592e) 
+- Update README (409673fe) 
+#### Refactors
+
+- Generate man pages from clap command tree via clap_mangen (e5ccb724) 
 ## 0.162.3 - 2026-09-14
 
 ### Highlights
