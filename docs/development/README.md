@@ -36,6 +36,7 @@ Entry point for VT Code contributor workflows.
 
 - [Adding Models](./ADDING_MODELS.md) - Complete workflow for adding new LLM models.
 - [Model Addition Checklist](./MODEL_ADDITION_CHECKLIST.md) - Step-by-step checklist for model additions.
+- [Compaction Engine](./compaction.md) - Provider compaction strategies, context-edit ladder, and budgets.
 
 ## Maintenance Workflows
 

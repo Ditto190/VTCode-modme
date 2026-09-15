@@ -29,6 +29,31 @@ impl OpenAiCompatSpec for VercelSpec {
     }
 }
 
+impl VercelProvider {
+    /// AI Gateway serves OpenAI's standalone compaction endpoint
+    /// (`POST /v1/responses/compact`, forwarded to OpenAI unchanged apart from
+    /// the model ID), but only for OpenAI-routed models on the gateway's own
+    /// endpoint. Other routes and custom base URLs stay on the universal local
+    /// summarization fallback.
+    fn vercel_compact_model(&self, model: &str) -> bool {
+        let resolved = if model.trim().is_empty() {
+            self.core.model.as_str()
+        } else {
+            model
+        };
+        resolved.starts_with("openai/") && self.core.base_url.contains("vercel.sh")
+    }
+
+    fn compact_client(&self, model: &str) -> crate::providers::openresponses::OpenResponsesProvider {
+        crate::providers::openresponses::OpenResponsesProvider::compact_endpoint_client(
+            &self.core.model,
+            &self.core.base_url,
+            &self.core.api_key,
+            model,
+        )
+    }
+}
+
 impl_openai_compat_provider!(VercelProvider, VercelSpec, {
     fn supports_streaming(&self) -> bool {
         true
@@ -45,6 +70,39 @@ impl_openai_compat_provider!(VercelProvider, VercelSpec, {
 
     fn effective_context_size(&self, model: &str) -> usize {
         crate::provider::catalog_context_window("vercel", model, 1_000_000)
+    }
+
+    fn supports_responses_compaction(&self, model: &str) -> bool {
+        self.vercel_compact_model(model)
+    }
+
+    fn supports_manual_openai_compaction(&self, model: &str) -> bool {
+        self.vercel_compact_model(model)
+    }
+
+    async fn compact_history(
+        &self,
+        model: &str,
+        history: &[crate::provider::Message],
+    ) -> Result<Vec<crate::provider::Message>, crate::provider::LLMError> {
+        if !self.vercel_compact_model(model) {
+            return Err(crate::provider::LLMError::Provider {
+                message:
+                    "Vercel AI Gateway compaction is only supported for OpenAI-routed models on the gateway endpoint"
+                        .to_string(),
+                metadata: None,
+            });
+        }
+        self.compact_client(model).compact_history_request(model, history).await
+    }
+
+    async fn compact_history_with_options(
+        &self,
+        model: &str,
+        history: &[crate::provider::Message],
+        _options: &crate::provider::ResponsesCompactionOptions,
+    ) -> Result<Vec<crate::provider::Message>, crate::provider::LLMError> {
+        self.compact_history(model, history).await
     }
 });
 
@@ -127,5 +185,99 @@ mod tests {
             VercelProvider::from_config(Some("k".to_string()), Some(model.to_string()), None, None, None, None, None);
         assert_eq!(provider.core.model, model);
         assert_eq!(provider.core.base_url, urls::VERCEL_AI_GATEWAY_API_BASE);
+    }
+
+    #[test]
+    fn compaction_support_is_openai_gateway_routes_only() {
+        use crate::provider::LLMProvider;
+
+        // Default gateway endpoint: OpenAI-routed models compact natively.
+        let gateway = VercelProvider::from_config(
+            Some("k".to_string()),
+            Some("openai/gpt-6-astra".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(gateway.supports_responses_compaction("openai/gpt-6-astra"));
+        assert!(gateway.supports_manual_openai_compaction("openai/gpt-6-astra"));
+        assert!(!gateway.supports_responses_compaction("anthropic/claude-sonnet-5"));
+        assert!(!gateway.supports_manual_openai_compaction("anthropic/claude-sonnet-5"));
+        assert!(!gateway.supports_native_inline_compaction("openai/gpt-6-astra"));
+
+        // Custom base URLs stay on local compaction even for OpenAI-routed
+        // models: the compact endpoint only exists on the gateway itself.
+        let custom = provider();
+        assert!(!custom.supports_manual_openai_compaction("openai/gpt-6-astra"));
+    }
+
+    #[tokio::test]
+    async fn compact_history_posts_to_gateway_compact_endpoint() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses/compact"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "resp_compact_1",
+                "object": "response.compaction",
+                "created_at": 1756800000,
+                "output": [
+                    {
+                        "id": "msg_000",
+                        "type": "message",
+                        "status": "completed",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "Refactor the auth module." }]
+                    },
+                    {
+                        "id": "cmp_001",
+                        "type": "compaction",
+                        "encrypted_content": "gAAAAABpM0Yj"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        // The host gate only passes on the gateway endpoint, so the transport
+        // is exercised through the compact client directly against the mock.
+        let provider = VercelProvider::from_config(
+            Some("test-key".to_string()),
+            Some("openai/gpt-6-astra".to_string()),
+            Some(format!("{}/v1", server.uri())),
+            None,
+            None,
+            None,
+            None,
+        );
+        let history = vec![Message::user("Refactor the auth module.".to_string())];
+        let compacted = provider
+            .compact_client("openai/gpt-6-astra")
+            .compact_history_request("openai/gpt-6-astra", &history)
+            .await
+            .expect("gateway compaction should succeed");
+        assert!(!compacted.is_empty());
+        assert!(
+            compacted
+                .iter()
+                .any(|message| message.content.as_text().contains("Refactor the auth module.")),
+            "retained gateway input must survive compaction"
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_history_rejects_non_openai_routes() {
+        use crate::provider::LLMProvider;
+
+        let provider = provider();
+        let history = vec![Message::user("hello".to_string())];
+        provider
+            .compact_history("anthropic/claude-sonnet-5", &history)
+            .await
+            .expect_err("non-OpenAI gateway routes must stay on local compaction");
     }
 }

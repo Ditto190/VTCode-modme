@@ -1,7 +1,10 @@
 # PLAN: `/compact` "Failed to generate compaction summary"
 
-Status: **in progress — not green**. The source fix is applied but the unit
-test and the local gate do not pass yet (see [Remaining work](#remaining-work)).
+Status: **green**. Input bounding, error-chain surfacing, hierarchical
+bounding, native-path bounding, and the local overflow retry are applied;
+`cargo nextest run -p vtcode-core --lib compaction` (68 passed) and
+`./scripts/check-dev.sh` pass. Provider strategy matrix lives in
+`docs/development/compaction.md`.
 
 Tracks the `.vtcode`-visible symptom:
 
@@ -59,51 +62,31 @@ undebuggable.
 | `crates/codegen/vtcode-core/src/compaction/mod.rs` | The legacy `compact_history_with_budget` path is bounded the same way. |
 | `crates/codegen/vtcode-core/src/compaction/mod.rs` | `mod summarization_fork_bounds_tests` — 4 unit tests covering: fits-verbatim, unknown-budget-verbatim, over-budget trimming, no-group-fits fallback. |
 | `src/agent/runloop/unified/turn/session/slash_commands/compact.rs` | `format!("... {err}")` → `format!("... {err:#}")` so the full anyhow context chain (the real provider error) is surfaced. |
+| `crates/codegen/vtcode-core/src/compaction/mod.rs` | `anthropic_inline_compaction_edits`: `NativeInline` now sends the documented ladder (thinking → tool-uses → compact), gated on `supports_context_edits`. |
+| `crates/codegen/vtcode-core/src/compaction/mod.rs` | `generate_local_summary_with_retry`: local summary retries once with a halved input budget on context-capacity errors. |
+| `crates/codegen/vtcode-core/src/compaction/mod.rs` | Native inputs (`NativeStandalone`, `NativeInline`, legacy Responses path) bounded with `bound_history_for_summarization` like the local fork. |
+| `docs/development/compaction.md` | Provider × strategy matrix, ladder thresholds, bounding/retry contract. |
+| `crates/codegen/vtcode-llm/src/providers/vercel.rs`, `xai.rs` | Native `POST /v1/responses/compact` via shared `OpenResponsesProvider::compact_endpoint_client`, gated on documented route + host. |
+| `crates/codegen/vtcode-core/src/compaction/mod.rs` | Shared `generate_summary_with_capacity_retry` now covers flat, legacy, and hierarchical band paths. |
+| `crates/codegen/vtcode-core/src/compaction/mod.rs` | `CompactionRoutePolicy` (threshold/retain/retries per route) with window-scaled tail targets; `prune_oversized_tool_outputs` trims tool dumps before bounding. |
 
 ## Remaining work
 
-1. **Clear `clippy::needless_range_loop`** (the current `check-dev.sh` failure).
-   In `bound_history_for_summarization`, replace
-   ```rust
-   for position in (0..group_starts.len()).rev() {
-       let start = group_starts[position];
-   ```
-   with an iterator form such as
-   ```rust
-   for (position, start) in group_starts.iter().enumerate().rev() {
-       let start = *start;
-   ```
+- [x] Clippy, trimming budget, gate, hierarchical bounding, lossy logs — done.
+- [x] Native-path input bounding — done.
 
-2. **Fix the trimming test's budget.** `trims_oldest_groups_when_over_budget_and_keeps_the_newest_turn`
-   currently hardcodes `let budget = 3_000;` and panics on
-   `assert!(bounded.len() < history.len())`. The hardcoded budget is too
-   generous: `Message::estimate_tokens` returns far fewer tokens per character
-   than assumed (≈6 chars/token, not ≈4). Derive the budget from the measured
-   estimate instead so the test does not depend on the exact heuristic:
-   ```rust
-   let budget = total_tokens(&history) / 2;
-   ```
-   Apply the same treatment to `falls_back_to_protocol_previews_when_no_group_fits`
-   (replace `Some(600)` with a derived value, and assert
-   `total_tokens(&bounded) <= budget` rather than comparing against the
-   unbounded history).
-   Current state: `3 passed; 1 failed`.
+1. **Clear `clippy::needless_range_loop`** — done (iterator form applied).
 
-3. **Re-run the gate:**
-   ```bash
-   cargo test -p vtcode-core --lib summarization_fork_bounds && ./scripts/check-dev.sh
-   ```
-   Both must be green.
+2. **Fix the trimming test's budget.** — done (budgets derived from measured
+   estimates; all fork-bounds tests pass).
 
-4. **Bound the hierarchical path.** `summarize_locally_hierarchical` still sends
-   un-bounded `abstract_band` / `detail_band`. Each band is at most a third of
-   the history so an overflow is much less likely, but it is the same class of
-   bug. Route both bands through `bound_history_for_summarization`.
+3. **Re-run the gate:** — done (`compaction` suite + `./scripts/check-dev.sh` green).
 
-5. **Fix the remaining lossy error logs.** `crates/codegen/vtcode-core/src/compaction/auto.rs`
-   and `crates/codegen/vtcode-core/src/core/agent/runner/summarize.rs` still log
-   with `%error`, which also prints only the outermost context. Prefer the full
-   chain (e.g. `?error`, or `error = %error` on the root cause).
+4. **Bound the hierarchical path.** — done (bands bounded + share the
+   capacity-retry contract).
+
+5. **Fix the remaining lossy error logs.** — done (`?error` / `{err:#}`
+   everywhere compaction errors reach users or logs).
 
 6. **End-to-end check.** Run `/compact` on a long session and confirm the
    reported failure is gone; if it still fails, the now-visible provider error

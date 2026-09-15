@@ -223,11 +223,29 @@ impl OpenResponsesProvider {
         format!("{}/responses/compact", self.base_url.trim_end_matches('/'))
     }
 
+    /// Client for driving another endpoint's OpenAI-compatible
+    /// `/responses/compact` surface (e.g. Vercel AI Gateway OpenAI routes, xAI
+    /// Grok models) with this provider's transport and response parsing.
+    /// Capability gating stays with the caller: only construct this for routes
+    /// whose upstream documents the endpoint.
+    pub(crate) fn compact_endpoint_client(configured_model: &str, base_url: &str, api_key: &str, model: &str) -> Self {
+        let resolved = if model.trim().is_empty() {
+            configured_model.to_string()
+        } else {
+            model.to_string()
+        };
+        Self::from_config(Some(api_key.to_string()), Some(resolved), Some(base_url.to_string()), None, None, None, None)
+    }
+
     fn supports_compaction_endpoint(&self) -> bool {
         self.base_url.contains("api.openai.com") || self.base_url.contains("api.openresponses.com")
     }
 
-    async fn compact_history_request(&self, model: &str, history: &[Message]) -> Result<Vec<Message>, LLMError> {
+    pub(crate) async fn compact_history_request(
+        &self,
+        model: &str,
+        history: &[Message],
+    ) -> Result<Vec<Message>, LLMError> {
         let resolved_model = if model.trim().is_empty() {
             self.model.clone()
         } else {

@@ -117,6 +117,9 @@ Selecting a model from the `/model` picker always routes to Vercel.
 - **Reasoning:** Reasoning traces are surfaced for all curated models except
   `alibaba/qwen3-coder-next`.
 - **Structured output:** Supported.
+- **Compaction:** `openai/*` routes compact via the gateway's native
+  `POST /v1/responses/compact` endpoint; all other routes use VT Code's
+  universal local summarization. See the [compaction engine guide](../development/compaction.md).
 
 ## Troubleshooting
 

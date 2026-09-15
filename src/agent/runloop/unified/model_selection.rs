@@ -259,7 +259,7 @@ pub(crate) async fn finalize_model_selection(
         ModelSwitchCompactionOutcome::Failed(err) => {
             renderer.line(
                 MessageStyle::Error,
-                &format!("Model switched, but context compaction failed: {err}. Continuing with full history."),
+                &format!("Model switched, but context compaction failed: {err:#}. Continuing with full history."),
             )?;
         }
     }

@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use std::fmt::Write;
 use std::sync::Arc;
+use vtcode_commons::is_context_capacity_message;
 use vtcode_commons::llm::FinishReason;
 use vtcode_config::constants::context::DEFAULT_COMPACTION_TRIGGER_RATIO;
 
@@ -139,6 +140,103 @@ impl Default for CompactionConfig {
     }
 }
 
+/// Per-route compaction policy in the DeepSeek-harness shape.
+///
+/// `threshold_ratio` caps the auto-compaction trigger as a fraction of the
+/// route window (fail-safe: it can only fire *earlier*). `retain_ratio` sizes
+/// the verbatim continuity tail as a fraction of the route window so small
+/// windows keep a usable summary instead of a tail-only history.
+/// `max_overflow_retries` bounds extra bounded-fork attempts after a
+/// context-capacity rejection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompactionRoutePolicy {
+    /// Trigger ceiling as a fraction of the route window. `1.0` preserves the
+    /// absolute-tokens trigger unchanged.
+    pub threshold_ratio: f64,
+    /// Verbatim-tail share of the route window.
+    pub retain_ratio: f64,
+    /// Extra attempts after a context-capacity rejection (progressive halving).
+    pub max_overflow_retries: u32,
+}
+
+/// Floor keeping the continuity anchor meaningful on tiny windows.
+const MIN_TAIL_TARGET_TOKENS: usize = 1_024;
+
+impl Default for CompactionRoutePolicy {
+    fn default() -> Self {
+        Self {
+            threshold_ratio: 1.0,
+            retain_ratio: 0.16,
+            max_overflow_retries: 1,
+        }
+    }
+}
+
+/// Per-route overrides, matched as `(provider_substring, model_substring)`.
+/// Empty until a route demonstrates a need: the window-derived defaults
+/// already adapt retention and budgets to every route's resolved capacity.
+const ROUTE_POLICIES: &[(&str, &str, CompactionRoutePolicy)] = &[];
+
+impl CompactionRoutePolicy {
+    /// Resolve the policy for a provider/model route (first table hit wins,
+    /// otherwise the default).
+    #[must_use]
+    pub fn resolve(provider_name: &str, model: &str) -> Self {
+        ROUTE_POLICIES
+            .iter()
+            .find(|(provider, model_match, _)| provider_name.contains(provider) && model.contains(model_match))
+            .map(|(_, _, policy)| *policy)
+            .unwrap_or_default()
+    }
+
+    /// Verbatim-tail budget for a route window. Unknown windows (`0`) keep the
+    /// legacy constant; otherwise the tail scales with the window so small
+    /// routes keep a usable summary instead of a tail-only history.
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "The ratio is clamped to [0.0, 1.0] and the window is non-negative, so the product cannot be negative."
+    )]
+    #[must_use]
+    pub fn tail_target_tokens(&self, window_tokens: usize) -> usize {
+        if window_tokens == 0 {
+            return CONTINUITY_TAIL_TARGET_TOKENS;
+        }
+        ((window_tokens as f64 * self.retain_ratio.clamp(0.0, 1.0)) as usize)
+            .clamp(MIN_TAIL_TARGET_TOKENS, CONTINUITY_TAIL_TARGET_TOKENS)
+    }
+
+    /// Fail-safe trigger cap: only fires compaction *earlier*, never later.
+    /// A `1.0` ratio (the default) leaves the absolute-tokens trigger
+    /// unchanged.
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "The ratio is clamped to [0.0, 1.0] and the window is non-negative, so the product cannot be negative."
+    )]
+    #[must_use]
+    pub fn apply_threshold_cap(&self, threshold_tokens: usize, window_tokens: usize) -> usize {
+        if self.threshold_ratio < 1.0 && window_tokens > 0 {
+            threshold_tokens.min((window_tokens as f64 * self.threshold_ratio.clamp(0.0, 1.0)) as usize)
+        } else {
+            threshold_tokens
+        }
+    }
+}
+
+/// Resolve the route tail budget from the session budget (already intersected
+/// with the provider window) or the provider window when unset.
+#[must_use]
+pub(crate) fn route_tail_target_tokens(
+    provider: &dyn LLMProvider,
+    model: &str,
+    context_budget: Option<usize>,
+) -> usize {
+    let policy = CompactionRoutePolicy::resolve(provider.name(), model);
+    let window = context_budget
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| provider.effective_context_size(model));
+    policy.tail_target_tokens(window)
+}
+
 /// Parent request prefix for cache-safe compaction forking.
 ///
 /// Prompt caching is a prefix match: a compaction request only reuses the
@@ -208,8 +306,7 @@ fn bound_history_for_summarization(history: &[Message], instructions: &str, budg
     let mut selected_start = history.len();
     let mut selected_end = history.len();
     let mut selected_tokens = 0usize;
-    for position in (0..group_starts.len()).rev() {
-        let start = group_starts[position];
+    for (position, &start) in group_starts.iter().enumerate().rev() {
         let natural_end = group_starts.get(position + 1).copied().unwrap_or(history.len());
         // The trailing group may end on an unanswered tool call; drop that
         // invalid protocol suffix instead of shipping it to the provider.
@@ -290,9 +387,17 @@ mod summarization_fork_bounds_tests {
     #[test]
     fn falls_back_to_protocol_previews_when_no_group_fits() {
         let history = vec![Message::user("x".repeat(40_000))];
-        let bounded = bound_history_for_summarization(&history, INSTRUCTIONS, Some(600));
+        // Derive the limit from the measured fixture so this remains a
+        // genuine no-group-fits case across tokenizer changes.
+        let budget = total_tokens(&history) / 4;
+        let bounded = bound_history_for_summarization(&history, INSTRUCTIONS, Some(budget));
         assert_eq!(bounded.len(), 1);
         assert!(total_tokens(&bounded) < total_tokens(&history), "an oversized single group must still be reduced");
+        assert!(
+            total_tokens(&bounded) <= budget,
+            "fallback must respect budget {budget}, used {}",
+            total_tokens(&bounded)
+        );
     }
 }
 
@@ -356,8 +461,10 @@ pub async fn compact_history_with_budget(
     }
 
     if !config.always_summarize && provider.supports_responses_compaction(model) {
+        let native_source =
+            bound_history_for_summarization(history, "", compaction_history_budget(provider, model, context_budget));
         let compacted = provider
-            .compact_history(model, history)
+            .compact_history(model, &native_source)
             .await
             .context("Failed to compact history via Responses compact endpoint")?;
         return Ok(bound_compacted_history_to_context(
@@ -378,20 +485,25 @@ pub async fn compact_history_with_budget(
     // Bound the fork so the summary request itself fits the summarizer window;
     // an unbounded fork is what made `/compact` fail on near-full or
     // smaller-window (model-switch) histories.
-    let summary_source = bound_history_for_summarization(
-        history,
+    let history_budget = compaction_history_budget(provider, model, context_budget);
+    let tail_target = route_tail_target_tokens(provider, model, context_budget);
+    // Trim oversized tool outputs before bounding so large dumps do not evict
+    // whole protocol groups from the summarizer fork.
+    let pruned_history = prune_oversized_tool_outputs(history);
+    let summary_source =
+        bound_history_for_summarization(&pruned_history, &effective_config.summary_prompt, history_budget);
+    let summary = generate_local_summary_with_retry(
+        provider,
+        model,
+        &pruned_history,
+        &summary_source,
         &effective_config.summary_prompt,
-        compaction_history_budget(provider, model, context_budget),
-    );
-    let request =
-        compaction_summary_request(model, &summary_source, &effective_config.summary_prompt, None, None, None, None);
+        history_budget,
+        &ManualCompactionOptions::default(),
+        None,
+    )
+    .await?;
 
-    let response = provider
-        .generate(request)
-        .await
-        .context("Failed to generate compaction summary")?;
-
-    let summary = response.content.unwrap_or_default().trim().to_string();
     Ok(bound_compacted_history_to_context(
         build_local_compacted_history(
             history,
@@ -401,6 +513,7 @@ pub async fn compact_history_with_budget(
             // Keep the same protocol-safe continuity tail as the live/manual
             // paths. Forked histories must not lose the newest working turn.
             true,
+            tail_target,
         ),
         provider,
         model,
@@ -550,8 +663,16 @@ pub async fn compact_history_manual_with_parent_context(
     match manual_compaction_strategy(provider, model) {
         CompactionStrategy::NativeStandalone => {
             let responses_options: ResponsesCompactionOptions = options.clone().into();
+            // Bound the native input the same way as the local fork: a
+            // near-full history would otherwise exceed the summarizer window
+            // and fail the whole `/compact` command.
+            let native_source = bound_history_for_summarization(
+                history,
+                options.instructions.as_deref().unwrap_or(""),
+                compaction_history_budget(provider, model, context_budget),
+            );
             let compacted = provider
-                .compact_history_with_options(model, history, &responses_options)
+                .compact_history_with_options(model, &native_source, &responses_options)
                 .await
                 .context("Failed to compact history via provider-native compaction")?;
             Ok((
@@ -620,6 +741,46 @@ fn resolve_manual_compaction_options(
 /// system/tools prefix is attached as well so the fork hits the provider
 /// prompt cache. `tool_choice` stays `none` so the pass cannot be spent on
 /// tool calls, and both local fallbacks forward `parent` for the same reason.
+/// Anthropic inline context-management triggers, matching the provider docs:
+/// thinking blocks are cheapest to clear, tool results next, and full
+/// compaction is the most aggressive last resort.
+const ANTHROPIC_COMPACT_TRIGGER_FLOOR: u64 = 50_000;
+const ANTHROPIC_CLEAR_TOOL_USES_TRIGGER_TOKENS: u64 = 100_000;
+const ANTHROPIC_CLEAR_TOOL_USES_KEEP: u64 = 3;
+const ANTHROPIC_CLEAR_THINKING_KEEP_TURNS: u64 = 2;
+
+/// Build the Anthropic inline `context_management.edits` ladder.
+///
+/// Order matters: the thinking-block edit runs first, then tool-result
+/// clearing, then the `compact_20260112` summarization edit. The cheaper
+/// clearing edits are only included when the provider reports
+/// `supports_context_edits`; otherwise the request carries the compact edit
+/// alone so non-Anthropic inline routes keep working.
+fn anthropic_inline_compaction_edits(instructions: Option<&str>, include_context_edits: bool) -> Vec<Value> {
+    let mut edits = Vec::with_capacity(3);
+    if include_context_edits {
+        edits.push(json!({
+            "type": "clear_thinking_20251015",
+            "keep": { "type": "thinking_turns", "value": ANTHROPIC_CLEAR_THINKING_KEEP_TURNS },
+        }));
+        edits.push(json!({
+            "type": "clear_tool_uses_20250919",
+            "trigger": { "type": "input_tokens", "value": ANTHROPIC_CLEAR_TOOL_USES_TRIGGER_TOKENS },
+            "keep": { "type": "tool_uses", "value": ANTHROPIC_CLEAR_TOOL_USES_KEEP },
+        }));
+    }
+    let mut compact_edit = serde_json::Map::new();
+    compact_edit.insert("type".to_string(), json!("compact_20260112"));
+    compact_edit
+        .insert("trigger".to_string(), json!({ "type": "input_tokens", "value": ANTHROPIC_COMPACT_TRIGGER_FLOOR }));
+    compact_edit.insert("pause_after_compaction".to_string(), json!(true));
+    if let Some(instructions) = instructions.map(str::trim).filter(|instructions| !instructions.is_empty()) {
+        compact_edit.insert("instructions".to_string(), json!(instructions));
+    }
+    edits.push(Value::Object(compact_edit));
+    edits
+}
+
 async fn compact_history_native_inline(
     provider: &dyn LLMProvider,
     model: &str,
@@ -629,29 +790,23 @@ async fn compact_history_native_inline(
     context_budget: Option<usize>,
     parent: Option<&CompactionParentContext>,
 ) -> Result<(Vec<Message>, CompactionMode)> {
-    const ANTHROPIC_COMPACT_TRIGGER_FLOOR: u64 = 50_000;
+    let edits =
+        anthropic_inline_compaction_edits(options.instructions.as_deref(), provider.supports_context_edits(model));
 
-    let mut compact_edit = serde_json::Map::new();
-    compact_edit.insert("type".to_string(), json!("compact_20260112"));
-    compact_edit
-        .insert("trigger".to_string(), json!({ "type": "input_tokens", "value": ANTHROPIC_COMPACT_TRIGGER_FLOOR }));
-    compact_edit.insert("pause_after_compaction".to_string(), json!(true));
-    if let Some(instructions) = options
-        .instructions
-        .as_ref()
-        .map(|instructions| instructions.trim())
-        .filter(|instructions| !instructions.is_empty())
-    {
-        compact_edit.insert("instructions".to_string(), json!(instructions));
-    }
-
+    // Bound the inline request input so a near-full history fits the
+    // summarizer window, mirroring the local-summary fork bound.
+    let inline_source = bound_history_for_summarization(
+        history,
+        options.instructions.as_deref().unwrap_or(""),
+        compaction_history_budget(provider, model, context_budget),
+    );
     let request = LLMRequest {
-        messages: Arc::new(history.to_vec()),
+        messages: Arc::new(inline_source),
         model: model.to_string(),
         system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
         tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
         tool_choice: Some(ToolChoice::none()),
-        context_management: Some(json!({ "edits": [Value::Object(compact_edit)] })),
+        context_management: Some(json!({ "edits": edits })),
         max_tokens: options.max_output_tokens,
         reasoning_effort: options.reasoning_effort,
         verbosity: options.verbosity,
@@ -668,7 +823,7 @@ async fn compact_history_native_inline(
         Ok(response) => response,
         Err(error) => {
             tracing::warn!(
-                error = %error,
+                error = ?error,
                 "provider-native inline compaction request failed; \
                  falling back to local summarization"
             );
@@ -686,7 +841,8 @@ async fn compact_history_native_inline(
             .filter(|summary| !summary.is_empty())
     {
         let effective_config = context_bounded_compaction_config(provider, model, history, config, context_budget);
-        let compacted = build_summary_compacted_history(history, summary, &effective_config, true);
+        let tail_target = route_tail_target_tokens(provider, model, context_budget);
+        let compacted = build_summary_compacted_history(history, summary, &effective_config, true, tail_target);
         return Ok((
             bound_compacted_history_to_context(compacted, provider, model, context_budget),
             CompactionMode::Provider,
@@ -730,38 +886,144 @@ async fn summarize_locally(
         &config.clone().with_manual_overrides(options),
         context_budget,
     );
+    let history_budget = compaction_history_budget(provider, model, context_budget);
+    let tail_target = route_tail_target_tokens(provider, model, context_budget);
     // Bound the fork so the summary request itself fits the summarizer window.
     // `/compact` is normally run when the context is already near full, so an
     // unbounded fork is rejected by the provider and the whole command fails.
-    let summary_source = bound_history_for_summarization(
-        history,
-        &effective_config.summary_prompt,
-        compaction_history_budget(provider, model, context_budget),
-    );
-    let request = compaction_summary_request(
+    // Oversized tool outputs are pruned first so large dumps do not evict
+    // whole protocol groups from the fork.
+    let pruned_history = prune_oversized_tool_outputs(history);
+    let summary_source =
+        bound_history_for_summarization(&pruned_history, &effective_config.summary_prompt, history_budget);
+    let summary = generate_local_summary_with_retry(
+        provider,
         model,
+        &pruned_history,
         &summary_source,
         &effective_config.summary_prompt,
-        options.max_output_tokens,
-        options.reasoning_effort,
-        options.verbosity,
+        history_budget,
+        options,
         parent,
-    );
+    )
+    .await?;
 
-    let response = provider
-        .generate(request)
-        .await
-        .context("Failed to generate compaction summary")?;
-
-    let summary = response.content.unwrap_or_default().trim().to_string();
     Ok(bound_compacted_history_to_context(
-        build_summary_compacted_history(history, summary, &effective_config, true),
+        build_summary_compacted_history(history, summary, &effective_config, true, tail_target),
         provider,
         model,
         context_budget,
     ))
 }
 
+/// Generate a summary request, retrying with progressively halved input budgets
+/// when the provider rejects the request as over context capacity.
+///
+/// Token estimates are heuristic, so a bounded input can still overflow the
+/// summarizer window. Bounded retries recover instead of failing the whole
+/// `/compact` command; any other error (or exhausted retries) propagates.
+/// `make_request` rebuilds the request shape (cache-safe fork or single-shot
+/// band prompt) from the given source messages so every local summarization
+/// path shares one retry contract.
+async fn generate_summary_with_capacity_retry(
+    provider: &dyn LLMProvider,
+    history: &[Message],
+    instructions: &str,
+    first_source: &[Message],
+    history_budget: Option<usize>,
+    max_overflow_retries: u32,
+    error_context: &'static str,
+    make_request: impl Fn(&[Message]) -> LLMRequest,
+) -> Result<String> {
+    let first_tokens = first_source.iter().map(Message::estimate_tokens).sum::<usize>();
+    let mut current_source: &[Message] = first_source;
+    let mut current_budget = history_budget;
+    let mut remaining_retries = max_overflow_retries;
+    let mut retry_storage: Vec<Message>;
+    loop {
+        match provider.generate(make_request(current_source)).await {
+            Ok(response) => return Ok(response.content.unwrap_or_default().trim().to_string()),
+            Err(error) if is_context_capacity_message(&error.to_string()) && remaining_retries > 0 => {
+                current_budget = current_budget.map(|budget| (budget / 2).max(4));
+                retry_storage = bound_history_for_summarization(history, instructions, current_budget);
+                // A retry only helps when it actually shrinks the input: with an
+                // unknown budget (or an already-fitting history) it would resend
+                // the identical request, so propagate the original failure instead.
+                let retry_tokens = retry_storage.iter().map(Message::estimate_tokens).sum::<usize>();
+                if retry_tokens >= first_tokens {
+                    return Err(anyhow::Error::from(error).context(error_context));
+                }
+                tracing::warn!(
+                    error = ?error,
+                    "{error_context}: input exceeded context capacity; retrying with a halved input budget"
+                );
+                current_source = &retry_storage;
+                remaining_retries -= 1;
+            }
+            Err(error) => return Err(anyhow::Error::from(error).context(error_context)),
+        }
+    }
+}
+
+/// Generate a cache-safe fork summary with the shared capacity-retry contract.
+async fn generate_local_summary_with_retry(
+    provider: &dyn LLMProvider,
+    model: &str,
+    history: &[Message],
+    summary_source: &[Message],
+    instructions: &str,
+    history_budget: Option<usize>,
+    options: &ManualCompactionOptions,
+    parent: Option<&CompactionParentContext>,
+) -> Result<String> {
+    generate_summary_with_capacity_retry(
+        provider,
+        history,
+        instructions,
+        summary_source,
+        history_budget,
+        CompactionRoutePolicy::resolve(provider.name(), model).max_overflow_retries,
+        "Failed to generate compaction summary",
+        |source| {
+            compaction_summary_request(
+                model,
+                source,
+                instructions,
+                options.max_output_tokens,
+                options.reasoning_effort,
+                options.verbosity,
+                parent,
+            )
+        },
+    )
+    .await
+}
+
+/// Intro framing for the hierarchical abstract band (oldest third).
+const ABSTRACT_BAND_INTRO: &str =
+    "In 1-2 sentences, what was the overall goal and major progress in this portion of the conversation?\n\n";
+
+/// Build a single-shot band summary request: one user message carrying the
+/// pre-rendered band prompt, with the parent system/tools prefix reused.
+fn band_summary_request(
+    model: &str,
+    prompt: String,
+    max_tokens: Option<u32>,
+    options: &ManualCompactionOptions,
+    parent: Option<&CompactionParentContext>,
+) -> LLMRequest {
+    LLMRequest {
+        messages: Arc::new(vec![Message::user(prompt)]),
+        model: model.to_string(),
+        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
+        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
+        tool_choice: Some(ToolChoice::none()),
+        max_tokens,
+        reasoning_effort: options.reasoning_effort,
+        verbosity: options.verbosity,
+        ..Default::default()
+    }
+}
 /// Hierarchical local summarization: abstract + detail + verbatim pyramid.
 ///
 /// Splits the history into three bands and summarizes each with a different
@@ -794,57 +1056,66 @@ async fn summarize_locally_hierarchical(
         &config.clone().with_manual_overrides(options),
         context_budget,
     );
-    let (summary_history, _) = split_continuity_history(history);
+    let (summary_history, _) =
+        split_continuity_history_with_target(history, route_tail_target_tokens(provider, model, context_budget));
 
-    // Split history into three bands at roughly equal thirds.
+    // Split history into three bands at roughly equal thirds. Each band is
+    // bounded to the summarizer window so a near-full context cannot overflow
+    // the band request itself (same class of bug as the flat-path fork).
+    // Oversized tool outputs are pruned first so large dumps do not evict
+    // whole protocol groups from a band.
     let total = summary_history.len();
     let band_size = total / 3;
     let abstract_end = band_size;
     let detail_end = band_size * 2;
+    let history_budget = compaction_history_budget(provider, model, context_budget);
+    let max_overflow_retries = CompactionRoutePolicy::resolve(provider.name(), model).max_overflow_retries;
 
     // Band 1 (oldest): compress into 1-2 sentence abstract.
-    let abstract_band = &summary_history[..abstract_end];
-    let abstract_prompt = format!(
-        "In 1-2 sentences, what was the overall goal and major progress in this \
-         portion of the conversation?\n\n{}",
-        build_summary_prompt(abstract_band, ""),
-    );
-    let abstract_request = LLMRequest {
-        messages: Arc::new(vec![Message::user(abstract_prompt)]),
-        model: model.to_string(),
-        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
-        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
-        tool_choice: Some(ToolChoice::none()),
-        max_tokens: Some(150),
-        reasoning_effort: options.reasoning_effort,
-        verbosity: options.verbosity,
-        ..Default::default()
-    };
-    let abstract_response = provider
-        .generate(abstract_request)
-        .await
-        .context("Failed to generate abstract summary")?;
-    let abstract_summary = abstract_response.content.unwrap_or_default().trim().to_string();
+    let pruned_abstract = prune_oversized_tool_outputs(&summary_history[..abstract_end]);
+    let abstract_band = bound_history_for_summarization(&pruned_abstract, "", history_budget);
+    let abstract_summary = generate_summary_with_capacity_retry(
+        provider,
+        &pruned_abstract,
+        "",
+        &abstract_band,
+        history_budget,
+        max_overflow_retries,
+        "Failed to generate abstract summary",
+        |band| {
+            band_summary_request(
+                model,
+                format!("{ABSTRACT_BAND_INTRO}{}", build_summary_prompt(band, "")),
+                Some(150),
+                options,
+                parent,
+            )
+        },
+    )
+    .await?;
 
     // Band 2 (middle): paragraph-level summary using the full summary prompt.
-    let detail_band = &summary_history[abstract_end..detail_end];
-    let detail_prompt = build_summary_prompt(detail_band, &effective_config.summary_prompt);
-    let detail_request = LLMRequest {
-        messages: Arc::new(vec![Message::user(detail_prompt)]),
-        model: model.to_string(),
-        system_prompt: parent.and_then(|parent| parent.system_prompt.clone()),
-        tools: parent.and_then(|parent| parent.tools.clone()).filter(|tools| !tools.is_empty()),
-        tool_choice: Some(ToolChoice::none()),
-        max_tokens: options.max_output_tokens,
-        reasoning_effort: options.reasoning_effort,
-        verbosity: options.verbosity,
-        ..Default::default()
-    };
-    let detail_response = provider
-        .generate(detail_request)
-        .await
-        .context("Failed to generate detail summary")?;
-    let detail_summary = detail_response.content.unwrap_or_default().trim().to_string();
+    let pruned_detail = prune_oversized_tool_outputs(&summary_history[abstract_end..detail_end]);
+    let detail_band = bound_history_for_summarization(&pruned_detail, &effective_config.summary_prompt, history_budget);
+    let detail_summary = generate_summary_with_capacity_retry(
+        provider,
+        &pruned_detail,
+        &effective_config.summary_prompt,
+        &detail_band,
+        history_budget,
+        max_overflow_retries,
+        "Failed to generate detail summary",
+        |band| {
+            band_summary_request(
+                model,
+                build_summary_prompt(band, &effective_config.summary_prompt),
+                options.max_output_tokens,
+                options,
+                parent,
+            )
+        },
+    )
+    .await?;
 
     // Band 3 (newest): retain verbatim via the bounded protocol tail.
     let recent_band = &summary_history[detail_end..];
@@ -860,7 +1131,7 @@ async fn summarize_locally_hierarchical(
     new_history.push(Message::system(format!("{DETAIL_PREFIX}{detail_summary}")));
     new_history.extend(retained);
     // Live compaction: retain the most recent turn verbatim for continuity.
-    for message in continuity_tail(history) {
+    for message in continuity_tail_with_target(history, route_tail_target_tokens(provider, model, context_budget)) {
         new_history.push(message.clone());
     }
     Ok(bound_compacted_history_to_context(new_history, provider, model, context_budget))
@@ -912,7 +1183,11 @@ fn context_bounded_compaction_config(
 ) -> CompactionConfig {
     let mut bounded = config.clone();
     if let Some(history_budget) = compaction_history_budget(provider, model, context_budget) {
-        let continuity_tokens = continuity_tail(history).iter().map(Message::estimate_tokens).sum::<usize>();
+        let tail_target = route_tail_target_tokens(provider, model, context_budget);
+        let continuity_tokens = continuity_tail_with_target(history, tail_target)
+            .iter()
+            .map(Message::estimate_tokens)
+            .sum::<usize>();
         bounded.retained_user_message_tokens = bounded
             .retained_user_message_tokens
             .min(history_budget.saturating_sub(continuity_tokens));
@@ -939,7 +1214,9 @@ pub fn bound_compacted_history_to_context(
         return compacted;
     }
 
-    let Some((tail_start, tail_end, _)) = continuity_tail_selection(&compacted) else {
+    let Some((tail_start, tail_end, _)) =
+        continuity_tail_selection_with_target(&compacted, route_tail_target_tokens(provider, model, context_budget))
+    else {
         return compacted
             .into_iter()
             .scan(history_budget, |remaining, message| {
@@ -1004,9 +1281,10 @@ pub(crate) fn build_local_compacted_history(
     retained_user_message_tokens: usize,
     retained_user_messages: usize,
     include_continuity_tail: bool,
+    tail_target_tokens: usize,
 ) -> Vec<Message> {
     let (retention_history, continuity) = if include_continuity_tail {
-        split_continuity_history(history)
+        split_continuity_history_with_target(history, tail_target_tokens)
     } else {
         (history, Vec::new())
     };
@@ -1017,7 +1295,7 @@ pub(crate) fn build_local_compacted_history(
     new_history.extend(retained_users);
 
     // Continuity anchor: retain the newest complete protocol groups verbatim
-    // within the fixed tail budget. Duplicate message text is still valid
+    // within the route tail budget. Duplicate message text is still valid
     // across turns, so preserve the sequence by index rather than deduplicating
     // on role/content.
     if include_continuity_tail {
@@ -1032,11 +1310,17 @@ pub(crate) fn build_local_compacted_history(
 /// continuity budget. The returned messages are owned because an oversized
 /// individual group may need a bounded preview.
 fn continuity_tail(history: &[Message]) -> Vec<Message> {
-    let Some((start, end, oversized)) = continuity_tail_selection(history) else {
+    continuity_tail_with_target(history, CONTINUITY_TAIL_TARGET_TOKENS)
+}
+
+/// [`continuity_tail`] with a route-scaled budget so small windows keep a
+/// usable summary instead of a tail-only history.
+fn continuity_tail_with_target(history: &[Message], tail_target_tokens: usize) -> Vec<Message> {
+    let Some((start, end, oversized)) = continuity_tail_selection_with_target(history, tail_target_tokens) else {
         return Vec::new();
     };
     if oversized {
-        bounded_protocol_group(&history[start..end], CONTINUITY_TAIL_TARGET_TOKENS)
+        bounded_protocol_group(&history[start..end], tail_target_tokens.max(4))
     } else {
         history[start..end].to_vec()
     }
@@ -1046,6 +1330,14 @@ fn continuity_tail(history: &[Message]) -> Vec<Message> {
 /// trailing assistant tool-call group is truncated at the assistant message,
 /// preserving its user anchor while excluding the invalid protocol suffix.
 fn continuity_tail_selection(history: &[Message]) -> Option<(usize, usize, bool)> {
+    continuity_tail_selection_with_target(history, CONTINUITY_TAIL_TARGET_TOKENS)
+}
+
+/// [`continuity_tail_selection`] with a route-scaled budget.
+fn continuity_tail_selection_with_target(
+    history: &[Message],
+    tail_target_tokens: usize,
+) -> Option<(usize, usize, bool)> {
     if history.is_empty() {
         return None;
     }
@@ -1079,10 +1371,10 @@ fn continuity_tail_selection(history: &[Message]) -> Option<(usize, usize, bool)
             break;
         }
         let group_tokens = group.iter().map(Message::estimate_tokens).sum::<usize>();
-        if selected_start.is_none() && group_tokens > CONTINUITY_TAIL_TARGET_TOKENS {
+        if selected_start.is_none() && group_tokens > tail_target_tokens {
             return Some((start, end, true));
         }
-        if estimated_tokens.saturating_add(group_tokens) > CONTINUITY_TAIL_TARGET_TOKENS {
+        if estimated_tokens.saturating_add(group_tokens) > tail_target_tokens {
             break;
         }
         selected_start = Some(start);
@@ -1151,11 +1443,11 @@ fn complete_protocol_group_prefix(group: &[Message]) -> usize {
     pending_origin.unwrap_or(group.len())
 }
 
-fn split_continuity_history(history: &[Message]) -> (&[Message], Vec<Message>) {
-    let Some((tail_start, _, _)) = continuity_tail_selection(history) else {
+fn split_continuity_history_with_target(history: &[Message], tail_target_tokens: usize) -> (&[Message], Vec<Message>) {
+    let Some((tail_start, _, _)) = continuity_tail_selection_with_target(history, tail_target_tokens) else {
         return (history, Vec::new());
     };
-    (&history[..tail_start], continuity_tail(history))
+    (&history[..tail_start], continuity_tail_with_target(history, tail_target_tokens))
 }
 
 fn build_summary_compacted_history(
@@ -1163,8 +1455,9 @@ fn build_summary_compacted_history(
     summary: impl AsRef<str>,
     config: &CompactionConfig,
     include_continuity_tail: bool,
+    tail_target_tokens: usize,
 ) -> Vec<Message> {
-    let (retention_history, continuity) = split_continuity_history(history);
+    let (retention_history, continuity) = split_continuity_history_with_target(history, tail_target_tokens);
     let retained_users = collect_retained_user_messages(
         retention_history,
         config.retained_user_message_tokens,
@@ -1186,6 +1479,28 @@ fn bounded_protocol_group(group: &[Message], token_budget: usize) -> Vec<Message
     group
         .iter()
         .map(|message| bounded_message_preview(message, per_message_budget))
+        .collect()
+}
+
+/// Per-message cap applied to tool outputs in summarizer inputs. Large dumps
+/// (file reads, command output) otherwise evict whole protocol groups from the
+/// bounded fork. Call IDs and pairing metadata are preserved by
+/// [`bounded_message_preview`], so trimmed groups stay protocol-valid.
+const TOOL_RESULT_PRUNE_TARGET_TOKENS: usize = 4_096;
+
+/// Trim oversized tool outputs to previews before bounding the summarizer
+/// input. Only `Tool` messages are touched; everything else passes through
+/// verbatim (cloned). Under the cap this is a pure copy.
+fn prune_oversized_tool_outputs(history: &[Message]) -> Vec<Message> {
+    history
+        .iter()
+        .map(|message| {
+            if message.role == MessageRole::Tool {
+                bounded_message_preview(message, TOOL_RESULT_PRUNE_TARGET_TOKENS)
+            } else {
+                message.clone()
+            }
+        })
         .collect()
 }
 
@@ -1553,6 +1868,23 @@ mod tests {
         last_request: Mutex<Option<LLMRequest>>,
     }
 
+    /// Inline provider that also reports `supports_context_edits`, e.g. Anthropic
+    /// on a compaction-capable model. The inline request must carry the full
+    /// clearing ladder (thinking, tool uses, compact) in documented order.
+    struct ContextEditsInlineProvider {
+        last_request: Mutex<Option<LLMRequest>>,
+    }
+
+    /// Local summarizer that rejects the first summary request with a
+    /// context-capacity error and succeeds on retry. Exercises the halved-budget
+    /// overflow retry in `summarize_locally`.
+    struct CapacityFailOnceProvider {
+        attempts: Mutex<usize>,
+        request_tokens: Mutex<Vec<usize>>,
+        /// Number of leading requests to reject before succeeding.
+        failures: usize,
+    }
+
     /// Capturing provider with no native support; used to assert the Local summary
     /// request carries the manual options.
     struct CapturingProvider {
@@ -1699,6 +2031,84 @@ mod tests {
 
         fn supports_native_inline_compaction(&self, _model: &str) -> bool {
             true
+        }
+
+        fn effective_context_size(&self, _model: &str) -> usize {
+            200_000
+        }
+    }
+
+    #[async_trait]
+    impl LLMProvider for ContextEditsInlineProvider {
+        fn name(&self) -> &str {
+            "context-edits-inline"
+        }
+
+        async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            *self.last_request.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(request);
+            let mut response = LLMResponse::new("stub-model", "compacted by provider");
+            response.finish_reason = FinishReason::Pause;
+            response.compaction = Some("provider compaction summary".to_string());
+            Ok(response)
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["stub-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+            Ok(())
+        }
+
+        fn supports_responses_compaction(&self, _model: &str) -> bool {
+            true
+        }
+
+        fn supports_context_edits(&self, _model: &str) -> bool {
+            true
+        }
+
+        fn supports_native_inline_compaction(&self, _model: &str) -> bool {
+            true
+        }
+
+        fn effective_context_size(&self, _model: &str) -> usize {
+            200_000
+        }
+    }
+
+    #[async_trait]
+    impl LLMProvider for CapacityFailOnceProvider {
+        fn name(&self) -> &str {
+            "capacity-fail-once"
+        }
+
+        async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            let mut attempts = self.attempts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.request_tokens
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(request.messages.iter().map(Message::estimate_tokens).sum());
+            *attempts += 1;
+            if *attempts <= self.failures {
+                return Err(LLMError::Provider {
+                    message: "maximum context length exceeded".to_string(),
+                    metadata: None,
+                });
+            }
+            Ok(LLMResponse::new("stub-model", "retried summary"))
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["stub-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+            Ok(())
+        }
+
+        fn effective_context_size(&self, _model: &str) -> usize {
+            200_000
         }
     }
 
@@ -2098,6 +2508,286 @@ mod tests {
         let edit = &forked.context_management.as_ref().expect("context_management")["edits"][0];
         assert_eq!(edit["type"].as_str(), Some("compact_20260112"));
         assert_eq!(edit["pause_after_compaction"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn inline_compaction_edits_follow_the_documented_ladder_order() {
+        use super::anthropic_inline_compaction_edits;
+
+        let edits = anthropic_inline_compaction_edits(Some("keep decisions"), true);
+        let types: Vec<&str> = edits
+            .iter()
+            .filter_map(|edit| edit.get("type").and_then(serde_json::Value::as_str))
+            .collect();
+        assert_eq!(
+            types,
+            vec![
+                "clear_thinking_20251015",
+                "clear_tool_uses_20250919",
+                "compact_20260112"
+            ],
+            "thinking clears first, tool uses next, compaction last"
+        );
+        assert_eq!(edits[2]["pause_after_compaction"].as_bool(), Some(true));
+        assert_eq!(edits[2]["instructions"].as_str(), Some("keep decisions"));
+
+        let compact_only = anthropic_inline_compaction_edits(None, false);
+        assert_eq!(compact_only.len(), 1);
+        assert_eq!(compact_only[0]["type"].as_str(), Some("compact_20260112"));
+    }
+
+    #[tokio::test]
+    async fn native_inline_request_carries_ladder_when_provider_supports_context_edits() {
+        use super::compact_history_manual_with_parent_context;
+
+        let history = sample_history();
+        let config = CompactionConfig::default();
+        let provider = ContextEditsInlineProvider { last_request: Mutex::new(None) };
+        let (_compacted, mode) = compact_history_manual_with_parent_context(
+            &provider,
+            "stub-model",
+            &history,
+            &config,
+            &ManualCompactionOptions::default(),
+            None,
+            None,
+        )
+        .await
+        .expect("manual compaction");
+        assert_eq!(mode, CompactionMode::Provider);
+        let request = provider.last_request.lock().unwrap().clone().expect("captured inline request");
+        let edits = request.context_management.as_ref().expect("context_management")["edits"]
+            .as_array()
+            .expect("edits array")
+            .clone();
+        let types: Vec<&str> = edits
+            .iter()
+            .filter_map(|edit| edit.get("type").and_then(serde_json::Value::as_str))
+            .collect();
+        assert_eq!(
+            types,
+            vec![
+                "clear_thinking_20251015",
+                "clear_tool_uses_20250919",
+                "compact_20260112"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn local_summary_retries_once_on_context_capacity_error() {
+        use super::compact_history_manual;
+
+        // Over-budget history so the halved retry is strictly smaller than
+        // the first attempt (the retry is skipped when it cannot shrink).
+        // Each turn is ~100k tokens against the stub's ~174k summarizer
+        // budget: the first fork keeps one turn, the retry degrades to
+        // previews, and the compacted output still fits the summary.
+        let history = vec![
+            Message::user("old ".repeat(100_000)),
+            Message::user("middle ".repeat(100_000)),
+            Message::user("newest ".repeat(100_000)),
+        ];
+        let config = CompactionConfig {
+            always_summarize: true,
+            ..CompactionConfig::default()
+        };
+        let provider = CapacityFailOnceProvider {
+            attempts: Mutex::new(0),
+            request_tokens: Mutex::new(Vec::new()),
+            failures: 1,
+        };
+        let (compacted, mode) =
+            compact_history_manual(&provider, "stub-model", &history, &config, &ManualCompactionOptions::default())
+                .await
+                .expect("retry must recover the summary");
+        assert_eq!(mode, CompactionMode::Local);
+        assert_eq!(*provider.attempts.lock().unwrap(), 2, "exactly one retry");
+        let tokens = provider.request_tokens.lock().unwrap().clone();
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens[1] < tokens[0], "retry must shrink the fork");
+        assert_eq!(compacted[0].content.as_text(), "Previous conversation summary:\nretried summary");
+    }
+
+    #[tokio::test]
+    async fn local_summary_skips_retry_when_it_cannot_shrink() {
+        use super::compact_history_manual;
+
+        // Tiny history fits the budget verbatim, so a halved retry would
+        // resend the identical fork. The capacity failure must propagate
+        // without a wasted second call.
+        let history = sample_history();
+        let config = CompactionConfig {
+            always_summarize: true,
+            ..CompactionConfig::default()
+        };
+        let provider = CapacityFailOnceProvider {
+            attempts: Mutex::new(0),
+            request_tokens: Mutex::new(Vec::new()),
+            failures: 1,
+        };
+        let error =
+            compact_history_manual(&provider, "stub-model", &history, &config, &ManualCompactionOptions::default())
+                .await
+                .expect_err("identical retry must not be attempted");
+        assert_eq!(*provider.attempts.lock().unwrap(), 1, "no second call");
+        assert!(error.to_string().contains("Failed to generate compaction summary"));
+    }
+
+    #[tokio::test]
+    async fn hierarchical_bands_retry_once_on_context_capacity_error() {
+        use super::compact_history_manual_with_budget;
+
+        // Small session budget forces over-budget bands; the failing abstract
+        // pass must retry with a halved band and the detail pass must still
+        // run, so exactly three generate calls happen.
+        let mut history = Vec::new();
+        for turn in ["first", "second", "third", "fourth", "fifth", "sixth"] {
+            history.push(Message::user(format!("{turn} {}", "text ".repeat(1_500))));
+        }
+        history.push(Message::user(format!("latest {}", "big ".repeat(25_000))));
+        let config = CompactionConfig {
+            hierarchical: true,
+            always_summarize: true,
+            ..CompactionConfig::default()
+        };
+        let provider = CapacityFailOnceProvider {
+            attempts: Mutex::new(0),
+            request_tokens: Mutex::new(Vec::new()),
+            failures: 1,
+        };
+        let (_compacted, mode) = compact_history_manual_with_budget(
+            &provider,
+            "stub-model",
+            &history,
+            &config,
+            &ManualCompactionOptions::default(),
+            Some(3_000),
+        )
+        .await
+        .expect("hierarchical bands must recover from a capacity error");
+        assert_eq!(mode, CompactionMode::Local);
+        assert_eq!(*provider.attempts.lock().unwrap(), 3, "abstract retries once, detail runs once");
+    }
+
+    #[test]
+    fn route_policy_defaults_to_status_quo_shape() {
+        use super::CompactionRoutePolicy;
+
+        let policy = CompactionRoutePolicy::resolve("unknown-provider", "unknown-model");
+        assert_eq!(policy, CompactionRoutePolicy::default());
+        assert!((policy.threshold_ratio - 1.0).abs() < f64::EPSILON);
+        assert!((policy.retain_ratio - 0.16).abs() < f64::EPSILON);
+        assert_eq!(policy.max_overflow_retries, 1);
+    }
+
+    #[test]
+    fn route_tail_target_scales_with_window() {
+        use super::{CONTINUITY_TAIL_TARGET_TOKENS, CompactionRoutePolicy};
+
+        let policy = CompactionRoutePolicy::default();
+        // Unknown windows keep the legacy constant.
+        assert_eq!(policy.tail_target_tokens(0), CONTINUITY_TAIL_TARGET_TOKENS);
+        // Large windows keep the legacy constant exactly.
+        assert_eq!(policy.tail_target_tokens(1_000_000), CONTINUITY_TAIL_TARGET_TOKENS);
+        assert_eq!(policy.tail_target_tokens(128_000), CONTINUITY_TAIL_TARGET_TOKENS);
+        // Small windows scale down so the summary survives output bounding.
+        assert_eq!(policy.tail_target_tokens(32_768), 5_242);
+        // Tiny windows keep a meaningful floor instead of collapsing to zero.
+        assert_eq!(policy.tail_target_tokens(4_096), 1_024);
+    }
+
+    #[test]
+    fn threshold_cap_only_fires_earlier() {
+        use super::CompactionRoutePolicy;
+
+        let policy = CompactionRoutePolicy::default();
+        assert_eq!(policy.apply_threshold_cap(900_000, 1_000_000), 900_000);
+        let eager = CompactionRoutePolicy {
+            threshold_ratio: 0.7,
+            ..CompactionRoutePolicy::default()
+        };
+        assert_eq!(eager.apply_threshold_cap(900_000, 1_000_000), 700_000);
+        assert_eq!(eager.apply_threshold_cap(500_000, 1_000_000), 500_000);
+        assert_eq!(eager.apply_threshold_cap(900_000, 0), 900_000);
+    }
+
+    #[test]
+    fn prune_oversized_tool_outputs_trims_only_tool_dumps() {
+        use super::{TOOL_RESULT_PRUNE_TARGET_TOKENS, prune_oversized_tool_outputs};
+
+        let user = Message::user("do the thing".to_string());
+        let mut assistant = Message::assistant("calling tool".to_string());
+        assistant.tool_calls = Some(vec![ToolCall::function(
+            "call-big".to_string(),
+            "read_file".to_string(),
+            "{}".to_string(),
+        )]);
+        let huge = {
+            let mut message = Message::tool_response("call-big".to_string(), "data ".repeat(20_000));
+            message.tool_call_id = Some("call-big".to_string());
+            message
+        };
+        let small = Message::tool_response("call-small".to_string(), "ok".to_string());
+        let history = vec![user.clone(), assistant.clone(), huge.clone(), small.clone()];
+
+        let pruned = prune_oversized_tool_outputs(&history);
+        assert_eq!(pruned.len(), history.len());
+        // Untouched roles pass through verbatim.
+        assert_eq!(pruned[0].content.as_text(), user.content.as_text());
+        assert_eq!(pruned[1].content.as_text(), assistant.content.as_text());
+        // The dump shrinks within budget while the small result is identical.
+        // Previews keep the head: the start survives, the tail does not.
+        let huge_text = huge.content.as_text();
+        let pruned_text = pruned[2].content.as_text();
+        assert!(pruned[2].estimate_tokens() < huge.estimate_tokens(), "oversized tool output must shrink");
+        assert!(
+            pruned[2].estimate_tokens() <= TOOL_RESULT_PRUNE_TARGET_TOKENS + 32,
+            "pruned output must respect the cap, used {}",
+            pruned[2].estimate_tokens()
+        );
+        assert!(pruned_text.len() < huge_text.len(), "preview must be shorter than the dump");
+        assert!(huge_text.starts_with(pruned_text.trim_end_matches('.')), "preview must be a head truncation");
+        assert_eq!(pruned[2].tool_call_id.as_deref(), Some("call-big"), "pairing ID must survive");
+        assert_eq!(pruned[3].content.as_text(), small.content.as_text());
+    }
+
+    #[tokio::test]
+    async fn capacity_retry_halves_progressively_until_recovery() {
+        use super::generate_summary_with_capacity_retry;
+
+        // Each turn is tens of thousands of tokens against a 30k budget: the
+        // first fork keeps one turn, then two halved retries shrink strictly
+        // before the third attempt succeeds.
+        let history = vec![
+            Message::user("a ".repeat(20_000)),
+            Message::user("b ".repeat(20_000)),
+            Message::user("c ".repeat(20_000)),
+        ];
+        let provider = CapacityFailOnceProvider {
+            attempts: Mutex::new(0),
+            request_tokens: Mutex::new(Vec::new()),
+            failures: 2,
+        };
+        let summary = generate_summary_with_capacity_retry(
+            &provider,
+            &history,
+            "test instructions",
+            &history,
+            Some(30_000),
+            2,
+            "Failed to generate compaction summary",
+            |source| {
+                super::compaction_summary_request("stub-model", source, "test instructions", None, None, None, None)
+            },
+        )
+        .await
+        .expect("two retries must recover the summary");
+        assert_eq!(summary, "retried summary");
+        assert_eq!(*provider.attempts.lock().unwrap(), 3, "two failures then success");
+        let tokens = provider.request_tokens.lock().unwrap().clone();
+        assert_eq!(tokens.len(), 3);
+        assert!(tokens[0] > tokens[1] && tokens[1] > tokens[2], "each retry must shrink strictly, got {tokens:?}");
     }
 
     #[tokio::test]

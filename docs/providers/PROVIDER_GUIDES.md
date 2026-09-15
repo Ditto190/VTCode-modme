@@ -255,7 +255,7 @@ replace the retained evidence or expose provider chain-of-thought.
     -   `grok-4.5` — previous flagship reasoning model, 500k context
     -   `grok-4.3` — balanced general-purpose model, 1M context
     -   `grok-build-0.1` — fast coding model for agentic software engineering, 256k context
--   **Features:** Streaming, tool calls, structured output, image input, configurable reasoning effort, and 500k-token context
+-   **Features:** Streaming, tool calls, structured output, image input, configurable reasoning effort, native `/responses/compact` compaction for curated Grok models, and 500k-token context
 
 ## Meta AI
 

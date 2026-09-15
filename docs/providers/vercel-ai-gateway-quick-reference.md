@@ -8,6 +8,7 @@
 | Endpoint override | `VERCEL_AI_GATEWAY_BASE_URL` |
 | Default model | `anthropic/claude-sonnet-5` |
 | Context | 1,000,000 tokens (Claude Sonnet 5) |
+| Compaction | Native `/responses/compact` for `openai/*` routes; local fallback otherwise |
 | Official docs | [vercel.com/docs/ai-gateway](https://vercel.com/docs/ai-gateway) |
 
 ```bash

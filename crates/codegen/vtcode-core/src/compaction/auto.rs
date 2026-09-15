@@ -114,13 +114,6 @@ pub async fn auto_compact_messages(
     else {
         return Ok(None);
     };
-    if current_token_usage < threshold && !force_compaction {
-        return Ok(None);
-    }
-
-    if *auto_compact_suppressed != SUPPRESS_NONE {
-        return Ok(None);
-    }
 
     // Use the same provider/session intersection as the trigger and preflight
     // paths. Native and local strategies must share this ceiling so a large
@@ -129,6 +122,18 @@ pub async fn auto_compact_messages(
         0 => None,
         budget => Some(budget),
     };
+    // Per-route triggers can only fire *earlier* (fail-safe); the default
+    // ratio preserves the absolute-tokens trigger unchanged.
+    let window = context_budget.unwrap_or(0);
+    let threshold = crate::compaction::CompactionRoutePolicy::resolve(provider.name(), model)
+        .apply_threshold_cap(threshold, window);
+    if current_token_usage < threshold && !force_compaction {
+        return Ok(None);
+    }
+
+    if *auto_compact_suppressed != SUPPRESS_NONE {
+        return Ok(None);
+    }
 
     let mut compaction_input = history.clone();
     strip_existing_memory_envelope(&mut compaction_input);
@@ -317,12 +322,14 @@ async fn try_two_pass_with_prefire(
 
     let effective_config =
         crate::compaction::context_bounded_compaction_config(provider, model, history, config, context_budget);
+    let tail_target = crate::compaction::route_tail_target_tokens(provider, model, context_budget);
     let compacted = build_local_compacted_history(
         history,
         &note2,
         effective_config.retained_user_message_tokens,
         effective_config.retained_user_messages,
         true,
+        tail_target,
     );
 
     Ok(Some(crate::compaction::bound_compacted_history_to_context(

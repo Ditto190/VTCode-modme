@@ -59,6 +59,30 @@ impl OpenAiCompatSpec for XaiSpec {
     }
 }
 
+impl XAIProvider {
+    /// xAI serves an OpenAI-compatible standalone compaction endpoint
+    /// (`POST /v1/responses/compact`), but only for curated Grok models on the
+    /// xAI API itself. Anything else stays on the universal local
+    /// summarization fallback.
+    fn xai_compact_model(&self, model: &str) -> bool {
+        let resolved = if model.trim().is_empty() {
+            self.core.model.as_str()
+        } else {
+            model
+        };
+        models::xai::SUPPORTED_MODELS.contains(&resolved) && self.core.base_url.contains("api.x.ai")
+    }
+
+    fn compact_client(&self, model: &str) -> crate::providers::openresponses::OpenResponsesProvider {
+        crate::providers::openresponses::OpenResponsesProvider::compact_endpoint_client(
+            &self.core.model,
+            &self.core.base_url,
+            &self.core.api_key,
+            model,
+        )
+    }
+}
+
 impl_openai_compat_provider!(XAIProvider, XaiSpec, {
     fn supports_reasoning(&self, model: &str) -> bool {
         let requested = if model.trim().is_empty() {
@@ -88,6 +112,37 @@ impl_openai_compat_provider!(XAIProvider, XaiSpec, {
                 vtcode_config::models::model_catalog_entry("xai", requested)
                     .is_some_and(|entry| !entry.reasoning_efforts.is_empty())
             })
+    }
+
+    fn supports_responses_compaction(&self, model: &str) -> bool {
+        self.xai_compact_model(model)
+    }
+
+    fn supports_manual_openai_compaction(&self, model: &str) -> bool {
+        self.xai_compact_model(model)
+    }
+
+    async fn compact_history(
+        &self,
+        model: &str,
+        history: &[crate::provider::Message],
+    ) -> Result<Vec<crate::provider::Message>, crate::provider::LLMError> {
+        if !self.xai_compact_model(model) {
+            return Err(crate::provider::LLMError::Provider {
+                message: "xAI compaction is only supported for curated Grok models on the xAI API".to_string(),
+                metadata: None,
+            });
+        }
+        self.compact_client(model).compact_history_request(model, history).await
+    }
+
+    async fn compact_history_with_options(
+        &self,
+        model: &str,
+        history: &[crate::provider::Message],
+        _options: &crate::provider::ResponsesCompactionOptions,
+    ) -> Result<Vec<crate::provider::Message>, crate::provider::LLMError> {
+        self.compact_history(model, history).await
     }
 });
 
@@ -156,5 +211,87 @@ mod tests {
         request.reasoning_effort = Some(ReasoningEffortLevel::Minimal);
         let payload = provider.core.convert_request(&request).unwrap();
         assert_eq!(payload["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn compaction_support_is_curated_grok_models_on_xai_api_only() {
+        use crate::provider::LLMProvider;
+
+        // Default xAI endpoint: curated Grok models compact natively.
+        let provider = XAIProvider::new("test-key".to_string());
+        assert!(provider.supports_responses_compaction(models::xai::DEFAULT_MODEL));
+        assert!(provider.supports_manual_openai_compaction(models::xai::DEFAULT_MODEL));
+        for model in models::xai::SUPPORTED_MODELS {
+            assert!(provider.supports_manual_openai_compaction(model), "compact support for {model}");
+        }
+        assert!(!provider.supports_native_inline_compaction(models::xai::DEFAULT_MODEL));
+    }
+
+    #[tokio::test]
+    async fn compact_history_posts_to_xai_compact_endpoint() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses/compact"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "cmp_01HZ9P0V8M2YQK3F7C4G6N5R2A",
+                "object": "response.compaction",
+                "created_at": 1748895600,
+                "model": "grok-4.6",
+                "output": [
+                    {
+                        "id": "msg_000",
+                        "type": "message",
+                        "status": "completed",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "Summarize the auth work." }]
+                    },
+                    {
+                        "id": "cmp_001",
+                        "type": "compaction",
+                        "encrypted_content": "opaque-blob"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        // The host gate only passes on the xAI API, so the transport is
+        // exercised through the compact client directly against the mock.
+        let provider = XAIProvider::new_with_client(
+            "test-key".to_string(),
+            models::xai::DEFAULT_MODEL.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let history = vec![Message::user("Summarize the auth work.".to_string())];
+        let compacted = provider
+            .compact_client(models::xai::DEFAULT_MODEL)
+            .compact_history_request(models::xai::DEFAULT_MODEL, &history)
+            .await
+            .expect("xAI compaction should succeed");
+        assert!(!compacted.is_empty());
+        assert!(
+            compacted
+                .iter()
+                .any(|message| message.content.as_text().contains("Summarize the auth work.")),
+            "retained xAI input must survive compaction"
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_history_rejects_unlisted_models() {
+        use crate::provider::LLMProvider;
+
+        let provider = XAIProvider::new("test-key".to_string());
+        assert!(!provider.supports_manual_openai_compaction("gpt-5"));
+        let history = vec![Message::user("hello".to_string())];
+        provider
+            .compact_history("gpt-5", &history)
+            .await
+            .expect_err("unlisted models must stay on local compaction");
     }
 }

@@ -70,7 +70,7 @@ impl AgentRunner {
             Ok(None) => return,
             Err(error) => {
                 warn!(
-                    error = %error,
+                    error = ?error,
                     "Automatic context compaction failed; continuing with full history"
                 );
                 return;
@@ -121,7 +121,7 @@ impl AgentRunner {
         {
             Ok(true) => info!("Context reset manifest written after compaction (mode: {})", reset_mode),
             Ok(false) => {}
-            Err(error) => warn!(error = %error, "Failed to write context reset manifest after compaction"),
+            Err(error) => warn!(error = ?error, "Failed to write context reset manifest after compaction"),
         }
 
         event_recorder.compact_boundary(
