@@ -237,13 +237,13 @@ full list.
 vtcode review
 
 # Nightly dependency audit as a durable cron job
-vtcode schedule add --cron "0 9 * * 1" "check for outdated deps and open an issue if any have CVEs"
+vtcode schedule create --cron "0 9 * * 1" --prompt "check for outdated deps and open an issue if any have CVEs"
 
 # Resume yesterday's session and fork it for a new experiment
 vtcode continue --session-id <id>
 
 # See exactly what the agent did in the last run
-vtcode trajectory --last
+vtcode trajectory
 ```
 
 ## Documentation
