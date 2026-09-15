@@ -83,15 +83,15 @@ The full documentation catalog lives in the
 Most agents are a model plus a tool call. VT Code answers each common failure
 mode with a **structural default in the runtime**, not a prompt tweak:
 
-| Failure mode                      | Structural answer                                                                                                                                                                      |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                   |
-| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out. [Architecture](./docs/ARCHITECTURE.md)                                        |
-| **One unreviewed command**        | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **A run dies mid-task**           | Durable sessions resume with `vtcode continue`, and workspace snapshots roll back with `vtcode revert` — no work is lost to a crash or a bad turn. [Commands](./docs/user-guide/commands.md) |
-| **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                            |
+| Failure mode                      | Structural answer                                                                                                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                      |
+| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out. [Architecture](./docs/ARCHITECTURE.md)                                           |
+| **One unreviewed command**        | Sandboxed, fail-closed execution, with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)   |
+| **A run dies mid-task**           | Durable sessions resume with `vtcode continue`; workspace snapshots roll back with `vtcode revert`. A crash or a bad turn never costs the work. [Commands](./docs/user-guide/commands.md) |
+| **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification — the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                              |
 
-Three foundations sit underneath all of them:
+Three foundations sit underneath every answer in that table:
 
 - **One record of truth.** A single
   [`ThreadEvent`](./crates/common/vtcode-exec-events) stream logs everything a
