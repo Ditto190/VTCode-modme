@@ -61,6 +61,9 @@ wrapper**: the model reasons; the runtime supplies everything else: tools,
 context, sandboxing, state, and **verification**: turning raw model output
 into safe, reviewable progress, entirely in your terminal.
 
+The full documentation catalog lives in the
+[docs overview](./docs/README.md).
+
 > [!NOTE]
 > **Status:** Active development. Local inference and some automation flows
 > are experimental and may change between releases.
@@ -83,11 +86,11 @@ mode with a **structural default in the runtime**, not a prompt tweak:
 | Failure mode                      | Structural answer                                                                                                                                                                          |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                       |
-| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out.                                                                                   |
+| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out. [Architecture](./docs/ARCHITECTURE.md)                                            |
 | **One unreviewed command**        | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)     |
 | **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                |
 
-Underneath all four:
+Three foundations sit underneath all four:
 
 - **One record of truth.** A single
   [`ThreadEvent`](./crates/common/vtcode-exec-events) stream logs everything a
@@ -97,8 +100,9 @@ Underneath all four:
   interface, and MCP, Skills, Plugins, ACP, A2A, and WebMCP attach as
   first-class extensions ([MCP](./docs/guides/mcp-integration.md) ·
   [Providers](./docs/providers/PROVIDER_GUIDES.md)).
-- **A keyboard-first TUI** with WCAG AA themes, gated by `cargo nextest` and
-  CI with `-D warnings` ([Testing](./docs/development/testing.md)).
+- **A keyboard-first TUI, held to the same bar.** WCAG AA themes, gated by
+  `cargo nextest` and CI with `-D warnings`
+  ([Testing](./docs/development/testing.md)).
 
 ## Architecture
 
@@ -145,6 +149,9 @@ graph LR
   rollback.
 - **Extensions and models:** attach without patching the core; swap providers
   without touching your workflow.
+
+For layer-by-layer details, extension seams, and internal composition rules,
+see the [Architecture guide](./docs/ARCHITECTURE.md).
 
 ## Quick start
 
@@ -214,6 +221,9 @@ vtcode review                     # agent review of uncommitted changes
 vtcode eval --suite suite.json    # verify behavior with pass@k metrics
 ```
 
+The complete CLI surface, flags, and exit codes are documented in the
+[command reference](./docs/user-guide/commands.md).
+
 A second tier handles session lifecycle and day-to-day operations:
 
 | Command                              | Purpose                                                                               |
@@ -245,6 +255,10 @@ vtcode continue --session-id <id>
 # See exactly what the agent did in the last run
 vtcode trajectory
 ```
+
+Headless `exec` usage is covered in the
+[exec mode guide](./docs/user-guide/exec-mode.md); durable cron schedules in
+the [scheduled tasks guide](./docs/user-guide/scheduled-tasks.md).
 
 ## Documentation
 
@@ -292,7 +306,8 @@ Contributions are welcome:
   covered by tests.
 - **Docs**: fixes and new guides in `docs/`; every user-facing feature should
   land with its documentation.
-- **Evals**: new suites and regression cases are high-leverage contributions.
+- **Evals**: new suites and regression cases are high-leverage contributions;
+  see the [eval guide](./docs/guides/eval.md) for suite authoring and metrics.
 - **Bug reports**: include `vtcode trajectory` output when possible; it makes
   runs reproducible.
 
