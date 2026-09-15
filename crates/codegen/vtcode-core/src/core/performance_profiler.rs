@@ -1,7 +1,7 @@
 //! Performance benchmarking and profiling tools for VT Code optimizations
 
 use crate::utils::file_utils::write_file_with_context;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -100,11 +100,11 @@ struct MonitorTask {
 }
 
 impl MonitorTask {
-    fn stop_and_join(self) -> Result<()> {
+    fn stop_and_join(self) {
         let _ = self.stop_sender.send(());
-        self.handle
-            .join()
-            .map_err(|panic| anyhow::anyhow!("resource monitor thread panicked: {panic:?}"))
+        if self.handle.join().is_err() {
+            tracing::warn!("vtcode performance monitor thread panicked during shutdown");
+        }
     }
 }
 
@@ -317,7 +317,7 @@ impl Drop for ResourceMonitor {
             Err(poisoned) => poisoned.into_inner().take(),
         };
         if let Some(task) = task {
-            let _ = task.stop_and_join();
+            task.stop_and_join();
         }
     }
 }
@@ -334,10 +334,7 @@ impl ResourceMonitor {
 
     /// Start resource monitoring
     pub async fn start_monitoring(&self) -> Result<()> {
-        let mut task_slot = self
-            .monitor_task
-            .lock()
-            .map_err(|error| anyhow::anyhow!("resource monitor state lock poisoned: {error}"))?;
+        let mut task_slot = self.monitor_task.lock().unwrap_or_else(|e| e.into_inner());
         if task_slot.is_some() {
             return Ok(()); // Already monitoring
         }
@@ -359,7 +356,7 @@ impl ResourceMonitor {
                     }
                 }
             })
-            .with_context(|| "failed to spawn resource monitor thread")?;
+            .map_err(|error| anyhow::Error::new(error).context("failed to spawn resource monitor thread"))?;
 
         *task_slot = Some(MonitorTask { stop_sender, handle: monitor_thread });
         Ok(())
@@ -367,14 +364,11 @@ impl ResourceMonitor {
 
     /// Stop resource monitoring
     pub async fn stop_monitoring(&self) -> Result<()> {
-        let mut task_slot = self
-            .monitor_task
-            .lock()
-            .map_err(|error| anyhow::anyhow!("resource monitor state lock poisoned: {error}"))?;
+        let mut task_slot = self.monitor_task.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(task) = task_slot.take() {
             // Keep the slot locked until the worker exits so a concurrent
             // start cannot replace a worker that is still winding down.
-            task.stop_and_join()?;
+            task.stop_and_join();
         }
         Ok(())
     }
@@ -399,33 +393,7 @@ impl ResourceMonitor {
 
     /// Get current memory usage in MB
     fn get_memory_usage_mb() -> f64 {
-        let contents: Option<String> = {
-            #[cfg(target_os = "linux")]
-            {
-                std::fs::read_to_string("/proc/self/status").ok()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                None
-            }
-        };
-        if let Some(contents) = contents
-            && let Some(memory_used_mb) = Self::parse_memory_usage_mb(&contents)
-        {
-            return memory_used_mb;
-        }
-
-        // Fallback estimation
-        100.0
-    }
-
-    fn parse_memory_usage_mb(contents: &str) -> Option<f64> {
-        contents.lines().find_map(|line| {
-            line.strip_prefix("VmRSS:")
-                .and_then(|value| value.split_whitespace().next())
-                .and_then(|kb| kb.parse::<f64>().ok())
-                .map(|kb| kb / 1024.0)
-        })
+        vtcode_commons::memory::sample_rss_mb()
     }
 
     /// Get current CPU usage percentage
@@ -564,12 +532,6 @@ mod tests {
         assert!(results.avg_duration_ns > 0);
 
         Ok(())
-    }
-
-    #[test]
-    fn parses_linux_memory_usage() {
-        let contents = "Name:\tvtcode\nVmRSS:\t2048 kB\n";
-        assert_eq!(ResourceMonitor::parse_memory_usage_mb(contents), Some(2.0));
     }
 
     #[tokio::test]
