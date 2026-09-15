@@ -907,6 +907,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Principles, Lifecycle, Evidence-bounded replanning, Cross-references
   - **User Questions**: "What can you tell me about PLAN Loop Engineering?", "How does Principles work?", "How does Lifecycle work?"
 
+- **File**: `docs/project/PLAN-compaction-summary-fix.md`
+  - **Content**: PLAN: `/compact` "Failed to generate compaction summary"
+  - **Topics**: Root cause, Evidence, Changes applied, Remaining work, Gotchas discovered
+  - **User Questions**: "What can you tell me about PLAN: `/compact` \"Failed to generate compaction summary\"?", "How does Root cause work?", "How does Evidence work?"
+
 - **File**: `docs/pty/PTY_ANSI_HANDLING.md`
   - **Content**: PTY Output ANSI Handling
   - **Topics**: Overview, Architecture, ANSI Parser Implementation, Data Flow, Testing

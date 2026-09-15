@@ -4,7 +4,6 @@ use tokio::sync::Notify;
 
 use tracing::warn;
 
-use vtcode_config::constants::ui;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 use vtcode_core::llm::provider::{self as uni};
@@ -18,7 +17,7 @@ use crate::agent::runloop::unified::palettes::{
     ActivePalette, MODE_ACTION_PREFIX, handle_palette_cancel, handle_palette_preview, handle_palette_selection,
     show_fork_mode_palette, show_sessions_palette, show_theme_palette,
 };
-use crate::agent::runloop::unified::planning_workflow::PlanExecutionContext;
+use crate::agent::runloop::unified::planning_workflow::{PlanExecutionContext, PlanExecutionTarget};
 use crate::agent::runloop::unified::settings_interactive::{
     ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, show_settings_palette,
 };
@@ -105,13 +104,29 @@ impl<'a> InlineModalProcessor<'a> {
         // Handle plan approval selections (Claude Code style HITL)
         match &selection {
             InlineListSelection::PlanApprovalExecute => {
-                return Ok(InlineLoopAction::PlanApproved { execution_context: PlanExecutionContext::Current });
+                return Ok(InlineLoopAction::PlanApproved {
+                    target: PlanExecutionTarget::build(PlanExecutionContext::Current, false),
+                });
             }
             InlineListSelection::PlanApprovalFreshContext => {
-                return Ok(InlineLoopAction::PlanApproved { execution_context: PlanExecutionContext::Fresh });
+                return Ok(InlineLoopAction::PlanApproved {
+                    target: PlanExecutionTarget::build(PlanExecutionContext::Fresh, false),
+                });
             }
             InlineListSelection::PlanApprovalAutoAccept => {
-                return Ok(InlineLoopAction::PlanApproved { execution_context: PlanExecutionContext::Current });
+                return Ok(InlineLoopAction::PlanApproved {
+                    target: PlanExecutionTarget::build(PlanExecutionContext::Current, false),
+                });
+            }
+            InlineListSelection::PlanApprovalSwitchBuild => {
+                return Ok(InlineLoopAction::PlanApproved {
+                    target: PlanExecutionTarget::build(PlanExecutionContext::Current, false),
+                });
+            }
+            InlineListSelection::PlanApprovalSwitchAuto => {
+                return Ok(InlineLoopAction::PlanApproved {
+                    target: PlanExecutionTarget::auto(PlanExecutionContext::Current),
+                });
             }
             InlineListSelection::PlanApprovalEditPlan | InlineListSelection::PlanApprovalDiscuss => {
                 return Ok(InlineLoopAction::PlanEditRequested);
@@ -170,9 +185,9 @@ impl<'a> InlineModalProcessor<'a> {
             return Ok(InlineLoopAction::Continue);
         }
 
-        // Update header in real-time when the plan approval selection changes
-        // so the user sees which mode they're about to enter.
-        update_header_for_plan_selection(&selection, self.model_picker.header_context, self.model_picker.handle);
+        // Keep the active agent badge stable while approval owns input. The
+        // session loop updates it only after the selected agent's permissions
+        // and tool catalog have been refreshed.
 
         self.palette.handle_preview(renderer, selection)
     }
@@ -606,31 +621,6 @@ impl<'a> ModelPickerCoordinator<'a> {
 
         Ok(false)
     }
-}
-
-/// Update the header to reflect the pending plan approval selection.
-///
-/// When the user navigates the plan confirmation overlay (Up/Down arrows),
-/// the header agent badge updates in real-time to show which mode the
-/// current selection implies:
-/// - Execute / AutoAccept → "build" (execution mode)
-/// - EditPlan → "plan" (planning mode)
-fn update_header_for_plan_selection(
-    selection: &InlineListSelection,
-    header_context: &mut InlineHeaderContext,
-    handle: &InlineHandle,
-) {
-    let (name, color) = match selection {
-        InlineListSelection::PlanApprovalExecute | InlineListSelection::PlanApprovalAutoAccept => {
-            (Some("build".to_string()), Some(ui::AGENT_COLOR_BUILD.to_string()))
-        }
-        InlineListSelection::PlanApprovalEditPlan => (Some("plan".to_string()), Some(ui::AGENT_COLOR_PLAN.to_string())),
-        _ => return,
-    };
-
-    header_context.primary_agent = name.clone();
-    header_context.primary_agent_color = color.clone();
-    handle.set_primary_agent(name, color);
 }
 
 enum ModelPickerOutcome {

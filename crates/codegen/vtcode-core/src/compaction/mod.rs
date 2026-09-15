@@ -174,6 +174,128 @@ pub fn build_cache_safe_compaction_history(history: &[Message], compaction_promp
     forked
 }
 
+/// Bound the summarizer's input to the resolved context budget.
+///
+/// The local-summary path forks the parent's entire conversation verbatim and
+/// appends the compaction instruction, but nothing bounded that fork. On a
+/// near-full context (the normal reason to run `/compact`) or after switching
+/// to a model with a smaller window, the summary request itself exceeded the
+/// summarizer's window and the provider rejected it, failing the whole
+/// compaction. The output side is already bounded by
+/// [`bound_compacted_history_to_context`], so bound the input the same way:
+/// keep the newest complete protocol groups that fit and drop the oldest.
+///
+/// Returns the history to append the instruction to (see
+/// [`build_cache_safe_compaction_history`]), not the finished fork.
+fn bound_history_for_summarization(history: &[Message], instructions: &str, budget: Option<usize>) -> Vec<Message> {
+    let Some(budget) = budget.filter(|value| *value > 0) else {
+        return history.to_vec();
+    };
+    let instruction_tokens = Message::user(instructions.to_string()).estimate_tokens();
+    let history_budget = budget.saturating_sub(instruction_tokens).max(4);
+    let total_tokens = history.iter().map(Message::estimate_tokens).sum::<usize>();
+    if total_tokens <= history_budget {
+        return history.to_vec();
+    }
+
+    let group_starts: Vec<usize> = history
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| (message.role == MessageRole::User).then_some(index))
+        .collect();
+    let last_group_index = group_starts.len().saturating_sub(1);
+
+    let mut selected_start = history.len();
+    let mut selected_end = history.len();
+    let mut selected_tokens = 0usize;
+    for position in (0..group_starts.len()).rev() {
+        let start = group_starts[position];
+        let natural_end = group_starts.get(position + 1).copied().unwrap_or(history.len());
+        // The trailing group may end on an unanswered tool call; drop that
+        // invalid protocol suffix instead of shipping it to the provider.
+        let end = if position == last_group_index {
+            start.saturating_add(complete_protocol_group_prefix(&history[start..natural_end]))
+        } else {
+            natural_end
+        };
+        if start >= end {
+            continue;
+        }
+        let group_tokens = history[start..end].iter().map(Message::estimate_tokens).sum::<usize>();
+        if selected_tokens.saturating_add(group_tokens) > history_budget {
+            break;
+        }
+        if selected_start == history.len() {
+            selected_end = end;
+        }
+        selected_tokens += group_tokens;
+        selected_start = start;
+    }
+
+    if selected_start >= selected_end {
+        // No complete protocol group fits (for example a single oversized tool
+        // result). Degrade to protocol-bounded previews so the request still
+        // goes out instead of failing the entire compaction.
+        return bounded_protocol_group(history, history_budget);
+    }
+    history[selected_start..selected_end].to_vec()
+}
+
+#[cfg(test)]
+mod summarization_fork_bounds_tests {
+    use super::{Message, bound_history_for_summarization};
+
+    const INSTRUCTIONS: &str = "Summarize now.";
+
+    fn total_tokens(messages: &[Message]) -> usize {
+        messages.iter().map(Message::estimate_tokens).sum()
+    }
+
+    #[test]
+    fn keeps_history_verbatim_when_it_already_fits() {
+        let history = vec![Message::user("a".repeat(4_000)), Message::user("b".repeat(4_000))];
+        let bounded = bound_history_for_summarization(&history, INSTRUCTIONS, Some(10_000_000));
+        assert_eq!(bounded.len(), history.len());
+        assert_eq!(total_tokens(&bounded), total_tokens(&history));
+    }
+
+    #[test]
+    fn keeps_history_verbatim_when_budget_is_unknown() {
+        let history = vec![Message::user("x".repeat(40_000))];
+        let bounded = bound_history_for_summarization(&history, INSTRUCTIONS, None);
+        assert_eq!(bounded.len(), 1);
+        assert_eq!(total_tokens(&bounded), total_tokens(&history));
+    }
+
+    #[test]
+    fn trims_oldest_groups_when_over_budget_and_keeps_the_newest_turn() {
+        let history = vec![
+            Message::user("old".repeat(2_000)),
+            Message::user("middle".repeat(2_000)),
+            Message::user("newest".repeat(64)),
+        ];
+        // Derive the limit from the measured fixture so this remains a
+        // genuine over-budget case across tokenizer changes.
+        let budget = total_tokens(&history).saturating_sub(1);
+        let bounded = bound_history_for_summarization(&history, INSTRUCTIONS, Some(budget));
+        assert!(bounded.len() < history.len(), "expected trimming, kept {}", bounded.len());
+        assert_eq!(
+            bounded.last().unwrap().content.as_text().as_ref(),
+            history.last().unwrap().content.as_text().as_ref(),
+            "the newest turn must survive the trim"
+        );
+        assert!(total_tokens(&bounded) <= budget);
+    }
+
+    #[test]
+    fn falls_back_to_protocol_previews_when_no_group_fits() {
+        let history = vec![Message::user("x".repeat(40_000))];
+        let bounded = bound_history_for_summarization(&history, INSTRUCTIONS, Some(600));
+        assert_eq!(bounded.len(), 1);
+        assert!(total_tokens(&bounded) < total_tokens(&history), "an oversized single group must still be reduced");
+    }
+}
+
 /// Build a cache-safe local-summary request that reuses the parent prefix.
 /// `tool_choice` is forced to `none` so the summarizer cannot spend the
 /// compaction pass on tool calls while the system/tools/messages prefix
@@ -253,7 +375,16 @@ pub async fn compact_history_with_budget(
     // uncached input rate). No parent system/tools are available on this
     // legacy path; callers with a request envelope should prefer
     // `compact_history_manual_with_parent_context`.
-    let request = compaction_summary_request(model, history, &effective_config.summary_prompt, None, None, None, None);
+    // Bound the fork so the summary request itself fits the summarizer window;
+    // an unbounded fork is what made `/compact` fail on near-full or
+    // smaller-window (model-switch) histories.
+    let summary_source = bound_history_for_summarization(
+        history,
+        &effective_config.summary_prompt,
+        compaction_history_budget(provider, model, context_budget),
+    );
+    let request =
+        compaction_summary_request(model, &summary_source, &effective_config.summary_prompt, None, None, None, None);
 
     let response = provider
         .generate(request)
@@ -599,9 +730,17 @@ async fn summarize_locally(
         &config.clone().with_manual_overrides(options),
         context_budget,
     );
+    // Bound the fork so the summary request itself fits the summarizer window.
+    // `/compact` is normally run when the context is already near full, so an
+    // unbounded fork is rejected by the provider and the whole command fails.
+    let summary_source = bound_history_for_summarization(
+        history,
+        &effective_config.summary_prompt,
+        compaction_history_budget(provider, model, context_budget),
+    );
     let request = compaction_summary_request(
         model,
-        history,
+        &summary_source,
         &effective_config.summary_prompt,
         options.max_output_tokens,
         options.reasoning_effort,

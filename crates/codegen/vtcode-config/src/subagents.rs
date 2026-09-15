@@ -2275,6 +2275,26 @@ Hook prompt"#,
     }
 
     #[test]
+    fn build_and_auto_primary_agents_have_identical_tool_authority() {
+        let builtins = builtin_subagents();
+        let build = builtins.iter().find(|spec| spec.name == "build").expect("missing build");
+        let auto = builtins.iter().find(|spec| spec.name == "auto").expect("missing auto");
+
+        assert_eq!(build.tools, auto.tools);
+        assert_eq!(build.disallowed_tools, auto.disallowed_tools);
+        assert_eq!(build.tool_policy_overrides, auto.tool_policy_overrides);
+        assert_eq!(build.mode, auto.mode);
+        assert_eq!(build.mcp_servers, auto.mcp_servers);
+        assert_eq!(build.skills, auto.skills);
+        assert_eq!(build.permissions.allow, auto.permissions.allow);
+        assert_eq!(build.permissions.ask, auto.permissions.ask);
+        assert_eq!(build.permissions.auto, auto.permissions.auto);
+        assert_eq!(build.permissions.deny, auto.permissions.deny);
+        assert_eq!(build.permissions.default, PermissionDefault::Ask);
+        assert_eq!(auto.permissions.default, PermissionDefault::Auto);
+    }
+
+    #[test]
     fn ask_default_mutating_builtins_are_not_read_only() {
         let builtins = builtin_subagents();
 

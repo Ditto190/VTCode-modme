@@ -12,6 +12,11 @@
 
 Primary-agent selection still works normally. If you explicitly select or configure a primary agent, including `duck`, full-auto runs on top of that agent. If no primary agent is explicitly selected or configured, VT Code selects the effective `auto` primary agent. If full-auto needs that defaulted `auto` agent and no effective `auto` exists, startup fails fast.
 
+When an approved plan enters execution, Auto is a confirmation policy choice,
+not an authority upgrade. Build and Auto expose the same tools and safety
+gates; command/path policy, verification requirements, blocked-call fuses,
+budgets, and recovery limits remain unchanged.
+
 ## Activation Checklist
 
 1. **Update `vtcode.toml`**

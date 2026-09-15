@@ -832,8 +832,8 @@ pub(super) async fn resolve_inline_loop_action(
             InlineLoopActionResolution::ContinueLoop
         }
         InlineLoopAction::Exit(reason) => InlineLoopActionResolution::Outcome(InteractionOutcome::Exit { reason }),
-        InlineLoopAction::PlanApproved { execution_context } => {
-            let message = match execution_context {
+        InlineLoopAction::PlanApproved { target } => {
+            let message = match target.execution_context {
                 crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current => {
                     "Plan approved. Starting execution in the current context."
                 }
@@ -842,14 +842,7 @@ pub(super) async fn resolve_inline_loop_action(
                 }
             };
             ctx.renderer.line(MessageStyle::Info, message)?;
-            let execution_agent = ctx
-                .plan_session
-                .execution_agent_after_approval(ctx.active_primary_agent.active().name());
-            InlineLoopActionResolution::Outcome(InteractionOutcome::PlanApproved {
-                execution_context,
-                skip_confirmations: ctx.skip_confirmations,
-                execution_agent,
-            })
+            InlineLoopActionResolution::Outcome(InteractionOutcome::PlanApproved { target })
         }
         InlineLoopAction::PlanEditRequested => {
             ctx.renderer

@@ -585,9 +585,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 &mut plan_session,
                                 &handle,
                                 plan,
-                                active_primary_agent.active().name(),
-                                session_skip_confirmations,
-                                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                                crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget::build(
+                                    crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                                    session_skip_confirmations,
+                                ),
                             )
                             .await
                         {
@@ -792,17 +793,81 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         turn_id = next_turn_id;
                         (input, prompt_message_index)
                     }
-                    InteractionOutcome::PlanApproved {
-                        execution_context,
-                        skip_confirmations,
-                        execution_agent,
-                    } => {
+                    InteractionOutcome::PlanApproved { target } => {
                         // This approval path starts the implementation turn in
                         // the same outer iteration, so mark it before the
                         // HarnessTurnState is constructed below. The queued
                         // approval path sets the equivalent flag on the next
                         // iteration.
                         executing_approved_plan = true;
+                        let plan = match crate::agent::runloop::unified::planning_workflow::load_plan_text_for_approval(
+                            &tool_registry,
+                        )
+                        .await
+                        {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                handle.set_activity_state(ActivityState::Idle);
+                                harness_try!(renderer.line(
+                                    MessageStyle::Error,
+                                    &format!("Approved-plan execution is blocked: {error}. The plan was retained; please retry approval."),
+                                ));
+                                transition_to_planning_workflow(
+                                    &tool_registry,
+                                    &mut session_stats,
+                                    &mut plan_session,
+                                    &handle,
+                                    PlanningEntrySource::AgentSelection,
+                                    Some(active_primary_agent.active().name().to_string()),
+                                    vt_cfg.as_ref().map(|cfg| cfg.default_primary_agent.clone()),
+                                    false,
+                                    false,
+                                )
+                                .await;
+                                continue;
+                            }
+                        };
+                        if let Err(error) =
+                            crate::agent::runloop::unified::planning_workflow::complete_approved_plan_handoff(
+                                &tool_registry,
+                                &mut plan_session,
+                                &handle,
+                                plan,
+                                target,
+                            )
+                            .await
+                        {
+                            handle.set_activity_state(ActivityState::Idle);
+                            harness_try!(renderer.line(
+                                MessageStyle::Error,
+                                &format!("Approved-plan execution is blocked: {error}. The plan was retained; please retry approval."),
+                            ));
+                            transition_to_planning_workflow(
+                                &tool_registry,
+                                &mut session_stats,
+                                &mut plan_session,
+                                &handle,
+                                PlanningEntrySource::AgentSelection,
+                                Some(active_primary_agent.active().name().to_string()),
+                                vt_cfg.as_ref().map(|cfg| cfg.default_primary_agent.clone()),
+                                false,
+                                false,
+                            )
+                            .await;
+                            continue;
+                        }
+                        crate::agent::runloop::unified::planning_workflow::resolve_plan_approval(
+                            &mut plan_session,
+                            harness_emitter.as_ref(),
+                            &turn_run_id.0,
+                            &turn_id,
+                            crate::agent::runloop::unified::planning_workflow::plan_approval_decision_for_target(
+                                target,
+                            ),
+                            false,
+                        );
+                        let execution_context = target.execution_context;
+                        let skip_confirmations = target.skip_confirmations;
                         let fresh_context = matches!(
                             execution_context,
                             crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Fresh
@@ -846,34 +911,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         );
                         let previous_context_usage_percent =
                             context_manager.context_usage_percent(current_context_budget);
-                        if fresh_context {
-                            handle.set_activity_state(ActivityState::RestoringApprovedPlan);
-                            runtime.clear_pending_follow_up_inputs();
-                            runtime.state.clear_conversation_history();
-                            context_manager.reset_for_fresh_execution();
-                            session_stats.reset_for_fresh_execution();
-                            let build_tool_limit = effective_max_tool_calls_for_approved_plan_execution(
-                                harness_config.max_tool_calls_per_turn,
-                            );
-                            let max_session_turns = vt_cfg
-                                .as_ref()
-                                .map(|cfg| cfg.agent.max_conversation_turns)
-                                .unwrap_or(vtcode_config::constants::defaults::DEFAULT_MAX_CONVERSATION_TURNS);
-                            let (max_per_turn, max_per_session) =
-                                resolve_safety_tool_call_limits(build_tool_limit, max_session_turns, false);
-                            safety_validator.reset_for_fresh_execution(max_per_turn, max_per_session);
-                            crate::agent::runloop::unified::planning_workflow::emit_context_reset(
-                                harness_emitter.as_ref(),
-                                turn_run_id.0.clone(),
-                                turn_id.clone(),
-                                previous_context_usage_percent,
-                            );
-                        }
                         let configured_default = vt_cfg
                             .as_ref()
                             .map(|cfg| cfg.default_primary_agent.as_str())
                             .filter(|name| !name.trim().is_empty());
-                        let requested_agent = execution_agent.as_deref();
+                        let requested_agent = Some(target.agent_name());
                         let resolved_execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,
@@ -979,6 +1021,29 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             tracing::error!(error = %err, "approved-plan runtime restoration failed");
                             session_end_reason = SessionEndReason::Error;
                             break;
+                        }
+                        if fresh_context {
+                            handle.set_activity_state(ActivityState::RestoringApprovedPlan);
+                            runtime.clear_pending_follow_up_inputs();
+                            runtime.state.clear_conversation_history();
+                            context_manager.reset_for_fresh_execution();
+                            session_stats.reset_for_fresh_execution();
+                            let build_tool_limit = effective_max_tool_calls_for_approved_plan_execution(
+                                harness_config.max_tool_calls_per_turn,
+                            );
+                            let max_session_turns = vt_cfg
+                                .as_ref()
+                                .map(|cfg| cfg.agent.max_conversation_turns)
+                                .unwrap_or(vtcode_config::constants::defaults::DEFAULT_MAX_CONVERSATION_TURNS);
+                            let (max_per_turn, max_per_session) =
+                                resolve_safety_tool_call_limits(build_tool_limit, max_session_turns, false);
+                            safety_validator.reset_for_fresh_execution(max_per_turn, max_per_session);
+                            crate::agent::runloop::unified::planning_workflow::emit_context_reset(
+                                harness_emitter.as_ref(),
+                                turn_run_id.0.clone(),
+                                turn_id.clone(),
+                                previous_context_usage_percent,
+                            );
                         }
                         let execution_display = active_primary_agent.active().display_name.clone();
                         let execution_color =
@@ -1156,9 +1221,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             turn_touched_files: std::collections::BTreeSet::new(),
                             turn_diagnostics: aborted_turn_diagnostics.unwrap_or_default(),
                             pending_primary_agent: None,
-                            pending_plan_auto_accept: false,
-                            pending_plan_execution_context:
-                                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                            pending_plan_execution_target: None,
                             plan_approved_execution_pending: false,
                             final_response_was_fallback: false,
                         }
@@ -1197,9 +1260,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 let outcome_result = outcome.result.clone();
                 let execution_modified_files = outcome.turn_modified_files.clone();
                 let switch_primary_agent = outcome.pending_primary_agent.clone();
-                let has_primary_agent_switch = switch_primary_agent.is_some();
-                let plan_auto_accept = outcome.pending_plan_auto_accept;
-                let plan_execution_context = outcome.pending_plan_execution_context;
+                let plan_execution_target = outcome.pending_plan_execution_target;
+                let has_primary_agent_switch = switch_primary_agent.is_some() || plan_execution_target.is_some();
+                let plan_execution_context = plan_execution_target.map_or(
+                    crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                    |target| target.execution_context,
+                );
+                let plan_skip_confirmations = plan_execution_target.is_some_and(|target| target.skip_confirmations);
                 let plan_approved_execution_pending = outcome.plan_approved_execution_pending;
                 let final_response_was_fallback = outcome.final_response_was_fallback;
                 last_turn_result = Some(outcome_result.clone());
@@ -1248,7 +1315,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // `InteractionLoopContext`, which is unavailable here because the
                 // plan-confirmation popup is rendered inside the turn loop rather
                 // than the inline interaction loop.
-                if let Some(requested_agent) = switch_primary_agent {
+                let requested_agent_for_handoff = plan_execution_target
+                    .map(|target| target.agent_name().to_owned())
+                    .or(switch_primary_agent);
+                if let Some(requested_agent) = requested_agent_for_handoff {
                     let configured_default = vt_cfg
                         .as_ref()
                         .map(|cfg| cfg.default_primary_agent.as_str())
@@ -1277,7 +1347,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     // name, owns confirmation policy. This keeps a manual
                     // Execute/Switch Build handoff prompting even if an
                     // earlier agent or fallback happens to be named `auto`.
-                    session_skip_confirmations = plan_auto_accept;
+                    session_skip_confirmations = plan_skip_confirmations;
                     handle.set_skip_confirmations(session_skip_confirmations);
                     sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
                     apply_primary_agent_tool_policy_overrides(&tool_registry, active_primary_agent.active()).await;
@@ -1307,7 +1377,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     persist_primary_agent(&mut session_archive, &active_primary_agent);
                 }
                 if plan_approved_execution_pending && !has_primary_agent_switch {
-                    session_skip_confirmations = plan_auto_accept;
+                    session_skip_confirmations = plan_skip_confirmations;
                     handle.set_skip_confirmations(session_skip_confirmations);
                 }
                 if plan_approved_execution_pending {

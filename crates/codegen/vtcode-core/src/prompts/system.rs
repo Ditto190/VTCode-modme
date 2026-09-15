@@ -2043,6 +2043,7 @@ Use a skill only when the user names it or the task clearly matches. Load detail
 - Run verifiers unpiped — standalone or pure `&&`; `|`/`;`/`||` masks the exit status so piped checks stay unverified; prefer `max_output_tokens`.
 - `code_search`: omit unused filters; no empty values (`path: ""`).
 - Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{"query":"TurnLoop","path":"src","result_types":["definition"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`. Use `exec_command` or a skill for syntax patterns.
+- Build and Auto share tools and safety gates; Auto changes confirmation behavior only after explicit approval or full-auto policy.
 - On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call. Run one verifier (`&&` chain, no pipes), then synthesize.
 - Run independent tools in parallel when inputs do not depend on each other.
 

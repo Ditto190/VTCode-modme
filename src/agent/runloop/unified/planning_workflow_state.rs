@@ -1,7 +1,6 @@
 use crate::agent::runloop::unified::state::SessionStats;
 use anyhow::Result;
 use vtcode_commons::ui_protocol::ActivityState;
-use vtcode_config::builtin_primary_build_agent;
 use vtcode_core::core::interfaces::session::PlanningEntrySource;
 use vtcode_core::tools::registry::ToolRegistry;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
@@ -111,6 +110,14 @@ impl PlanningWorkflowSessionState {
         self.previous_primary_agent = None;
         self.fallback_primary_agent = None;
         self.pending_approval = None;
+    }
+
+    /// Leave Planning after the artifact/tracker handoff while retaining the
+    /// approval identity until the caller emits its resolved event.
+    pub(crate) fn exit_preserving_pending_approval(&mut self) {
+        let pending_approval = self.pending_approval.take();
+        self.exit();
+        self.pending_approval = pending_approval;
     }
 
     #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
@@ -264,31 +271,6 @@ impl PlanningWorkflowSessionState {
         self.fallback_primary_agent = agent.filter(|name| !name.trim().is_empty());
     }
 
-    pub(crate) fn previous_primary_agent(&self) -> Option<&str> {
-        self.previous_primary_agent.as_deref()
-    }
-
-    /// Resolve the primary agent that should execute an approved plan.
-    ///
-    /// Planning may be entered from an execution agent or by selecting the
-    /// dedicated `plan` agent. Keep this decision at the planning-state
-    /// boundary so inline, headless, and automatic approval paths cannot drift
-    /// into different handoff behavior.
-    pub(crate) fn execution_agent_after_approval(&self, active_agent_name: &str) -> Option<String> {
-        if let Some(previous) = self
-            .previous_primary_agent()
-            .filter(|agent| !agent.eq_ignore_ascii_case(active_agent_name) && !agent.eq_ignore_ascii_case("plan"))
-        {
-            return Some(previous.to_owned());
-        }
-
-        active_agent_name.eq_ignore_ascii_case("plan").then(|| {
-            self.fallback_primary_agent
-                .clone()
-                .unwrap_or_else(|| builtin_primary_build_agent().name)
-        })
-    }
-
     pub(crate) fn mark_plan_approval_pending(&mut self, thread_id: String, turn_id: String) {
         self.pending_approval = Some(PendingPlanApproval { thread_id, turn_id });
     }
@@ -381,7 +363,11 @@ pub(crate) async fn finish_planning_workflow(
         plan_state.set_plan_file(None).await;
     }
 
-    plan_session.exit();
+    if reason == PlanningFinishReason::Approved {
+        plan_session.exit_preserving_pending_approval();
+    } else {
+        plan_session.exit();
+    }
     handle.set_activity_state(ActivityState::Idle);
     handle.force_redraw();
     Ok(tracker)
@@ -559,44 +545,28 @@ mod tests {
     }
 
     #[test]
-    fn previous_primary_agent_is_retained_only_for_active_planning_session() {
-        let mut state = PlanningWorkflowSessionState::default();
-        state.enter(PlanningEntrySource::AgentSelection);
-        state.set_previous_primary_agent(Some("build".to_string()));
-
-        assert_eq!(state.previous_primary_agent(), Some("build"));
-
-        state.exit();
-        assert_eq!(state.previous_primary_agent(), None);
-    }
-
-    #[test]
-    fn approved_plan_restores_prior_agent_or_falls_back_from_plan_agent() {
-        let mut state = PlanningWorkflowSessionState::default();
-        state.enter(PlanningEntrySource::AgentSuggestion);
-        state.set_previous_primary_agent(Some("auto".to_string()));
-
-        assert_eq!(state.execution_agent_after_approval("plan"), Some("auto".to_string()));
-
-        state.set_previous_primary_agent(None);
-        assert_eq!(state.execution_agent_after_approval("plan"), Some("build".to_string()));
-        assert_eq!(state.execution_agent_after_approval("auto"), None);
-    }
-
-    #[test]
-    fn configured_execution_fallback_wins_over_builtin_build() {
-        let mut state = PlanningWorkflowSessionState::default();
-        state.enter(PlanningEntrySource::UserRequest);
-        state.set_fallback_primary_agent(Some("duck".to_string()));
-
-        assert_eq!(state.execution_agent_after_approval("plan"), Some("duck".to_string()));
-    }
-
-    #[test]
     fn pending_approval_identity_is_consumed_once() {
         let mut state = PlanningWorkflowSessionState::default();
         state.enter(PlanningEntrySource::UserRequest);
         state.mark_plan_approval_pending("thread-1".to_string(), "turn-2".to_string());
+
+        assert_eq!(
+            state.take_pending_plan_approval(),
+            Some(super::PendingPlanApproval {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-2".to_string(),
+            })
+        );
+        assert_eq!(state.take_pending_plan_approval(), None);
+    }
+
+    #[test]
+    fn approved_exit_preserves_pending_identity_until_resolution() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::UserRequest);
+        state.mark_plan_approval_pending("thread-1".to_string(), "turn-2".to_string());
+
+        state.exit_preserving_pending_approval();
 
         assert_eq!(
             state.take_pending_plan_approval(),

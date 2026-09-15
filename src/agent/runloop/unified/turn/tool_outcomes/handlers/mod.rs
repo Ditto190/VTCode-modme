@@ -410,6 +410,12 @@ pub(super) enum ValidationTransition {
     Return(Option<TurnHandlerOutcome>),
 }
 
+pub(crate) enum MutationVerificationResult {
+    Allowed,
+    Blocked,
+    Outcome(TurnHandlerOutcome),
+}
+
 pub(super) fn finalize_validation_result(
     ctx: &mut TurnProcessingContext<'_>,
     tool_call_id: &str,
@@ -592,8 +598,11 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
     use crate::agent::runloop::unified::run_loop_context::TurnPhase;
     t_ctx.ctx.set_phase(TurnPhase::ExecutingTools);
 
-    if block_mutation_until_verification(t_ctx.ctx, t_ctx.repeated_tool_attempts, tool_call_id, tool_name, args_val)? {
-        return Ok(None);
+    match block_mutation_until_verification(t_ctx.ctx, t_ctx.repeated_tool_attempts, tool_call_id, tool_name, args_val)?
+    {
+        MutationVerificationResult::Allowed => {}
+        MutationVerificationResult::Blocked => return Ok(None),
+        MutationVerificationResult::Outcome(outcome) => return Ok(Some(outcome)),
     }
 
     // 1. Validate (Circuit Breaker, Rate Limit, Loop Detection, Safety, Permission)
@@ -608,14 +617,16 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
     // A PreToolUse hook may have rewritten the arguments inside validate_tool_call;
     // re-evaluate the mutation guard against the arguments that will actually
     // execute, so a rewrite cannot turn a read-only call into an unguarded mutation.
-    if block_mutation_until_verification(
+    match block_mutation_until_verification(
         t_ctx.ctx,
         t_ctx.repeated_tool_attempts,
         tool_call_id,
         &prepared.canonical_name,
         &prepared.effective_args,
     )? {
-        return Ok(None);
+        MutationVerificationResult::Allowed => {}
+        MutationVerificationResult::Blocked => return Ok(None),
+        MutationVerificationResult::Outcome(outcome) => return Ok(Some(outcome)),
     }
 
     if let Some(signature) = shell_run_signature(&prepared.canonical_name, &prepared.effective_args) {
@@ -647,9 +658,9 @@ pub(crate) fn block_mutation_until_verification(
     tool_call_id: &str,
     tool_name: &str,
     args_val: &serde_json::Value,
-) -> Result<bool> {
+) -> Result<MutationVerificationResult> {
     if !mutation_blocked_until_verification(repeated_tool_attempts, tool_name, args_val) {
-        return Ok(false);
+        return Ok(MutationVerificationResult::Allowed);
     }
 
     let pending_mutations =
@@ -688,6 +699,33 @@ pub(crate) fn block_mutation_until_verification(
         ctx.renderer.line(MessageStyle::Warning, &message)?;
         repeated_tool_attempts.verification_block_notice_emitted = true;
     }
+    let guard_response_expected = !ctx.is_recovery_active() || ctx.recovery_pass_used();
+    let guard_outcome = enforce_blocked_tool_call_guard(ctx, tool_call_id, tool_name, args_val);
+    if let Some(outcome) = guard_outcome {
+        if !guard_response_expected {
+            ctx.push_rejected_tool_response(
+                tool_call_id,
+                Some(tool_name),
+                Some(args_val),
+                serde_json::json!({
+            "success": false,
+            "blocked": true,
+            "tool_name": tool_name,
+            "failure_kind": "anti_blind_editing_verification_required",
+            "verification_required": true,
+            "pending_mutations": pending_mutations,
+            "pending_mutation_count_known": pending_mutations.is_some(),
+            "fix_edits_remaining": repeated_tool_attempts.fix_edits_remaining,
+            "error": message,
+            "next_action": format!("Run one verification command with exec_command to exit 0 before another workspace mutation: your project's build/test/lint tool (e.g. `cargo check --locked`, `go test`, `npm test`, or `pytest`). A pure `&&` chain of verifiers also clears the gate. Do not pipe verifiers through `| head` and do not join with `;`/`||`/`|`; use `max_output_tokens` instead of pipes. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation, then requires re-verify."),
+            "retryable": true,
+                })
+                .to_string(),
+            );
+        }
+        return Ok(MutationVerificationResult::Outcome(outcome));
+    }
+
     ctx.push_rejected_tool_response(
         tool_call_id,
         Some(tool_name),
@@ -707,7 +745,7 @@ pub(crate) fn block_mutation_until_verification(
         })
         .to_string(),
     );
-    Ok(true)
+    Ok(MutationVerificationResult::Blocked)
 }
 
 /// Validates a tool call against all safety and permission checks.
@@ -1107,9 +1145,34 @@ pub(crate) async fn validate_tool_call<'a>(
             Ok(ValidationResult::Blocked)
         }
         Ok(ToolPermissionFlow::Blocked { reason }) => {
-            Ok(ValidationResult::Outcome(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
-                reason: Some(reason),
-            })))
+            // A terminal permission flow is still a blocked tool call. Keep
+            // its exact denial reason for the first attempts, while routing
+            // accounting and fuse handling through the same dispatch guard as
+            // every other blocked validation result.
+            let guard_response_expected = !ctx.is_recovery_active() || ctx.recovery_pass_used();
+            if let Some(outcome) =
+                enforce_blocked_tool_call_guard(ctx, tool_call_id, &canonical_tool_name, effective_args)
+            {
+                if !guard_response_expected {
+                    ctx.push_rejected_tool_response(
+                        tool_call_id,
+                        Some(&canonical_tool_name),
+                        Some(effective_args),
+                        build_failure_error_content(reason.clone(), "policy"),
+                    );
+                }
+                Ok(ValidationResult::Outcome(outcome))
+            } else {
+                ctx.push_rejected_tool_response(
+                    tool_call_id,
+                    Some(&canonical_tool_name),
+                    Some(effective_args),
+                    build_failure_error_content(reason.clone(), "policy"),
+                );
+                Ok(ValidationResult::Outcome(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+                    reason: Some(reason),
+                })))
+            }
         }
         Ok(ToolPermissionFlow::Exit) => Ok(ValidationResult::Outcome(TurnHandlerOutcome::Break(TurnLoopResult::Exit))),
         Ok(ToolPermissionFlow::Interrupted) => {

@@ -754,13 +754,21 @@ async fn plan_confirmation_events_map_to_expected_actions() {
     assert!(matches!(
         execute,
         InlineLoopAction::PlanApproved {
-            execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current
+            target: crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget {
+                destination: crate::agent::runloop::unified::planning_workflow::PlanExecutionDestination::Build,
+                execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                skip_confirmations: false,
+            }
         }
     ));
     assert!(matches!(
         fresh,
         InlineLoopAction::PlanApproved {
-            execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Fresh
+            target: crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget {
+                destination: crate::agent::runloop::unified::planning_workflow::PlanExecutionDestination::Build,
+                execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Fresh,
+                skip_confirmations: false,
+            }
         }
     ));
     assert!(matches!(edit, InlineLoopAction::PlanEditRequested));

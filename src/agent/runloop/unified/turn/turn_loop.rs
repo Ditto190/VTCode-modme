@@ -446,11 +446,8 @@ pub(crate) struct TurnLoopOutcome {
     /// When set, the interaction loop should switch the active primary agent
     /// to this name after the turn completes.
     pub pending_primary_agent: Option<String>,
-    /// Explicit auto-accept state from plan approval. This must survive an
-    /// agent fallback from `plan` to `build`; inferring it from the agent name
-    /// loses the user's confirmation choice.
-    pub pending_plan_auto_accept: bool,
-    pub pending_plan_execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext,
+    /// Typed destination and policy selected at the plan approval boundary.
+    pub pending_plan_execution_target: Option<crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget>,
     /// When true, the plan was approved via the inline confirmation overlay
     /// inside the turn loop and the session loop must push an execution
     /// directive before starting the next turn so the model begins
@@ -730,9 +727,7 @@ pub(crate) async fn run_turn_loop(
     let touched_at_turn_start: std::collections::HashSet<String> =
         ctx.session_stats.recent_touched_files().into_iter().collect();
     let mut pending_primary_agent: Option<String> = None;
-    let mut pending_plan_auto_accept = false;
-    let mut pending_plan_execution_context =
-        crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current;
+    let mut pending_plan_execution_target = None;
     *ctx.auto_finish_planning_attempted = false;
 
     // Compact command rows are a presentation-only active tail. A new turn
@@ -845,7 +840,6 @@ pub(crate) async fn run_turn_loop(
             working_history,
             ctx.auto_finish_planning_attempted,
             crate::agent::runloop::unified::planning_workflow::PlanningExitContext {
-                active_agent_name: ctx.active_primary_agent.active().name(),
                 session: ctx.session,
                 ctrl_c_state: ctx.ctrl_c_state,
                 ctrl_c_notify: ctx.ctrl_c_notify,
@@ -869,11 +863,9 @@ pub(crate) async fn run_turn_loop(
         .await?;
 
         if transition.should_break() {
-            let (loop_result, agent, auto_accept, execution_context) = transition.into_result_and_agent();
+            let (loop_result, target) = transition.into_result_and_target();
             result = loop_result;
-            pending_primary_agent = agent;
-            pending_plan_auto_accept = auto_accept;
-            pending_plan_execution_context = execution_context;
+            pending_plan_execution_target = target;
             break;
         }
 
@@ -1620,20 +1612,13 @@ pub(crate) async fn run_turn_loop(
                 result = TurnLoopResult::Completed { plan_approved_execution_pending: true };
                 break;
             }
-            TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { agent, skip_confirmations, execution_context } => {
-                pending_primary_agent = Some(agent);
-                pending_plan_auto_accept = skip_confirmations;
-                pending_plan_execution_context = execution_context;
+            TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { target } => {
+                pending_plan_execution_target = Some(target);
                 result = TurnLoopResult::Completed { plan_approved_execution_pending: true };
                 break;
             }
-            TurnHandlerOutcome::BreakWithPolicy {
-                result: outcome_result,
-                skip_confirmations,
-                execution_context,
-            } => {
-                pending_plan_auto_accept = skip_confirmations;
-                pending_plan_execution_context = execution_context;
+            TurnHandlerOutcome::BreakWithPolicy { result: outcome_result, target } => {
+                pending_plan_execution_target = Some(target);
                 result = outcome_result;
                 break;
             }
@@ -1795,8 +1780,7 @@ pub(crate) async fn run_turn_loop(
         turn_touched_files,
         turn_diagnostics,
         pending_primary_agent,
-        pending_plan_auto_accept,
-        pending_plan_execution_context,
+        pending_plan_execution_target,
         plan_approved_execution_pending,
         final_response_was_fallback,
     })

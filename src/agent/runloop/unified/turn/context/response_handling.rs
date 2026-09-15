@@ -991,8 +991,8 @@ impl<'a> TurnProcessingContext<'a> {
                     self.ctrl_c_notify,
                     PlanApprovalRequestContext {
                         plan: &plan,
-                        active_agent_name: self.active_primary_agent.active().name(),
                         skip_confirmations: self.skip_confirmations,
+                        full_auto: self.full_auto,
                         context_usage_percent: self.context_manager.context_usage_percent(
                             vtcode_core::compaction::effective_context_budget(
                                 self.vt_cfg,
@@ -1086,8 +1086,12 @@ impl<'a> TurnProcessingContext<'a> {
                 }
                 return Ok(TurnHandlerOutcome::BreakWithPolicy {
                     result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
-                    skip_confirmations: self.skip_confirmations,
-                    execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                    target: crate::agent::runloop::unified::planning_workflow::resolve_plan_execution_target(
+                        vtcode_core::exec::events::PlanApprovalDecision::AutoAccept,
+                        crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                        self.skip_confirmations,
+                        self.full_auto,
+                    ),
                 });
             }
 
@@ -1098,23 +1102,18 @@ impl<'a> TurnProcessingContext<'a> {
                 self.plan_session,
                 self.handle,
                 plan,
-                self.active_primary_agent.active().name(),
-                true,
-                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                crate::agent::runloop::unified::planning_workflow::resolve_plan_execution_target(
+                    vtcode_core::exec::events::PlanApprovalDecision::AutoAccept,
+                    crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+                    true,
+                    self.full_auto,
+                ),
             )
             .await;
             let handoff = match handoff {
                 Ok(handoff) => handoff,
                 Err(error) => {
                     tracing::warn!(target: "vtcode.planning_workflow", error = %error, "automatic approved-plan handoff blocked");
-                    crate::agent::runloop::unified::planning_workflow::resolve_plan_approval(
-                        self.plan_session,
-                        self.harness_emitter,
-                        &self.harness_state.run_id.0,
-                        &self.harness_state.turn_id.0,
-                        vtcode_core::exec::events::PlanApprovalDecision::Cancel,
-                        true,
-                    );
                     let message = format!("Plan execution is blocked: {error}");
                     self.renderer.line(MessageStyle::Error, &message)?;
                     return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed {
@@ -1130,20 +1129,17 @@ impl<'a> TurnProcessingContext<'a> {
                 vtcode_core::exec::events::PlanApprovalDecision::AutoAccept,
                 true,
             );
-            let execution_agent = handoff.execution_agent;
-            let handoff_skip_confirmations = handoff.skip_confirmations;
-            if let Some(agent) = execution_agent {
-                return Ok(TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy {
-                    agent,
-                    skip_confirmations: handoff_skip_confirmations,
-                    execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+            let target = handoff.target;
+            if target
+                .agent_name()
+                .eq_ignore_ascii_case(self.active_primary_agent.active().name())
+            {
+                return Ok(TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    target,
                 });
             }
-            return Ok(TurnHandlerOutcome::BreakWithPolicy {
-                result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
-                skip_confirmations: handoff_skip_confirmations,
-                execution_context: crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
-            });
+            return Ok(TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { target });
         }
 
         Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false }))
@@ -1563,9 +1559,8 @@ Repairs the approved plan after the referenced paths moved.
                 outcome,
                 TurnHandlerOutcome::BreakWithPolicy {
                     result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
-                    skip_confirmations: false,
-                    ..
-                }
+                    target,
+                } if !target.skip_confirmations,
             ),
             "the revised plan must schedule the continuation turn while keeping the session confirmation policy"
         );
@@ -1594,9 +1589,8 @@ Repairs the approved plan after the referenced paths moved.
                 outcome,
                 TurnHandlerOutcome::BreakWithPolicy {
                     result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
-                    skip_confirmations: true,
-                    ..
-                }
+                    target,
+                } if target.skip_confirmations,
             ),
             "a policy-automatic replan must schedule the continuation turn"
         );

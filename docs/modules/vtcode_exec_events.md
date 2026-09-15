@@ -42,6 +42,14 @@ variant captures a specific moment in the lifecycle of an execution thread:
 The schema favors additive evolution: new fields default via `Option` or `#[serde(default)]`
 so older consumers continue to deserialize previously known structures.
 
+For an approved plan, `plan.approval.resolved` is emitted once at the validated
+plan/task-tracker boundary. The event identifies the approval decision; the
+runtime then refreshes the selected Build or Auto agent before exposing tools
+and schedules one implementation turn. A failed handoff remains resumable and
+does not pretend that execution started. Build and Auto produce the same
+`turn.blocked` safety telemetry for identical blocked calls; Auto's unattended
+confirmation policy does not expand runtime authority or safety limits.
+
 ## Versioning and compatibility
 
 The crate follows semantic versioning. Backwards-compatible additions (such as new event

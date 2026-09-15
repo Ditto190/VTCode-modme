@@ -1,11 +1,11 @@
 //! Performance benchmarking and profiling tools for VT Code optimizations
 
 use crate::utils::file_utils::write_file_with_context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
@@ -88,11 +88,24 @@ pub struct ResourceMonitor {
     /// Monitoring interval
     monitor_interval: Duration,
 
-    /// Whether monitoring is active
-    is_monitoring: Arc<RwLock<bool>>,
+    /// Dedicated sampling worker and its interruptible cancellation channel.
+    /// Keeping this polling loop off Tokio workers avoids competing for
+    /// executor capacity during latency-sensitive agent work.
+    monitor_task: Mutex<Option<MonitorTask>>,
+}
 
-    /// Handle to the background monitoring task, cancelled on drop.
-    monitor_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+struct MonitorTask {
+    stop_sender: mpsc::Sender<()>,
+    handle: std::thread::JoinHandle<()>,
+}
+
+impl MonitorTask {
+    fn stop_and_join(self) -> Result<()> {
+        let _ = self.stop_sender.send(());
+        self.handle
+            .join()
+            .map_err(|panic| anyhow::anyhow!("resource monitor thread panicked: {panic:?}"))
+    }
 }
 
 impl PerformanceProfiler {
@@ -299,8 +312,12 @@ pub struct ComparisonReport {
 
 impl Drop for ResourceMonitor {
     fn drop(&mut self) {
-        if let Some(handle) = self.monitor_task.try_lock().ok().and_then(|mut h| h.take()) {
-            handle.abort();
+        let task = match self.monitor_task.lock() {
+            Ok(mut task_slot) => task_slot.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some(task) = task {
+            let _ = task.stop_and_join();
         }
     }
 }
@@ -311,43 +328,54 @@ impl ResourceMonitor {
         Self {
             current_metrics: Arc::new(RwLock::new(ResourceMetrics::default())),
             monitor_interval,
-            is_monitoring: Arc::new(RwLock::new(false)),
-            monitor_task: tokio::sync::Mutex::new(None),
+            monitor_task: Mutex::new(None),
         }
     }
 
     /// Start resource monitoring
     pub async fn start_monitoring(&self) -> Result<()> {
-        let mut is_monitoring = self.is_monitoring.write().await;
-        if *is_monitoring {
+        let mut task_slot = self
+            .monitor_task
+            .lock()
+            .map_err(|error| anyhow::anyhow!("resource monitor state lock poisoned: {error}"))?;
+        if task_slot.is_some() {
             return Ok(()); // Already monitoring
         }
-        *is_monitoring = true;
-        drop(is_monitoring);
 
         let current_metrics = Arc::clone(&self.current_metrics);
-        let is_monitoring_flag = Arc::clone(&self.is_monitoring);
         let interval = self.monitor_interval;
+        let (stop_sender, stop_receiver) = mpsc::channel();
 
-        let handle = tokio::spawn(async move {
-            let mut interval_timer = tokio::time::interval(interval);
+        let monitor_thread = std::thread::Builder::new()
+            .name("vtcode-perf-monitor".to_string())
+            .spawn(move || {
+                loop {
+                    match stop_receiver.recv_timeout(interval) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            let sample = Self::collect_system_metrics_sync();
+                            *current_metrics.blocking_write() = sample;
+                        }
+                    }
+                }
+            })
+            .with_context(|| "failed to spawn resource monitor thread")?;
 
-            while *is_monitoring_flag.read().await {
-                interval_timer.tick().await;
-
-                let metrics = Self::collect_system_metrics().await;
-                *current_metrics.write().await = metrics;
-            }
-        });
-
-        *self.monitor_task.lock().await = Some(handle);
-
+        *task_slot = Some(MonitorTask { stop_sender, handle: monitor_thread });
         Ok(())
     }
 
     /// Stop resource monitoring
     pub async fn stop_monitoring(&self) -> Result<()> {
-        *self.is_monitoring.write().await = false;
+        let mut task_slot = self
+            .monitor_task
+            .lock()
+            .map_err(|error| anyhow::anyhow!("resource monitor state lock poisoned: {error}"))?;
+        if let Some(task) = task_slot.take() {
+            // Keep the slot locked until the worker exits so a concurrent
+            // start cannot replace a worker that is still winding down.
+            task.stop_and_join()?;
+        }
         Ok(())
     }
 
@@ -357,12 +385,10 @@ impl ResourceMonitor {
     }
 
     /// Collect system resource metrics
-    async fn collect_system_metrics() -> ResourceMetrics {
-        // This is a simplified implementation
-        // In a real system, you'd use system APIs or libraries like `sysinfo`
-
+    fn collect_system_metrics_sync() -> ResourceMetrics {
+        let memory_used_mb = Self::get_memory_usage_mb();
         ResourceMetrics {
-            memory_used_mb: Self::get_memory_usage_mb().await,
+            memory_used_mb,
             cpu_percent: Self::get_cpu_usage_percent(),
             network_bytes_sent: 0,
             network_bytes_received: 0,
@@ -372,12 +398,11 @@ impl ResourceMonitor {
     }
 
     /// Get current memory usage in MB
-    async fn get_memory_usage_mb() -> f64 {
-        // Simplified implementation - would use actual system APIs
+    fn get_memory_usage_mb() -> f64 {
         let contents: Option<String> = {
             #[cfg(target_os = "linux")]
             {
-                tokio::fs::read_to_string("/proc/self/status").await.ok()
+                std::fs::read_to_string("/proc/self/status").ok()
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -545,6 +570,22 @@ mod tests {
     fn parses_linux_memory_usage() {
         let contents = "Name:\tvtcode\nVmRSS:\t2048 kB\n";
         assert_eq!(ResourceMonitor::parse_memory_usage_mb(contents), Some(2.0));
+    }
+
+    #[tokio::test]
+    async fn monitor_stop_interrupts_worker_and_clears_handle() {
+        let monitor = ResourceMonitor::new(Duration::from_secs(5));
+        monitor.start_monitoring().await.expect("start monitoring");
+
+        let started = Instant::now();
+        monitor.stop_monitoring().await.expect("stop monitoring");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(monitor.monitor_task.lock().expect("monitor state lock").is_none());
+
+        monitor.start_monitoring().await.expect("restart monitoring");
+        let restarted = Instant::now();
+        monitor.stop_monitoring().await.expect("stop restarted monitoring");
+        assert!(restarted.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]

@@ -143,7 +143,11 @@ async fn execute_manual_compaction(
     let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(err) => {
-            ctx.renderer.line(MessageStyle::Error, &format!("Compaction failed: {err}"))?;
+            // Use the alternate Display (`{err:#}`) so the full anyhow context
+            // chain is surfaced. Plain `{err}` prints only the outermost
+            // "Failed to generate compaction summary" context and hides the
+            // underlying provider error, which is the actual cause.
+            ctx.renderer.line(MessageStyle::Error, &format!("Compaction failed: {err:#}"))?;
             return Ok(SlashCommandControl::Continue);
         }
     };

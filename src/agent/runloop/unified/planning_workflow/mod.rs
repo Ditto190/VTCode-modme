@@ -29,12 +29,171 @@ pub(crate) enum PlanExecutionContext {
     Fresh,
 }
 
+/// The destinations available to an approved plan handoff.
+///
+/// Auto is a confirmation-policy choice, not an authority upgrade. Both
+/// destinations continue through the same runtime safety gates and tool
+/// catalog refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanExecutionDestination {
+    Build,
+    Auto,
+}
+
+/// Immutable policy selected at the approval boundary and carried through the
+/// rest of the handoff. Keeping these fields together prevents an agent name
+/// from being restored independently of confirmation policy or context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlanExecutionTarget {
+    pub(crate) destination: PlanExecutionDestination,
+    pub(crate) skip_confirmations: bool,
+    pub(crate) execution_context: PlanExecutionContext,
+}
+
+impl PlanExecutionTarget {
+    pub(crate) const fn build(execution_context: PlanExecutionContext, skip_confirmations: bool) -> Self {
+        Self {
+            destination: PlanExecutionDestination::Build,
+            skip_confirmations,
+            execution_context,
+        }
+    }
+
+    pub(crate) const fn auto(execution_context: PlanExecutionContext) -> Self {
+        Self {
+            destination: PlanExecutionDestination::Auto,
+            skip_confirmations: true,
+            execution_context,
+        }
+    }
+
+    pub(crate) const fn agent_name(self) -> &'static str {
+        match self.destination {
+            PlanExecutionDestination::Build => "build",
+            PlanExecutionDestination::Auto => "auto",
+        }
+    }
+}
+
+/// Resolve destination and confirmation policy exactly once for an approval.
+/// Explicit destination selections win. Ordinary approvals use Build, even
+/// when planning began from Auto; only an explicitly configured full-auto
+/// policy selects Auto automatically.
+pub(crate) const fn resolve_plan_execution_target(
+    decision: PlanApprovalDecision,
+    execution_context: PlanExecutionContext,
+    skip_confirmations: bool,
+    full_auto: bool,
+) -> PlanExecutionTarget {
+    match decision {
+        PlanApprovalDecision::SwitchAuto => PlanExecutionTarget::auto(execution_context),
+        PlanApprovalDecision::SwitchBuild => PlanExecutionTarget::build(execution_context, false),
+        _ if full_auto => PlanExecutionTarget::auto(execution_context),
+        _ => PlanExecutionTarget::build(execution_context, skip_confirmations),
+    }
+}
+
+/// Map the target carried by the legacy inline interaction path back to the
+/// stable approval event vocabulary. The target remains authoritative for
+/// runtime behavior; this is only the telemetry representation.
+pub(crate) const fn plan_approval_decision_for_target(target: PlanExecutionTarget) -> PlanApprovalDecision {
+    match target.destination {
+        PlanExecutionDestination::Auto => PlanApprovalDecision::SwitchAuto,
+        PlanExecutionDestination::Build => match target.execution_context {
+            PlanExecutionContext::Current => PlanApprovalDecision::Execute,
+            PlanExecutionContext::Fresh => PlanApprovalDecision::FreshContext,
+        },
+    }
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::{PlanExecutionContext, PlanExecutionDestination, PlanExecutionTarget, resolve_plan_execution_target};
+    use vtcode_core::exec::events::PlanApprovalDecision;
+
+    #[test]
+    fn approval_target_matrix_keeps_destination_and_policy_together() {
+        let cases = [
+            (
+                PlanApprovalDecision::Execute,
+                PlanExecutionContext::Current,
+                false,
+                false,
+                PlanExecutionTarget::build(PlanExecutionContext::Current, false),
+            ),
+            (
+                PlanApprovalDecision::FreshContext,
+                PlanExecutionContext::Fresh,
+                false,
+                false,
+                PlanExecutionTarget::build(PlanExecutionContext::Fresh, false),
+            ),
+            (
+                PlanApprovalDecision::SwitchAuto,
+                PlanExecutionContext::Current,
+                false,
+                false,
+                PlanExecutionTarget::auto(PlanExecutionContext::Current),
+            ),
+            (
+                PlanApprovalDecision::SwitchAuto,
+                PlanExecutionContext::Fresh,
+                false,
+                false,
+                PlanExecutionTarget::auto(PlanExecutionContext::Fresh),
+            ),
+            (
+                PlanApprovalDecision::Execute,
+                PlanExecutionContext::Current,
+                true,
+                false,
+                PlanExecutionTarget::build(PlanExecutionContext::Current, true),
+            ),
+        ];
+
+        for (decision, context, skip, full_auto, expected) in cases {
+            assert_eq!(resolve_plan_execution_target(decision, context, skip, full_auto), expected);
+        }
+    }
+
+    #[test]
+    fn explicit_destination_wins_over_full_auto_and_source_agent() {
+        let build =
+            resolve_plan_execution_target(PlanApprovalDecision::SwitchBuild, PlanExecutionContext::Current, true, true);
+        assert_eq!(build.destination, PlanExecutionDestination::Build);
+        assert!(!build.skip_confirmations);
+
+        let auto = resolve_plan_execution_target(
+            PlanApprovalDecision::SwitchAuto,
+            PlanExecutionContext::Current,
+            false,
+            false,
+        );
+        assert_eq!(auto.destination, PlanExecutionDestination::Auto);
+        assert!(auto.skip_confirmations);
+    }
+
+    #[test]
+    fn default_approval_does_not_inherit_auto_without_full_auto_policy() {
+        let ordinary =
+            resolve_plan_execution_target(PlanApprovalDecision::AutoAccept, PlanExecutionContext::Current, true, false);
+        assert_eq!(ordinary.destination, PlanExecutionDestination::Build);
+        assert!(ordinary.skip_confirmations);
+
+        let configured_full_auto =
+            resolve_plan_execution_target(PlanApprovalDecision::AutoAccept, PlanExecutionContext::Current, false, true);
+        assert_eq!(configured_full_auto.destination, PlanExecutionDestination::Auto);
+        assert!(configured_full_auto.skip_confirmations);
+    }
+}
+
 // --- Stable interface (the only planning symbols the runloop should name) ---
 
 use std::path::PathBuf;
 
 use anyhow::Context;
 use thiserror::Error;
+use vtcode_core::exec::events::PlanApprovalDecision;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::registry::ToolRegistry;
 use vtcode_ui::tui::app::InlineHandle;
@@ -227,9 +386,7 @@ impl ValidatedPlanArtifact {
 pub(crate) struct ApprovedPlanHandoff {
     pub(crate) plan: ValidatedPlanArtifact,
     pub(crate) tracker: TaskTrackerHandoff,
-    pub(crate) execution_agent: Option<String>,
-    pub(crate) skip_confirmations: bool,
-    pub(crate) execution_context: PlanExecutionContext,
+    pub(crate) target: PlanExecutionTarget,
 }
 
 pub(crate) async fn complete_approved_plan_handoff(
@@ -237,22 +394,13 @@ pub(crate) async fn complete_approved_plan_handoff(
     plan_session: &mut PlanningWorkflowSessionState,
     handle: &InlineHandle,
     plan: ValidatedPlanArtifact,
-    active_agent_name: &str,
-    skip_confirmations: bool,
-    execution_context: PlanExecutionContext,
+    target: PlanExecutionTarget,
 ) -> anyhow::Result<ApprovedPlanHandoff> {
-    let execution_agent = plan_session.execution_agent_after_approval(active_agent_name);
     let tracker = finish_planning_workflow(tool_registry, plan_session, handle, PlanningFinishReason::Approved)
         .await?
         .context("approved-plan handoff completed without a task tracker")?;
-    handle.set_skip_confirmations(skip_confirmations);
-    let handoff = ApprovedPlanHandoff {
-        plan,
-        tracker,
-        execution_agent,
-        skip_confirmations,
-        execution_context,
-    };
+    handle.set_skip_confirmations(target.skip_confirmations);
+    let handoff = ApprovedPlanHandoff { plan, tracker, target };
     tracing::info!(
         target: "vtcode.planning_workflow",
         plan_file = %handoff.plan.plan_file.display(),
@@ -260,8 +408,9 @@ pub(crate) async fn complete_approved_plan_handoff(
         tracker_plan_file = %handoff.tracker.plan_file.display(),
         tracker_file = %handoff.tracker.tracker_file.display(),
         tracker_items = handoff.tracker.item_count,
-        skip_confirmations = handoff.skip_confirmations,
-        execution_context = ?handoff.execution_context,
+        destination = ?handoff.target.destination,
+        skip_confirmations = handoff.target.skip_confirmations,
+        execution_context = ?handoff.target.execution_context,
         "approved-plan handoff completed"
     );
     Ok(handoff)
@@ -275,7 +424,7 @@ pub(crate) fn resolve_plan_approval(
     emitter: Option<&crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter>,
     fallback_thread_id: &str,
     fallback_turn_id: &str,
-    decision: vtcode_core::exec::events::PlanApprovalDecision,
+    decision: PlanApprovalDecision,
     automatic: bool,
 ) {
     let Some(pending) = plan_session.take_pending_plan_approval() else {

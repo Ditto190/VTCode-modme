@@ -19,6 +19,7 @@ use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
 use crate::agent::runloop::unified::overlay_prompt::{OverlayWaitOutcome, show_overlay_and_wait};
 use crate::agent::runloop::unified::planning_workflow::{
     PlanArtifactError, PlanExecutionContext, ValidatedPlanArtifact, complete_approved_plan_handoff,
+    resolve_plan_execution_target,
 };
 use crate::agent::runloop::unified::state::CtrlCState;
 
@@ -75,8 +76,8 @@ pub(crate) struct PlanApprovalTelemetryContext<'a> {
 
 pub(crate) struct PlanApprovalRequestContext<'a> {
     pub(crate) plan: &'a ValidatedPlanArtifact,
-    pub(crate) active_agent_name: &'a str,
     pub(crate) skip_confirmations: bool,
+    pub(crate) full_auto: bool,
     pub(crate) context_usage_percent: u8,
 }
 
@@ -432,6 +433,16 @@ pub(crate) fn build_plan_confirmation_request_with_context(
             search_value: None,
         },
         InlineListItem {
+            title: "Yes, switch to Auto and implement".to_string(),
+            subtitle: Some(
+                "Use the Auto agent's unattended confirmation policy; safety gates remain active.".to_string(),
+            ),
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::PlanApprovalSwitchAuto),
+            search_value: None,
+        },
+        InlineListItem {
             title: "No, stay in Plan mode".to_string(),
             subtitle: Some("Return to planning and revise the plan.".to_string()),
             badge: None,
@@ -586,7 +597,6 @@ pub(crate) async fn load_plan_text_for_approval(
 
 use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState;
 use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
-use vtcode_config::{builtin_primary_auto_agent, builtin_primary_build_agent};
 use vtcode_core::tools::registry::ToolRegistry;
 
 /// Execute the plan-approval overlay and return the corresponding turn outcome.
@@ -689,27 +699,13 @@ pub(crate) async fn execute_plan_approval(
                     }));
                 }
             };
-            let handoff = complete_approved_plan_handoff(
-                tool_registry,
-                plan_session,
-                handle,
-                request.plan.clone(),
-                request.active_agent_name,
-                skip_confirmations,
-                execution_context,
-            )
-            .await;
+            let target =
+                resolve_plan_execution_target(decision, execution_context, skip_confirmations, request.full_auto);
+            let handoff =
+                complete_approved_plan_handoff(tool_registry, plan_session, handle, request.plan.clone(), target).await;
             let handoff = match handoff {
                 Ok(handoff) => handoff,
                 Err(err) => {
-                    super::resolve_plan_approval(
-                        plan_session,
-                        telemetry.emitter,
-                        telemetry.thread_id,
-                        telemetry.turn_id,
-                        PlanApprovalDecision::Cancel,
-                        false,
-                    );
                     tracing::warn!(target: "vtcode.planning_workflow", error = %err, "approved-plan handoff blocked");
                     append_message(handle, InlineMessageKind::Error, format!("Plan execution is blocked: {err}"));
                     return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed {
@@ -725,23 +721,8 @@ pub(crate) async fn execute_plan_approval(
                 decision,
                 false,
             );
-            let execution_agent = match approval {
-                PlanConfirmationOutcome::SwitchBuild => Some(builtin_primary_build_agent().name),
-                PlanConfirmationOutcome::SwitchAuto => Some(builtin_primary_auto_agent().name),
-                _ => handoff.execution_agent,
-            };
-            Ok(execution_agent.map_or(
-                TurnHandlerOutcome::BreakWithPolicy {
-                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
-                    skip_confirmations,
-                    execution_context,
-                },
-                |agent| TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy {
-                    agent,
-                    skip_confirmations,
-                    execution_context,
-                },
-            ))
+            debug_assert_eq!(handoff.target, target);
+            Ok(TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { target })
         }
     }
 }
@@ -916,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_confirmation_request_has_three_choices_and_dynamic_context() {
+    fn plan_confirmation_request_has_build_auto_and_revision_choices() {
         let req = build_plan_confirmation_request_with_context(&sample_plan(), false, 7);
         let ListOverlayRequest { items, .. } = match req {
             TransientRequest::List(list) => list,
@@ -934,7 +915,12 @@ mod tests {
                 .iter()
                 .any(|s| matches!(s, InlineListSelection::PlanApprovalEditPlan))
         );
-        assert_eq!(selections.len(), 3);
+        assert!(
+            selections
+                .iter()
+                .any(|s| matches!(s, InlineListSelection::PlanApprovalSwitchAuto))
+        );
+        assert_eq!(selections.len(), 4);
         let TransientRequest::List(request) = build_plan_confirmation_request_with_context(&sample_plan(), false, 7)
         else {
             panic!("expected list request");

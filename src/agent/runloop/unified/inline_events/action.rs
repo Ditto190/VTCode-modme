@@ -1,4 +1,4 @@
-use crate::agent::runloop::unified::planning_workflow::PlanExecutionContext;
+use crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget;
 use vtcode_core::hooks::SessionEndReason;
 use vtcode_ui::tui::app::SubmittedInput;
 
@@ -23,7 +23,7 @@ pub(crate) enum InlineLoopAction {
     },
     /// Plan approved (Claude Code style HITL) - continue with implementation
     PlanApproved {
-        execution_context: PlanExecutionContext,
+        target: PlanExecutionTarget,
     },
     /// User wants to return to planning workflow to edit the plan
     PlanEditRequested,

@@ -346,14 +346,22 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
             continue;
         };
 
-        if block_mutation_until_verification(
+        match block_mutation_until_verification(
             t_ctx.ctx,
             t_ctx.repeated_tool_attempts,
             tool_call.call_id(),
             tool_call.tool_name(),
             args,
         )? {
-            continue;
+            super::MutationVerificationResult::Allowed => {}
+            super::MutationVerificationResult::Blocked => continue,
+            super::MutationVerificationResult::Outcome(outcome) => {
+                if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
+                    super::drain_blocked_tool_recovery_responses(t_ctx.ctx, &tool_calls[index + 1..]);
+                }
+                super::flush_blocked_tool_recovery(t_ctx.ctx);
+                return Ok(Some(outcome));
+            }
         }
 
         let validation_result = validate_tool_call(t_ctx.ctx, tool_call.call_id(), tool_call.tool_name(), args).await?;
@@ -363,16 +371,25 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
                 // A PreToolUse hook may have rewritten the arguments inside
                 // validate_tool_call; re-evaluate the mutation guard against
                 // the arguments that will actually execute.
-                if block_mutation_until_verification(
+                match block_mutation_until_verification(
                     t_ctx.ctx,
                     t_ctx.repeated_tool_attempts,
                     tool_call.call_id(),
                     &prepared.canonical_name,
                     &prepared.effective_args,
                 )? {
-                    continue;
+                    super::MutationVerificationResult::Allowed => {
+                        validated_calls.push(ValidatedToolCall { tool_call, prepared });
+                    }
+                    super::MutationVerificationResult::Blocked => continue,
+                    super::MutationVerificationResult::Outcome(outcome) => {
+                        if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
+                            super::drain_blocked_tool_recovery_responses(t_ctx.ctx, &tool_calls[index + 1..]);
+                        }
+                        super::flush_blocked_tool_recovery(t_ctx.ctx);
+                        return Ok(Some(outcome));
+                    }
                 }
-                validated_calls.push(ValidatedToolCall { tool_call, prepared });
             }
             ValidationTransition::Return(Some(outcome)) => {
                 if t_ctx.ctx.harness_state.consecutive_preflight_failures
@@ -528,8 +545,10 @@ async fn execute_and_handle_tool_call_inner<'a>(
     args_val: serde_json::Value,
     batch_tracker: Option<&mut crate::agent::runloop::unified::tool_pipeline::ToolBatchOutcome>,
 ) -> Result<Option<TurnHandlerOutcome>> {
-    if block_mutation_until_verification(ctx, repeated_tool_attempts, tool_call_id.as_str(), tool_name, &args_val)? {
-        return Ok(None);
+    match block_mutation_until_verification(ctx, repeated_tool_attempts, tool_call_id.as_str(), tool_name, &args_val)? {
+        super::MutationVerificationResult::Allowed => {}
+        super::MutationVerificationResult::Blocked => return Ok(None),
+        super::MutationVerificationResult::Outcome(outcome) => return Ok(Some(outcome)),
     }
 
     // Reset only after the final mutation guard. Permission or hook rewrites

@@ -135,14 +135,20 @@ You can steer the workflow with short phrases instead of the review-gate UI:
 4. Review the emitted `<proposed_plan>` block.
 5. Switch to a build-oriented primary agent such as `build` or `auto` when you are ready to implement.
 
-When planning was entered from another primary agent, approving the plan
-restores that agent automatically when it is write-capable. `build` resumes
-with reviewable edits and `auto` resumes its configured automation policy.
-Read-only agents such as `duck` and `plan` are never selected to execute an
-approved plan; the handoff resolves to the configured write-capable agent or
-the built-in `build` agent. If the dedicated `plan` agent was already active
-when planning began, approval uses the configured default execution agent
-only when that agent can mutate the workspace.
+Approval resolves one typed execution target before leaving Planning. The
+normal current-context and fresh-context choices target `build`; they do not
+inherit `auto` merely because planning began from `auto`. `auto` is selected
+only by the explicit **Switch to Auto** choice or an explicitly configured
+full-auto policy. An explicit destination always wins over the agent that was
+active when planning began, and read-only agents such as `duck` and `plan` are
+never selected to execute an approved plan.
+
+`build` and `auto` use the same write-capable tool catalog and runtime safety
+gates. The only intended difference is confirmation policy: Build remains
+confirmation-aware, while Auto may continue unattended after that policy was
+explicitly selected. Auto does not receive broader authority, larger blocked-
+call limits, or a bypass around command, path, verification, budget, or
+recovery safeguards.
 
 The approval overlay shows a compact synopsis so its choices remain visible,
 while the complete plan markdown is appended to the scrollable TUI transcript
@@ -168,8 +174,13 @@ turn, so each gets the same one-time allowance.
 The implementation request is scheduled as an explicit internal next-turn
 trigger after the handoff directive is appended. It is not dependent on the
 bounded ordinary steering FIFO, and the synthetic user prompt is recorded once
-so an approved plan cannot switch to `build` and then wait for another
-`continue` input.
+so an approved plan cannot switch destination and then wait for another
+`continue` input. Current-context and fresh-context approvals use the same
+handoff sequence: validate the persisted plan, persist and verify the task
+tracker, resolve approval telemetry, leave Planning, select the destination,
+refresh permissions and tool catalogs, then enqueue exactly one implementation
+turn. If that sequence cannot complete, the validated plan remains available
+for a resumable retry.
 
 ### Validated Approval Handoff
 
@@ -470,12 +481,14 @@ runtime plan events; long previews are elided with an explicit count rather than
 
 Approval options:
 
-- **Yes, implement this plan** — execute in the current context while preserving the session's existing confirmation policy.
-- **Yes, clear context and implement** — preserve the approved plan and task tracker, then rebuild a fresh execution thread. The subtitle reports the pre-reset context usage (for example, `Fresh thread. Context: 7% used.`). This is recommended after long research sessions.
+- **Yes, implement this plan** — execute in the current context as `build` while preserving the session's existing confirmation policy.
+- **Yes, clear context and implement** — execute in a fresh `build` thread while preserving the approved plan and task tracker. The subtitle reports the pre-reset context usage (for example, `Fresh thread. Context: 7% used.`). This is recommended after long research sessions.
+- **Yes, switch to Auto and implement** — execute in the current context as `auto` with unattended confirmations. The same command, path, verification, blocked-call, budget, and recovery gates remain active.
 - **No, stay in Plan mode** — return to planning and revise the plan.
 
-The existing manual or auto-accept policy selected by the session remains attached to both
-approval paths. A fresh handoff clears only transient transcript, continuation, cache-lineage,
+The existing manual confirmation policy remains attached to the Build approval paths. The Auto
+choice explicitly selects the unattended confirmation policy; ordinary approval does not infer it
+from the source agent. A fresh handoff clears only transient transcript, continuation, cache-lineage,
 recovery, and tool-budget state; the plan file, task tracker, working tree, configuration,
 provider, permissions, and aggregate usage remain intact. The UI shows `Preparing fresh execution
 thread...`, `Restoring approved plan...`, and `Starting build...` while the handoff is active and
@@ -498,10 +511,13 @@ All clients can reconstruct the approval lifecycle from the authoritative
 `ThreadEvent` stream. A plan turn emits `plan.delta` and the completed plan item,
 then `plan.approval.requested` with the producing turn and plan file. The
 terminal decision is emitted as `plan.approval.resolved` with one of
-`execute`, `fresh_context`, `revise`, `cancel`, or a legacy handoff decision,
-plus an `automatic` flag. A successful fresh handoff then emits `context.reset`
-with the trigger, plan-preserved status, previous context usage, and tool-budget
-reset status. The Open Responses bridge forwards this as `vtcode.context_reset`.
+`execute`, `fresh_context`, `switch_build`, `switch_auto`, `revise`, `cancel`,
+or `auto_accept`, plus an `automatic` flag. The event is emitted once only
+after the validated plan and task tracker are ready to hand off; a failed
+handoff keeps the plan pending for retry. A successful fresh handoff then emits
+`context.reset` with the trigger, plan-preserved status, previous context
+usage, and tool-budget reset status. The Open Responses bridge forwards this
+as `vtcode.context_reset`.
 
 ## Budget Exhaustion
 

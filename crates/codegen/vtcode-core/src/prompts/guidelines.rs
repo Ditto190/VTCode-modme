@@ -177,6 +177,10 @@ pub fn generate_tool_guidelines_for_profile(
         lines.push(code_search_guidance(has_exec, shell_profile));
     }
     if has_apply_patch || has_exec {
+        lines.push(
+            "- Build and Auto share tools and safety gates; Auto changes confirmation behavior only after explicit approval or full-auto policy."
+                .to_string(),
+        );
         lines.push("- On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call. Run one verifier (`&&` chain, no pipes), then synthesize.".to_string());
     }
     if has_search || has_exec {
@@ -835,12 +839,13 @@ mod tests {
         // the no-piping rule, and the budget test proves it fits.
         assert!(guidelines.contains("piped checks stay unverified"));
         assert!(guidelines.contains("max_output_tokens"));
+        assert!(guidelines.contains("Build and Auto share tools and safety gates"));
         let approx_tokens = vtcode_commons::estimate_tokens(&guidelines);
         // The batching, bounded-diff, and shipped verifier-discipline
         // guardrails are intentionally part of the compact shared prompt; the
-        // budget moved 400 -> 430 for the deliberate no-pipe-verifier line
-        // (checkpoint session-vtcode-20260912T083718Z), not by drift.
-        assert!(approx_tokens < 430, "got ~{approx_tokens} tokens");
+        // Keep the compact prompt bounded while retaining the explicit
+        // Build/Auto parity contract and no-pipe verifier rule.
+        assert!(approx_tokens < 460, "got ~{approx_tokens} tokens");
     }
 
     #[test]

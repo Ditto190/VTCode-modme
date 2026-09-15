@@ -2801,8 +2801,11 @@ async fn streamed_valid_plan_is_persisted_and_publishes_approval_ready_events() 
     assert_eq!(calls.load(Ordering::SeqCst), 1, "a valid streamed plan must not re-enter synthesis");
     assert!(outcome.plan_approved_execution_pending, "the existing automatic approval route should be selected");
     assert_eq!(
-        outcome.pending_plan_execution_context,
-        PlanExecutionContext::Current,
+        outcome.pending_plan_execution_target,
+        Some(crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget::build(
+            PlanExecutionContext::Current,
+            true,
+        )),
         "automatic approval must retain the typed current-session execution handoff"
     );
 
@@ -2902,8 +2905,8 @@ async fn explicit_build_and_auto_approval_selections_handoff_persisted_plan_with
             &Arc::new(tokio::sync::Notify::new()),
             PlanApprovalRequestContext {
                 plan: &plan,
-                active_agent_name: "plan",
                 skip_confirmations: false,
+                full_auto: false,
                 context_usage_percent: 0,
             },
             PlanApprovalTelemetryContext {
@@ -2918,10 +2921,10 @@ async fn explicit_build_and_auto_approval_selections_handoff_persisted_plan_with
         assert!(matches!(
             outcome,
             TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy {
-                agent,
-                skip_confirmations,
-                execution_context: PlanExecutionContext::Current,
-            } if agent == expected_agent && skip_confirmations == expected_skip_confirmations
+                target,
+            } if target.agent_name() == expected_agent
+                && target.skip_confirmations == expected_skip_confirmations
+                && target.execution_context == PlanExecutionContext::Current
         ));
         assert!(
             fs::read_dir(workspace.path())

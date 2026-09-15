@@ -451,7 +451,8 @@ mod tests {
     use vtcode_config::core::permissions::{AgentPermissionsConfig, PermissionDefault};
     use vtcode_config::{
         HookCommandConfig, HooksConfig, IsolationMode, SubagentDiscoveryInput, SubagentMcpServer, SubagentMemoryScope,
-        SubagentSource, builtin_plan_agent, builtin_primary_duck_agent, builtin_subagents, discover_subagents,
+        SubagentSource, builtin_plan_agent, builtin_primary_auto_agent, builtin_primary_duck_agent, builtin_subagents,
+        discover_subagents,
     };
 
     use crate::config::constants::tools;
@@ -695,6 +696,28 @@ mod tests {
         assert!(primary_agent_allows_tool(active.active(), tools::APPLY_PATCH));
         assert!(primary_agent_allows_tool(active.active(), tools::RUN_PTY_CMD));
         assert_eq!(active.active().permissions.default, PermissionDefault::Ask);
+    }
+
+    #[test]
+    fn build_and_auto_expose_the_same_tools_and_policy_decisions() {
+        let build = ActivePrimaryAgent::from_spec(&builtin_primary_build_agent());
+        let auto = ActivePrimaryAgent::from_spec(&builtin_primary_auto_agent());
+        let tools_to_compare = [
+            tools::CODE_SEARCH,
+            tools::EXEC_COMMAND,
+            tools::APPLY_PATCH,
+            tools::RUN_PTY_CMD,
+            tools::WRITE_FILE,
+            tools::REQUEST_USER_INPUT,
+        ];
+
+        for tool in tools_to_compare {
+            assert_eq!(
+                primary_agent_allows_tool(&build, tool),
+                primary_agent_allows_tool(&auto, tool),
+                "Build and Auto must expose the same capability for {tool}"
+            );
+        }
     }
 
     #[test]

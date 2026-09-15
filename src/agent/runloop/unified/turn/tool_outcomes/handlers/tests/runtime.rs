@@ -1452,6 +1452,8 @@ async fn pending_verification_blocks_patch_before_filesystem_mutation() {
 
     assert!(outcome.is_none());
     assert_eq!(std::fs::read_to_string(sample_file).expect("read sample file"), "hello\n");
+    assert_eq!(outcome_ctx.ctx.harness_state.consecutive_blocked_tool_calls, 1);
+    assert_eq!(outcome_ctx.ctx.harness_state.blocked_tool_calls, 1);
     assert!(outcome_ctx.ctx.working_history.iter().any(|message| {
         message.role == uni::MessageRole::Tool
             && message.content.as_text().contains("anti_blind_editing_verification_required")

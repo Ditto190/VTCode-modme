@@ -181,9 +181,7 @@ mod tests {
             turn_touched_files: BTreeSet::new(),
             turn_diagnostics: Default::default(),
             pending_primary_agent: None,
-            pending_plan_auto_accept: false,
-            pending_plan_execution_context:
-                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+            pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
         };
@@ -239,9 +237,7 @@ mod tests {
             turn_touched_files: BTreeSet::new(),
             turn_diagnostics: Default::default(),
             pending_primary_agent: None,
-            pending_plan_auto_accept: false,
-            pending_plan_execution_context:
-                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+            pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
         };
@@ -288,9 +284,7 @@ mod tests {
             turn_touched_files: BTreeSet::new(),
             turn_diagnostics: Default::default(),
             pending_primary_agent: None,
-            pending_plan_auto_accept: false,
-            pending_plan_execution_context:
-                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+            pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
         };
@@ -337,9 +331,7 @@ mod tests {
             turn_touched_files: BTreeSet::new(),
             turn_diagnostics: Default::default(),
             pending_primary_agent: None,
-            pending_plan_auto_accept: false,
-            pending_plan_execution_context:
-                crate::agent::runloop::unified::planning_workflow::PlanExecutionContext::Current,
+            pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
         };

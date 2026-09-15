@@ -30,6 +30,24 @@ layers get a first-class signal instead of inferring it. Harness `TurnBlocked`,
 `BlockedRecoveryStarted`, and `BlockedRecoveryFinished` item events cover the
 recovery lifecycle.
 
+### Approved-plan handoff boundary
+
+Plan approval produces one immutable execution target containing the destination
+(`build` or `auto`), confirmation policy, and current/fresh context. Normal
+approval targets Build; Auto is selected only by an explicit Auto choice or an
+explicit full-auto policy. The source agent is never silently restored. Build
+and Auto share the same tool catalog, command/path/verification gates, blocked-
+call fuse, budgets, and recovery limits; Auto changes confirmation behavior
+only.
+
+The handoff validates the persisted plan, persists and verifies its task
+tracker, emits one `plan.approval.resolved` event, exits Planning, refreshes the
+selected agent's permissions and tool catalog, applies the context choice, and
+queues exactly one implementation turn. Fresh and current execution use this
+same boundary. A failed handoff keeps the validated plan available for a
+resumable retry, and queued mode input cannot replace the selected destination
+while the transition is active.
+
 ### Tool-result ordering and bounded request repair
 
 An assistant message with tool calls is one protocol batch. Every matching tool
