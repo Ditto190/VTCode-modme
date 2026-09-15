@@ -237,3 +237,7 @@ Headline: functionally stable, but cost efficiency is broken and long-run stabil
 3. P1 — Exec economy: prompt guidance to prefer read_file/code_search over sed/rg via exec_command, batch parallel-safe reads, raise/background long cargo cmds (exec_sessions, check-dev.sh --changed/--test), dedupe cargo check/build loops. Validate with ./scripts/check-dev.sh --test + --changed.
 4. P1 — Verification gate: review turn.blocked thresholds + “unverified response” classifier; require evidence markers before retry, cap preflight-denied retries (especially planning-denied + security-denied).
 5. P2 — Patch + path hygiene: apply_patch schema hint (no unified diff), pre-check target already exists, fix code_search path guessing; permission fast-path for read-only safe tools to cut 40s waits.
+
+===
+
+https://dial9-rs.github.io/blog/principles-for-fast-tokio-applications/
