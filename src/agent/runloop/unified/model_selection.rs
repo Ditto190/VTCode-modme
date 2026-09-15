@@ -246,7 +246,8 @@ pub(crate) async fn finalize_model_selection(
             renderer.line(
                 MessageStyle::Info,
                 &format!(
-                    "Compacted conversation for model switch ({} -> {} messages, {} compaction).",
+                    "Compacted conversation for model switch ({} -> {} messages, {} compaction). \
+                    Auto-resume injected; new model continues seamlessly with preserved context.",
                     outcome.original_len,
                     outcome.compacted_len,
                     outcome.mode.as_str()
@@ -254,12 +255,18 @@ pub(crate) async fn finalize_model_selection(
             )?;
         }
         ModelSwitchCompactionOutcome::AlreadyCompact => {
-            renderer.line(MessageStyle::Info, "Model switched; conversation was already compact.")?;
+            renderer.line(
+                MessageStyle::Info,
+                "Model switched; conversation was already compact. Auto-resume injected for seamless continuation.",
+            )?;
         }
         ModelSwitchCompactionOutcome::Failed(err) => {
             renderer.line(
                 MessageStyle::Error,
-                &format!("Model switched, but context compaction failed: {err:#}. Continuing with full history."),
+                &format!(
+                    "Model switched, but context compaction failed: {err:#}. \
+                    Continuing with full history plus auto-resume note."
+                ),
             )?;
         }
     }
