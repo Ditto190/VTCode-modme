@@ -76,7 +76,7 @@ help me check and fix on control+g to edit/review plan proposal in external edit
 
 ===
 
-check VT Code notification from terminal/ghostty etc doesn't showing in the notification center properly. Bug: notifications are not appearing as expected, making it difficult for the user to stay informed about important events and updates. Currently, only the terminal get pinged, and the notification center remains empty and I am missing critical notifications. (Note: currently tested on macOS and ghostty, other platforms may have similar issues.)
+check VT Code notification from terminal/ghostty etc doesn't showing in the notification center properly. Bug: notifications are not appearing as expected, making it difficult for the user to stay informed about important events and updates. Currently, only the terminal get pinged, and the notification center remains empty and I am missing critical notifications. (Note: currently tested on macOS and ghostty, other platforms may have similar issues.). Use sound alerts and system notifications to ensure the user is properly informed about important events and updates. Configurable by the user through the settings.
 
 ===
 
@@ -250,3 +250,36 @@ add double escape to open /rewind commands
 
 debug session and fix: "[!] Turn balancer: repeated low-signal navigation detected (exec::inspection:
 :rg::exit ×5); scheduling an early recovery pass."
+
+===
+
+add code syntax highlighting for code diff previews, use existing code syntax highlighting rules and engine. '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-15 at 17.15.28.png'
+
+===
+
+revise the diff header, it seems wrong: '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 17.16.54.png'
+
+===
+
+check the inline diff, it seems the gutter style colors are missing? '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 17.18.38.png'
+
+===
+
+allow user the choose diff themes, provide a preview of the selected theme. example themes: github, ayu, gruvbox, nord, solarized, dracula. Add new command with live preview and apply the selected theme.
+
+===
+
+double check compaction /compact if it works properly. "Compaction failed: Failed to generate compaction summary", check last session and debug and fix.
+
+---
+
+check and fix " Blocked action
+exec_command is denied by workspace tool policy, so I could not run the
+final extraction:
+• Denial: "Tool 'exec_command' execution denied by policy";"
+
+===
+
+remove trailing ... dot from diff preview find another way '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 17.56.04.png'
+
+===
