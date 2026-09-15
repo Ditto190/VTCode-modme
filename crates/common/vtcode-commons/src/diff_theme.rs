@@ -5,6 +5,8 @@
 use anstyle::{AnsiColor, Color};
 
 use crate::ansi_capabilities::{ColorScheme, detect_color_scheme};
+use crate::color_policy::color_output_enabled;
+use crate::color256_theme::rgb_to_ansi256_for_theme;
 
 /// Terminal background theme for diff rendering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +40,12 @@ pub enum DiffColorLevel {
 impl DiffColorLevel {
     /// Detect color level from terminal capabilities.
     pub fn detect() -> Self {
+        // Keep diff backgrounds foreground-only when the process has opted
+        // out of ANSI color. Mapping no-color to ANSI16 also keeps all
+        // renderer-specific style resolvers on the same fallback path.
+        if !color_output_enabled() {
+            return Self::Ansi16;
+        }
         let colorterm = std::env::var("COLORTERM").unwrap_or_default();
         let term = std::env::var("TERM").unwrap_or_default();
         let term_program = std::env::var("TERM_PROGRAM").ok();
@@ -92,21 +100,91 @@ fn is_windows_terminal(term_program: Option<&str>) -> bool {
     normalized.contains("windows_terminal") || normalized.contains("windows terminal")
 }
 
-// ── Standard ANSI red/green backgrounds ────────────────────────────────────
+// ── Theme-aware red/green palette ──────────────────────────────────────────
+
+fn capability_color(rgb: (u8, u8, u8), theme: DiffTheme, level: DiffColorLevel) -> Color {
+    match level {
+        DiffColorLevel::TrueColor => Color::Rgb(anstyle::RgbColor(rgb.0, rgb.1, rgb.2)),
+        DiffColorLevel::Ansi256 => {
+            Color::Ansi256(anstyle::Ansi256Color(rgb_to_ansi256_for_theme(rgb.0, rgb.1, rgb.2, theme.is_light())))
+        }
+        // ANSI16 callers use these colors only as a foreground fallback. The
+        // renderer still suppresses all backgrounds at this capability level.
+        DiffColorLevel::Ansi16 => Color::Rgb(anstyle::RgbColor(rgb.0, rgb.1, rgb.2)),
+    }
+}
+
+/// Foreground color for an addition marker or fallback body.
+pub fn diff_add_fg(theme: DiffTheme, level: DiffColorLevel) -> Color {
+    match level {
+        DiffColorLevel::Ansi16 => Color::Ansi(if theme.is_light() {
+            AnsiColor::Green
+        } else {
+            AnsiColor::BrightGreen
+        }),
+        DiffColorLevel::TrueColor | DiffColorLevel::Ansi256 => {
+            capability_color(if theme.is_light() { (0, 92, 43) } else { (85, 255, 85) }, theme, level)
+        }
+    }
+}
+
+/// Foreground color for a deletion marker or fallback body.
+pub fn diff_del_fg(theme: DiffTheme, level: DiffColorLevel) -> Color {
+    match level {
+        DiffColorLevel::Ansi16 => Color::Ansi(if theme.is_light() {
+            AnsiColor::Red
+        } else {
+            AnsiColor::BrightRed
+        }),
+        DiffColorLevel::TrueColor | DiffColorLevel::Ansi256 => capability_color(
+            if theme.is_light() {
+                (140, 20, 25)
+            } else {
+                (255, 180, 180)
+            },
+            theme,
+            level,
+        ),
+    }
+}
+
+/// Foreground color for line-number gutters and separators.
+pub fn diff_gutter_fg(theme: DiffTheme, level: DiffColorLevel) -> Color {
+    match level {
+        DiffColorLevel::Ansi16 => Color::Ansi(if theme.is_light() {
+            AnsiColor::Black
+        } else {
+            AnsiColor::BrightWhite
+        }),
+        DiffColorLevel::TrueColor | DiffColorLevel::Ansi256 => capability_color(
+            if theme.is_light() {
+                (70, 80, 75)
+            } else {
+                // Keep the gutter quieter than code text while retaining
+                // WCAG AA contrast against both dark row backgrounds.
+                (165, 175, 170)
+            },
+            theme,
+            level,
+        ),
+    }
+}
+
+// ── Soft diff backgrounds ─────────────────────────────────────────────────
 
 /// Get background color for addition lines based on theme and color level.
-pub fn diff_add_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+pub fn diff_add_bg(theme: DiffTheme, level: DiffColorLevel) -> Color {
     match theme {
-        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(20, 58, 45)),
-        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(218, 246, 225)),
+        DiffTheme::Dark => capability_color((20, 58, 45), theme, level),
+        DiffTheme::Light => capability_color((218, 246, 225), theme, level),
     }
 }
 
 /// Get background color for deletion lines based on theme and color level.
-pub fn diff_del_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+pub fn diff_del_bg(theme: DiffTheme, level: DiffColorLevel) -> Color {
     match theme {
-        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(70, 38, 42)),
-        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(255, 224, 224)),
+        DiffTheme::Dark => capability_color((70, 38, 42), theme, level),
+        DiffTheme::Light => capability_color((255, 224, 224), theme, level),
     }
 }
 
@@ -114,18 +192,18 @@ pub fn diff_del_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
 ///
 /// Sits on top of the subtle full-width add tint so only the tokens that
 /// actually changed pop (IntelliJ / GitHub two-level background).
-pub fn diff_add_word_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+pub fn diff_add_word_bg(theme: DiffTheme, level: DiffColorLevel) -> Color {
     match theme {
-        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(36, 100, 70)),
-        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(168, 230, 190)),
+        DiffTheme::Dark => capability_color((36, 100, 70), theme, level),
+        DiffTheme::Light => capability_color((168, 230, 190), theme, level),
     }
 }
 
 /// Stronger deletion-chip background for word-level (intra-line) highlights.
-pub fn diff_del_word_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+pub fn diff_del_word_bg(theme: DiffTheme, level: DiffColorLevel) -> Color {
     match theme {
-        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(140, 52, 58)),
-        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(255, 186, 186)),
+        DiffTheme::Dark => capability_color((140, 52, 58), theme, level),
+        DiffTheme::Light => capability_color((255, 186, 186), theme, level),
     }
 }
 
@@ -133,14 +211,14 @@ pub fn diff_del_word_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
 ///
 /// Neutral blue-grey tint (not red/green) so hunk separators stay visually
 /// distinct from add/del content while still painting full-width.
-pub fn diff_hunk_bg(theme: DiffTheme, _level: DiffColorLevel) -> Color {
+pub fn diff_hunk_bg(theme: DiffTheme, level: DiffColorLevel) -> Color {
     match theme {
-        DiffTheme::Dark => Color::Rgb(anstyle::RgbColor(30, 45, 62)),
-        DiffTheme::Light => Color::Rgb(anstyle::RgbColor(221, 235, 244)),
+        DiffTheme::Dark => capability_color((30, 45, 62), theme, level),
+        DiffTheme::Light => capability_color((221, 235, 244), theme, level),
     }
 }
 
-/// Get gutter foreground color for light theme (dark theme uses dimmed default).
+/// Legacy light-theme gutter foreground retained for compatibility.
 pub fn diff_gutter_fg_light(_level: DiffColorLevel) -> Color {
     Color::Ansi(AnsiColor::Black)
 }
@@ -184,17 +262,15 @@ mod tests {
     }
 
     #[test]
-    fn all_levels_use_same_theme_tints() {
-        for level in [
-            DiffColorLevel::TrueColor,
-            DiffColorLevel::Ansi256,
-            DiffColorLevel::Ansi16,
-        ] {
-            assert_eq!(diff_add_bg(DiffTheme::Dark, level), Color::Rgb(anstyle::RgbColor(20, 58, 45)));
-            assert_eq!(diff_del_bg(DiffTheme::Dark, level), Color::Rgb(anstyle::RgbColor(70, 38, 42)));
-            assert_eq!(diff_add_bg(DiffTheme::Light, level), Color::Rgb(anstyle::RgbColor(218, 246, 225)));
-            assert_eq!(diff_del_bg(DiffTheme::Light, level), Color::Rgb(anstyle::RgbColor(255, 224, 224)));
-        }
+    fn backgrounds_follow_terminal_capability() {
+        assert_eq!(diff_add_bg(DiffTheme::Dark, DiffColorLevel::TrueColor), Color::Rgb(anstyle::RgbColor(20, 58, 45)));
+        assert_eq!(
+            diff_del_bg(DiffTheme::Light, DiffColorLevel::TrueColor),
+            Color::Rgb(anstyle::RgbColor(255, 224, 224))
+        );
+        assert!(matches!(diff_add_bg(DiffTheme::Dark, DiffColorLevel::Ansi256), Color::Ansi256(_)));
+        assert!(matches!(diff_add_word_bg(DiffTheme::Light, DiffColorLevel::Ansi256), Color::Ansi256(_)));
+        assert!(matches!(diff_gutter_fg(DiffTheme::Dark, DiffColorLevel::Ansi256), Color::Ansi256(_)));
     }
 
     #[test]

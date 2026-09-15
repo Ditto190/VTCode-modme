@@ -8,6 +8,7 @@
 - Preserve source line endings and byte-safe intraline ranges.
 - All expensive diff and intraline paths require explicit bounds or deadlines.
 - Layout emits semantic rows; applications supply syntax and color policy.
+- Shared responsive constants keep side-by-side and unified gutter decisions consistent across renderers; measured widths are post-indent/content widths.
 
 ## Dependencies
 

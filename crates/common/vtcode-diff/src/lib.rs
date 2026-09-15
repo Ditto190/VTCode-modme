@@ -975,6 +975,63 @@ pub fn diff_display_line_number_width(lines: &[DiffDisplayLine]) -> usize {
     decimal_digits(maximum).clamp(5, 6)
 }
 
+/// Minimum content width for the paired old/new preview.
+///
+/// Below this width, two independently numbered panes leave too little room
+/// for source text. Renderers should fall back to the unified presentation.
+pub const DIFF_MIN_SIDE_BY_SIDE_WIDTH: usize = 60;
+
+/// Whether a measured width can support the paired old/new preview.
+///
+/// An unknown width preserves the existing caller behavior; redirected
+/// output and test sinks may not expose terminal sizing at all.
+#[must_use]
+pub const fn diff_side_by_side_fits(available_width: Option<usize>) -> bool {
+    match available_width {
+        Some(width) => width >= DIFF_MIN_SIDE_BY_SIDE_WIDTH,
+        None => true,
+    }
+}
+
+/// Minimum source width retained when the unified line gutter is visible.
+///
+/// This keeps the marker, line number, separator, and a useful amount of
+/// source text together. Narrower layouts should hide the gutter and give its
+/// columns back to the source body.
+pub const DIFF_MIN_BODY_WIDTH_WITH_GUTTER: usize = 20;
+
+/// Width consumed by a unified diff gutter after the line-number field.
+///
+/// The rendered shape is `+123 │ `: one marker plus the three-cell separator
+/// around `│`. The line-number field is supplied by the caller because it is
+/// derived from the visible diff excerpt.
+#[must_use]
+pub const fn diff_gutter_width(line_number_width: usize) -> usize {
+    line_number_width.saturating_add(4)
+}
+
+/// Whether a unified diff can keep its marker, line number, and separator
+/// without starving the source body.
+#[must_use]
+pub const fn diff_gutter_fits(available_width: usize, line_number_width: usize) -> bool {
+    available_width >= diff_gutter_width(line_number_width).saturating_add(DIFF_MIN_BODY_WIDTH_WITH_GUTTER)
+}
+
+/// Width to pass to semantic unified layout when the renderer hides its
+/// visible gutter.
+///
+/// `layout_display_lines` subtracts the normal gutter before wrapping source
+/// text. Giving that width back keeps wrapping aligned with compact rendering
+/// without adding another public layout option.
+#[must_use]
+pub const fn diff_layout_width(available_width: usize, line_number_width: usize, show_gutter: bool) -> usize {
+    if show_gutter {
+        available_width
+    } else {
+        available_width.saturating_add(diff_gutter_width(line_number_width))
+    }
+}
+
 fn decimal_digits(mut number: u32) -> usize {
     let mut digits = 1usize;
     while number >= 10 {
@@ -1169,7 +1226,7 @@ impl Default for LayoutOptions {
             width: 80,
             max_rows: 2_000,
             wrap: true,
-            min_side_by_side_width: 60,
+            min_side_by_side_width: DIFF_MIN_SIDE_BY_SIDE_WIDTH,
         }
     }
 }
@@ -1963,6 +2020,22 @@ mod tests {
                 .filter(|row| row.kind != DiffRowKind::HunkHeader)
                 .all(|row| row.right.is_none())
         );
+    }
+
+    #[test]
+    fn responsive_gutter_policy_preserves_source_room_at_the_boundary() {
+        assert_eq!(diff_gutter_width(5), 9);
+        assert!(diff_gutter_fits(29, 5));
+        assert!(!diff_gutter_fits(28, 5));
+        assert_eq!(diff_layout_width(29, 5, true), 29);
+        assert_eq!(diff_layout_width(28, 5, false), 37);
+    }
+
+    #[test]
+    fn side_by_side_policy_has_a_stable_resize_boundary() {
+        assert!(!diff_side_by_side_fits(Some(59)));
+        assert!(diff_side_by_side_fits(Some(DIFF_MIN_SIDE_BY_SIDE_WIDTH)));
+        assert!(diff_side_by_side_fits(None));
     }
 
     #[test]

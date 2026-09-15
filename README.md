@@ -83,14 +83,15 @@ The full documentation catalog lives in the
 Most agents are a model plus a tool call. VT Code answers each common failure
 mode with a **structural default in the runtime**, not a prompt tweak:
 
-| Failure mode                      | Structural answer                                                                                                                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                       |
-| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out. [Architecture](./docs/ARCHITECTURE.md)                                            |
-| **One unreviewed command**        | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)     |
-| **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                |
+| Failure mode                      | Structural answer                                                                                                                                                                      |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                   |
+| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out. [Architecture](./docs/ARCHITECTURE.md)                                        |
+| **One unreviewed command**        | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **A run dies mid-task**           | Durable sessions resume with `vtcode continue`, and workspace snapshots roll back with `vtcode revert` — no work is lost to a crash or a bad turn. [Commands](./docs/user-guide/commands.md) |
+| **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                            |
 
-Three foundations sit underneath all four:
+Three foundations sit underneath all of them:
 
 - **One record of truth.** A single
   [`ThreadEvent`](./crates/common/vtcode-exec-events) stream logs everything a
@@ -100,8 +101,9 @@ Three foundations sit underneath all four:
   interface, and MCP, Skills, Plugins, ACP, A2A, and WebMCP attach as
   first-class extensions ([MCP](./docs/guides/mcp-integration.md) ·
   [Providers](./docs/providers/PROVIDER_GUIDES.md)).
-- **A keyboard-first TUI, held to the same bar.** WCAG AA themes, gated by
-  `cargo nextest` and CI with `-D warnings`
+- **A keyboard-first TUI, held to the same bar.** WCAG AA contrast on every
+  built-in theme ([Color guidelines](./docs/guides/COLOR_GUIDELINES.md)),
+  gated by `cargo nextest` and CI with `-D warnings`
   ([Testing](./docs/development/testing.md)).
 
 ## Architecture
@@ -350,7 +352,6 @@ Thank you to everyone who shaped VT Code.
 
 </details>
 
-
 ## Support
 
 ### Sponsorship
@@ -365,7 +366,6 @@ project independent.
   <a href="https://github.com/coderabbitai"><img src="https://avatars.githubusercontent.com/u/132028505" width="80" height="80" alt="@coderabbitai" style="border-radius: 50%" /></a>
   <a href="https://github.com/KhaiRyth"><img src="https://avatars.githubusercontent.com/u/273723951" width="80" height="80" alt="@KhaiRyth" style="border-radius: 50%" /></a>
 </div>
-
 
 <div align="center">
 

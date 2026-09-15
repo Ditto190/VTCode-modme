@@ -219,30 +219,38 @@ fn replace_indicator_icon(line: &mut Line<'static>, frame: &str) -> bool {
 
 /// Full-row tint for a diff line.
 ///
-/// Uses the most common span background so a word chip that happens to be the
-/// first span cannot become the fill colour for the whole row.
+/// Uses the marker/gutter background rather than a changed-word chip so a row
+/// with several syntax spans does not extend the stronger chip across padding.
 ///
 /// Returns `None` for side-by-side rows — those mix coloured panes with an
 /// uncoloured sibling (or two different colours), and full-width fill would
 /// paint the empty pane with the other side's tint.
 fn line_background(line: &Line<'_>) -> Option<Color> {
-    let mut counts = std::collections::HashMap::new();
-    let mut has_uncolored = false;
+    let mut first_background = None;
+    let mut marker_background = None;
+    let mut has_uncolored_divider = false;
     for span in &line.spans {
         match span.style.bg {
+            Some(Color::Reset) if span.content.trim() == "│" => has_uncolored_divider = true,
+            Some(Color::Reset) => {}
             Some(bg) => {
-                *counts.entry(bg).or_insert(0usize) += 1;
+                first_background.get_or_insert(bg);
+                if marker_background.is_none() && matches!(span.content.chars().next(), Some('+' | '-')) {
+                    marker_background = Some(bg);
+                }
             }
-            None => has_uncolored = true,
+            None if span.content.trim() == "│" => has_uncolored_divider = true,
+            None => {}
         }
     }
-    // Side-by-side rows either mix a coloured pane with an uncoloured sibling
-    // (orphan add/del) or have two distinct colours (paired red+green).
-    // Full-width fill would bleed the dominant tint into the other pane.
-    if counts.len() > 1 || (has_uncolored && !counts.is_empty()) {
+    // Side-by-side rows carry an uncoloured divider. Full-width fill would
+    // bleed one pane's tint into the other. Do not inspect every later span
+    // for a marker: a changed word can legitimately begin with `+` or `-`
+    // (for example `--last`) without turning a unified row into two panes.
+    if has_uncolored_divider {
         return None;
     }
-    counts.into_iter().next().map(|(bg, _)| bg)
+    marker_background.or(first_background)
 }
 
 /// Fill untinted cells on a diff row with the line tint.
@@ -326,6 +334,121 @@ mod tests {
         assert_eq!(buf[(4, 0)].bg, chip_bg, "word chip must not be overwritten");
         assert_eq!(buf[(19, 0)].bg, line_bg, "empty cells fill with line tint");
         assert_eq!(buf[(0, 0)].bg, line_bg);
+    }
+
+    #[test]
+    fn full_width_fill_uses_the_row_tint_when_word_chips_are_present() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let line_bg = Color::Rgb(20, 58, 45);
+        let chip_bg = Color::Rgb(36, 100, 70);
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        for x in 1..8 {
+            buf[(x, 0)].bg = chip_bg;
+        }
+        let line = RatLine::from(vec![
+            RatSpan::styled("+", RatStyle::default().bg(line_bg)),
+            RatSpan::styled("changed", RatStyle::default().bg(chip_bg)),
+            RatSpan::styled(" ", RatStyle::default().bg(line_bg)),
+        ]);
+
+        apply_full_width_line_backgrounds(&mut buf, area, &[line], Some(Color::Black));
+
+        assert_eq!(buf[(1, 0)].bg, chip_bg, "word chip must remain stronger");
+        assert_eq!(buf[(19, 0)].bg, line_bg, "row tint must fill after word chip");
+    }
+
+    #[test]
+    fn full_width_fill_uses_the_marker_tint_when_syntax_chips_outnumber_it() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let line_bg = Color::Rgb(20, 58, 45);
+        let chip_bg = Color::Rgb(36, 100, 70);
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        let line = RatLine::from(vec![
+            RatSpan::styled("+", RatStyle::default().bg(line_bg)),
+            RatSpan::styled("changed", RatStyle::default().bg(chip_bg)),
+            RatSpan::styled(" syntax", RatStyle::default().bg(chip_bg)),
+            RatSpan::styled(" tokens", RatStyle::default().bg(chip_bg)),
+        ]);
+
+        apply_full_width_line_backgrounds(&mut buf, area, &[line], Some(Color::Black));
+
+        assert_eq!(buf[(19, 0)].bg, line_bg, "padding must use the marker tint");
+    }
+
+    #[test]
+    fn full_width_fill_does_not_misclassify_dash_prefixed_word_chip() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 36, 1);
+        let mut buf = Buffer::empty(area);
+        let line_bg = Color::Rgb(70, 38, 42);
+        let chip_bg = Color::Rgb(140, 52, 58);
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        let line = RatLine::from(vec![
+            RatSpan::styled("-", RatStyle::default().bg(line_bg)),
+            RatSpan::styled(" 256 │ vtcode trajectory ", RatStyle::default().bg(line_bg)),
+            RatSpan::styled("--last", RatStyle::default().bg(chip_bg)),
+        ]);
+        for x in 25..31 {
+            buf[(x, 0)].bg = chip_bg;
+        }
+
+        apply_full_width_line_backgrounds(&mut buf, area, &[line], Some(Color::Black));
+
+        assert_eq!(buf[(26, 0)].bg, chip_bg, "intraline chip must remain stronger");
+        assert_eq!(buf[(35, 0)].bg, line_bg, "a dash-prefixed chip must not create a tint gap");
+    }
+
+    #[test]
+    fn full_width_fill_survives_an_uncolored_indent_before_the_marker() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let line_bg = Color::Rgb(20, 58, 45);
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        let line = RatLine::from(vec![
+            RatSpan::raw("    "),
+            RatSpan::styled("+", RatStyle::default().bg(line_bg)),
+            RatSpan::styled("new", RatStyle::default().bg(line_bg)),
+        ]);
+
+        apply_full_width_line_backgrounds(&mut buf, area, &[line], Some(Color::Black));
+
+        assert_eq!(buf[(19, 0)].bg, line_bg, "indentation must not disable row tinting");
+    }
+
+    #[test]
+    fn full_width_fill_skips_side_by_side_dividers() {
+        use ratatui::style::Style as RatStyle;
+        use ratatui::text::{Line as RatLine, Span as RatSpan};
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let left_bg = Color::Rgb(70, 38, 42);
+        let right_bg = Color::Rgb(20, 58, 45);
+        buf.set_style(area, RatStyle::default().bg(Color::Black));
+        let line = RatLine::from(vec![
+            RatSpan::styled("-", RatStyle::default().bg(left_bg)),
+            RatSpan::raw("old       "),
+            RatSpan::raw("│"),
+            RatSpan::styled("+", RatStyle::default().bg(right_bg)),
+            RatSpan::styled("new", RatStyle::default().bg(right_bg)),
+        ]);
+
+        apply_full_width_line_backgrounds(&mut buf, area, &[line], Some(Color::Black));
+
+        assert_eq!(buf[(19, 0)].bg, Color::Black, "pane tint must not bleed across the row");
     }
 
     fn row_text(buf: &Buffer, area: Rect, row: u16) -> String {

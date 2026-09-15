@@ -28,7 +28,8 @@ impl Session {
     /// This method also applies visual styling for:
     /// - Todo/checkbox items (completed items are dimmed)
     /// - List items with consistent formatting
-    /// - Diff rows (foreground-only aware, never justified as prose)
+    /// - Diff rows (background-aware with a foreground-only fallback, never
+    ///   justified as prose)
     pub(super) fn justify_wrapped_lines(
         &self,
         lines: Vec<Line<'static>>,
@@ -63,8 +64,8 @@ impl Session {
             // Check for todo/checkbox items
             let todo_state = text_utils::detect_todo_state(line_text);
 
-            // Extend diff line backgrounds to full width; foreground-only
-            // diff rows are still excluded from prose justification.
+            // Extend the base diff tint to full width; stronger intraline
+            // chips stay on their explicit spans.
             let processed_line = if self.is_diff_line(&line) {
                 self.pad_diff_line(&line, max_width)
             } else if todo_state == text_utils::TodoState::Completed && self.appearance.dim_completed_todos {
@@ -145,14 +146,14 @@ impl Session {
     /// Check if a line is a diff row (markers plus tint or diff foreground).
     ///
     /// Shared with `blocks.rs` via `helpers::is_diff_row_spans` so
-    /// foreground-only diff rows are never justified as prose.
+    /// foreground-only fallback diff rows are never justified as prose.
     fn is_diff_line(&self, line: &Line<'static>) -> bool {
         is_diff_row_spans(&line.spans)
     }
 
     /// Pad a diff line to full width.
     ///
-    /// Foreground-only rows (no bg) need no padding by design.
+    /// Foreground-only fallback rows (no bg) need no padding by design.
     fn pad_diff_line(&self, line: &Line<'static>, max_width: usize) -> Line<'static> {
         if max_width == 0 || line.spans.is_empty() {
             return line.clone();

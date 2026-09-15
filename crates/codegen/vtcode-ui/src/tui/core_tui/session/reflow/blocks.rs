@@ -16,7 +16,8 @@ use super::helpers::{
 };
 use crate::tui::config::constants::ui;
 
-/// Whether spans form a diff row (header or body), foreground-only aware.
+/// Whether spans form a diff row (header or body), including the
+/// foreground-only fallback.
 /// Shared via `helpers::is_diff_row_spans` so reflow and formatting agree.
 fn is_diff_row(spans: &[Span<'_>]) -> bool {
     is_diff_row_spans(spans)
@@ -24,7 +25,7 @@ fn is_diff_row(spans: &[Span<'_>]) -> bool {
 /// Pad a tinted diff row with bg-colored spaces to the full viewport width.
 ///
 /// Non-diff rows are left at exact content width (no right border/padding).
-/// Foreground-only rows (no bg) need no padding by design.
+/// Foreground-only fallback rows (no bg) need no padding by design.
 fn pad_diff_row_to_width(line: &mut Line<'static>, max_width: usize) {
     let Some(bg) = diff_row_bg(&line.spans) else {
         return;
@@ -160,6 +161,9 @@ impl Session {
             let text: &str = span.content.as_ref();
             Self::wrapped_diff_continuation_prefix(text)
         });
+        // Wrapping removes the original marker from continuation fragments,
+        // so keep the source row's tint before turning the spans into lines.
+        let content_diff_bg = diff_row_bg(&content);
 
         let line_text = content.iter().map(|span| span.content.as_ref()).collect::<String>();
         let tree_continuation_prefix = text_utils::compact_tree_continuation_prefix(&line_text);
@@ -184,7 +188,7 @@ impl Session {
             // Diff rows keep their tinted band edge-to-edge: paint the gutter
             // prefixes with the row bg so wrapped rows don't start with an
             // unpainted strip.
-            let row_diff_bg = diff_row_bg(&line.spans);
+            let row_diff_bg = content_diff_bg.or_else(|| diff_row_bg(&line.spans));
             let mut gutter_style = border_style;
             if let Some(bg) = row_diff_bg {
                 gutter_style = gutter_style.bg(bg);
@@ -196,9 +200,10 @@ impl Session {
             if idx > 0
                 && let Some(ref prefix) = diff_continuation_prefix
             {
-                // Add the diff prefix with dimmed style to match diff appearance
-                let prefix_style = gutter_style.add_modifier(Modifier::DIM);
-                new_spans.push(Span::styled(prefix.clone(), prefix_style));
+                // Keep the continuation marker at the same contrast as the
+                // row gutter; terminal-dependent DIM can make it disappear
+                // against the stronger intraline background.
+                new_spans.push(Span::styled(prefix.clone(), gutter_style));
             }
 
             new_spans.append(&mut line.spans);
@@ -327,8 +332,8 @@ impl Session {
                 // Dim tool output and avoid right-side padding borders.
                 // Detail rows are nested under their header with an extra indent,
                 // and wrapped lines keep the tree marker aligned via hanging indent.
-                // Diff rows keep their explicit bright styling (foreground-only
-                // red/green/cyan); dimming them dulls the fg alignment.
+                // Diff rows keep their explicit base/chip styling; dimming
+                // them dulls the foreground alignment.
                 let mut detail_spans = line_spans;
                 if !is_diff_row(&detail_spans) {
                     for span in &mut detail_spans {
@@ -620,6 +625,7 @@ fn line_is_tool_command_header(line: &Line<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::prelude::InlineTheme;
 
     fn span(text: &str, bg: Option<Color>) -> Span<'static> {
         let mut style = Style::default();
@@ -651,12 +657,34 @@ mod tests {
     }
 
     #[test]
+    fn diff_row_bg_ignores_side_by_side_divider_tint() {
+        let left_bg = Some(Color::Rgb(70, 38, 42));
+        let right_bg = Some(Color::Rgb(20, 58, 45));
+        let spans = vec![
+            span("- 10 │ old", left_bg),
+            Span::raw("│"),
+            span("+ 10 │ new", right_bg),
+        ];
+
+        assert_eq!(diff_row_bg(&spans), None);
+        assert_eq!(
+            diff_row_bg(&[
+                span("- 10 │ old", left_bg),
+                Span::styled("│", Style::default().bg(Color::Reset)),
+            ]),
+            None
+        );
+    }
+
+    #[test]
     fn is_diff_row_detects_foreground_only_headers_and_bodies() {
         assert!(is_diff_row(&[fg_span("--- a/README.md", Color::LightRed)]));
         assert!(is_diff_row(&[fg_span("+++ b/README.md", Color::LightGreen)]));
         assert!(is_diff_row(&[fg_span("@@ -100 +100 @@", Color::Cyan)]));
         assert!(is_diff_row(&[fg_span("+ new line", Color::LightGreen)]));
-        assert!(is_diff_row(&[fg_span("- old line", Color::Rgb(255, 90, 90))]));
+        assert!(is_diff_row(&[fg_span("- old line", Color::Rgb(255, 180, 180))]));
+        assert!(is_diff_row(&[fg_span("+ light insertion", Color::Rgb(0, 92, 43))]));
+        assert!(is_diff_row(&[fg_span("- light deletion", Color::Rgb(140, 20, 25))]));
         assert!(!is_diff_row(&[fg_span("- bullet item", Color::Gray)]));
         assert!(!is_diff_row(&[span("plain tool output", None)]));
     }
@@ -677,5 +705,23 @@ mod tests {
         pad_diff_row_to_width(&mut line, 40);
         assert_eq!(line.spans.len(), 1);
         assert_eq!(UnicodeWidthStr::width(line.spans[0].content.as_ref()), "plain tool output".len());
+    }
+
+    #[test]
+    fn wrapped_diff_continuations_keep_the_source_row_tint() {
+        let session = Session::new(InlineTheme::default(), None, 20);
+        let row_bg = Color::Rgb(20, 58, 45);
+        let content = vec![Span::styled(
+            "+fn main() { this line is long enough to wrap without a space after the marker",
+            Style::default().bg(row_bg),
+        )];
+
+        let wrapped = session.wrap_block_lines_no_right_border("", "", content, 20, Style::default());
+
+        assert!(wrapped.len() > 1);
+        for line in wrapped {
+            assert!(line.spans.iter().any(|span| span.style.bg == Some(row_bg)));
+            assert_eq!(line.spans.iter().map(Span::width).sum::<usize>(), 20);
+        }
     }
 }

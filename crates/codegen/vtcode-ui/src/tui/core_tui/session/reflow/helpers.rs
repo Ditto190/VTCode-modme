@@ -182,15 +182,24 @@ fn numbered_code_gutter_prefix(text: &str) -> Option<String> {
 /// Requires both a painted background and a diff marker (`+`/`-`/space body
 /// marker, `---`/`+++` file header, or `@@` hunk header) so ordinary tool
 /// output that happens to be styled never gets diff treatment.
-/// Foreground-only diff rows (no bg) return `None` by design.
+/// ANSI16/no-color foreground-only rows (no bg) return `None` by design.
 pub(super) fn diff_row_bg(spans: &[Span<'_>]) -> Option<Color> {
-    let bg = spans.iter().find_map(|span| span.style.bg)?;
+    // Side-by-side stream rows contain an unpainted outer divider between two
+    // independently tinted panes. Do not extend either pane's tint through
+    // the reflow padding or into the empty sibling pane.
+    let has_uncolored_divider = spans
+        .iter()
+        .any(|span| span.content.trim() == "│" && matches!(span.style.bg, None | Some(Color::Reset)));
+    if has_uncolored_divider {
+        return None;
+    }
+    let bg = spans.iter().find_map(|span| span.style.bg.filter(|bg| *bg != Color::Reset))?;
     let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let trimmed = text.trim_start();
     if trimmed.starts_with("--- ")
         || trimmed.starts_with("+++ ")
         || trimmed.starts_with("@@")
-        || matches!(spans.first().and_then(|span| span.content.chars().next()), Some('+' | '-' | ' '))
+        || matches!(spans.iter().find_map(|span| span.content.chars().next()), Some('+' | '-' | ' '))
     {
         Some(bg)
     } else {
@@ -198,7 +207,8 @@ pub(super) fn diff_row_bg(spans: &[Span<'_>]) -> Option<Color> {
     }
 }
 
-/// Whether spans form a diff row (header or body), foreground-only aware.
+/// Whether spans form a diff row (header or body), including the
+/// foreground-only fallback.
 ///
 /// Matches `---`/`+++`/`@@` headers and `+`/`-` bodies by marker plus a diff
 /// foreground (red/green/cyan family) so fg-only rows stay exempt from DIM
@@ -210,13 +220,11 @@ pub(super) fn is_diff_row_spans(spans: &[Span<'_>]) -> bool {
     }
     let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let trimmed = text.trim_start();
-    let is_marker = trimmed.starts_with("--- ")
-        || trimmed.starts_with("+++ ")
-        || trimmed.starts_with("@@")
-        || matches!(spans.first().and_then(|span| span.content.chars().next()), Some('+' | '-'));
+    let is_marker = trimmed.starts_with("@@") || matches!(trimmed.chars().next(), Some('+' | '-'));
     if !is_marker {
         return false;
     }
+    let is_header = trimmed.starts_with("--- ") || trimmed.starts_with("+++ ") || trimmed.starts_with("@@");
     spans.iter().any(|span| {
         matches!(
             span.style.fg,
@@ -228,8 +236,12 @@ pub(super) fn is_diff_row_spans(spans: &[Span<'_>]) -> bool {
                     | Color::Cyan
                     | Color::LightCyan
                     | Color::Rgb(255, 90, 90)
+                    | Color::Rgb(255, 180, 180)
+                    | Color::Rgb(85, 255, 85)
+                    | Color::Rgb(140, 20, 25)
+                    | Color::Rgb(0, 92, 43)
             )
-        )
+        ) || (is_header && matches!(span.style.fg, Some(Color::Indexed(_))))
     })
 }
 
@@ -338,8 +350,17 @@ mod tests {
         let tint = Color::Rgb(20, 58, 45);
         assert!(is_diff_row_spans(&[bg_span("+ new line", tint)]));
         assert!(is_diff_row_spans(&[fg_span("+ new line", Color::LightGreen)]));
+        assert!(is_diff_row_spans(&[fg_span("- dark deletion", Color::Rgb(255, 180, 180))]));
+        assert!(is_diff_row_spans(&[fg_span("+ light insertion", Color::Rgb(0, 92, 43))]));
+        assert!(is_diff_row_spans(&[fg_span("- light deletion", Color::Rgb(140, 20, 25))]));
+        assert!(is_diff_row_spans(&[fg_span("+ dark insertion", Color::Rgb(85, 255, 85))]));
         assert!(is_diff_row_spans(&[fg_span("@@ -100 +100 @@", Color::Cyan)]));
         assert!(is_diff_row_spans(&[fg_span("--- a/README.md", Color::LightRed)]));
+        assert!(is_diff_row_spans(&[fg_span("+++ b/main.rs", Color::Indexed(42))]));
+        assert!(is_diff_row_spans(&[bg_span("+++ b/README.md", Color::Indexed(42))]));
+        assert!(is_diff_row_spans(&[Span::raw("    "), fg_span("+ indented", Color::LightGreen)]));
+        assert!(!is_diff_row_spans(&[fg_span("--- separator", Color::Gray)]));
+        assert!(!is_diff_row_spans(&[fg_span("- indexed bullet", Color::Indexed(42))]));
         // Asymmetric: same `-` marker, gray bullet fg must not match.
         assert!(!is_diff_row_spans(&[fg_span("- bullet item", Color::Gray)]));
         assert!(!is_diff_row_spans(&[bg_span("bolt normal output", Color::Black)]));

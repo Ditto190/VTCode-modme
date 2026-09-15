@@ -41,6 +41,108 @@ fn render_file_heading(renderer: &mut AnsiRenderer, heading: &str) -> Result<()>
     }
 }
 
+fn diff_action(diff: &Value) -> &'static str {
+    match get_string(diff, "operation") {
+        Some("created") => "Created",
+        Some("deleted") => "Deleted",
+        _ => "Edited",
+    }
+}
+
+fn diff_path(diff: &Value) -> &str {
+    get_string(diff, "path").filter(|path| !path.is_empty()).unwrap_or("file")
+}
+
+fn diff_counts(diff: &Value) -> (Option<u64>, Option<u64>) {
+    let additions = get_u64(diff, "additions").or_else(|| {
+        diff.get("summary")
+            .and_then(|summary| summary.get("additions"))
+            .and_then(Value::as_u64)
+    });
+    let deletions = get_u64(diff, "deletions").or_else(|| {
+        diff.get("summary")
+            .and_then(|summary| summary.get("deletions"))
+            .and_then(Value::as_u64)
+    });
+    (additions, deletions)
+}
+
+fn diff_count_suffix(additions: Option<u64>, deletions: Option<u64>) -> String {
+    if additions.is_some() || deletions.is_some() {
+        format!(" (+{} -{})", additions.unwrap_or_default(), deletions.unwrap_or_default())
+    } else {
+        String::new()
+    }
+}
+
+fn diff_heading(diff: &Value) -> String {
+    let (additions, deletions) = diff_counts(diff);
+    format!("{} {}{}", diff_action(diff), diff_path(diff), diff_count_suffix(additions, deletions))
+}
+
+fn aggregate_diff_summary(diffs: &[Value]) -> String {
+    let action = diffs
+        .first()
+        .map(diff_action)
+        .filter(|first| diffs.iter().all(|diff| diff_action(diff) == *first))
+        .unwrap_or("Edited");
+    let (additions, deletions, has_counts) = diffs.iter().fold((0_u64, 0_u64, false), |summary, diff| {
+        let (diff_additions, diff_deletions) = diff_counts(diff);
+        (
+            summary.0.saturating_add(diff_additions.unwrap_or_default()),
+            summary.1.saturating_add(diff_deletions.unwrap_or_default()),
+            summary.2 || diff_additions.is_some() || diff_deletions.is_some(),
+        )
+    });
+    let file_label = if diffs.len() == 1 { "file" } else { "files" };
+    let suffix = if has_counts {
+        diff_count_suffix(Some(additions), Some(deletions))
+    } else {
+        String::new()
+    };
+    format!("{action} {} {file_label}{suffix}", diffs.len())
+}
+
+fn render_diff_entry_details(
+    renderer: &mut AnsiRenderer,
+    diff: &Value,
+    git_styles: &GitStyles,
+    ls_styles: &LsStyles,
+) -> Result<()> {
+    if get_bool(diff, "skipped") {
+        let reason = diff_preview_user_message(diff);
+        if let Some(detail) = get_string(diff, "detail") {
+            renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason} ({detail})"))?;
+        } else {
+            renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason}"))?;
+        }
+        return Ok(());
+    }
+
+    let diff_content = get_string(diff, "content").unwrap_or("");
+    if diff_content.is_empty() && get_bool(diff, "is_empty") {
+        renderer.line(MessageStyle::ToolDetail, "(no changes)")?;
+        return Ok(());
+    }
+
+    if !diff_content.is_empty() {
+        renderer.line(MessageStyle::ToolDetail, "")?;
+        render_diff_content(renderer, diff_content, git_styles, ls_styles)?;
+    }
+
+    if get_bool(diff, "truncated") {
+        if let Some(omitted) = get_u64(diff, "omitted_line_count") {
+            renderer.line(
+                MessageStyle::ToolDetail,
+                &format!("… +{omitted} lines (use exec_command with sed for full view)"),
+            )?;
+        } else {
+            renderer.line(MessageStyle::ToolDetail, "… diff truncated")?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn render_write_file_preview(
     renderer: &mut AnsiRenderer,
     payload: &Value,
@@ -104,61 +206,20 @@ fn render_diff_preview_entries(
     git_styles: &GitStyles,
     ls_styles: &LsStyles,
 ) -> Result<()> {
-    for diff in diffs.iter().take(MAX_DISPLAYED_FILES) {
-        let path = get_string(diff, "path");
-        let operation = get_string(diff, "operation");
-        let additions = get_u64(diff, "additions").or_else(|| {
-            diff.get("summary")
-                .and_then(|summary| summary.get("additions"))
-                .and_then(Value::as_u64)
-        });
-        let deletions = get_u64(diff, "deletions").or_else(|| {
-            diff.get("summary")
-                .and_then(|summary| summary.get("deletions"))
-                .and_then(Value::as_u64)
-        });
-
-        let action = match operation {
-            Some("created") => "Created",
-            Some("deleted") => "Deleted",
-            _ => "Edited",
-        };
-        let mut heading = path.map_or_else(|| format!("{action} file"), |path| format!("{action} {path}"));
-        if additions.is_some() || deletions.is_some() {
-            heading.push_str(&format!(" (+{} -{})", additions.unwrap_or_default(), deletions.unwrap_or_default()));
+    let visible_diffs = &diffs[..diffs.len().min(MAX_DISPLAYED_FILES)];
+    if compact_file_glance_enabled(renderer) && visible_diffs.len() > 1 {
+        render_file_heading(renderer, &aggregate_diff_summary(visible_diffs))?;
+        for (index, diff) in visible_diffs.iter().enumerate() {
+            let branch = if index + 1 == visible_diffs.len() { "└" } else { "├" };
+            let (additions, deletions) = diff_counts(diff);
+            let child = format!("  {branch} {}{}", diff_path(diff), diff_count_suffix(additions, deletions));
+            renderer.line(MessageStyle::Info, &child)?;
+            render_diff_entry_details(renderer, diff, git_styles, ls_styles)?;
         }
-        render_file_heading(renderer, &heading)?;
-
-        if get_bool(diff, "skipped") {
-            let reason = diff_preview_user_message(diff);
-            if let Some(detail) = get_string(diff, "detail") {
-                renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason} ({detail})"))?;
-            } else {
-                renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason}"))?;
-            }
-            continue;
-        }
-
-        let diff_content = get_string(diff, "content").unwrap_or("");
-        if diff_content.is_empty() && get_bool(diff, "is_empty") {
-            renderer.line(MessageStyle::ToolDetail, "(no changes)")?;
-            continue;
-        }
-
-        if !diff_content.is_empty() {
-            renderer.line(MessageStyle::ToolDetail, "")?;
-            render_diff_content(renderer, diff_content, git_styles, ls_styles)?;
-        }
-
-        if get_bool(diff, "truncated") {
-            if let Some(omitted) = get_u64(diff, "omitted_line_count") {
-                renderer.line(
-                    MessageStyle::ToolDetail,
-                    &format!("… +{omitted} lines (use exec_command with sed for full view)"),
-                )?;
-            } else {
-                renderer.line(MessageStyle::ToolDetail, "… diff truncated")?;
-            }
+    } else {
+        for diff in visible_diffs {
+            render_file_heading(renderer, &diff_heading(diff))?;
+            render_diff_entry_details(renderer, diff, git_styles, ls_styles)?;
         }
     }
 

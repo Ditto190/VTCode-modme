@@ -4,8 +4,8 @@ use crate::tui::config::loader::SyntaxHighlightingConfig;
 use crate::tui::ui::syntax_highlight;
 use crate::tui::ui::theme::ThemeStyles;
 use crate::tui::utils::diff_styles::{
-    DiffLineType, current_diff_render_style_context, style_content_ansi, style_file_header_new_ansi,
-    style_file_header_old_ansi, style_hunk_header_ansi, style_sign_ansi,
+    DiffLineType, current_diff_render_style_context, diff_add_fg, diff_del_fg, style_content_ansi,
+    style_file_header_new_ansi, style_file_header_old_ansi, style_hunk_header_ansi, style_sign_ansi,
 };
 use anstyle::{Color as AnstyleColor, Effects, Style};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -13,9 +13,10 @@ use std::fmt::Write;
 use syntect::util::LinesWithEndings;
 use vtcode_commons::diff_paths::{
     format_start_only_hunk_header, is_diff_addition_line, is_diff_deletion_line, is_diff_header_line,
-    is_diff_new_file_marker_line, is_prose_language_hint, looks_like_diff_content, parse_diff_git_path,
-    parse_diff_marker_path,
+    is_diff_new_file_marker_line, is_prose_language_hint, language_hint_from_path, looks_like_diff_content,
+    parse_diff_git_path, parse_diff_marker_path,
 };
+use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine, annotate_word_level_diffs};
 
 const DIFF_SUMMARY_PREFIX: &str = "• Diff ";
 
@@ -319,9 +320,24 @@ fn render_diff_code_block(
     base_style: Style,
     prefix_segments: &[MarkdownSegment],
 ) -> Vec<MarkdownLine> {
+    render_diff_code_block_with_context(
+        code,
+        theme_styles,
+        base_style,
+        prefix_segments,
+        current_diff_render_style_context(),
+    )
+}
+
+pub(crate) fn render_diff_code_block_with_context(
+    code: &str,
+    theme_styles: &ThemeStyles,
+    base_style: Style,
+    prefix_segments: &[MarkdownSegment],
+    style_context: crate::tui::utils::diff_styles::DiffRenderStyleContext,
+) -> Vec<MarkdownLine> {
     let mut lines = Vec::new();
     let context_style = code_block_style(theme_styles, base_style);
-    let style_context = current_diff_render_style_context();
     let metadata_style = Style::new()
         .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack)))
         .effects(Effects::DIMMED);
@@ -332,11 +348,20 @@ fn render_diff_code_block(
     let removed_marker_style = style_sign_ansi(DiffLineType::Delete, style_context);
     let file_old_style = style_file_header_old_ansi(style_context);
     let file_new_style = style_file_header_new_ansi(style_context);
+    let added_background = added_style.get_bg_color();
+    let removed_background = removed_style.get_bg_color();
+    let added_word = style_context.add_word_bg();
+    let removed_word = style_context.del_word_bg();
+    let mut current_language: Option<String> = None;
     let normalized = normalize_diff_lines(code);
+    let word_ranges_by_line = word_level_ranges_for_normalized(&normalized);
 
-    for line in normalized.iter() {
+    for (line_index, line) in normalized.iter().enumerate() {
         let trimmed = line.trim_end_matches('\n');
         let trimmed_start = trimmed.trim_start();
+        if let Some(path) = diff_path_for_language(trimmed_start) {
+            current_language = language_hint_from_path(&path);
+        }
         if let Some((path, additions, deletions)) = parse_diff_summary_line(trimmed_start) {
             let leading_len = trimmed.len().saturating_sub(trimmed_start.len());
             let leading = &trimmed[..leading_len];
@@ -344,11 +369,12 @@ fn render_diff_code_block(
             if !leading.is_empty() {
                 line.push_segment(context_style, leading);
             }
-            // Summary counts keep bright red/green fg without the body tint.
+            // Summary counts keep accessible red/green foregrounds without
+            // the body tint.
             let count_style = |kind: DiffLineType| {
                 let fg = match kind {
-                    DiffLineType::Insert => Some(AnstyleColor::Ansi(anstyle::AnsiColor::BrightGreen)),
-                    DiffLineType::Delete => Some(AnstyleColor::Ansi(anstyle::AnsiColor::BrightRed)),
+                    DiffLineType::Insert => Some(diff_add_fg(style_context.theme(), style_context.level())),
+                    DiffLineType::Delete => Some(diff_del_fg(style_context.theme(), style_context.level())),
                     DiffLineType::Context => None,
                 };
                 Style::new().fg_color(fg)
@@ -378,19 +404,43 @@ fn render_diff_code_block(
                 if body.is_empty() {
                     line.push_segment(added_style, " ");
                 } else {
-                    push_highlighted_diff_body(&mut line, body, added_style);
+                    let word_ranges = word_ranges_by_line.get(line_index).map(Vec::as_slice).unwrap_or(&[]);
+                    push_highlighted_diff_body(
+                        &mut line,
+                        body,
+                        current_language.as_deref(),
+                        added_style,
+                        added_background,
+                        word_ranges,
+                        added_word,
+                    );
                 }
+                paint_line_background(&mut line, added_background);
+                line.set_line_background(added_background);
             } else if trimmed_start.starts_with("*** Update File:") {
                 line.push_segment(added_marker_style, "+");
-                line.push_segment(added_style, &trimmed[1..]);
+                line.push_segment(added_style, trimmed_start);
+                paint_line_background(&mut line, added_background);
+                line.set_line_background(added_background);
             } else if is_diff_deletion_line(trimmed_start) {
                 line.push_segment(removed_marker_style, "-");
                 let body = &trimmed_start[1..];
                 if body.is_empty() {
                     line.push_segment(removed_style, " ");
                 } else {
-                    push_highlighted_diff_body(&mut line, body, removed_style);
+                    let word_ranges = word_ranges_by_line.get(line_index).map(Vec::as_slice).unwrap_or(&[]);
+                    push_highlighted_diff_body(
+                        &mut line,
+                        body,
+                        current_language.as_deref(),
+                        removed_style,
+                        removed_background,
+                        word_ranges,
+                        removed_word,
+                    );
                 }
+                paint_line_background(&mut line, removed_background);
+                line.set_line_background(removed_background);
             } else if let Some(context_body) = trimmed.strip_prefix(' ') {
                 line.push_segment(context_style, " ");
                 line.push_segment(context_style, context_body);
@@ -404,17 +454,106 @@ fn render_diff_code_block(
     lines
 }
 
-/// Push a `+`/`-` diff body.
-///
-/// Foreground-only: the whole body shares the red/green foreground aligned
-/// with the marker. No background bands or word chips so wrapped rows cannot
-/// leave striped holes.
-fn push_highlighted_diff_body(line: &mut MarkdownLine, body: &str, body_style: Style) {
-    if body.is_empty() {
-        line.push_segment(body_style, " ");
+/// Fill unpainted holes on a tinted diff row, including any blockquote/list
+/// prefix that was added before the diff marker.
+fn paint_line_background(line: &mut MarkdownLine, background: Option<AnstyleColor>) {
+    let Some(background) = background else {
+        return;
+    };
+    for segment in &mut line.segments {
+        if segment.style.get_bg_color().is_none() {
+            segment.style = segment.style.bg_color(Some(background));
+        }
+    }
+}
+
+/// Push a `+`/`-` diff body while preserving syntax foregrounds and applying
+/// the stronger background only to changed intraline ranges.
+fn push_highlighted_diff_body(
+    line: &mut MarkdownLine,
+    body: &str,
+    language: Option<&str>,
+    fallback: Style,
+    row_background: Option<AnstyleColor>,
+    word_ranges: &[(usize, usize)],
+    word_background: Option<AnstyleColor>,
+) {
+    let segments = render_diff_content_segments(body, language, fallback);
+    if segments.is_empty() {
+        line.push_segment(fallback.bg_color(row_background), " ");
         return;
     }
-    line.push_segment(body_style, body);
+
+    let mut cursor = 0usize;
+    for segment in segments {
+        let segment_len = segment.text.len();
+        let segment_end = cursor.saturating_add(segment_len);
+        let mut boundaries = vec![0, segment_len];
+        for &(start, end) in word_ranges {
+            if start < segment_end && end > cursor {
+                boundaries.push(start.max(cursor).saturating_sub(cursor).min(segment_len));
+                boundaries.push(end.min(segment_end).saturating_sub(cursor).min(segment_len));
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        for pair in boundaries.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            if start >= end {
+                continue;
+            }
+            let global_start = cursor.saturating_add(start);
+            let global_end = cursor.saturating_add(end);
+            let changed = word_background.is_some()
+                && word_ranges
+                    .iter()
+                    .any(|&(range_start, range_end)| global_start < range_end && global_end > range_start);
+            let background = if changed { word_background } else { row_background };
+            let mut style = segment.style.bg_color(background);
+            if style.get_fg_color().is_none() {
+                style = style.fg_color(fallback.get_fg_color());
+            }
+            line.push_segment(style, &segment.text[start..end]);
+        }
+        cursor = segment_end;
+    }
+}
+
+/// Map each normalized body line to byte-safe word-level ranges against its
+/// consecutive opposite-side line.
+fn word_level_ranges_for_normalized(normalized: &[String]) -> Vec<Vec<(usize, usize)>> {
+    let mut display = Vec::with_capacity(normalized.len());
+    for line in normalized {
+        let trimmed = line.trim_end_matches('\n');
+        let trimmed_start = trimmed.trim_start();
+        let kind = if is_diff_addition_line(trimmed_start) {
+            DiffDisplayKind::Addition
+        } else if is_diff_deletion_line(trimmed_start) {
+            DiffDisplayKind::Deletion
+        } else {
+            DiffDisplayKind::Context
+        };
+        let body = match kind {
+            DiffDisplayKind::Addition | DiffDisplayKind::Deletion => {
+                trimmed_start.strip_prefix(['+', '-']).unwrap_or("").to_owned()
+            }
+            DiffDisplayKind::Context | DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => trimmed.to_owned(),
+        };
+        display.push(DiffDisplayLine::body(kind, None, None, body));
+    }
+    annotate_word_level_diffs(&mut display);
+    display.into_iter().map(|line| line.changed).collect()
+}
+
+fn diff_path_for_language(line: &str) -> Option<String> {
+    parse_diff_git_path(line).or_else(|| parse_diff_marker_path(line)).or_else(|| {
+        ["*** Update File:", "*** Add File:", "*** Delete File:"]
+            .iter()
+            .find_map(|prefix| line.strip_prefix(prefix).map(str::trim).filter(|path| !path.is_empty()))
+            .map(ToOwned::to_owned)
+    })
 }
 
 fn parse_diff_summary_line(line: &str) -> Option<(&str, usize, usize)> {

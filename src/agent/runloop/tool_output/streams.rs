@@ -41,7 +41,7 @@
 
 use std::borrow::Cow;
 
-use anstyle::{AnsiColor, Effects, Reset, Style as AnsiStyle};
+use anstyle::{AnsiColor, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use smallvec::SmallVec;
 use vtcode_commons::preview::{
@@ -54,7 +54,7 @@ use vtcode_core::tools::tool_intent;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_diff::{
     DiffDisplayKind, DiffDisplayLine, SideBySideRow, bounded_display_lines, diff_display_line_number_width,
-    display_lines_from_unified_diff, side_by_side_rows,
+    diff_gutter_fits, diff_gutter_width, diff_side_by_side_fits, display_lines_from_unified_diff, side_by_side_rows,
 };
 
 use super::files::colorize_diff_summary_line;
@@ -162,9 +162,19 @@ fn highlight_diff_content(
     word_ranges: &[(usize, usize)],
     word_bg: Option<anstyle::Color>,
 ) -> Option<String> {
-    // Foreground-only mode passes `bg: None`, so there is no tint or word
-    // chip to paint. Return `None` so the caller falls through to the solid
-    // foreground-only body style.
+    highlight_diff_content_with_foreground(content, bg, word_ranges, word_bg, None)
+}
+
+fn highlight_diff_content_with_foreground(
+    content: &str,
+    bg: Option<anstyle::Color>,
+    word_ranges: &[(usize, usize)],
+    word_bg: Option<anstyle::Color>,
+    foreground: Option<anstyle::Color>,
+) -> Option<String> {
+    // ANSI16/no-color mode passes `bg: None`, so there is no tint or word
+    // chip to paint. Return `None` so the caller falls through to the
+    // foreground fallback body style.
     if content.is_empty() {
         return None;
     }
@@ -174,7 +184,7 @@ fn highlight_diff_content(
     out.push_str(&Reset.to_string());
 
     if word_ranges.is_empty() || word_bg.is_none() {
-        out.push_str(&AnsiStyle::new().bg_color(Some(bg)).render().to_string());
+        out.push_str(&AnsiStyle::new().fg_color(foreground).bg_color(Some(bg)).render().to_string());
         out.push_str(content);
         out.push_str(&Reset.to_string());
         return Some(out);
@@ -187,30 +197,122 @@ fn highlight_diff_content(
         let start = start.min(content.len());
         let end = end.min(content.len()).max(start);
         if start > cursor {
-            out.push_str(&AnsiStyle::new().bg_color(Some(bg)).render().to_string());
+            out.push_str(&AnsiStyle::new().fg_color(foreground).bg_color(Some(bg)).render().to_string());
             out.push_str(&content[cursor..start]);
             out.push_str(&Reset.to_string());
         }
         if end > start {
-            out.push_str(&AnsiStyle::new().bg_color(Some(word_bg)).render().to_string());
+            out.push_str(
+                &AnsiStyle::new()
+                    .fg_color(foreground)
+                    .bg_color(Some(word_bg))
+                    .render()
+                    .to_string(),
+            );
             out.push_str(&content[start..end]);
             out.push_str(&Reset.to_string());
         }
         cursor = end.max(cursor);
     }
     if cursor < content.len() {
-        out.push_str(&AnsiStyle::new().bg_color(Some(bg)).render().to_string());
+        out.push_str(&AnsiStyle::new().fg_color(foreground).bg_color(Some(bg)).render().to_string());
         out.push_str(&content[cursor..]);
         out.push_str(&Reset.to_string());
     }
     Some(out)
 }
 
+fn semantic_diff_line_style(
+    line: &DiffDisplayLine,
+    style: Option<AnsiStyle>,
+    git_styles: &GitStyles,
+) -> Option<AnsiStyle> {
+    let mut style = style?;
+    if style.get_fg_color().is_none() {
+        let foreground = match line.kind {
+            DiffDisplayKind::Addition => Some(git_styles.addition_fg),
+            DiffDisplayKind::Deletion => Some(git_styles.deletion_fg),
+            _ => None,
+        };
+        if let Some(foreground) = foreground {
+            style = style.fg_color(Some(foreground));
+        }
+    }
+    Some(style)
+}
+
+fn diff_display_text(line: &DiffDisplayLine, line_number_width: usize, show_gutter: bool) -> String {
+    if show_gutter || !line.kind.is_diff() {
+        return line.numbered_text(line_number_width);
+    }
+
+    // Keep one styled leading cell as the compact row marker. It preserves
+    // diff-row identity in the inline transcript without spending columns on
+    // +/- signs, line numbers, or the vertical separator.
+    if line.text.is_empty() {
+        "  ".to_owned()
+    } else {
+        format!(" {}", line.text)
+    }
+}
+
+fn select_render_line_style(
+    line: &DiffDisplayLine,
+    display_line: &str,
+    tool_name: Option<&str>,
+    git_styles: &GitStyles,
+    ls_styles: &LsStyles,
+) -> Option<AnsiStyle> {
+    select_line_style_for_kind(line, git_styles).or_else(|| {
+        // In the compact layout context rows start with a single blank, so a
+        // source line beginning with `+` or `-` must not be reclassified as an
+        // insertion or deletion by the generic parser.
+        (!line.kind.is_diff())
+            .then(|| select_line_style(tool_name, display_line, git_styles, ls_styles))
+            .flatten()
+    })
+}
+
+fn should_show_diff_gutter(
+    color_enabled: bool,
+    has_row_background: bool,
+    available_width: Option<usize>,
+    line_number_width: usize,
+) -> bool {
+    !color_enabled
+        || !has_row_background
+        || available_width.is_none_or(|width| diff_gutter_fits(width, line_number_width))
+}
+
+#[cfg(test)]
 fn format_diff_line_with_gutter_and_syntax<'a>(
     line: &DiffDisplayLine,
     base_style: Option<AnsiStyle>,
     line_number_width: usize,
     word_bg: Option<anstyle::Color>,
+    git_styles: &GitStyles,
+    out: &'a mut String,
+) -> &'a str {
+    format_diff_line_with_gutter_and_syntax_to_width(
+        line,
+        base_style,
+        line_number_width,
+        word_bg,
+        git_styles,
+        None,
+        true,
+        out,
+    )
+}
+
+fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
+    line: &DiffDisplayLine,
+    base_style: Option<AnsiStyle>,
+    line_number_width: usize,
+    word_bg: Option<anstyle::Color>,
+    git_styles: &GitStyles,
+    target_width: Option<usize>,
+    show_gutter: bool,
     out: &'a mut String,
 ) -> &'a str {
     use std::fmt::Write as _;
@@ -221,7 +323,18 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
         DiffDisplayKind::Deletion => ('-', line.text.as_str()),
         DiffDisplayKind::Context => (' ', line.text.as_str()),
         DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => {
-            out.push_str(&line.numbered_text(line_number_width));
+            let max_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
+            let text = line.numbered_text(line_number_width);
+            let text = if display_width(&text) > max_width {
+                truncate_with_ellipsis(&text, max_width, "...")
+            } else {
+                text
+            };
+            if let Some(style) = base_style {
+                out.push_str(&style.render().to_string());
+            }
+            out.push_str(&text);
+            out.push_str(&Reset.to_string());
             return out;
         }
     };
@@ -229,78 +342,110 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
         content = " ";
     }
 
-    // Add/delete content is truncated to a single line at MAX_LINE_LENGTH so
-    // these rows never wrap or get padded into continuation rows.
+    // Keep the complete rendered row within the measured width when one is
+    // available; otherwise retain the generic preview cap.
+    let prefix_width: usize = if show_gutter { 4 + line_number_width } else { 1 };
+    let max_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
+    let content_width = max_width.saturating_sub(prefix_width);
     let content_owned;
     let mut truncated = false;
-    let content: &str = if !matches!(marker, ' ') {
-        if display_width(content) > MAX_LINE_LENGTH {
-            content_owned = truncate_with_ellipsis(content, MAX_LINE_LENGTH, "...");
-            truncated = true;
-            &content_owned
-        } else {
-            content
-        }
+    let content: &str = if display_width(content) > content_width {
+        content_owned = truncate_with_ellipsis(content, content_width, "...");
+        truncated = true;
+        &content_owned
     } else {
         content
     };
 
     let bg = base_style.and_then(|style| style.get_bg_color());
-    // Unified gutter: bright red/green only on the sign; numbers stay dim
-    // grey. Foreground-only: no background band, body fg aligns with marker.
+    // Unified gutter: the sign uses the shared accessible marker foreground;
+    // numbers use a theme-aware muted foreground. The body uses the row tint
+    // while changed spans receive the stronger word background.
     let marker_style = match marker {
-        '+' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
-            .bg_color(bg),
-        '-' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightRed)))
-            .bg_color(bg),
-        _ => AnsiStyle::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack))),
+        '+' => AnsiStyle::new().fg_color(Some(git_styles.addition_fg)).bg_color(bg),
+        '-' => AnsiStyle::new().fg_color(Some(git_styles.deletion_fg)).bg_color(bg),
+        _ => AnsiStyle::new().fg_color(Some(git_styles.gutter_fg)),
     };
-    let gutter_style = AnsiStyle::new()
-        .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
-        .bg_color(bg)
-        .effects(Effects::DIMMED);
+    let gutter_style = AnsiStyle::new().fg_color(Some(git_styles.gutter_fg)).bg_color(bg);
     let reset = Reset;
     out.reserve(line.text.len() + 32);
     // Single gutter: `sign + number + │ + content`. The `│` keeps markdown
     // bullets (`- foo`) distinct from the diff marker (`+`/`-`).
-    // Foreground-only: no background band. Full Reset before
-    // each span so SGR state never leaks into the next.
+    // Reset between spans so SGR state never leaks into the next. The outer
+    // line style deliberately remains active for the message indent, making
+    // the row tint continuous from the transcript prefix through the gutter.
     let line_no = match marker {
         '+' => line.new_line,
         '-' => line.old_line,
         _ => line.new_line.or(line.old_line),
     }
     .unwrap_or_default();
-    let _ = write!(out, "{reset}");
-    let _ = write!(out, "{}", marker_style.render());
-    out.push_str(match marker {
-        '+' => "+",
-        '-' => "-",
-        _ => " ",
-    });
-    let _ = write!(out, "{reset}");
-    let _ = write!(out, "{}", gutter_style.render());
-    let _ = write!(out, "{line_no:>line_number_width$} │ ");
-    let _ = write!(out, "{reset}");
-    // Foreground-only body: solid red/green fg aligned with the marker.
-    // Skip chips on truncated rows — `changed` offsets are into the original
+    let mut body_style = base_style.unwrap_or_else(|| AnsiStyle::new().bg_color(bg));
+    if !show_gutter && body_style.get_fg_color().is_none() {
+        let foreground = match marker {
+            '+' => Some(git_styles.addition_fg),
+            '-' => Some(git_styles.deletion_fg),
+            _ => None,
+        };
+        if let Some(foreground) = foreground {
+            body_style = body_style.fg_color(Some(foreground));
+        }
+    }
+
+    if show_gutter {
+        let _ = write!(out, "{}", marker_style.render());
+        out.push_str(match marker {
+            '+' => "+",
+            '-' => "-",
+            _ => " ",
+        });
+        let _ = write!(out, "{reset}");
+        let _ = write!(out, "{}", gutter_style.render());
+        let _ = write!(out, "{line_no:>line_number_width$} │ ");
+        let _ = write!(out, "{reset}");
+    } else {
+        // One blank, styled cell keeps compact rows identifiable to the
+        // inline transcript's diff reflow while dropping the visible gutter.
+        let compact_marker = AnsiStyle::new().bg_color(bg);
+        let _ = write!(out, "{compact_marker} ");
+        let _ = write!(out, "{Reset}");
+    }
+    // Gutter is 1 (sign) + number_width + 3 (` │ `); compact rows use one
+    // marker cell only.
+    // Color-capable rows use a neutral foreground on the row tint; ANSI16
+    // falls back to the bright body foreground. Skip chips on truncated rows — `changed` offsets are into the original
     // text and would highlight the wrong slice after ellipsis truncation.
     let word_ranges: &[(usize, usize)] = if matches!(marker, '+' | '-') && !content.is_empty() && !truncated {
         &line.changed
     } else {
         &[]
     };
-    if let Some(highlighted) = highlight_diff_content(content, bg, word_ranges, word_bg) {
+    let highlighted = highlight_diff_content_with_foreground(
+        content,
+        bg,
+        word_ranges,
+        word_bg,
+        (!show_gutter).then(|| body_style.get_fg_color()).flatten(),
+    );
+    if let Some(highlighted) = highlighted {
         out.push_str(&highlighted);
-    } else if let Some(body_style) = base_style {
+    } else {
         let _ = write!(out, "{}", body_style.render());
         out.push_str(content);
         let _ = write!(out, "{reset}");
-    } else {
-        out.push_str(content);
-        let _ = write!(out, "{reset}");
+    }
+
+    // Continue the base row tint through the unused cells on the right. Word
+    // chips above remain stronger because padding is appended only after the
+    // body has restored the base row state.
+    if let Some(bg) = bg
+        && let Some(target_width) = target_width
+    {
+        let visible_width = prefix_width.saturating_add(display_width(content));
+        let padding = target_width.saturating_sub(visible_width);
+        if padding > 0 {
+            let _ = write!(out, "{}{}{}", AnsiStyle::new().bg_color(Some(bg)).render(), " ".repeat(padding), reset);
+        }
     }
     out
 }
@@ -377,25 +522,64 @@ pub(crate) fn render_diff_content_block(
     };
     let bounded_lines = bounded_display_lines(&diff_lines, effective_limit);
     let lines_slice = bounded_lines.as_slice();
+    let line_number_width = diff_display_line_number_width(lines_slice);
+    let available_width = renderer.diff_content_width(fallback_style);
 
-    if renderer.diff_preview_mode() == vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide {
+    if renderer.diff_preview_mode() == vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide
+        && diff_side_by_side_fits(available_width)
+    {
         return render_diff_content_side_by_side(renderer, lines_slice, git_styles, fallback_style);
     }
 
-    let line_number_width = diff_display_line_number_width(lines_slice);
+    // Without ANSI styling the row tint and foreground fallback disappear,
+    // so keep the marker/line-number gutter as the only remaining add/delete
+    // distinction even when the content width is narrow.
+    let has_row_background = git_styles.add.as_ref().is_some_and(|style| style.get_bg_color().is_some());
+    let show_gutter = should_show_diff_gutter(
+        renderer.capabilities().supports_color(),
+        has_row_background,
+        available_width,
+        line_number_width,
+    );
+    render_diff_content_inline(
+        renderer,
+        lines_slice,
+        tool_name,
+        git_styles,
+        ls_styles,
+        fallback_style,
+        line_number_width,
+        show_gutter,
+    )
+}
+
+fn render_diff_content_inline(
+    renderer: &mut AnsiRenderer,
+    lines_slice: &[DiffDisplayLine],
+    tool_name: Option<&str>,
+    git_styles: &GitStyles,
+    ls_styles: &LsStyles,
+    fallback_style: MessageStyle,
+    line_number_width: usize,
+    show_gutter: bool,
+) -> Result<()> {
     let color_enabled = renderer.capabilities().supports_color();
+    let target_width = renderer.diff_content_width(fallback_style);
+    // A measured content width is a stricter bound than the generic preview
+    // cap. Compact rows must not wrap in the transcript after their gutter is
+    // hidden on a narrow terminal.
+    let max_line_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
     let mut formatted_buffer = String::with_capacity(256);
     let mut display_buffer = String::with_capacity(256);
 
     for line in lines_slice {
         display_buffer.clear();
-        let raw_line = line.numbered_text(line_number_width);
+        let raw_line = diff_display_text(line, line_number_width, show_gutter);
         if raw_line.is_empty() {
             continue;
         }
-        let was_truncated = display_width(&raw_line) > MAX_LINE_LENGTH;
-        if was_truncated {
-            display_buffer.push_str(&truncate_with_ellipsis(&raw_line, MAX_LINE_LENGTH, "..."));
+        if display_width(&raw_line) > max_line_width {
+            display_buffer.push_str(&truncate_with_ellipsis(&raw_line, max_line_width, "..."));
         } else {
             display_buffer.push_str(&raw_line);
         }
@@ -415,20 +599,26 @@ pub(crate) fn render_diff_content_block(
             continue;
         }
 
-        let line_style = select_line_style(tool_name, &display_buffer, git_styles, ls_styles);
+        let line_style = select_render_line_style(line, &display_buffer, tool_name, git_styles, ls_styles);
+        let line_style = semantic_diff_line_style(line, line_style, git_styles);
         let word_bg = match line.kind {
             DiffDisplayKind::Addition => git_styles.add_word.and_then(|s| s.get_bg_color()),
             DiffDisplayKind::Deletion => git_styles.remove_word.and_then(|s| s.get_bg_color()),
             _ => None,
         };
-        // Always route add/del through the dual-gutter formatter; prose falls
-        // back to the solid line tint (no syntax colours).
-        let rendered_owned = if color_enabled && !was_truncated {
-            Some(format_diff_line_with_gutter_and_syntax(
+        // Route add/delete rows through the shared formatter; compact layouts
+        // omit the visible gutter while prose falls back to the solid tint.
+        let rendered_owned = if color_enabled
+            && (!show_gutter || target_width.is_none_or(|width| width >= diff_gutter_width(line_number_width)))
+        {
+            Some(format_diff_line_with_gutter_and_syntax_to_width(
                 line,
                 line_style,
                 line_number_width,
                 word_bg,
+                git_styles,
+                target_width,
+                show_gutter,
                 &mut formatted_buffer,
             ))
         } else {
@@ -465,8 +655,12 @@ fn render_diff_content_side_by_side(
     let mut formatted_buffer = String::with_capacity(512);
     let mut display_buffer = String::with_capacity(512);
 
-    // Target pane width: leave room for gutter + divider within MAX_LINE_LENGTH.
-    let pane_width = ((MAX_LINE_LENGTH.saturating_sub(3)) / 2).max(20);
+    // Target pane width: leave room for gutter + divider within the actual
+    // content width when terminal sizing is available. Keep the bounded
+    // fallback for non-terminal tests and redirected output.
+    let total_width = renderer.diff_content_width(fallback_style).unwrap_or(MAX_LINE_LENGTH);
+    let pane_width = ((total_width.saturating_sub(3)) / 2).max(20);
+    let full_width_limit = total_width.min(MAX_LINE_LENGTH);
 
     for row in rows {
         display_buffer.clear();
@@ -474,9 +668,12 @@ fn render_diff_content_side_by_side(
         if raw_line.is_empty() {
             continue;
         }
-        let was_truncated = display_width(&raw_line) > MAX_LINE_LENGTH;
+        // Source rows are already bounded independently by `pane_width`; do
+        // not apply the single-line preview cap to the combined panes on a
+        // wide terminal or the right pane would be clipped before styling.
+        let was_truncated = row.is_full_width() && display_width(&raw_line) > full_width_limit;
         if was_truncated {
-            display_buffer.push_str(&truncate_with_ellipsis(&raw_line, MAX_LINE_LENGTH, "..."));
+            display_buffer.push_str(&truncate_with_ellipsis(&raw_line, full_width_limit, "..."));
         } else {
             display_buffer.push_str(&raw_line);
         }
@@ -556,11 +753,23 @@ fn format_side_by_side_row_ansi<'a>(
 ) -> &'a str {
     out.clear();
     use std::fmt::Write as _;
+    let reset_background = diff_background_reset(git_styles);
 
     if row.is_full_width() {
         let text = row.left.as_ref().map(|l| l.text.as_str()).unwrap_or("");
         let _ = write!(out, "{Reset}");
+        let style = row.left.as_ref().and_then(|line| match line.kind {
+            DiffDisplayKind::HunkHeader => git_styles.hunk,
+            DiffDisplayKind::Metadata if line.text.starts_with("--- ") => git_styles.file_old,
+            DiffDisplayKind::Metadata if line.text.starts_with("+++ ") => git_styles.file_new,
+            DiffDisplayKind::Metadata => git_styles.header,
+            _ => None,
+        });
+        if let Some(style) = style {
+            let _ = write!(out, "{style}");
+        }
         out.push_str(text);
+        let _ = write!(out, "{Reset}");
         return out.as_str();
     }
 
@@ -568,14 +777,22 @@ fn format_side_by_side_row_ansi<'a>(
     let right = format_side_by_side_pane_ansi(row.right.as_ref(), number_width, pane_width, git_styles);
     // Start the row with a full reset + default bg so nothing carries over
     // from the previous line.
-    let _ = write!(out, "\x1b[0m\x1b[49m");
+    out.push_str(reset_background);
     out.push_str(&left);
     let divider = AnsiStyle::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)));
-    let _ = write!(out, "{divider}│\x1b[0m\x1b[49m");
+    let _ = write!(out, "{divider}│{reset_background}");
     out.push_str(&right);
     // End with full reset so the next line starts clean.
     let _ = write!(out, "\x1b[0m");
     out.as_str()
+}
+
+fn diff_background_reset(git_styles: &GitStyles) -> &'static str {
+    if git_styles.add.as_ref().is_some_and(|style| style.get_bg_color().is_some()) {
+        "\x1b[0m\x1b[49m"
+    } else {
+        "\x1b[0m"
+    }
 }
 
 fn format_side_by_side_pane_ansi(
@@ -588,8 +805,9 @@ fn format_side_by_side_pane_ansi(
     let mut out = String::with_capacity(pane_width + 16);
     let Some(line) = line else {
         // SGR 49 = default background. More reliable than SGR 0 (full reset)
-        // for clearing an inherited bg in ansi-to-tui / terminal parsers.
-        let _ = write!(out, "\x1b[0m\x1b[49m");
+        // for clearing an inherited tint in color-capable terminal parsers;
+        // ANSI16 stays foreground-only and needs only the full reset.
+        out.push_str(diff_background_reset(git_styles));
         out.push_str(&" ".repeat(pane_width));
         return out;
     };
@@ -611,29 +829,18 @@ fn format_side_by_side_pane_ansi(
     // + pad. No Reset between cells — that would carve out an unstyled gutter
     // strip next to the coloured body.
     let marker_style = match marker {
-        '+' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
-            .bg_color(bg),
-        '-' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightRed)))
-            .bg_color(bg),
-        _ => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
-            .bg_color(bg),
+        '+' => AnsiStyle::new().fg_color(Some(git_styles.addition_fg)).bg_color(bg),
+        '-' => AnsiStyle::new().fg_color(Some(git_styles.deletion_fg)).bg_color(bg),
+        _ => AnsiStyle::new().fg_color(Some(git_styles.gutter_fg)).bg_color(bg),
     };
-    // Dim the gutter line numbers so they recede behind the content.
-    let gutter_style = AnsiStyle::new()
-        .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightBlack)))
-        .bg_color(bg)
-        .effects(Effects::DIMMED);
-    // Foreground-only body: solid red/green fg aligned with the marker.
+    // Avoid DIM: its attenuation is terminal-dependent and can fail contrast
+    // against the stronger intraline background.
+    let gutter_style = AnsiStyle::new().fg_color(Some(git_styles.gutter_fg)).bg_color(bg);
+    // Color-capable rows use the row tint and reserve the stronger tint for
+    // changed spans. ANSI16 uses the bright body foreground fallback.
     let body_style = match marker {
-        '+' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightGreen)))
-            .bg_color(bg),
-        '-' => AnsiStyle::new()
-            .fg_color(Some(anstyle::Color::Ansi(AnsiColor::BrightRed)))
-            .bg_color(bg),
+        '+' => git_styles.add.unwrap_or_default(),
+        '-' => git_styles.remove.unwrap_or_default(),
         _ => AnsiStyle::new().bg_color(bg),
     };
 
@@ -643,10 +850,8 @@ fn format_side_by_side_pane_ansi(
     let body_width = pane_width.saturating_sub(2 + number_width);
     let truncated = display_width(&line.text) > body_width;
     let body = truncate_chars_to_width(&line.text, body_width);
-    // Foreground-only: word chips disabled (word_bg always None in this mode),
-    // so this falls through to the solid red/green body. Skip chips on
-    // truncated rows — `changed` offsets are into the original text and would
-    // highlight the wrong slice after truncation.
+    // Skip chips on truncated rows — `changed` offsets are into the original
+    // text and would highlight the wrong slice after truncation.
     let word_ranges: &[(usize, usize)] = if truncated { &[] } else { &line.changed };
     let highlighted = highlight_diff_content(&body, bg, word_ranges, word_bg);
     match highlighted {
@@ -903,14 +1108,17 @@ mod tests {
     use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
     use anstyle::AnsiColor;
-    use vtcode_diff::{DiffDisplayKind, DiffDisplayLine};
+    use vtcode_commons::diff_theme::{DiffColorLevel, DiffTheme};
+    use vtcode_diff::{DiffDisplayKind, DiffDisplayLine, SideBySideRow};
 
     use crate::agent::runloop::tool_output::collect_inline_output;
 
     use super::super::styles::{GitStyles, LsStyles};
     use super::{
         HiddenLinesNoticeKind, MAX_LINE_LENGTH, collect_run_command_preview, format_diff_line_with_gutter_and_syntax,
-        hidden_lines_notice, highlight_diff_content, render_diff_content_block, render_preview_line, strip_ansi_codes,
+        format_diff_line_with_gutter_and_syntax_to_width, format_side_by_side_row_ansi, hidden_lines_notice,
+        highlight_diff_content, render_diff_content_block, render_preview_line, select_render_line_style,
+        should_show_diff_gutter, strip_ansi_codes,
     };
     use vtcode_core::config::ToolOutputMode;
 
@@ -1011,6 +1219,7 @@ mod tests {
             Some(style),
             5,
             None,
+            &GitStyles::new(),
             &mut buf,
         );
         assert!(rendered.contains("\u{1b}["));
@@ -1027,6 +1236,7 @@ mod tests {
             None,
             5,
             None,
+            &GitStyles::new(),
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1041,6 +1251,7 @@ mod tests {
             None,
             5,
             None,
+            &GitStyles::new(),
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1055,6 +1266,7 @@ mod tests {
             None,
             5,
             None,
+            &GitStyles::new(),
             &mut buf,
         );
         let rendered = format_diff_line_with_gutter_and_syntax(
@@ -1062,6 +1274,7 @@ mod tests {
             None,
             5,
             None,
+            &GitStyles::new(),
             &mut buf,
         );
 
@@ -1076,6 +1289,7 @@ mod tests {
             None,
             5,
             None,
+            &GitStyles::new(),
             &mut buf,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1092,7 +1306,7 @@ mod tests {
         // Simulate a chip that would be invalid after truncation.
         line.changed = vec![(0, long_text.len())];
         let word_bg = Some(anstyle::Color::Rgb(anstyle::RgbColor(36, 100, 70)));
-        let rendered = format_diff_line_with_gutter_and_syntax(&line, None, 5, word_bg, &mut buf);
+        let rendered = format_diff_line_with_gutter_and_syntax(&line, None, 5, word_bg, &GitStyles::new(), &mut buf);
         let stripped = strip_ansi_codes(rendered);
         assert!(
             vtcode_commons::preview::display_width(&stripped) <= MAX_LINE_LENGTH + gutter_width,
@@ -1126,5 +1340,320 @@ mod tests {
         assert!(rendered.contains("48;2;20;58;45"));
         // Default fg on both spans: no bright syntax leak.
         assert!(!rendered.contains("38;2;"));
+    }
+
+    #[test]
+    fn inline_diff_uses_shared_accessible_marker_gutter_and_two_level_palette() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let mut line = test_diff_line(DiffDisplayKind::Addition, None, Some(7), "let value = 2;");
+        line.changed = vec![(4, 9)];
+        let mut buffer = String::new();
+        let rendered = format_diff_line_with_gutter_and_syntax(
+            &line,
+            git.add,
+            3,
+            git.add_word.and_then(|style| style.get_bg_color()),
+            &git,
+            &mut buffer,
+        )
+        .to_owned();
+
+        assert!(rendered.contains("48;2;20;58;45"), "row tint missing: {rendered:?}");
+        assert!(rendered.contains("48;2;36;100;70"), "word tint missing: {rendered:?}");
+        assert!(rendered.contains("38;2;85;255;85"), "accessible addition marker missing: {rendered:?}");
+        assert!(rendered.contains("38;2;165;175;170"), "accessible gutter missing: {rendered:?}");
+    }
+
+    #[test]
+    fn inline_diff_row_tint_reaches_the_requested_width() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let line = test_diff_line(DiffDisplayKind::Addition, None, Some(7), "let value = 2;");
+        let mut buffer = String::new();
+        let rendered = format_diff_line_with_gutter_and_syntax_to_width(
+            &line,
+            git.add,
+            3,
+            git.add_word.and_then(|style| style.get_bg_color()),
+            &git,
+            Some(48),
+            true,
+            &mut buffer,
+        );
+        let stripped = strip_ansi_codes(rendered);
+
+        assert_eq!(vtcode_commons::preview::display_width(&stripped), 48);
+        assert!(rendered.contains("48;2;20;58;45"), "row tint missing: {rendered:?}");
+        assert!(rendered.ends_with("\x1b[0m"), "padded row must reset cleanly: {rendered:?}");
+    }
+
+    #[test]
+    fn compact_diff_row_drops_the_visible_gutter_but_keeps_semantic_styling() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let mut line = test_diff_line(DiffDisplayKind::Addition, None, Some(7), "changed");
+        line.changed = vec![(0, line.text.len())];
+        let mut buffer = String::new();
+        let rendered = format_diff_line_with_gutter_and_syntax_to_width(
+            &line,
+            git.add,
+            5,
+            git.add_word.and_then(|style| style.get_bg_color()),
+            &git,
+            Some(28),
+            false,
+            &mut buffer,
+        );
+        let stripped = strip_ansi_codes(rendered);
+
+        assert_eq!(vtcode_commons::preview::display_width(&stripped), 28);
+        assert!(stripped.starts_with(' '));
+        assert!(!stripped.contains('+'));
+        assert!(!stripped.contains('│'));
+        assert!(!stripped.contains('7'));
+        assert!(rendered.contains("48;2;20;58;45"), "compact row tint missing: {rendered:?}");
+        assert!(rendered.contains("38;2;85;255;85"), "compact semantic foreground missing: {rendered:?}");
+        assert!(rendered.contains("48;2;36;100;70"), "compact word tint missing: {rendered:?}");
+    }
+
+    #[test]
+    fn compact_diff_row_truncates_before_applying_color() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let line = test_diff_line(DiffDisplayKind::Addition, None, Some(7), &"changed ".repeat(20));
+        let mut buffer = String::new();
+        let rendered = format_diff_line_with_gutter_and_syntax_to_width(
+            &line,
+            git.add,
+            5,
+            git.add_word.and_then(|style| style.get_bg_color()),
+            &git,
+            Some(28),
+            false,
+            &mut buffer,
+        );
+        let stripped = strip_ansi_codes(rendered);
+
+        assert_eq!(vtcode_commons::preview::display_width(&stripped), 28);
+        assert!(rendered.contains("48;2;20;58;45"), "truncated row tint missing: {rendered:?}");
+        assert!(rendered.contains("38;2;85;255;85"), "compact semantic foreground missing: {rendered:?}");
+    }
+
+    #[test]
+    fn compact_context_content_is_not_reclassified_as_a_deletion() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let ls = LsStyles::from_env();
+        let line = test_diff_line(DiffDisplayKind::Context, Some(4), Some(4), "- bullet item");
+
+        assert_eq!(
+            select_render_line_style(&line, " - bullet item", Some("run_pty_cmd"), &git, &ls),
+            None,
+            "compact context rows must keep source-leading markers as content"
+        );
+    }
+
+    #[test]
+    fn foreground_only_diff_rows_keep_their_visible_gutter_when_narrow() {
+        assert!(should_show_diff_gutter(true, false, Some(1), 5));
+        assert!(!should_show_diff_gutter(true, true, Some(28), 5));
+        assert!(should_show_diff_gutter(true, true, Some(29), 5));
+    }
+
+    #[test]
+    fn narrow_inline_diff_rows_fit_the_measured_content_width() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        renderer.set_diff_preview_mode(vtcode_commons::ui_protocol::DiffPreviewMode::Inline);
+        renderer.set_table_max_width(Some(28));
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let diff = format!("@@ -1 +1 @@\n-{}\n+{}\n", "old ".repeat(30), "new ".repeat(30));
+
+        render_diff_content_block(
+            &mut renderer,
+            &diff,
+            Some("apply_patch"),
+            &git,
+            &LsStyles::from_env(),
+            MessageStyle::ToolDetail,
+            ToolOutputMode::Full,
+            100,
+        )
+        .expect("narrow diff should render");
+
+        let collected = collect_inline_output(&mut receiver);
+        let output = strip_ansi_codes(&collected);
+        assert!(
+            output.lines().all(|line| {
+                let content = line.strip_prefix(MessageStyle::ToolDetail.indent()).unwrap_or(line);
+                vtcode_commons::preview::display_width(content) <= 20
+            }),
+            "rows must fit the measured content width after indentation: {output:?}"
+        );
+    }
+
+    #[test]
+    fn side_by_side_diff_falls_back_narrow_and_recovers_wide() {
+        fn render(mode: vtcode_commons::ui_protocol::DiffPreviewMode, width: usize) -> String {
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+            renderer.set_diff_preview_mode(mode);
+            renderer.set_table_max_width(Some(width));
+            let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+            render_diff_content_block(
+                &mut renderer,
+                "--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-old value\n+new value\n",
+                Some("apply_patch"),
+                &git,
+                &LsStyles::from_env(),
+                MessageStyle::ToolDetail,
+                ToolOutputMode::Full,
+                100,
+            )
+            .expect("diff preview should render");
+            strip_ansi_codes(&collect_inline_output(&mut receiver)).into_owned()
+        }
+
+        assert_eq!(
+            render(vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide, 50),
+            render(vtcode_commons::ui_protocol::DiffPreviewMode::Inline, 50),
+            "narrow side-by-side should use the inline renderer"
+        );
+        assert_ne!(
+            render(vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide, 80),
+            render(vtcode_commons::ui_protocol::DiffPreviewMode::Inline, 80),
+            "wide side-by-side should recover the configured layout"
+        );
+    }
+
+    #[test]
+    fn wide_side_by_side_rows_are_not_clipped_to_inline_preview_limit() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        renderer.set_diff_preview_mode(vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide);
+        renderer.set_table_max_width(Some(200));
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let old = format!("-{}\n", "old ".repeat(40));
+        let new = format!("+{}\n", "new ".repeat(40));
+        let diff = format!("@@ -1 +1 @@\n{old}{new}");
+
+        render_diff_content_block(
+            &mut renderer,
+            &diff,
+            Some("apply_patch"),
+            &git,
+            &LsStyles::from_env(),
+            MessageStyle::ToolDetail,
+            ToolOutputMode::Full,
+            100,
+        )
+        .expect("wide side-by-side diff should render");
+
+        let collected = collect_inline_output(&mut receiver);
+        let output = strip_ansi_codes(&collected);
+        assert!(
+            output
+                .lines()
+                .any(|line| vtcode_commons::preview::display_width(line) > MAX_LINE_LENGTH),
+            "source panes should use the measured width instead of the inline cap: {output:?}"
+        );
+    }
+
+    #[test]
+    fn side_by_side_metadata_fits_the_measured_content_width() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        renderer.set_diff_preview_mode(vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide);
+        renderer.set_table_max_width(Some(80));
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let path = "very-long-directory-name/another-long-directory-name/source-file.rs";
+        let diff = format!("diff --git a/{path} b/{path}\n@@ -1 +1 @@\n-old\n+new\n");
+
+        render_diff_content_block(
+            &mut renderer,
+            &diff,
+            Some("apply_patch"),
+            &git,
+            &LsStyles::from_env(),
+            MessageStyle::ToolDetail,
+            ToolOutputMode::Full,
+            100,
+        )
+        .expect("side-by-side metadata should render");
+
+        let collected = collect_inline_output(&mut receiver);
+        let output = strip_ansi_codes(&collected);
+        assert!(
+            output.lines().all(|line| {
+                let content = line.strip_prefix(MessageStyle::ToolDetail.indent()).unwrap_or(line);
+                vtcode_commons::preview::display_width(content) <= 72
+            }),
+            "full-width rows must fit measured content width: {output:?}"
+        );
+    }
+
+    #[test]
+    fn diff_section_headers_are_foreground_only_and_highlighted() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let mut buffer = String::new();
+
+        let file_header = format_diff_line_with_gutter_and_syntax(
+            &test_diff_line(DiffDisplayKind::Metadata, None, None, "--- a/README.md"),
+            git.file_old,
+            3,
+            None,
+            &git,
+            &mut buffer,
+        )
+        .to_owned();
+        assert!(!file_header.contains("48;"), "file header must not have a background: {file_header:?}");
+        assert!(file_header.contains("38;2;255;180;180"), "file header foreground missing: {file_header:?}");
+
+        let hunk_header = format_diff_line_with_gutter_and_syntax(
+            &test_diff_line(DiffDisplayKind::HunkHeader, None, None, "@@ -1 +1 @@"),
+            git.hunk,
+            3,
+            None,
+            &git,
+            &mut buffer,
+        )
+        .to_owned();
+        assert!(!hunk_header.contains("48;"), "hunk header must not have a background: {hunk_header:?}");
+        assert!(hunk_header.contains("36m"), "hunk header foreground missing: {hunk_header:?}");
+    }
+
+    #[test]
+    fn side_by_side_diff_resets_empty_pane_and_keeps_tints_isolated() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let mut deleted = test_diff_line(DiffDisplayKind::Deletion, Some(3), None, "old value");
+        deleted.changed = vec![(4, 9)];
+        let mut added = test_diff_line(DiffDisplayKind::Addition, None, Some(3), "new value");
+        added.changed = vec![(4, 9)];
+
+        let mut buffer = String::new();
+        let left_only =
+            format_side_by_side_row_ansi(&SideBySideRow { left: Some(deleted), right: None }, 2, 24, &git, &mut buffer)
+                .to_owned();
+        assert!(left_only.contains("48;2;70;38;42"));
+        assert!(left_only.contains("48;2;140;52;58"));
+        assert!(!left_only.contains("48;2;20;58;45"));
+        assert!(left_only.contains("\x1b[0m\x1b[49m"), "empty right pane must reset its background");
+
+        let right_only =
+            format_side_by_side_row_ansi(&SideBySideRow { left: None, right: Some(added) }, 2, 24, &git, &mut buffer)
+                .to_owned();
+        assert!(right_only.contains("48;2;20;58;45"));
+        assert!(right_only.contains("48;2;36;100;70"));
+        assert!(!right_only.contains("48;2;70;38;42"));
+        assert!(right_only.starts_with("\x1b[0m\x1b[49m"), "empty left pane must reset its background");
+    }
+
+    #[test]
+    fn ansi16_side_by_side_diff_stays_foreground_only() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::Ansi16);
+        let added = test_diff_line(DiffDisplayKind::Addition, None, Some(3), "new value");
+        let mut buffer = String::new();
+        let rendered =
+            format_side_by_side_row_ansi(&SideBySideRow { left: None, right: Some(added) }, 2, 24, &git, &mut buffer);
+
+        assert!(!rendered.contains("48;"), "ANSI16 must not paint a background: {rendered:?}");
+        assert!(!rendered.contains("49m"), "ANSI16 must not emit background resets: {rendered:?}");
+        assert!(rendered.contains("\x1b[92m"), "ANSI16 foreground should remain visible: {rendered:?}");
     }
 }

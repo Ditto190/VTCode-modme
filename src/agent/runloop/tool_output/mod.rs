@@ -1218,6 +1218,43 @@ mod tests {
         assert!(inline_output.contains("+    1 │ after"));
     }
 
+    #[tokio::test]
+    async fn render_tool_output_groups_multiple_file_edits_in_compact_summary() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "diff": [
+                {
+                    "path": "src/a.rs",
+                    "operation": "updated",
+                    "content": "@@ -1 +1 @@\n-old a\n+new a\n",
+                    "additions": 2,
+                    "deletions": 3,
+                    "skipped": false
+                },
+                {
+                    "path": "src/b.rs",
+                    "operation": "updated",
+                    "content": "@@ -1 +1 @@\n-old b\n+new b\n",
+                    "summary": {"additions": 2, "deletions": 2},
+                    "skipped": false
+                }
+            ]
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::APPLY_PATCH), &payload, None)
+            .await
+            .expect("multi-file diff payload should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(inline_output.contains("• Edited 2 files (+4 -5)"));
+        assert!(inline_output.contains("  ├ src/a.rs (+2 -3)"));
+        assert!(inline_output.contains("  └ src/b.rs (+2 -2)"));
+        assert!(!inline_output.contains("• Edited src/a.rs"));
+        assert!(!inline_output.contains("• Edited src/b.rs"));
+        assert!(inline_output.find("  ├ src/a.rs").unwrap() < inline_output.find("  └ src/b.rs").unwrap());
+    }
+
     #[test]
     fn tracker_summary_lines_hide_successful_tracker_details() {
         let payload = json!({

@@ -241,3 +241,15 @@ Headline: functionally stable, but cost efficiency is broken and long-run stabil
 ===
 
 https://dial9-rs.github.io/blog/principles-for-fast-tokio-applications/
+
+===
+
+revamp /config modal
+
+===
+
+check error " I hit the tool-call safety fuse mid-verification and must stop issuing commands this turn" when VT Code is running. maybe it is because of the plan -> auto mode, should we use build mode instead?
+
+===
+
+add double escape to open /rewind commands

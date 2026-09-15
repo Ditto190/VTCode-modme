@@ -418,6 +418,36 @@ impl AnsiRenderer {
         &self.capabilities
     }
 
+    /// Return the width available to a rendered diff row after the logical
+    /// message indent and, for inline UI output, the transcript frame.
+    ///
+    /// Diff rows use this width only to extend their background with spaces;
+    /// when terminal sizing is unavailable callers retain their bounded
+    /// fallback behavior.
+    pub fn diff_content_width(&self, style: MessageStyle) -> Option<usize> {
+        let indent_width = UnicodeWidthStr::width(self.indent_for_style(style));
+        let kind = Self::message_kind(style);
+        let frame_width = self
+            .sink
+            .as_ref()
+            .map(|sink| transcript_table_frame_width(kind, sink.handle.agent_label_frame_width()))
+            .unwrap_or_default();
+        // An explicit test/configuration width wins. Otherwise prefer a fresh
+        // terminal measurement so a later diff preview follows a resize even
+        // when an earlier Markdown render cached the previous width.
+        let terminal_width = self
+            .sink
+            .as_ref()
+            .and_then(|sink| {
+                sink.table_max_width_override
+                    .or_else(|| crossterm::terminal::size().ok().map(|(width, _)| usize::from(width)))
+                    .or(sink.table_max_width)
+            })
+            .or_else(|| crossterm::terminal::size().ok().map(|(width, _)| usize::from(width)));
+
+        terminal_width.map(|width| width.saturating_sub(indent_width).saturating_sub(frame_width))
+    }
+
     /// Check if unicode should be used for formatting (tables, boxes, etc.)
     pub fn should_use_unicode_formatting(&self) -> bool {
         self.capabilities.should_use_unicode_boxes()

@@ -2,8 +2,12 @@ use hashbrown::HashMap;
 
 use anstyle::{AnsiColor, Color, Style as AnsiStyle};
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line, is_diff_header_line};
+use vtcode_commons::diff_theme::{diff_add_fg, diff_del_fg, diff_gutter_fg};
 use vtcode_core::config::constants::tools;
 use vtcode_core::tools::tool_intent;
+use vtcode_core::utils::diff_styles::{
+    DiffColorLevel, DiffTheme, diff_add_bg, diff_add_word_bg, diff_del_bg, diff_del_word_bg,
+};
 use vtcode_core::utils::style_helpers::bold_color;
 
 pub(crate) struct GitStyles {
@@ -13,23 +17,45 @@ pub(crate) struct GitStyles {
     pub(crate) file_old: Option<AnsiStyle>,
     pub(crate) file_new: Option<AnsiStyle>,
     pub(crate) hunk: Option<AnsiStyle>,
-    /// Word-level highlights are disabled in foreground-only mode (always `None`).
+    /// Stronger addition background for changed intraline spans.
     pub(crate) add_word: Option<AnsiStyle>,
-    /// Word-level highlights are disabled in foreground-only mode (always `None`).
+    /// Stronger deletion background for changed intraline spans.
     pub(crate) remove_word: Option<AnsiStyle>,
+    /// Accessible addition marker foreground for the active terminal level.
+    pub(crate) addition_fg: Color,
+    /// Accessible deletion marker foreground for the active terminal level.
+    pub(crate) deletion_fg: Color,
+    /// Accessible gutter foreground for the active terminal level.
+    pub(crate) gutter_fg: Color,
 }
 
 impl GitStyles {
     pub(crate) fn new() -> Self {
-        // Foreground-only diff rows: bright red/green body fg aligned with
-        // the `+`/`-` marker, bold cyan headers, no background bands.
+        Self::new_for(DiffTheme::detect(), DiffColorLevel::detect())
+    }
+
+    pub(crate) fn new_for(theme: DiffTheme, level: DiffColorLevel) -> Self {
+        let addition_bg = (level != DiffColorLevel::Ansi16).then(|| diff_add_bg(theme, level));
+        let deletion_bg = (level != DiffColorLevel::Ansi16).then(|| diff_del_bg(theme, level));
+        let addition_fg = diff_add_fg(theme, level);
+        let deletion_fg = diff_del_fg(theme, level);
+        let gutter_fg = diff_gutter_fg(theme, level);
+
         let body_style = |is_addition: bool| {
-            let fg = if is_addition {
-                Color::Ansi(AnsiColor::BrightGreen)
+            let fg = if is_addition { addition_fg } else { deletion_fg };
+            if level == DiffColorLevel::Ansi16 {
+                AnsiStyle::new().fg_color(Some(fg))
             } else {
-                Color::Ansi(AnsiColor::BrightRed)
+                AnsiStyle::new().bg_color(if is_addition { addition_bg } else { deletion_bg })
+            }
+        };
+        let word_style = |is_addition: bool| {
+            let bg = if is_addition {
+                diff_add_word_bg(theme, level)
+            } else {
+                diff_del_word_bg(theme, level)
             };
-            AnsiStyle::new().fg_color(Some(fg))
+            (level != DiffColorLevel::Ansi16).then(|| AnsiStyle::new().bg_color(Some(bg)))
         };
         Self {
             add: Some(body_style(true)),
@@ -39,23 +65,18 @@ impl GitStyles {
                     .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
                     .effects(anstyle::Effects::BOLD),
             ),
-            file_old: Some(
-                AnsiStyle::new()
-                    .fg_color(Some(Color::Ansi(AnsiColor::BrightRed)))
-                    .effects(anstyle::Effects::BOLD),
-            ),
-            file_new: Some(
-                AnsiStyle::new()
-                    .fg_color(Some(Color::Ansi(AnsiColor::BrightGreen)))
-                    .effects(anstyle::Effects::BOLD),
-            ),
+            file_old: Some(AnsiStyle::new().fg_color(Some(deletion_fg)).effects(anstyle::Effects::BOLD)),
+            file_new: Some(AnsiStyle::new().fg_color(Some(addition_fg)).effects(anstyle::Effects::BOLD)),
             hunk: Some(
                 AnsiStyle::new()
                     .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
                     .effects(anstyle::Effects::BOLD),
             ),
-            add_word: None,
-            remove_word: None,
+            add_word: word_style(true),
+            remove_word: word_style(false),
+            addition_fg,
+            deletion_fg,
+            gutter_fg,
         }
     }
 }
@@ -160,8 +181,9 @@ pub(crate) fn select_line_style(
     let trimmed = line.trim_start();
     // Always detect and style diff lines, even when tool_name is not provided
     // (e.g. git_diff payloads routed through generic rendering path).
-    // File headers get red/green bands, `@@` hunks get the neutral cyan band,
-    // other metadata (`diff --git`, `index`, ...) stays dim with no band.
+    // File headers get red/green foregrounds, `@@` hunks get a bold cyan
+    // foreground, and other metadata (`diff --git`, `index`, ...) stays dim
+    // with no band.
     if trimmed.starts_with("--- ") {
         return git.file_old;
     }
@@ -209,18 +231,26 @@ mod tests {
     }
 
     #[test]
-    fn diff_content_styles_use_foreground_only() {
-        let git = GitStyles::new();
+    fn diff_content_styles_use_row_tint_and_ansi16_fallback() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
         let remove = git.remove.expect("remove style should exist");
         let add = git.add.expect("add style should exist");
-        // DIMMED red is unreadable; both sides stay solid bright fg, no bg.
+        // DIMMED red is unreadable; the row tint carries the body and the
+        // marker remains bright.
         assert!(!remove.get_effects().contains(Effects::DIMMED));
         assert!(!add.get_effects().contains(Effects::DIMMED));
-        // Foreground-only on all levels: body fg aligns with the marker.
-        assert_eq!(remove.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightRed)));
-        assert_eq!(add.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightGreen)));
-        assert_eq!(remove.get_bg_color(), None);
-        assert_eq!(add.get_bg_color(), None);
+        assert_eq!(remove.get_fg_color(), None);
+        assert_eq!(add.get_fg_color(), None);
+        assert_eq!(remove.get_bg_color(), Some(diff_del_bg(DiffTheme::Dark, DiffColorLevel::TrueColor)));
+        assert_eq!(add.get_bg_color(), Some(diff_add_bg(DiffTheme::Dark, DiffColorLevel::TrueColor)));
+
+        let ansi16 = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::Ansi16);
+        let ansi16_remove = ansi16.remove.expect("ansi16 removal style");
+        let ansi16_add = ansi16.add.expect("ansi16 addition style");
+        assert_eq!(ansi16_remove.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightRed)));
+        assert_eq!(ansi16_add.get_fg_color(), Some(Color::Ansi(AnsiColor::BrightGreen)));
+        assert_eq!(ansi16_remove.get_bg_color(), None);
+        assert_eq!(ansi16.add_word, None);
     }
 
     #[test]
@@ -258,8 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn file_and_hunk_headers_use_foreground_only_bold() {
-        let git = GitStyles::new();
+    fn file_and_hunk_headers_keep_metadata_separate_from_row_tints() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
         let ls = LsStyles::from_components(HashMap::new(), Vec::new());
         assert_eq!(select_line_style(None, "--- a/README.md", &git, &ls), git.file_old);
         assert_eq!(select_line_style(None, "+++ b/README.md", &git, &ls), git.file_new);
@@ -271,6 +301,23 @@ mod tests {
         }
         let header = git.header.expect("metadata header exists");
         assert_eq!(header.get_bg_color(), None);
+        let add_word = git.add_word.expect("addition word style");
+        let remove_word = git.remove_word.expect("deletion word style");
+        assert_eq!(add_word.get_bg_color(), Some(diff_add_word_bg(DiffTheme::Dark, DiffColorLevel::TrueColor)));
+        assert_eq!(remove_word.get_bg_color(), Some(diff_del_word_bg(DiffTheme::Dark, DiffColorLevel::TrueColor)));
+    }
+
+    #[test]
+    fn light_diff_headers_use_accessible_shared_foregrounds() {
+        let git = GitStyles::new_for(DiffTheme::Light, DiffColorLevel::TrueColor);
+        assert_eq!(
+            git.file_old.expect("old file header").get_fg_color(),
+            Some(diff_del_fg(DiffTheme::Light, DiffColorLevel::TrueColor))
+        );
+        assert_eq!(
+            git.file_new.expect("new file header").get_fg_color(),
+            Some(diff_add_fg(DiffTheme::Light, DiffColorLevel::TrueColor))
+        );
     }
 
     #[test]
