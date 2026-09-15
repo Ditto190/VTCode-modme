@@ -80,23 +80,25 @@ into safe, reviewable progress, entirely in your terminal.
 Most agents are a model plus a tool call. VT Code answers each common failure
 mode with a **structural default in the runtime**, not a prompt tweak:
 
-| Failure mode                     | Structural answer                                                                                                                                 |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sessions drift**               | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)              |
-| **Tool output floods the window** | Results spool to disk and are summarized into context on demand; signal stays in, noise stays out.                                              |
-| **One unreviewed command**       | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **"Done" is a claim**            | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md) |
+| Failure mode                      | Structural answer                                                                                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                       |
+| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out.                                                                                   |
+| **One unreviewed command**        | Sandboxed, fail-closed execution with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)     |
+| **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification: the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                                |
 
-Underneath all four: one [`ThreadEvent`](./crates/common/vtcode-exec-events)
-stream records everything a run did, and the
-[agent loop contract](./docs/guides/agent-loop-contract.md) specifies how
-turns, tool results, and recovery behave. Extensibility is structural too:
-every major model sits behind one interface, and MCP, Skills, Plugins, ACP,
-A2A, and WebMCP attach without forking
-([MCP](./docs/guides/mcp-integration.md) ·
-[Providers](./docs/providers/PROVIDER_GUIDES.md)). The interface is a
-keyboard-first TUI with WCAG AA themes, gated by `cargo nextest` and CI with
-`-D warnings` ([Testing](./docs/development/testing.md)).
+Underneath all four:
+
+- **One record of truth.** A single
+  [`ThreadEvent`](./crates/common/vtcode-exec-events) stream logs everything a
+  run did, and the [agent loop contract](./docs/guides/agent-loop-contract.md)
+  specifies how turns, tool results, and recovery behave.
+- **Extensibility without forks.** Every major model sits behind one
+  interface, and MCP, Skills, Plugins, ACP, A2A, and WebMCP attach as
+  first-class extensions ([MCP](./docs/guides/mcp-integration.md) ·
+  [Providers](./docs/providers/PROVIDER_GUIDES.md)).
+- **A keyboard-first TUI** with WCAG AA themes, gated by `cargo nextest` and
+  CI with `-D warnings` ([Testing](./docs/development/testing.md)).
 
 ## Architecture
 
