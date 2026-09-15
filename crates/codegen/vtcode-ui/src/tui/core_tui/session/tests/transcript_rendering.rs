@@ -986,7 +986,7 @@ fn tool_command_header_does_not_use_accent_tool_body_as_fallback() {
 }
 
 #[test]
-fn tool_output_is_dimmed_but_tool_header_is_opaque() {
+fn tool_output_is_not_dimmed_and_tool_header_is_opaque() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(
         InlineMessageKind::Tool,
@@ -1009,12 +1009,53 @@ fn tool_output_is_dimmed_but_tool_header_is_opaque() {
         .expect("expected tool output");
 
     assert!(!header.style.add_modifier.contains(Modifier::DIM));
-    assert!(output.style.add_modifier.contains(Modifier::DIM));
+    assert!(!output.style.add_modifier.contains(Modifier::DIM));
+}
+
+#[test]
+fn exit_status_row_uses_success_and_error_accents() {
+    let theme = InlineTheme {
+        foreground: Some(anstyle::AnsiColor::White.into()),
+        background: Some(anstyle::AnsiColor::Black.into()),
+        primary: Some(anstyle::AnsiColor::Green.into()),
+        error: Some(anstyle::AnsiColor::Red.into()),
+        ..InlineTheme::default()
+    };
+
+    let badge_foreground = |text: &str| {
+        let mut session = Session::new(theme.clone(), None, VIEW_ROWS);
+        session.push_line(
+            InlineMessageKind::Tool,
+            vec![InlineSegment {
+                text: text.to_string(),
+                style: Arc::new(InlineTextStyle::default()),
+            }],
+        );
+        let rendered = session.reflow_transcript_lines(80);
+        let badge = rendered
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.contains(text))
+            .unwrap_or_else(|| panic!("expected exit badge span for {text}"));
+        assert!(!badge.style.add_modifier.contains(Modifier::DIM), "exit badge must not be dimmed: {text}");
+        badge.style.fg
+    };
+
+    // Clean exit resolves to the success accent; any non-zero code to the error
+    // accent. Both stay at normal intensity and keep the `✓ exit N` text.
+    assert_eq!(badge_foreground("✓ exit 0"), Some(ratatui_color_from_ansi(anstyle::AnsiColor::Green.into())));
+    assert_eq!(badge_foreground("✓ exit 1"), Some(ratatui_color_from_ansi(anstyle::AnsiColor::Red.into())));
 }
 
 #[test]
 fn pty_lines_use_subdued_foreground() {
-    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let theme = InlineTheme {
+        foreground: Some(AnsiColorEnum::Rgb(RgbColor(0xEE, 0xEE, 0xEE))),
+        background: Some(AnsiColorEnum::Ansi(anstyle::AnsiColor::Black)),
+        pty_body: Some(AnsiColorEnum::Rgb(RgbColor(0x7A, 0x7A, 0x7A))),
+        ..InlineTheme::default()
+    };
+    let mut session = Session::new(theme, None, VIEW_ROWS);
     push_pty_line(&mut session, "plain pty output");
 
     let rendered = session.reflow_pty_lines(0, 80);
@@ -1023,10 +1064,12 @@ fn pty_lines_use_subdued_foreground() {
         .flat_map(|line| line.line.spans.iter())
         .find(|span| span.content.contains("plain pty output"))
         .expect("expected PTY body span");
-    assert!(
-        body_span.style.fg.is_some() || body_span.style.add_modifier.contains(Modifier::DIM),
-        "PTY body span should apply non-default visual styling"
+    assert_eq!(
+        body_span.style.fg,
+        Some(Color::Rgb(0x7A, 0x7A, 0x7A)),
+        "PTY body span should use the subdued pty_body foreground"
     );
+    assert!(!body_span.style.add_modifier.contains(Modifier::DIM), "PTY body should render at normal intensity");
 }
 
 #[test]
@@ -1069,12 +1112,12 @@ fn assistant_text_is_brighter_than_pty_output() {
         .find(|span| span.content.contains("pty output"))
         .expect("expected PTY body span");
     assert_eq!(pty_body.style.fg, Some(pty_fg));
-    assert!(pty_body.style.add_modifier.contains(Modifier::DIM));
+    assert!(!pty_body.style.add_modifier.contains(Modifier::DIM));
     assert_ne!(agent_body.style.fg, pty_body.style.fg);
 }
 
 #[test]
-fn pty_ansi_detail_colors_are_attenuated_toward_background() {
+fn pty_ansi_detail_colors_keep_full_intensity() {
     let mut session = Session::new(
         InlineTheme {
             background: Some(AnsiColorEnum::Ansi(anstyle::AnsiColor::Black)),
@@ -1102,8 +1145,13 @@ fn pty_ansi_detail_colors_are_attenuated_toward_background() {
         .find(|span| span.content.contains("SUCCESS"))
         .expect("expected ANSI-colored PTY detail span");
 
-    assert_eq!(body_span.style.fg, Some(Color::Rgb(55, 165, 55)));
-    assert!(body_span.style.add_modifier.contains(Modifier::DIM));
+    assert!(body_span.style.fg.is_some());
+    assert_ne!(
+        body_span.style.fg,
+        Some(Color::Rgb(55, 165, 55)),
+        "explicit PTY detail colors must no longer be attenuated toward the background"
+    );
+    assert!(!body_span.style.add_modifier.contains(Modifier::DIM));
 }
 
 #[test]

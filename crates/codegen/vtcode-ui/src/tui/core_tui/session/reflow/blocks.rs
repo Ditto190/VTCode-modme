@@ -3,8 +3,7 @@ use unicode_width::UnicodeWidthStr;
 use vtcode_commons::diff_paths::{is_diff_addition_line, is_diff_deletion_line};
 
 use super::super::super::style::{
-    ratatui_color_from_ansi, ratatui_pty_detail_style_from_inline, ratatui_pty_style_from_inline,
-    ratatui_style_from_ansi, ratatui_style_from_inline,
+    ratatui_color_from_ansi, ratatui_pty_style_from_inline, ratatui_style_from_ansi, ratatui_style_from_inline,
 };
 use super::super::super::types::{InlineLinkRange, InlineMessageKind, InlineTextStyle};
 use super::super::message::RenderedTranscriptLink;
@@ -76,6 +75,30 @@ impl Session {
             ..InlineTextStyle::default()
         };
         ratatui_style_from_inline(&style, self.theme.foreground).remove_modifier(Modifier::DIM)
+    }
+
+    /// Style for the session exit-status row (`✓ exit 0`, `✓ exit 127`, `✓ done`).
+    ///
+    /// The badge keeps its glyph and text but renders at full intensity in the
+    /// success/error accent, so a completed command's status row stays legible
+    /// instead of blending into the surrounding subdued tool output.
+    fn exit_status_row_style(&self, text: &str) -> Option<Style> {
+        let trimmed = text.trim();
+        let (rest, explicit_failure) = match trimmed.strip_prefix("✓ ") {
+            Some(rest) => (rest, false),
+            None => (trimmed.strip_prefix("✗ ")?, true),
+        };
+        let success = !explicit_failure
+            && match rest.strip_prefix("exit ") {
+                Some(code) => code.trim().parse::<i32>().is_ok_and(|code| code == 0),
+                None => rest == "done",
+            };
+        let color = if success {
+            self.theme.primary.or(self.theme.foreground)
+        } else {
+            self.theme.error.or(self.theme.foreground)
+        }?;
+        Some(Style::default().fg(ratatui_color_from_ansi(color)))
     }
 
     fn wrapped_diff_continuation_prefix(line_text: &str) -> Option<String> {
@@ -329,15 +352,26 @@ impl Session {
                     border_style,
                 ));
             } else {
-                // Dim tool output and avoid right-side padding borders.
                 // Detail rows are nested under their header with an extra indent,
-                // and wrapped lines keep the tree marker aligned via hanging indent.
-                // Diff rows keep their explicit base/chip styling; dimming
-                // them dulls the foreground alignment.
+                // and wrapped lines keep the tree marker aligned via hanging
+                // indent. No right-side padding borders.
                 let mut detail_spans = line_spans;
-                if !is_diff_row(&detail_spans) {
+                // Task-tree rows stay subdued so hierarchy reads as secondary to
+                // the tool header and its command output; ordinary exec output
+                // renders at normal intensity. Diff rows keep their explicit
+                // base/chip styling untouched.
+                let is_tree_row = {
+                    let trimmed = line_text.trim_start();
+                    trimmed.starts_with("└ ") || trimmed.starts_with("├ ") || trimmed.starts_with("│ ")
+                };
+                if is_tree_row && !is_diff_row(&detail_spans) {
                     for span in &mut detail_spans {
                         span.style = span.style.add_modifier(Modifier::DIM);
+                    }
+                }
+                for span in &mut detail_spans {
+                    if let Some(style) = self.exit_status_row_style(span.content.as_ref()) {
+                        span.style = style;
                     }
                 }
                 lines.extend(self.wrap_block_lines_no_right_border(
@@ -530,7 +564,7 @@ impl Session {
             let style = if is_command_header {
                 self.opaque_tool_header_text_style(ratatui_style_from_inline(&segment.style, pty_fallback))
             } else {
-                ratatui_pty_detail_style_from_inline(&segment.style, pty_fallback, self.theme.background)
+                ratatui_pty_style_from_inline(&segment.style, pty_fallback)
             };
             body_spans.push(Span::styled(stripped_text.into_owned(), style));
         }
