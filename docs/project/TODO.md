@@ -434,57 +434,6 @@ cache."
 
 ===
 
-Tool execution completed, but the model follow-up failed. Output above is valid.
-Follow-up error category: Execution failed
-Tip: planning evidence is preserved; the harness synthesizes the plan from collected tool outputs, and the next `keep
-planning` turn reuses that evidence without re-reading. If the failure repeats, switch provider/model for the follow-
-up.
-[!] Follow-up failed after tool execution; scheduling a final tool-free recovery pass.
-Tool execution completed, but the model follow-up failed. Output above is valid.
-Follow-up error category: Execution failed
-Tip: planning evidence is preserved; the harness synthesizes the plan from collected tool outputs, and the next `keep
-planning` turn reuses that evidence without re-reading. If the failure repeats, switch provider/model for the follow-
-up.
-Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active. The
-current plan and task state were retained.
-Turn blocked: Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains
-active. The current plan and task state were retained.
-
-# Last-Turn Diagnostics
-
-Elapsed: 291219ms
-Tools used this session (2): code_search, command_session_internal
-Tool calls: requested=35 admitted=30 failed=1 denied=0 preflight_failures=0 reused=0
-Turn usage: prompt=956758 cached=445740 completion=11870
-What you can do:
-• In this session: Type 'continue' to resume, or describe alternative instructions
-• From terminal: Run `vtcode --resume session-vtcode-20260916T094604Z_037055-81627`
-• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
-• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-
-20260916t094604z_037055-81627-20260916T095114Z-f2bf8a31-97ad-4c1b-923e-124eff3bf9e1.md
-
-┏Logs╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
-╏(oldest logs dropped) ╏
-╏[2026-09-16T09:46:45Z] INFO vtcode.turn.metrics turn metric metric=tool_call_turn_outcome ╏
-╏run_id=session-vtcode-20260916T094604Z_037055-81627 turn_id=2161743f-cdba-4664-a5cb-7a37b2b0e9d3 outcome=continue ╏
-╏[2026-09-16T09:46:45Z] INFO vtcode::agent::runloop::unified::turn::turn_loop Resolved per-turn context budget ╏
-╏denominator model=anthropic/claude-sonnet-5 context_budget=1000000 prompt_tokens=15833 ╏
-╏[2026-09-16T09:46:45Z] INFO vtcode.turn.metrics turn metric metric=tool_catalog_cache ╏
-╏run_id=session-vtcode-20260916T094604Z_037055-81627 turn_id=2161743f-cdba-4664-a5cb-7a37b2b0e9d3 turn=4 ╏
-╏model=anthropic/claude-sonnet-5 cache_hit=true planning_workflow=true request_user_input_enabled=true ╏
-╏available_tools=3 stable_prefix_hash=11466911882916377052 tool_catalog_hash=10073322524028838740 ╏
-╏prefix_change_reason=unchanged ordered_wire_tool_names=None active_loaded_skill_names=None ╏
-╏[2026-09-16T09:46:45Z] INFO vtcode.turn.metrics turn metric metric=token_budget_breakdown ╏
-╏run_id=session-vtcode-20260916T094604Z_037055-81627 turn_id=2161743f-cdba-4664-a5cb-7a37b2b0e9d3 turn=4 ╏
-╏model=anthropic/claude-sonnet-5 system_prompt_tokens=7503 tool_schema_tokens=606 message_history_tokens=2695 ╏
-╏on_wire_tools=3 client_local_deferral=true tool_free_recovery=false ╏
-╏[2026-09-16T09:46:52Z] INFO vtcode.turn.metrics turn metric metric=llm_retry_outcome ╏
-┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
-
-/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260916T094604Z_037055-81627
-
-===
-
 revamp command permission popup: adjust wording, remove `COMMAND` and `WHY` sections and `|` also add a brief explanation section for asking permission, eg: what the agent trying to do and why it needs the permission
 
 ```
@@ -504,33 +453,3 @@ ref 2 states:
 
 • Compacting context...
 • Context compacted · 1m 34s
-
----
-
-check compaction again it seems not working reliably:
-
-```
-Compacted conversation for model switch (86 -> 88 messages, local compaction). Auto-resume injected; new model
-continues seamlessly with preserved context.
-Reasoning effort remains 'medium'.
-Using API key from secure storage.
-Compacted conversation history (88 -> 12 messages, local compaction).
-
-┏Logs╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
-╏[2026-09-16T11:04:05Z] INFO  vtcode_core::context::history_files Wrote conversation history to file                ╏
-╏session=session-vtcode-20260916T094604Z_037055-81627 turn=86 messages=86                                           ╏
-╏path=.vtcode/history/session-vtcode-20260916T094604Z__0086_20260916T110405Z.jsonl                                  ╏
-╏[2026-09-16T11:04:05Z] INFO  vtcode::agent::runloop::unified::turn::compaction Injected session memory envelope    ╏
-╏provider=merge-gateway model=anthropic/claude-sonnet-5 turn=88 tool_count=0 parallelized=false                     ╏
-╏compaction_mode=local grounded_fact_count=5 previous_response_chain_present=false                                  ╏
-╏[2026-09-16T11:04:05Z] INFO  vtcode::agent::runloop::unified::turn::compaction Applied conversation compaction     ╏
-╏provider=merge-gateway model=anthropic/claude-sonnet-5 turn=86 tool_count=0 parallelized=false                     ╏
-╏compaction_mode=local grounded_fact_count=5 previous_response_chain_present=false                                  ╏
-╏[2026-09-16T11:04:43Z] INFO  vtcode_core::context::history_files Wrote conversation history to file                ╏
-╏session=session-vtcode-20260916T094604Z_037055-81627 turn=88 messages=88                                           ╏
-╏path=.vtcode/history/session-vtcode-20260916T094604Z__0088_20260916T110443Z.jsonl                                  ╏
-╏[2026-09-16T11:04:43Z] INFO  vtcode::agent::runloop::unified::turn::compaction Injected session memory envelope    ╏
-╏provider=merge-gateway model=anthropic/claude-sonnet-5 turn=12 tool_count=0 parallelized=false                     ╏
-╏compaction_mode=local grounded_fact_count=5 previous_response_chain_present=false                                  ╏
-┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
-```
