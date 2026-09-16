@@ -887,6 +887,53 @@ async fn api_key_responses_stream_sends_metadata_and_preserves_usage() {
 }
 
 #[tokio::test]
+async fn generate_coerces_luna_to_responses_streaming() {
+    let Some(server) = start_mock_server_or_skip().await else {
+        return;
+    };
+    let captured = Arc::new(Mutex::new(None::<Value>));
+    let captured_for_mock = Arc::clone(&captured);
+
+    Mock::given(method("POST"))
+        .and(path("/responses"))
+        .respond_with(move |req: &wiremock::Request| {
+            *captured_for_mock.lock().expect("not poisoned") =
+                Some(serde_json::from_slice(&req.body).expect("valid json"));
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"luna summary\"}\n\n\
+                     data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_luna\",\"output\":[]}}\n\n",
+                )
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = OpenAIProvider::new_with_client(
+        "test-key".to_string(),
+        None,
+        models::openai::GPT_5_6_LUNA.to_string(),
+        reqwest::Client::builder().no_proxy().build().expect("test client"),
+        native_openai_mock_base_url(&server),
+        TimeoutsConfig::default(),
+    );
+
+    let response = provider
+        .generate(provider::LLMRequest {
+            messages: vec![provider::Message::user("Summarize this".to_string())].into(),
+            model: models::openai::GPT_5_6_LUNA.to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("streaming-required model should generate through Responses SSE");
+
+    assert_eq!(response.content.as_deref(), Some("luna summary"));
+    let payload = captured.lock().expect("not poisoned").clone().expect("request captured");
+    assert_eq!(payload["stream"], json!(true));
+}
+
+#[tokio::test]
 async fn chatgpt_responses_stream_accepts_empty_final_output_after_text_delta() {
     let Some(server) = start_mock_server_or_skip().await else {
         return;
@@ -3028,6 +3075,7 @@ fn openai_models_support_streaming() {
 
 #[test]
 fn native_stream_required_models_disable_non_streaming() {
+    assert!(models::openai::STREAMING_REQUIRED_MODELS.contains(&models::openai::GPT_5_6_LUNA));
     for model in models::openai::STREAMING_REQUIRED_MODELS {
         let provider = test_provider("http://test", model);
         assert!(!provider.supports_non_streaming(model), "Model {model} should require streaming");

@@ -15,6 +15,12 @@ pub async fn collect_single_response(
         return provider.generate(request).await;
     }
 
+    // `stream_normalized` is the fallback transport for this request, so make
+    // the selected wire mode explicit for adapters that inspect the request
+    // instead of unconditionally setting it in their transport layer.
+    let mut request = request;
+    request.stream = true;
+
     #[cfg(feature = "profiling")]
     let mut stream: LLMNormalizedStream =
         hotpath::future!(provider.stream_normalized(request), label = "llm_streaming").await?;

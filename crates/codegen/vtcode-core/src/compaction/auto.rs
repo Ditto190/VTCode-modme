@@ -23,7 +23,10 @@ use crate::compaction::{
     compact_history_manual_with_parent_context, manual_compaction_strategy,
 };
 use crate::exec::events::CompactionMode;
-use crate::llm::provider::{LLMProvider, LLMRequest, Message, ToolChoice};
+use crate::llm::{
+    collect_single_response,
+    provider::{LLMProvider, LLMRequest, Message, ToolChoice},
+};
 use vtcode_config::loader::VTCodeConfig;
 
 /// Result of a successful automatic compaction pass.
@@ -325,7 +328,7 @@ async fn try_two_pass_with_prefire(
         ..Default::default()
     };
 
-    let response = provider.generate(request).await?;
+    let response = collect_single_response(provider, request).await?;
     let note2 = response.content.unwrap_or_default().trim().to_string();
 
     if note2.trim().is_empty() {
@@ -357,8 +360,11 @@ mod tests {
     use super::*;
     use crate::compaction::SUPPRESS_STICKY;
     use crate::compaction::two_pass::fingerprint_prefix;
-    use crate::llm::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, Message, ToolChoice};
+    use crate::llm::provider::{
+        LLMError, LLMNormalizedStream, LLMProvider, LLMRequest, LLMResponse, Message, NormalizedStreamEvent, ToolChoice,
+    };
     use async_trait::async_trait;
+    use futures::stream;
     use std::sync::Mutex;
 
     struct FailingProvider;
@@ -464,9 +470,26 @@ mod tests {
             "capturing"
         }
 
-        async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        fn supports_streaming(&self) -> bool {
+            true
+        }
+
+        fn supports_non_streaming(&self, _model: &str) -> bool {
+            false
+        }
+
+        async fn generate(&self, _request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            Err(LLMError::Provider {
+                message: "capturing provider is streaming-only".to_string(),
+                metadata: None,
+            })
+        }
+
+        async fn stream_normalized(&self, request: LLMRequest) -> Result<LLMNormalizedStream, LLMError> {
             *self.last_request.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(request);
-            Ok(LLMResponse::new("capturing-model", "summary"))
+            Ok(Box::pin(stream::iter(vec![Ok(NormalizedStreamEvent::Done {
+                response: Box::new(LLMResponse::new("capturing-model", "summary")),
+            })])))
         }
 
         fn supported_models(&self) -> Vec<String> {

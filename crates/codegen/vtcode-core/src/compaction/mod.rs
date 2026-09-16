@@ -9,12 +9,15 @@ use vtcode_config::constants::context::DEFAULT_COMPACTION_TRIGGER_RATIO;
 
 use crate::config::types::{ReasoningEffortLevel, VerbosityLevel};
 use crate::exec::events::CompactionMode;
-use crate::llm::provider::{
-    LLMProvider, LLMRequest, LLMResponse, Message, MessageContent, MessageRole, ResponsesCompactionOptions, ToolChoice,
-    ToolDefinition,
-};
 use crate::llm::reasoning_effort::ReasoningEffortMapper;
 use crate::llm::utils::truncate_to_token_limit;
+use crate::llm::{
+    collect_single_response,
+    provider::{
+        LLMProvider, LLMRequest, LLMResponse, Message, MessageContent, MessageRole, ResponsesCompactionOptions,
+        ToolChoice, ToolDefinition,
+    },
+};
 
 pub mod auto;
 pub mod memory_envelope;
@@ -593,12 +596,13 @@ pub enum CompactionStrategy {
     /// (OpenAI `/responses/compact`). Delegates to `LLMProvider::compact_history_with_options`.
     NativeStandalone,
     /// Provider compacts inline via request fields, threshold-triggered
-    /// (Anthropic `compact_20260112`). Invoked through `LLMProvider::generate`
-    /// with `context_management` set and `pause_after_compaction`.
+    /// (Anthropic `compact_20260112`). Invoked through the capability-aware
+    /// one-shot response collector with `context_management` set and
+    /// `pause_after_compaction`.
     NativeInline,
-    /// Universal fallback: summarize history via `LLMProvider::generate` and
-    /// rebuild as a summary message plus retained recent user messages.
-    /// Works for every provider.
+    /// Universal fallback: summarize history via the capability-aware one-shot
+    /// response collector and rebuild as a summary message plus retained recent
+    /// user messages. Works for every provider.
     Local,
 }
 
@@ -881,7 +885,7 @@ async fn compact_history_native_inline(
     // endpoint) the request may be rejected. Per the manual `/compact` contract
     // ("always succeeds"), swallow the inline error and fall back to local
     // summarization rather than aborting the whole command.
-    let response = match provider.generate(request).await {
+    let response = match collect_single_response(provider, request).await {
         Ok(response) => response,
         Err(error) => {
             tracing::warn!(
@@ -1020,7 +1024,7 @@ async fn generate_summary_with_capacity_retry(
     let mut remaining_retries = max_overflow_retries;
     let mut retry_storage: Vec<Message>;
     loop {
-        match provider.generate(make_request(current_source)).await {
+        match collect_single_response(provider, make_request(current_source)).await {
             Ok(response) => return Ok(response.content.unwrap_or_default().trim().to_string()),
             Err(error) if is_context_capacity_message(&error.to_string()) && remaining_retries > 0 => {
                 current_budget = current_budget.map(|budget| (budget / 2).max(4));
@@ -2002,9 +2006,11 @@ mod tests {
     use crate::config::types::{ReasoningEffortLevel, VerbosityLevel};
     use crate::exec::events::CompactionMode;
     use crate::llm::provider::{
-        LLMError, LLMProvider, LLMRequest, LLMResponse, Message, MessageRole, ResponsesCompactionOptions,
+        LLMError, LLMNormalizedStream, LLMProvider, LLMRequest, LLMResponse, Message, MessageRole,
+        NormalizedStreamEvent, ResponsesCompactionOptions,
     };
     use async_trait::async_trait;
+    use futures::stream;
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -2044,6 +2050,15 @@ mod tests {
         request_tokens: Mutex<Vec<usize>>,
         /// Number of leading requests to reject before succeeding.
         failures: usize,
+    }
+
+    /// Local summarizer that only supports normalized streaming. Its
+    /// non-streaming method deliberately returns an error so compaction tests
+    /// prove the capability-aware collection path is used.
+    struct StreamingOnlyCompactionProvider {
+        generate_calls: Mutex<usize>,
+        stream_calls: Mutex<usize>,
+        stream_modes: Mutex<Vec<bool>>,
     }
 
     /// Capturing provider with no native support; used to assert the Local summary
@@ -2289,6 +2304,48 @@ mod tests {
 
         fn effective_context_size(&self, _model: &str) -> usize {
             200_000
+        }
+    }
+
+    #[async_trait]
+    impl LLMProvider for StreamingOnlyCompactionProvider {
+        fn name(&self) -> &str {
+            "streaming-only-compaction"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            true
+        }
+
+        fn supports_non_streaming(&self, _model: &str) -> bool {
+            false
+        }
+
+        async fn generate(&self, _request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            *self.generate_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+            Err(LLMError::Provider {
+                message: "streaming-only provider cannot generate non-streaming responses".to_string(),
+                metadata: None,
+            })
+        }
+
+        async fn stream_normalized(&self, request: LLMRequest) -> Result<LLMNormalizedStream, LLMError> {
+            *self.stream_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+            self.stream_modes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(request.stream);
+            Ok(Box::pin(stream::iter(vec![Ok(NormalizedStreamEvent::Done {
+                response: Box::new(LLMResponse::new("stub-model", "streamed summary")),
+            })])))
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["stub-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+            Ok(())
         }
     }
 
@@ -2612,6 +2669,31 @@ mod tests {
         assert_eq!(compacted[1].content.as_text(), "first request");
         assert_eq!(compacted[2].content.as_text(), "working");
         assert_eq!(compacted[3].content.as_text(), "second request");
+    }
+
+    #[tokio::test]
+    async fn local_compaction_collects_summary_from_streaming_only_provider() {
+        let provider = StreamingOnlyCompactionProvider {
+            generate_calls: Mutex::new(0),
+            stream_calls: Mutex::new(0),
+            stream_modes: Mutex::new(Vec::new()),
+        };
+
+        let (compacted, mode) = compact_history_manual(
+            &provider,
+            "stub-model",
+            &sample_history(),
+            &CompactionConfig::default(),
+            &ManualCompactionOptions::default(),
+        )
+        .await
+        .expect("streaming-only local compaction should succeed");
+
+        assert_eq!(mode, CompactionMode::Local);
+        assert_eq!(compacted[0].content.as_text(), "Previous conversation summary:\nstreamed summary");
+        assert_eq!(*provider.generate_calls.lock().unwrap(), 0, "non-streaming generation must not be attempted");
+        assert_eq!(*provider.stream_calls.lock().unwrap(), 1, "summary should be collected from one normalized stream");
+        assert_eq!(*provider.stream_modes.lock().unwrap(), vec![true], "stream fallback must set the request mode");
     }
 
     #[tokio::test]
