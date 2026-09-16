@@ -206,12 +206,18 @@ fn control_i_toggles_inline_list_visibility() {
 
 #[test]
 fn tab_cycles_primary_agent_with_submission_text() {
+    // Plain Tab now submits like Ctrl+Enter; Shift+Tab cycles.
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
 
     session.set_input("queued".to_string());
 
     let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    assert!(matches!(event, Some(InlineEvent::CyclePrimaryAgent)));
+    assert!(matches!(event, Some(InlineEvent::Submit(value)) if value == "queued"));
+    assert_eq!(session.input_manager.content(), "");
+
+    session.set_input("queued".to_string());
+    let cycle = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+    assert!(matches!(cycle, Some(InlineEvent::CyclePrimaryAgent)));
     assert_eq!(session.input_manager.content(), "queued");
 }
 
@@ -498,12 +504,19 @@ fn tab_accepts_inline_prompt_suggestion_with_trailing_space_prefix() {
 
 #[test]
 fn tab_cycles_primary_agent_when_no_inline_prompt_suggestion_is_visible() {
+    // Without a suggestion, plain Tab submits like Ctrl+Enter.
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.set_input("Review the current.diff".to_string());
 
     let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
-    assert!(matches!(event, Some(InlineEvent::CyclePrimaryAgent)));
+    assert!(matches!(event, Some(InlineEvent::Submit(value)) if value == "Review the current.diff"));
+    assert_eq!(session.input_manager.content(), "");
+
+    session.set_input("Review the current.diff".to_string());
+    let cycle = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+
+    assert!(matches!(cycle, Some(InlineEvent::CyclePrimaryAgent)));
     assert_eq!(session.input_manager.content(), "Review the current.diff");
 }
 
@@ -647,25 +660,231 @@ fn app_restore_input_draft_command_preserves_attachments_in_order() {
 
 #[test]
 fn busy_tab_does_not_cycle_primary_agent() {
+    // Busy Tab queues like Ctrl+Enter instead of cycling.
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     set_busy_status(&mut session);
     session.set_input("queue this next".to_string());
 
     let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    assert!(event.is_none());
-    assert_eq!(session.input_manager.content(), "queue this next");
+    assert!(matches!(event, Some(InlineEvent::QueueSubmit(value)) if value == "queue this next"));
+    assert_eq!(session.input_manager.content(), "");
 }
 
 #[test]
 fn busy_tab_shows_mode_switch_notice() {
+    // Mode-switch notice now lives on Shift+Tab (BackTab); plain Tab queues.
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     set_busy_status(&mut session);
 
-    let _ = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    let _ = session.process_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
 
     let transcript = visible_transcript(&mut session);
     assert!(
         transcript.iter().any(|line| line.contains("Mode switching is disabled")),
         "expected a mode-switch busy notice, got: {transcript:?}"
     );
+}
+
+#[test]
+fn command_backspace_clears_single_line_entire_input() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("hello world".to_string());
+    session.input_manager.set_cursor(5);
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+    assert!(event.is_none());
+    assert_eq!(session.input_manager.content(), "");
+}
+
+#[test]
+fn command_a_clears_single_line_entire_input() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("hello".to_string());
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::SUPER));
+    assert!(event.is_none());
+    assert_eq!(session.input_manager.content(), "");
+}
+
+#[test]
+fn command_backspace_clears_only_current_line_in_multiline() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("first\nsecond\nthird".to_string());
+    // Cursor inside "second" (offset 8).
+    session.input_manager.set_cursor(8);
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+    assert!(event.is_none());
+    assert_eq!(session.input_manager.content(), "first\n\nthird");
+    assert_eq!(session.input_manager.cursor(), 6);
+}
+
+#[test]
+fn command_a_clears_only_current_line_in_multiline() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("first\nsecond\nthird".to_string());
+    session.input_manager.set_cursor(1);
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SUPER));
+    assert!(event.is_none());
+    assert_eq!(session.input_manager.content(), "\nsecond\nthird");
+}
+
+#[test]
+fn command_left_and_right_move_within_current_line() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("first\nsecond\nthird".to_string());
+    session.input_manager.set_cursor(8);
+
+    let _ = session.process_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SUPER));
+    assert_eq!(session.input_manager.cursor(), 6);
+
+    let _ = session.process_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SUPER));
+    assert_eq!(session.input_manager.cursor(), 12);
+}
+
+#[test]
+fn command_left_and_right_single_line_match_buffer_edges() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("hello".to_string());
+    session.input_manager.set_cursor(2);
+
+    let _ = session.process_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SUPER));
+    assert_eq!(session.input_manager.cursor(), 0);
+
+    let _ = session.process_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SUPER));
+    assert_eq!(session.input_manager.cursor(), 5);
+}
+
+#[test]
+fn command_backspace_clears_compact_paste_block_atomically() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let line_total = ui::INLINE_PASTE_COLLAPSE_LINE_THRESHOLD + 2;
+    let pasted = (0..line_total).map(|i| format!("paste-{i}")).collect::<Vec<_>>().join("\n");
+    session.insert_paste_text(&pasted);
+    assert!(session.input_manager.compact_paste_range().is_some());
+    // Cursor in the middle of the collapsed block.
+    let mid = session.input_manager.content().len() / 2;
+    session.input_manager.set_cursor(mid);
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+    assert!(event.is_none());
+    assert_eq!(session.input_manager.content(), "");
+    assert!(session.input_manager.compact_paste_range().is_none());
+}
+
+#[test]
+fn command_backspace_clears_single_image_block() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("[Image #1]".to_string());
+    session
+        .input_manager
+        .set_attachments(vec![ContentPart::image("encoded", "image/png")]);
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+    assert!(event.is_none());
+    assert_eq!(session.input_manager.content(), "");
+    assert!(session.input_manager.attachments().is_empty());
+}
+
+#[test]
+fn double_escape_clears_single_line_entire_input() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("hello".to_string());
+
+    let first = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(first.is_none());
+    assert_eq!(session.input_manager.content(), "hello");
+
+    let second = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(second.is_none());
+    assert_eq!(session.input_manager.content(), "");
+}
+
+#[test]
+fn double_escape_clears_only_current_line_in_multiline() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("first\nsecond\nthird".to_string());
+    session.input_manager.set_cursor(8);
+
+    let first = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(first.is_none());
+    assert_eq!(session.input_manager.content(), "first\nsecond\nthird");
+
+    let second = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(second.is_none());
+    assert_eq!(session.input_manager.content(), "first\n\nthird");
+}
+
+#[test]
+fn single_escape_followed_by_other_key_does_not_clear() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("hello".to_string());
+
+    let first = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(first.is_none());
+    let _ = session.process_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    let second = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(second.is_none());
+    // Second Esc is a fresh first press, so content remains.
+    assert_eq!(session.input_manager.content(), "hello");
+}
+
+#[test]
+fn tab_enqueues_like_control_enter_when_idle() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("queue me".to_string());
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(matches!(event, Some(InlineEvent::Submit(value)) if value == "queue me"));
+    assert_eq!(session.input_manager.content(), "");
+}
+
+#[test]
+fn tab_enqueues_like_control_enter_when_busy() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    set_busy_status(&mut session);
+    session.set_input("busy draft".to_string());
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(matches!(event, Some(InlineEvent::QueueSubmit(value)) if value == "busy draft"));
+}
+
+#[test]
+fn shift_tab_cycles_forward_and_backtab_cycles_previous() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+
+    let forward = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+    assert!(matches!(forward, Some(InlineEvent::CyclePrimaryAgent)));
+
+    let previous = session.process_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert!(matches!(previous, Some(InlineEvent::CyclePrimaryAgentPrevious)));
+}
+
+#[test]
+fn app_tab_enqueues_like_control_enter_when_idle() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.core.set_input("app draft".to_string());
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(
+        matches!(&event, Some(AppInlineEvent::Submit(value)) if value.text == "app draft"),
+        "expected Submit, got: {event:?}"
+    );
+    assert_eq!(session.core.input_manager.content(), "");
+}
+
+#[test]
+fn app_double_escape_clears_current_line_in_multiline() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.core.set_input("first\nsecond\nthird".to_string());
+    session.core.input_manager.set_cursor(8);
+
+    let first = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(first.is_none());
+    assert_eq!(session.core.input_manager.content(), "first\nsecond\nthird");
+
+    let second = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(second.is_none());
+    assert_eq!(session.core.input_manager.content(), "first\n\nthird");
 }

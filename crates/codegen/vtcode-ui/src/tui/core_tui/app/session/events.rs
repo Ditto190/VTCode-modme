@@ -22,6 +22,44 @@ use crate::tui::core_tui::types::{
 };
 use crate::tui::ui::theme;
 
+/// Window for consecutive double-Escape detection (mirrors core session).
+const DOUBLE_ESCAPE_WINDOW: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// Shared Tab-to-queue path mirroring `Ctrl+Enter` for the app session.
+///
+/// Plain text becomes batchable when queued during a running turn; slash
+/// commands stay non-batchable so command intent is preserved.
+fn enqueue_tab_draft(session: &mut Session) -> Option<InlineEvent> {
+    let Some(submitted) = take_submitted_input(session) else {
+        session.mark_dirty();
+        return if session.is_running_activity() {
+            None
+        } else {
+            Some(InlineEvent::ProcessLatestQueued)
+        };
+    };
+    session.mark_dirty();
+    if session.is_running_activity() {
+        match extract_slash_command_name(&submitted.text) {
+            Some("stop") => Some(InlineEvent::Interrupt),
+            Some("pause") => Some(InlineEvent::Pause),
+            Some("resume") => Some(InlineEvent::Resume),
+            Some(_) => {
+                let text = submitted.text.clone();
+                session.push_queued_input(text);
+                Some(InlineEvent::QueueSubmit(submitted))
+            }
+            None => {
+                let text = submitted.text.clone();
+                session.push_queued_input(text);
+                Some(InlineEvent::QueueSubmit(submitted.batchable()))
+            }
+        }
+    } else {
+        Some(InlineEvent::Submit(submitted))
+    }
+}
+
 fn input_history_entries(session: &Session) -> Vec<(String, Vec<ContentPart>, chrono::DateTime<chrono::Utc>)> {
     session
         .core
@@ -202,6 +240,7 @@ fn handle_secure_prompt_key(
 ) -> Option<InlineEvent> {
     match key.code {
         KeyCode::Esc => {
+            session.core.last_escape_press = None;
             session.core.input_manager.clear();
             session.close_overlay();
             session.mark_dirty();
@@ -223,7 +262,7 @@ fn handle_secure_prompt_key(
             if has_alt {
                 session.delete_word_backward();
             } else if has_command {
-                session.delete_to_start_of_line();
+                session.clear_current_line_or_all();
             } else {
                 session.delete_char();
             }
@@ -241,7 +280,7 @@ fn handle_secure_prompt_key(
         }
         KeyCode::Left => {
             if has_command {
-                session.move_to_start();
+                session.move_to_start_of_line();
             } else if has_alt {
                 session.move_left_word();
             } else {
@@ -252,7 +291,7 @@ fn handle_secure_prompt_key(
         }
         KeyCode::Right => {
             if has_command {
-                session.move_to_end();
+                session.move_to_end_of_line();
             } else if has_alt {
                 session.move_right_word();
             } else {
@@ -312,6 +351,22 @@ fn handle_secure_prompt_key(
                 }
                 return None;
             }
+            // Cmd+A clears single-line secret, Cmd+E jumps to end (mirrors composer).
+            if has_command && !has_control && !has_alt {
+                match ch {
+                    'a' | 'A' => {
+                        session.clear_current_line_or_all();
+                        session.mark_dirty();
+                        return None;
+                    }
+                    'e' | 'E' => {
+                        session.move_to_end_of_line();
+                        session.mark_dirty();
+                        return None;
+                    }
+                    _ => {}
+                }
+            }
             // Plain character insertion (Shift is allowed — produces the shifted
             // glyph). Control characters (Tab, newline, etc.) are ignored so the
             // field stays a single-line secret.
@@ -343,6 +398,11 @@ pub(super) fn process_key_with_clipboard_image_reader(
     // On macOS: Command = SUPER, on some terminals Alt = META
     let has_command = has_super || raw_meta;
     let has_alt = raw_alt && !has_command;
+
+    // Double-Escape must be consecutive: any non-Esc key disarms the timer.
+    if !matches!(key.code, KeyCode::Esc) {
+        session.core.last_escape_press = None;
+    }
 
     if copy_selected_input_if_requested(session, &key, has_command) {
         return None;
@@ -811,20 +871,43 @@ pub(super) fn process_key_with_clipboard_image_reader(
         KeyCode::Esc => {
             if session.has_active_overlay() {
                 session.close_overlay();
+                session.core.last_escape_press = None;
                 None
             } else if session.is_running_activity() || session.active_pty_session_count() > 0 {
+                session.core.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Interrupt)
-            } else if !session.core.input_manager.content().is_empty() {
-                // Escape with content: clear input
-                session
-                    .core
-                    .handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
-                session.mark_dirty();
-                None
-            } else {
+            } else if session.core.input_manager.content().is_empty() || !session.core.input_enabled() {
+                session.core.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Cancel)
+            } else {
+                // Focused composer with content: require consecutive
+                // double-Escape. First press arms, second clears current line
+                // (multiline) or entire input (single-line, compact/image).
+                let now = Instant::now();
+                let is_double = session
+                    .core
+                    .last_escape_press
+                    .is_some_and(|last| now.duration_since(last) <= DOUBLE_ESCAPE_WINDOW);
+                if is_double {
+                    session.core.last_escape_press = None;
+                    if session.core.input_manager.is_single_line() {
+                        session
+                            .core
+                            .handle_command(crate::tui::core_tui::types::InlineCommand::ClearInput);
+                    } else {
+                        session.clear_current_line_or_all();
+                        session.update_input_triggers();
+                    }
+                    session.mark_dirty();
+                    None
+                } else {
+                    session.core.last_escape_press = Some(now);
+                    session.clear_inline_prompt_suggestion();
+                    session.mark_dirty();
+                    None
+                }
             }
         }
         KeyCode::PageUp => {
@@ -1030,18 +1113,24 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 return None;
             }
 
-            if mode_switch_guard::try_cycle_primary_agent(session, &key) {
-                session.mark_dirty();
-                return Some(InlineEvent::CyclePrimaryAgent);
+            // Shift+Tab arriving as Tab+SHIFT still switches agents; plain Tab
+            // enqueues the draft like Ctrl+Enter.
+            if has_shift {
+                if mode_switch_guard::try_cycle_primary_agent(session, &key) {
+                    session.mark_dirty();
+                    return Some(InlineEvent::CyclePrimaryAgent);
+                }
+                return None;
             }
-            None
+
+            enqueue_tab_draft(session)
         }
         KeyCode::Backspace => {
             if session.core.input_enabled() {
                 if has_alt {
                     session.delete_word_backward();
                 } else if has_command {
-                    session.delete_to_start_of_line();
+                    session.clear_current_line_or_all();
                 } else {
                     session.delete_char();
                 }
@@ -1088,11 +1177,11 @@ pub(super) fn process_key_with_clipboard_image_reader(
 
                 session.clear_inline_prompt_suggestion();
                 if has_shift && has_command {
-                    session.select_to_start();
+                    session.select_to_start_of_line();
                 } else if has_shift {
                     session.select_left();
                 } else if has_command {
-                    session.move_to_start();
+                    session.move_to_start_of_line();
                 } else if has_alt {
                     session.move_left_word();
                 } else {
@@ -1106,11 +1195,11 @@ pub(super) fn process_key_with_clipboard_image_reader(
             if session.core.input_enabled() {
                 session.clear_inline_prompt_suggestion();
                 if has_shift && has_command {
-                    session.select_to_end();
+                    session.select_to_end_of_line();
                 } else if has_shift {
                     session.select_right();
                 } else if has_command {
-                    session.move_to_end();
+                    session.move_to_end_of_line();
                 } else if has_alt {
                     session.move_right_word();
                 } else {
@@ -1173,22 +1262,28 @@ pub(super) fn process_key_with_clipboard_image_reader(
                     session.update_input_triggers();
                     return None;
                 }
-                if mode_switch_guard::try_cycle_primary_agent(session, &key) {
-                    session.mark_dirty();
-                    return Some(InlineEvent::CyclePrimaryAgent);
+                // Terminals that deliver Tab as Char('\t'): plain Tab enqueues
+                // like Ctrl+Enter; Shift+Tab still cycles agents.
+                if has_shift {
+                    if mode_switch_guard::try_cycle_primary_agent(session, &key) {
+                        session.mark_dirty();
+                        return Some(InlineEvent::CyclePrimaryAgent);
+                    }
+                    return None;
                 }
-                return None;
+                return enqueue_tab_draft(session);
             }
 
             if has_command {
                 match ch {
                     'a' | 'A' => {
-                        session.move_to_start();
+                        session.clear_current_line_or_all();
+                        session.update_input_triggers();
                         session.mark_dirty();
                         return None;
                     }
                     'e' | 'E' => {
-                        session.move_to_end();
+                        session.move_to_end_of_line();
                         session.mark_dirty();
                         return None;
                     }
@@ -1509,11 +1604,13 @@ fn handle_tool_output_viewer_key(
 }
 
 fn can_cycle_primary_agent(session: &Session, key: &KeyEvent) -> bool {
+    // Agent/mode switching lives on Shift+Tab only (BackTab). Plain Tab
+    // enqueues the draft like Ctrl+Enter, so it must not cycle.
     let valid_modifiers = match key.code {
-        // Crossterm reports Shift+Tab as BackTab with the SHIFT bit set.
-        // Keep accepting the explicit bit while rejecting unrelated combos.
         KeyCode::BackTab => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
-        _ => key.modifiers == KeyModifiers::NONE,
+        KeyCode::Tab => key.modifiers == KeyModifiers::SHIFT,
+        KeyCode::Char('\t') => key.modifiers == KeyModifiers::SHIFT,
+        _ => false,
     };
     valid_modifiers && session.visible_transient_surface().is_none() && !session.has_active_overlay()
 }

@@ -113,6 +113,7 @@ impl Session {
             pending_new_messages: 0,
             should_exit: false,
             last_interrupt_press: None,
+            last_escape_press: None,
             scroll_cursor_steady_until: None,
             last_shimmer_active: false,
             view_rows: resolved_rows,

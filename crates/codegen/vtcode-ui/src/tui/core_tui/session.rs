@@ -253,6 +253,13 @@ pub struct Session {
     should_exit: bool,
     /// Timestamp of the last Ctrl+C press for double-press exit detection.
     pub(crate) last_interrupt_press: Option<Instant>,
+    /// Timestamp of the last Esc press for double-Escape line clearing.
+    ///
+    /// First Esc arms the timer; a second Esc within
+    /// `DOUBLE_ESCAPE_WINDOW` clears the current line (multiline) or the
+    /// entire input (single-line). Any non-Esc key resets it so the double
+    /// press must be consecutive.
+    pub(crate) last_escape_press: Option<Instant>,
     scroll_cursor_steady_until: Option<Instant>,
     last_shimmer_active: bool,
     view_rows: u16,

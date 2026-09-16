@@ -335,9 +335,9 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                 Binding::new("?", "help"),
                 Binding::new("Enter", "submit"),
                 Binding::new("Ctrl+C", "interrupt"),
-                Binding::new("Esc", "clear/cancel"),
-                Binding::new("Tab", "next agent"),
-                Binding::new("Shift+Tab", "previous agent"),
+                Binding::new("Esc Esc", "clear line/all"),
+                Binding::new("Tab", "queue for next turn"),
+                Binding::new("Shift+Tab", "switch agent"),
             ])
             .binding_groups(vec![
                 vec![
@@ -345,8 +345,9 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                     Binding::new("@path", "file reference"),
                     Binding::new("Enter", "run / steer busy turn"),
                     Binding::new("Ctrl+Enter", "queue for next turn"),
+                    Binding::new("Tab", "queue for next turn"),
                     Binding::new("Shift+Enter", "new line"),
-                    Binding::new("Esc", "clear/cancel"),
+                    Binding::new("Esc Esc", "clear line/all"),
                     Binding::new("Ctrl+C", "interrupt/copy"),
                     Binding::new("Ctrl+D", "exit"),
                     Binding::new("PgUp/PgDn", "scroll"),
@@ -354,6 +355,8 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                 ],
                 vec![
                     Binding::new("Ctrl+A/E", "line ends"),
+                    Binding::new("Cmd+Left/Right", "line ends"),
+                    Binding::new("Cmd+A/Backspace", "clear line"),
                     Binding::new("Ctrl+F/B", "char move"),
                     Binding::new("Alt+F/B", "word move"),
                     Binding::new("Alt+←/→", "word move"),
@@ -368,8 +371,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                 vec![
                     Binding::new("/", "commands"),
                     Binding::new("?", "shortcuts"),
-                    Binding::new("Shift+Tab", "previous agent"),
-                    Binding::new("Tab", "next agent"),
+                    Binding::new("Shift+Tab", "switch agent"),
                     Binding::new("Ctrl+L", "clear screen"),
                     Binding::new("Ctrl+M", "model picker"),
                     Binding::new("Ctrl+O", "copy response"),

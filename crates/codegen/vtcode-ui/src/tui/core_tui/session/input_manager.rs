@@ -491,6 +491,49 @@ impl InputManager {
         self.clear_selection();
     }
 
+    /// Byte range of the logical line containing the cursor.
+    ///
+    /// Lines are split on `\n` (logical lines, not visual wraps), matching
+    /// Up/Down handling. Returns `(line_start, line_end)` byte offsets with
+    /// `line_start <= cursor <= line_end` clamped to content bounds.
+    pub fn current_line_byte_range(&self) -> (usize, usize) {
+        let lines = self.textarea.lines();
+        if lines.is_empty() {
+            return (0, 0);
+        }
+        let row = self.cursor_row().min(lines.len().saturating_sub(1));
+        let mut start = 0usize;
+        for line in lines.iter().take(row) {
+            start = start.saturating_add(line.len()).saturating_add(1);
+        }
+        let end = start.saturating_add(lines.get(row).map_or(0, |line| line.len()));
+        let content_len = self.content_cache.len();
+        (start.min(content_len), end.min(content_len))
+    }
+
+    /// Move cursor to the beginning of the current logical line.
+    ///
+    /// Single-line input degenerates to buffer start, satisfying the
+    /// `Cmd+Left` single-line contract with the same code path.
+    pub fn move_cursor_to_start_of_line(&mut self) {
+        let (line_start, _) = self.current_line_byte_range();
+        self.set_cursor(line_start);
+    }
+
+    /// Move cursor to the end of the current logical line.
+    ///
+    /// Single-line input degenerates to buffer end, satisfying the
+    /// `Cmd+Right` single-line contract with the same code path.
+    pub fn move_cursor_to_end_of_line(&mut self) {
+        let (_, line_end) = self.current_line_byte_range();
+        self.set_cursor(line_end);
+    }
+
+    /// Whether the composer holds a single logical line.
+    pub fn is_single_line(&self) -> bool {
+        self.line_count() <= 1
+    }
+
     /// Current cursor row (0-based) within the multiline composer.
     pub fn cursor_row(&self) -> usize {
         let DataCursor(row, _) = self.textarea.cursor();
@@ -1308,5 +1351,54 @@ mod tests {
         assert_eq!(restored, Some("my original prompt".to_owned()));
         // History navigation should be fully exited.
         assert!(manager.history_index().is_none());
+    }
+
+    #[test]
+    fn single_line_range_covers_entire_buffer() {
+        let mut manager = InputManager::new();
+        manager.set_content("hello".to_owned());
+        assert!(manager.is_single_line());
+        assert_eq!(manager.current_line_byte_range(), (0, 5));
+    }
+
+    #[test]
+    fn multiline_current_line_range_follows_cursor_row() {
+        let mut manager = InputManager::new();
+        manager.set_content("first\nsecond\nthird".to_owned());
+        assert!(!manager.is_single_line());
+        // set_content lands at end (third line).
+        assert_eq!(manager.current_line_byte_range(), (13, 18));
+
+        manager.set_cursor(0);
+        assert_eq!(manager.current_line_byte_range(), (0, 5));
+
+        manager.set_cursor(8);
+        assert_eq!(manager.current_line_byte_range(), (6, 12));
+    }
+
+    #[test]
+    fn move_to_start_and_end_of_line_single_line_matches_buffer_edges() {
+        let mut manager = InputManager::new();
+        manager.set_content("hello".to_owned());
+        manager.set_cursor(2);
+
+        manager.move_cursor_to_start_of_line();
+        assert_eq!(manager.cursor(), 0);
+
+        manager.move_cursor_to_end_of_line();
+        assert_eq!(manager.cursor(), 5);
+    }
+
+    #[test]
+    fn move_to_start_and_end_of_line_multiline_stays_within_line() {
+        let mut manager = InputManager::new();
+        manager.set_content("first\nsecond\nthird".to_owned());
+
+        manager.set_cursor(8);
+        manager.move_cursor_to_start_of_line();
+        assert_eq!(manager.cursor(), 6);
+
+        manager.move_cursor_to_end_of_line();
+        assert_eq!(manager.cursor(), 12);
     }
 }

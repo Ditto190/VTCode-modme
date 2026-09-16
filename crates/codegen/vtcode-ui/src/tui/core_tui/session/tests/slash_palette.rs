@@ -129,7 +129,10 @@ fn slash_palette_accepted_input_remains_editable_and_cancellable() {
     let _ = session.process_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
     assert_eq!(session.core.input_manager.content(), "/new x");
 
-    // User can cancel the accepted input with Esc.
+    // User can cancel the accepted input with double-Esc.
+    let first = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(first.is_none());
+    assert_eq!(session.core.input_manager.content(), "/new x");
     let cancel = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(cancel.is_none());
     assert_eq!(session.core.input_manager.content(), "");

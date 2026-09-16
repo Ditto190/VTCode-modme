@@ -625,7 +625,7 @@ head/tail omission marker and can skip expensive syntax or intraline work
 without suppressing the underlying diff. In a preview overlay, use Up/Down or
 PageUp/PageDown to scroll and Tab/Shift-Tab to jump between hunks.
 
-For the full shortcut list and tmux notes, see [Interactive Mode Reference](../user-guide/interactive-mode.md).
+For the full shortcut list and tmux notes, see [Keyboard Shortcuts](../user-guide/keyboard-shortcuts.md) and [Interactive Mode Reference](../user-guide/interactive-mode.md).
 
 ## Execution environment
 

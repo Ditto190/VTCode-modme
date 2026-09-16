@@ -9,7 +9,7 @@ Subagents help you:
 - reuse project or user agent definitions across repositories
 - preload skills, MCP servers, memory, and hooks for specialized work
 - inspect delegated child threads with `/agent`
-- switch the main session's active primary agent with `Tab`
+- switch the main session's active primary agent with `Shift+Tab` (see [Keyboard Shortcuts](./keyboard-shortcuts.md#agent-and-mode-switching))
 
 VT Code ships with built-in primary agents and subagents, and can also load custom agents from `.vtcode`, `.claude`, `.codex`, and enabled plugins.
 

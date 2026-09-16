@@ -7,6 +7,36 @@ use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::ui::tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 
+/// Window for consecutive double-Escape detection.
+///
+/// First Esc arms `last_escape_press`; a second Esc within this window clears
+/// the current line (multiline) or the entire input (single-line). Matches the
+/// existing double-Ctrl+C exit window scale (1s) but slightly tighter.
+const DOUBLE_ESCAPE_WINDOW: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// Shared Tab-to-queue path mirroring `Ctrl+Enter`.
+///
+/// Tab accepts ghost suggestions first (caller handles that), then enqueues
+/// the draft: running turns get `QueueSubmit`, idle turns get `Submit`, and
+/// empty drafts get `ProcessLatestQueued` (idle) or nothing (busy).
+fn enqueue_tab_draft(session: &mut Session) -> Option<InlineEvent> {
+    let Some(submitted) = take_submitted_input(session) else {
+        session.mark_dirty();
+        return if session.is_running_activity() {
+            None
+        } else {
+            Some(InlineEvent::ProcessLatestQueued)
+        };
+    };
+    session.mark_dirty();
+    if session.is_running_activity() {
+        session.push_queued_input(submitted.text.clone());
+        Some(InlineEvent::QueueSubmit(submitted))
+    } else {
+        Some(InlineEvent::Submit(submitted))
+    }
+}
+
 pub(super) fn handle_paste(session: &mut Session, content: &str) {
     if let Some(modal) = session.modal_state_mut() {
         if let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut()) {
@@ -205,6 +235,11 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
     // On macOS: Command = SUPER, on some terminals Alt = META
     let has_command = has_super || raw_meta;
     let has_alt = raw_alt && !has_command;
+
+    // Double-Escape must be consecutive: any non-Esc key disarms the timer.
+    if !matches!(key.code, KeyCode::Esc) {
+        session.last_escape_press = None;
+    }
 
     // Only the composer owner may consume Ctrl+C as an input-selection copy.
     // Active modal and runtime owners route the same key below.
@@ -486,18 +521,39 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
         KeyCode::Esc => {
             if session.has_active_overlay() {
                 session.close_overlay();
+                session.last_escape_press = None;
                 None
             } else if session.is_running_activity() || session.active_pty_session_count() > 0 {
+                session.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Interrupt)
-            } else if !session.input_manager.content().is_empty() {
-                // Escape with content: clear input
-                command::clear_input(session);
-                session.mark_dirty();
-                None
-            } else {
+            } else if session.input_manager.content().is_empty() || !session.input_enabled {
+                session.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Cancel)
+            } else {
+                // Focused composer with content: require consecutive
+                // double-Escape. First press arms, second clears current line
+                // (multiline) or entire input (single-line, compact/image).
+                let now = Instant::now();
+                let is_double = session
+                    .last_escape_press
+                    .is_some_and(|last| now.duration_since(last) <= DOUBLE_ESCAPE_WINDOW);
+                if is_double {
+                    session.last_escape_press = None;
+                    if session.input_manager.is_single_line() {
+                        command::clear_input(session);
+                    } else {
+                        session.clear_current_line_or_all();
+                    }
+                    session.mark_dirty();
+                    None
+                } else {
+                    session.last_escape_press = Some(now);
+                    session.clear_inline_prompt_suggestion();
+                    session.mark_dirty();
+                    None
+                }
             }
         }
         KeyCode::Enter => {
@@ -583,11 +639,18 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
                 return None;
             }
 
-            if mode_switch_guard::try_cycle_primary_agent(session, &key) {
-                session.mark_dirty();
-                return Some(InlineEvent::CyclePrimaryAgent);
+            // Shift+Tab arriving as Tab+SHIFT still switches agents; plain Tab
+            // enqueues the draft like Ctrl+Enter. Agent cycling lives on
+            // BackTab (Shift+Tab) — see `can_cycle_primary_agent`.
+            if has_shift {
+                if mode_switch_guard::try_cycle_primary_agent(session, &key) {
+                    session.mark_dirty();
+                    return Some(InlineEvent::CyclePrimaryAgent);
+                }
+                return None;
             }
-            None
+
+            enqueue_tab_draft(session)
         }
         KeyCode::BackTab => {
             if !session.input_enabled {
@@ -606,7 +669,7 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
                 if has_alt {
                     session.delete_word_backward();
                 } else if has_command {
-                    session.delete_to_start_of_line();
+                    session.clear_current_line_or_all();
                 } else {
                     session.delete_char();
                 }
@@ -648,11 +711,11 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
 
                 session.clear_inline_prompt_suggestion();
                 if has_shift && has_command {
-                    session.select_to_start();
+                    session.select_to_start_of_line();
                 } else if has_shift {
                     session.select_left();
                 } else if has_command {
-                    session.move_to_start();
+                    session.move_to_start_of_line();
                 } else if has_alt {
                     session.move_left_word();
                 } else {
@@ -666,11 +729,11 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
             if session.input_enabled {
                 session.clear_inline_prompt_suggestion();
                 if has_shift && has_command {
-                    session.select_to_end();
+                    session.select_to_end_of_line();
                 } else if has_shift {
                     session.select_right();
                 } else if has_command {
-                    session.move_to_end();
+                    session.move_to_end_of_line();
                 } else if has_alt {
                     session.move_right_word();
                 } else {
@@ -720,22 +783,27 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
                 if session.accept_inline_prompt_suggestion() {
                     return None;
                 }
-                if mode_switch_guard::try_cycle_primary_agent(session, &key) {
-                    session.mark_dirty();
-                    return Some(InlineEvent::CyclePrimaryAgent);
+                // Terminals that deliver Tab as Char('\t'): plain Tab enqueues
+                // like Ctrl+Enter; Shift+Tab still cycles agents.
+                if has_shift {
+                    if mode_switch_guard::try_cycle_primary_agent(session, &key) {
+                        session.mark_dirty();
+                        return Some(InlineEvent::CyclePrimaryAgent);
+                    }
+                    return None;
                 }
-                return None;
+                return enqueue_tab_draft(session);
             }
 
             if has_command {
                 match ch {
                     'a' | 'A' => {
-                        session.move_to_start();
+                        session.clear_current_line_or_all();
                         session.mark_dirty();
                         return None;
                     }
                     'e' | 'E' => {
-                        session.move_to_end();
+                        session.move_to_end_of_line();
                         session.mark_dirty();
                         return None;
                     }
@@ -769,11 +837,15 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
 }
 
 fn can_cycle_primary_agent(session: &Session, key: &KeyEvent) -> bool {
+    // Agent/mode switching lives on Shift+Tab only (BackTab). Plain Tab
+    // enqueues the draft like Ctrl+Enter, so it must not cycle.
+    // Crossterm reports Shift+Tab as BackTab (with or without SHIFT bit);
+    // some terminals report Tab+SHIFT instead — accept both.
     let valid_modifiers = match key.code {
-        // Crossterm reports Shift+Tab as BackTab with the SHIFT bit set.
-        // Keep accepting the explicit bit while rejecting unrelated combos.
         KeyCode::BackTab => key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT,
-        _ => key.modifiers == KeyModifiers::NONE,
+        KeyCode::Tab => key.modifiers == KeyModifiers::SHIFT,
+        KeyCode::Char('\t') => key.modifiers == KeyModifiers::SHIFT,
+        _ => false,
     };
     valid_modifiers && !session.has_active_overlay()
 }

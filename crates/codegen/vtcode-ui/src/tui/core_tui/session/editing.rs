@@ -411,12 +411,101 @@ impl Session {
         self.input_manager.move_cursor_to_end();
     }
 
+    /// Move cursor to the beginning of the current logical line.
+    ///
+    /// Multi-line input moves within the cursor's line; single-line input
+    /// degenerates to buffer start via [`InputManager::move_cursor_to_start_of_line`].
+    pub(crate) fn move_to_start_of_line(&mut self) {
+        self.input_manager.move_cursor_to_start_of_line();
+    }
+
+    /// Move cursor to the end of the current logical line.
+    ///
+    /// Multi-line input moves within the cursor's line; single-line input
+    /// degenerates to buffer end via [`InputManager::move_cursor_to_end_of_line`].
+    pub(crate) fn move_to_end_of_line(&mut self) {
+        self.input_manager.move_cursor_to_end_of_line();
+    }
+
     pub(crate) fn select_to_start(&mut self) {
         self.input_manager.set_cursor_with_selection(0);
     }
 
     pub(crate) fn select_to_end(&mut self) {
         self.input_manager.set_cursor_with_selection(self.input_manager.content().len());
+    }
+
+    /// Extend selection to the beginning of the current logical line.
+    pub(crate) fn select_to_start_of_line(&mut self) {
+        let (line_start, _) = self.input_manager.current_line_byte_range();
+        self.input_manager.set_cursor_with_selection(line_start);
+    }
+
+    /// Extend selection to the end of the current logical line.
+    pub(crate) fn select_to_end_of_line(&mut self) {
+        let (_, line_end) = self.input_manager.current_line_byte_range();
+        self.input_manager.set_cursor_with_selection(line_end);
+    }
+
+    /// Clear the current logical line, or the entire input when single-line.
+    ///
+    /// Dimension key: `line_start..line_end` are byte offsets of the cursor's
+    /// logical line; `clear_start..clear_end` expands that range to cover an
+    /// overlapping compact paste block (`[Pasted Content N chars]`) so a
+    /// collapsed multi-line paste is removed atomically. Image placeholders
+    /// (`[Image #N]`) live inside their line, so line deletion already covers
+    /// them; single-line clears go through [`InputManager::clear`] which also
+    /// drops attachments and compact state.
+    pub(crate) fn clear_current_line_or_all(&mut self) {
+        if self.input_manager.delete_selection() {
+            self.refresh_input_edit_state();
+            return;
+        }
+        let content_len = self.input_manager.content().len();
+        if content_len == 0 {
+            return;
+        }
+        if self.input_manager.is_single_line() {
+            self.input_manager.clear();
+            self.refresh_input_edit_state();
+            return;
+        }
+
+        let cursor = self.input_manager.cursor().min(content_len);
+        let (line_start, line_end) = self.input_manager.current_line_byte_range();
+        let mut clear_start = line_start.min(content_len);
+        let mut clear_end = line_end.min(content_len);
+
+        if let Some(range) = self.input_manager.compact_paste_range()
+            && range.start < range.end
+        {
+            // Clamp stale ranges to current content before expanding.
+            let range_start = range.start.min(content_len);
+            let range_end = range.end.min(content_len);
+            if range_start < range_end {
+                let overlaps_line = range_start < clear_end && clear_start < range_end;
+                let cursor_inside = cursor >= range_start && cursor <= range_end;
+                if overlaps_line || cursor_inside {
+                    clear_start = clear_start.min(range_start);
+                    clear_end = clear_end.max(range_end);
+                }
+            }
+        }
+
+        // Clamp to char boundaries so multi-byte content never panics.
+        let content = self.input_manager.content();
+        while clear_start > 0 && !content.is_char_boundary(clear_start) {
+            clear_start -= 1;
+        }
+        while clear_end < content.len() && !content.is_char_boundary(clear_end) {
+            clear_end += 1;
+        }
+        if clear_start >= clear_end {
+            return;
+        }
+        self.input_manager.replace_range(clear_start, clear_end, "");
+        self.input_manager.set_cursor(clear_start);
+        self.refresh_input_edit_state();
     }
 
     /// Remember submitted input in history

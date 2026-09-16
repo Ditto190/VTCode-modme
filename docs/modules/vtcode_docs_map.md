@@ -274,6 +274,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: What Makes VT Code Special, Enhanced Terminal Interface, Configuration, Usage Examples, Understanding the Agents
   - **User Questions**: "What can you tell me about Getting Started with VT Code?", "How does What Makes VT Code Special work?", "How does Enhanced Terminal Interface work?"
 
+- **File**: `docs/user-guide/keyboard-shortcuts.md`
+  - **Content**: Keyboard Shortcuts
+  - **Topics**: Composer submit and queue, Composer line editing (new), Readline and word editing (unchanged), Agent and mode switching, Overlays, palettes, and lists
+  - **User Questions**: "What can you tell me about Keyboard Shortcuts?", "How does Composer submit and queue work?", "How does Composer line editing (new) work?"
+
 - **File**: `docs/loop-engineering.md`
   - **Content**: Loop Engineering in vtcode
   - **Topics**: The Five Primitives, Reconcile Flow, Configuration, Feature Flags
