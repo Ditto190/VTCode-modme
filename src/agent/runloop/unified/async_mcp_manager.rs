@@ -307,6 +307,11 @@ impl AsyncMcpManager {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_initialization_task(&self) -> bool {
+        self.init_task.lock().is_ok_and(|guard| guard.is_some())
+    }
+
     async fn initialize_mcp_client(
         config: McpClientConfig,
         hitl_notification_bell: bool,

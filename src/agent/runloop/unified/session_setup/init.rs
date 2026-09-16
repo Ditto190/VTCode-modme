@@ -363,6 +363,13 @@ pub(crate) async fn initialize_session(
         // providers) so reconfigure does not drop plugin-provided providers.
         let mcp_config = session_mcp_config(Some(cfg), Some(active_primary_agent.active()), &config.workspace);
         manager.reconfigure(mcp_config).await?;
+        // `reconfigure` aborts any background init task started by
+        // `create_async_mcp_manager` and leaves status as "activation pending".
+        // Deferred auto-load: restart in background so MCP becomes available
+        // without manual `/mcp repair`. Non-blocking to keep Ctrl+C responsive.
+        if let Err(err) = manager.start_initialization() {
+            warn!("MCP background initialization did not restart after session config merge: {err:#}");
+        }
     }
 
     let tool_result_cache = Arc::new(RwLock::new(ToolResultCache::new(128)));
@@ -506,7 +513,14 @@ fn create_async_mcp_manager(
         Arc::new(|_event: mcp_events::McpEvent| {}),
         sandbox_context,
     );
-    Some(Arc::new(manager))
+    let manager = Arc::new(manager);
+    if let Err(err) = manager
+        .start_initialization()
+        .context("failed to start MCP initialization task")
+    {
+        warn!("MCP background initialization did not start: {err:#}");
+    }
+    Some(manager)
 }
 
 /// Build the session MCP config: the base config (optionally merged with the
@@ -834,8 +848,49 @@ mod tests {
         );
     }
 
-    #[test]
-    fn async_mcp_manager_uses_primary_agent_merged_mcp_config() {
+    #[tokio::test]
+    async fn enabled_session_mcp_manager_starts_initialization_task() {
+        let mut cfg = VTCodeConfig::default();
+        cfg.mcp.enabled = true;
+
+        let manager = create_async_mcp_manager(Some(&cfg), None, Path::new("/tmp")).expect("manager should exist");
+
+        assert!(manager.has_initialization_task(), "enabled session MCP manager should start in the background");
+    }
+
+    #[tokio::test]
+    async fn initialize_session_restarts_mcp_background_task_after_merge() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut cfg = VTCodeConfig::default();
+        cfg.mcp.enabled = true;
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &cfg,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        let state = initialize_session(&runtime_config, Some(&cfg), false, false, None, "test-session", None)
+            .await
+            .expect("initialize session");
+
+        let manager = state.async_mcp_manager.expect("MCP manager should exist when enabled");
+        assert!(
+            manager.has_initialization_task(),
+            "session MCP background task must survive primary-agent merge without manual /mcp repair"
+        );
+    }
+
+    #[tokio::test]
+    async fn async_mcp_manager_uses_primary_agent_merged_mcp_config() {
         let mut cfg = VTCodeConfig::default();
         cfg.mcp.enabled = true;
         cfg.mcp.providers.push(
@@ -875,6 +930,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(provider_names, vec!["global", "local"]);
+        assert!(!matches!(manager.get_status().await, McpInitStatus::Disabled));
     }
 
     #[test]

@@ -318,36 +318,6 @@ Session 6m 15s | 431.9k in / 12.1k out | Cache 35.8k read (8.3% hit rate) | Code
 
 ===
 
-check and fix mcp does not working. it seems only after manual /mcp repair then the mcp servers become available. it should be deferred auto loaded when VT Code starts.
-
-can you read https://deepwiki.com/search/how-does-codex-handle-compacti_730aa1ca-8457-4540-97a1-90e0a3370f63?mode=deep
-? use deepwiki mcp
-Diagnosis: mcp
-Observed: The 'mcp' tool reported a execution failure (Execution failed): MCP client not available
-Likely cause: The tool reported an execution error without enough evidence for a narrower cause.
-Next action: Inspect the bounded error evidence and retry with corrected arguments.
-• Web fetch Use Fetch
-└ Url: https://deepwiki.com/search/ho…0-97a1-90e0a3370f63?mode=deep
-└ Prompt: Retrieve and summarize the pag…ication, report that clearly.
-└ Max output tokens: 6000
-• The DeepWiki MCP client is unavailable in this session, so I can’t call that server directly. I’ll inspect the
-fetched page as a fallback to see whether the answer is embedded in the response.
-Tool execution completed, but the model follow-up failed. Output above is valid.
-Follow-up error category: Operation cancelled
-Tip: rerun with a narrower prompt or switch provider/model for the follow-up.
-• The turn stopped before a final assistant response was produced. No final outcome was confirmed; please retry the
-request.
-Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were
-retained.
-Turn blocked: Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task
-state were retained.
-What you can do:
-• In this session: Type 'continue' to resume, or describe alternative instructions
-• From terminal: Run `vtcode --resume session-vtcode-20260916T064709Z_237411-19611`
-• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
-• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-
-20260916t064709z_237411-19611-20260916T064824Z-e2bb65cb-08e8-4b07-bc17-e3fb28a8c69d.md
-
 ===
 
 for all failure runtime, first check the error and look for settings/config. if the issue is from user misconfiguration, guide the user to correct the configuration before retrying.
