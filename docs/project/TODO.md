@@ -511,3 +511,46 @@ What you can do:
 ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
 
 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260916T094604Z_037055-81627
+
+===
+
+revamp command permission popup: adjust wording, remove `COMMAND` and `WHY` sections and `|` also add a brief explanation section for asking permission, eg: what the agent trying to do and why it needs the permission
+
+```
+Tool Permission Required
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tool: exec_command
+COMMAND
+  │ awk 'BEGIN{p=0} /^## Why VT Code/{p=1} p{print} /^## Architecture/{exit}' README.md
+WHY
+```
+
+===
+
+check and improve compaction logic and UI/UX, it seems not working reliably:
+
+```
+Compacted conversation for model switch (86 -> 88 messages, local compaction). Auto-resume injected; new model
+continues seamlessly with preserved context.
+Reasoning effort remains 'medium'.
+Using API key from secure storage.
+Compacted conversation history (88 -> 12 messages, local compaction).
+
+┏Logs╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
+╏[2026-09-16T11:04:05Z] INFO  vtcode_core::context::history_files Wrote conversation history to file                ╏
+╏session=session-vtcode-20260916T094604Z_037055-81627 turn=86 messages=86                                           ╏
+╏path=.vtcode/history/session-vtcode-20260916T094604Z__0086_20260916T110405Z.jsonl                                  ╏
+╏[2026-09-16T11:04:05Z] INFO  vtcode::agent::runloop::unified::turn::compaction Injected session memory envelope    ╏
+╏provider=merge-gateway model=anthropic/claude-sonnet-5 turn=88 tool_count=0 parallelized=false                     ╏
+╏compaction_mode=local grounded_fact_count=5 previous_response_chain_present=false                                  ╏
+╏[2026-09-16T11:04:05Z] INFO  vtcode::agent::runloop::unified::turn::compaction Applied conversation compaction     ╏
+╏provider=merge-gateway model=anthropic/claude-sonnet-5 turn=86 tool_count=0 parallelized=false                     ╏
+╏compaction_mode=local grounded_fact_count=5 previous_response_chain_present=false                                  ╏
+╏[2026-09-16T11:04:43Z] INFO  vtcode_core::context::history_files Wrote conversation history to file                ╏
+╏session=session-vtcode-20260916T094604Z_037055-81627 turn=88 messages=88                                           ╏
+╏path=.vtcode/history/session-vtcode-20260916T094604Z__0088_20260916T110443Z.jsonl                                  ╏
+╏[2026-09-16T11:04:43Z] INFO  vtcode::agent::runloop::unified::turn::compaction Injected session memory envelope    ╏
+╏provider=merge-gateway model=anthropic/claude-sonnet-5 turn=12 tool_count=0 parallelized=false                     ╏
+╏compaction_mode=local grounded_fact_count=5 previous_response_chain_present=false                                  ╏
+┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+```
