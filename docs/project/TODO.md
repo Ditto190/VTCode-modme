@@ -14,7 +14,7 @@ improve git diff preview UI '/Users/vinhnguyenxuan/Documents/vtcode-resources/id
 
 ====
 
-open source vtcode-diff
+open source vtcode-diff, IMPORTANT remember to attribute OpenAI Codex https://github.com/openai/codex as the source of the underlying code and ideas.
 
 ===
 
@@ -285,3 +285,52 @@ remove trailing ... dot from diff preview find another way '/Users/vinhnguyenxua
 ===
 
 when changing model mid-turn, find a way to run auto compaction and resume for continuation from previous model to new model seamlessly. This is important to maintain the integrity of the session and avoid data and context loss.
+
+===
+
+CRITICAL: check planning failure.
+
+[!] Planning recovery: tool preview budget exhausted; synthesizing plan from collected evidence.
+• Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the
+synthesized draft failed validation: invalid plan artifact: invalid implementation steps: step 1: verification
+item 1 must be a concrete command or check; step 5: verification item 1 must be a concrete command or check). The
+latest request and bounded evidence are preserved. Do NOT re-read files already read this turn; reuse the tool
+outputs above and emit one complete <proposed_plan> with Action -> files: [path] -> verify: [command] steps. Re-
+state the planning request or type keep planning to try again; no changes were applied.
+planning recovery did not produce an approval-ready plan; planning remains active
+Turn blocked: planning recovery did not produce an approval-ready plan; planning remains active
+What you can do:
+• In this session: Type 'continue' to resume, or describe alternative instructions
+• From terminal: Run `vtcode --resume session-vtcode-20260916T033857Z_346951-33962`
+• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
+• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-
+20260916t033857z_346951-33962-20260916T034301Z-fcb0f192-9439-42a4-8fe5-4c3708aa9ac1.md
+
+Planning workflow remains active: no approval-ready plan was produced. Keep planning and describe what to revise.
+• The proposed plan was rejected and discarded; no continuation turn was scheduled. Revise the plan or restate the
+request to continue (invalid plan artifact: invalid implementation steps: step 1: verification item 1 must be a
+concrete command or check; step 5: verification item 1 must be a concrete command or check).
+Worked for 57s
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+continue
+Plan is not ready for approval: invalid plan artifact: invalid implementation steps: step 1: verification item 1 must
+be a concrete command or check; step 5: verification item 1 must be a concrete command or check
+Rejected plan draft:
+
+==> check session 20260916T033857Z_346951-33962 and fix for vtcode, not do it yourself
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260916T033857Z_346951-33962 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260916t033857z_346951-33962-20260916T034301Z-fcb0f192-9439-42a4-8fe5-4c3708aa9ac1.md
+
+===
+
+idea: reference TUI table rendering style '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-16 at 10.50.18.png' and apply to our table rendering system. use deepwiki openai/codex and research how Codex implements table rendering and apply to VT Code. remember to attribute appropriately.
+
+===
+
+help me check cache hit rate is too low. 8.3% hit rate
+
+Session 6m 15s | 431.9k in / 12.1k out | Cache 35.8k read (8.3% hit rate) | Code +37 / -0
+
+==> check session 20260916T033857Z_346951-33962 and fix for vtcode, not do it yourself
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260916T033857Z_346951-33962 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260916t033857z_346951-33962-20260916T034301Z-fcb0f192-9439-42a4-8fe5-4c3708aa9ac1.md
+==> also self-check and fix for all other providers, not just openai. use web search for research docs and apply to improve VT COde
