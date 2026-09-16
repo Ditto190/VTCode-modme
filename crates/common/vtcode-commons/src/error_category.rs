@@ -382,6 +382,19 @@ pub fn is_context_capacity_message(message: &str) -> bool {
             "maximum input tokens",
             "too many tokens in the prompt",
             "request exceeds the context",
+            // Merge-gateway / Anthropic / OpenAI variants observed on
+            // near-budget follow-ups (e.g. ~956k prompt on a 1M budget) that
+            // previously fell through to generic `ExecutionError` and missed
+            // the compacting tool-enabled recovery path.
+            "context limit exceeded",
+            "context size exceeded",
+            "exceeds context",
+            "input tokens exceed",
+            "prompt tokens exceed",
+            "prompt token count exceeds",
+            "token limit exceeded",
+            "input too large",
+            "prompt too large",
         ],
     )
 }
@@ -1011,6 +1024,29 @@ mod tests {
         assert!(is_context_capacity_message("invalid request: maximum context length is 114688 tokens"));
         assert!(is_context_capacity_message("input token count exceeds the maximum number of tokens allowed"));
         assert!(!is_context_capacity_message("invalid request: context field is missing"));
+    }
+
+    #[test]
+    fn context_capacity_markers_cover_gateway_variants() {
+        // Near-budget follow-up failures from merge-gateway / Anthropic /
+        // OpenAI routes must enter the compacting recovery path instead of
+        // falling through to generic `ExecutionError`.
+        for msg in [
+            "input tokens exceed context limit (956758 > 1000000)",
+            "prompt tokens exceed the model context window",
+            "context limit exceeded: too many input tokens",
+            "request exceeds context size for anthropic/claude-sonnet-5",
+            "token limit exceeded for prompt",
+            "prompt too large for context window",
+        ] {
+            assert!(is_context_capacity_message(msg), "{msg} should be a capacity signal");
+        }
+        // Negative guard: ordinary prose must stay out of recovery (the
+        // field-missing case is covered in `context_capacity_markers_are_specific`).
+        assert!(!is_context_capacity_message("upstream stream file ready"));
+        // "context limited" contains "context limit" as a substring; it must
+        // not enter capacity recovery.
+        assert!(!is_context_capacity_message("context limited to 5 tools"));
     }
 
     // --- Recovery suggestions ---

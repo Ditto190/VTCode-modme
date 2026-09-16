@@ -216,7 +216,16 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         format!("Tool execution completed, but the model follow-up failed{transient_hint}. Output above is valid.",);
     renderer.line(MessageStyle::Info, &summary)?;
     renderer.line(MessageStyle::Info, &format!("Follow-up error category: {}", err_cat.user_label()))?;
-    if !err_cat.is_retryable() {
+    let should_retry_tool_enabled = allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
+    let should_retry_tool_free =
+        allow_tool_free_retry && (err_cat.is_retryable() || matches!(err_cat, ErrorCategory::ExecutionError));
+    // The "next turn reuses evidence" tip only applies when the turn actually
+    // ends here (StopAfterDirective). When a bounded retry is scheduled below,
+    // the same-turn retry reuses the evidence immediately, so emitting the
+    // next-turn tip alongside the retry notice contradicts the recovery flow
+    // (observed: ExecutionError in plan mode showed both the tip and
+    // "scheduling a final tool-free recovery pass").
+    if !err_cat.is_retryable() && !should_retry_tool_enabled && !should_retry_tool_free {
         if planning_active {
             renderer.line(
                 MessageStyle::Info,
@@ -229,9 +238,6 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
             )?;
         }
     }
-    let should_retry_tool_enabled = allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
-    let should_retry_tool_free =
-        allow_tool_free_retry && (err_cat.is_retryable() || matches!(err_cat, ErrorCategory::ExecutionError));
     let action = if should_retry_tool_enabled {
         ensure_recent_system_message(working_history, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE);
         renderer.line(
