@@ -694,11 +694,35 @@ fn diff_line_style(kind: &DiffLineKind) -> Style {
     }
 }
 
+/// Plan-approval header rows already carry their own markers (`1. …`, `… and
+/// N more`), so prepending the generic `•` bullet would double-mark them.
+/// Detect those rows and render them as plain body text without a bullet.
+fn is_numbered_step_row(trimmed: &str) -> bool {
+    let Some((number, rest)) = trimmed.split_once('.') else {
+        return false;
+    };
+    !number.is_empty() && number.chars().all(|character| character.is_ascii_digit()) && !rest.trim().is_empty()
+}
+
+fn is_plan_overflow_row(trimmed: &str) -> bool {
+    trimmed.starts_with('…') || trimmed.starts_with("...") || trimmed.starts_with("·")
+}
+
 /// Split `Label: value` metadata rows (`Reason`, `Risk`, `Source`, …) so the
 /// label can render dimmed and the value in body style. Returns the trimmed
 /// label and value; `Tool:` stays a header and never matches here.
 fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
-    const CONTEXT_LABELS: &[&str] = &["Reason", "Risk", "Expected", "Suggestion", "Impact", "Fix", "Source"];
+    const CONTEXT_LABELS: &[&str] = &[
+        "Reason",
+        "Risk",
+        "Expected",
+        "Suggestion",
+        "Impact",
+        "Fix",
+        "Source",
+        "Summary",
+        "Plan",
+    ];
     let (label, value) = trimmed.split_once(':')?;
     let label = label.trim();
     let value = value.trim();
@@ -819,6 +843,8 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
             // `Reason:` / `Risk:` / `Source:` rows render as dim label +
             // body value with a hanging indent — no bullet — so metadata
             // reads as subordinate to the COMMAND code block above.
+            // `Summary:` / `Plan:` use the same treatment so the plan-approval
+            // header reads as an overview section instead of a bulleted list.
             first_content_rendered = true;
             let wrapped_value = wrap_instruction_lines(value, content_width.saturating_sub(2).max(1));
             let mut lines = Vec::new();
@@ -855,6 +881,42 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
             }
             items.push(lines);
             first_content_rendered = true;
+        } else if is_plan_overflow_row(trimmed) {
+            // `… and N more plan steps` is meta-evidence, not content: dim it
+            // and skip the bullet so the header stays scannable.
+            first_content_rendered = true;
+            let mut lines = Vec::new();
+            for segment in wrapped {
+                lines.push(Line::from(vec![
+                    Span::styled(bullet_indent.clone(), Style::default()),
+                    Span::styled(segment, styles.hint),
+                ]));
+            }
+            items.push(lines);
+        } else if is_numbered_step_row(trimmed) {
+            // Numbered plan steps (`1. …`) already carry a list marker.
+            // Render them indented but bullet-free to avoid `• 1. …`.
+            first_content_rendered = true;
+            let mut lines = Vec::new();
+            for (index, segment) in wrapped.into_iter().enumerate() {
+                let body_style = if is_highlighted {
+                    styles.highlight.add_modifier(Modifier::BOLD)
+                } else {
+                    styles.instruction_body
+                };
+                if index == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(bullet_indent.clone(), Style::default()),
+                        Span::styled(segment, body_style),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled(bullet_indent.clone(), Style::default()),
+                        Span::styled(format!("  {segment}"), body_style),
+                    ]));
+                }
+            }
+            items.push(lines);
         } else {
             let mut lines = Vec::new();
             for (index, segment) in wrapped.into_iter().enumerate() {
@@ -1297,6 +1359,28 @@ mod tests {
         let text = line_text(risk_line);
         assert!(!text.contains('•'), "context row must not use bullet, got: {text}");
         assert!(risk_line.spans.len() > 1, "label and value should be separate spans");
+    }
+
+    #[test]
+    fn plan_approval_header_renders_without_bullets() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 10),
+            &[
+                "A plan is ready to execute. Would you like to proceed?".to_string(),
+                "Summary: Fix vtcode analyze so it runs non-interactively".to_string(),
+                "1. Add tools::LIST_FILES to AUTO_ALLOW_TOOLS".to_string(),
+                "2. Fix step parsing in analyze.rs".to_string(),
+                "… and 2 more plan steps".to_string(),
+            ],
+            &styles,
+        );
+
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(texts.iter().all(|text| !text.contains('•')), "plan header must not use bullets, got: {texts:?}");
+        assert!(texts.iter().any(|text| text.contains("Summary:")), "summary overview must remain");
+        assert!(texts.iter().any(|text| text.contains("1. Add")), "numbered steps must remain");
+        assert!(texts.iter().any(|text| text.contains("more plan steps")), "overflow evidence must remain");
     }
 
     fn render_modal_lines(search: ModalSearchState) -> Vec<String> {

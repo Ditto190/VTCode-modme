@@ -324,11 +324,20 @@ pub(crate) fn render_structured_plan(plan: &PlanContent) -> Vec<String> {
 // The confirmation prompt consumes one of the modal's six instruction rows.
 const PLAN_PREVIEW_MAX_LINES: usize = 5;
 const PLAN_PREVIEW_MAX_CHARS: usize = 64;
+/// The summary overview gets a longer budget than individual steps so the
+/// approval modal shows a decision-ready paragraph (not just a fragment)
+/// while still fitting the six-row instruction viewport on typical widths.
+const PLAN_SUMMARY_MAX_CHARS: usize = 120;
 
 fn truncate_plan_preview(text: &str) -> String {
-    let text = text.trim();
-    let mut chars = text.chars();
-    let preview: String = chars.by_ref().take(PLAN_PREVIEW_MAX_CHARS).collect();
+    truncate_plan_text(text, PLAN_PREVIEW_MAX_CHARS)
+}
+
+fn truncate_plan_text(text: &str, max_chars: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = collapsed.trim();
+    let mut chars = collapsed.chars();
+    let preview: String = chars.by_ref().take(max_chars).collect();
     if chars.next().is_some() {
         format!("{preview}…")
     } else {
@@ -350,13 +359,15 @@ fn numbered_step_description(line: &str) -> Option<String> {
 /// Render a bounded, decision-ready plan synopsis for the inline approval UI.
 ///
 /// The plan file and plan events retain the complete markdown. The approval
-/// modal has a small instruction viewport, so it receives only the summary and
-/// numbered steps, with long lines elided and an explicit count for omitted
-/// steps.
+/// modal has a small instruction viewport, so it receives a concise summary
+/// overview paragraph plus numbered steps, with long lines elided and an
+/// explicit count for omitted steps. The `Summary:` row renders as a
+/// label/value overview section (no bullet) so users grasp the change without
+/// reading every step.
 pub(crate) fn render_plan_summary(plan: &PlanContent) -> Vec<String> {
     let mut lines = Vec::new();
     if !plan.summary.trim().is_empty() {
-        lines.push(format!("Summary: {}", truncate_plan_preview(&plan.summary)));
+        lines.push(format!("Summary: {}", truncate_plan_text(&plan.summary, PLAN_SUMMARY_MAX_CHARS)));
     }
 
     let structured_steps: Vec<String> = plan
@@ -841,6 +852,30 @@ mod tests {
         assert!(lines.iter().any(|line| line.starts_with("1. Instrument startup timing")));
         assert!(lines.iter().any(|line| line == "… and 2 more plan steps"));
         assert!(!lines.iter().any(|line| line == "Summary"));
+    }
+
+    #[test]
+    fn plan_summary_overview_keeps_concise_paragraph_within_modal_budget() {
+        let long_summary = "Fix vtcode analyze so it runs non-interactively with auto-allowed tools, correct step parsing, and bounded verification across startup and update paths.";
+        let plan = PlanContent {
+            title: "Implementation Plan".to_string(),
+            summary: long_summary.to_string(),
+            file_path: Some(".vtcode/plans/analyze.md".to_string()),
+            phases: vec![],
+            open_questions: vec![],
+            raw_content: format!("{long_summary}\n\n1. First step\n2. Second step"),
+            total_steps: 2,
+            completed_steps: 0,
+        };
+
+        let lines = render_plan_summary(&plan);
+        assert!(lines.len() <= 5, "summary plus steps must fit the modal budget: {lines:?}");
+        let summary_line = lines
+            .iter()
+            .find(|line| line.starts_with("Summary:"))
+            .expect("summary overview");
+        assert!(summary_line.chars().count() <= "Summary: ".len() + 121, "summary must stay concise: {summary_line}");
+        assert!(summary_line.contains("non-interactively"), "overview must preserve the change intent");
     }
 
     // --- C: approval outcomes (submission mapping, request items) ------

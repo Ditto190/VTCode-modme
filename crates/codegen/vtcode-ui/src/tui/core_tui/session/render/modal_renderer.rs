@@ -43,7 +43,31 @@ fn list_row_cap(list: &ModalListState) -> usize {
 }
 
 fn list_desired_rows(list: &ModalListState) -> usize {
-    list.visible_indices.len().clamp(1, list_row_cap(list))
+    // Count rendered rows, not items: each title costs one row, each subtitle
+    // costs a second row, headers reserve a blank separator above, and
+    // non-compact selectable rows reserve a trailing blank. Capped so large
+    // pickers still scroll instead of claiming the full viewport.
+    let mut rows = 0usize;
+    for (visible_index, &item_index) in list.visible_indices.iter().enumerate() {
+        let Some(item) = list.items.get(item_index) else {
+            continue;
+        };
+        if item.is_divider {
+            rows = rows.saturating_add(1);
+            continue;
+        }
+        if item.is_header() && visible_index > 0 {
+            rows = rows.saturating_add(1);
+        }
+        rows = rows.saturating_add(1);
+        if item.subtitle.as_ref().is_some_and(|subtitle| !subtitle.trim().is_empty()) {
+            rows = rows.saturating_add(1);
+        }
+        if !list.compact_rows() && item.selection.is_some() {
+            rows = rows.saturating_add(1);
+        }
+    }
+    rows.clamp(1, list_row_cap(list))
 }
 
 fn modal_title_text(session: &Session) -> &str {

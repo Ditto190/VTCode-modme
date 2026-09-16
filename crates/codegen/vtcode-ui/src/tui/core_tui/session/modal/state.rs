@@ -910,7 +910,7 @@ impl ModalListState {
         self.total_selectable
     }
 
-    pub(super) fn compact_rows(&self) -> bool {
+    pub(crate) fn compact_rows(&self) -> bool {
         self.compact_rows
     }
 

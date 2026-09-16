@@ -398,9 +398,10 @@ fn inline_modal_height_budgets_list_divider_without_search() {
     use super::super::render::split_inline_modal_area;
 
     let mut session = Session::new(InlineTheme::default(), None, 30);
-    // Sixteen two-line items sit under the 20-row multiline cap, so the exact
+    // Sixteen two-line items saturate the 20-row multiline cap, so the exact
     // height below is sensitive to the divider row: 1 instructions +
-    // 1 divider + 16 list + 0 summary + 3 title chrome = 21.
+    // 20 list (16 items × 2 rows, capped) + 1 divider + 0 summary + 3 title
+    // chrome = 25.
     let items = (0..16)
         .map(|index| InlineListItem {
             title: format!("Option {index}"),
@@ -416,7 +417,7 @@ fn inline_modal_height_budgets_list_divider_without_search() {
     let area = Rect::new(0, 0, 80, 40);
     let (_transcript_area, modal_area) = split_inline_modal_area(&session, area);
     let modal_area = modal_area.expect("list modal should claim a bottom panel area");
-    assert_eq!(modal_area.height, 21, "modal height must budget the always-rendered list divider");
+    assert_eq!(modal_area.height, 25, "modal height must budget the always-rendered list divider");
 }
 
 #[test]
