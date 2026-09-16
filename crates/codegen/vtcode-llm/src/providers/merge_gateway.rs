@@ -374,10 +374,16 @@ impl MergeGatewayProvider {
         payload.insert("model".to_owned(), Value::String(request.model.clone()));
         payload.insert("input".to_owned(), Value::Array(input));
 
-        if let Some(tools) = request
-            .tools
-            .as_ref()
-            .and_then(|tools| self.build_native_tools(tools, &request.model))
+        // Some Merge routes terminate at Anthropic Bedrock, which rejects
+        // `tool_choice: "none"`. A request that explicitly disables tools
+        // does not need either the choice or the definitions on the wire, so
+        // omit both while preserving the no-tool behavior across routes.
+        let tools_disabled = matches!(request.tool_choice, Some(ToolChoice::None));
+        if !tools_disabled
+            && let Some(tools) = request
+                .tools
+                .as_ref()
+                .and_then(|tools| self.build_native_tools(tools, &request.model))
         {
             payload.insert("tools".to_owned(), Value::Array(tools));
         }
@@ -394,7 +400,7 @@ impl MergeGatewayProvider {
         if let Some(stop) = Self::native_stop_sequences(request) {
             payload.insert("stop".to_owned(), Value::Array(stop));
         }
-        if let Some(choice) = &request.tool_choice {
+        if !tools_disabled && let Some(choice) = &request.tool_choice {
             payload.insert("tool_choice".to_owned(), choice.to_provider_format("merge-gateway"));
         }
         if let Some(output_format) = &request.output_format {
@@ -1697,6 +1703,37 @@ mod tests {
         assert_eq!(input[3]["type"], "tool_result");
         assert_eq!(input[3]["tool_use_id"], "call_1");
         assert_eq!(input[3]["content"], "sunny");
+    }
+
+    #[test]
+    fn native_payload_omits_tool_choice_none_for_bedrock_compatible_routes() {
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5.to_string(),
+        );
+        let request = LLMRequest {
+            model: models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5.to_string(),
+            messages: vec![Message::user("Summarize the conversation.".to_string())].into(),
+            tools: Some(Arc::new(vec![ToolDefinition::function(
+                "read_file".to_string(),
+                "Read a file".to_string(),
+                json!({"type": "object"}),
+            )])),
+            tool_choice: Some(ToolChoice::None),
+            ..Default::default()
+        };
+
+        let payload = provider.build_native_payload(&request, false).expect("payload");
+        assert!(payload.get("tools").is_none(), "disabled tools must not be sent to Bedrock routes");
+        assert!(payload.get("tool_choice").is_none(), "Bedrock rejects tool_choice=none");
+
+        // The no-tool normalization must not suppress an explicit tool-enabled
+        // request on the same route.
+        let mut enabled_request = request;
+        enabled_request.tool_choice = Some(ToolChoice::Auto);
+        let enabled_payload = provider.build_native_payload(&enabled_request, false).expect("enabled payload");
+        assert!(enabled_payload.get("tools").is_some());
+        assert_eq!(enabled_payload["tool_choice"], json!("auto"));
     }
 
     #[test]
