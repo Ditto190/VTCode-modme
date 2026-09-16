@@ -3240,7 +3240,8 @@ async fn manual_compaction_payload_includes_selected_fields_and_appends_instruct
     assert_eq!(p["reasoning"]["effort"], json!("low"));
     assert_eq!(p["text"]["verbosity"], json!("high"));
     assert_eq!(p["prompt_cache_key"], json!("lineage-key"));
-    assert!(p.get("previous_response_id").is_none() && p.get("output_types").is_none() && p.get("stream").is_none());
+    assert_eq!(p["stream"], json!(true));
+    assert!(p.get("previous_response_id").is_none() && p.get("output_types").is_none());
     let instr = p["instructions"].as_str().expect("instructions required");
     assert!(
         instr.contains("Preserve decisions.")

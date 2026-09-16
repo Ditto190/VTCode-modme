@@ -200,6 +200,7 @@ impl OpenAIProvider {
         let mut compact_payload = json!({
             "model": resolved_model,
             "input": input,
+            "stream": true,
         });
         if let Some(map) = compact_payload.as_object_mut() {
             let merged_instructions = append_manual_compaction_instructions(

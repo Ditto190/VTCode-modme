@@ -80,31 +80,37 @@ The full documentation catalog lives in the
 
 ## Why VT Code
 
-Most agents are a model plus a tool call. VT Code answers each common failure
-mode with a **structural default in the runtime**, not a prompt tweak:
+An AI model can reason about code, but it cannot provide a dependable
+development workflow on its own. VT Code treats the model as one component of
+a larger **harness**: the runtime supplies context, tools, policy, state, and
+verification. The result is an agent that is designed to make safe, reviewable
+progress over long-running work—not just produce a plausible next response.
 
-| Failure mode                      | Structural answer                                                                                                                                                                         |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sessions drift**                | Dynamic context assembly and auto-compaction keep long sessions grounded. [Runtime guidance](./docs/development/runtime-guidance.md)                                                      |
-| **Tool output floods the window** | Results spool to disk and are summarized back into context on demand — signal stays in, noise stays out. [Architecture](./docs/ARCHITECTURE.md)                                           |
-| **One unreviewed command**        | Sandboxed, fail-closed execution, with adversarial coverage for injection, path/symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)   |
-| **A run dies mid-task**           | Durable sessions resume with `vtcode continue`; workspace snapshots roll back with `vtcode revert`. A crash or a bad turn never costs the work. [Commands](./docs/user-guide/commands.md) |
-| **"Done" is a claim**             | Built-in evals with pass@k / pass^k and environment-based verification — the agent's own report never counts as success. [Eval guide](./docs/guides/eval.md)                              |
+Each common failure mode has a runtime-level answer rather than another prompt
+instruction:
 
-Three foundations sit underneath every answer in that table:
+| Failure mode | VT Code's structural answer |
+| --- | --- |
+| **Long sessions lose context** | Dynamic context assembly, instruction loading, and auto-compaction keep the active window focused. [Runtime guidance](./docs/development/runtime-guidance.md) |
+| **Tool output overwhelms the model** | Large results are bounded, spooled to disk, and brought back on demand, keeping signal in context without losing recoverable detail. [Architecture](./docs/ARCHITECTURE.md) |
+| **Generated commands can be unsafe** | Policy checks and sandboxed, fail-closed execution protect the workspace, with coverage for injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **Work is interrupted or a turn goes wrong** | Durable sessions resume with `vtcode continue`, while workspace snapshots can be restored with `vtcode revert`. [Commands](./docs/user-guide/commands.md) |
+| **The agent says it is done without proving it** | Built-in evals use environment-based verification and pass@k / pass^k metrics; the agent's own report is not treated as success. [Eval guide](./docs/guides/eval.md) |
 
-- **One record of truth.** A single
-  [`ThreadEvent`](./crates/common/vtcode-exec-events) stream logs everything a
-  run did, and the [agent loop contract](./docs/guides/agent-loop-contract.md)
-  specifies how turns, tool results, and recovery behave.
-- **Extensibility without forks.** Every major model sits behind one
-  interface, and MCP, Skills, Plugins, ACP, A2A, and WebMCP attach as
-  first-class extensions ([MCP](./docs/guides/mcp-integration.md) ·
+Three principles make those guarantees useful in practice:
+
+- **A durable record of work.** A single
+  [`ThreadEvent`](./crates/common/vtcode-exec-events) stream records what a run
+  did, while the [agent loop contract](./docs/guides/agent-loop-contract.md)
+  defines how turns, tool results, and recovery behave.
+- **Extensions without a fork.** Model providers share one interface, while
+  MCP, Skills, Plugins, ACP, A2A, and WebMCP connect through documented
+  extension points ([MCP](./docs/guides/mcp-integration.md) ·
   [Providers](./docs/providers/PROVIDER_GUIDES.md)).
-- **A keyboard-first TUI, held to the same bar.** WCAG AA contrast on every
-  built-in theme ([Color guidelines](./docs/guides/COLOR_GUIDELINES.md)),
-  gated by `cargo nextest` and CI with `-D warnings`
-  ([Testing](./docs/development/testing.md)).
+- **A focused terminal workflow.** The keyboard-first TUI is accessible by
+  default, with WCAG AA contrast across built-in themes and quality gates in CI
+  ([Color guidelines](./docs/guides/COLOR_GUIDELINES.md) ·
+  [Testing](./docs/development/testing.md)).
 
 ## Architecture
 
