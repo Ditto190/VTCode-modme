@@ -364,6 +364,13 @@ model_id_table! {
         display: "Gemini 3.8 Flash (Merge Gateway)",
         description: "Google Gemini 3.8 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
+    MergeGatewayAnthropicClaudeHaiku4520251001 {
+        provider: MergeGateway,
+        id: models::merge_gateway::ANTHROPIC_CLAUDE_HAIKU_4_5_20251001,
+        parse: [models::merge_gateway::ANTHROPIC_CLAUDE_HAIKU_4_5_20251001],
+        display: "Claude Haiku 4.5 (Merge Gateway)",
+        description: "Anthropic Claude Haiku 4.5 fast, cost-efficient model accessed through Merge Gateway",
+    },
     MergeGatewayAnthropicClaudeFable51 {
         provider: MergeGateway,
         id: models::merge_gateway::ANTHROPIC_CLAUDE_FABLE_5_1,

@@ -60,6 +60,7 @@ impl ModelId {
             ModelId::MergeGatewayOpenAIGpt56Sol,
             ModelId::MergeGatewayOpenAIGpt56Terra,
             ModelId::MergeGatewayGoogleGemini38Flash,
+            ModelId::MergeGatewayAnthropicClaudeHaiku4520251001,
             ModelId::MergeGatewayAnthropicClaudeFable51,
             ModelId::MergeGatewayDeepseekFlash,
             ModelId::MergeGatewayOpenAIGpt6Astra,

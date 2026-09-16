@@ -18,6 +18,7 @@ pub const OPENAI_GPT_5_6_SOL: &str = "openai/gpt-5.6-sol";
 pub const OPENAI_GPT_5_6_TERRA: &str = "openai/gpt-5.6-terra";
 pub const OPENAI_GPT_6_ASTRA: &str = "openai/gpt-6-astra";
 pub const GOOGLE_GEMINI_3_8_FLASH: &str = "google/gemini-3.8-flash";
+pub const ANTHROPIC_CLAUDE_HAIKU_4_5_20251001: &str = "anthropic/claude-haiku-4-5-20251001";
 pub const ANTHROPIC_CLAUDE_FABLE_5_1: &str = "anthropic/claude-fable-5-1";
 pub const DEEPSEEK_FLASH: &str = "deepseek/deepseek-v4.1-flash";
 
@@ -30,6 +31,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     OPENAI_GPT_5_5,
     ANTHROPIC_CLAUDE_OPUS_5,
     ANTHROPIC_CLAUDE_SONNET_5,
+    ANTHROPIC_CLAUDE_HAIKU_4_5_20251001,
     ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,

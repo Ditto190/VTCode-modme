@@ -114,6 +114,8 @@ pub enum ModelId {
     MergeGatewayOpenAIGpt56Terra,
     /// Google Gemini 3.8 Flash through Merge Gateway
     MergeGatewayGoogleGemini38Flash,
+    /// Anthropic Claude Haiku 4.5 through Merge Gateway
+    MergeGatewayAnthropicClaudeHaiku4520251001,
     /// Anthropic Claude Fable 5.1 through Merge Gateway
     MergeGatewayAnthropicClaudeFable51,
     /// OpenAI GPT-6 Astra through Merge Gateway

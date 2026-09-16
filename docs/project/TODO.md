@@ -527,7 +527,16 @@ WHY
 
 ===
 
-check and improve compaction logic and UI/UX, it seems not working reliably:
+check and improve compaction logic and UI/UX,
+
+ref 2 states:
+
+• Compacting context...
+• Context compacted · 1m 34s
+
+---
+
+check compaction again it seems not working reliably:
 
 ```
 Compacted conversation for model switch (86 -> 88 messages, local compaction). Auto-resume injected; new model
