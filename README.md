@@ -55,7 +55,7 @@
 </div>
 
 VT Code is an open-source terminal coding agent written in Rust: one static
-binary for quick interactive sessions and long-running autonomous work alike —
+binary for quick interactive sessions and long-running autonomous work alike,
 no IDE required, no context left behind. It is a **harness, not just an LLM
 wrapper**: the model reasons; the runtime supplies everything else: tools,
 context, sandboxing, state, and **verification**: turning raw model output
@@ -84,18 +84,18 @@ An AI model can reason about code, but it cannot provide a dependable
 development workflow on its own. VT Code treats the model as one component of
 a larger **harness**: the runtime supplies context, tools, policy, state, and
 verification. The result is an agent that is designed to make safe, reviewable
-progress over long-running work—not just produce a plausible next response.
+progress over long-running work, not just produce a plausible next response.
 
 Each common failure mode has a runtime-level answer rather than another prompt
 instruction:
 
-| Failure mode | VT Code's structural answer |
-| --- | --- |
-| **Long sessions lose context** | Dynamic context assembly, instruction loading, and auto-compaction keep the active window focused. [Runtime guidance](./docs/development/runtime-guidance.md) |
-| **Tool output overwhelms the model** | Large results are bounded, spooled to disk, and brought back on demand, keeping signal in context without losing recoverable detail. [Architecture](./docs/ARCHITECTURE.md) |
-| **Generated commands can be unsafe** | Policy checks and sandboxed, fail-closed execution protect the workspace, with coverage for injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
-| **Work is interrupted or a turn goes wrong** | Durable sessions resume with `vtcode continue`, while workspace snapshots can be restored with `vtcode revert`. [Commands](./docs/user-guide/commands.md) |
-| **The agent says it is done without proving it** | Built-in evals use environment-based verification and pass@k / pass^k metrics; the agent's own report is not treated as success. [Eval guide](./docs/guides/eval.md) |
+| Failure mode                                     | VT Code's structural answer                                                                                                                                                                                             |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Long sessions lose context**                   | Dynamic context assembly, instruction loading, and auto-compaction keep the active window focused. [Runtime guidance](./docs/development/runtime-guidance.md)                                                           |
+| **Tool output overwhelms the model**             | Large results are bounded, spooled to disk, and brought back on demand, keeping signal in context without losing recoverable detail. [Architecture](./docs/ARCHITECTURE.md)                                             |
+| **Generated commands can be unsafe**             | Policy checks and sandboxed, fail-closed execution protect the workspace, with coverage for injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md) |
+| **Work is interrupted or a turn goes wrong**     | Durable sessions resume with `vtcode continue`, while workspace snapshots can be restored with `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                                               |
+| **The agent says it is done without proving it** | Built-in evals use environment-based verification and pass@k / pass^k metrics; the agent's own report is not treated as success. [Eval guide](./docs/guides/eval.md)                                                    |
 
 Three principles make those guarantees useful in practice:
 
