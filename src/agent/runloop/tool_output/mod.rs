@@ -1255,6 +1255,104 @@ mod tests {
         assert!(inline_output.find("  ├ src/a.rs").unwrap() < inline_output.find("  └ src/b.rs").unwrap());
     }
 
+    #[tokio::test]
+    async fn render_tool_output_apply_patch_strips_duplicated_file_headers() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "diff": [{
+                "path": "src/main.rs",
+                "operation": "updated",
+                "content": "diff --git a/src/main.rs b/src/main.rs\nindex 1111111..2222222 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n",
+                "additions": 1,
+                "deletions": 1,
+                "skipped": false
+            }]
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::APPLY_PATCH), &payload, None)
+            .await
+            .expect("apply_patch diff with headers should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(inline_output.contains("• Edited src/main.rs (+1 -1)"));
+        assert!(inline_output.contains("@@ -1 +1 @@"));
+        assert!(inline_output.contains("-    1 │ old"));
+        assert!(inline_output.contains("+    1 │ new"));
+        assert!(!inline_output.contains("--- a/src/main.rs"), "heading already shows the path: {inline_output}");
+        assert!(!inline_output.contains("+++ b/src/main.rs"), "heading already shows the path: {inline_output}");
+        assert!(!inline_output.contains("diff --git"), "git header must not duplicate the heading: {inline_output}");
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_apply_patch_header_only_shows_no_changes() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "diff": [{
+                "path": "src/main.rs",
+                "operation": "updated",
+                "content": "--- a/src/main.rs\n+++ b/src/main.rs\n",
+                "skipped": false
+            }]
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::APPLY_PATCH), &payload, None)
+            .await
+            .expect("header-only diff should render a friendly row");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(inline_output.contains("• Edited src/main.rs"));
+        assert!(inline_output.contains("no changes"), "header-only preview must not render blank: {inline_output}");
+        assert!(!inline_output.contains("--- a/src/main.rs"));
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_apply_patch_skipped_shows_user_message_not_reason_code() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "diff": [{
+                "path": "src/big.rs",
+                "operation": "updated",
+                "skipped": true,
+                "reason": "too_many_changes",
+                "summary": {"additions": 12, "deletions": 3}
+            }]
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::APPLY_PATCH), &payload, None)
+            .await
+            .expect("skipped diff should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(!inline_output.contains("too_many_changes"), "stable reason code must not surface: {inline_output}");
+        assert!(inline_output.contains("+12 -3"), "friendly message keeps counts: {inline_output}");
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_empty_content_keeps_truncation_notice() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "diff": [{
+                "path": "src/big.rs",
+                "operation": "updated",
+                "content": "",
+                "truncated": true,
+                "omitted_line_count": 9,
+                "skipped": false
+            }]
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::APPLY_PATCH), &payload, None)
+            .await
+            .expect("empty truncated diff should render");
+
+        let inline_output = collect_inline_output(&mut receiver);
+        assert!(inline_output.contains("+9 lines"), "omission metadata must survive empty bodies: {inline_output}");
+    }
+
     #[test]
     fn tracker_summary_lines_hide_successful_tracker_details() {
         let payload = json!({

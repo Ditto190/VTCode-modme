@@ -181,7 +181,7 @@ fn standard_diff_formatter_handles_diff_without_diff_git_header() {
 #[test]
 fn strip_redundant_file_headers_keeps_hunks_and_bodies() {
     let content = "diff --git a/src/main.rs b/src/main.rs\nindex 1111111..2222222 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
-    let stripped = strip_redundant_file_headers(content, "src/main.rs");
+    let stripped = strip_redundant_file_headers(content);
     assert!(!stripped.contains("diff --git"), "git header must be removed: {stripped:?}");
     assert!(!stripped.contains("--- a/src/main.rs"), "old marker must be removed: {stripped:?}");
     assert!(!stripped.contains("+++ b/src/main.rs"), "new marker must be removed: {stripped:?}");
@@ -193,7 +193,7 @@ fn strip_redundant_file_headers_keeps_hunks_and_bodies() {
 #[test]
 fn strip_redundant_file_headers_falls_back_when_only_headers() {
     let content = "--- a/src/main.rs\n+++ b/src/main.rs\n";
-    let stripped = strip_redundant_file_headers(content, "src/main.rs");
+    let stripped = strip_redundant_file_headers(content);
     assert!(stripped.trim().is_empty(), "header-only preview strips to blank: {stripped:?}");
 }
 
@@ -231,13 +231,43 @@ fn styled_headings_stay_plain_without_color() {
 #[test]
 fn strip_redundant_file_headers_keeps_context_and_body_markers() {
     let content = "@@ -1,2 +1,2 @@\n index = 0\n-old\n+new\n";
-    let stripped = strip_redundant_file_headers(content, "src/main.rs");
+    let stripped = strip_redundant_file_headers(content);
     assert!(stripped.contains("index = 0"), "context line must survive: {stripped:?}");
 
     let body = "@@ -1 +1 @@\n--- foo\n+++ bar\n";
-    let stripped_body = strip_redundant_file_headers(body, "other.rs");
+    let stripped_body = strip_redundant_file_headers(body);
     assert!(stripped_body.contains("--- foo"), "body marker must survive after hunk: {stripped_body:?}");
     assert!(stripped_body.contains("+++ bar"), "body marker must survive after hunk: {stripped_body:?}");
+}
+
+#[test]
+fn strip_redundant_file_headers_strips_ansi_colored_headers() {
+    let content = "\u{1b}[36mdiff --git a/src/main.rs b/src/main.rs\u{1b}[0m\n\u{1b}[36m--- a/src/main.rs\u{1b}[0m\n\u{1b}[36m+++ b/src/main.rs\u{1b}[0m\n@@ -1 +1 @@\n-old\n+new\n";
+    let stripped = strip_redundant_file_headers(content);
+    assert!(!stripped.contains("diff --git"), "ANSI git header must be removed: {stripped:?}");
+    assert!(!stripped.contains("--- a/src/main.rs"), "ANSI old marker must be removed: {stripped:?}");
+    assert!(stripped.contains("@@ -1 +1 @@"), "hunk must be kept: {stripped:?}");
+}
+
+#[test]
+fn strip_redundant_file_headers_strips_without_path_match() {
+    // Headings already identify the file, so headers strip even when the
+    // marker path does not match (absolute/quoted/diverged paths).
+    let content = "diff --git a/other.rs b/other.rs\n--- a/other.rs\n+++ b/other.rs\n@@ -1 +1 @@\n-old\n+new\n";
+    let stripped = strip_redundant_file_headers(content);
+    assert!(!stripped.contains("diff --git"), "mismatched header must still strip: {stripped:?}");
+    assert!(!stripped.contains("--- a/other.rs"), "mismatched marker must still strip: {stripped:?}");
+    assert!(stripped.contains("+new"), "body must survive: {stripped:?}");
+}
+
+#[test]
+fn strip_redundant_file_headers_strips_modes_and_apply_patch_markers() {
+    let content = "new file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/src/new.rs\n*** Update File: src/new.rs\n@@ -0,0 +1 @@\n+hello\n";
+    let stripped = strip_redundant_file_headers(content);
+    assert!(!stripped.contains("new file mode"), "mode must be removed: {stripped:?}");
+    assert!(!stripped.contains("*** Update File:"), "apply-patch marker must be removed: {stripped:?}");
+    assert!(!stripped.contains("--- /dev/null"), "/dev/null marker must be removed: {stripped:?}");
+    assert!(stripped.contains("+hello"), "body must survive: {stripped:?}");
 }
 
 #[test]

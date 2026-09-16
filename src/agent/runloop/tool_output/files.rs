@@ -35,11 +35,12 @@ fn compact_file_glance_enabled(renderer: &AnsiRenderer) -> bool {
 }
 
 fn render_file_heading(renderer: &mut AnsiRenderer, heading: &str) -> Result<()> {
-    if compact_file_glance_enabled(renderer) {
-        renderer.line(MessageStyle::Info, &format!("• {heading}"))
-    } else {
-        renderer.line(MessageStyle::ToolDetail, heading)
-    }
+    // File-op summaries are always `•` Info rows so single-file, multi-file,
+    // compact, and expanded output share one intuitive hierarchy. Each Info
+    // row is a transcript boundary (see vtcode-ui gotchas), which keeps
+    // `• Edited …` scannable and prevents the heading from merging into the
+    // surrounding tool-detail group.
+    renderer.line(MessageStyle::Info, &format!("• {heading}"))
 }
 
 fn diff_action(diff: &Value) -> &'static str {
@@ -147,59 +148,83 @@ fn styled_child_row(diff: &Value, branch: &str, git_styles: &GitStyles, color_en
     format!("  {branch} {path}{}", styled_count_suffix(additions, deletions, git_styles, color_enabled))
 }
 
-/// Remove redundant `diff --git` / `index` / `---` / `+++` file headers when
-/// the file path is already shown in the surrounding heading.
+/// Remove leading unified-diff file headers so the transcript never repeats
+/// the path shown in the surrounding `• Edited path` heading.
 ///
 /// Canonical per-file previews carry one file's unified diff. Rendering both
-/// the heading (`• Edited path`) and the raw `--- a/path` / `+++ b/path`
+/// the heading and the raw `diff --git` / `index` / `--- a/path` / `+++ b/path`
 /// lines repeats the same path three times and reads as blank duplication.
-/// Hunk headers (`@@`) and `+/-` bodies are always preserved.
+/// Hunk headers (`@@`), `+/-` bodies, context lines, and `\ No newline`
+/// markers are always preserved.
 ///
 /// Only the leading header block (before the first `@@` hunk or `+/-` body)
-/// is stripped, and headers must start at column 0. Context lines such as
-/// `" index = 0"` (leading space) are body content and are never removed.
-fn strip_redundant_file_headers(content: &str, path: &str) -> String {
+/// is stripped. Headers are matched on ANSI-stripped text at column 0 so
+/// colored previews strip identically to plain ones, and every known header
+/// shape (`diff --git`, `index`, `---`/`+++`, mode lines, rename/copy lines,
+/// `Binary … differs`, and `*** … File:` apply-patch markers) is removed
+/// unconditionally — the heading already identifies the file, so keeping any
+/// of them would reintroduce duplication on absolute/quoted paths.
+/// Context lines such as `" index = 0"` (leading space) are body content and
+/// are never removed.
+fn strip_redundant_file_headers(content: &str) -> String {
+    // Cheap ANSI scan: only strip when an escape is present so plain diffs
+    // avoid an extra allocation.
+    fn plain_line(line: &str) -> std::borrow::Cow<'_, str> {
+        if line.contains('\x1b') {
+            strip_ansi_codes(line)
+        } else {
+            std::borrow::Cow::Borrowed(line)
+        }
+    }
+
+    fn is_file_header(plain: &str) -> bool {
+        plain.starts_with("diff --git ")
+            || plain.starts_with("diff --combined ")
+            || plain.starts_with("index ")
+            || plain.starts_with("--- ")
+            || plain.starts_with("+++ ")
+            || plain.starts_with("new file mode ")
+            || plain.starts_with("deleted file mode ")
+            || plain.starts_with("old mode ")
+            || plain.starts_with("new mode ")
+            || plain.starts_with("similarity index ")
+            || plain.starts_with("dissimilarity index ")
+            || plain.starts_with("rename from ")
+            || plain.starts_with("rename to ")
+            || plain.starts_with("copy from ")
+            || plain.starts_with("copy to ")
+            || plain.starts_with("Binary ")
+            || plain.starts_with("*** Update File:")
+            || plain.starts_with("*** Add File:")
+            || plain.starts_with("*** Delete File:")
+            || plain.starts_with("*** Begin Patch")
+            || plain.starts_with("*** End Patch")
+    }
+
     let mut kept = Vec::new();
     let mut in_header = true;
     for line in content.lines() {
         if in_header {
+            let plain = plain_line(line);
             // Hunk header ends the file-header block; everything after is body.
-            if line.starts_with("@@") {
+            if plain.starts_with("@@") {
                 in_header = false;
                 kept.push(line);
                 continue;
             }
-            // `+/-` bodies (excluding `---`/`+++` markers handled below) also
-            // end the header block. Context lines start with a space.
-            if line.starts_with('+') && !line.starts_with("+++ ")
-                || line.starts_with('-') && !line.starts_with("--- ")
-                || line.starts_with(' ')
+            // `+/-` bodies (excluding `---`/`+++` markers handled above) also
+            // end the header block. Context lines start with a space and
+            // `\ No newline` markers are body trailers.
+            if plain.starts_with('\\')
+                || (plain.starts_with('+') && !plain.starts_with("+++ "))
+                || (plain.starts_with('-') && !plain.starts_with("--- "))
+                || plain.starts_with(' ')
             {
                 in_header = false;
                 kept.push(line);
                 continue;
             }
-            if line.starts_with("diff --git ") || line.starts_with("index ") {
-                continue;
-            }
-            if line.starts_with("--- ") || line.starts_with("+++ ") {
-                let marker_path = line.split_whitespace().nth(1).unwrap_or_default().trim_matches('"');
-                if marker_path.is_empty() {
-                    kept.push(line);
-                    continue;
-                }
-                let normalized = marker_path.trim_start_matches("a/").trim_start_matches("b/");
-                if marker_path == "/dev/null" || normalized == path || path.ends_with(normalized) {
-                    continue;
-                }
-                kept.push(line);
-                continue;
-            }
-            if line.starts_with("new file mode ")
-                || line.starts_with("deleted file mode ")
-                || line.starts_with("old mode ")
-                || line.starts_with("new mode ")
-            {
+            if plain.trim().is_empty() || is_file_header(&plain) {
                 continue;
             }
             kept.push(line);
@@ -229,42 +254,39 @@ fn render_diff_entry_details(
     if get_bool(diff, "skipped") {
         let reason = diff_preview_user_message(diff);
         if let Some(detail) = get_string(diff, "detail") {
-            renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason} ({detail})"))?;
+            render_tree_detail(renderer, &format!("preview: {reason} ({detail})"))?;
         } else {
-            renderer.line(MessageStyle::ToolDetail, &format!("preview: {reason}"))?;
+            render_tree_detail(renderer, &format!("preview: {reason}"))?;
         }
         return Ok(());
     }
 
     let diff_content = get_string(diff, "content").unwrap_or("");
-    if diff_content.is_empty() && get_bool(diff, "is_empty") {
-        renderer.line(MessageStyle::ToolDetail, "(no changes)")?;
-        return Ok(());
-    }
-
-    if !diff_content.is_empty() {
+    if diff_content.is_empty() {
+        if get_bool(diff, "is_empty") {
+            render_tree_detail(renderer, "no changes")?;
+            return Ok(());
+        }
+        // Empty non-`is_empty` previews render no body here, but fall through
+        // to the truncation notice below so omission metadata is preserved.
+    } else {
         let path = diff_path(diff);
-        let trimmed = strip_redundant_file_headers(diff_content, path);
-        // If stripping leaves only whitespace (e.g. a preview that contained
-        // solely file headers), fall back to the original content so the diff
-        // never renders as an unintuitive blank block.
-        let visible = if trimmed.trim().is_empty() {
-            diff_content
+        let trimmed = strip_redundant_file_headers(diff_content);
+        // Header-only previews (no hunks/bodies) carry no visible changes.
+        // Render a friendly row instead of echoing the duplicated `---`/`+++`
+        // markers that the heading already shows.
+        if trimmed.trim().is_empty() {
+            render_tree_detail(renderer, "no changes")?;
         } else {
-            trimmed.as_str()
-        };
-        renderer.line(MessageStyle::ToolDetail, "")?;
-        render_diff_content(renderer, visible, path, git_styles, ls_styles)?;
+            render_diff_content(renderer, trimmed.as_str(), path, git_styles, ls_styles)?;
+        }
     }
 
     if get_bool(diff, "truncated") {
         if let Some(omitted) = get_u64(diff, "omitted_line_count") {
-            renderer.line(
-                MessageStyle::ToolDetail,
-                &format!("… +{omitted} lines (use exec_command with sed for full view)"),
-            )?;
+            render_tree_detail(renderer, &format!("… +{omitted} lines (use exec_command with sed for full view)"))?;
         } else {
-            renderer.line(MessageStyle::ToolDetail, "… diff truncated")?;
+            render_tree_detail(renderer, "… diff truncated")?;
         }
     }
     Ok(())
@@ -278,29 +300,26 @@ pub(crate) fn render_write_file_preview(
 ) -> Result<()> {
     let diffs = canonical_diff_previews(payload);
 
-    // Show basic metadata (compact format)
+    // Created files without a diff still get the shared `•` summary row so
+    // create/write/edit/patch headings stay scannable as one hierarchy.
     if get_bool(payload, "created") && diffs.is_empty() {
-        if compact_file_glance_enabled(renderer) {
-            let heading = get_string(payload, "path")
-                .map_or_else(|| "File created".to_string(), |path| format!("Created {path}"));
-            render_file_heading(renderer, &heading)?;
-        } else {
-            renderer.line(MessageStyle::ToolDetail, "File created")?;
-        }
+        let heading =
+            get_string(payload, "path").map_or_else(|| "File created".to_string(), |path| format!("Created {path}"));
+        render_file_heading(renderer, &heading)?;
     }
 
     if let Some(encoding) = get_string(payload, "encoding") {
-        renderer.line(MessageStyle::ToolDetail, &format!("encoding: {encoding}"))?;
+        render_tree_detail(renderer, &format!("encoding: {encoding}"))?;
     }
 
     if diffs.is_empty() {
         if get_bool(payload, "skipped") {
             let reason = get_string(payload, "reason").unwrap_or("already exists");
-            renderer.line(MessageStyle::ToolDetail, &format!("write skipped: {reason}"))?;
+            render_tree_detail(renderer, &format!("write skipped: {reason}"))?;
         } else if get_bool(payload, "conflict") {
-            renderer.line(MessageStyle::ToolDetail, "write blocked: file conflict")?;
+            render_tree_detail(renderer, "write blocked: file conflict")?;
         } else if let Some(error) = get_string(payload, "error") {
-            renderer.line(MessageStyle::ToolDetail, error)?;
+            renderer.line(MessageStyle::ToolError, error)?;
         }
         return Ok(());
     }
@@ -317,9 +336,9 @@ pub(crate) fn render_apply_patch_diff_preview(
     let diffs = canonical_diff_previews(payload);
     if diffs.is_empty() {
         if get_bool(payload, "conflict") {
-            renderer.line(MessageStyle::ToolDetail, "patch blocked: file conflict")?;
+            render_tree_detail(renderer, "patch blocked: file conflict")?;
         } else if let Some(error) = get_string(payload, "error") {
-            renderer.line(MessageStyle::ToolDetail, error)?;
+            renderer.line(MessageStyle::ToolError, error)?;
         }
         return Ok(());
     }
@@ -349,6 +368,11 @@ fn render_diff_preview_entries(
         }
     }
 
+    let omitted = diffs.len().saturating_sub(visible_diffs.len());
+    if omitted > 0 {
+        render_tree_detail(renderer, &format!("… +{omitted} more files not shown"))?;
+    }
+
     Ok(())
 }
 
@@ -367,7 +391,8 @@ pub(crate) fn render_list_dir_output(renderer: &mut AnsiRenderer, val: &Value, _
             .line(MessageStyle::ToolDetail, &format!("{}{}", display_path, if !path.is_empty() { "/" } else { "" }))?;
     }
 
-    // Show summary - compact format
+    // Show summary as a tree detail so list/read/edit summaries share one
+    // `  └ …` hierarchy under the tool header.
     if count > 0 || total > 0 {
         let start_idx = (page - 1) * per_page + 1;
         let _end_idx = start_idx + count - 1;
@@ -378,13 +403,13 @@ pub(crate) fn render_list_dir_output(renderer: &mut AnsiRenderer, val: &Value, _
         } else {
             format!("{count} items total")
         };
-        renderer.line(MessageStyle::ToolDetail, &summary)?;
+        render_tree_detail(renderer, &summary)?;
     }
 
     // Render items grouped by type
     if let Some(items) = val.get("items").and_then(|v| v.as_array()) {
         if items.is_empty() {
-            renderer.line(MessageStyle::ToolDetail, "(empty)")?;
+            render_tree_detail(renderer, "empty")?;
         } else {
             let mut directories = Vec::new();
             let mut files = Vec::new();
@@ -489,7 +514,7 @@ pub(crate) fn render_list_dir_output(renderer: &mut AnsiRenderer, val: &Value, _
 
             let omitted = items.len().saturating_sub(MAX_DISPLAYED_FILES);
             if omitted > 0 {
-                renderer.line(MessageStyle::ToolDetail, &format!("+ {omitted} more items not shown"))?;
+                render_tree_detail(renderer, &format!("… +{omitted} more items not shown"))?;
             }
         }
     }
@@ -586,14 +611,16 @@ fn shorten_path(path: &str, max_len: usize) -> String {
     preview::truncate_to_display_width(path, max_len).to_string()
 }
 
-/// Render diff content lines with proper truncation and styling (compact format)
+/// Render diff bodies with the design-system diff treatment.
 ///
 /// `file_path` supplies the syntax language hint (`rs`, `ts`, …) so diff
-/// bodies keep their row tint while code tokens carry syntax foregrounds.
-/// Prose (`md`/`txt`) and unknown extensions stay solid-tinted by design.
-/// When the path carries no extension (e.g. `Makefile`, fallback `"file"`),
-/// fall back to inferring from the diff headers so pathless previews keep
-/// the syntax they previously had.
+/// bodies keep the soft add/delete row tint plus stronger intraline chips
+/// while code tokens carry syntax foregrounds. Prose (`md`/`txt`) and unknown
+/// extensions stay solid-tinted by design; ANSI16 and no-color remain
+/// foreground-only. File headers are stripped by the caller, so this starts
+/// at the first hunk — no duplicated `---`/`+++` rows. When the path carries
+/// no extension (e.g. `Makefile`, fallback `"file"`), fall back to inferring
+/// from the diff headers so pathless previews keep their syntax.
 fn render_diff_content(
     renderer: &mut AnsiRenderer,
     diff_content: &str,

@@ -1,29 +1,4 @@
-Improve apply/edit patch UI
-
-1. Change the apply/edit patch UI to be more intuitive.
-2. style and syntax highlight the file and diff color on the edit patch
-3. reason code kept stable; renderers show `diff_preview_user_message`
-4. Improve and streamline the overall UI of file ops UI/UX in the TUI
-5. Follow design system
-
-current it look blank and seems unintuitive and duplicated '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-15 at 16.53.19.png'
-
-===
-
-improve git diff preview UI '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-14 at 14.26.27.png' it too dimmed.
-
-====
-
 open source vtcode-diff, IMPORTANT remember to attribute OpenAI Codex https://github.com/openai/codex as the source of the underlying code and ideas.
-
-===
-
-Implement keyboard shortcut enhancements in chat input text field:
-
-1. command (macos:) or similar key on other platforms: a/ command+backspace should clear all text input in a single line of multi-line chat input. if it is single-line chat input, it should clear the entire input. also applied for compact [pasted content ... chars] block and image block.
-2. command+left or command+right should move the cursor to the beginning or end of the current line in multi-line chat input. if it is single-line chat input, it should move the cursor to the beginning or end of the entire input.
-3. if the cursor focus is active in chat input, pressing the double-escape key should clear the current line in multi-line chat input or the entire input in single-line chat input.
-4. if the cursor focus is active in chat input, pressing tab should enqueue the messages to queue list (similiar to control+enter).
 
 ===
 
