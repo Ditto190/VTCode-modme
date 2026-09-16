@@ -266,7 +266,7 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaNemotron3Super120bA12b));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 16);
+    assert_eq!(merge_gateway_models.len(), 17);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini38Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeFable51));
@@ -552,6 +552,7 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             // Merge Gateway deliberately reuses upstream provider/model ids;
             // bare parsing preserves OpenRouter precedence for overlapping ids.
             ModelId::MergeGatewayAnthropicClaudeOpus5
+            | ModelId::MergeGatewayAnthropicClaudeSonnet5
             | ModelId::MergeGatewayGoogleGemini38Flash
             | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt6Astra => continue,

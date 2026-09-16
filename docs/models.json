@@ -3171,6 +3171,37 @@
           "structured_output": false
         }
       },
+      "anthropic/claude-sonnet-5": {
+        "id": "anthropic/claude-sonnet-5",
+        "name": "Claude Sonnet 5 (Merge Gateway)",
+        "description": "Anthropic Claude Sonnet 5 served through Merge Gateway's native Responses API.",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "output_tokens": 128000,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": false
+        }
+      },
       "google/gemini-3.6-flash": {
         "id": "google/gemini-3.6-flash",
         "name": "Gemini 3.6 Flash (Merge Gateway)",

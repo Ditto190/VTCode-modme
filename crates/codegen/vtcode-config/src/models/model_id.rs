@@ -86,6 +86,8 @@ pub enum ModelId {
     MergeGatewayDefaultRouting,
     /// Anthropic Claude Opus 5 through Merge Gateway
     MergeGatewayAnthropicClaudeOpus5,
+    /// Anthropic Claude Sonnet 5 through Merge Gateway
+    MergeGatewayAnthropicClaudeSonnet5,
     /// Google Gemini 3.6 Flash through Merge Gateway
     /// Google Gemini 3.7 Flash through Merge Gateway
     /// DeepSeek V4.1 Flash through Merge Gateway

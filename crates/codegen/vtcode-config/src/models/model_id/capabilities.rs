@@ -415,6 +415,7 @@ impl ModelId {
             // Qwen models
             ModelId::MergeGatewayDefaultRouting => "routing",
             ModelId::MergeGatewayAnthropicClaudeOpus5 => "5",
+            ModelId::MergeGatewayAnthropicClaudeSonnet5 => "5",
             ModelId::MergeGatewayAnthropicClaudeFable51 => "5.1",
             ModelId::MergeGatewayMinimaxH3 => "H3",
             ModelId::MergeGatewayThinkingMachinesInkling => "Inkling",

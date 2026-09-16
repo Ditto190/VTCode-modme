@@ -266,6 +266,13 @@ model_id_table! {
         display: "Claude Opus 5 (Merge Gateway)",
         description: "Anthropic Claude Opus 5 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
+    MergeGatewayAnthropicClaudeSonnet5 {
+        provider: MergeGateway,
+        id: models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5,
+        parse: [models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5],
+        display: "Claude Sonnet 5 (Merge Gateway)",
+        description: "Anthropic Claude Sonnet 5 accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
     MergeGatewayDeepseekFlash {
         provider: MergeGateway,
         id: models::merge_gateway::DEEPSEEK_FLASH,
@@ -707,6 +714,7 @@ mod tests {
             || matches!(
                 model,
                 ModelId::MergeGatewayAnthropicClaudeOpus5
+                    | ModelId::MergeGatewayAnthropicClaudeSonnet5
                     | ModelId::MergeGatewayGoogleGemini38Flash
                     | ModelId::MergeGatewayMetaMuseSpark13
                     | ModelId::MergeGatewayOpenAIGpt6Astra

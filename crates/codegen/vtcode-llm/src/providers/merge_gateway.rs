@@ -1534,6 +1534,7 @@ impl LLMProvider for MergeGatewayProvider {
         matches!(
             model,
             models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5
+                | models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5
                 | models::merge_gateway::ANTHROPIC_CLAUDE_FABLE_5_1
                 | models::merge_gateway::GOOGLE_GEMINI_3_6_FLASH
                 | models::merge_gateway::GOOGLE_GEMINI_3_7_FLASH

@@ -48,6 +48,7 @@ impl ModelId {
             // Merge Gateway routes
             ModelId::MergeGatewayDefaultRouting,
             ModelId::MergeGatewayAnthropicClaudeOpus5,
+            ModelId::MergeGatewayAnthropicClaudeSonnet5,
             ModelId::MergeGatewayXaiGrok46,
             ModelId::MergeGatewayMinimaxH3,
             ModelId::MergeGatewayMoonshotKimiK3,

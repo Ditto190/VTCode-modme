@@ -3,6 +3,7 @@
 pub const DEFAULT_ROUTING: &str = "default_routing";
 pub const OPENAI_GPT_5_5: &str = "openai/gpt-5.5";
 pub const ANTHROPIC_CLAUDE_OPUS_5: &str = "anthropic/claude-opus-5";
+pub const ANTHROPIC_CLAUDE_SONNET_5: &str = "anthropic/claude-sonnet-5";
 pub const GOOGLE_GEMINI_3_6_FLASH: &str = "google/gemini-3.6-flash";
 pub const GOOGLE_GEMINI_3_7_FLASH: &str = "google/gemini-3.7-flash";
 pub const XAI_GROK_4_6: &str = "xai/grok-4.6";
@@ -28,6 +29,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     DEFAULT_ROUTING,
     OPENAI_GPT_5_5,
     ANTHROPIC_CLAUDE_OPUS_5,
+    ANTHROPIC_CLAUDE_SONNET_5,
     ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
@@ -64,6 +66,7 @@ pub const REASONING_EFFORT_ROUTES: &[&str] = &[
 /// Routes that advertise Gateway-controlled `thinking.budget_tokens` controls.
 pub const THINKING_BUDGET_ROUTES: &[&str] = &[
     ANTHROPIC_CLAUDE_OPUS_5,
+    ANTHROPIC_CLAUDE_SONNET_5,
     ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_6_FLASH,
     GOOGLE_GEMINI_3_7_FLASH,
@@ -78,6 +81,7 @@ pub const THINKING_BUDGET_ROUTES: &[&str] = &[
 /// thinking budget.
 pub const REASONING_MODELS: &[&str] = &[
     ANTHROPIC_CLAUDE_OPUS_5,
+    ANTHROPIC_CLAUDE_SONNET_5,
     ANTHROPIC_CLAUDE_FABLE_5_1,
     GOOGLE_GEMINI_3_8_FLASH,
     DEEPSEEK_FLASH,
