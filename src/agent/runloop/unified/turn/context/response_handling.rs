@@ -8,9 +8,9 @@ use crate::agent::runloop::unified::planning_workflow::{
 use crate::agent::runloop::unified::turn::turn_processing::resolve_effective_request_model;
 use crate::agent::runloop::unified::ui_interaction_stream_helpers::render_compact_reasoning_block;
 
-const DENIED_INTERVIEW_PLAN_SYNTHESIS_RETRY_DIRECTIVE: &str = "Planning recovery: the interactive interview is unavailable, and the previous response did not contain a completed plan. Do not ask another question or offer approval yet. Emit exactly one compact `<proposed_plan>` now from the repository evidence already in this conversation; include Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, and short Assumptions. Do not emit tool calls.";
+const DENIED_INTERVIEW_PLAN_SYNTHESIS_RETRY_DIRECTIVE: &str = "Planning recovery: the interactive interview is unavailable, and the previous response did not contain a completed plan. Do not ask another question or offer approval yet. Emit exactly one compact `<proposed_plan>` now from the repository evidence already in this conversation; include Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, and short Assumptions. Each `verify:` must be a concrete command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, and `verify: [rg -n 'symbol' src/file.rs]`. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; every comma-separated item must independently be concrete. Do not emit tool calls.";
 
-const PLAN_PSEUDO_TOOL_CALL_REPROMPT_DIRECTIVE: &str = "Planning: the previous response contained tool-call markup that was not executed — XML tool-call text is not a tool call. If you need more repository evidence, invoke tools through the tool-call channel now. Otherwise present the completed plan as one compact `<proposed_plan>` (Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, short Assumptions). Do not emit XML tool-call markup as text.";
+const PLAN_PSEUDO_TOOL_CALL_REPROMPT_DIRECTIVE: &str = "Planning: the previous response contained tool-call markup that was not executed — XML tool-call text is not a tool call. If you need more repository evidence, invoke tools through the tool-call channel now. Otherwise present the completed plan as one compact `<proposed_plan>` (Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, short Assumptions). Each `verify:` must be a concrete command or observable check; use `cargo nextest run -p vtcode`, `cargo check --locked`, or `rg -n 'symbol' src/file.rs` as valid examples, not `run checks`, `check later`, or `git diff --check`. Do not emit XML tool-call markup as text.";
 
 const EXECUTION_PLAN_REJECTION_NOTICE: &str = "The proposed plan was rejected and discarded; no continuation turn was scheduled. Adjust the request or revise the plan to continue.";
 const PLAN_APPROVAL_WAITING_NOTICE: &str = "Plan is awaiting approval. Type `approve`, `implement`, or `yes` to begin execution, or `edit` to revise the plan.";
@@ -166,7 +166,7 @@ impl<'a> TurnProcessingContext<'a> {
             detail.to_string()
         };
         let message = format!(
-            "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan ({detail}). The latest request and bounded evidence are preserved. Do NOT re-read files already read this turn; reuse the tool outputs above and emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Re-state the planning request or type `keep planning` to try again; no changes were applied."
+            "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan ({detail}). The latest request and bounded evidence are preserved. Do NOT re-read files already read this turn; reuse the tool outputs above and emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Each `verify:` must be a concrete command or observable check: valid examples are `verify: [cargo nextest run -p vtcode]` and `verify: [rg -n 'symbol' src/file.rs]`; invalid examples are `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`. Re-state the planning request or type `keep planning` to try again; no changes were applied."
         );
 
         self.harness_state.mark_final_response_fallback();
@@ -1179,11 +1179,23 @@ const REJECTED_PLAN_DRAFT_HISTORY_BUDGET: usize = 8 * 1024;
 /// rejected plan (turn_912/913: the final assistant message degraded to the
 /// planning-workflow reminder bullet). Keeping it as assistant content also
 /// prevents untrusted draft text from being interpreted as system guidance.
-fn append_rejected_plan_draft_to_last_assistant(working_history: &mut [uni::Message], plan_text: &str) {
+fn append_rejected_plan_draft_to_last_assistant(working_history: &mut Vec<uni::Message>, plan_text: &str) {
     let Some(draft) = bounded_rejected_plan_draft(plan_text) else {
         return;
     };
-    append_to_last_assistant_message(working_history, &draft);
+    if working_history
+        .last()
+        .is_some_and(|message| message.role == uni::MessageRole::Assistant)
+    {
+        append_to_last_assistant_message(working_history, &draft);
+    } else {
+        // A non-streaming provider can return only an extracted plan. In that
+        // shape `handle_assistant_response` has no visible text to store, so
+        // there is no assistant message to attach the rejected draft to. Keep
+        // the draft in the assistant role as bounded context for the repair
+        // pass instead of silently dropping the validator's failure input.
+        working_history.push(uni::Message::assistant(draft).with_phase(Some(uni::AssistantPhase::Commentary)));
+    }
 }
 
 fn bounded_rejected_plan_draft(plan_text: &str) -> Option<String> {
@@ -1352,6 +1364,49 @@ Fix the read-cap recovery path from gathered evidence.
 1. Keep existing behavior.
 "#;
 
+    /// Regression fixture from session-vtcode-20260916T033857Z_346951-33962:
+    /// the plan has otherwise concrete steps, but more than one verification
+    /// item is rejected by the validator. The repair must see the complete
+    /// bounded draft and validator-owned feedback before it gets a corrected
+    /// plan.
+    const RECOVERY_INVALID_VERIFICATION_PLAN: &str = r#"# Preview recovery plan
+
+## Summary
+Repair planning recovery from the evidence already gathered.
+
+## Implementation Steps
+1. Update the preview guard -> files: [src/agent/runloop/unified/turn/guards.rs] -> verify: [run checks]
+2. Strengthen synthesis guidance -> files: [src/agent/runloop/unified/turn/turn_loop.rs] -> verify: [cargo check --locked]
+3. Preserve validator feedback -> files: [src/agent/runloop/unified/turn/context/response_handling.rs] -> verify: [rg -n verify src/agent/runloop/unified/turn]
+4. Keep tools disabled during repair -> files: [src/agent/runloop/unified/turn/turn_processing/result_handler.rs] -> verify: [cargo nextest run -p vtcode]
+5. Add the transition regression -> files: [src/agent/runloop/unified/turn/turn_loop/tests.rs] -> verify: [git diff --check]
+
+## Test Cases and Validation
+1. Run the focused planning recovery test.
+
+## Assumptions and Defaults
+1. Keep strict plan validation and bounded recovery.
+"#;
+
+    const RECOVERY_CORRECTED_VERIFICATION_PLAN: &str = r#"# Preview recovery plan
+
+## Summary
+Repair planning recovery from the evidence already gathered with concrete verification.
+
+## Implementation Steps
+1. Update the preview guard -> files: [src/agent/runloop/unified/turn/guards.rs] -> verify: [cargo nextest run -p vtcode]
+2. Strengthen synthesis guidance -> files: [src/agent/runloop/unified/turn/turn_loop.rs] -> verify: [cargo check --locked]
+3. Preserve validator feedback -> files: [src/agent/runloop/unified/turn/context/response_handling.rs] -> verify: [rg -n verify src/agent/runloop/unified/turn]
+4. Keep tools disabled during repair -> files: [src/agent/runloop/unified/turn/turn_processing/result_handler.rs] -> verify: [cargo nextest run -p vtcode]
+5. Add the transition regression -> files: [src/agent/runloop/unified/turn/turn_loop/tests.rs] -> verify: [cargo nextest run -p vtcode]
+
+## Test Cases and Validation
+1. Run cargo nextest run -p vtcode.
+
+## Assumptions and Defaults
+1. Keep strict plan validation and bounded recovery.
+"#;
+
     #[tokio::test]
     async fn tool_free_recovery_tolerates_intro_prose_around_valid_plan() {
         let mut backing = TestTurnProcessingBacking::new(8).await;
@@ -1409,6 +1464,100 @@ Fix the read-cap recovery path from gathered evidence.
         assert!(
             matches!(second, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
             "exhausted repair budget must end with the resumable blocked handoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_free_invalid_plan_repair_preserves_draft_feedback_and_accepts_corrected_plan() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.activate_planning_for_test();
+        backing.activate_tool_free_recovery_for_test("preview budget exhausted");
+        let mut ctx = backing.turn_processing_context();
+        assert!(ctx.consume_recovery_pass());
+
+        let first = ctx
+            .handle_text_response(
+                String::new(),
+                Vec::new(),
+                None,
+                Some(RECOVERY_INVALID_VERIFICATION_PLAN.to_string()),
+                false,
+            )
+            .await
+            .expect("invalid verification fixture should be handled");
+        assert!(
+            matches!(first, TurnHandlerOutcome::Continue),
+            "the first invalid recovery draft must schedule bounded repair"
+        );
+        assert!(ctx.recovery_is_tool_free(), "the repair pass must keep tools disabled");
+
+        let rejected_draft = ctx
+            .working_history
+            .iter()
+            .find(|message| {
+                message.role == uni::MessageRole::Assistant
+                    && message.content.as_text().contains("Update the preview guard")
+            })
+            .expect("the rejected non-streaming draft must remain in assistant history");
+        assert_eq!(rejected_draft.phase, Some(uni::AssistantPhase::Commentary));
+
+        let feedback = ctx
+            .working_history
+            .iter()
+            .find(|message| {
+                message.role == uni::MessageRole::System
+                    && message.content.as_text().contains("proposed plan was rejected")
+            })
+            .expect("validator-owned feedback must be retained for the repair pass")
+            .content
+            .as_text();
+        assert!(feedback.contains("2 of 5 implementation step(s)"), "feedback should count both invalid steps");
+        assert!(feedback.contains("step 1: verification item 1"));
+        assert!(feedback.contains("step 5: verification item 1"));
+        assert!(feedback.contains("Valid examples: `verify: [cargo nextest run -p vtcode]`"));
+        assert!(
+            !feedback.contains("1. Update the preview guard -> files:"),
+            "validator-owned feedback must not echo the rejected draft"
+        );
+
+        assert!(ctx.consume_recovery_pass());
+        let repaired = ctx
+            .handle_text_response(
+                String::new(),
+                Vec::new(),
+                None,
+                Some(RECOVERY_CORRECTED_VERIFICATION_PLAN.to_string()),
+                false,
+            )
+            .await
+            .expect("corrected recovery plan should be handled");
+        assert!(
+            matches!(
+                repaired,
+                TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    ..
+                }
+            ),
+            "the corrected draft must reach the approval handoff without a blocked recovery"
+        );
+        assert!(
+            ctx.working_history.iter().any(|message| {
+                message.role == uni::MessageRole::Assistant
+                    && message.content.as_text().contains("Update the preview guard")
+            }),
+            "the rejected draft must remain available after the corrected plan is accepted"
+        );
+        let plan_file = ctx
+            .tool_registry
+            .planning_workflow_state()
+            .get_plan_file()
+            .await
+            .expect("the corrected plan should publish a plan file");
+        let persisted_plan = std::fs::read_to_string(plan_file).expect("read the corrected plan");
+        assert!(
+            persisted_plan.contains("with concrete verification"),
+            "the corrected fixture, rather than the rejected draft, must be persisted"
         );
     }
 
@@ -1997,10 +2146,14 @@ Repairs the approved plan after the referenced paths moved.
         assert!(text.len() < REJECTED_PLAN_DRAFT_HISTORY_BUDGET + 64);
         assert!(text.contains("…[truncated]"));
 
-        // No assistant message → no-op, must not panic.
+        // A non-streaming extracted plan may have no assistant message yet;
+        // preserve it as a bounded commentary message for the repair pass.
         let mut history = vec![uni::Message::user("hi".to_string())];
         append_rejected_plan_draft_to_last_assistant(&mut history, "draft");
-        assert_eq!(history.len(), 1);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].role, uni::MessageRole::Assistant);
+        assert_eq!(history[1].phase, Some(uni::AssistantPhase::Commentary));
+        assert_eq!(history[1].content.as_text(), "<proposed_plan>\ndraft\n</proposed_plan>");
         // Empty draft → no-op.
         let mut history = vec![uni::Message::assistant("kept".to_string())];
         append_rejected_plan_draft_to_last_assistant(&mut history, "   ");

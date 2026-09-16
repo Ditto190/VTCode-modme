@@ -150,7 +150,9 @@ impl PlanValidationReport {
         result.push_str(CANONICAL_STEP_FORMAT);
         result.push_str(
             "\nEach step MUST name a concrete file path or symbol (not prose) and one concrete verify command or observable check. \
-             Comma-separated verify entries must each be a command or an observable check; commas inside single or double quotes stay inside one item.",
+             Comma-separated verify entries must each be a command or an observable check; commas inside single or double quotes stay inside one item. \
+             Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, or `verify: [rg -n 'symbol' src/file.rs]`. \
+             Invalid examples: `verify: [run checks]`, `verify: [check later]`, or `verify: [git diff --check]`; vague prose and generic VCS-only checks do not satisfy this validator.",
         );
         result
     }
