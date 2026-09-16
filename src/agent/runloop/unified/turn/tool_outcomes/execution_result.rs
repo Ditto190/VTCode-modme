@@ -76,6 +76,26 @@ fn record_tool_execution(
     ctx.telemetry.record_tool_usage(tool_name, success);
 }
 
+/// Record a failed shell execution for cross-turn identical-failure loop
+/// detection. Only shell-command tools with a stable signature and non-empty
+/// error text are tracked; anything else leaves the streak slot untouched.
+/// Successes simply record nothing here — a later turn without a matching
+/// failure resets the streak in `CrossTurnTracker`.
+fn record_failed_shell_for_cross_turn_tracking(
+    ctx: &mut TurnProcessingContext<'_>,
+    tool_name: &str,
+    args_val: &serde_json::Value,
+    status: &ToolExecutionStatus,
+) {
+    let Some(signature) = super::handlers::shell_run_signature(tool_name, args_val) else {
+        return;
+    };
+    let Some(error_signature) = super::handlers::shell_failure_error_signature(status) else {
+        return;
+    };
+    ctx.harness_state.record_failed_shell_command(signature, error_signature);
+}
+
 fn emit_turn_metric_log(
     ctx: &TurnProcessingContext<'_>,
     metric: &'static str,
@@ -145,6 +165,7 @@ pub(crate) async fn handle_tool_execution_result<'a>(
     record_tool_execution(t_ctx.ctx, tool_name, tool_start_time, is_success, is_argument_error);
     if pipeline_outcome.status.is_failure_like() {
         t_ctx.ctx.harness_state.record_failed_tool_call();
+        record_failed_shell_for_cross_turn_tracking(t_ctx.ctx, tool_name, args_val, &pipeline_outcome.status);
     }
 
     match &pipeline_outcome.status {

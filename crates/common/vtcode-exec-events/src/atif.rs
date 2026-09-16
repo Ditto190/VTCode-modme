@@ -664,7 +664,7 @@ impl AtifTrajectoryBuilder {
     }
 
     /// Returns the number of steps collected so far.
-    fn step_count(&self) -> usize {
+    pub fn step_count(&self) -> usize {
         self.steps.len()
     }
 }

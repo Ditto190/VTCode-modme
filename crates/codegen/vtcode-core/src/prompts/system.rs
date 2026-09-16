@@ -2037,10 +2037,11 @@ Use a skill only when the user names it or the task clearly matches. Load detail
 - skill-creator: Create skills
 
 ## Active Tools
-- Use `exec_command.cmd` with `ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing.
+- Use `exec_command.cmd` with `ls`, `find`, `cat`, `sed`, and `awk` for repository browsing. Prefer `code_search` over `rg`/`grep` for code.
 - Batch independent read-only calls; order dependent reads, and serialize mutations.
 - Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks. In one-shot `exec_command` calls, do not use `!!`, `!$`, `!ssh`, or `fc`; write full command arguments explicitly from conversation or tool results. Interactive shells: review-safe history expansion (Bash `histverify`, zsh `HIST_VERIFY`).
 - Run verifiers unpiped — standalone or pure `&&`; `|`/`;`/`||` masks the exit status so piped checks stay unverified; prefer `max_output_tokens`.
+- Fast checks before full builds.
 - `code_search`: omit unused filters; no empty values (`path: ""`).
 - Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{"query":"TurnLoop","path":"src","result_types":["definition"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`. Use `exec_command` or a skill for syntax patterns.
 - Build and Auto share tools and safety gates; Auto changes confirmation behavior only after explicit approval or full-auto policy.

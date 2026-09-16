@@ -28,7 +28,9 @@ pub(super) fn is_openai_prompt_cache_enabled(
     global_prompt_cache_enabled: bool,
     openai_prompt_cache_enabled: bool,
 ) -> bool {
-    provider_name.eq_ignore_ascii_case("openai") && global_prompt_cache_enabled && openai_prompt_cache_enabled
+    (provider_name.eq_ignore_ascii_case("openai") || provider_name.eq_ignore_ascii_case("merge-gateway"))
+        && global_prompt_cache_enabled
+        && openai_prompt_cache_enabled
 }
 
 pub(super) fn resolve_prompt_cache_shaping_mode(

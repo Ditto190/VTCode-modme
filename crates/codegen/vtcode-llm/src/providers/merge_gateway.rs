@@ -14,7 +14,7 @@ use crate::providers::gemini::sanitize_function_parameters;
 use crate::providers::openai_compat::{OpenAiCompatCore, OpenAiCompatSpec};
 use crate::providers::shared::{
     Utf8StreamDecoder, extract_data_payload, find_sse_boundary_bytes, function_output_value_from_message_content,
-    generate_tool_call_id,
+    generate_tool_call_id, parse_cache_write_tokens_from_usage, parse_cached_prompt_tokens_from_usage,
 };
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -402,6 +402,14 @@ impl MergeGatewayProvider {
         }
         if let Some(service_tier) = request.service_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
             payload.insert("service_tier".to_owned(), Value::String(service_tier.to_owned()));
+        }
+        if let Some(cache_key) = request
+            .prompt_cache_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            payload.insert("prompt_cache_key".to_owned(), Value::String(cache_key.to_owned()));
         }
         if stream {
             payload.insert("stream".to_owned(), Value::Bool(true));
@@ -1034,13 +1042,43 @@ impl MergeGatewayProvider {
             .and_then(|value| u32::try_from(value).ok())
             .unwrap_or_else(|| prompt_tokens.saturating_add(completion_tokens));
 
+        // Surface gateway cache signals instead of hard-coding None. The
+        // shared Responses helpers cover OpenAI-style
+        // `input_tokens_details.cached_tokens` /
+        // `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens` /
+        // `cached_tokens` shapes; the explicit fallbacks cover gateway
+        // variants (`cache_read_tokens`, OpenRouter-style
+        // `prompt_cache_read_tokens`, Anthropic-style
+        // `cache_read_input_tokens`).
+        let cached_prompt_tokens = parse_cached_prompt_tokens_from_usage(usage, true);
+        let cache_creation_tokens = parse_cache_write_tokens_from_usage(usage, true)
+            .or_else(|| {
+                usage
+                    .get("prompt_cache_write_tokens")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+            })
+            .or_else(|| {
+                usage
+                    .get("cache_creation_input_tokens")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+            });
+        let cache_read_tokens = usage
+            .get("cache_read_tokens")
+            .or_else(|| usage.get("prompt_cache_read_tokens"))
+            .or_else(|| usage.get("cache_read_input_tokens"))
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .or(cached_prompt_tokens);
+
         Some(Usage {
             prompt_tokens,
             completion_tokens,
             total_tokens,
-            cached_prompt_tokens: None,
-            cache_creation_tokens: None,
-            cache_read_tokens: None,
+            cached_prompt_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
             iterations: None,
         })
     }
@@ -1831,6 +1869,88 @@ mod tests {
         assert!(tools.iter().all(|tool| tool["parameters"].get("anyOf").is_none()));
         assert_eq!(tools[0]["parameters"]["required"], json!(["session_id"]));
         assert!(tools[1]["parameters"].get("required").is_none());
+    }
+
+    #[test]
+    fn native_payload_forwards_prompt_cache_key_for_routing_stickiness() {
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+        );
+        let mut request = LLMRequest {
+            model: models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+        request.prompt_cache_key = Some("vtcode:merge:session-123".to_string());
+
+        let payload = provider.build_native_payload(&request, false).expect("payload");
+
+        assert_eq!(payload.get("prompt_cache_key").and_then(Value::as_str), Some("vtcode:merge:session-123"));
+    }
+
+    #[test]
+    fn native_payload_omits_blank_prompt_cache_key() {
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+        );
+        let mut request = LLMRequest {
+            model: models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+        request.prompt_cache_key = Some("   ".to_string());
+
+        let payload = provider.build_native_payload(&request, false).expect("payload");
+
+        assert!(payload.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn native_usage_surfaces_gateway_cache_signals() {
+        let usage = MergeGatewayProvider::parse_native_usage(Some(&json!({
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "total_tokens": 1100,
+            "input_tokens_details": {"cached_tokens": 800},
+            "prompt_tokens_details": {"cache_write_tokens": 50},
+        })))
+        .expect("usage");
+
+        assert_eq!(usage.prompt_tokens, 1000);
+        assert_eq!(usage.cached_prompt_tokens, Some(800));
+        assert_eq!(usage.cache_creation_tokens, Some(50));
+        assert_eq!(usage.cache_read_tokens, Some(800));
+    }
+
+    #[test]
+    fn native_usage_without_cache_signals_reports_no_cache_metrics() {
+        let usage = MergeGatewayProvider::parse_native_usage(Some(&json!({
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "total_tokens": 110,
+        })))
+        .expect("usage");
+
+        assert_eq!(usage.cached_prompt_tokens, None);
+        assert_eq!(usage.cache_creation_tokens, None);
+        assert_eq!(usage.cache_read_tokens, None);
+    }
+
+    #[test]
+    fn native_usage_prefers_explicit_cache_read_tokens() {
+        let usage = MergeGatewayProvider::parse_native_usage(Some(&json!({
+            "input_tokens": 500,
+            "output_tokens": 50,
+            "total_tokens": 550,
+            "cache_read_tokens": 200,
+            "prompt_cache_write_tokens": 30,
+        })))
+        .expect("usage");
+
+        assert_eq!(usage.cache_read_tokens, Some(200));
+        assert_eq!(usage.cache_creation_tokens, Some(30));
     }
 
     #[tokio::test]

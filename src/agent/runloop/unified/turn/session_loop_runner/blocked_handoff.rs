@@ -2,6 +2,7 @@ use std::path::Path;
 
 use vtcode_core::core::agent::blocked_handoff::{BlockedHandoffResume, write_blocked_handoff_with_resume};
 use vtcode_core::core::agent::harness_artifacts::existing_harness_artifact_paths;
+use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
 use vtcode_core::exec::events::HarnessEventKind;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_core::utils::session_archive::{
@@ -18,6 +19,83 @@ const UNVERIFIED_RESUME_EXPLANATION: &str = "Resume is unavailable because the s
 /// prefix plus a pointer to the handoff file; the handoff markdown keeps the
 /// full reason unchanged.
 const TRANSCRIPT_BLOCK_REASON_LIMIT: usize = 600;
+
+/// Upper bound (in chars) for the appended last-turn diagnostics footer in
+/// the handoff markdown. The canonical `events.jsonl` remains the
+/// full-fidelity source; the footer only carries the counts needed to
+/// triage without opening the log.
+const BLOCKED_DIAGNOSTICS_FOOTER_LIMIT: usize = 1200;
+
+/// Build the `# Last-Turn Diagnostics` footer from the turn snapshot and the
+/// session tool set. Returns an empty string when there is nothing
+/// meaningful to report, so callers can append unconditionally.
+pub(super) fn blocked_diagnostics_footer(
+    diagnostics: Option<&SnapshotTurnDiagnostics>,
+    distinct_tools: &[String],
+) -> String {
+    let Some(diagnostics) = diagnostics else {
+        return String::new();
+    };
+    let mut lines = Vec::with_capacity(6);
+    lines.push(format!("Elapsed: {}ms", diagnostics.elapsed_ms));
+    if !distinct_tools.is_empty() {
+        let mut tools = distinct_tools.to_vec();
+        tools.sort();
+        tools.dedup();
+        let mut joined = tools.join(", ");
+        if joined.chars().count() > 300 {
+            joined = format!("{}… ({} tools)", joined.chars().take(300).collect::<String>(), tools.len());
+        }
+        lines.push(format!("Tools used this session ({}): {joined}", tools.len()));
+    }
+    lines.push(format!(
+        "Tool calls: requested={} admitted={} failed={} denied={} preflight_failures={} reused={}",
+        diagnostics.requested_tool_calls,
+        diagnostics.admitted_tool_calls,
+        diagnostics.failed_tool_calls,
+        diagnostics.denied_tool_calls,
+        diagnostics.preflight_failures,
+        diagnostics.reused_results,
+    ));
+    if diagnostics.model_visible_tool_preview_budget_exhausted || diagnostics.suppressed_tool_previews > 0 {
+        lines.push(format!(
+            "Preview budget exhausted: {} (suppressed previews: {})",
+            diagnostics.model_visible_tool_preview_budget_exhausted, diagnostics.suppressed_tool_previews,
+        ));
+    }
+    let usage = &diagnostics.usage;
+    if usage.input_tokens > 0 || usage.output_tokens > 0 {
+        lines.push(format!(
+            "Turn usage: prompt={} cached={} completion={}",
+            usage.input_tokens, usage.cached_input_tokens, usage.output_tokens,
+        ));
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut footer = format!("\n\n# Last-Turn Diagnostics\n\n{}", lines.join("\n"));
+    if footer.chars().count() > BLOCKED_DIAGNOSTICS_FOOTER_LIMIT {
+        footer = footer.chars().take(BLOCKED_DIAGNOSTICS_FOOTER_LIMIT).collect();
+    }
+    footer
+}
+
+/// Append the diagnostics footer to a blocker summary, keeping the result
+/// bounded. The transcript renderer truncates separately.
+pub(super) fn blocker_summary_with_diagnostics(
+    reason: &str,
+    diagnostics: Option<&SnapshotTurnDiagnostics>,
+    distinct_tools: &[String],
+) -> String {
+    let footer = blocked_diagnostics_footer(diagnostics, distinct_tools);
+    if footer.is_empty() {
+        return reason.to_string();
+    }
+    let mut summary = String::with_capacity(reason.len() + footer.len());
+    summary.push_str(reason);
+    summary.push_str(&footer);
+    summary
+}
 
 /// Bound the block reason for transcript rendering. When the summary exceeds
 /// [`TRANSCRIPT_BLOCK_REASON_LIMIT`] chars it is truncated and suffixed with
@@ -224,7 +302,8 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use super::{TRANSCRIPT_BLOCK_REASON_LIMIT, truncated_block_reason};
+    use super::{TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics, truncated_block_reason};
+    use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
 
     #[test]
     fn short_block_reason_is_rendered_verbatim() {
@@ -256,5 +335,35 @@ mod tests {
         assert!(truncated.chars().count() <= TRANSCRIPT_BLOCK_REASON_LIMIT);
         assert!(truncated.ends_with("full reason: h.md"));
         assert!(truncated.contains('é'), "multi-byte chars must survive intact");
+    }
+
+    #[test]
+    fn blocker_summary_without_diagnostics_is_verbatim() {
+        let summary = blocker_summary_with_diagnostics("stalled", None, &[]);
+        assert_eq!(summary, "stalled");
+    }
+
+    #[test]
+    fn blocker_summary_appends_bounded_diagnostics_footer() {
+        let diagnostics = SnapshotTurnDiagnostics {
+            elapsed_ms: 12_345,
+            requested_tool_calls: 32,
+            admitted_tool_calls: 28,
+            failed_tool_calls: 3,
+            denied_tool_calls: 1,
+            preflight_failures: 2,
+            model_visible_tool_preview_budget_exhausted: true,
+            suppressed_tool_previews: 5,
+            ..Default::default()
+        };
+        let summary = blocker_summary_with_diagnostics(
+            "repeated unverified responses",
+            Some(&diagnostics),
+            &["exec_command".to_string(), "code_search".to_string()],
+        );
+        assert!(summary.starts_with("repeated unverified responses\n\n# Last-Turn Diagnostics"));
+        assert!(summary.contains("requested=32 admitted=28 failed=3 denied=1 preflight_failures=2"));
+        assert!(summary.contains("Preview budget exhausted: true"));
+        assert!(summary.contains("exec_command"));
     }
 }

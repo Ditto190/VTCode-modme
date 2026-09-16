@@ -16,9 +16,9 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use vtcode_commons::reasoning::ReasoningEffortLevel;
-use vtcode_core::config::build_openai_prompt_cache_key;
 use vtcode_core::config::constants::llm_generation;
 use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
+use vtcode_core::config::{build_openai_prompt_cache_key, map_prompt_cache_key_for_provider};
 use vtcode_core::core::agent::harness_kernel::{
     HarnessRequestPlanInput, build_harness_request_plan, stable_system_prefix_hash,
 };
@@ -220,7 +220,8 @@ pub(super) async fn build_turn_request(
         turn_snapshot.openai_prompt_cache_enabled,
         &turn_snapshot.openai_prompt_cache_key_mode,
         ctx.session_stats.prompt_cache_lineage_id(),
-    );
+    )
+    .map(|key| map_prompt_cache_key_for_provider(&turn_snapshot.provider_name, key));
     let selected_tools = if use_out_of_band_copilot_tools || turn_snapshot.tool_free_recovery {
         None
     } else if turn_snapshot.client_local_tool_deferral {

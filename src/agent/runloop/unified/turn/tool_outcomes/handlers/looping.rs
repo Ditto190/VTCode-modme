@@ -123,7 +123,7 @@ fn read_file_slice_suffix(args: &Value) -> String {
     }
 }
 
-pub(super) fn shell_run_signature(canonical_tool_name: &str, args: &Value) -> Option<String> {
+pub(crate) fn shell_run_signature(canonical_tool_name: &str, args: &Value) -> Option<String> {
     // The family-key prefix must stay stable across internal tool renames
     // (e.g. `command_session_internal` -> `command_session`) so loop detection
     // keeps working. Use the stable label.
@@ -133,6 +133,36 @@ pub(super) fn shell_run_signature(canonical_tool_name: &str, args: &Value) -> Op
 
     let command = normalized_shell_command_arg(args, 200)?;
     Some(format!("command_session::{}", command))
+}
+
+/// First-line error signature for a failed shell execution, used to key
+/// cross-turn identical-failure streaks. Only the first line is kept:
+/// trailing lines are usually context, and absolute paths are stable within
+/// a session so they do not need scrubbing. Returns `None` when there is no
+/// failure-like status or no error text, so textless failures never
+/// false-streak.
+pub(crate) fn shell_failure_error_signature(
+    status: &crate::agent::runloop::unified::tool_pipeline::ToolExecutionStatus,
+) -> Option<String> {
+    use crate::agent::runloop::unified::tool_pipeline::ToolExecutionStatus;
+    let text = match status {
+        ToolExecutionStatus::Success { output, command_success: false, .. } => {
+            const ERROR_BODY_FIELDS: [&str; 5] = ["stderr", "output", "stdout", "preview", "content"];
+            ERROR_BODY_FIELDS
+                .iter()
+                .filter_map(|field| output.get(*field).and_then(Value::as_str))
+                .flat_map(str::lines)
+                .map(str::trim)
+                .find(|line| !line.is_empty())?
+                .to_string()
+        }
+        ToolExecutionStatus::Failure { error } | ToolExecutionStatus::Timeout { error } => {
+            error.message.lines().map(str::trim).find(|line| !line.is_empty())?.to_string()
+        }
+        _ => return None,
+    };
+    let signature = compact_loop_text(&text, 160);
+    (!signature.is_empty()).then_some(signature)
 }
 
 pub(super) fn maybe_apply_spool_read_offset_hint(
@@ -281,8 +311,9 @@ mod tests {
 
     use super::{
         read_file_has_limit_arg, read_file_has_offset_arg, read_file_limit_value, read_file_offset_value,
-        read_file_raw_flag, read_file_slice_suffix,
+        read_file_raw_flag, read_file_slice_suffix, shell_failure_error_signature,
     };
+    use crate::agent::runloop::unified::tool_pipeline::ToolExecutionStatus;
     use crate::agent::runloop::unified::turn::tool_outcomes::handlers::low_signal_family_key;
 
     #[test]
@@ -359,6 +390,55 @@ mod tests {
         assert_eq!(raw_false, "::raw=false");
         assert_ne!(raw_true, raw_false);
         assert_ne!(raw_true, no_raw);
+    }
+
+    #[test]
+    fn shell_failure_error_signature_uses_first_stderr_line() {
+        let status = ToolExecutionStatus::Success {
+            output: json!({
+                "exit_code": 101,
+                "stderr": "error: failed to load manifest for workspace member `/repo/crates/x`\nCaused by:\n  missing file",
+                "stdout": "",
+            }),
+            stdout: None,
+            modified_files: Vec::new(),
+            command_success: false,
+        };
+        assert_eq!(
+            shell_failure_error_signature(&status).as_deref(),
+            Some("error: failed to load manifest for workspace member `/repo/crates/x`")
+        );
+    }
+
+    #[test]
+    fn shell_failure_error_signature_uses_error_message_for_failures() {
+        let status = ToolExecutionStatus::Failure {
+            error: vtcode_core::tools::registry::ToolExecutionError::new(
+                "exec_command".to_string(),
+                vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+                "spawn failed\nretry later".to_string(),
+            ),
+        };
+        assert_eq!(shell_failure_error_signature(&status).as_deref(), Some("spawn failed"));
+    }
+
+    #[test]
+    fn shell_failure_error_signature_ignores_success_and_empty_text() {
+        let ok = ToolExecutionStatus::Success {
+            output: json!({"exit_code": 0, "output": "done"}),
+            stdout: None,
+            modified_files: Vec::new(),
+            command_success: true,
+        };
+        assert_eq!(shell_failure_error_signature(&ok), None);
+
+        let blank = ToolExecutionStatus::Success {
+            output: json!({"exit_code": 1, "stderr": "   \n  "}),
+            stdout: None,
+            modified_files: Vec::new(),
+            command_success: false,
+        };
+        assert_eq!(shell_failure_error_signature(&blank), None);
     }
 
     #[test]

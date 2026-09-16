@@ -1111,6 +1111,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     cross_turn_read_sigs,
                     cross_turn_written,
                     cross_turn_shell_cmd,
+                    cross_turn_failed_shell_key,
                     cross_turn_out_of_band_progress,
                     session_limit_granted,
                     aborted_turn_diagnostics,
@@ -1199,6 +1200,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .collect::<Vec<_>>(),
                         harness_state.recently_written_files.clone(),
                         harness_state.last_admitted_shell_command_signature.clone(),
+                        harness_state.last_failed_shell_key().map(str::to_owned),
                         harness_state.has_out_of_band_tool_progress(),
                         harness_state.has_session_limit_grant(),
                         aborted_turn_diagnostics,
@@ -1243,6 +1245,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     &cross_turn_read_sigs,
                     &cross_turn_written,
                     cross_turn_shell_cmd.as_deref(),
+                    cross_turn_failed_shell_key.as_deref(),
                     cross_turn_out_of_band_progress,
                     planning_active,
                 ) {
@@ -1544,10 +1547,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     );
                 }
                 if let RunLoopTurnLoopResult::Blocked { reason } = &outcome_result {
+                    let base = reason.as_deref().unwrap_or("Turn blocked due to repeated failing behavior.");
+                    let summary = super::blocked_handoff::blocker_summary_with_diagnostics(
+                        base,
+                        last_turn_diagnostics.as_ref(),
+                        &session_stats.sorted_tools(),
+                    );
                     write_blocked_handoff_after_checkpoint(
                         &config.workspace,
                         &harness_snapshot.session_id,
-                        reason.as_deref().unwrap_or("Turn blocked due to repeated failing behavior."),
+                        &summary,
                         checkpoint_outcome.blocked_handoff_resume(),
                         &mut renderer,
                         harness_emitter.as_ref(),

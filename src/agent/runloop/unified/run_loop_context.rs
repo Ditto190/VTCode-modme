@@ -298,10 +298,19 @@ pub(crate) struct CrossTurnTracker {
     window_size: usize,
     /// Consecutive turns with no workspace mutation or command execution.
     zero_mutation_turns: usize,
+    /// Failure key of the previous turn's shell execution, if it failed.
+    last_failed_shell_key: Option<String>,
+    /// Consecutive turns repeating the same failed shell key.
+    consecutive_same_failed_shell: usize,
 }
 
 /// Number of consecutive zero-mutation turns before a HARD STOP fires.
 const STUCK_ZERO_MUTATION_THRESHOLD: usize = 3;
+
+/// Consecutive turns repeating an identical shell failure before a warning
+/// fires. Three turns (two repeats) confirm the pattern while tolerating a
+/// single fix-then-reverify cycle.
+const IDENTICAL_SHELL_FAILURE_TURNS_THRESHOLD: usize = 3;
 
 impl CrossTurnTracker {
     pub(crate) fn new() -> Self {
@@ -309,6 +318,8 @@ impl CrossTurnTracker {
             turn_fingerprints: VecDeque::with_capacity(8),
             window_size: 8,
             zero_mutation_turns: 0,
+            last_failed_shell_key: None,
+            consecutive_same_failed_shell: 0,
         }
     }
 
@@ -318,6 +329,11 @@ impl CrossTurnTracker {
     /// - `read_only_signatures`: signatures of read-only tool calls this turn.
     /// - `written_files`: paths of files written this turn.
     /// - `shell_command`: last shell command signature, if any.
+    /// - `failed_shell_key`: `signature::err::error-signature` of this turn's
+    ///   failed shell execution, if any. Identical keys across consecutive
+    ///   turns mean the same command fails with an unchanged error — retries
+    ///   after a genuine fix change the error or succeed, so they never
+    ///   extend the streak.
     /// - `planning_active`: whether the planning workflow is currently active.
     ///
     /// Returns a warning string if a loop or stuck pattern is detected.
@@ -332,7 +348,7 @@ impl CrossTurnTracker {
         shell_command: Option<&str>,
         planning_active: bool,
     ) -> Option<String> {
-        self.seal_turn_with_progress(read_only_signatures, written_files, shell_command, false, planning_active)
+        self.seal_turn_with_progress(read_only_signatures, written_files, shell_command, None, false, planning_active)
     }
 
     /// Seal a turn while accounting for productive provider-native tool work
@@ -342,6 +358,7 @@ impl CrossTurnTracker {
         read_only_signatures: &[String],
         written_files: &HashSet<String>,
         shell_command: Option<&str>,
+        failed_shell_key: Option<&str>,
         out_of_band_tool_progress: bool,
         planning_active: bool,
     ) -> Option<String> {
@@ -394,9 +411,41 @@ impl CrossTurnTracker {
             self.zero_mutation_turns = self.zero_mutation_turns.saturating_add(1);
         }
 
+        // Track identical shell failures across turns. Unlike the
+        // fingerprint set above, this fires regardless of surrounding
+        // variation (different reads between retries must not mask the
+        // loop), and only when the error itself is unchanged.
+        let identical_failure_warning = match failed_shell_key {
+            Some(key) if self.last_failed_shell_key.as_deref() == Some(key) => {
+                self.consecutive_same_failed_shell = self.consecutive_same_failed_shell.saturating_add(1);
+                (self.consecutive_same_failed_shell >= IDENTICAL_SHELL_FAILURE_TURNS_THRESHOLD).then(|| {
+                    format!(
+                        "Identical shell failure in {} consecutive turns ({key}). The command fails with an unchanged error, so rerunning it cannot make progress. \
+                         Inspect the underlying state the error names (file existence, manifest validity, toolchain availability), fix the root cause, then verify once. \
+                         If the error already changed, ignore this warning and continue.",
+                        self.consecutive_same_failed_shell,
+                    )
+                })
+            }
+            Some(key) => {
+                self.last_failed_shell_key = Some(key.to_string());
+                self.consecutive_same_failed_shell = 1;
+                None
+            }
+            None => {
+                self.last_failed_shell_key = None;
+                self.consecutive_same_failed_shell = 0;
+                None
+            }
+        };
+
         // Return loop warning first (higher priority), then stuck warning.
         if loop_warning.is_some() {
             return loop_warning;
+        }
+
+        if identical_failure_warning.is_some() {
+            return identical_failure_warning;
         }
 
         if !planning_active && self.zero_mutation_turns >= STUCK_ZERO_MUTATION_THRESHOLD {
@@ -508,6 +557,10 @@ pub(crate) struct HarnessTurnState {
     /// guard records `last_shell_command_signature` earlier, so it must not be
     /// used as evidence of execution progress by the cross-turn tracker.
     pub last_admitted_shell_command_signature: Option<String>,
+    /// Failure key (`signature::err::error-signature`) of the last failed
+    /// shell execution this turn. Feeds cross-turn identical-failure loop
+    /// detection; reset every turn with the rest of the harness state.
+    last_failed_shell_key: Option<String>,
     pub consecutive_same_file_read_family_calls: usize,
     last_file_read_family_signature: Option<String>,
     /// Per-file-path read count, independent of slice (offset/limit/raw).
@@ -663,6 +716,7 @@ impl HarnessTurnState {
             consecutive_same_shell_command_runs: 0,
             last_shell_command_signature: None,
             last_admitted_shell_command_signature: None,
+            last_failed_shell_key: None,
             consecutive_same_file_read_family_calls: 0,
             last_file_read_family_signature: None,
             file_read_path_counts: HashMap::new(),
@@ -1509,6 +1563,20 @@ impl HarnessTurnState {
 
     pub(crate) fn record_admitted_shell_command(&mut self, signature: String) {
         self.last_admitted_shell_command_signature = Some(signature);
+    }
+
+    /// Remember this turn's failed shell execution, keyed by command plus
+    /// first-line error text. The cross-turn tracker compares the key across
+    /// turns; only byte-identical command/error pairs extend the streak, so
+    /// retries after a genuine fix (changed error or success) start over.
+    /// The last failure wins: one representative per turn is enough because
+    /// the streak requires the *same* key in consecutive turns.
+    pub(crate) fn record_failed_shell_command(&mut self, signature: String, error_signature: String) {
+        self.last_failed_shell_key = Some(format!("{signature}::err::{error_signature}"));
+    }
+
+    pub(crate) fn last_failed_shell_key(&self) -> Option<&str> {
+        self.last_failed_shell_key.as_deref()
     }
 
     pub(crate) fn record_file_read_family_call(&mut self, signature: String) -> usize {
@@ -3041,7 +3109,11 @@ mod tests {
         assert!(tracker.seal_turn(&["read::b".to_string()], &written, None, false).is_none());
         assert_eq!(tracker.zero_mutation_turns(), 2);
 
-        assert!(tracker.seal_turn_with_progress(&[], &written, None, true, false).is_none());
+        assert!(
+            tracker
+                .seal_turn_with_progress(&[], &written, None, None, true, false)
+                .is_none()
+        );
         assert_eq!(tracker.zero_mutation_turns(), 0);
 
         assert!(tracker.seal_turn(&["read::c".to_string()], &written, None, false).is_none());
@@ -3060,6 +3132,16 @@ mod tests {
     }
 
     #[test]
+    fn harness_state_records_failed_shell_key() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        assert_eq!(state.last_failed_shell_key(), None);
+
+        state
+            .record_failed_shell_command("command_session::cargo check".to_string(), "error: bad manifest".to_string());
+        assert_eq!(state.last_failed_shell_key(), Some("command_session::cargo check::err::error: bad manifest"));
+    }
+
+    #[test]
     fn cross_turn_tracker_empty_turn_no_warning() {
         let mut tracker = CrossTurnTracker::new();
         let empty_sigs: Vec<String> = Vec::new();
@@ -3068,6 +3150,80 @@ mod tests {
         // Empty turns should not trigger warnings or corrupt state
         assert!(tracker.seal_turn(&empty_sigs, &empty_written, None, false).is_none());
         assert!(tracker.seal_turn(&empty_sigs, &empty_written, None, false).is_none());
+    }
+
+    #[test]
+    fn cross_turn_tracker_identical_shell_failure_warns_on_third_turn() {
+        let mut tracker = CrossTurnTracker::new();
+        let written = HashSet::new();
+        let key = Some("command_session::cargo check::err::error: failed to load manifest");
+
+        // Vary the read sets so the fingerprint loop detector stays quiet;
+        // the identical-failure streak must fire regardless.
+        let sigs_a = vec!["code_search::alpha".to_string()];
+        let sigs_b = vec!["code_search::beta".to_string()];
+        let sigs_c = vec!["code_search::gamma".to_string()];
+        assert!(
+            tracker
+                .seal_turn_with_progress(&sigs_a, &written, None, key, false, false)
+                .is_none()
+        );
+        assert!(
+            tracker
+                .seal_turn_with_progress(&sigs_b, &written, None, key, false, false)
+                .is_none()
+        );
+        let warning = tracker.seal_turn_with_progress(&sigs_c, &written, None, key, false, false);
+        assert!(warning.is_some());
+        let warning = warning.unwrap();
+        assert!(warning.contains("Identical shell failure"), "warning names the pattern: {warning}");
+        assert!(warning.contains("cargo check"), "warning names the command: {warning}");
+    }
+
+    #[test]
+    fn cross_turn_tracker_failed_shell_streak_resets_on_change_or_success() {
+        let mut tracker = CrossTurnTracker::new();
+        let written = HashSet::new();
+        let empty: Vec<String> = Vec::new();
+        let key_a = Some("command_session::cargo check::err::error: bad manifest");
+        let key_b = Some("command_session::cargo check::err::error: missing crate");
+
+        assert!(
+            tracker
+                .seal_turn_with_progress(&empty, &written, None, key_a, false, false)
+                .is_none()
+        );
+        assert!(
+            tracker
+                .seal_turn_with_progress(&empty, &written, None, key_a, false, false)
+                .is_none()
+        );
+        // Changed error text restarts the streak: no warning on what would
+        // otherwise be the third consecutive failure turn.
+        assert!(
+            tracker
+                .seal_turn_with_progress(&empty, &written, None, key_b, false, false)
+                .is_none()
+        );
+        // A clean turn clears the streak entirely.
+        assert!(
+            tracker
+                .seal_turn_with_progress(&empty, &written, None, None, false, false)
+                .is_none()
+        );
+        assert!(
+            tracker
+                .seal_turn_with_progress(&empty, &written, None, key_b, false, false)
+                .is_none()
+        );
+        assert!(
+            tracker
+                .seal_turn_with_progress(&empty, &written, None, key_b, false, false)
+                .is_none()
+        );
+        let warning = tracker.seal_turn_with_progress(&empty, &written, None, key_b, false, false);
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("Identical shell failure"));
     }
 
     #[test]

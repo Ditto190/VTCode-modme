@@ -38,7 +38,7 @@ pub use prompt_cache::{
     AnthropicPromptCacheSettings, DeepSeekPromptCacheSettings, GeminiPromptCacheMode, GeminiPromptCacheSettings,
     MoonshotPromptCacheSettings, OpenAIPromptCacheKeyMode, OpenAIPromptCacheSettings, OpenRouterPromptCacheSettings,
     PromptCacheRetention, PromptCachingConfig, ProviderPromptCachingConfig, ZaiPromptCacheSettings,
-    build_openai_prompt_cache_key,
+    build_openai_prompt_cache_key, map_prompt_cache_key_for_provider,
 };
 pub use provider::{
     AnthropicConfig, OpenAIConfig, OpenAIHostedShellConfig, OpenAIHostedShellDomainSecret,

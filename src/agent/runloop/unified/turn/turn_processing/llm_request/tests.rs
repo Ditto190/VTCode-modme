@@ -440,8 +440,10 @@ fn llm_first_progress_timeout_respects_planning_workflow_cap() {
 #[test]
 fn openai_prompt_cache_enablement_requires_provider_and_flags() {
     assert!(is_openai_prompt_cache_enabled("openai", true, true));
+    assert!(is_openai_prompt_cache_enabled("merge-gateway", true, true));
     assert!(!is_openai_prompt_cache_enabled("openai", false, true));
     assert!(!is_openai_prompt_cache_enabled("openai", true, false));
+    assert!(!is_openai_prompt_cache_enabled("merge-gateway", false, true));
     assert!(!is_openai_prompt_cache_enabled("anthropic", true, true));
 }
 

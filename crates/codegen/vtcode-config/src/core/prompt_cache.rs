@@ -87,7 +87,7 @@ impl PromptCachingConfig {
         }
 
         match provider_name.to_ascii_lowercase().as_str() {
-            "openai" => self.providers.openai.enabled,
+            "openai" | "merge-gateway" => self.providers.openai.enabled,
             "anthropic" | "minimax" => self.providers.anthropic.enabled,
             "gemini" => {
                 self.providers.gemini.enabled && !matches!(self.providers.gemini.mode, GeminiPromptCacheMode::Off)
@@ -258,6 +258,19 @@ pub fn build_openai_prompt_cache_key(
     match prompt_cache_key_mode {
         OpenAIPromptCacheKeyMode::Session => lineage_id.map(|lineage_id| format!("vtcode:openai:{lineage_id}")),
         OpenAIPromptCacheKeyMode::Off => None,
+    }
+}
+
+/// Rewrite an OpenAI-style cache key for gateway routes that share the
+/// Responses wire shape but need distinct routing stickiness.
+/// Keeps the stable session identifier while namespacing merge-gateway
+/// traffic apart from native OpenAI traffic.
+#[must_use]
+pub fn map_prompt_cache_key_for_provider(provider_name: &str, key: String) -> String {
+    if provider_name.eq_ignore_ascii_case("merge-gateway") {
+        key.replacen("vtcode:openai:", "vtcode:merge:", 1)
+    } else {
+        key
     }
 }
 
@@ -702,6 +715,15 @@ prompt_cache_key_mode = "off"
     }
 
     #[test]
+    fn map_prompt_cache_key_namespaces_merge_gateway() {
+        assert_eq!(
+            map_prompt_cache_key_for_provider("merge-gateway", "vtcode:openai:abc".to_string()),
+            "vtcode:merge:abc"
+        );
+        assert_eq!(map_prompt_cache_key_for_provider("openai", "vtcode:openai:abc".to_string()), "vtcode:openai:abc");
+    }
+
+    #[test]
     fn build_openai_prompt_cache_key_honors_disabled_or_off_mode() {
         assert_eq!(build_openai_prompt_cache_key(false, &OpenAIPromptCacheKeyMode::Session, Some("id")), None);
         assert_eq!(build_openai_prompt_cache_key(true, &OpenAIPromptCacheKeyMode::Off, Some("id")), None);
@@ -713,9 +735,11 @@ prompt_cache_key_mode = "off"
         let mut cfg = PromptCachingConfig { enabled: true, ..PromptCachingConfig::default() };
         cfg.providers.openai.enabled = true;
         assert!(cfg.is_provider_enabled("openai"));
+        assert!(cfg.is_provider_enabled("merge-gateway"));
 
         cfg.enabled = false;
         assert!(!cfg.is_provider_enabled("openai"));
+        assert!(!cfg.is_provider_enabled("merge-gateway"));
     }
 
     #[test]

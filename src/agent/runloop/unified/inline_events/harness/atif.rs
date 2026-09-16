@@ -1,9 +1,23 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tokio::task::spawn_blocking;
 use vtcode_core::exec::events::atif::{AtifAgent, AtifTrajectoryBuilder};
+
+/// Returns true when the existing derived file already holds a non-empty
+/// trajectory. Best-effort read-only probe: any I/O or parse failure means
+/// "no usable trajectory", so the fresh export proceeds normally.
+fn existing_trajectory_has_steps(path: &Path) -> bool {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value.get("steps")?.as_array().map(|steps| !steps.is_empty()))
+        .unwrap_or(false)
+}
 
 /// Optional ATIF trajectory exporter.
 pub(crate) struct AtifExporter {
@@ -25,9 +39,16 @@ impl AtifExporter {
     }
 
     /// Finalize, serialize, and write off the async executor.
+    ///
+    /// Never regress a fuller trajectory with an emptier one: resumed or
+    /// short-lived probes share the session derived path but start with a
+    /// fresh in-memory builder. Overwriting would destroy the good export
+    /// (observed: 1220-event session left with `steps: []`), breaking
+    /// eval/replay parity with the canonical `events.jsonl`.
     pub(crate) async fn finish(self) -> Result<(u64, u64, u64)> {
         let Self { builder, output_path } = self;
-        let (json, metrics) = spawn_blocking(move || {
+        let (json, metrics, new_steps) = spawn_blocking(move || {
+            let new_steps = builder.step_count() as u64;
             let trajectory = builder.finish(None);
             let metrics = trajectory
                 .final_metrics
@@ -41,19 +62,94 @@ impl AtifExporter {
                 })
                 .unwrap_or((0, 0, 0));
             let json = serde_json::to_vec_pretty(&trajectory)?;
-            Ok::<_, serde_json::Error>((json, metrics))
+            Ok::<_, serde_json::Error>((json, metrics, new_steps))
         })
         .await
         .context("ATIF serialization task failed")??;
 
+        if new_steps == 0 && existing_trajectory_has_steps(&output_path) {
+            tracing::warn!(
+                target: "vtcode.harness",
+                phase = "atif_finish",
+                path = %output_path.display(),
+                "skipping empty ATIF overwrite to preserve existing trajectory"
+            );
+            return Ok(metrics);
+        }
+
+        let output_path_for_write = output_path.clone();
         spawn_blocking(move || {
-            if let Some(parent) = output_path.parent() {
+            if let Some(parent) = output_path_for_write.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::write(output_path, json)
+            fs::write(output_path_for_write, json)
         })
         .await
         .context("ATIF write task failed")??;
         Ok(metrics)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failed_turn(message: &str) -> vtcode_core::exec::events::ThreadEvent {
+        vtcode_core::exec::events::ThreadEvent::TurnFailed(vtcode_core::exec::events::TurnFailedEvent {
+            message: message.to_string(),
+            usage: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn empty_export_preserves_existing_trajectory() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("atif-trajectory.json");
+        fs::write(
+            &path,
+            serde_json::json!({
+                "schema_version": "ATIF-v1.4",
+                "session_id": "sess",
+                "agent": {"name": "vtcode", "version": "test"},
+                "steps": [{"step_id": 1, "timestamp": "t", "source": "agent", "message": "prior work"}],
+                "final_metrics": {"total_prompt_tokens": 10, "total_completion_tokens": 1, "total_steps": 1}
+            })
+            .to_string(),
+        )
+        .expect("seed existing trajectory");
+
+        let exporter = AtifExporter::new("test-model", path.clone());
+        let _ = exporter.finish().await.expect("finish");
+
+        let preserved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("read preserved")).expect("parse preserved");
+        assert_eq!(preserved["steps"].as_array().map(Vec::len), Some(1));
+        assert_eq!(preserved["steps"][0]["message"], serde_json::json!("prior work"));
+    }
+
+    #[tokio::test]
+    async fn non_empty_export_overwrites() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("atif-trajectory.json");
+        fs::write(
+            &path,
+            serde_json::json!({
+                "schema_version": "ATIF-v1.4",
+                "session_id": "sess",
+                "agent": {"name": "vtcode", "version": "test"},
+                "steps": [],
+                "final_metrics": {"total_prompt_tokens": 0, "total_completion_tokens": 0, "total_steps": 0}
+            })
+            .to_string(),
+        )
+        .expect("seed empty trajectory");
+
+        let mut exporter = AtifExporter::new("test-model", path.clone());
+        exporter.process_event(&failed_turn("turn blocked"));
+        let _ = exporter.finish().await.expect("finish");
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("read written")).expect("parse written");
+        assert_eq!(written["steps"].as_array().map(Vec::len), Some(1));
     }
 }

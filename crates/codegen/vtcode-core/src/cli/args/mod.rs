@@ -57,8 +57,7 @@ pub struct Cli {
         value_name = "WORKSPACE",
         value_hint = ValueHint::DirPath,
         value_parser = parse_workspace_directory,
-        global = true,
-        last = true
+        global = true
     )]
     pub workspace_path: Option<PathBuf>,
 

@@ -25,7 +25,9 @@ use crate::agent::runloop::unified::tool_routing::{
 use crate::agent::runloop::unified::turn::context::{
     PreparedAssistantToolCall, TurnHandlerOutcome, TurnLoopResult, TurnProcessingContext,
 };
-use looping::shell_run_signature;
+pub(crate) use looping::low_signal_family_key;
+use looping::maybe_apply_spool_read_offset_hint;
+pub(crate) use looping::{shell_failure_error_signature, shell_run_signature};
 mod budget;
 mod fallbacks;
 mod guards;
@@ -55,8 +57,6 @@ use guards::{
     enforce_repeated_read_only_call_guard, enforce_repeated_shell_run_guard, enforce_spool_chunk_read_guard,
 };
 pub(crate) use handlers_batch::{execute_and_handle_tool_call, handle_tool_call_batch_prepared};
-pub(crate) use looping::low_signal_family_key;
-use looping::maybe_apply_spool_read_offset_hint;
 use rate_limit::acquire_adaptive_rate_limit_slot;
 use recovery::try_interactive_circuit_recovery;
 pub(crate) use types::{PreparedToolCall, ToolOutcomeContext, ValidationResult};

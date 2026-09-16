@@ -164,6 +164,10 @@ pub fn generate_tool_guidelines_for_profile(
             "- Run verifiers unpiped — standalone or pure `&&`; `|`/`;`/`||` masks the exit status so piped checks stay unverified; prefer `max_output_tokens`."
                 .to_string(),
         );
+        // Tool-latency tail is dominated by full builds (observed p90 ~18s):
+        // verify incrementally first. Kept tool-agnostic: fast checks exist
+        // in every stack (`cargo check`, `tsc --noEmit`, `pytest --collect-only`).
+        lines.push("- Fast checks before full builds.".to_string());
     }
     // "Diagnose from evidence; never bypass safeguards" and the
     // completion-as-checkpoint line are already stated unconditionally in the
@@ -414,7 +418,7 @@ fn browse_tool_guidance(
     shell_profile: ResolvedShellPromptProfile,
 ) -> Option<String> {
     if has_exec {
-        return Some(shell_browse_guidance(shell_profile).to_string());
+        return Some(shell_browse_guidance(shell_profile, has_search));
     }
 
     if !(has_search || has_list_files || has_read_file) {
@@ -435,13 +439,33 @@ pub fn render_shell_profile_guidance(shell_profile: ResolvedShellPromptProfile) 
     }
 }
 
-fn shell_browse_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static str {
+fn shell_browse_guidance(shell_profile: ResolvedShellPromptProfile, has_search: bool) -> String {
+    // Sessions show `exec_command` + `rg` crowding out `code_search`
+    // (observed 654 exec vs 15 code_search in one run): `rg` scans text
+    // while `code_search` resolves definitions and exact usages, so route
+    // code search to the dedicated tool whenever it is available.
+    const SEARCH_PREFERENCE_UNIX: &str = " Prefer `code_search` over `rg`/`grep` for code.";
+    const SEARCH_PREFERENCE_POWERSHELL: &str = " Prefer `code_search` over `Select-String` for code.";
     match shell_profile {
         ResolvedShellPromptProfile::UnixLike => {
-            "- Use `exec_command.cmd` with `ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing."
+            let mut line = if has_search {
+                "- Use `exec_command.cmd` with `ls`, `find`, `cat`, `sed`, and `awk` for repository browsing."
+                    .to_string()
+            } else {
+                "- Use `exec_command.cmd` with `ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing."
+                    .to_string()
+            };
+            if has_search {
+                line.push_str(SEARCH_PREFERENCE_UNIX);
+            }
+            line
         }
         ResolvedShellPromptProfile::PowerShell => {
-            "- Use `exec_command.cmd` with native PowerShell commands such as `Get-ChildItem`, `Select-String`, `Get-Content`, and `Where-Object` for repository browsing."
+            let mut line = "- Use `exec_command.cmd` with native PowerShell commands such as `Get-ChildItem`, `Select-String`, `Get-Content`, and `Where-Object` for repository browsing.".to_string();
+            if has_search {
+                line.push_str(SEARCH_PREFERENCE_POWERSHELL);
+            }
+            line
         }
     }
 }
@@ -613,6 +637,12 @@ mod tests {
         assert!(guidelines.contains("git diff -- <path>"));
         assert!(guidelines.contains("build tools"));
         assert!(guidelines.contains("test tools"));
+        // Search steering: with both tools present the browse line must
+        // prefer `code_search` over `rg` for code (session evidence showed
+        // `rg`-via-exec crowding out `code_search` 654:15).
+        assert!(guidelines.contains("Prefer `code_search` over `rg`/`grep` for code"));
+        // Latency steering: fast checks before full builds (tool-agnostic).
+        assert!(guidelines.contains("Fast checks before full builds"));
         // Completion-as-checkpoint guidance lives in the operating profiles;
         // the guidelines section no longer repeats it.
         assert!(!guidelines.contains("Completion is a checkpoint"));
@@ -677,6 +707,9 @@ mod tests {
         assert!(guidelines.contains("existing `session_id`"));
         assert!(guidelines.contains("Bash `histverify`"));
         assert!(guidelines.contains("zsh `HIST_VERIFY`"));
+        // No `code_search` in this profile: the search-preference clause
+        // must not spend budget naming an unavailable tool.
+        assert!(!guidelines.contains("Prefer `code_search` over `rg`"));
     }
 
     #[test]
@@ -692,6 +725,7 @@ mod tests {
         assert!(guidelines.contains("`Get-ChildItem`"));
         assert!(guidelines.contains("`Select-String`"));
         assert!(guidelines.contains("native PowerShell syntax"));
+        assert!(guidelines.contains("Prefer `code_search` over `Select-String` for code"));
         assert!(guidelines.contains("Advanced `code_search` takes `query`"));
         assert!(guidelines.contains("literal smart-case"));
         assert!(guidelines.contains("omit unused filters"));
@@ -931,7 +965,8 @@ mod tests {
         let guidelines =
             generate_runtime_tool_guidelines_for_profile(&tools, false, ResolvedShellPromptProfile::UnixLike);
 
-        assert!(guidelines.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+        assert!(guidelines.contains("`ls`, `find`, `cat`, `sed`, and `awk` for repository browsing"));
+        assert!(guidelines.contains("Prefer `code_search` over `rg`/`grep` for code"));
         assert!(guidelines.contains("Advanced `code_search` takes `query`"));
         assert!(guidelines.contains("literal smart-case"));
         assert!(guidelines.contains("shell-only tasks"));
@@ -982,7 +1017,8 @@ mod tests {
         assert!(!powershell_prompt.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
 
         assert!(unix_prompt.contains("## Active Tools"));
-        assert!(unix_prompt.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk`"));
+        assert!(unix_prompt.contains("`ls`, `find`, `cat`, `sed`, and `awk` for repository browsing"));
+        assert!(unix_prompt.contains("Prefer `code_search` over `rg`/`grep` for code"));
         assert!(unix_prompt.contains("Advanced `code_search` takes `query`"));
         assert!(unix_prompt.contains("literal smart-case"));
         assert!(!unix_prompt.contains("`Get-ChildItem`"));

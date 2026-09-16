@@ -31,7 +31,13 @@ pub(crate) fn parse(input: &str) -> Result<Vec<PatchOperation>, PatchError> {
     let mut line_number = 2usize;
 
     while offset < last {
-        if lines[offset].trim().is_empty() {
+        let trimmed = lines[offset].trim();
+        if trimmed.is_empty() || trimmed == END_PATCH_MARKER {
+            // Tolerate stray `*** End Patch` markers: models often duplicate
+            // the envelope terminator (observed: trailing `*** End Patch`
+            // twice fails with "invalid hunk header '*** End Patch'"). The
+            // authoritative terminator is the final line, excluded via `last`,
+            // so interior duplicates carry no information.
             offset += 1;
             line_number += 1;
             continue;
@@ -404,5 +410,25 @@ mod tests {
         // well-formed patches.
         let ops = parse("*** Begin Patch\n*** Add File: f.txt\n+hi\n*** End Patch").expect("valid patch should parse");
         assert_eq!(ops.len(), 1);
+    }
+
+    #[test]
+    fn duplicated_trailing_end_patch_marker_is_tolerated() {
+        // Observed in live sessions: the model emits `*** End Patch` twice,
+        // which previously failed with "invalid hunk header '*** End Patch'".
+        let ops = parse(
+            "*** Begin Patch\n*** Update File: crates/codegen/vtcode-core/src/cli/man_pages.rs\n@@\n+line\n*** End Patch\n*** End Patch",
+        )
+        .expect("duplicated end marker should parse");
+        assert_eq!(ops.len(), 1);
+    }
+
+    #[test]
+    fn stray_end_patch_between_operations_is_tolerated() {
+        let ops = parse(
+            "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n*** Update File: b.txt\n@@\n+yo\n*** End Patch",
+        )
+        .expect("interior end marker should parse");
+        assert_eq!(ops.len(), 2);
     }
 }

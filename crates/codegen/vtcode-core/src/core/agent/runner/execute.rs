@@ -8,11 +8,11 @@ use super::execute_helpers::{
 use super::helpers::detect_textual_exec_tool_call;
 use super::orchestration::EvaluatorGateOutcome;
 use super::prompt_alignment;
-use crate::config::build_openai_prompt_cache_key;
 use crate::config::constants::tools;
 use crate::config::models::{ModelId, Provider as ModelProvider};
 use crate::config::tool_loop_limit_reached;
 use crate::config::types::{ReasoningEffortLevel, SystemPromptMode, VerbosityLevel};
+use crate::config::{build_openai_prompt_cache_key, map_prompt_cache_key_for_provider};
 use crate::core::agent::blocked_handoff::{BlockedHandoffResume, write_blocked_handoff_with_resume};
 use crate::core::agent::completion::{check_completion_candidate, check_for_response_loop};
 use crate::core::agent::events::ExecEventRecorder;
@@ -827,13 +827,17 @@ impl AgentRunner {
                     context_management: None,
                     previous_response_id,
                     prompt_cache_key: build_openai_prompt_cache_key(
-                        provider_name.eq_ignore_ascii_case("openai")
+                        (provider_name.eq_ignore_ascii_case("openai")
+                            || provider_name.eq_ignore_ascii_case("merge-gateway"))
                             && self.config().prompt_cache.enabled
                             && self.config().prompt_cache.providers.openai.enabled,
                         &self.config().prompt_cache.providers.openai.prompt_cache_key_mode,
                         Some(&self.session_id),
                     )
-                    .map(|key| format!("{key}-{capability_prefix_hash:016x}")),
+                    .map(|key| {
+                        let key = map_prompt_cache_key_for_provider(&provider_name, key);
+                        format!("{key}-{capability_prefix_hash:016x}")
+                    }),
                     prompt_cache_profile: None,
                     tool_catalog_hash: prompt_bundle.request_envelope.catalog_hash(),
                     system_prompt_prefix_hash: Some(capability_prefix_hash),
