@@ -119,10 +119,19 @@ pub(crate) fn build_mid_turn_resume_message(
     stall_reason: Option<&str>,
     verification_snapshot: (bool, u8),
     touched_files: &[String],
+    compaction_applied: bool,
 ) -> String {
+    // Report the handoff honestly: the AlreadyCompact and Failed paths reuse
+    // this note without summarizing, so they must not claim a compaction
+    // happened (previously every switch asserted "was auto-compacted").
+    let continuity = if compaction_applied {
+        "Conversation was auto-compacted to preserve context; summary plus recent tail retained."
+    } else {
+        "Conversation history was left intact; full context retained."
+    };
     let mut message = format!(
         "{MODEL_SWITCH_RESUME_PREFIX} {prev_provider}/{prev_model} -> {new_provider}/{new_model}. \
-        Conversation was auto-compacted to preserve context; summary plus recent tail retained. \
+        {continuity} \
         Continue seamlessly from where the previous model left off. \
         Reuse tool outputs already in history instead of re-reading files. \
         Do not claim success from an unverified plan."
@@ -180,6 +189,7 @@ fn inject_mid_turn_resume(
     new_provider: &str,
     new_model: &str,
     session_stats: &SessionStats,
+    compaction_applied: bool,
 ) -> bool {
     if history.is_empty() {
         return false;
@@ -192,6 +202,7 @@ fn inject_mid_turn_resume(
         session_stats.turn_stall_reason(),
         session_stats.verification_snapshot(),
         &session_stats.recent_touched_files(),
+        compaction_applied,
     );
     if let Some(last) = history.last()
         && is_model_switch_resume(last)
@@ -286,7 +297,15 @@ pub(crate) async fn compact_on_model_switch(
             // Keep `compacted_len` as emitted in `thread.compact_boundary` for
             // telemetry/UI consistency; the trailing resume note is accounted
             // separately in the log line.
-            inject_mid_turn_resume(history, &prev_provider, &prev_model, &new_provider, &new_model, session_stats);
+            inject_mid_turn_resume(
+                history,
+                &prev_provider,
+                &prev_model,
+                &new_provider,
+                &new_model,
+                session_stats,
+                true,
+            );
             Ok(ModelSwitchCompactionOutcome::Compacted(outcome))
         }
         Ok(None) => {
@@ -296,7 +315,15 @@ pub(crate) async fn compact_on_model_switch(
             session_stats.begin_request_segment(SegmentBoundaryReason::Model);
             context_manager.take_compaction_pending();
             context_manager.reset_token_pressure_after_compaction();
-            inject_mid_turn_resume(history, &prev_provider, &prev_model, &new_provider, &new_model, session_stats);
+            inject_mid_turn_resume(
+                history,
+                &prev_provider,
+                &prev_model,
+                &new_provider,
+                &new_model,
+                session_stats,
+                false,
+            );
             Ok(ModelSwitchCompactionOutcome::AlreadyCompact)
         }
         Err(err) => {
@@ -308,7 +335,15 @@ pub(crate) async fn compact_on_model_switch(
             session_stats.begin_request_segment(SegmentBoundaryReason::Model);
             context_manager.take_compaction_pending();
             context_manager.reset_token_pressure_after_compaction();
-            inject_mid_turn_resume(history, &prev_provider, &prev_model, &new_provider, &new_model, session_stats);
+            inject_mid_turn_resume(
+                history,
+                &prev_provider,
+                &prev_model,
+                &new_provider,
+                &new_model,
+                session_stats,
+                false,
+            );
             Ok(ModelSwitchCompactionOutcome::Failed(err))
         }
     }
@@ -580,6 +615,7 @@ mod tests {
         let text = last.content.as_text().to_string();
         assert!(text.contains("Model switched mid-turn: openai/gpt-x -> anthropic/claude-x"));
         assert!(text.contains("Continue seamlessly"));
+        assert!(text.contains("auto-compacted"));
     }
 
     #[tokio::test]
@@ -636,6 +672,7 @@ mod tests {
             stats.turn_stall_reason(),
             stats.verification_snapshot(),
             &stats.recent_touched_files(),
+            true,
         );
 
         assert!(message.contains("openai/gpt-x -> anthropic/claude-x"));
@@ -652,6 +689,7 @@ mod tests {
             clean.turn_stall_reason(),
             clean.verification_snapshot(),
             &clean.recent_touched_files(),
+            true,
         );
         assert!(!clean_message.contains("Verification gate pending"));
         assert!(!clean_message.contains("Previous turn stalled"));
@@ -663,14 +701,14 @@ mod tests {
         let stats = SessionStats::default();
         let mut history = test_history();
         let base_len = history.len();
-        let first = inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats);
+        let first = inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats, true);
         assert!(first);
         assert_eq!(history.len(), base_len + 1);
-        let second = inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats);
+        let second = inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats, true);
         assert!(!second);
         assert_eq!(history.len(), base_len + 1);
         // Reverse route replaces the trailing note instead of stacking.
-        let third = inject_mid_turn_resume(&mut history, "anthropic", "claude-x", "openai", "gpt-x", &stats);
+        let third = inject_mid_turn_resume(&mut history, "anthropic", "claude-x", "openai", "gpt-x", &stats, true);
         assert!(third);
         assert_eq!(history.len(), base_len + 1);
         assert!(
@@ -678,6 +716,35 @@ mod tests {
                 .last()
                 .is_some_and(|last| last.content.as_text().contains("anthropic/claude-x -> openai/gpt-x"))
         );
+    }
+
+    #[test]
+    fn resume_without_compaction_reports_history_preserved() {
+        let stats = SessionStats::default();
+        let compacted_note = build_mid_turn_resume_message(
+            "openai",
+            "gpt-x",
+            "anthropic",
+            "claude-x",
+            stats.turn_stall_reason(),
+            stats.verification_snapshot(),
+            &stats.recent_touched_files(),
+            true,
+        );
+        let preserved_note = build_mid_turn_resume_message(
+            "openai",
+            "gpt-x",
+            "anthropic",
+            "claude-x",
+            stats.turn_stall_reason(),
+            stats.verification_snapshot(),
+            &stats.recent_touched_files(),
+            false,
+        );
+        assert!(compacted_note.contains("auto-compacted"));
+        assert!(!preserved_note.contains("auto-compacted"));
+        assert!(preserved_note.contains("left intact"));
+        assert!(preserved_note.contains("Continue seamlessly"));
     }
 
     #[test]
@@ -698,6 +765,7 @@ mod tests {
             stats.turn_stall_reason(),
             stats.verification_snapshot(),
             &stats.recent_touched_files(),
+            true,
         );
 
         assert!(!message.contains('\n'));
@@ -710,8 +778,8 @@ mod tests {
     fn strip_prior_resumes_bounds_sequential_switches() {
         let stats = SessionStats::default();
         let mut history = test_history();
-        assert!(inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats));
-        assert!(inject_mid_turn_resume(&mut history, "anthropic", "claude-x", "openai", "gpt-y", &stats));
+        assert!(inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats, true));
+        assert!(inject_mid_turn_resume(&mut history, "anthropic", "claude-x", "openai", "gpt-y", &stats, true));
         // Replace keeps one trailing note, but an older note could still linger
         // mid-history after manual pushes; strip collapses to zero before next switch.
         history.insert(0, Message::system("Model switched mid-turn: stale -> route. Old.".to_string()));
@@ -727,7 +795,7 @@ mod tests {
     fn empty_history_never_resumes() {
         let stats = SessionStats::default();
         let mut history: Vec<Message> = Vec::new();
-        assert!(!inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats));
+        assert!(!inject_mid_turn_resume(&mut history, "openai", "gpt-x", "anthropic", "claude-x", &stats, true));
         assert!(history.is_empty());
     }
 
@@ -889,6 +957,9 @@ mod tests {
         assert_eq!(history.len(), original_len + 1);
         let resume = history.last().expect("resume injected").content.as_text().to_string();
         assert!(resume.contains("Model switched mid-turn: openai/gpt-x -> anthropic/claude-x"));
+        // No compaction ran on this path, so the note must not claim one did.
+        assert!(!resume.contains("auto-compacted"));
+        assert!(resume.contains("left intact"));
         // Lineage preserved so the next request still advises exactly once.
         assert_eq!(session_stats.record_prompt_cache_fingerprint("claude-x", 11, Some(22)), "model");
         assert!(session_stats.model_change_advisory().is_some());

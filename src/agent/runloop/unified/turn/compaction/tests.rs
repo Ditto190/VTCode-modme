@@ -95,6 +95,37 @@ impl LLMProvider for LocalCompactionProvider {
     }
 }
 
+/// Local-summarization stub with a realistic window. `LocalCompactionProvider`
+/// resolves to a ~1 KiB tail *and* a ~360-token summarizer budget, so any
+/// history large enough to shrink gets its summary/envelope truncated back
+/// off by output bounding. Tests that assert on compacted shape (summary and
+/// envelope present, message counts shrunk) need a window where the tail and
+/// the output budget agree.
+struct RoomyLocalCompactionProvider;
+
+#[async_trait]
+impl LLMProvider for RoomyLocalCompactionProvider {
+    fn name(&self) -> &str {
+        "stub-roomy"
+    }
+
+    async fn generate(&self, _request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        Ok(LLMResponse::new("stub-model", "summary"))
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        vec!["stub-model".to_string()]
+    }
+
+    fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+        Ok(())
+    }
+
+    fn effective_context_size(&self, _model: &str) -> usize {
+        128_000
+    }
+}
+
 #[async_trait]
 impl LLMProvider for ProviderCompactionProvider {
     fn name(&self) -> &str {
@@ -315,7 +346,9 @@ impl LLMProvider for InlineRejectingRecoveryProvider {
     }
 
     fn effective_context_size(&self, _model: &str) -> usize {
-        1_000
+        // Roomy window so the continuity tail does not cover the fixture and
+        // the Local fallback genuinely shrinks the history.
+        128_000
     }
 }
 
@@ -341,6 +374,52 @@ fn test_history_with_memory_envelope() -> Vec<Message> {
         "[Session Memory Envelope]\nSummary:\nExisting summary".to_string(),
     )];
     history.extend(test_history());
+    history
+}
+
+/// Build a tool-heavy history that exceeds the continuity-tail budget, so
+/// local compaction genuinely shrinks it. Each cycle is a complete
+/// user-anchored protocol group with a distinct command (defeats file-read
+/// de-duplication) and a sizable tool output. Mirrors real sessions where
+/// dozens of assistant/tool turns sit behind many user messages. Size the
+/// cycles to the provider window under test (see `ROOMY_HISTORY_CYCLES`).
+fn tool_heavy_history(cycles: usize) -> Vec<Message> {
+    let mut history = Vec::with_capacity(cycles.saturating_mul(3).saturating_add(2));
+    for index in 0..cycles {
+        history.push(Message::user(format!("Investigate failure {index} in module alpha and report the root cause")));
+        let call = ToolCall::function(
+            format!("call-{index}"),
+            tool_names::EXEC_COMMAND.to_string(),
+            json!({ "cmd": format!("grep -rn pattern-{index} src/module-{index}.rs") }).to_string(),
+        );
+        let mut assistant = Message::assistant(format!("Running diagnostics for failure {index}"));
+        assistant.tool_calls = Some(vec![call]);
+        history.push(assistant);
+        let output =
+            format!("diagnostic output for failure {index}: {}", "all checks passed without errors. ".repeat(40));
+        history.push(Message::tool_response(format!("call-{index}"), output));
+    }
+    history.push(Message::user("Summarize the investigation so far".to_string()));
+    history.push(Message::assistant("All investigated failures share the same root cause.".to_string()));
+    history
+}
+
+/// Cycles sized for roomy providers (tens of KiB continuity tails).
+const ROOMY_HISTORY_CYCLES: usize = 120;
+
+/// Mirror of the reported `86 -> 88` session: many tiny assistant/tool turns
+/// behind two user messages, fitting entirely within the continuity tail.
+/// Compaction must report already-compact instead of growing the history.
+fn tail_fitting_tool_history() -> Vec<Message> {
+    let mut history = vec![Message::user(
+        "refine and update README at Why VT Code section".to_string(),
+    )];
+    for index in 0..40 {
+        history.push(Message::assistant(format!("progress note {index}")));
+        history.push(Message::tool_response(format!("call-{index}"), format!("ok {index}")));
+    }
+    history.push(Message::user("continue".to_string()));
+    history.push(Message::assistant("working on it".to_string()));
     history
 }
 
@@ -400,10 +479,12 @@ fn test_context_manager() -> ContextManager {
 #[tokio::test]
 async fn manual_compaction_succeeds_without_server_side_support() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
-    let mut history = test_history();
+    let provider = RoomyLocalCompactionProvider;
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+    let original_history = history.clone();
+    let original_len = history.len();
     let mut session_stats = SessionStats::default();
-    session_stats.set_previous_response_chain("stub", "stub-model", Some("resp_123"), &[]);
+    session_stats.set_previous_response_chain("stub-roomy", "stub-model", Some("resp_123"), &[]);
     let mut context_manager = test_context_manager();
     context_manager.update_token_usage(&Some(Usage {
         prompt_tokens: 900,
@@ -426,25 +507,102 @@ async fn manual_compaction_succeeds_without_server_side_support() {
     .expect("manual compaction succeeds")
     .expect("history should compact");
 
-    assert_eq!(outcome.original_len, 12);
-    // This fixture is smaller than the internal continuity-tail target, so
-    // local compaction keeps the complete protocol history and adds the
-    // summary/envelope metadata without dropping any live context.
-    assert!(outcome.compacted_len >= outcome.original_len);
+    assert_eq!(outcome.original_len, original_len);
+    // The history exceeds the continuity tail, so compaction must strictly
+    // shrink the message count (never report growth as success).
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
     assert_local_compaction_history(&history, 0);
-    assert_history_contains_messages(&history, &test_history());
-    assert_eq!(session_stats.previous_response_id_for("stub", "stub-model"), None);
+    // Continuity is preserved: the newest turn survives verbatim while the
+    // oldest summarized-away turns are gone.
+    assert!(
+        history
+            .iter()
+            .any(|message| message.content.as_text() == "Summarize the investigation so far"),
+        "continuity tail should retain the latest user turn"
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|message| message.content.as_text().contains("Investigate failure 0")),
+        "oldest turns should be summarized away, got {} messages",
+        history.len()
+    );
+    assert_ne!(history, original_history);
+    assert_eq!(session_stats.previous_response_id_for("stub-roomy", "stub-model"), None);
     assert!(context_manager.current_token_usage() <= 900);
     assert!(latest_memory_envelope_path_for_session(temp.path(), "session-alpha").is_some());
 }
 
 #[tokio::test]
-async fn manual_compaction_emits_local_compaction_boundary_event() {
+async fn manual_compaction_reports_already_compact_when_tail_covers_history() {
+    // Regression test for the reported `86 -> 88` growth: a tool-heavy history
+    // that fits entirely within the continuity tail must not be "compacted"
+    // into a longer history. Both entry points return `None` and leave the
+    // history untouched.
     let temp = tempdir().expect("tempdir");
     let provider = LocalCompactionProvider;
+    for entry in [
+        "manual_compact_history_in_place",
+        "compact_history_on_model_switch_in_place",
+    ] {
+        let mut history = tail_fitting_tool_history();
+        let original_history = history.clone();
+        let mut session_stats = SessionStats::default();
+        let mut context_manager = test_context_manager();
+
+        let outcome = if entry == "manual_compact_history_in_place" {
+            manual_compact_history_in_place(
+                CompactionContext::new(
+                    &provider,
+                    "stub-model",
+                    "session-alpha",
+                    "thread-alpha",
+                    temp.path(),
+                    Some(&VTCodeConfig::default()),
+                    None,
+                    None,
+                ),
+                CompactionState::new(&mut history, &mut session_stats, &mut context_manager),
+                &ManualCompactionOptions::default(),
+                false,
+            )
+            .await
+            .expect("compaction check succeeds")
+        } else {
+            compact_history_on_model_switch_in_place(
+                CompactionContext::new(
+                    &provider,
+                    "stub-model",
+                    "session-alpha",
+                    "thread-alpha",
+                    temp.path(),
+                    Some(&VTCodeConfig::default()),
+                    None,
+                    None,
+                ),
+                CompactionState::new(&mut history, &mut session_stats, &mut context_manager),
+            )
+            .await
+            .expect("compaction check succeeds")
+        };
+
+        assert!(outcome.is_none(), "{entry} must not report growth as compaction");
+        assert_eq!(history, original_history, "{entry} must leave history untouched");
+    }
+}
+
+#[tokio::test]
+async fn manual_compaction_emits_local_compaction_boundary_event() {
+    let temp = tempdir().expect("tempdir");
+    let provider = RoomyLocalCompactionProvider;
     let harness_path = temp.path().join("harness.jsonl");
     let harness_emitter = HarnessEventEmitter::new(harness_path.clone()).expect("emitter");
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
 
@@ -467,6 +625,12 @@ async fn manual_compaction_emits_local_compaction_boundary_event() {
     .expect("history should compact");
 
     assert_eq!(outcome.mode, vtcode_core::exec::events::CompactionMode::Local);
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
     let content = fs::read_to_string(harness_path).expect("read harness log");
     assert!(content.contains("\"type\":\"thread.compact_boundary\""));
     assert!(content.contains("\"mode\":\"local\""));
@@ -612,8 +776,8 @@ async fn manual_compaction_native_only_rejects_provider_without_standalone_compa
 #[tokio::test]
 async fn manual_compaction_compacts_locally_for_non_native_provider() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
-    let mut history = test_history();
+    let provider = RoomyLocalCompactionProvider;
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
 
@@ -637,7 +801,12 @@ async fn manual_compaction_compacts_locally_for_non_native_provider() {
     .expect("history should compact");
 
     assert_eq!(outcome.mode, vtcode_core::exec::events::CompactionMode::Local);
-    assert_history_contains_messages(&history, &test_history());
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
     assert_local_compaction_history(&history, 0);
 }
 
@@ -1359,7 +1528,8 @@ async fn provider_compaction_error_preserves_existing_history() {
 async fn recovery_compaction_falls_back_to_local_when_inline_request_errors() {
     let temp = tempdir().expect("tempdir");
     let provider = InlineRejectingRecoveryProvider;
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+    let original_history = history.clone();
     let original_len = history.len();
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
@@ -1386,21 +1556,27 @@ async fn recovery_compaction_falls_back_to_local_when_inline_request_errors() {
     .expect("history should compact");
 
     assert_eq!(outcome.mode, vtcode_core::exec::events::CompactionMode::Local);
-    assert!(outcome.compacted_len >= outcome.original_len);
-    assert_history_contains_messages(&history, &test_history());
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
+    assert_ne!(history, original_history);
 }
 
 #[tokio::test]
 async fn auto_compaction_replaces_history_and_clears_response_chain() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
+    let provider = RoomyLocalCompactionProvider;
     let mut vt_cfg = VTCodeConfig::default();
     vt_cfg.agent.harness.auto_compaction_enabled = true;
     vt_cfg.agent.harness.auto_compaction_threshold_tokens = Some(700);
 
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+    let original_len = history.len();
     let mut session_stats = SessionStats::default();
-    session_stats.set_previous_response_chain("stub", "stub-model", Some("resp_123"), &[]);
+    session_stats.set_previous_response_chain("stub-roomy", "stub-model", Some("resp_123"), &[]);
     let mut context_manager = test_context_manager();
     context_manager.update_token_usage(&Some(Usage {
         prompt_tokens: 900,
@@ -1426,14 +1602,18 @@ async fn auto_compaction_replaces_history_and_clears_response_chain() {
     .expect("auto compaction succeeds")
     .expect("history should compact");
 
-    assert_eq!(outcome.original_len, 12);
-    // The complete fixture fits within the continuity tail, so compaction
-    // preserves all protocol messages and only adds durable metadata.
-    assert!(outcome.compacted_len >= outcome.original_len);
+    assert_eq!(outcome.original_len, original_len);
+    // The history exceeds the continuity tail, so auto-compaction must strictly
+    // shrink the message count (never report growth as success).
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
     assert_local_compaction_history(&history, 4);
-    assert_history_contains_messages(&history, &test_history());
     assert!(history[0].content.as_text().contains("Previous conversation summary"));
-    assert_eq!(session_stats.previous_response_id_for("stub", "stub-model"), None);
+    assert_eq!(session_stats.previous_response_id_for("stub-roomy", "stub-model"), None);
     assert!(context_manager.current_token_usage() <= 700);
     assert!(latest_memory_envelope_path_for_session(temp.path(), "session-alpha").is_some());
 }
@@ -1443,7 +1623,8 @@ async fn auto_compaction_uses_the_effective_session_safety_ceiling() {
     let temp = tempdir().expect("tempdir");
     let provider = ContextSizedProvider { context_size: 500_000, provider_name: "openai" };
     let vt_cfg = VTCodeConfig::default();
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+    let original_len = history.len();
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
     context_manager.update_token_usage(&Some(Usage {
@@ -1470,15 +1651,23 @@ async fn auto_compaction_uses_the_effective_session_safety_ceiling() {
     .expect("auto compaction succeeds")
     .expect("496k prompt pressure must cross the 495.9k provider boundary");
 
-    assert!(outcome.compacted_len >= outcome.original_len);
+    assert_eq!(outcome.original_len, original_len);
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
     assert!(context_manager.current_token_usage() <= 495_904);
 }
 
 #[tokio::test]
 async fn targeted_compaction_preserves_prefix_and_replaces_suffix() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
-    let mut history = test_history();
+    let provider = RoomyLocalCompactionProvider;
+    let mut history = vec![Message::user("keep this prefix".to_string())];
+    history.extend(tool_heavy_history(ROOMY_HISTORY_CYCLES));
+    let original_len = history.len();
     let preserved_prefix = history[..1].to_vec();
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
@@ -1505,15 +1694,23 @@ async fn targeted_compaction_preserves_prefix_and_replaces_suffix() {
     .expect("history should compact");
 
     assert_eq!(&history[..1], preserved_prefix.as_slice());
-    assert_eq!(outcome.original_len, 12);
-    // The suffix fits within the continuity tail, so it remains verbatim after
-    // the preserved prefix rather than being reduced to a message-count-based
-    // approximation.
-    assert!(outcome.compacted_len >= outcome.original_len);
-    // The suffix begins with the assistant/tool completion for the first
-    // group; without its user anchor that partial group belongs in the
-    // summary prefix. Newer complete groups remain verbatim.
-    assert_history_contains_messages(&history, &test_history()[3..]);
+    assert_eq!(outcome.original_len, original_len);
+    // The suffix exceeds the continuity tail, so it compacts to a summary
+    // plus tail instead of being kept verbatim.
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
+    // The suffix's oldest turns are summarized away while its newest turn
+    // remains verbatim.
+    assert!(
+        history
+            .iter()
+            .any(|m| m.content.as_text() == "Summarize the investigation so far")
+    );
+    assert!(!history.iter().any(|m| m.content.as_text().contains("Investigate failure 0")));
     assert!(
         history
             .iter()
@@ -1530,18 +1727,19 @@ async fn targeted_compaction_preserves_prefix_and_replaces_suffix() {
 #[tokio::test]
 async fn recovery_compaction_preserves_current_turn_suffix_and_emits_event() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
+    let provider = RoomyLocalCompactionProvider;
     let harness_path = temp.path().join("recovery-harness.jsonl");
     let harness_emitter = HarnessEventEmitter::new(harness_path.clone()).expect("emitter");
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+    let prefix_len = history.len();
     history.push(Message::system("Previous turn already completed tool execution. Reuse the latest tool outputs in history instead of rerunning the same exploration. If those tool outputs include `critical_note`, `hint`, `next_action`, `fallback_tool`, `fallback_tool_args`, or `rerun_hint`, follow that guidance first.".to_string()));
     history.push(Message::system("Model follow-up failed after tool activity. Tools are disabled on the next pass; provide a direct textual response from the current context and reuse the latest tool outputs already in history.".to_string()));
     history.push(Message::user("current-turn".to_string()));
     history.push(Message::assistant("".to_string()));
     history.push(Message::tool_response("call-current".to_string(), "{\"ok\":true}".to_string()));
-    let preserved_suffix = history[12..].to_vec();
+    let preserved_suffix = history[prefix_len..].to_vec();
     let mut session_stats = SessionStats::default();
-    session_stats.set_previous_response_chain("stub", "stub-model", Some("resp-recovery"), &[]);
+    session_stats.set_previous_response_chain("stub-roomy", "stub-model", Some("resp-recovery"), &[]);
     let mut context_manager = test_context_manager();
     context_manager.update_token_usage(&Some(Usage {
         prompt_tokens: 950,
@@ -1562,17 +1760,21 @@ async fn recovery_compaction_preserves_current_turn_suffix_and_emits_event() {
             Some(&harness_emitter),
         ),
         CompactionState::new(&mut history, &mut session_stats, &mut context_manager),
-        12,
+        prefix_len,
     )
     .await
     .expect("recovery compaction succeeds")
     .expect("history should compact");
 
     assert_eq!(history[history.len() - preserved_suffix.len()..], preserved_suffix);
-    assert!(outcome.compacted_len >= outcome.original_len);
-    assert_eq!(session_stats.previous_response_id_for("stub", "stub-model"), None);
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
+    assert_eq!(session_stats.previous_response_id_for("stub-roomy", "stub-model"), None);
     assert!(context_manager.current_token_usage() <= 900);
-    assert_history_contains_messages(&history, &test_history());
 
     let content = fs::read_to_string(harness_path).expect("read harness log");
     assert_eq!(content.matches("\"type\":\"thread.compact_boundary\"").count(), 1);
@@ -1741,11 +1943,11 @@ fn inject_latest_memory_envelope_requires_exact_session_prefix_match() {
 #[tokio::test]
 async fn no_envelope_written_when_dynamic_history_is_disabled() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
+    let provider = RoomyLocalCompactionProvider;
     let mut vt_cfg = VTCodeConfig::default();
     vt_cfg.context.dynamic.enabled = false;
 
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
 
@@ -1769,8 +1971,8 @@ async fn no_envelope_written_when_dynamic_history_is_disabled() {
 #[tokio::test]
 async fn persisted_envelope_uses_recorded_touched_files_only() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
-    let mut history = test_history();
+    let provider = RoomyLocalCompactionProvider;
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
     history.push(Message::user("Mentioning docs/example.md in prose should not populate touched files.".to_string()));
     let mut session_stats = SessionStats::default();
     session_stats.record_touched_files(["src/main.rs".to_string(), "Cargo.toml".to_string()]);
@@ -1844,8 +2046,9 @@ fn inject_latest_memory_envelope_uses_exact_session_id_when_prefixes_collide() {
 #[tokio::test]
 async fn compaction_strips_existing_memory_envelope_before_recompacting() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
-    let mut history = test_history();
+    let provider = RoomyLocalCompactionProvider;
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+    let original_len = history.len();
     history.insert(0, Message::system("[Session Memory Envelope]\nSummary:\nPersisted summary".to_string()));
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
@@ -1864,9 +2067,13 @@ async fn compaction_strips_existing_memory_envelope_before_recompacting() {
     .expect("compaction succeeds")
     .expect("history should compact");
 
-    assert_eq!(outcome.original_len, 12);
-    assert!(outcome.compacted_len >= outcome.original_len);
-    assert_history_contains_messages(&history, &test_history());
+    assert_eq!(outcome.original_len, original_len);
+    assert!(
+        outcome.compacted_len < outcome.original_len,
+        "expected shrink, got {} -> {}",
+        outcome.original_len,
+        outcome.compacted_len
+    );
     assert_eq!(
         history
             .iter()
@@ -1985,11 +2192,11 @@ async fn budget_resume_summary_reuses_saved_envelope_without_provider_compaction
 #[tokio::test]
 async fn local_and_fork_compaction_preserve_continuity_tail() {
     let temp = tempdir().expect("tempdir");
-    let provider = LocalCompactionProvider;
+    let provider = RoomyLocalCompactionProvider;
     let mut vt_cfg = VTCodeConfig::default();
     vt_cfg.context.dynamic.retained_user_messages = 2;
 
-    let mut history = test_history();
+    let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
     let mut session_stats = SessionStats::default();
     let mut context_manager = test_context_manager();
 
@@ -2193,7 +2400,11 @@ async fn capability_driven_compaction_triggers_for_three_families_at_small_and_l
             assert_eq!(effective_compaction_threshold(Some(&config), &provider, "dynamic-model"), Some(threshold));
             for (prompt_tokens, should_compact) in [(threshold - 1, false), (threshold, true)] {
                 let temp = tempdir().expect("temporary workspace");
-                let mut history = test_history();
+                // The history must exceed the continuity tail at every tested
+                // capacity (up to a 20k-token tail at 1M) so a triggered
+                // compaction genuinely shrinks instead of reporting
+                // already-compact.
+                let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
                 let mut stats = SessionStats::default();
                 let mut manager = test_context_manager();
                 manager.update_token_usage(&Some(Usage {

@@ -629,6 +629,35 @@ pub fn manual_compaction_strategy(provider: &dyn LLMProvider, model: &str) -> Co
     }
 }
 
+/// Whether a compaction result is worth keeping.
+///
+/// Local compaction always appends framing around the summarized history (a
+/// summary message plus the persisted session-memory envelope), so a result
+/// whose message count is not strictly smaller than the input grows the
+/// conversation instead of compacting it. This happens when the continuity
+/// tail already covers the whole history (small, tool-heavy sessions where a
+/// handful of user turns anchor dozens of assistant/tool messages): the
+/// rebuild keeps every message and adds framing on top (observed as
+/// `86 -> 88`). Such results must be discarded in favor of the already-compact
+/// path so callers never report growth as a successful compaction.
+///
+/// The check is intentionally message-count based: that is the unit surfaced
+/// in user-facing progress (`86 -> 12`) and harness `compact_boundary`
+/// events, so the persisted history must never exceed it.
+#[must_use]
+pub fn compacted_history_shrinks(original_len: usize, compacted_len: usize, mode: CompactionMode) -> bool {
+    // Local mode injects one envelope message into the returned history during
+    // persistence; account for it here so the *final* history is what shrinks.
+    // Provider-native windows (and the `Unknown` catch-all, which never arises
+    // from a live compaction pass) are canonical replay state with no envelope
+    // injected, so the raw lengths compare directly.
+    let envelope_messages = match mode {
+        CompactionMode::Local => 1,
+        CompactionMode::Provider | CompactionMode::Unknown => 0,
+    };
+    compacted_len.saturating_add(envelope_messages) < original_len
+}
+
 /// Universally meaningful manual-compaction options.
 ///
 /// Provider-specific extras (OpenAI `service_tier` / `prompt_cache_key` / `store` /
@@ -3111,6 +3140,30 @@ mod tests {
         assert_eq!(policy.tail_target_tokens(32_768), 5_242);
         // Tiny windows keep a meaningful floor instead of collapsing to zero.
         assert_eq!(policy.tail_target_tokens(4_096), 1_024);
+    }
+
+    #[test]
+    fn compacted_history_shrinks_rejects_growth() {
+        use super::compacted_history_shrinks;
+        use crate::exec::events::CompactionMode;
+
+        // Reported `86 -> 88` regression: a rebuild that keeps every message
+        // plus framing must be discarded, accounting for the envelope message
+        // Local persistence injects.
+        assert!(!compacted_history_shrinks(86, 87, CompactionMode::Local));
+        assert!(!compacted_history_shrinks(12, 12, CompactionMode::Local));
+        assert!(!compacted_history_shrinks(0, 0, CompactionMode::Local));
+        // Genuine compression passes, including the envelope slot. Note a
+        // one-message reduction is still rejected for Local mode: the
+        // envelope re-adds it, netting zero.
+        assert!(compacted_history_shrinks(88, 11, CompactionMode::Local));
+        assert!(compacted_history_shrinks(12, 10, CompactionMode::Local));
+        assert!(!compacted_history_shrinks(12, 11, CompactionMode::Local));
+        // Provider-native windows carry no envelope framing, so the raw
+        // lengths compare directly.
+        assert!(compacted_history_shrinks(12, 11, CompactionMode::Provider));
+        assert!(!compacted_history_shrinks(12, 12, CompactionMode::Provider));
+        assert!(!compacted_history_shrinks(12, 13, CompactionMode::Provider));
     }
 
     #[test]

@@ -344,16 +344,33 @@ async fn run_manual_compaction(
     let mut compaction_options = options.clone();
     compaction_options.allow_reasoning_effort_downgrade =
         vt_cfg.is_some_and(|config| config.agent.allow_reasoning_effort_downgrade);
+    // Mirror the auto/recovery path: de-duplicate repeated file reads before a
+    // local-summary pass so `/compact` and model-switch compaction compress
+    // the same input the threshold-driven paths would.
+    let strategy = vtcode_core::compaction::manual_compaction_strategy(provider, model);
+    let compaction_history = if matches!(strategy, vtcode_core::compaction::CompactionStrategy::Local) {
+        dedup_repeated_file_reads_for_local_compaction(&compaction_input)
+    } else {
+        compaction_input.clone()
+    };
     let (compacted, compaction_mode) = vtcode_core::compaction::compact_history_manual_with_budget(
         provider,
         model,
-        &compaction_input,
+        &compaction_history,
         &local_compaction_config(vt_cfg, true),
         &compaction_options,
         context_budget,
     )
     .await?;
-    if compacted == compaction_input {
+    if compacted == compaction_history {
+        return Ok(None);
+    }
+    // Never report growth as a compaction: when the continuity tail already
+    // covers the history the rebuild keeps every message and the envelope
+    // framing only adds more (observed as `86 -> 88`). The caller then takes
+    // the already-compact path (segment boundary plus resume note for model
+    // switches, "already compact" for `/compact`) with history untouched.
+    if !vtcode_core::compaction::compacted_history_shrinks(original_history.len(), compacted.len(), compaction_mode) {
         return Ok(None);
     }
 
@@ -489,6 +506,13 @@ async fn compact_history_segment_in_place_with_boundary(
         return Ok(None);
     }
 
+    // Same growth guard as the manual path: a rebuild that does not shrink
+    // the history (tail already covers it) must not be persisted as a
+    // compaction.
+    if !vtcode_core::compaction::compacted_history_shrinks(original_history.len(), compacted.len(), compaction_mode) {
+        return Ok(None);
+    }
+
     apply_compacted_history(
         CompactionContext {
             provider,
@@ -591,7 +615,8 @@ async fn apply_compacted_history(
         tracing::info!(
             provider = %provider.name(),
             model = %model,
-            turn = compacted_len,
+            original_len,
+            compacted_len,
             tool_count = 0usize,
             parallelized = false,
             compaction_mode = %compaction_mode.as_str(),
@@ -603,7 +628,8 @@ async fn apply_compacted_history(
     tracing::info!(
         provider = %provider.name(),
         model = %model,
-        turn = original_len,
+        original_len,
+        compacted_len,
         tool_count = 0usize,
         parallelized = false,
         compaction_mode = %compaction_mode.as_str(),

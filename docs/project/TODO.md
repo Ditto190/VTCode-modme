@@ -55,10 +55,6 @@ check VT Code notification from terminal/ghostty etc doesn't showing in the noti
 
 ===
 
-Change keyboard shortcut to switch modes/agents from single tab to shift+tab.
-
-===
-
 Help me check this session run log and harness atif trajectory. Even though it very stable and good now, more than I expected, I want to ensure that there are no hidden issues or potential improvements that can be made. Check for potential optimizations, edge cases, and any anomalies that might affect long-term stability and performance. Eg: memory leaks, race conditions, unexpected errors, performance bottlenecks, and unusual patterns in the logs, context and tool calls optimzation that might need attention and can further improve the system. Also check if VT Code prompt caching is functioning correctly and efficiently. check for cache hit / miss ratio and any potential improvements in caching strategy. Make sure cost efficiency is maintained and any unnecessary resource usage is minimized.
 
 ```

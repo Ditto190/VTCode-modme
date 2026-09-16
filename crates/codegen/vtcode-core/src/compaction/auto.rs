@@ -20,7 +20,7 @@ use crate::compaction::two_pass::fingerprint_prefix;
 use crate::compaction::{
     CompactionConfig, CompactionParentContext, CompactionStrategy, ManualCompactionOptions, SUPPRESS_NONE,
     build_local_compacted_history, build_summary_prompt, classify_suppress_reason,
-    compact_history_manual_with_parent_context, manual_compaction_strategy,
+    compact_history_manual_with_parent_context, compacted_history_shrinks, manual_compaction_strategy,
 };
 use crate::exec::events::CompactionMode;
 use crate::llm::{
@@ -219,6 +219,13 @@ pub async fn auto_compact_messages(
             return Ok(None);
         }
 
+        // Never persist growth as a compaction: when the continuity tail
+        // already covers the history, the rebuild keeps every message and the
+        // envelope framing only adds more. Report already-compact instead.
+        if !compacted_history_shrinks(original_history.len(), compacted.len(), mode) {
+            return Ok(None);
+        }
+
         let original_len = original_history.len();
         // Memory-envelope persistence also injects a local system message. A
         // native provider window is an opaque replay contract (for example an
@@ -347,12 +354,15 @@ async fn try_two_pass_with_prefire(
         tail_target,
     );
 
-    Ok(Some(crate::compaction::bound_compacted_history_to_context(
-        compacted,
-        provider,
-        model,
-        context_budget,
-    )))
+    let compacted = crate::compaction::bound_compacted_history_to_context(compacted, provider, model, context_budget);
+    // A degenerate pass-2 (tail already covers the history) keeps every
+    // message and only adds framing; persisting it would grow the
+    // conversation, so fall back to single-pass instead.
+    if !compacted_history_shrinks(history.len(), compacted.len(), CompactionMode::Local) {
+        return Ok(None);
+    }
+
+    Ok(Some(compacted))
 }
 
 #[cfg(test)]
@@ -588,8 +598,10 @@ mod tests {
         vt_cfg.context.dynamic.enabled = true;
         vt_cfg.context.dynamic.persist_history = true;
         let workspace = tempfile::tempdir().expect("tempdir");
-        let mut history = (0..12)
-            .map(|index| Message::user(format!("request {index}")))
+        // The history must exceed the ~1 KiB continuity tail (4 KiB window)
+        // so compaction genuinely shrinks instead of reporting already-compact.
+        let mut history = (0..60)
+            .map(|index| Message::user(format!("request {index} {}", "detail ".repeat(25))))
             .collect::<Vec<_>>();
         let intent = crate::core::agent::steering::QueuedFollowUpIntent::from_parts("intent-1", "finish the request");
         let steering_update = SessionMemoryEnvelopeUpdate {
@@ -696,11 +708,13 @@ mod tests {
         let mut vt_cfg = VTCodeConfig::default();
         vt_cfg.agent.harness.auto_compaction_enabled = true;
         let workspace = tempfile::tempdir().expect("tempdir");
-        let history = (0..12)
-            .map(|index| Message::user(format!("request {index}")))
+        // Sized past the ~1 KiB continuity tail so the two-pass rebuild
+        // shrinks the history instead of being discarded as already-compact.
+        let history = (0..60)
+            .map(|index| Message::user(format!("request {index} {}", "detail ".repeat(25))))
             .collect::<Vec<_>>();
         let mut history = history;
-        let prefix_len = 10;
+        let prefix_len = 50;
         let prefire = PrefireState::default();
         prefire.store(AsyncCompactionCache {
             note1: "prior summary".to_string(),
