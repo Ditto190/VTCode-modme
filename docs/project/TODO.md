@@ -323,7 +323,17 @@ Rejected plan draft:
 
 ===
 
-idea: reference TUI table rendering style '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-16 at 10.50.18.png' and apply to our table rendering system. use deepwiki openai/codex and research how Codex implements table rendering and apply to VT Code. remember to attribute appropriately.
+idea: reference TUI table rendering style
+
+for minimal columns count '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-16 at 10.50.18.png'
+for maximal columns count '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-16 at 11.45.20.png'
+
+NOTE:
+
+1. use deepwiki openai/codex and research how Codex implements table rendering and apply to VT Code.
+2. Double check existing adaptive table rendering engine for terminal width and adjust as necessary.
+3. Make sure text is properly aligned and formatted within the table cells. No truncation or misalignment should occur.
+4. remember to attribute appropriately.
 
 ===
 
