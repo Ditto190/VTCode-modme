@@ -53,6 +53,21 @@ impl OpenAiCompatSpec for MergeGatewaySpec {
             .or_else(|| std::env::var(Self::API_KEY_ENV).ok().filter(|key| !key.trim().is_empty()))
             .unwrap_or_default()
     }
+
+    fn insert_tool_choice(_core: &OpenAiCompatCore<Self>, request: &LLMRequest, payload: &mut Map<String, Value>) {
+        // Merge routes that terminate at Anthropic Bedrock reject
+        // `tool_choice: "none"`. Removing the serialized tool definitions as
+        // well preserves the request's no-tool behavior on the legacy
+        // chat-completions surface.
+        if matches!(request.tool_choice, Some(ToolChoice::None)) {
+            payload.remove("tools");
+            return;
+        }
+
+        if let Some(choice) = &request.tool_choice {
+            payload.insert("tool_choice".to_owned(), choice.to_provider_format(Self::KEY));
+        }
+    }
 }
 
 fn provider_error(message: impl Into<String>) -> LLMError {
@@ -1706,34 +1721,69 @@ mod tests {
     }
 
     #[test]
-    fn native_payload_omits_tool_choice_none_for_bedrock_compatible_routes() {
-        let provider = MergeGatewayProvider::with_model(
-            "test-key".to_string(),
-            models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5.to_string(),
+    fn native_payload_omits_tool_choice_none_for_all_routes() {
+        for model in models::merge_gateway::SUPPORTED_MODELS {
+            let provider = MergeGatewayProvider::with_model("test-key".to_string(), (*model).to_string());
+            let mut request = LLMRequest {
+                model: (*model).to_string(),
+                messages: vec![Message::user("Summarize the conversation.".to_string())].into(),
+                tools: Some(Arc::new(vec![ToolDefinition::function(
+                    "read_file".to_string(),
+                    "Read a file".to_string(),
+                    json!({"type": "object"}),
+                )])),
+                tool_choice: Some(ToolChoice::None),
+                ..Default::default()
+            };
+
+            let payload = provider.build_native_payload(&request, false).expect("payload");
+            assert!(payload.get("tools").is_none(), "disabled tools must not be sent for route {model}");
+            assert!(payload.get("tool_choice").is_none(), "tool_choice=none must not be sent for route {model}");
+
+            // The no-tool normalization must not suppress an explicit
+            // tool-enabled request on any route.
+            request.tool_choice = Some(ToolChoice::Auto);
+            let enabled_payload = provider.build_native_payload(&request, false).expect("enabled payload");
+            assert!(enabled_payload.get("tools").is_some(), "tools must be preserved for route {model}");
+            assert_eq!(enabled_payload["tool_choice"], json!("auto"));
+        }
+    }
+
+    #[test]
+    fn legacy_payload_omits_tool_choice_none_for_all_routes() {
+        let provider = MergeGatewayProvider::from_config(
+            Some("test-key".to_string()),
+            Some(models::merge_gateway::DEFAULT_ROUTING.to_string()),
+            Some("https://example.test/v1/openai".to_string()),
+            None,
+            None,
+            None,
+            None,
         );
-        let request = LLMRequest {
-            model: models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5.to_string(),
-            messages: vec![Message::user("Summarize the conversation.".to_string())].into(),
-            tools: Some(Arc::new(vec![ToolDefinition::function(
-                "read_file".to_string(),
-                "Read a file".to_string(),
-                json!({"type": "object"}),
-            )])),
-            tool_choice: Some(ToolChoice::None),
-            ..Default::default()
-        };
+        let core = provider.legacy_core.as_ref().expect("legacy core");
 
-        let payload = provider.build_native_payload(&request, false).expect("payload");
-        assert!(payload.get("tools").is_none(), "disabled tools must not be sent to Bedrock routes");
-        assert!(payload.get("tool_choice").is_none(), "Bedrock rejects tool_choice=none");
+        for model in models::merge_gateway::SUPPORTED_MODELS {
+            let mut request = LLMRequest {
+                model: (*model).to_string(),
+                messages: vec![Message::user("Summarize the conversation.".to_string())].into(),
+                tools: Some(Arc::new(vec![ToolDefinition::function(
+                    "read_file".to_string(),
+                    "Read a file".to_string(),
+                    json!({"type": "object"}),
+                )])),
+                tool_choice: Some(ToolChoice::None),
+                ..Default::default()
+            };
 
-        // The no-tool normalization must not suppress an explicit tool-enabled
-        // request on the same route.
-        let mut enabled_request = request;
-        enabled_request.tool_choice = Some(ToolChoice::Auto);
-        let enabled_payload = provider.build_native_payload(&enabled_request, false).expect("enabled payload");
-        assert!(enabled_payload.get("tools").is_some());
-        assert_eq!(enabled_payload["tool_choice"], json!("auto"));
+            let payload = core.convert_request(&request).expect("legacy payload");
+            assert!(payload.get("tools").is_none(), "disabled tools must not be sent for route {model}");
+            assert!(payload.get("tool_choice").is_none(), "tool_choice=none must not be sent for route {model}");
+
+            request.tool_choice = Some(ToolChoice::Auto);
+            let enabled_payload = core.convert_request(&request).expect("enabled legacy payload");
+            assert!(enabled_payload.get("tools").is_some(), "tools must be preserved for route {model}");
+            assert_eq!(enabled_payload["tool_choice"], json!("auto"));
+        }
     }
 
     #[test]
