@@ -41,13 +41,87 @@ pub struct Usage {
     pub cached_prompt_tokens: Option<u32>,
     pub cache_creation_tokens: Option<u32>,
     pub cache_read_tokens: Option<u32>,
-    /// Per-iteration token usage for Anthropic server-side fallback and compaction.
-    /// Each entry represents one sampling pass (message, fallback_message, or compaction).
+    /// Per-iteration token usage for Anthropic server-side fallback, advisor,
+    /// and compaction passes. Each entry represents one sampling pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iterations: Option<Vec<serde_json::Value>>,
 }
 
+/// Usage totals across every provider sampling iteration.
+///
+/// Anthropic's compaction response reports only the final message iteration in
+/// the top-level fields. Keeping this as a named shape avoids making callers
+/// reconstruct the billing totals from an untyped JSON array.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UsageTotals {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    pub cache_read_tokens: u32,
+    pub cache_creation_tokens: u32,
+}
+
 impl Usage {
+    #[inline]
+    pub fn billable_totals(&self) -> UsageTotals {
+        let mut totals = UsageTotals::default();
+        let mut recognized_iteration = false;
+        let mut saw_iteration_cache_read = false;
+        let mut saw_iteration_cache_creation = false;
+
+        if let Some(iterations) = &self.iterations {
+            for iteration in iterations {
+                let Some(object) = iteration.as_object() else {
+                    continue;
+                };
+                let Some(iteration_type) = object.get("type").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                if !matches!(iteration_type, "message" | "fallback_message" | "advisor_message" | "compaction") {
+                    continue;
+                }
+
+                recognized_iteration = true;
+                totals.prompt_tokens = totals.prompt_tokens.saturating_add(json_u32(object.get("input_tokens")));
+                totals.completion_tokens =
+                    totals.completion_tokens.saturating_add(json_u32(object.get("output_tokens")));
+
+                if let Some(cache_read) = object.get("cache_read_input_tokens").and_then(serde_json::Value::as_u64) {
+                    saw_iteration_cache_read = true;
+                    totals.cache_read_tokens = totals.cache_read_tokens.saturating_add(saturating_u32(cache_read));
+                }
+                if let Some(cache_creation) =
+                    object.get("cache_creation_input_tokens").and_then(serde_json::Value::as_u64)
+                {
+                    saw_iteration_cache_creation = true;
+                    totals.cache_creation_tokens =
+                        totals.cache_creation_tokens.saturating_add(saturating_u32(cache_creation));
+                }
+            }
+        }
+
+        if !recognized_iteration {
+            totals.prompt_tokens = self.prompt_tokens;
+            totals.completion_tokens = self.completion_tokens;
+            totals.cache_read_tokens = self.cache_read_tokens_or_fallback();
+            totals.cache_creation_tokens = self.cache_creation_tokens_or_zero();
+        } else {
+            // Some Anthropic streaming events carry iteration token counts but
+            // leave cache metrics only at the top level. Use those fields when
+            // no iteration supplied the corresponding metric, without
+            // double-counting a metric that was present in an iteration.
+            if !saw_iteration_cache_read {
+                totals.cache_read_tokens = self.cache_read_tokens_or_fallback();
+            }
+            if !saw_iteration_cache_creation {
+                totals.cache_creation_tokens = self.cache_creation_tokens_or_zero();
+            }
+        }
+
+        totals.total_tokens = totals.prompt_tokens.saturating_add(totals.completion_tokens);
+        totals
+    }
+
     #[inline]
     fn has_cache_read_metric(&self) -> bool {
         self.cache_read_tokens.is_some() || self.cached_prompt_tokens.is_some()
@@ -156,9 +230,20 @@ impl From<DeepSeekBalanceResponse> for BalanceInfo {
     }
 }
 
+#[inline]
+fn saturating_u32(value: u64) -> u32 {
+    u32::try_from(value.min(u64::from(u32::MAX))).unwrap_or(u32::MAX)
+}
+
+#[inline]
+fn json_u32(value: Option<&serde_json::Value>) -> u32 {
+    value.and_then(serde_json::Value::as_u64).map_or(0, saturating_u32)
+}
+
 #[cfg(test)]
 mod usage_tests {
     use super::Usage;
+    use serde_json::json;
 
     #[test]
     fn cache_helpers_fall_back_to_cached_prompt_tokens() {
@@ -198,6 +283,69 @@ mod usage_tests {
         assert_eq!(usage.is_cache_miss(), None);
         assert_eq!(usage.cache_savings_ratio(), None);
         assert_eq!(usage.cache_hit_rate(), None);
+    }
+
+    #[test]
+    fn billable_totals_aggregate_recognized_iterations() {
+        let usage = Usage {
+            prompt_tokens: 10,
+            completion_tokens: 1,
+            total_tokens: 11,
+            cached_prompt_tokens: None,
+            cache_creation_tokens: Some(2),
+            cache_read_tokens: Some(3),
+            iterations: Some(vec![
+                json!({
+                    "type": "compaction",
+                    "input_tokens": 50,
+                    "output_tokens": 5,
+                    "cache_creation_input_tokens": 4,
+                    "cache_read_input_tokens": 6,
+                }),
+                json!({
+                    "type": "message",
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "cache_creation_input_tokens": 1,
+                    "cache_read_input_tokens": 2,
+                }),
+            ]),
+        };
+
+        assert_eq!(
+            usage.billable_totals(),
+            super::UsageTotals {
+                prompt_tokens: 60,
+                completion_tokens: 7,
+                total_tokens: 67,
+                cache_read_tokens: 8,
+                cache_creation_tokens: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn billable_totals_fall_back_to_top_level_without_known_iterations() {
+        let usage = Usage {
+            prompt_tokens: 10,
+            completion_tokens: 1,
+            total_tokens: 11,
+            cached_prompt_tokens: Some(4),
+            cache_creation_tokens: Some(2),
+            cache_read_tokens: None,
+            iterations: Some(vec![json!({"type": "future_iteration"})]),
+        };
+
+        assert_eq!(
+            usage.billable_totals(),
+            super::UsageTotals {
+                prompt_tokens: 10,
+                completion_tokens: 1,
+                total_tokens: 11,
+                cache_read_tokens: 4,
+                cache_creation_tokens: 2,
+            }
+        );
     }
 }
 

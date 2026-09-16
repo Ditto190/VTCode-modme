@@ -738,6 +738,15 @@ impl StreamAggregator {
             .collect();
     }
 
+    /// Append a completed structured item received from a streaming
+    /// output-item event.
+    pub(crate) fn append_reasoning_detail(&mut self, detail: &Value) {
+        let serialized = detail.as_str().map(ToOwned::to_owned).unwrap_or_else(|| detail.to_string());
+        if !self.reasoning_details.iter().any(|existing| existing == &serialized) {
+            self.reasoning_details.push(serialized);
+        }
+    }
+
     /// Process tool call deltas.
     pub(crate) fn handle_tool_calls(&mut self, deltas: &[Value]) {
         update_tool_calls(&mut self.tool_builders, deltas);

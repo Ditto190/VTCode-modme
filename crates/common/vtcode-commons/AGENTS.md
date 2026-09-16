@@ -28,3 +28,4 @@
 - `ui_protocol::SessionSurface` defaults to `Inline`; callers requiring alternate-screen detection must request `Auto` or `Alternate` explicitly. New diff consumers use `vtcode-diff` directly; its computation preserves CR, CRLF, LF, hunk numbering, and byte-safe intraline ranges.
 - `ui_protocol::tool_summary` contains renderer-independent compact activity metadata; keep grouping/output boundaries independent of TUI/runtime types and out of `ThreadEvent`. `MessageMetadata.intent_id` is optional wire metadata for durable steering recovery; preserve it through message serialization.
 - `task_guard::TaskGuard` is the canonical abort-on-drop task owner — use it instead of adding per-crate guard structs; `disarm()` releases the handle for documented-detached handoff.
+- `llm::Usage::billable_totals()` is the canonical aggregation boundary for prompt/completion/reasoning/cache usage; preserve raw provider counters separately from billable totals.

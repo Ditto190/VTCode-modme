@@ -607,6 +607,27 @@ fn extract_compaction_summary(compacted: &[Message], original_history: &[Message
         return summary;
     }
 
+    if let Some(summary) = compacted.iter().find_map(|message| {
+        if message.role != MessageRole::Assistant {
+            return None;
+        }
+
+        message.reasoning_details.as_ref()?.iter().find_map(|detail| {
+            let value = match detail {
+                Value::String(serialized) => serde_json::from_str::<Value>(serialized).ok()?,
+                value => value.clone(),
+            };
+            let summary = value
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|summary| !summary.is_empty())?;
+            (value.get("type").and_then(Value::as_str) == Some("compaction")).then_some(summary.to_string())
+        })
+    }) {
+        return summary;
+    }
+
     let mut recent = original_history
         .iter()
         .rev()
@@ -1369,4 +1390,24 @@ pub fn effective_compaction_threshold(
         .max_tokens
         .map_or(DEFAULT_OUTPUT_RESERVE_TOKENS, |value| value as usize);
     effective_compaction_threshold_with_reserve(vt_cfg, provider, model, reserve)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_compaction_summary;
+    use crate::llm::provider::Message;
+
+    #[test]
+    fn local_summary_takes_precedence_over_retained_provider_detail() {
+        let compacted = vec![
+            Message::system("Previous conversation summary:\nnew local summary".to_string()),
+            Message::user("latest request".to_string()),
+            Message::assistant(String::new()).with_reasoning_details(Some(vec![serde_json::json!({
+                "type": "compaction",
+                "content": "stale provider summary",
+            })])),
+        ];
+
+        assert_eq!(extract_compaction_summary(&compacted, &[]), "new local summary");
+    }
 }

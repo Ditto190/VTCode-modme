@@ -4,8 +4,10 @@
 //! and accumulating partial content into a complete LLMResponse.
 
 use crate::provider::LLMError;
-use crate::provider::{LLMStreamEvent, Usage};
-use crate::providers::anthropic_types::{AnthropicContentBlock, AnthropicStreamDelta, AnthropicStreamEvent};
+use crate::provider::LLMStreamEvent;
+use crate::providers::anthropic_types::{
+    AnthropicContentBlock, AnthropicStreamDelta, AnthropicStreamEvent, CacheControl,
+};
 use crate::providers::error_handling::format_network_error;
 use crate::providers::shared;
 
@@ -14,7 +16,7 @@ use futures::StreamExt;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
-use super::response_parser::parse_finish_reason;
+use super::response_parser::{parse_finish_reason, parse_usage};
 
 enum ReasoningBlockState {
     Thinking {
@@ -23,6 +25,12 @@ enum ReasoningBlockState {
     },
     Redacted {
         data: String,
+    },
+    Compaction {
+        content: Option<String>,
+        signature: Option<String>,
+        cache_control: Option<CacheControl>,
+        extra: Map<String, Value>,
     },
 }
 
@@ -68,15 +76,8 @@ pub fn create_stream(
 
                     match event {
                         AnthropicStreamEvent::MessageStart { message } => {
-                            aggregator.set_usage(Usage {
-                                prompt_tokens: message.usage.input_tokens,
-                                completion_tokens: 0,
-                                total_tokens: message.usage.input_tokens,
-                                cached_prompt_tokens: message.usage.cache_read_input_tokens,
-                                cache_creation_tokens: message.usage.cache_creation_input_tokens,
-                                cache_read_tokens: message.usage.cache_read_input_tokens,
-                                iterations: None,
-                            });
+                            let usage_value = serde_json::to_value(&message.usage).unwrap_or_else(|_| Value::Object(Map::new()));
+                            aggregator.set_usage(parse_usage(&usage_value));
                         }
                         AnthropicStreamEvent::ContentBlockStart {
                             index,
@@ -99,10 +100,27 @@ pub fn create_stream(
                             reasoning_blocks.insert(index, ReasoningBlockState::Redacted { data });
                         }
                         AnthropicStreamEvent::ContentBlockStart {
-                            content_block: AnthropicContentBlock::Compaction { content, .. },
-                            ..
+                            index,
+                            content_block:
+                                AnthropicContentBlock::Compaction {
+                                    content,
+                                    signature,
+                                    cache_control,
+                                    extra,
+                                },
                         } => {
-                            aggregator.compaction = Some(content);
+                            if let Some(summary) = content.as_ref() {
+                                aggregator.compaction = Some(summary.clone());
+                            }
+                            reasoning_blocks.insert(
+                                index,
+                                ReasoningBlockState::Compaction {
+                                    content,
+                                    signature,
+                                    cache_control,
+                                    extra,
+                                },
+                            );
                         }
                         AnthropicStreamEvent::ContentBlockStart {
                             index,
@@ -184,8 +202,41 @@ pub fn create_stream(
                                     }
                                     yield LLMStreamEvent::ReasoningSignature { signature };
                                 }
-                                AnthropicStreamDelta::CompactionDelta { content } => {
-                                    aggregator.compaction = Some(content);
+                                AnthropicStreamDelta::CompactionDelta { content, extra } => {
+                                    if let Some(content) = content.as_ref() {
+                                        if let Some(summary) = aggregator.compaction.as_mut() {
+                                            summary.push_str(content);
+                                        } else {
+                                            aggregator.compaction = Some(content.clone());
+                                        }
+                                    }
+                                    match reasoning_blocks.entry(index) {
+                                        std::collections::btree_map::Entry::Occupied(mut entry) => {
+                                            if let ReasoningBlockState::Compaction {
+                                                content: current,
+                                                extra: state_extra,
+                                                ..
+                                            } = entry.get_mut()
+                                            {
+                                                if let Some(content) = content.as_ref() {
+                                                    if let Some(accumulated) = current.as_mut() {
+                                                        accumulated.push_str(content);
+                                                    } else {
+                                                        *current = Some(content.clone());
+                                                    }
+                                                }
+                                                state_extra.extend(extra);
+                                            }
+                                        }
+                                        std::collections::btree_map::Entry::Vacant(entry) => {
+                                            entry.insert(ReasoningBlockState::Compaction {
+                                                content,
+                                                signature: None,
+                                                cache_control: None,
+                                                extra,
+                                            });
+                                        }
+                                    }
                                 }
                                 AnthropicStreamDelta::InputJsonDelta { partial_json } => {
                                     if aggregator.tool_builders.len() <= index {
@@ -202,37 +253,36 @@ pub fn create_stream(
                         }
                         AnthropicStreamEvent::ContentBlockStop { index } => {
                             if let Some(reasoning_block) = reasoning_blocks.remove(&index) {
-                                let detail = match reasoning_block {
-                                    ReasoningBlockState::Thinking { thinking, signature } => {
-                                        let mut detail = serde_json::json!({
-                                            "type": "thinking",
-                                            "thinking": thinking,
-                                        });
-                                        if let Some(signature) = signature
-                                            && let Some(obj) = detail.as_object_mut()
-                                        {
-                                            obj.insert(
-                                                "signature".to_string(),
-                                                Value::String(signature),
-                                            );
-                                        }
-                                        detail.to_string()
-                                    }
-                                    ReasoningBlockState::Redacted { data } => serde_json::json!({
-                                        "type": "redacted_thinking",
-                                        "data": data,
-                                    })
-                                    .to_string(),
-                                };
-                                finalized_reasoning_details.push(detail);
+                                finalized_reasoning_details.push(serialize_reasoning_block_detail(reasoning_block));
                             }
                         }
                         AnthropicStreamEvent::MessageDelta { delta, usage } => {
-                            if let Some(u) = usage
-                                && let Some(mut current_usage) = aggregator.usage
-                            {
-                                current_usage.completion_tokens = u.output_tokens;
-                                current_usage.total_tokens = u.input_tokens + u.output_tokens;
+                            if let Some(u) = usage {
+                                let usage_value =
+                                    serde_json::to_value(&u).unwrap_or_else(|_| Value::Object(Map::new()));
+                                let delta_usage = parse_usage(&usage_value);
+                                let mut current_usage = aggregator.usage.take().unwrap_or_default();
+
+                                // `message_delta.usage` may contain only the
+                                // output count. Keep the message-start input
+                                // and cache metrics when they are omitted.
+                                if delta_usage.prompt_tokens != 0 {
+                                    current_usage.prompt_tokens = delta_usage.prompt_tokens;
+                                }
+                                current_usage.completion_tokens = delta_usage.completion_tokens;
+                                current_usage.total_tokens = current_usage
+                                    .prompt_tokens
+                                    .saturating_add(current_usage.completion_tokens);
+                                if delta_usage.cached_prompt_tokens.is_some() {
+                                    current_usage.cached_prompt_tokens = delta_usage.cached_prompt_tokens;
+                                    current_usage.cache_read_tokens = delta_usage.cache_read_tokens;
+                                }
+                                if delta_usage.cache_creation_tokens.is_some() {
+                                    current_usage.cache_creation_tokens = delta_usage.cache_creation_tokens;
+                                }
+                                if delta_usage.iterations.is_some() {
+                                    current_usage.iterations = delta_usage.iterations;
+                                }
                                 aggregator.usage = Some(current_usage);
                             }
                             if let Some(reason) = delta.stop_reason {
@@ -259,26 +309,7 @@ pub fn create_stream(
         }
 
         for (_, reasoning_block) in reasoning_blocks {
-            let detail = match reasoning_block {
-                ReasoningBlockState::Thinking { thinking, signature } => {
-                    let mut detail = serde_json::json!({
-                        "type": "thinking",
-                        "thinking": thinking,
-                    });
-                    if let Some(signature) = signature
-                        && let Some(obj) = detail.as_object_mut()
-                    {
-                        obj.insert("signature".to_string(), Value::String(signature));
-                    }
-                    detail.to_string()
-                }
-                ReasoningBlockState::Redacted { data } => serde_json::json!({
-                    "type": "redacted_thinking",
-                    "data": data,
-                })
-                .to_string(),
-            };
-            finalized_reasoning_details.push(detail);
+            finalized_reasoning_details.push(serialize_reasoning_block_detail(reasoning_block));
         }
 
         let mut response = aggregator.finalize();
@@ -301,4 +332,30 @@ pub fn create_stream(
     };
 
     Box::pin(stream)
+}
+
+fn serialize_reasoning_block_detail(block: ReasoningBlockState) -> String {
+    match block {
+        ReasoningBlockState::Thinking { thinking, signature } => {
+            let mut detail = serde_json::json!({
+                "type": "thinking",
+                "thinking": thinking,
+            });
+            if let Some(signature) = signature
+                && let Some(obj) = detail.as_object_mut()
+            {
+                obj.insert("signature".to_string(), Value::String(signature));
+            }
+            detail.to_string()
+        }
+        ReasoningBlockState::Redacted { data } => serde_json::json!({
+            "type": "redacted_thinking",
+            "data": data,
+        })
+        .to_string(),
+        ReasoningBlockState::Compaction { content, signature, cache_control, extra } => {
+            serde_json::to_string(&AnthropicContentBlock::Compaction { content, signature, cache_control, extra })
+                .unwrap_or_else(|_| "{\"type\":\"compaction\",\"content\":null}".to_string())
+        }
+    }
 }

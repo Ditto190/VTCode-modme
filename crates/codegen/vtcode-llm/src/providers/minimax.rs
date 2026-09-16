@@ -277,4 +277,13 @@ mod tests {
 
         assert!(provider.supports_streaming());
     }
+
+    #[test]
+    fn minimax_uses_local_compaction_because_context_management_is_ignored() {
+        let provider = MinimaxProvider::from_config(Some("test-key".to_string()), None, None, None, None, None, None);
+
+        assert!(!provider.supports_responses_compaction(models::minimax::DEFAULT_MODEL));
+        assert!(!provider.supports_native_inline_compaction(models::minimax::DEFAULT_MODEL));
+        assert!(!provider.supports_context_edits(models::minimax::DEFAULT_MODEL));
+    }
 }

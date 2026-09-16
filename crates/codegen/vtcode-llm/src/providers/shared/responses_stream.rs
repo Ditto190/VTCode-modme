@@ -242,9 +242,19 @@ where
             ResponsesStreamEvent::Error { message } => {
                 return Err(provider_error(self.options.provider_name, message));
             }
-            ResponsesStreamEvent::Lifecycle { .. }
-            | ResponsesStreamEvent::ProviderValueBearingRigGap { .. }
-            | ResponsesStreamEvent::Unknown => {}
+            ResponsesStreamEvent::ProviderValueBearingRigGap { event_type, payload, .. } => {
+                // `added` compaction items can contain an incomplete opaque
+                // state. Replay only the completed snapshot so a partial item
+                // cannot replace or duplicate the continuation token.
+                if event_type == "response.output_item.done"
+                    && payload.get("item").and_then(|item| item.get("type")).and_then(Value::as_str)
+                        == Some("compaction")
+                    && let Some(item) = payload.get("item")
+                {
+                    self.aggregator.append_reasoning_detail(item);
+                }
+            }
+            ResponsesStreamEvent::Lifecycle { .. } | ResponsesStreamEvent::Unknown => {}
         }
 
         Ok(events)
@@ -1134,6 +1144,39 @@ mod tests {
 
         let finished = processor.finish().expect("finish should succeed");
         assert!(matches!(finished.as_slice(), [NormalizedStreamEvent::Done { .. }]));
+    }
+
+    #[test]
+    fn completed_compaction_item_is_preserved_without_replaying_added_snapshot() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
+        processor
+            .handle_payload(json!({
+                "type": "response.output_item.added",
+                "item": {"type": "compaction", "id": "cmp_1", "encrypted_content": "partial_state"}
+            }))
+            .expect("added compaction item should parse");
+        let completed_item = json!({
+            "type": "compaction",
+            "id": "cmp_1",
+            "encrypted_content": "opaque_state"
+        });
+        processor
+            .handle_payload(json!({
+                "type": "response.output_item.done",
+                "item": completed_item.clone()
+            }))
+            .expect("completed compaction item should parse");
+
+        let finished = processor.finish().expect("stream should finish");
+        let NormalizedStreamEvent::Done { response } = &finished[0] else {
+            panic!("expected normalized stream completion");
+        };
+        let details = response
+            .reasoning_details
+            .as_ref()
+            .expect("compaction detail should be retained");
+        assert_eq!(details.len(), 1);
+        assert_eq!(serde_json::from_str::<Value>(&details[0]).unwrap(), completed_item);
     }
 
     #[test]

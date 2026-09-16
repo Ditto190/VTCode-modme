@@ -106,7 +106,12 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
                 }
             }
             Some("compaction") => {
-                compaction = block.get("content").and_then(|t| t.as_str()).map(|s| s.to_string());
+                // Keep the complete opaque block for a faithful replay. The
+                // public `compaction` field is only the usable summary text;
+                // signatures, cache controls, and provider extensions belong
+                // in reasoning_details so the next request can send them back.
+                compaction = block.get("content").and_then(|t| t.as_str()).map(str::to_owned);
+                reasoning_details_vec.push(block.to_string());
             }
             Some("fallback") => {
                 // Fallback content block marks model boundary - preserve for conversation continuity

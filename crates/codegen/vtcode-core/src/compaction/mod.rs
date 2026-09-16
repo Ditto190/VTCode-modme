@@ -10,7 +10,7 @@ use vtcode_config::constants::context::DEFAULT_COMPACTION_TRIGGER_RATIO;
 use crate::config::types::{ReasoningEffortLevel, VerbosityLevel};
 use crate::exec::events::CompactionMode;
 use crate::llm::provider::{
-    LLMProvider, LLMRequest, Message, MessageContent, MessageRole, ResponsesCompactionOptions, ToolChoice,
+    LLMProvider, LLMRequest, LLMResponse, Message, MessageContent, MessageRole, ResponsesCompactionOptions, ToolChoice,
     ToolDefinition,
 };
 use crate::llm::reasoning_effort::ReasoningEffortMapper;
@@ -279,8 +279,9 @@ pub fn build_cache_safe_compaction_history(history: &[Message], compaction_promp
 /// near-full context (the normal reason to run `/compact`) or after switching
 /// to a model with a smaller window, the summary request itself exceeded the
 /// summarizer's window and the provider rejected it, failing the whole
-/// compaction. The output side is already bounded by
-/// [`bound_compacted_history_to_context`], so bound the input the same way:
+/// compaction. Local output paths are bounded by
+/// [`bound_compacted_history_to_context`]; native provider output is treated as
+/// canonical and must not be rewritten. Bound the input so local requests fit:
 /// keep the newest complete protocol groups that fit and drop the oldest.
 ///
 /// Returns the history to append the instruction to (see
@@ -291,6 +292,37 @@ fn bound_history_for_summarization(history: &[Message], instructions: &str, budg
     };
     let instruction_tokens = Message::user(instructions.to_string()).estimate_tokens();
     let history_budget = budget.saturating_sub(instruction_tokens).max(4);
+    bound_history_to_token_budget(history, history_budget)
+}
+
+/// Bound a native compaction request while retaining the latest provider
+/// compaction marker. Provider-native windows use that opaque marker as the
+/// continuity anchor; dropping it while selecting a recent suffix loses the
+/// state needed to replay the window on the next request.
+fn bound_history_for_native_compaction(history: &[Message], instructions: &str, budget: Option<usize>) -> Vec<Message> {
+    let Some(budget) = budget.filter(|value| *value > 0) else {
+        return history.to_vec();
+    };
+    let instruction_tokens = Message::user(instructions.to_string()).estimate_tokens();
+    let history_budget = budget.saturating_sub(instruction_tokens).max(4);
+    let total_tokens = history.iter().map(Message::estimate_tokens).sum::<usize>();
+    if total_tokens <= history_budget {
+        return history.to_vec();
+    }
+
+    let Some(marker_index) = history.iter().rposition(is_provider_compaction_message) else {
+        return bound_history_to_token_budget(history, history_budget);
+    };
+    let marker = history[marker_index].clone();
+    let marker_tokens = marker.estimate_tokens();
+    let mut bounded = vec![marker];
+    if marker_tokens < history_budget {
+        bounded.extend(bound_history_to_token_budget(&history[marker_index + 1..], history_budget - marker_tokens));
+    }
+    bounded
+}
+
+fn bound_history_to_token_budget(history: &[Message], history_budget: usize) -> Vec<Message> {
     let total_tokens = history.iter().map(Message::estimate_tokens).sum::<usize>();
     if total_tokens <= history_budget {
         return history.to_vec();
@@ -338,9 +370,17 @@ fn bound_history_for_summarization(history: &[Message], instructions: &str, budg
     history[selected_start..selected_end].to_vec()
 }
 
+fn is_provider_compaction_message(message: &Message) -> bool {
+    message.role == MessageRole::Assistant
+        && message
+            .reasoning_details
+            .as_ref()
+            .is_some_and(|details| details.iter().any(is_compaction_detail))
+}
+
 #[cfg(test)]
 mod summarization_fork_bounds_tests {
-    use super::{Message, bound_history_for_summarization};
+    use super::{Message, bound_history_for_native_compaction, bound_history_for_summarization};
 
     const INSTRUCTIONS: &str = "Summarize now.";
 
@@ -399,6 +439,25 @@ mod summarization_fork_bounds_tests {
             total_tokens(&bounded)
         );
     }
+
+    #[test]
+    fn native_bound_preserves_latest_provider_compaction_marker() {
+        let marker = Message::assistant(String::new()).with_reasoning_details(Some(vec![serde_json::json!({
+            "type": "compaction",
+            "content": null,
+            "encrypted_content": "opaque-state",
+        })]));
+        let newest = Message::user("newest".repeat(64));
+        let history = vec![marker.clone(), Message::user("old".repeat(4_000)), newest.clone()];
+        let instruction_tokens = Message::user(INSTRUCTIONS.to_string()).estimate_tokens();
+        let history_budget = marker.estimate_tokens() + newest.estimate_tokens() + 4;
+        let bounded =
+            bound_history_for_native_compaction(&history, INSTRUCTIONS, Some(instruction_tokens + history_budget));
+
+        assert_eq!(bounded.first(), Some(&marker));
+        assert_eq!(bounded.last(), Some(&newest));
+        assert!(bounded.len() < history.len(), "expected old pre-compaction history to be dropped");
+    }
 }
 
 /// Build a cache-safe local-summary request that reuses the parent prefix.
@@ -438,10 +497,9 @@ pub async fn compact_history(
     compact_history_with_budget(provider, model, history, config, None).await
 }
 
-/// Compact conversation history while enforcing a caller-resolved context
-/// budget. A positive budget is the complete effective capacity for the
-/// session (provider capacity intersected with any configured session cap),
-/// so native and local compaction retain the same amount of history.
+/// Compact conversation history using a caller-resolved context budget for
+/// input bounding and locally rebuilt output. Standalone native responses are
+/// returned as the provider's canonical next context window.
 pub async fn compact_history_with_budget(
     provider: &dyn LLMProvider,
     model: &str,
@@ -460,19 +518,26 @@ pub async fn compact_history_with_budget(
         return Ok(bound_compacted_history_to_context(history.to_vec(), provider, model, context_budget));
     }
 
-    if !config.always_summarize && provider.supports_responses_compaction(model) {
-        let native_source =
-            bound_history_for_summarization(history, "", compaction_history_budget(provider, model, context_budget));
+    // `supports_responses_compaction` is shared by standalone Responses
+    // endpoints and Anthropic's inline context-management path. This legacy
+    // function calls `compact_history` directly, so only the narrower
+    // standalone capability is safe here; inline providers use the manual
+    // strategy dispatcher below (or the local fallback on this legacy path).
+    if !config.always_summarize && provider.supports_manual_openai_compaction(model) {
+        let native_source = bound_history_for_native_compaction(
+            history,
+            "",
+            compaction_history_budget(provider, model, context_budget),
+        );
         let compacted = provider
             .compact_history(model, &native_source)
             .await
             .context("Failed to compact history via Responses compact endpoint")?;
-        return Ok(bound_compacted_history_to_context(
-            normalize_provider_compacted_history(compacted, history),
-            provider,
-            model,
-            context_budget,
-        ));
+        // A standalone compaction response is the provider's canonical next
+        // context window. Do not append a locally selected continuity tail or
+        // discard opaque provider items from it. The provider has already
+        // produced the exact window that must be replayed on the next turn.
+        return Ok(compacted);
     }
 
     let effective_config = context_bounded_compaction_config(provider, model, history, config, context_budget);
@@ -629,8 +694,9 @@ pub async fn compact_history_manual(
     compact_history_manual_with_budget(provider, model, history, config, options, None).await
 }
 
-/// Manual compaction with the resolved session context budget applied to every
-/// provider strategy, including native results and local fallback summaries.
+/// Manual compaction with the resolved session context budget applied to native
+/// request inputs and locally rebuilt summaries. Native provider responses are
+/// returned unchanged so opaque continuation state remains valid.
 pub async fn compact_history_manual_with_budget(
     provider: &dyn LLMProvider,
     model: &str,
@@ -666,7 +732,7 @@ pub async fn compact_history_manual_with_parent_context(
             // Bound the native input the same way as the local fork: a
             // near-full history would otherwise exceed the summarizer window
             // and fail the whole `/compact` command.
-            let native_source = bound_history_for_summarization(
+            let native_source = bound_history_for_native_compaction(
                 history,
                 options.instructions.as_deref().unwrap_or(""),
                 compaction_history_budget(provider, model, context_budget),
@@ -675,15 +741,11 @@ pub async fn compact_history_manual_with_parent_context(
                 .compact_history_with_options(model, &native_source, &responses_options)
                 .await
                 .context("Failed to compact history via provider-native compaction")?;
-            Ok((
-                bound_compacted_history_to_context(
-                    normalize_provider_compacted_history(compacted, history),
-                    provider,
-                    model,
-                    context_budget,
-                ),
-                CompactionMode::Provider,
-            ))
+            // A standalone compaction response is the provider's canonical
+            // next context window. Keep its retained items and opaque
+            // compaction items intact; the next provider request must receive
+            // this window as returned rather than a locally pruned variant.
+            Ok((compacted, CompactionMode::Provider))
         }
         CompactionStrategy::NativeInline => {
             compact_history_native_inline(provider, model, history, config, &options, context_budget, parent).await
@@ -795,7 +857,7 @@ async fn compact_history_native_inline(
 
     // Bound the inline request input so a near-full history fits the
     // summarizer window, mirroring the local-summary fork bound.
-    let inline_source = bound_history_for_summarization(
+    let inline_source = bound_history_for_native_compaction(
         history,
         options.instructions.as_deref().unwrap_or(""),
         compaction_history_budget(provider, model, context_budget),
@@ -842,11 +904,28 @@ async fn compact_history_native_inline(
     {
         let effective_config = context_bounded_compaction_config(provider, model, history, config, context_budget);
         let tail_target = route_tail_target_tokens(provider, model, context_budget);
-        let compacted = build_summary_compacted_history(history, summary, &effective_config, true, tail_target);
-        return Ok((
-            bound_compacted_history_to_context(compacted, provider, model, context_budget),
-            CompactionMode::Provider,
-        ));
+        if let Some(detail) = response_compaction_detail(&response) {
+            // The provider compaction block is opaque state. Preserve the exact
+            // block and the selected protocol-safe tail for replay; applying the
+            // generic local bound here could turn it into an ordinary text/system
+            // message and invalidate the provider's continuation contract.
+            return Ok((
+                build_provider_compacted_history(history, detail, &effective_config, true, tail_target),
+                CompactionMode::Provider,
+            ));
+        }
+
+        // A provider may expose only the public summary field without the raw
+        // continuation block. Treat that response as an ordinary local summary
+        // so it receives the local context bound and is not mislabeled as a
+        // provider-native replay window.
+        let compacted = bound_compacted_history_to_context(
+            build_summary_compacted_history(history, summary, &effective_config, true, tail_target),
+            provider,
+            model,
+            context_budget,
+        );
+        return Ok((compacted, CompactionMode::Local));
     }
 
     // Compaction did not fire (e.g. history below the minimum trigger threshold);
@@ -1195,12 +1274,10 @@ fn context_bounded_compaction_config(
     bounded
 }
 
-/// Apply the model-window budget to provider-native results as well as local
-/// results. Native providers can return a large prefix or metadata-heavy tool
-/// calls, so retaining the tail alone is not sufficient to guarantee that the
-/// next request fits.
-/// Bound a compacted history to the resolved context budget, including any
-/// caller-supplied session ceiling.
+/// Bound a locally managed compacted history to the resolved context budget,
+/// including any caller-supplied session ceiling. Standalone native responses
+/// must bypass this helper: their retained items and opaque continuation state
+/// are the provider's canonical next context window.
 pub fn bound_compacted_history_to_context(
     compacted: Vec<Message>,
     provider: &dyn LLMProvider,
@@ -1309,6 +1386,7 @@ pub(crate) fn build_local_compacted_history(
 /// Return the newest complete user-anchored protocol groups that fit the fixed
 /// continuity budget. The returned messages are owned because an oversized
 /// individual group may need a bounded preview.
+#[cfg(test)]
 fn continuity_tail(history: &[Message]) -> Vec<Message> {
     continuity_tail_with_target(history, CONTINUITY_TAIL_TARGET_TOKENS)
 }
@@ -1329,11 +1407,6 @@ fn continuity_tail_with_target(history: &[Message], tail_target_tokens: usize) -
 /// Find one contiguous suffix of complete protocol groups. An incomplete
 /// trailing assistant tool-call group is truncated at the assistant message,
 /// preserving its user anchor while excluding the invalid protocol suffix.
-fn continuity_tail_selection(history: &[Message]) -> Option<(usize, usize, bool)> {
-    continuity_tail_selection_with_target(history, CONTINUITY_TAIL_TARGET_TOKENS)
-}
-
-/// [`continuity_tail_selection`] with a route-scaled budget.
 fn continuity_tail_selection_with_target(
     history: &[Message],
     tail_target_tokens: usize,
@@ -1450,6 +1523,22 @@ fn split_continuity_history_with_target(history: &[Message], tail_target_tokens:
     (&history[..tail_start], continuity_tail_with_target(history, tail_target_tokens))
 }
 
+fn response_compaction_detail(response: &LLMResponse) -> Option<Value> {
+    response.reasoning_details.as_ref()?.iter().find_map(|detail| {
+        let parsed = serde_json::from_str::<Value>(detail).ok()?;
+        let parsed = match parsed {
+            Value::String(serialized) => serde_json::from_str::<Value>(&serialized).ok()?,
+            value => value,
+        };
+        let summary = parsed
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        (parsed.get("type").and_then(Value::as_str) == Some("compaction") && summary.is_some()).then_some(parsed)
+    })
+}
+
 fn build_summary_compacted_history(
     history: &[Message],
     summary: impl AsRef<str>,
@@ -1457,21 +1546,129 @@ fn build_summary_compacted_history(
     include_continuity_tail: bool,
     tail_target_tokens: usize,
 ) -> Vec<Message> {
+    build_compacted_history_with_leading(
+        history,
+        Message::system(format!("{SUMMARY_PREFIX}{}", summary.as_ref().trim())),
+        config,
+        include_continuity_tail,
+        tail_target_tokens,
+        false,
+    )
+}
+
+fn build_provider_compacted_history(
+    history: &[Message],
+    compaction_detail: Value,
+    config: &CompactionConfig,
+    include_continuity_tail: bool,
+    tail_target_tokens: usize,
+) -> Vec<Message> {
+    let signed_compaction = compaction_detail
+        .get("signature")
+        .and_then(Value::as_str)
+        .is_some_and(|signature| !signature.trim().is_empty());
+    let history_without_provider_compaction = history
+        .iter()
+        .cloned()
+        .filter_map(strip_provider_compaction_detail)
+        .collect::<Vec<_>>();
+    build_compacted_history_with_leading(
+        &history_without_provider_compaction,
+        Message::assistant(String::new()).with_reasoning_details(Some(vec![compaction_detail])),
+        config,
+        include_continuity_tail,
+        tail_target_tokens,
+        signed_compaction,
+    )
+}
+
+fn build_compacted_history_with_leading(
+    history: &[Message],
+    leading: Message,
+    config: &CompactionConfig,
+    include_continuity_tail: bool,
+    tail_target_tokens: usize,
+    strip_pre_compaction_thinking: bool,
+) -> Vec<Message> {
     let (retention_history, continuity) = split_continuity_history_with_target(history, tail_target_tokens);
     let retained_users = collect_retained_user_messages(
         retention_history,
         config.retained_user_message_tokens,
         config.retained_user_messages,
     );
+    let retained_users = if strip_pre_compaction_thinking {
+        retained_users.into_iter().map(strip_anthropic_thinking_details).collect()
+    } else {
+        retained_users
+    };
     let mut compacted = Vec::with_capacity(retained_users.len().saturating_add(1));
-    compacted.push(Message::system(format!("{SUMMARY_PREFIX}{}", summary.as_ref().trim())));
+    compacted.push(leading);
     compacted.extend(retained_users);
     if include_continuity_tail {
         for message in continuity {
-            compacted.push(message);
+            compacted.push(if strip_pre_compaction_thinking {
+                strip_anthropic_thinking_details(message)
+            } else {
+                message
+            });
         }
     }
     compacted
+}
+
+fn strip_anthropic_thinking_details(mut message: Message) -> Message {
+    if message.role != MessageRole::Assistant {
+        return message;
+    }
+
+    let Some(details) = message.reasoning_details.take() else {
+        return message;
+    };
+    let retained = details
+        .into_iter()
+        .filter(|detail| !is_reasoning_detail_type(detail, "thinking"))
+        .filter(|detail| !is_reasoning_detail_type(detail, "redacted_thinking"))
+        .collect::<Vec<_>>();
+    message.reasoning_details = (!retained.is_empty()).then_some(retained);
+    message
+}
+
+fn strip_provider_compaction_detail(mut message: Message) -> Option<Message> {
+    if message.role != MessageRole::Assistant {
+        return Some(message);
+    }
+
+    let Some(details) = message.reasoning_details.take() else {
+        return Some(message);
+    };
+    let retained = details
+        .into_iter()
+        .filter(|detail| !is_compaction_detail(detail))
+        .collect::<Vec<_>>();
+    message.reasoning_details = (!retained.is_empty()).then_some(retained);
+
+    let has_content = !message.content.trim().is_empty();
+    let has_reasoning = message.reasoning.as_ref().is_some_and(|reasoning| !reasoning.trim().is_empty());
+    let has_tool_calls = message.tool_calls.as_ref().is_some_and(|tool_calls| !tool_calls.is_empty());
+    let has_other_metadata = message.tool_call_id.is_some()
+        || message.phase.is_some()
+        || message.origin_tool.is_some()
+        || message.metadata.is_some()
+        || message.clear_at.is_some();
+    (has_content || has_reasoning || message.reasoning_details.is_some() || has_tool_calls || has_other_metadata)
+        .then_some(message)
+}
+
+fn is_compaction_detail(detail: &Value) -> bool {
+    is_reasoning_detail_type(detail, "compaction")
+}
+
+fn is_reasoning_detail_type(detail: &Value, expected_type: &str) -> bool {
+    let value = match detail {
+        Value::String(serialized) => serde_json::from_str::<Value>(serialized).ok(),
+        value => Some(value.clone()),
+    };
+    value.as_ref().and_then(|value| value.get("type")).and_then(Value::as_str) == Some(expected_type)
 }
 
 fn bounded_protocol_group(group: &[Message], token_budget: usize) -> Vec<Message> {
@@ -1553,45 +1750,6 @@ fn bounded_message_preview(message: &Message, token_budget: usize) -> Message {
         }
     }
     preview
-}
-
-/// Keep the provider's compacted prefix, but apply the same bounded protocol
-/// tail rules used by local compaction. A provider may return a summary only;
-/// that remains valid, while malformed trailing tool calls are discarded.
-fn normalize_provider_compacted_history(compacted: Vec<Message>, fallback_history: &[Message]) -> Vec<Message> {
-    let mut compacted = compacted;
-    while compacted.last().is_some_and(|message| {
-        message.role == MessageRole::Assistant && message.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty())
-    }) {
-        compacted.pop();
-    }
-    let selection = continuity_tail_selection(&compacted);
-    let tail = selection.map(|(start, end, oversized)| {
-        if oversized {
-            bounded_protocol_group(&compacted[start..end], CONTINUITY_TAIL_TARGET_TOKENS)
-        } else {
-            compacted[start..end].to_vec()
-        }
-    });
-    let mut normalized = if let Some((tail_start, _, _)) = selection {
-        // `tail_end` may be before the physical end when a provider returned
-        // only part of a tool-result group. Discard that invalid suffix by
-        // using the selection's actual start, rather than subtracting the
-        // selected tail length from the physical vector length.
-        compacted[..tail_start].to_vec()
-    } else {
-        compacted
-    };
-    if tail.as_ref().is_none_or(Vec::is_empty) {
-        // Some native endpoints return only their summary. Keep the newest
-        // source protocol groups in that case rather than silently losing the
-        // continuity anchor. Preserve sequence identity: two steering intents
-        // may intentionally have identical text but distinct metadata IDs.
-        normalized.extend(continuity_tail(fallback_history));
-    } else if let Some(tail) = tail {
-        normalized.extend(tail);
-    }
-    normalized
 }
 
 fn collect_retained_user_messages(history: &[Message], token_budget: usize, max_messages: usize) -> Vec<Message> {
@@ -1838,8 +1996,8 @@ fn truncate_user_message(message: &Message, token_budget: usize) -> Option<Messa
 #[cfg(test)]
 mod tests {
     use super::{
-        COMPACTION_CONTEXT_FIXED_OVERHEAD_TOKENS, CompactionConfig, ManualCompactionOptions, compact_history,
-        compact_history_manual, compact_history_manual_with_budget, continuity_tail, manual_compaction_strategy,
+        CompactionConfig, ManualCompactionOptions, compact_history, compact_history_manual,
+        compact_history_manual_with_budget, continuity_tail, manual_compaction_strategy,
     };
     use crate::config::types::{ReasoningEffortLevel, VerbosityLevel};
     use crate::exec::events::CompactionMode;
@@ -1847,6 +2005,7 @@ mod tests {
         LLMError, LLMProvider, LLMRequest, LLMResponse, Message, MessageRole, ResponsesCompactionOptions,
     };
     use async_trait::async_trait;
+    use serde_json::json;
     use std::sync::Arc;
     use std::sync::Mutex;
     use vtcode_commons::llm::{FinishReason, ToolCall};
@@ -1859,6 +2018,7 @@ mod tests {
     /// (`supports_manual_openai_compaction -> true`), e.g. OpenAI `/responses/compact`.
     struct ManualStandaloneProvider {
         last_options: Mutex<Option<ResponsesCompactionOptions>>,
+        output: Vec<Message>,
     }
 
     /// Inline-compaction-capable provider (`supports_responses_compaction -> true`,
@@ -1866,6 +2026,7 @@ mod tests {
     /// Returns a `Pause` finish with a compaction block so the inline path succeeds.
     struct InlinePauseProvider {
         last_request: Mutex<Option<LLMRequest>>,
+        include_compaction_detail: bool,
     }
 
     /// Inline provider that also reports `supports_context_edits`, e.g. Anthropic
@@ -1999,7 +2160,7 @@ mod tests {
             options: &ResponsesCompactionOptions,
         ) -> Result<Vec<Message>, LLMError> {
             *self.last_options.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(options.clone());
-            Ok(vec![Message::system("provider standalone compacted".to_string())])
+            Ok(self.output.clone())
         }
     }
 
@@ -2014,6 +2175,17 @@ mod tests {
             let mut response = LLMResponse::new("stub-model", "compacted by provider");
             response.finish_reason = FinishReason::Pause;
             response.compaction = Some("provider compaction summary".to_string());
+            if self.include_compaction_detail {
+                response.reasoning_details = Some(vec![
+                    json!({
+                        "type": "compaction",
+                        "content": "provider compaction summary",
+                        "signature": "provider-signature",
+                        "opaque_extension": "preserve-me",
+                    })
+                    .to_string(),
+                ]);
+            }
             Ok(response)
         }
 
@@ -2049,6 +2221,14 @@ mod tests {
             let mut response = LLMResponse::new("stub-model", "compacted by provider");
             response.finish_reason = FinishReason::Pause;
             response.compaction = Some("provider compaction summary".to_string());
+            response.reasoning_details = Some(vec![
+                json!({
+                    "type": "compaction",
+                    "content": "provider compaction summary",
+                    "signature": "provider-signature",
+                })
+                .to_string(),
+            ]);
             Ok(response)
         }
 
@@ -2238,6 +2418,97 @@ mod tests {
         ]
     }
 
+    fn canonical_standalone_output() -> Vec<Message> {
+        vec![
+            Message::user("retained by provider".to_string()),
+            Message::assistant(String::new()).with_reasoning_details(Some(vec![json!({
+                "type": "compaction",
+                "id": "cmp_1",
+                "encrypted_content": "opaque_state"
+            })])),
+        ]
+    }
+
+    #[test]
+    fn signed_provider_compaction_strips_old_thinking_but_preserves_other_details() {
+        let old_assistant = Message::assistant_with_tools(
+            "old answer".to_string(),
+            vec![ToolCall::function(
+                "call-1".to_string(),
+                "lookup".to_string(),
+                "{}".to_string(),
+            )],
+        )
+        .with_reasoning_details(Some(vec![
+            json!({
+                "type": "thinking",
+                "thinking": "old trace",
+                "signature": "old-signature"
+            }),
+            json!({"type": "provider_extension", "state": "keep"}),
+        ]));
+        let history = vec![
+            Message::user("old request".to_string()),
+            old_assistant,
+            Message::tool_response("call-1".to_string(), "lookup result".to_string()),
+            Message::user("latest request ".repeat(100_000)),
+        ];
+
+        let compacted = super::build_provider_compacted_history(
+            &history,
+            json!({
+                "type": "compaction",
+                "content": "summary",
+                "signature": "new-signature"
+            }),
+            &CompactionConfig::default(),
+            true,
+            20_000,
+        );
+
+        let old = compacted
+            .iter()
+            .find(|message| message.content.as_text() == "old answer")
+            .expect("retained action history should keep the old answer");
+        let details = old.reasoning_details.as_ref().expect("opaque detail should survive");
+        assert_eq!(details, &vec![json!({"type": "provider_extension", "state": "keep"})]);
+    }
+
+    #[test]
+    fn provider_compaction_replaces_old_provider_marker_in_continuity_tail() {
+        let old_marker = Message::assistant(String::new()).with_reasoning_details(Some(vec![json!({
+            "type": "compaction",
+            "content": "old summary",
+            "signature": "old-signature",
+        })]));
+        let history = vec![
+            Message::user("old request".to_string()),
+            old_marker,
+            Message::user("latest request".to_string()),
+            Message::assistant("latest response".to_string()),
+        ];
+
+        let compacted = super::build_provider_compacted_history(
+            &history,
+            json!({
+                "type": "compaction",
+                "content": "new summary",
+                "signature": "new-signature"
+            }),
+            &CompactionConfig::default(),
+            true,
+            20_000,
+        );
+        let markers = compacted
+            .iter()
+            .flat_map(|message| message.reasoning_details.as_deref().unwrap_or(&[]))
+            .filter(|detail| detail.get("type").and_then(serde_json::Value::as_str) == Some("compaction"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0]["content"], "new summary");
+    }
+
     /// Build an assistant message that carries a (single) pending tool call.
     fn assistant_with_calls(content: &str, call_id: &str) -> Message {
         let mut message = Message::assistant(content.to_string());
@@ -2295,13 +2566,19 @@ mod tests {
 
     #[tokio::test]
     async fn manual_compaction_strategy_picks_native_standalone_for_manual_provider() {
-        let provider = ManualStandaloneProvider { last_options: Mutex::new(None) };
+        let provider = ManualStandaloneProvider {
+            last_options: Mutex::new(None),
+            output: canonical_standalone_output(),
+        };
         assert_eq!(manual_compaction_strategy(&provider, "stub-model"), super::CompactionStrategy::NativeStandalone);
     }
 
     #[tokio::test]
     async fn manual_compaction_strategy_picks_native_inline_for_responses_capable_provider() {
-        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let provider = InlinePauseProvider {
+            last_request: Mutex::new(None),
+            include_compaction_detail: true,
+        };
         assert_eq!(manual_compaction_strategy(&provider, "stub-model"), super::CompactionStrategy::NativeInline);
     }
 
@@ -2338,10 +2615,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compact_history_manual_uses_native_standalone_for_manual_provider() {
+    async fn compact_history_manual_preserves_native_standalone_window() {
         let history = sample_history();
         let config = CompactionConfig::default();
-        let provider = ManualStandaloneProvider { last_options: Mutex::new(None) };
+        let provider = ManualStandaloneProvider {
+            last_options: Mutex::new(None),
+            output: canonical_standalone_output(),
+        };
 
         let (compacted, mode) =
             compact_history_manual(&provider, "stub-model", &history, &config, &ManualCompactionOptions::default())
@@ -2349,21 +2629,24 @@ mod tests {
                 .expect("manual compaction");
 
         assert_eq!(mode, CompactionMode::Provider);
-        assert_eq!(compacted.len(), 4);
-        assert_eq!(compacted[0].content.as_text(), "provider standalone compacted");
-        assert_eq!(compacted[1].content.as_text(), "first request");
-        assert_eq!(compacted[2].content.as_text(), "working");
-        assert_eq!(compacted[3].content.as_text(), "second request");
+        assert_eq!(compacted, canonical_standalone_output());
     }
 
     #[tokio::test]
-    async fn native_compaction_respects_explicit_session_context_budget() {
-        let mut history = Vec::new();
-        for index in 0..24 {
-            history.push(Message::user(format!("request-{index} {}", "context ".repeat(1_200))));
-            history.push(Message::assistant(format!("completed request {index}")));
-        }
-        let provider = ManualStandaloneProvider { last_options: Mutex::new(None) };
+    async fn native_compaction_preserves_canonical_window_over_session_budget() {
+        let history = sample_history();
+        let canonical = vec![
+            Message::user("provider-retained ".repeat(20_000)),
+            Message::assistant(String::new()).with_reasoning_details(Some(vec![json!({
+                "type": "compaction",
+                "id": "cmp_canonical",
+                "encrypted_content": "opaque_state",
+            })])),
+        ];
+        let provider = ManualStandaloneProvider {
+            last_options: Mutex::new(None),
+            output: canonical.clone(),
+        };
         let (compacted, mode) = compact_history_manual_with_budget(
             &provider,
             "stub-model",
@@ -2376,15 +2659,21 @@ mod tests {
         .expect("native compaction");
 
         assert_eq!(mode, CompactionMode::Provider);
-        let estimated_tokens = compacted.iter().map(Message::estimate_tokens).sum::<usize>();
-        assert!(estimated_tokens <= 8_192 - COMPACTION_CONTEXT_FIXED_OVERHEAD_TOKENS);
+        assert_eq!(compacted, canonical, "standalone output is the canonical replay window");
+        assert!(
+            compacted.iter().map(Message::estimate_tokens).sum::<usize>() > 8_192,
+            "fixture must prove that the local session bound was not applied"
+        );
     }
 
     #[tokio::test]
     async fn compact_history_manual_passes_options_to_native_standalone() {
         let history = sample_history();
         let config = CompactionConfig::default();
-        let provider = ManualStandaloneProvider { last_options: Mutex::new(None) };
+        let provider = ManualStandaloneProvider {
+            last_options: Mutex::new(None),
+            output: canonical_standalone_output(),
+        };
         let options = ManualCompactionOptions {
             instructions: Some("keep only decisions".to_string()),
             max_output_tokens: Some(256),
@@ -2409,7 +2698,10 @@ mod tests {
     async fn compact_history_manual_uses_native_inline_when_pause_and_compaction_present() {
         let history = sample_history();
         let config = CompactionConfig::default();
-        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let provider = InlinePauseProvider {
+            last_request: Mutex::new(None),
+            include_compaction_detail: true,
+        };
 
         let (compacted, mode) =
             compact_history_manual(&provider, "stub-model", &history, &config, &ManualCompactionOptions::default())
@@ -2418,7 +2710,16 @@ mod tests {
 
         assert_eq!(mode, CompactionMode::Provider);
         assert_eq!(compacted.len(), 4);
-        assert_eq!(compacted[0].content.as_text(), "Previous conversation summary:\nprovider compaction summary");
+        assert_eq!(compacted[0].role, MessageRole::Assistant);
+        assert!(compacted[0].content.as_text().is_empty());
+        let detail = compacted[0]
+            .reasoning_details
+            .as_ref()
+            .and_then(|details| details.first())
+            .expect("provider compaction detail");
+        let detail: serde_json::Value = serde_json::from_value(detail.clone()).expect("provider detail");
+        assert_eq!(detail["signature"], "provider-signature");
+        assert_eq!(detail["opaque_extension"], "preserve-me");
         assert_eq!(compacted[1].content.as_text(), "first request");
         assert_eq!(compacted[2].content.as_text(), "working");
         assert_eq!(compacted[3].content.as_text(), "second request");
@@ -2437,10 +2738,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inline_summary_without_opaque_detail_falls_back_to_local_mode() {
+        let history = sample_history();
+        let provider = InlinePauseProvider {
+            last_request: Mutex::new(None),
+            include_compaction_detail: false,
+        };
+
+        let (compacted, mode) = compact_history_manual_with_budget(
+            &provider,
+            "stub-model",
+            &history,
+            &CompactionConfig::default(),
+            &ManualCompactionOptions::default(),
+            Some(8_192),
+        )
+        .await
+        .expect("manual compaction should fall back to local mode");
+
+        assert_eq!(mode, CompactionMode::Local);
+        assert_eq!(compacted[0].role, MessageRole::System);
+        assert!(compacted[0].content.as_text().starts_with("Previous conversation summary:"));
+    }
+
+    #[tokio::test]
     async fn compact_history_manual_inline_request_carries_instructions_when_provided() {
         let history = sample_history();
         let config = CompactionConfig::default();
-        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let provider = InlinePauseProvider {
+            last_request: Mutex::new(None),
+            include_compaction_detail: true,
+        };
         let options = ManualCompactionOptions {
             instructions: Some("  keep only decisions  ".to_string()),
             ..ManualCompactionOptions::default()
@@ -2466,7 +2794,10 @@ mod tests {
         // Asymmetric arms on the same history: without a parent the inline
         // request carries no fork fields; with one it carries all three while
         // the compaction edit stays intact in both.
-        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let provider = InlinePauseProvider {
+            last_request: Mutex::new(None),
+            include_compaction_detail: true,
+        };
         let (_compacted, mode) = compact_history_manual_with_parent_context(
             &provider,
             "stub-model",
@@ -2484,7 +2815,10 @@ mod tests {
         assert!(bare.tools.is_none());
         assert!(bare.context_management.is_some());
 
-        let provider = InlinePauseProvider { last_request: Mutex::new(None) };
+        let provider = InlinePauseProvider {
+            last_request: Mutex::new(None),
+            include_compaction_detail: true,
+        };
         let parent = CompactionParentContext {
             system_prompt: Some(Arc::from("parent system")),
             tools: None,
@@ -2975,6 +3309,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_compaction_uses_local_for_responses_only_capability() {
+        let config = CompactionConfig {
+            keep_last_messages: 0,
+            ..CompactionConfig::default()
+        };
+
+        // Responses capability alone is not enough for this legacy entry point:
+        // the provider's `compact_history` method is only valid for standalone
+        // compaction endpoints. The universal local path must remain usable.
+        let compacted = compact_history(&CompatibleEndpointProvider, "stub-model", &sample_history(), &config)
+            .await
+            .expect("local compaction should handle responses-only providers");
+
+        assert_eq!(compacted[0].content.as_text(), "Previous conversation summary:\nsummary");
+    }
+
+    #[tokio::test]
     async fn compact_history_preserves_continuity_tail_over_retention_budget() {
         let history = vec![
             Message::user("alpha beta gamma delta epsilon zeta".to_string()),
@@ -3182,71 +3533,6 @@ mod tests {
         assert_eq!(call.id, "call-large");
         assert_eq!(call.function.as_ref().unwrap().arguments, "{}");
         assert_eq!(tail[2].tool_call_id.as_deref(), Some("call-large"));
-    }
-
-    #[test]
-    fn provider_normalization_falls_back_to_source_tail_and_drops_pending_call() {
-        let source = vec![
-            Message::user("latest request".into()),
-            Message::assistant("finished".into()),
-        ];
-        let provider_output = vec![Message::system("provider summary".into())];
-
-        let normalized = super::normalize_provider_compacted_history(provider_output, &source);
-
-        assert_eq!(normalized.len(), 3);
-        assert_eq!(normalized[0].content.as_text(), "provider summary");
-        assert_eq!(normalized[1].content.as_text(), "latest request");
-        assert_eq!(normalized[2].content.as_text(), "finished");
-
-        let malformed = vec![Message::system("summary".into()), {
-            let mut message = Message::assistant("pending".into());
-            message.tool_calls = Some(vec![ToolCall::function("c1".into(), "run".into(), "{}".into())]);
-            message
-        }];
-        let normalized = super::normalize_provider_compacted_history(malformed, &source);
-        assert_eq!(normalized.len(), 3);
-        assert_eq!(normalized[0].content.as_text(), "summary");
-        assert_eq!(normalized[1].content.as_text(), "latest request");
-
-        let partial = vec![
-            Message::system("provider summary".into()),
-            Message::user("older request".into()),
-            Message::assistant("older result".into()),
-            Message::user("latest request".into()),
-            Message::assistant_with_tools(
-                "calling".into(),
-                vec![
-                    ToolCall::function("c1".into(), "run".into(), "{}".into()),
-                    ToolCall::function("c2".into(), "run".into(), "{}".into()),
-                ],
-            ),
-            Message::tool_response("c1".into(), "partial result".into()),
-        ];
-        let normalized = super::normalize_provider_compacted_history(partial, &source);
-        assert_eq!(normalized[0].content.as_text(), "provider summary");
-        assert_eq!(normalized.last().unwrap().content.as_text(), "latest request");
-        assert!(!normalized.iter().any(|message| message.tool_call_id.as_deref() == Some("c1")));
-        assert!(!normalized.iter().any(|message| message.tool_calls.is_some()));
-    }
-
-    #[test]
-    fn provider_normalization_preserves_duplicate_tagged_intents() {
-        use vtcode_commons::message_metadata::MessageMetadata;
-
-        let mut first = Message::user("same follow-up".into());
-        first.metadata = Some(MessageMetadata::user_input(1, first.estimate_tokens()).with_intent_id("intent-1"));
-        let mut second = Message::user("same follow-up".into());
-        second.metadata = Some(MessageMetadata::user_input(2, second.estimate_tokens()).with_intent_id("intent-2"));
-        let source = vec![first, second];
-
-        let normalized = super::normalize_provider_compacted_history(vec![Message::system("summary".into())], &source);
-        let intent_ids = normalized
-            .iter()
-            .filter_map(|message| message.metadata.as_ref().and_then(|metadata| metadata.intent_id()))
-            .collect::<Vec<_>>();
-
-        assert_eq!(intent_ids, vec!["intent-1", "intent-2"]);
     }
 
     /// History-growth verify-item: the local summarization prompt must exclude

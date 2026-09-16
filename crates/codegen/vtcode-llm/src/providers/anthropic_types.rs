@@ -144,9 +144,18 @@ pub enum AnthropicContentBlock {
     },
     #[serde(rename = "compaction")]
     Compaction {
-        content: String,
+        /// Threshold compaction streams may start with `null` and provide the
+        /// summary in a single delta. On-demand compaction returns the full
+        /// signed block in the start event.
+        content: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
+        /// Preserve provider fields that are not yet modeled so an opaque
+        /// compaction block can be replayed without alteration.
+        #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+        extra: Map<String, Value>,
     },
     /// Server-side tool use (e.g., tool search execution) - advanced-tool-use beta
     #[serde(rename = "server_tool_use")]
@@ -443,7 +452,12 @@ pub enum AnthropicStreamDelta {
     #[serde(rename = "signature_delta")]
     SignatureDelta { signature: String },
     #[serde(rename = "compaction_delta")]
-    CompactionDelta { content: String },
+    CompactionDelta {
+        content: Option<String>,
+        /// Preserve opaque fields such as `encrypted_content` from a delta.
+        #[serde(flatten, default)]
+        extra: Map<String, Value>,
+    },
     /// Catch-all for unknown delta types added by the Anthropic API.
     #[serde(other)]
     Unknown,
@@ -481,37 +495,54 @@ pub struct AnthropicMessageResponse {
     pub(crate) usage: AnthropicUsage,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnthropicUsage {
+    #[serde(default, deserialize_with = "deserialize_nullable_u32")]
     pub(crate) input_tokens: u32,
+    #[serde(default, deserialize_with = "deserialize_nullable_u32")]
     pub(crate) output_tokens: u32,
     pub(crate) cache_creation_input_tokens: Option<u32>,
     pub(crate) cache_read_input_tokens: Option<u32>,
-    /// Per-iteration token usage, populated when compaction triggers or server-side fallback runs.
-    /// Each entry represents one sampling pass (compaction, message, or fallback_message).
+    /// Per-iteration token usage, populated when compaction, advisor, or
+    /// server-side fallback runs. Each entry represents one sampling pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     iterations: Option<Vec<AnthropicUsageIteration>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AnthropicUsageIteration {
     Message {
-        model: String,
+        model: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
         input_tokens: u32,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
         output_tokens: u32,
         cache_creation_input_tokens: Option<u32>,
         cache_read_input_tokens: Option<u32>,
     },
     FallbackMessage {
-        model: String,
+        model: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
         input_tokens: u32,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
+        output_tokens: u32,
+        cache_creation_input_tokens: Option<u32>,
+        cache_read_input_tokens: Option<u32>,
+    },
+    AdvisorMessage {
+        model: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
+        input_tokens: u32,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
         output_tokens: u32,
         cache_creation_input_tokens: Option<u32>,
         cache_read_input_tokens: Option<u32>,
     },
     Compaction {
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
         input_tokens: u32,
+        #[serde(default, deserialize_with = "deserialize_nullable_u32")]
         output_tokens: u32,
         cache_creation_input_tokens: Option<u32>,
         cache_read_input_tokens: Option<u32>,
@@ -519,6 +550,13 @@ pub enum AnthropicUsageIteration {
     /// Catch-all for unknown iteration types added by the Anthropic API.
     #[serde(other)]
     Unknown,
+}
+
+fn deserialize_nullable_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<u32>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 #[derive(Debug, Deserialize)]

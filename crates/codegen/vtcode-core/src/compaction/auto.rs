@@ -116,8 +116,8 @@ pub async fn auto_compact_messages(
     };
 
     // Use the same provider/session intersection as the trigger and preflight
-    // paths. Native and local strategies must share this ceiling so a large
-    // provider window cannot bypass an explicit session cap.
+    // paths. This bounds local input and output, while native output remains
+    // provider-canonical and is not rewritten by the session budget.
     let context_budget = match effective_context_budget(vt_cfg, provider, model) {
         0 => None,
         budget => Some(budget),
@@ -184,9 +184,8 @@ pub async fn auto_compact_messages(
 
         // Route through the same strategy dispatch as the manual `/compact` command
         // so every provider uses its correct native strategy (or falls back to a
-        // local LLM summary). This guarantees a *visible* structured summary plus
-        // envelope for every provider, preserving conversational continuity rather
-        // than relying on opaque server-side compaction.
+        // local LLM summary). Native outputs remain canonical replay windows, while
+        // local strategies provide the visible summary and session envelope.
         let strategy = manual_compaction_strategy(provider, model);
         let compaction_history = if matches!(strategy, CompactionStrategy::Local) {
             dedup_repeated_file_reads_for_local_compaction(&compaction_input)
@@ -218,20 +217,33 @@ pub async fn auto_compact_messages(
         }
 
         let original_len = original_history.len();
+        // Memory-envelope persistence also injects a local system message. A
+        // native provider window is an opaque replay contract (for example an
+        // Anthropic signed compaction block must stay first), so persist the
+        // envelope against a private copy and leave the provider result intact.
+        let mut envelope_history = if mode == CompactionMode::Provider {
+            compacted.clone()
+        } else {
+            std::mem::take(&mut compacted)
+        };
         let envelope = persist_memory_envelope_async_with_update(
             workspace_root,
             session_id,
             vt_cfg,
             &original_history,
             touched_files,
-            &mut compacted,
+            &mut envelope_history,
             MemoryEnvelopePersistence::PersistToDisk,
             placement,
             None,
             steering_update,
         )
         .await?;
-        compacted = crate::compaction::bound_compacted_history_to_context(compacted, provider, model, context_budget);
+        if mode == CompactionMode::Local {
+            compacted = envelope_history;
+            compacted =
+                crate::compaction::bound_compacted_history_to_context(compacted, provider, model, context_budget);
+        }
         let history_artifact_path = envelope.as_ref().and_then(|item| item.history_artifact_path.clone());
         let compacted_len = compacted.len();
         *history = compacted;
@@ -353,6 +365,10 @@ mod tests {
 
     struct SuccessfulProvider;
 
+    struct NativeStandaloneProvider {
+        output: Vec<Message>,
+    }
+
     #[async_trait]
     impl LLMProvider for SuccessfulProvider {
         fn name(&self) -> &str {
@@ -373,6 +389,42 @@ mod tests {
 
         fn effective_context_size(&self, _model: &str) -> usize {
             4_096
+        }
+    }
+
+    #[async_trait]
+    impl LLMProvider for NativeStandaloneProvider {
+        fn name(&self) -> &str {
+            "native-standalone"
+        }
+
+        async fn generate(&self, _request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            Ok(LLMResponse::new("native-model", "summary"))
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["native-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+            Ok(())
+        }
+
+        fn supports_manual_openai_compaction(&self, _model: &str) -> bool {
+            true
+        }
+
+        fn effective_context_size(&self, _model: &str) -> usize {
+            4_096
+        }
+
+        async fn compact_history_with_options(
+            &self,
+            _model: &str,
+            _history: &[Message],
+            _options: &crate::llm::provider::ResponsesCompactionOptions,
+        ) -> Result<Vec<Message>, LLMError> {
+            Ok(self.output.clone())
         }
     }
 
@@ -557,6 +609,60 @@ mod tests {
         let envelope = result.envelope.expect("compaction should produce an envelope");
         assert_eq!(envelope.pending_intents, vec![intent]);
         assert_eq!(envelope.applied_intent_ids, vec!["applied-1"]);
+    }
+
+    #[tokio::test]
+    async fn automatic_native_compaction_preserves_provider_window_when_persisting_envelope() {
+        let provider_output = vec![
+            Message::assistant(String::new()).with_reasoning_details(Some(vec![serde_json::json!({
+                "type": "compaction",
+                "content": null,
+                "signature": "signed-provider-state",
+            })])),
+            Message::user("provider-retained".to_string()),
+        ];
+        let provider = NativeStandaloneProvider { output: provider_output.clone() };
+        let mut vt_cfg = VTCodeConfig::default();
+        vt_cfg.agent.harness.auto_compaction_enabled = true;
+        vt_cfg.context.dynamic.enabled = true;
+        vt_cfg.context.dynamic.persist_history = true;
+        let workspace = tempfile::tempdir().expect("tempdir");
+        let mut history = (0..12)
+            .map(|index| Message::user(format!("request {index}")))
+            .collect::<Vec<_>>();
+        let mut suppressed = SUPPRESS_NONE;
+
+        let result = auto_compact_messages(
+            AutoCompactionInput {
+                provider: &provider,
+                model: "native-model",
+                session_id: "session-1",
+                workspace_root: workspace.path(),
+                vt_cfg: Some(&vt_cfg),
+                reserved_output_tokens: 0,
+                current_token_usage: 4_100,
+                touched_files: &[],
+                engine_cfg: CompactionConfig {
+                    keep_last_messages: 0,
+                    ..CompactionConfig::default()
+                },
+                manual_options: ManualCompactionOptions::default(),
+                placement: MemoryEnvelopePlacement::Start,
+                prefire: None,
+                auto_compact_suppressed: &mut suppressed,
+                force_compaction: false,
+                steering_update: None,
+                parent_context: None,
+            },
+            &mut history,
+        )
+        .await
+        .expect("automatic native compaction should succeed")
+        .expect("automatic native compaction should run");
+
+        assert_eq!(result.mode, CompactionMode::Provider);
+        assert!(result.envelope.is_some());
+        assert_eq!(history, provider_output, "provider output is the canonical replay window");
     }
 
     #[tokio::test]

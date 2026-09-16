@@ -552,6 +552,15 @@ async fn apply_compacted_history(
     }
 
     let mut compacted = compacted;
+    // Memory-envelope persistence also injects a local system message. Native
+    // provider output is an opaque replay contract (for example an Anthropic
+    // signed compaction block must stay first), so persist the envelope against
+    // a private copy and leave the provider result intact.
+    let mut envelope_history = if compaction_mode == vtcode_core::exec::events::CompactionMode::Provider {
+        compacted.clone()
+    } else {
+        std::mem::take(&mut compacted)
+    };
     let touched_files = session_stats.recent_touched_files();
     let envelope = persist_memory_envelope_async_with_update(
         workspace_root,
@@ -559,14 +568,18 @@ async fn apply_compacted_history(
         vt_cfg,
         &original_history,
         &touched_files,
-        &mut compacted,
+        &mut envelope_history,
         plan.envelope_mode.persistence,
         plan.envelope_mode.placement,
         None,
         steering_update.as_ref(),
     )
     .await?;
-    compacted = vtcode_core::compaction::bound_compacted_history_to_context(compacted, provider, model, context_budget);
+    if compaction_mode == vtcode_core::exec::events::CompactionMode::Local {
+        compacted = envelope_history;
+        compacted =
+            vtcode_core::compaction::bound_compacted_history_to_context(compacted, provider, model, context_budget);
+    }
     let history_artifact_path = envelope.as_ref().and_then(|item| item.history_artifact_path.clone());
     let compacted_len = compacted.len();
     let segment_transition = begin_segment.then(|| session_stats.begin_request_segment(plan.boundary_reason));

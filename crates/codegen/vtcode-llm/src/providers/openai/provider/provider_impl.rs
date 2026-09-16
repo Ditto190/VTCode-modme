@@ -134,7 +134,7 @@ impl provider::LLMProvider for OpenAIProvider {
         model: &str,
         history: &[provider::Message],
     ) -> Result<Vec<provider::Message>, provider::LLMError> {
-        if !self.supports_responses_compaction(model) {
+        if !self.supports_manual_openai_compaction(model) {
             return Err(provider::LLMError::Provider {
                 message: "OpenAI Responses compaction is not supported for this endpoint/model".to_string(),
                 metadata: None,

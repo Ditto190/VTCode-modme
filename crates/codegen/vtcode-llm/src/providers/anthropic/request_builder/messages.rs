@@ -29,11 +29,24 @@ pub(crate) fn hoist_largest_user_message(messages: &mut Vec<Message>) {
     }
 
     if let Some(idx) = max_idx
-        && idx > 0
+        && idx > messages.iter().position(has_compaction_block).map_or(0, |index| index + 1)
     {
         let msg = messages.remove(idx);
-        messages.insert(0, msg);
+        let insert_at = messages.iter().position(has_compaction_block).map_or(0, |index| index + 1);
+        messages.insert(insert_at, msg);
     }
+}
+
+fn has_compaction_block(message: &Message) -> bool {
+    message.role == MessageRole::Assistant
+        && message.reasoning_details.as_ref().is_some_and(|details| {
+            details.iter().any(|detail| {
+                normalize_reasoning_detail_object(detail)
+                    .and_then(|detail| detail.get("type").and_then(Value::as_str).map(str::to_owned))
+                    .as_deref()
+                    == Some("compaction")
+            })
+        })
 }
 
 pub(crate) fn build_messages(
@@ -46,6 +59,7 @@ pub(crate) fn build_messages(
 ) -> Result<Vec<AnthropicMessage>, LLMError> {
     let mut messages = Vec::with_capacity(messages_to_process.len());
     let mut tool_use_ids = HashSet::new();
+    let mut compaction_seen = false;
     let allow_mid_conversation_system = supports_mid_conversation_system_messages(&request.model, default_model);
     let allow_container_uploads = request
         .tools
@@ -71,6 +85,31 @@ pub(crate) fn build_messages(
                         tool_use_ids.insert(call.id.clone());
                     }
                 }
+
+                let (compaction_blocks, has_signed_compaction) = build_compaction_blocks(msg)?;
+                if !compaction_blocks.is_empty() {
+                    if compaction_seen || compaction_blocks.len() > 1 {
+                        let formatted_error = error_display::format_llm_error(
+                            "Anthropic",
+                            "A request may contain at most one compaction block",
+                        );
+                        return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
+                    }
+                    if has_signed_compaction && !messages.is_empty() {
+                        let formatted_error = error_display::format_llm_error(
+                            "Anthropic",
+                            "A signed compaction block must be the first Anthropic message",
+                        );
+                        return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
+                    }
+                    compaction_seen = true;
+                    blocks.extend(compaction_blocks);
+                }
+
+                // The compaction-history builder removes thinking blocks from
+                // the pre-compaction continuity tail. Keep replaying thinking
+                // here so responses generated after that boundary are not
+                // accidentally dropped on every later request.
                 blocks.extend(build_reasoning_blocks(msg));
 
                 blocks.extend(content_blocks_from_message_content(&msg.content, None, allow_container_uploads));
@@ -239,6 +278,37 @@ fn build_advisor_blocks(msg: &Message) -> Vec<AnthropicContentBlock> {
         }
     }
     blocks
+}
+
+fn build_compaction_blocks(msg: &Message) -> Result<(Vec<AnthropicContentBlock>, bool), LLMError> {
+    let Some(details) = &msg.reasoning_details else {
+        return Ok((Vec::new(), false));
+    };
+
+    let mut blocks = Vec::new();
+    let mut has_signed_compaction = false;
+    for detail in details {
+        let Some(normalized) = normalize_reasoning_detail_object(detail) else {
+            continue;
+        };
+        if normalized.get("type").and_then(|value| value.as_str()) != Some("compaction") {
+            continue;
+        }
+
+        let block = serde_json::from_value::<AnthropicContentBlock>(normalized).map_err(|error| {
+            let formatted_error = error_display::format_llm_error(
+                "Anthropic",
+                &format!("Invalid compaction block in conversation history: {error}"),
+            );
+            LLMError::InvalidRequest { message: formatted_error, metadata: None }
+        })?;
+        if let AnthropicContentBlock::Compaction { signature, .. } = &block {
+            has_signed_compaction |= signature.as_deref().is_some_and(|value| !value.trim().is_empty());
+        }
+        blocks.push(block);
+    }
+
+    Ok((blocks, has_signed_compaction))
 }
 
 fn build_reasoning_blocks(msg: &Message) -> Vec<AnthropicContentBlock> {
@@ -425,7 +495,10 @@ pub fn tool_result_blocks(content: &str) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_advisor_blocks, build_messages, build_reasoning_blocks, content_blocks_from_message_content};
+    use super::{
+        build_advisor_blocks, build_messages, build_reasoning_blocks, content_blocks_from_message_content,
+        hoist_largest_user_message,
+    };
     use crate::provider::{ContentPart, LLMRequest, Message, MessageContent};
     use crate::providers::anthropic_types::{AnthropicContentBlock, CacheControl};
     use serde_json::json;
@@ -564,6 +637,96 @@ mod tests {
             }
             other => panic!("expected thinking block, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn build_messages_replays_signed_compaction_block_and_keeps_later_thinking() {
+        let compaction = json!({
+            "type": "compaction",
+            "content": null,
+            "signature": "signed-summary",
+            "encrypted_content": "opaque-extension",
+            "cache_control": {"type": "ephemeral"}
+        });
+        let first = Message::assistant(String::new()).with_reasoning_details(Some(vec![compaction.clone()]));
+        let mut later = Message::assistant("continuation".to_string()).with_reasoning_details(Some(vec![json!({
+            "type": "thinking",
+            "thinking": "thinking from the summarized transcript",
+            "signature": "old-thinking"
+        })]));
+        later.content = MessageContent::Text("continuation".to_string());
+        let request = LLMRequest {
+            model: "claude-sonnet-5".to_string(),
+            messages: vec![first, later, Message::user("next".to_string())].into(),
+            ..Default::default()
+        };
+        let mut breakpoints_remaining = 0usize;
+
+        let messages = build_messages(
+            &request,
+            request.messages.as_ref(),
+            &None,
+            &AnthropicPromptCacheSettings::default(),
+            &mut breakpoints_remaining,
+            "",
+        )
+        .expect("signed compaction should be replayable");
+
+        assert_eq!(messages[0].role, "assistant");
+        assert_eq!(messages[0].content.len(), 1);
+        assert_eq!(serde_json::to_value(&messages[0].content[0]).expect("serialize block"), compaction);
+        assert_eq!(messages[1].content.len(), 2);
+        assert!(
+            matches!(messages[1].content[0], AnthropicContentBlock::Thinking { ref thinking, .. } if thinking == "thinking from the summarized transcript")
+        );
+        assert!(
+            matches!(messages[1].content[1], AnthropicContentBlock::Text { ref text, .. } if text == "continuation")
+        );
+    }
+
+    #[test]
+    fn hoist_largest_user_message_keeps_compaction_marker_at_prefix() {
+        let marker = Message::assistant(String::new()).with_reasoning_details(Some(vec![json!({
+            "type": "compaction",
+            "content": null,
+            "signature": "signed-summary",
+        })]));
+        let largest = Message::user("largest".repeat(256));
+        let mut messages = vec![marker.clone(), Message::user("small".to_string()), largest.clone()];
+
+        hoist_largest_user_message(&mut messages);
+
+        assert_eq!(messages.first(), Some(&marker));
+        assert_eq!(messages.get(1), Some(&largest));
+    }
+
+    #[test]
+    fn build_messages_rejects_misplaced_signed_compaction_block() {
+        let history = vec![
+            Message::user("older context".to_string()),
+            Message::assistant(String::new()).with_reasoning_details(Some(vec![json!({
+                "type": "compaction",
+                "content": "summary",
+                "signature": "signed-summary"
+            })])),
+        ];
+        let request = LLMRequest {
+            model: "claude-sonnet-5".to_string(),
+            messages: history.clone().into(),
+            ..Default::default()
+        };
+        let mut breakpoints_remaining = 0usize;
+
+        let error = build_messages(
+            &request,
+            &history,
+            &None,
+            &AnthropicPromptCacheSettings::default(),
+            &mut breakpoints_remaining,
+            "",
+        )
+        .expect_err("signed compaction after old messages must be rejected");
+        assert!(error.to_string().contains("first Anthropic message"));
     }
 
     #[test]

@@ -2726,6 +2726,17 @@ fn supports_manual_openai_compaction_is_native_only() {
     assert!(!openai.supports_manual_openai_compaction("gpt-4.1"));
 }
 
+#[tokio::test]
+async fn compact_history_rejects_responses_only_compatible_endpoint() {
+    let provider = compatible_endpoint_provider(models::openai::GPT_5, "https://compat.example/v1");
+    let error = provider
+        .compact_history(models::openai::GPT_5, &[provider::Message::user("compact this".to_string())])
+        .await
+        .expect_err("standalone compaction must be gated separately from Responses support");
+
+    assert!(error.to_string().contains("not supported"));
+}
+
 #[test]
 fn manual_openai_compaction_unavailable_message_mentions_backend() {
     let chatgpt = chatgpt_backend_provider(models::openai::GPT_5);

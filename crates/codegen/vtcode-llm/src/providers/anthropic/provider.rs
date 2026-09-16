@@ -713,7 +713,7 @@ impl LLMClient for AnthropicProvider {
             finish_reason: response.finish_reason,
             tool_calls: response.tool_calls,
             tool_references: response.tool_references,
-            compaction: None,
+            compaction: response.compaction,
         })
     }
 
@@ -725,9 +725,132 @@ impl LLMClient for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::{AnthropicProvider, capabilities, code_execution_beta_name, headers};
-    use crate::provider::{ContentPart, LLMProvider, LLMRequest, Message, MessageContent, ToolDefinition};
+    use crate::provider::{
+        ContentPart, LLMProvider, LLMRequest, LLMStreamEvent, Message, MessageContent, ToolDefinition,
+    };
+    use futures::StreamExt;
     use serde_json::json;
     use vtcode_config::constants::models;
+
+    #[tokio::test]
+    async fn generate_sends_inline_compaction_and_parses_compaction_response() {
+        use wiremock::matchers::{body_partial_json, header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(header("anthropic-beta", "compact-2026-01-12"))
+            .and(body_partial_json(json!({
+                "context_management": {
+                    "edits": [{"type": "compact_20260112"}]
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "compaction", "content": "opaque summary"}],
+                "stop_reason": "compaction"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::CLAUDE_SONNET_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let response = LLMProvider::generate(
+            &provider,
+            LLMRequest {
+                model: models::CLAUDE_SONNET_5.to_string(),
+                messages: vec![Message::user("compact this".to_string())].into(),
+                context_management: Some(json!({
+                    "edits": [{
+                        "type": "compact_20260112",
+                        "trigger": {"type": "input_tokens", "value": 50_000},
+                        "pause_after_compaction": true
+                    }]
+                })),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("inline compaction request should succeed");
+
+        assert!(matches!(response.finish_reason, crate::provider::FinishReason::Pause));
+        assert_eq!(response.compaction.as_deref(), Some("opaque summary"));
+    }
+
+    #[tokio::test]
+    async fn stream_preserves_anthropic_compaction_block_and_iteration_usage() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\",\"content\":null,\"signature\":\"signed-summary\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":null,\"encrypted_content\":\"opaque-extension\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"opaque \"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"summary\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"compaction\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":null,\"output_tokens\":0,\"iterations\":[{\"type\":\"compaction\",\"input_tokens\":50,\"output_tokens\":5},{\"type\":\"message\",\"model\":null,\"input_tokens\":10,\"output_tokens\":0},{\"type\":\"advisor_message\",\"model\":\"claude-opus-5\",\"input_tokens\":7,\"output_tokens\":2}]}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(body_partial_json(json!({"stream": true})))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::CLAUDE_SONNET_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let mut stream = LLMProvider::stream(
+            &provider,
+            LLMRequest {
+                model: models::CLAUDE_SONNET_5.to_string(),
+                messages: vec![Message::user("continue after compaction".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("stream request should succeed");
+
+        let mut completed = None;
+        while let Some(event) = stream.next().await {
+            match event.expect("stream event") {
+                LLMStreamEvent::Completed { response } => completed = Some(*response),
+                LLMStreamEvent::Token { .. }
+                | LLMStreamEvent::Reasoning { .. }
+                | LLMStreamEvent::ReasoningSignature { .. }
+                | LLMStreamEvent::ReasoningStage { .. } => {}
+            }
+        }
+
+        let response = completed.expect("completed stream response");
+        assert_eq!(response.compaction.as_deref(), Some("opaque summary"));
+        let details = response.reasoning_details.expect("compaction detail");
+        assert_eq!(details.len(), 1);
+        let detail: serde_json::Value = serde_json::from_str(&details[0]).expect("serialized compaction detail");
+        assert_eq!(detail["content"], "opaque summary");
+        assert_eq!(detail["signature"], "signed-summary");
+        assert_eq!(detail["encrypted_content"], "opaque-extension");
+
+        let usage = response.usage.expect("usage");
+        let totals = usage.billable_totals();
+        assert_eq!(totals.prompt_tokens, 67);
+        assert_eq!(totals.completion_tokens, 7);
+    }
 
     #[test]
     fn non_streaming_capability_is_pinned_for_stream_timeout_fallback() {

@@ -1010,6 +1010,45 @@ mod tests {
     }
 
     #[test]
+    fn parse_responses_payload_preserves_compaction_item_for_replay() {
+        let compaction_item = json!({
+            "type": "compaction",
+            "id": "cmp_1",
+            "encrypted_content": "opaque_state"
+        });
+        let response = json!({
+            "output": [
+                compaction_item.clone(),
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "continued"}]
+                }
+            ]
+        });
+
+        let parsed = parse_responses_payload(response, "gpt-5".to_string(), false).expect("payload should parse");
+        let reasoning_details = parsed_reasoning_details(&parsed);
+        assert!(reasoning_details.iter().any(|item| item == &compaction_item));
+
+        let payload = build_standard_responses_payload(
+            &LLMRequest {
+                model: "gpt-5".to_string(),
+                messages: vec![
+                    Message::assistant(parsed.content.unwrap_or_default())
+                        .with_reasoning_details(Some(reasoning_details)),
+                ]
+                .into(),
+                ..Default::default()
+            },
+            true,
+        )
+        .expect("payload should replay compaction item");
+
+        assert_eq!(payload.input[0], compaction_item);
+        assert_eq!(payload.input[1]["role"], "assistant");
+    }
+
+    #[test]
     fn parse_responses_payload_tool_calls_replay_with_result_linkage() {
         let response = json!({
             "output": [

@@ -45,6 +45,7 @@ struct NativeStreamEventWire<'a> {
     delta: Option<&'a str>,
     #[serde(borrow)]
     item_id: Option<&'a str>,
+    item: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +81,7 @@ impl OpenResponsesProvider {
         let mut tool_calls = Vec::new();
         let mut reasoning = None;
         let mut tool_references = Vec::new();
+        let mut replay_items = Vec::new();
 
         for item_val in output {
             let item_type = item_val.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -94,6 +96,7 @@ impl OpenResponsesProvider {
                     }
                 }
                 "reasoning" => {
+                    replay_items.push(item_val.clone());
                     if let Some(text) = item_val.get("content").and_then(|t| t.as_str()) {
                         reasoning = Some(text.to_string());
                     }
@@ -111,11 +114,16 @@ impl OpenResponsesProvider {
                 "tool_search_output" => {
                     collect_tool_references_from_tool_search_output(item_val, &mut tool_references);
                 }
+                _ if !item_type.is_empty() => replay_items.push(item_val.clone()),
                 _ => {}
             }
         }
 
-        let mut reasoning_details: Option<Vec<String>> = None;
+        let mut reasoning_details = if replay_items.is_empty() {
+            None
+        } else {
+            Some(replay_items.into_iter().map(|item| item.to_string()).collect())
+        };
         let (final_reasoning, final_content) = if reasoning.is_none() && !content.is_empty() {
             let (reasoning_parts, cleaned_content) = crate::utils::extract_reasoning_content(&content);
             if reasoning_parts.is_empty() {
@@ -246,6 +254,16 @@ impl OpenResponsesProvider {
         model: &str,
         history: &[Message],
     ) -> Result<Vec<Message>, LLMError> {
+        self.compact_history_request_with_options(model, history, &ResponsesCompactionOptions::default())
+            .await
+    }
+
+    pub(crate) async fn compact_history_request_with_options(
+        &self,
+        model: &str,
+        history: &[Message],
+        options: &ResponsesCompactionOptions,
+    ) -> Result<Vec<Message>, LLMError> {
         let resolved_model = if model.trim().is_empty() {
             self.model.clone()
         } else {
@@ -258,10 +276,28 @@ impl OpenResponsesProvider {
         };
         let native_payload = self.build_native_payload(&request, false)?;
         let input = native_payload.get("input").cloned().unwrap_or_else(|| json!([]));
-        let compact_payload = json!({
+        let mut compact_payload = json!({
             "model": resolved_model,
             "input": input,
         });
+        if let Some(map) = compact_payload.as_object_mut() {
+            if let Some(instructions) = options.instructions.as_deref().map(str::trim).filter(|value| !value.is_empty())
+            {
+                map.insert("instructions".to_string(), json!(instructions));
+            }
+            if let Some(service_tier) = options.service_tier.as_deref().map(str::trim).filter(|value| !value.is_empty())
+            {
+                map.insert("service_tier".to_string(), json!(service_tier));
+            }
+            if let Some(prompt_cache_key) = options
+                .prompt_cache_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                map.insert("prompt_cache_key".to_string(), json!(prompt_cache_key));
+            }
+        }
 
         let response = self
             .http_client
@@ -743,16 +779,23 @@ impl LLMProvider for OpenResponsesProvider {
         self.compact_history_request(model, history).await
     }
 
-    // The standalone `/responses/compact` endpoint does not accept the
-    // provider-specific Responses options, so delegate to `compact_history`
-    // (matching the legacy auto/recovery path, which never passed options).
+    // The compact endpoint accepts the common instruction and routing fields;
+    // output-shaping options are intentionally omitted because this endpoint
+    // does not expose them in its request schema.
     async fn compact_history_with_options(
         &self,
         model: &str,
         history: &[Message],
-        _options: &ResponsesCompactionOptions,
+        options: &ResponsesCompactionOptions,
     ) -> Result<Vec<Message>, LLMError> {
-        self.compact_history(model, history).await
+        if !self.supports_compaction_endpoint() {
+            return Err(LLMError::Provider {
+                message: "OpenResponses compact endpoint is not supported for this configured base URL".to_string(),
+                metadata: None,
+            });
+        }
+
+        self.compact_history_request_with_options(model, history, options).await
     }
 
     fn supported_models(&self) -> Vec<String> {
@@ -911,6 +954,16 @@ impl LLMProvider for OpenResponsesProvider {
                                         yield LLMStreamEvent::Reasoning { delta: delta.to_string() };
                                     }
                                 }
+                                // The added event may contain an incomplete
+                                // opaque item. Only the done snapshot is safe
+                                // to replay on the next request.
+                                "response.output_item.done" => {
+                                    if let Some(item) = event.item.as_ref()
+                                        && item.get("type").and_then(Value::as_str) == Some("compaction")
+                                    {
+                                        aggregator.append_reasoning_detail(item);
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -987,7 +1040,7 @@ mod tests {
     use super::*;
     use crate::provider::NormalizedStreamEvent;
     use futures::StreamExt;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_json, body_partial_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -1105,6 +1158,144 @@ mod tests {
     fn openresponses_provider_disables_compaction_for_unknown_endpoint() {
         let provider = test_provider("https://api.example.com/v1");
         assert!(!provider.supports_responses_compaction("gpt-5"));
+    }
+
+    #[tokio::test]
+    async fn compact_history_request_matches_openresponses_compact_schema() {
+        let Some(server) = start_mock_server_or_skip().await else {
+            return;
+        };
+
+        Mock::given(method("POST"))
+            .and(path("/v1/responses/compact"))
+            .and(body_json(serde_json::json!({
+                "model": "gpt-5",
+                "input": [{
+                    "type": "message",
+                    "id": "msg_0",
+                    "status": "completed",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "compact this"}]
+                }]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "cmp_streaming",
+                "object": "response.compaction",
+                "output": [{
+                    "type": "compaction",
+                    "id": "cmp_1",
+                    "encrypted_content": "opaque_state"
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = test_provider(&format!("{}/v1", server.uri()));
+        let compacted = provider
+            .compact_history_request("gpt-5", &[Message::user("compact this".to_string())])
+            .await
+            .expect("compaction request should succeed");
+
+        let preserved_type = compacted[0]
+            .reasoning_details
+            .as_ref()
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str);
+        assert_eq!(preserved_type, Some("compaction"));
+    }
+
+    #[tokio::test]
+    async fn compact_history_request_forwards_supported_options() {
+        let Some(server) = start_mock_server_or_skip().await else {
+            return;
+        };
+
+        Mock::given(method("POST"))
+            .and(path("/v1/responses/compact"))
+            .and(body_partial_json(json!({
+                "instructions": "keep decisions",
+                "service_tier": "priority",
+                "prompt_cache_key": "session-1"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "cmp_options",
+                "object": "response.compaction",
+                "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "compacted"}]}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = test_provider(&format!("{}/v1", server.uri()));
+        provider
+            .compact_history_request_with_options(
+                "gpt-5",
+                &[Message::user("compact this".to_string())],
+                &ResponsesCompactionOptions {
+                    instructions: Some("  keep decisions  ".to_string()),
+                    service_tier: Some(" priority ".to_string()),
+                    prompt_cache_key: Some(" session-1 ".to_string()),
+                    ..ResponsesCompactionOptions::default()
+                },
+            )
+            .await
+            .expect("compaction request should succeed");
+    }
+
+    #[test]
+    fn native_response_preserves_opaque_compaction_item_for_replay() {
+        let provider = test_provider("https://api.openresponses.com/v1");
+        let compaction_item = json!({
+            "type": "compaction",
+            "id": "cmp_1",
+            "encrypted_content": "opaque_state"
+        });
+        let response = json!({
+            "id": "resp_1",
+            "status": "completed",
+            "output": [
+                compaction_item.clone(),
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "continued"}]
+                }
+            ]
+        });
+
+        let parsed = OpenResponsesProvider::parse_native_response_payload(response, "gpt-5".to_string())
+            .expect("native response should parse");
+        let reasoning_details = parsed.reasoning_details.clone().expect("compaction item should be preserved");
+        assert_eq!(serde_json::from_str::<Value>(&reasoning_details[0]).unwrap(), compaction_item);
+        let reasoning_values = reasoning_details
+            .iter()
+            .map(|item| serde_json::from_str(item).expect("reasoning detail should be valid JSON"))
+            .collect();
+
+        let payload = provider
+            .build_native_payload(
+                &LLMRequest {
+                    model: "gpt-5".to_string(),
+                    messages: vec![
+                        Message::assistant(parsed.content.unwrap_or_default())
+                            .with_reasoning_details(Some(reasoning_values)),
+                    ]
+                    .into(),
+                    ..Default::default()
+                },
+                false,
+            )
+            .expect("native payload should replay compaction item");
+        let input = payload
+            .get("input")
+            .and_then(Value::as_array)
+            .expect("input should be an array");
+
+        assert_eq!(input[0], compaction_item);
+        assert_eq!(input[1].get("type").and_then(Value::as_str), Some("message"));
+        assert_eq!(input[1].get("role").and_then(Value::as_str), Some("assistant"));
     }
 
     #[test]
@@ -1391,6 +1582,63 @@ data: [DONE]\n\n",
 
         let response = completed.expect("stream should finish with a completed response");
         assert_eq!(response.content.as_deref(), Some("native stream"));
+    }
+
+    #[tokio::test]
+    async fn native_stream_preserves_opaque_compaction_output_items() {
+        let Some(server) = start_mock_server_or_skip().await else {
+            return;
+        };
+        let provider = test_provider(&server.uri());
+        let compaction_item = json!({
+            "type": "compaction",
+            "id": "cmp_1",
+            "encrypted_content": "opaque_state"
+        });
+        let added_event = json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "compaction",
+                "id": "cmp_1",
+                "encrypted_content": "partial_state"
+            }
+        });
+        let done_event = json!({
+            "type": "response.output_item.done",
+            "item": compaction_item.clone()
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!("data: {added_event}\n\ndata: {done_event}\n\ndata: [DONE]\n\n")),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut stream = provider
+            .stream(LLMRequest {
+                model: "gpt-5".to_string(),
+                messages: vec![Message::user("continue".to_string())].into(),
+                ..Default::default()
+            })
+            .await
+            .expect("native stream should succeed");
+
+        let mut completed = None;
+        while let Some(event) = stream.next().await {
+            if let LLMStreamEvent::Completed { response } = event.expect("stream event should parse") {
+                completed = Some(response);
+            }
+        }
+
+        let response = completed.expect("stream should finish with a completed response");
+        let details = response.reasoning_details.expect("compaction item should be preserved");
+        assert_eq!(details.len(), 1, "added and done events must not duplicate the item");
+        assert_eq!(serde_json::from_str::<Value>(&details[0]).unwrap(), compaction_item);
     }
 
     #[tokio::test]

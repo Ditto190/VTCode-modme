@@ -22,9 +22,9 @@ VT Code's default OpenAI profile keeps `gpt-5.5` on a compact execution contract
 
 2. **Surface reasoning summaries**: VT Code automatically requests `reasoning.summary = "auto"` for OpenAI reasoning models. Returned provider-marked summary text is folded into the agent’s normal reasoning output and logs; raw and continuation-only reasoning remains internal, so no extra toggle is required.
 
-3. **Preserve reasoning items across API calls**: VT Code keeps continuity in two ways. It stores `previous_response_id` for OpenAI, OpenAI-compatible Responses sessions, and OpenResponses sessions, and it also preserves structured reasoning items in assistant `reasoning_details` so tool loops can replay them when the next request is built. That matches OpenAI’s guidance to pass `previous_response_id` or reinsert reasoning items explicitly.
+3. **Preserve reasoning and compaction items across API calls**: VT Code preserves structured reasoning and opaque compaction items in assistant `reasoning_details` so stateless tool loops can replay them when the next request is built. Native OpenAI HTTP requests use the full input window; `previous_response_id` is used only on routes that opt into it, such as OpenResponses and Gemini. This keeps either Responses continuity pattern available without claiming a response ID is valid for every compatible endpoint.
 
-4. **Use hybrid continuity + server-side compaction**: VT Code keeps Responses-style continuity (`previous_response_id`) for OpenAI, OpenAI-compatible Responses providers, and OpenResponses providers, and enables compaction via `context_management` on `/responses` requests when `agent.harness.auto_compaction_enabled = true`. This matches OpenAI's recommended stateful path: when you are already chaining with `previous_response_id`, let the API manage context compaction instead of manually pruning request input.
+4. **Use the compaction mode supported by the route**: VT Code's compaction engine calls a documented standalone `/responses/compact` endpoint when the route supports it, uses Anthropic's inline context-management edit where supported, and falls back to a bounded local summary everywhere else. For routes that advertise Responses compaction, normal turns also carry the configured `context_management` hint so the provider can compact at the threshold; explicit standalone/inline compaction remains owned by the session engine so token accounting, checkpoints, and memory envelopes stay aligned.
 
 5. **Use encrypted reasoning for ZDR-style compliance**: If you are restricted from storing model state, enable the Responses API flags directly in `vtcode.toml`:
 
@@ -60,7 +60,7 @@ VT Code's default OpenAI profile keeps `gpt-5.5` on a compact execution contract
 
 10. **Reasoning visibility**: When troubleshooting, inspect `.vtcode/logs/trajectory.jsonl` for `reasoning` entries and correlate them with the configured `reasoning_effort`.
 
-11. **Auto-compaction settings**: Auto compaction is disabled by default. Turn it on explicitly when you want long-session coherence via Responses `context_management`:
+11. **Auto-compaction settings**: Auto compaction is enabled by default. Disable it when the surrounding application owns context-window management, or tune its trigger when you want a lower threshold:
 
     ```toml
     [agent.harness]
@@ -69,7 +69,12 @@ VT Code's default OpenAI profile keeps `gpt-5.5` on a compact execution contract
     auto_compaction_threshold_tokens = 200000
     ```
 
-    VT Code applies provider-native server-side compaction on compatible Responses providers/endpoints. On providers without native compaction, the same threshold is reused for VT Code's local fallback summarization path.
+    VT Code applies the selected provider-native standalone or inline strategy at
+    the threshold. On providers without native compaction, the same threshold is
+    reused for VT Code's local fallback summarization path. Server-side
+    Responses-capable non-Anthropic routes also receive the configured
+    `context_management` hint on normal turns so provider-side threshold
+    compaction can run without changing the session-owned boundary.
 
 12. **Manual `/compact` uses the provider-native endpoint when possible**: VT Code's `/compact` command calls the Responses `/responses/compact` endpoint for compatible providers and keeps the returned canonical output structure as conversation history, including opaque `compaction` items. For providers without native support, VT Code falls back to local summarization.
 

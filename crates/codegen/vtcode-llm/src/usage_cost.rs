@@ -21,13 +21,14 @@ pub fn provider_reports_exclusive_input(provider: &str) -> bool {
 /// [`provider_reports_exclusive_input`] so `input_tokens` always represents
 /// the total prompt token count across every provider.
 pub fn normalized_turn_usage(provider: &str, usage: &ProviderUsage) -> vtcode_exec_events::Usage {
-    let cached = u64::from(usage.cache_read_tokens_or_fallback());
-    let creation = u64::from(usage.cache_creation_tokens_or_zero());
-    let mut input = u64::from(usage.prompt_tokens);
+    let totals = usage.billable_totals();
+    let cached = u64::from(totals.cache_read_tokens);
+    let creation = u64::from(totals.cache_creation_tokens);
+    let mut input = u64::from(totals.prompt_tokens);
     if provider_reports_exclusive_input(provider) {
         input = input.saturating_add(cached).saturating_add(creation);
     }
-    let output = u64::from(usage.completion_tokens);
+    let output = u64::from(totals.completion_tokens);
 
     vtcode_exec_events::Usage {
         input_tokens: input,
@@ -178,6 +179,35 @@ mod tests {
             assert!((cost.raw_usd - 12.0).abs() < 1e-12, "{provider}");
             assert!((cost.effective_usd - 4.925).abs() < 1e-12, "{provider}");
         }
+    }
+
+    #[test]
+    fn anthropic_compaction_iterations_are_included_in_normalized_usage() {
+        let usage = ProviderUsage {
+            // These top-level values describe only the final message pass.
+            prompt_tokens: 10,
+            completion_tokens: 1,
+            total_tokens: 11,
+            cached_prompt_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+            iterations: Some(vec![
+                serde_json::json!({
+                    "type": "compaction",
+                    "input_tokens": 50,
+                    "output_tokens": 5,
+                }),
+                serde_json::json!({
+                    "type": "message",
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                }),
+            ]),
+        };
+
+        let normalized = normalized_turn_usage("anthropic", &usage);
+        assert_eq!(normalized.input_tokens, 60);
+        assert_eq!(normalized.output_tokens, 7);
     }
 
     #[test]
