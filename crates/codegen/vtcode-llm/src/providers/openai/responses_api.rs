@@ -696,6 +696,58 @@ mod tests {
     }
 
     #[test]
+    fn grown_history_keeps_wire_prefix_byte_stable() {
+        // Root-cause guard for low prompt-cache hit rates: provider-side
+        // prefix caching only hits when the rendered wire prefix is
+        // append-stable. A second turn that only appends one assistant+tool
+        // round must keep `instructions` identical and extend `input`
+        // without rewriting earlier items. Asymmetric pair: grown history
+        // must contain the first turn's rendering as an exact prefix.
+        use std::sync::Arc;
+
+        let history = vec![
+            Message::user("list files".to_string()),
+            Message::assistant_with_tools(
+                "checking".to_string(),
+                vec![ToolCall::function(
+                    "call_1".to_string(),
+                    "exec_command".to_string(),
+                    "{\"command\":\"ls\"}".to_string(),
+                )],
+            ),
+            Message::tool_response("call_1".to_string(), "a.txt\nb.txt".to_string()),
+        ];
+        let first = LLMRequest {
+            model: "gpt-5.6-luna".to_string(),
+            system_prompt: Some(Arc::from("stable system instructions")),
+            messages: history.clone().into(),
+            ..Default::default()
+        };
+        let mut grown = history;
+        grown.push(Message::assistant_with_tools(
+            "reading".to_string(),
+            vec![ToolCall::function(
+                "call_2".to_string(),
+                "exec_command".to_string(),
+                "{\"command\":\"cat a.txt\"}".to_string(),
+            )],
+        ));
+        grown.push(Message::tool_response("call_2".to_string(), "hello".to_string()));
+        let second = LLMRequest {
+            model: "gpt-5.6-luna".to_string(),
+            system_prompt: Some(Arc::from("stable system instructions")),
+            messages: grown.into(),
+            ..Default::default()
+        };
+
+        let a = build_standard_responses_payload(&first, true).expect("payload should build");
+        let b = build_standard_responses_payload(&second, true).expect("payload should build");
+        assert_eq!(a.instructions, b.instructions, "appended history must not rewrite instructions");
+        assert!(b.input.len() > a.input.len(), "grown history must extend input");
+        assert_eq!(&b.input[..a.input.len()], &a.input[..], "input prefix must be append-stable across turns");
+    }
+
+    #[test]
     fn standard_payload_uses_responses_function_call_items_for_structured_tool_history() {
         let request = LLMRequest {
             model: "gpt-5-codex".to_string(),

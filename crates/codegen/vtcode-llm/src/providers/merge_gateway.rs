@@ -1721,6 +1721,71 @@ mod tests {
     }
 
     #[test]
+    fn native_payload_keeps_wire_prefix_byte_stable_across_grown_history() {
+        // Companion to the OpenAI `grown_history_keeps_wire_prefix_byte_stable`
+        // guard: Merge Gateway is the default provider, so its native payload
+        // must also render grown history as a pure extension. The system
+        // message stays at input[0] and earlier items must be byte-identical.
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::DEFAULT_ROUTING.to_string(),
+        );
+        let history = vec![
+            Message::user("list files".to_string()),
+            Message::assistant_with_tools(
+                "checking".to_string(),
+                vec![ToolCall::function(
+                    "call_1".to_string(),
+                    "get_weather".to_string(),
+                    r#"{"location":"Paris"}"#.to_string(),
+                )],
+            ),
+            Message::tool_response("call_1".to_string(), "sunny".to_string()),
+        ];
+        let tools = Some(Arc::new(vec![ToolDefinition::function(
+            "get_weather".to_string(),
+            "Get weather".to_string(),
+            json!({
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"]
+            }),
+        )]));
+        let first = LLMRequest {
+            system_prompt: Some(Arc::from("You are helpful")),
+            messages: history.clone().into(),
+            tools: tools.clone(),
+            model: models::merge_gateway::DEFAULT_ROUTING.to_string(),
+            ..Default::default()
+        };
+        let mut grown = history;
+        grown.push(Message::assistant_with_tools(
+            "reading".to_string(),
+            vec![ToolCall::function(
+                "call_2".to_string(),
+                "get_weather".to_string(),
+                r#"{"location":"Nice"}"#.to_string(),
+            )],
+        ));
+        grown.push(Message::tool_response("call_2".to_string(), "rainy".to_string()));
+        let second = LLMRequest {
+            system_prompt: Some(Arc::from("You are helpful")),
+            messages: grown.into(),
+            tools,
+            model: models::merge_gateway::DEFAULT_ROUTING.to_string(),
+            ..Default::default()
+        };
+
+        let a = provider.build_native_payload(&first, false).expect("payload");
+        let b = provider.build_native_payload(&second, false).expect("payload");
+        assert_eq!(a["tools"], b["tools"], "tools must not be rewritten by appended history");
+        let input_a = a["input"].as_array().expect("input array");
+        let input_b = b["input"].as_array().expect("input array");
+        assert!(input_b.len() > input_a.len(), "grown history must extend input");
+        assert_eq!(&input_b[..input_a.len()], &input_a[..], "input prefix must be append-stable across turns");
+    }
+
+    #[test]
     fn native_payload_omits_tool_choice_none_for_all_routes() {
         for model in models::merge_gateway::SUPPORTED_MODELS {
             let provider = MergeGatewayProvider::with_model("test-key".to_string(), (*model).to_string());

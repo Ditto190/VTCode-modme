@@ -295,6 +295,7 @@ fn without_responses_backend_fields(mut payload: Value) -> Value {
         "include",
         "output_types",
         "previous_response_id",
+        "prompt_cache_options",
         "prompt_cache_retention",
         "sampling_parameters",
         "store",
@@ -310,6 +311,7 @@ fn without_responses_backend_capability_fields(mut payload: Value) -> Value {
     for field in [
         "include",
         "output_types",
+        "prompt_cache_options",
         "prompt_cache_retention",
         "sampling_parameters",
         "text",
@@ -2848,6 +2850,27 @@ fn responses_payload_includes_prompt_cache_retention_for_native_openai() {
     // Chat Completions model - should NOT have it
     let chat_payload = chat_payload_for(models::openai::GPT_5, &provider);
     assert_absent(&chat_payload, "prompt_cache_retention");
+}
+
+#[test]
+fn responses_payload_defaults_gpt56_cache_ttl_to_30m() {
+    // No retention configured: GPT-5.6-family Responses requests must still
+    // declare `prompt_cache_options.ttl` explicitly ("30m" is currently the
+    // only accepted value) instead of relying on the implicit default alone.
+    // Asymmetric pair: LUNA (gpt56) gets the default, CODEX (non-gpt56) does not.
+    let provider = native_openai_provider(models::openai::GPT_5_6_LUNA);
+    let payload = responses_payload_for(models::openai::GPT_5_6_LUNA, &provider);
+    assert_eq!(
+        payload
+            .get("prompt_cache_options")
+            .and_then(|v| v.get("ttl"))
+            .and_then(Value::as_str),
+        Some("30m")
+    );
+    assert_absent(&payload, "prompt_cache_retention");
+
+    let codex_payload = responses_payload_for(models::openai::GPT_5_CODEX, &provider);
+    assert_absent(&codex_payload, "prompt_cache_options");
 }
 
 #[test]

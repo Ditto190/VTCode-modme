@@ -22,6 +22,10 @@ use super::tool_serialization;
 use super::types::{MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload};
 
 const NONE_REASONING_EFFORT_MODELS: &[&str] = &[openai_models::GPT, openai_models::GPT_5_6, openai_models::GPT_5_6_SOL];
+/// Default `prompt_cache_options.ttl` for GPT-5.6-family Responses requests.
+/// Currently the only value OpenAI accepts; sent explicitly so cache intent
+/// does not rely on the implicit default alone.
+const DEFAULT_GPT56_PROMPT_CACHE_TTL: &str = "30m";
 const MEDIUM_REASONING_EFFORT_MODELS: &[&str] = &[openai_models::GPT_5, openai_models::GPT_5_6_SOL];
 const HIGH_REASONING_EFFORT_MODELS: &[&str] = &[
     openai_models::GPT_6_ASTRA,
@@ -579,6 +583,15 @@ fn build_responses_request_from_history(
     let cache_ttl = vtcode_config::models::model_catalog_entry("openai", &request.model)
         .and_then(|entry| entry.prompt_cache_ttl)
         .and_then(|ttl| trimmed_non_empty(Some(ttl)));
+    // GPT-5.6+ uses `prompt_cache_options.ttl` ("30m" is currently the only
+    // supported value); the legacy `prompt_cache_retention` field is
+    // deprecated for these models. No catalog entry sets a TTL today, so
+    // default GPT-5.6-family Responses requests to "30m" to document caching
+    // intent explicitly instead of relying on the implicit default alone.
+    let cache_ttl = cache_ttl.or_else(|| {
+        (is_gpt56_model(&request.model) && ctx.include_prompt_cache_retention && ctx.is_responses_api_model)
+            .then_some(DEFAULT_GPT56_PROMPT_CACHE_TTL)
+    });
     if let Some(ttl) = cache_ttl
         && ctx.include_prompt_cache_retention
         && ctx.is_responses_api_model

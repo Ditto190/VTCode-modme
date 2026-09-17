@@ -40,6 +40,7 @@ surface_metrics = true
 -   `surface_metrics` — when enabled, OpenAI usage responses expose cache-hit statistics surfaced through VT Code’s usage telemetry.
 -   `prompt_cache_retention` — optional OpenAI Responses API retention policy for cached prefixes. Supported values are `"in_memory"` and `"24h"`.
 -   Default: `None` (opt-in) - VT Code does not set prompt_cache_retention by default; so OpenAI keeps its default `in_memory` behavior unless you opt in explicitly.
+-   GPT-5.6-family Responses requests additionally send `prompt_cache_options: {"ttl": "30m"}` by default (currently the only TTL OpenAI accepts for these models), declaring cache intent explicitly instead of relying on the implicit default alone. An explicit catalog TTL or a configured `prompt_cache_retention` takes precedence where applicable.
 -   Example CLI override to enable 24h retention for Responses model:
 
     ```bash
@@ -109,7 +110,7 @@ Two further article prescriptions were researched and deliberately deferred:
 -   **Planning/full-auto via `<system-reminder>` messages instead of system-prompt sections.** Snapshots are deterministic per mode, so the wire prefix is already stable turn-to-turn within a mode on every provider; the only residual cost is the single toggle-transition miss (zero on Anthropic, where the wire split keeps the cached stable prefix across the toggle). Moving the full planning contract — read-only enforcement, plan-quality spec, research floor — out of the system prompt risks planning behavior with no eval to verify, and would require reworking the prompt/catalog alignment guard that pins the interview-policy line. Revisit only with eval coverage for planning adherence.
 -   **Always exposing the full tool catalog (no planning filtering).** Same steady-state analysis: deterministic per-mode filtering means no per-turn churn today; always-expose would save only the toggle-transition miss while showing mutating tools on every planning turn, trading rare one-time savings for per-turn model-confusion risk and denied-call waste across all supported models (including small ones). The fail-closed execution gate stays as the safety net, and tool hiding stays as defense-in-depth. Revisit only with eval evidence that target models obey read-only instructions reliably when mutating tools are visible.
 
-OpenAI additionally keeps `prompt_cache_key` stable per session (unless `prompt_cache_key_mode = "off"`).
+OpenAI additionally keeps `prompt_cache_key` stable per session (unless `prompt_cache_key_mode = "off"`). The wire key is exactly `vtcode:openai:{session_id}` (namespaced per gateway); per-turn capability/catalog hashes are tracked separately in `tool_catalog_hash` / `system_prompt_prefix_hash` and never mixed into the routing key, since OpenAI requires the key to stay consistent across requests sharing a prefix.
 
 VT Code surfaces prompt-cache churn using the same terminology in `vtcode trajectory` and `/share-log` exports:
 
@@ -173,7 +174,6 @@ explicit_ttl_seconds = 900
 -   `explicit_ttl_seconds` — optional TTL when explicit mode is active.
 
 ### OpenRouter
-
 ```toml
 [prompt_cache.providers.openrouter]
 enabled = true
@@ -183,6 +183,15 @@ report_savings = true
 
 -   `propagate_provider_capabilities` — pass provider cache instructions straight through to upstream models.
 -   `report_savings` — surface cache-hit metrics returned by OpenRouter alongside standard usage data.
+
+### DeepSeek
+
+```toml
+[prompt_cache.providers.deepseek]
+enabled = true
+```
+
+DeepSeek caches automatically on disk with 64-token prefix units; no wire flags are needed. VT Code sends the system prompt as the leading `messages[0]` system message so the stable prefix starts at token 0 — a requirement for DeepSeek prefix matching. Keep volatile content at the end of the history; any byte difference at the front busts the whole prefix.
 
 ### Z.AI
 

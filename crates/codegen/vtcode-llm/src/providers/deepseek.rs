@@ -26,7 +26,7 @@ impl OpenAiCompatSpec for DeepSeekSpec {
     const LISTED_MODELS: &'static [&'static str] = models::deepseek::SUPPORTED_MODELS;
     const VALIDATION_ALLOWLIST: Option<&'static [&'static str]> = Some(models::deepseek::SUPPORTED_MODELS);
 
-    const SYSTEM_PROMPT: SystemPromptPlacement = SystemPromptPlacement::TopLevelField;
+    const SYSTEM_PROMPT: SystemPromptPlacement = SystemPromptPlacement::FirstMessage;
     const STREAM_OPTIONS_INCLUDE_USAGE: bool = true;
     const INCLUDE_USER_ID: bool = true;
     const RESPONSE_REASONING_EXTRACTOR: Option<super::openai_compat::ReasoningExtractor> = Some(deepseek_reasoning);
@@ -248,10 +248,15 @@ mod tests {
 
         assert_eq!(payload["model"], models::deepseek::DEFAULT_MODEL);
         let messages = payload["messages"].as_array().unwrap();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0]["role"], "user");
-        // DeepSeek sends the system prompt as a top-level field, not a message.
-        assert_eq!(payload["system"], "system guidance");
+        assert_eq!(messages.len(), 2);
+        // DeepSeek is OpenAI-compatible chat completions: the system prompt
+        // must lead `messages` so the 7k-token stable prefix participates in
+        // disk prefix caching from token 0. A top-level `system` field is not
+        // part of the DeepSeek API and would drop the cached prefix.
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "system guidance");
+        assert_eq!(messages[1]["role"], "user");
+        assert!(payload.get("system").is_none());
         assert_eq!(payload["max_tokens"], 512);
         assert_eq!(payload["temperature"], 0.5);
         assert_eq!(payload["top_p"], 0.25);

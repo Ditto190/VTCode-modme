@@ -834,10 +834,17 @@ impl AgentRunner {
                         &self.config().prompt_cache.providers.openai.prompt_cache_key_mode,
                         Some(&self.session_id),
                     )
-                    .map(|key| {
-                        let key = map_prompt_cache_key_for_provider(&provider_name, key);
-                        format!("{key}-{capability_prefix_hash:016x}")
-                    }),
+                    // Keep the wire key stable per session. OpenAI routes by
+                    // (prefix hash + key); the key must stay consistent across
+                    // requests sharing a prefix ("Use prompt_cache_key
+                    // consistently"). Per-turn suffixes (capability/catalog
+                    // hashes) fragment routing buckets without benefit: distinct
+                    // prefixes already route distinctly via their prefix hash,
+                    // and a suffix that changes on tool-catalog churn busts an
+                    // otherwise reusable routing affinity every few turns.
+                    // Prefix identity stays tracked per request via
+                    // `tool_catalog_hash` / `system_prompt_prefix_hash` below.
+                    .map(|key| map_prompt_cache_key_for_provider(&provider_name, key)),
                     prompt_cache_profile: None,
                     tool_catalog_hash: prompt_bundle.request_envelope.catalog_hash(),
                     system_prompt_prefix_hash: Some(capability_prefix_hash),

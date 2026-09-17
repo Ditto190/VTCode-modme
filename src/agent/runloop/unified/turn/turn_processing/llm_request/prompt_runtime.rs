@@ -107,17 +107,57 @@ fn render_tool_names(tool_snapshot: &SessionToolCatalogSnapshot) -> String {
         return "none".to_string();
     }
 
-    let mut result = String::new();
-    for (index, tool) in tools.iter().enumerate() {
-        if index > 0 {
-            result.push_str(", ");
-        }
-        result.push_str(
+    // Sort: this line lands in the cache-stable system prompt, so it must not
+    // jitter with tool-discovery order. Name order carries no semantics here;
+    // the wire `tools` array keeps its own canonical envelope ordering.
+    let mut names: Vec<&str> = tools
+        .iter()
+        .map(|tool| {
             tool.function
                 .as_ref()
                 .map(|function| function.name.as_str())
-                .unwrap_or(tool.tool_type.as_str()),
-        );
+                .unwrap_or(tool.tool_type.as_str())
+        })
+        .collect();
+    names.sort_unstable();
+    names.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_tool_names;
+    use std::sync::Arc;
+    use vtcode_core::core::agent::tool_catalog::SessionToolCatalogSnapshot;
+    use vtcode_core::llm::provider::ToolDefinition;
+
+    fn snapshot_with(names: &[&str]) -> SessionToolCatalogSnapshot {
+        let tools: Vec<ToolDefinition> = names
+            .iter()
+            .map(|name| {
+                ToolDefinition::function(
+                    (*name).to_string(),
+                    format!("{name} tool"),
+                    serde_json::json!({"type": "object", "properties": {}}),
+                )
+            })
+            .collect();
+        SessionToolCatalogSnapshot::new(1, 1, false, true, Some(Arc::new(tools)), true)
     }
-    result
+
+    #[test]
+    fn tool_names_render_is_insensitive_to_discovery_order() {
+        // Asymmetric pair: reverse discovery order must render byte-identical
+        // output, otherwise the system-prompt prefix busts the provider cache.
+        let forward = render_tool_names(&snapshot_with(&["exec_command", "code_search", "apply_patch"]));
+        let reverse = render_tool_names(&snapshot_with(&["apply_patch", "code_search", "exec_command"]));
+        assert_eq!(forward, "apply_patch, code_search, exec_command");
+        assert_eq!(reverse, forward);
+    }
+
+    #[test]
+    fn tool_names_render_handles_empty_and_missing_snapshot() {
+        assert_eq!(render_tool_names(&snapshot_with(&[])), "none");
+        let missing = SessionToolCatalogSnapshot::new(1, 1, false, true, None, true);
+        assert_eq!(render_tool_names(&missing), "none");
+    }
 }
