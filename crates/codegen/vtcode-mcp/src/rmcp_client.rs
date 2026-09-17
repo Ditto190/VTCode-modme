@@ -42,6 +42,24 @@ use tracing::{debug, error, info, warn};
 use url::Url;
 use vtcode_commons::sanitizer::sanitize_provider_diagnostic;
 
+/// Highest protocol version sent on the wire for the legacy `initialize`
+/// handshake.
+///
+/// The `2026-07-28` draft is excluded: legacy streamable-HTTP servers (e.g.
+/// DeepWiki, max `2025-11-25`) reject unknown versions with HTTP 400 whose
+/// JSON-RPC error carries the non-correlated id `"server-error"`, surfacing in
+/// rmcp as `UncorrelatedErrorResponse { expected: 0, received: "server-error" }`
+/// with the real validation payload discarded. Capping here keeps every
+/// handshake path (`connect_server`, pool startup, `reconnect`) on a version
+/// legacy servers accept; negotiation can still settle lower.
+fn clamp_initialize_protocol_version(version: rmcp::model::ProtocolVersion) -> rmcp::model::ProtocolVersion {
+    if version > rmcp::model::ProtocolVersion::V_2025_11_25 {
+        rmcp::model::ProtocolVersion::V_2025_11_25
+    } else {
+        version
+    }
+}
+
 const MCP_PROGRESS_TOKEN_META_KEY: &str = "progressToken";
 const MCP_STDERR_MAX_BYTES: usize = 8 * 1024;
 const LIST_CHANGED_BUCKET_CAPACITY: u8 = 4;
@@ -360,9 +378,7 @@ impl RmcpClient {
         timeout: Option<Duration>,
     ) -> Result<ServerPeerInfo> {
         let mut params = params;
-        if params.protocol_version > rmcp::model::ProtocolVersion::V_2025_11_25 {
-            params.protocol_version = rmcp::model::ProtocolVersion::V_2025_11_25;
-        }
+        params.protocol_version = clamp_initialize_protocol_version(params.protocol_version);
         let handler = LoggingClientHandler::new(
             self.provider_name.clone(),
             params,
@@ -1070,6 +1086,33 @@ mod tests {
 
         assert_eq!(versions, vec!["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05",]);
         assert!(!versions.contains(&"2026-07-28"));
+    }
+
+    #[test]
+    fn clamp_initialize_protocol_version_caps_draft_at_last_stable() {
+        assert_eq!(
+            clamp_initialize_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28),
+            rmcp::model::ProtocolVersion::V_2025_11_25
+        );
+    }
+
+    #[test]
+    fn clamp_initialize_protocol_version_caps_unknown_future_versions() {
+        let future: rmcp::model::ProtocolVersion = serde_json::from_value(Value::String("2099-01-01".to_string()))
+            .expect("custom protocol versions must deserialize");
+        assert_eq!(clamp_initialize_protocol_version(future), rmcp::model::ProtocolVersion::V_2025_11_25);
+    }
+
+    #[test]
+    fn clamp_initialize_protocol_version_keeps_supported_versions() {
+        for version in [
+            rmcp::model::ProtocolVersion::V_2025_11_25,
+            rmcp::model::ProtocolVersion::V_2025_06_18,
+            rmcp::model::ProtocolVersion::V_2025_03_26,
+            rmcp::model::ProtocolVersion::V_2024_11_05,
+        ] {
+            assert_eq!(clamp_initialize_protocol_version(version.clone()), version);
+        }
     }
 
     #[test]
