@@ -437,3 +437,30 @@ after compaction, vtcode agent should read from the compacted context handoff an
 ===
 
 make sure vtcode cli run smoothly in headless mode out of the box
+
+===
+
+fix DeepWiki MCP provider connection failure: `mcp connect deepwiki` fails with "Failed to initialize MCP provider 'deepwiki' — uncorrelated error response: expected id 0, error response carried server-error", even though the server itself is healthy.
+
+Evidence gathered (2026-09-17):
+- Raw HTTP probes to https://mcp.deepwiki.com/mcp succeed: single-object JSON-RPC `initialize` returns HTTP 200 + SSE result for every protocol version (2024-11-05 … 2026-07-28), negotiating down to 2025-11-25.
+- Replicated VT Code's exact initialize payload (protocolVersion 2026-07-28, capabilities roots.listChanged + elicitation.form.schemaValidation, clientInfo vtcode/0.159.0) → HTTP 200 OK. Wire protocol is NOT the problem.
+- rmcp 3.1.4 streamable HTTP transport (transport/common/reqwest/streamable_http_client.rs:211) sends a single message per POST via request.json(&message) — batch arrays are never sent, ruling out the batching-removal hypothesis.
+- The literal id "server-error" in the error message matches DeepWiki's 400-batch-response body, so the failing step is inside VT Code's own connection path, not the HTTP exchange.
+
+Plan:
+1. Read the deepwiki provider entry in MCP config (.vtcode/config.toml or equivalent) — check transport type (sse vs streamable_http), stale protocol_version field, or extra headers VT Code adds that raw probes did not replicate.
+2. Read the full error chain in .vtcode/logs/trajectory.jsonl around the `mcp connect` failures (turns 6 and 8) — debug_context only surfaced the top-level message; the underlying rmcp error pinpoints the failing step.
+3. Inspect transport selection logic in crates/codegen/vtcode-mcp/src/provider.rs:67-138 (client vs protocol_version decision) — a config-declared protocol_version unsupported by DeepWiki would fail before the HTTP request.
+4. Patch the actual failing step in vtcode-mcp (likely provider.rs transport selection or rmcp_client.rs handshake handling), keeping changes surgical.
+5. Verify: cargo check --locked -p vtcode-mcp, then a real `mcp connect deepwiki` session (initialize → tools/list → tools/call ask_question) to confirm end-to-end.
+6. If the root cause turns out to be an rmcp upstream issue, file an issue with the probe evidence instead of working around it in VT Code.
+
+Session log excerpt (.vtcode/logs/trajectory.jsonl, session 2026-09-17):
+- turn 6  ts=1789641712  mcp {action: connect, name: deepwiki}  → ok=false "Failed to initialize MCP provider 'deepwiki': uncorrelated error response: expected id 0, error response carried server-error" (retry also failed)
+- turn 8  ts=1789641723  mcp {action: connect, name: deepwiki}  → ok=false (same error, retry_delay_ms=null, circuit_breaker_impact=true)
+- turn 16 ts=1789641792  exec_command python3 probe initialize 2025-06-18 → HTTP 200 OK, DeepWiki v2.14.3, tools: read_wiki_structure / read_wiki_contents / ask_question / …
+- turn ~40 python3 probe initialize × 4 protocol versions (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05) → all OK, negotiated 2025-11-25 for every request
+- turn ~55 python3 probe batch-array POST → HTTP 400 id="server-error" code=-32602 (server rejects batch arrays; matches the "server-error" id seen in the VT Code error)
+- turn ~70 python3 probe with VT Code's exact initialize payload (protocolVersion 2026-07-28, roots.listChanged + elicitation.form.schemaValidation, clientInfo vtcode/0.159.0) → HTTP 200 OK
+- Note: trajectory.jsonl records tool calls with ok flags only; the full rmcp error chain is not persisted, so step 2 of the plan (reproduce with RUST_LOG=trace) is still needed to capture the underlying failing step.
