@@ -72,8 +72,9 @@ use std::ffi::OsString;
 use std::fmt::Write;
 
 /// MCP protocol version constants
-pub(crate) const LATEST_PROTOCOL_VERSION: &str = "2024-11-05";
-pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[LATEST_PROTOCOL_VERSION];
+pub(crate) const LATEST_PROTOCOL_VERSION: &str = "2026-07-28";
+pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
+    &["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// Convert any serializable type to rmcp model type via JSON serialization
 pub(crate) fn convert_to_rmcp<T, U>(value: T) -> Result<U>
@@ -363,12 +364,28 @@ mod tests {
         roots.list_changed = Some(true);
         capabilities.roots = Some(roots);
         let params = InitializeRequestParams::new(capabilities, Implementation::new("vtcode", "1.0"))
-            .with_protocol_version(rmcp::model::ProtocolVersion::V_2024_11_05);
+            .with_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28);
 
         let converted: InitializeRequestParams = convert_to_rmcp(params.clone()).unwrap();
         // Verify the conversion succeeded by checking the name
         assert_eq!(converted.client_info.name, "vtcode");
         assert_eq!(converted.client_info.version, "1.0");
+    }
+
+    #[test]
+    fn supported_protocol_versions_cover_known_rmcp_versions_newest_first() {
+        let known: Vec<String> = rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+            .iter()
+            .map(|version| version.to_string())
+            .collect();
+        let mut known_newest_first = known.clone();
+        known_newest_first.reverse();
+
+        assert_eq!(
+            SUPPORTED_PROTOCOL_VERSIONS,
+            known_newest_first.as_slice(),
+            "supported MCP versions must track rmcp's known versions, newest first"
+        );
     }
 
     #[test]

@@ -971,7 +971,7 @@ impl McpClient {
         }
 
         InitializeRequestParams::new(capabilities, super::utils::build_client_implementation())
-            .with_protocol_version(rmcp::model::ProtocolVersion::V_2024_11_05)
+            .with_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28)
     }
 
     pub(super) fn normalize_arguments(args: &Value) -> Map<String, Value> {

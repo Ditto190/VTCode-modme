@@ -372,7 +372,7 @@ pub struct PooledMcpStats {
 /// Build initialize params for an MCP provider
 fn build_pool_initialize_params(_provider: &McpProvider) -> InitializeRequestParams {
     InitializeRequestParams::new(ClientCapabilities::default(), super::utils::build_client_implementation())
-        .with_protocol_version(rmcp::model::ProtocolVersion::V_2024_11_05)
+        .with_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28)
 }
 
 /// MCP connection pool errors

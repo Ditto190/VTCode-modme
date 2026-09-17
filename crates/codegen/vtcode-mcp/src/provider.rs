@@ -549,7 +549,7 @@ impl McpProvider {
             rmcp::model::ClientCapabilities::default(),
             super::utils::build_client_implementation(),
         )
-        .with_protocol_version(rmcp::model::ProtocolVersion::V_2024_11_05);
+        .with_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28);
         self.initialize(init_params, startup_timeout, tool_timeout, allowlist)
             .await
             .with_context(|| format!("MCP re-initialization failed for provider '{}'", self.name))?;

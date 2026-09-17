@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use serde_json::Value;
 use tokio::sync::Notify;
+use vtcode_core::ToolCatalog;
 use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
@@ -166,7 +167,10 @@ pub(crate) async fn run_tool_call_with_args(
             }
         }
     } else if let Some(tool) = ctx.tool_registry.get_tool(requested_name) {
-        canonical_name = Some(tool.name().to_string());
+        canonical_name = Some(match ctx.tool_registry.resolve_tool_name(requested_name) {
+            Ok(resolved_name) => resolved_name,
+            Err(_) => tool.name().to_string(),
+        });
     }
     let name = canonical_name.as_deref().unwrap_or(requested_name);
 

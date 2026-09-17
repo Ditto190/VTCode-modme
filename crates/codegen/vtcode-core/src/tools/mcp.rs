@@ -50,6 +50,7 @@ pub fn build_mcp_registration(
         client: Arc::clone(&client),
         remote_name: remote_name.clone(),
         input_schema: input_schema.clone(),
+        primary_name: primary_name.clone(),
     };
 
     let mut metadata = crate::tools::registry::ToolMetadata::default()
@@ -61,17 +62,21 @@ pub fn build_mcp_registration(
         metadata = metadata.with_server_hint(hint);
     }
 
-    Ok(
-        ToolRegistration::from_tool_with_metadata(primary_name, CapabilityLevel::Basic, Arc::new(proxy), metadata)
-            .with_catalog_source(ToolCatalogSource::Mcp)
-            .with_network_access(crate::tools::registry::ToolNetworkAccess::Unknown)
-            .with_llm_visibility(false)
-            .with_native_cgp_factory(native_cgp_tool_factory(move || McpProxyTool {
-                client: Arc::clone(&client),
-                remote_name: remote_name.clone(),
-                input_schema: input_schema.clone(),
-            })),
+    Ok(ToolRegistration::from_tool_with_metadata(
+        primary_name.clone(),
+        CapabilityLevel::Basic,
+        Arc::new(proxy),
+        metadata,
     )
+    .with_catalog_source(ToolCatalogSource::Mcp)
+    .with_network_access(crate::tools::registry::ToolNetworkAccess::Unknown)
+    .with_llm_visibility(false)
+    .with_native_cgp_factory(native_cgp_tool_factory(move || McpProxyTool {
+        client: Arc::clone(&client),
+        remote_name: remote_name.clone(),
+        input_schema: input_schema.clone(),
+        primary_name: primary_name.clone(),
+    })))
 }
 
 /// Bound remote metadata before cloning it into registry and model catalogs.
@@ -124,6 +129,7 @@ struct McpProxyTool {
     client: Arc<McpClient>,
     remote_name: String,
     input_schema: Value,
+    primary_name: String,
 }
 
 #[async_trait]
@@ -133,7 +139,7 @@ impl Tool for McpProxyTool {
     }
 
     fn name(&self) -> &str {
-        "mcp_proxy"
+        &self.primary_name
     }
 
     fn description(&self) -> &str {
@@ -215,6 +221,10 @@ mod tests {
         let wrapped = native_factory(&registration, PathBuf::from("/tmp/test"), CgpRuntimeMode::Interactive);
 
         assert_eq!(wrapped.name(), "mcp::context7::search-docs");
+        let crate::tools::registry::ToolHandler::TraitObject(raw_handler) = registration.handler() else {
+            panic!("MCP registration should retain a trait-object handler");
+        };
+        assert_eq!(raw_handler.name(), "mcp::context7::search-docs");
         let description = wrapped.description();
         assert!(description.starts_with("Host tool and permission policy remains authoritative."));
         assert!(description.contains("<untrusted_mcp_description provider=\"context7\" tool=\"search-docs\">"));

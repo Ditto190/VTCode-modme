@@ -16,7 +16,9 @@ use rmcp::model::{
     ReadResourceResult, RequestMetaObject, Resource, ResourceTemplate, ResourceUpdatedNotificationParam, Root,
     ServerNotification, ServerPeerInfo, ServerRequest, Tool,
 };
-use rmcp::service::{self, NotificationContext, RequestContext, RoleClient, RunningService, Service};
+use rmcp::service::{
+    self, ClientLifecycleMode, NotificationContext, RequestContext, RoleClient, RunningService, Service,
+};
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::{StreamableHttpClientTransport, StreamableHttpClientTransportConfig};
 use rmcp_reqwest::header::HeaderMap;
@@ -362,12 +364,38 @@ impl RmcpClient {
             let mut guard = self.state.lock().await;
             match &mut *guard {
                 ClientState::Connecting { transport } => match transport.take() {
-                    Some(PendingTransport::ChildProcess(transport)) => {
-                        (service::serve_client(service_handler.clone(), transport).boxed(), "stdio")
-                    }
-                    Some(PendingTransport::StreamableHttp(transport)) => {
-                        (service::serve_client(service_handler.clone(), transport).boxed(), "http")
-                    }
+                    Some(PendingTransport::ChildProcess(transport)) => (
+                        service::serve_client_with_lifecycle(
+                            service_handler.clone(),
+                            transport,
+                            ClientLifecycleMode::Auto {
+                                preferred_versions: rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+                                    .iter()
+                                    .rev()
+                                    .cloned()
+                                    .collect(),
+                                legacy_version: Some(rmcp::model::ProtocolVersion::V_2024_11_05),
+                            },
+                        )
+                        .boxed(),
+                        "stdio",
+                    ),
+                    Some(PendingTransport::StreamableHttp(transport)) => (
+                        service::serve_client_with_lifecycle(
+                            service_handler.clone(),
+                            transport,
+                            ClientLifecycleMode::Auto {
+                                preferred_versions: rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+                                    .iter()
+                                    .rev()
+                                    .cloned()
+                                    .collect(),
+                                legacy_version: Some(rmcp::model::ProtocolVersion::V_2024_11_05),
+                            },
+                        )
+                        .boxed(),
+                        "http",
+                    ),
                     None => {
                         return Err(anyhow!("MCP client for {} already initializing", handler.provider_name()));
                     }

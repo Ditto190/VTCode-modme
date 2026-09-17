@@ -1511,6 +1511,130 @@ async fn mcp_policy_paths_resolve_model_visible_aliases() -> Result<()> {
 }
 
 #[tokio::test]
+async fn mcp_alias_prevalidation_preserves_canonical_registration_name() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let canonical_name = "mcp::deepwiki::ask_question";
+    let alias_name = crate::tools::mcp::model_visible_mcp_tool_name("deepwiki", "ask_question");
+    let tool = crate::mcp::McpToolInfo {
+        name: "ask_question".to_string(),
+        description: "Ask a DeepWiki question".to_string(),
+        provider: "deepwiki".to_string(),
+        input_schema: json!({"type": "object"}),
+    };
+    let registration = crate::tools::mcp::build_mcp_registration(
+        Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default())),
+        "deepwiki",
+        &tool,
+        None,
+    )?;
+
+    registry.allow_all_tools().await?;
+
+    registry.register_tool(registration).await?;
+    registry
+        .mcp_tool_index
+        .write()
+        .await
+        .insert("deepwiki".to_string(), vec!["ask_question".to_string()]);
+    registry
+        .mcp_reverse_index
+        .write()
+        .await
+        .insert("ask_question".to_string(), "deepwiki".to_string());
+    registry.persist_mcp_tool_policy(&alias_name, ToolPolicy::Allow).await?;
+
+    let raw_tool = registry.get_tool(&alias_name).expect("MCP alias should resolve to a tool");
+    assert_eq!(raw_tool.name(), canonical_name);
+    assert_eq!(
+        registry
+            .evaluate_tool_policy(&alias_name)
+            .await
+            .expect("MCP alias policy should resolve"),
+        ToolPermissionDecision::Allow
+    );
+    assert_eq!(
+        registry
+            .resolve_public_tool_name(&alias_name)
+            .expect("MCP alias should be public"),
+        canonical_name
+    );
+
+    let preflight = registry.preflight_validate_harness_call(&alias_name, &json!({}))?;
+    assert_eq!(preflight.normalized_tool_name, canonical_name);
+
+    let response = registry.execute_public_tool_ref(&alias_name, &json!({})).await?;
+    assert!(response.is_object(), "MCP tool should execute successfully");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_proxy_harness_fallback_resolves_single_mcp_tool() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let canonical_name = "mcp::deepwiki::ask_question";
+    let alias_name = crate::tools::mcp::model_visible_mcp_tool_name("deepwiki", "ask_question");
+    let tool = vtcode_mcp::McpToolInfo {
+        name: "ask_question".to_string(),
+        description: "Ask a DeepWiki question".to_string(),
+        provider: "deepwiki".to_string(),
+        input_schema: json!({"type": "object"}),
+    };
+    let registration = crate::tools::mcp::build_mcp_registration(
+        Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default())),
+        "deepwiki",
+        &tool,
+        None,
+    )?;
+
+    registry.register_tool(registration).await?;
+
+    let preflight = registry.preflight_validate_harness_call("mcp_proxy", &json!({}))?;
+    assert_eq!(preflight.normalized_tool_name, canonical_name);
+    assert_eq!(
+        registry
+            .resolve_public_tool_name(&alias_name)
+            .expect("MCP alias should be public"),
+        canonical_name
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_proxy_harness_fallback_rejects_ambiguous_mcp_tools() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let tools = [("deepwiki", "ask_question"), ("context7", "search-docs")];
+    for (provider, remote_name) in tools {
+        let tool = vtcode_mcp::McpToolInfo {
+            name: remote_name.to_string(),
+            description: "MCP tool".to_string(),
+            provider: provider.to_string(),
+            input_schema: json!({"type": "object"}),
+        };
+        let registration = crate::tools::mcp::build_mcp_registration(
+            Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default())),
+            provider,
+            &tool,
+            None,
+        )?;
+        registry.register_tool(registration).await?;
+    }
+
+    let error = registry
+        .preflight_validate_harness_call("mcp_proxy", &json!({}))
+        .expect_err("ambiguous MCP proxy call should fail");
+    let message = error.to_string();
+    assert!(message.contains("Ambiguous MCP proxy call"));
+    assert!(message.contains("mcp__deepwiki__ask_question"));
+    assert!(message.contains("mcp__context7__search-docs"));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn apply_patch_alias_executes_without_recursive_reentry() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;

@@ -361,6 +361,19 @@ Worked for 57s
 ╏https://mcp.deepwiki.com/mcp ╏
 ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
 
+Diagnosis: mcp::deepwiki::ask_question
+Observed: The 'mcp_proxy' tool reported a execution failure (Tool not found): Unknown tool: mcp_proxy: Tool error:
+Unknown tool: mcp_proxy
+Likely cause: The requested tool is not available in the current runtime.
+Next action: Correct the tool name or arguments using the declared schema, then retry once.
+Diagnosis: mcp::deepwiki::read_wiki_structure
+Observed: The 'mcp_proxy' tool reported a execution failure (Tool not found): Unknown tool: mcp_proxy: Tool error:
+Unknown tool: mcp_proxy
+Likely cause: The requested tool is not available in the current runtime.
+Next action: Correct the tool name or arguments using the declared schema, then retry once.
+• The DeepWiki MCP tools are declared but the MCP proxy behind them is reporting "Unknown tool" — the server
+appears disconnected. Let me fall back to fetching the page directly.
+
 ===
 
 check if mcp config is correct
@@ -415,14 +428,12 @@ ref 2 states:
 
 ===
 
-CRITICAL: check failure `
-•   I have sufficient evidence from prior reads. Applying the section rewrite now.<tool_call>exec_command<arg_key>cmd
-</arg_key><arg_value>grep -n "## Why VT Code" README.md</arg_value></tool_call>
-[i] Cleaned recovery response (removed tool-call markup).
-Execution summary: blocked; changed files: none recorded; verification: see the final response and task tracker;
-blockers: the approved-plan turn produced no file changes, so implementation completion was not confirmed.
-MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.` and fix
+check and fix duplicated TODO/task block entries when task system is updated '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-17 at 13.45.47.png'
 
 ===
 
-check and fix duplicated TODO/task block entries when task system is updated '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-17 at 13.45.47.png'
+after compaction, vtcode agent should read from the compacted context handoff and continue processing tasks based on the updated context.
+
+===
+
+make sure vtcode cli run smoothly in headless mode out of the box

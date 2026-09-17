@@ -742,6 +742,27 @@ impl ToolPolicyManager {
             has_changes = true;
         }
 
+        // Seed allowlist rules for newly advertised providers so a persisted
+        // enforce-mode allowlist cannot permanently hide a connected provider.
+        // Per-tool Prompt policies still gate execution after discovery.
+        for provider in advertised_providers {
+            let rules =
+                self.config
+                    .mcp
+                    .allowlist
+                    .providers
+                    .entry(provider.clone())
+                    .or_insert_with(|| McpAllowListRules {
+                        tools: Some(vec!["*".to_string()]),
+                        logging: Some(mcp_standard_logging()),
+                        ..Default::default()
+                    });
+            if rules.logging.is_none() {
+                rules.logging = Some(mcp_standard_logging());
+                has_changes = true;
+            }
+        }
+
         // Remove any stale MCP keys from the primary policy map
         let stale_runtime_keys: Vec<_> = self
             .config
@@ -1769,5 +1790,27 @@ api_key_env = "STALE_API_KEY"
         manager.apply_tools_config(&tools_config).await.expect("apply config");
 
         assert_eq!(manager.get_policy(tools::EXEC_COMMAND), ToolPolicy::Deny);
+    }
+
+    #[tokio::test]
+    async fn update_mcp_tools_seeds_allowlist_rules_for_new_provider() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("tool-policy.json");
+        let mut manager = ToolPolicyManager::new_with_config_path(&config_path).await.expect("manager");
+        assert!(manager.mcp_allowlist().enforce);
+        assert!(!manager.mcp_allowlist().is_tool_allowed("deepwiki", "ask_question"));
+
+        let mut provider_tools = HashMap::new();
+        provider_tools.insert("deepwiki".to_string(), vec!["ask_question".to_string()]);
+
+        manager.update_mcp_tools(&provider_tools).await.expect("update MCP tools");
+
+        assert!(manager.mcp_allowlist().is_tool_allowed("deepwiki", "ask_question"));
+        assert!(manager.mcp_allowlist().is_tool_allowed("deepwiki", "read_wiki_structure"));
+
+        let reloaded = ToolPolicyManager::new_with_config_path(&config_path)
+            .await
+            .expect("reload manager");
+        assert!(reloaded.mcp_allowlist().is_tool_allowed("deepwiki", "ask_question"));
     }
 }

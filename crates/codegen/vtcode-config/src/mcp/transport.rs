@@ -252,7 +252,7 @@ fn default_provider_max_concurrent() -> usize {
 }
 
 fn default_mcp_protocol_version() -> String {
-    "2024-11-05".into()
+    "2026-07-28".into()
 }
 
 #[cfg(test)]

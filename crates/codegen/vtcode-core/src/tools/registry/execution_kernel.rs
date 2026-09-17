@@ -7,7 +7,9 @@ use crate::config::constants::tools as tool_names;
 use crate::tools::apply_patch::{UNIFIED_FILE_MAX_PAYLOAD_BYTES_ENV, effective_max_payload_bytes};
 use crate::tools::error_messages::agent_execution;
 use crate::tools::names::canonical_tool_name;
+use crate::tools::registry::ToolCatalogSource;
 use crate::tools::validation::{commands, condensed_schema_hint, paths};
+use crate::utils::tool_name_parsing::MCP_QUALIFIED_TOOL_PREFIX;
 
 use super::ToolRegistry;
 
@@ -519,12 +521,58 @@ pub(super) fn preflight_validate_call_with_mode(
 pub(super) fn resolve_dispatch_target(registry: &ToolRegistry, name: &str, mode: DispatchMode) -> Result<String> {
     match registry.resolve_public_tool(name) {
         Ok(resolution) => Ok(resolution.registration_name().to_string()),
-        Err(public_err) => mode
-            .allows_internal_dispatch()
-            .then(|| resolve_internal_dispatch_tool(registry, name))
-            .flatten()
-            .ok_or_else(|| anyhow!("Unknown tool: {}: {public_err}", canonical_tool_name(name))),
+        Err(public_err) => {
+            if mode.allows_internal_dispatch() {
+                if let Some(internal_target) = resolve_internal_dispatch_tool(registry, name) {
+                    return Ok(internal_target);
+                }
+                if name.eq_ignore_ascii_case("mcp_proxy")
+                    && let Some(mcp_target) = resolve_mcp_proxy_dispatch_target(registry)
+                {
+                    return mcp_target;
+                }
+            }
+            Err(anyhow!("Unknown tool: {}: {public_err}", canonical_tool_name(name)))
+        }
     }
+}
+
+/// Resolve the legacy `mcp_proxy` tool name used by some persisted model
+/// histories to a registered MCP proxy.
+///
+/// Returns `Ok(None)` when no MCP registration exists, and an explicit error
+/// naming the model-visible alternatives when the request is ambiguous. This
+/// keeps the fallback scoped to MCP tools instead of silently widening the
+/// harness dispatch surface.
+fn resolve_mcp_proxy_dispatch_target(registry: &ToolRegistry) -> Option<Result<String>> {
+    let mcp_registrations = registry
+        .inventory
+        .registrations_snapshot()
+        .into_iter()
+        .filter(|registration| registration.catalog_source() == ToolCatalogSource::Mcp)
+        .collect::<Vec<_>>();
+    if mcp_registrations.is_empty() {
+        return None;
+    }
+
+    if mcp_registrations.len() == 1 {
+        return Some(Ok(mcp_registrations[0].name().to_string()));
+    }
+
+    let visible_names = mcp_registrations
+        .iter()
+        .flat_map(|registration| {
+            registration
+                .metadata()
+                .aliases()
+                .iter()
+                .find(|alias| alias.starts_with(MCP_QUALIFIED_TOOL_PREFIX))
+                .map(|alias| alias.to_string())
+                .or_else(|| Some(registration.name().to_string()))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(Err(anyhow!("Ambiguous MCP proxy call: specify one of the available MCP tools: {visible_names}")))
 }
 
 /// Resolve a requested name to a registered harness-dispatchable internal
