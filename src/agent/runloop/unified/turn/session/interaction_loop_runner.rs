@@ -29,8 +29,8 @@ use support::{
     InlineLoopActionResolution, apply_live_theme_and_appearance, build_durable_scheduler_daemon,
     build_user_message_content, extract_recent_follow_up_hint, fallback_args_preview,
     refresh_ide_context_before_user_turn, replace_submitted_input_text, resolve_inline_loop_action, scheduler_enabled,
-    selected_model_supports_image_input, stalled_follow_up_recovery_prompt, submitted_images_are_unsupported,
-    sync_mcp_approval_policy_for_context,
+    selected_model_supports_image_input, stalled_follow_up_recovery_prompt, stalled_verification_resume_directive,
+    submitted_images_are_unsupported, sync_mcp_approval_policy_for_context,
 };
 pub(crate) use support::{handle_select_primary_agent, try_resume_latest_session};
 use vtcode_config::loader::SimpleConfigWatcher;
@@ -518,8 +518,24 @@ pub(super) async fn run_interaction_loop_impl(
                     .unwrap_or("Previous turn stalled without a detailed reason.")
                     .to_string();
                 let fallback_hint = extract_recent_follow_up_hint(ctx.conversation_history);
-                ctx.conversation_history
-                    .push(uni::Message::system(REPEATED_FOLLOW_UP_STALLED_DIRECTIVE.to_string()));
+                // A stall with the verification gate still pending is not a
+                // generic stuck turn: concluding would abandon unverified work
+                // the user asked to continue. Resume verifier-first with the
+                // configured-or-detected project command instead of the
+                // generic conclude-oriented directive.
+                let verification_stalled = ctx.session_stats.verification_snapshot().0;
+                if verification_stalled {
+                    let verifier =
+                        crate::agent::runloop::unified::turn::tool_outcomes::helpers::resolve_harness_verifier_command(
+                            ctx.vt_cfg.as_ref(),
+                            ctx.config.workspace.as_path(),
+                        );
+                    ctx.conversation_history
+                        .push(uni::Message::system(stalled_verification_resume_directive(verifier.as_deref())));
+                } else {
+                    ctx.conversation_history
+                        .push(uni::Message::system(REPEATED_FOLLOW_UP_STALLED_DIRECTIVE.to_string()));
+                }
                 if let Some((tool, args)) = fallback_hint.as_ref() {
                     let args_preview = fallback_args_preview(args);
                     ctx.conversation_history.push(uni::Message::system(format!(
@@ -534,7 +550,11 @@ pub(super) async fn run_interaction_loop_impl(
                     )));
                 ctx.renderer.line(
                     MessageStyle::Info,
-                    "Repeated follow-up after stalled turn detected; enforcing autonomous recovery and conclusion.",
+                    if verification_stalled {
+                        "Repeated follow-up after verification stall detected; resuming verifier-first recovery."
+                    } else {
+                        "Repeated follow-up after stalled turn detected; enforcing autonomous recovery and conclusion."
+                    },
                 )?;
             } else {
                 let directive = REPEATED_FOLLOW_UP_DIRECTIVE;

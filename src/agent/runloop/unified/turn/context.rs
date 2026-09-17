@@ -204,6 +204,17 @@ impl<'a> TurnProcessingContext<'a> {
         self.harness_state.recovery_is_tool_free()
     }
 
+    /// Whether this turn is inside the tool-free recovery synthesis pass:
+    /// recovery armed, its pass consumed, and tools disabled at the API level.
+    /// Texts produced here cannot verify (no tool call is possible), so they
+    /// must not consume verification-gate budgets — recovery carries its own
+    /// bounded budgets that already terminate the turn, and the generic
+    /// text-response cap still refuses unverified completion (see the
+    /// `cap_ends_completed` gate in `run_turn_loop`).
+    pub(crate) fn in_tool_free_recovery_synthesis(&self) -> bool {
+        self.is_recovery_active() && self.recovery_pass_used() && self.recovery_is_tool_free()
+    }
+
     #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     pub(crate) fn switch_to_tool_free_recovery(&mut self) -> bool {
         self.harness_state.switch_to_tool_free_recovery()

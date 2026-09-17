@@ -85,6 +85,25 @@ pub(crate) struct SessionStats {
     /// Granted by a failed verifier so a broken build can be repaired across
     /// `continue` turns; consumed by successful fix-up mutations.
     verification_fix_remaining: u8,
+    /// Bounded autonomous turns the session loop may schedule after a
+    /// verification-blocked turn before requiring manual `continue`.
+    /// Reset on every `Completed` turn and on fresh execution; incremented by
+    /// [`Self::record_verification_auto_recovery_turn_with_limit`]. Prevents unbounded
+    /// self-retry loops on a verifier that can never pass while still letting
+    /// long-running autonomous work survive transient verification misses
+    /// without user intervention.
+    verification_auto_recovery_turns: u8,
+    /// Consecutive failed harness auto-verifications this stall episode.
+    /// Incremented by [`Self::record_verification_auto_failure`], reset by
+    /// [`Self::record_verification_auto_success`] and every
+    /// [`Self::reset_verification_recovery_episode`] site. At the configured
+    /// threshold the harness stops executing verifiers itself and escalates
+    /// to a manual handoff carrying [`Self::last_verification_failure`].
+    verification_consecutive_failures: u8,
+    /// Bounded tail of the last failed harness auto-verification, kept for
+    /// handoff enrichment. `None` when the last auto-verification succeeded
+    /// or none ran this episode.
+    last_verification_failure: Option<VerificationFailureSummary>,
     /// Responses-style continuation state keyed by normalized provider/model pairs.
     previous_response_chains: HashMap<(String, String), ResponsesContinuationState>,
     prompt_cache_profile: Option<PromptCacheProfile>,
@@ -469,6 +488,7 @@ impl SessionStats {
         self.suppress_next_follow_up_prompt = false;
         self.turn_stalled = false;
         self.turn_stall_reason = None;
+        self.reset_verification_recovery_episode();
         self.clear_previous_response_chain();
         self.prompt_cache_lineage_id = None;
         self.last_prompt_cache_model = None;
@@ -506,6 +526,7 @@ impl SessionStats {
             self.follow_up_prompt_streak = 0;
             self.turn_stalled = false;
             self.turn_stall_reason = None;
+            self.reset_verification_recovery_episode();
             return FollowUpPromptAction::None;
         }
 
@@ -546,6 +567,71 @@ impl SessionStats {
     pub(crate) fn set_verification_snapshot(&mut self, snapshot: (bool, u8)) {
         self.verification_pending = snapshot.0;
         self.verification_fix_remaining = if snapshot.0 { snapshot.1 } else { 0 };
+    }
+
+    /// Config-aware cross-turn recovery recorder; prefer it at call sites with
+    /// workspace config access so `[agent.harness.verification].cross_turn_turns`
+    /// is honored. Returns `true` when budget remained (the caller should
+    /// queue a recovery turn instead of writing a blocked handoff); `false`
+    /// once exhausted and manual `continue` is required.
+    pub(crate) fn record_verification_auto_recovery_turn_with_limit(&mut self, max_turns: u8) -> bool {
+        if self.verification_auto_recovery_turns >= max_turns {
+            return false;
+        }
+        self.verification_auto_recovery_turns = self.verification_auto_recovery_turns.saturating_add(1);
+        true
+    }
+
+    pub(crate) fn verification_auto_recovery_turns(&self) -> u8 {
+        self.verification_auto_recovery_turns
+    }
+
+    /// Record a failed harness auto-verification of `command`, keeping a
+    /// bounded tail of its output for the escalated handoff. Returns the new
+    /// consecutive-failure count so callers can compare against the
+    /// configured escalation threshold without a second accessor call.
+    pub(crate) fn record_verification_auto_failure(&mut self, command: String, excerpt: &str) -> u8 {
+        const BOUND: usize =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::VERIFICATION_FAILURE_EXCERPT_CHARS;
+        // Keep the last BOUND chars (the tail usually holds the error
+        // summary) without materializing the full char vector.
+        let start = excerpt
+            .char_indices()
+            .rev()
+            .nth(BOUND.saturating_sub(1))
+            .map_or(0, |(idx, _)| idx);
+        let tail = excerpt[start..].to_string();
+        self.verification_consecutive_failures = self.verification_consecutive_failures.saturating_add(1);
+        let consecutive_failures = self.verification_consecutive_failures;
+        self.last_verification_failure =
+            Some(VerificationFailureSummary { command, excerpt_tail: tail, consecutive_failures });
+        consecutive_failures
+    }
+
+    /// Record a successful harness auto-verification: the suite is green, so
+    /// the consecutive-failure count and any stored failure tail are dropped.
+    pub(crate) fn record_verification_auto_success(&mut self) {
+        self.verification_consecutive_failures = 0;
+        self.last_verification_failure = None;
+    }
+
+    pub(crate) fn verification_consecutive_failures(&self) -> u8 {
+        self.verification_consecutive_failures
+    }
+
+    pub(crate) fn last_verification_failure(&self) -> Option<&VerificationFailureSummary> {
+        self.last_verification_failure.as_ref()
+    }
+
+    /// Reset the whole verification-recovery episode: cross-turn budget,
+    /// consecutive-failure count, and stored failure tail. Call on
+    /// `Completed` turns, cancellation/exit, fresh execution, and fresh user
+    /// instructions — every point where past verification struggles stop
+    /// being relevant to future work.
+    pub(crate) fn reset_verification_recovery_episode(&mut self) {
+        self.verification_auto_recovery_turns = 0;
+        self.verification_consecutive_failures = 0;
+        self.last_verification_failure = None;
     }
 
     #[cfg(test)]
@@ -802,6 +888,21 @@ pub(crate) fn should_enforce_safe_mode_prompts(
     }
 
     !matches!(workspace_trust_level, Some(WorkspaceTrustLevel::FullAuto))
+}
+
+/// Bounded record of a failed harness auto-verification, kept for handoff
+/// enrichment so the eventual manual blocker names the failing command and
+/// shows its output tail instead of repeating the generic "run a verifier"
+/// recipe.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct VerificationFailureSummary {
+    /// Verifier command that failed (e.g. `cargo check --locked`).
+    pub command: String,
+    /// Tail excerpt of the tool output, bounded to
+    /// `VERIFICATION_FAILURE_EXCERPT_CHARS` chars at record time.
+    pub excerpt_tail: String,
+    /// Consecutive failure count including this failure.
+    pub consecutive_failures: u8,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1281,6 +1382,60 @@ mod tests {
         assert!(stats.verification_snapshot().0);
         stats.set_verification_snapshot((false, 0));
         assert!(!stats.verification_snapshot().0);
+    }
+
+    #[test]
+    fn verification_auto_recovery_turns_are_bounded_and_reset_on_new_request() {
+        use crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_TURNS;
+
+        let mut stats = SessionStats::default();
+        for _ in 0..MAX_VERIFICATION_AUTO_RECOVERY_TURNS {
+            assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+        }
+        assert!(!stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+        assert_eq!(stats.verification_auto_recovery_turns(), MAX_VERIFICATION_AUTO_RECOVERY_TURNS);
+
+        stats.reset_verification_recovery_episode();
+        assert_eq!(stats.verification_auto_recovery_turns(), 0);
+        assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+
+        // A fresh non-follow-up user request resets the cross-turn budget.
+        assert_eq!(stats.register_follow_up_prompt("run tests and summarize"), FollowUpPromptAction::None);
+        assert_eq!(stats.verification_auto_recovery_turns(), 0);
+    }
+
+    #[test]
+    fn verification_auto_failure_escalation_counts_and_resets_as_episode() {
+        let mut stats = SessionStats::default();
+        assert_eq!(stats.verification_consecutive_failures(), 0);
+        assert!(stats.last_verification_failure().is_none());
+
+        let first = stats.record_verification_auto_failure("cargo check --locked".to_string(), "error[A]: boom");
+        assert_eq!(first, 1);
+        let second = stats.record_verification_auto_failure("cargo check --locked".to_string(), "error[A]: boom again");
+        assert_eq!(second, 2);
+        let summary = stats.last_verification_failure().expect("failure tail must be kept");
+        assert_eq!(summary.command, "cargo check --locked");
+        assert_eq!(summary.consecutive_failures, 2);
+        assert!(summary.excerpt_tail.contains("boom again"));
+
+        // Long output is bounded to the tail at record time.
+        let long = format!("x{} tail-marker", "y".repeat(5000));
+        stats.record_verification_auto_failure("pytest -q".to_string(), &long);
+        let bounded = stats.last_verification_failure().expect("bounded tail must be kept");
+        assert!(bounded.excerpt_tail.chars().count() <= 2000);
+        assert!(bounded.excerpt_tail.contains("tail-marker"));
+        assert!(!bounded.excerpt_tail.starts_with('x'), "head must be elided, not kept");
+
+        stats.record_verification_auto_success();
+        assert_eq!(stats.verification_consecutive_failures(), 0);
+        assert!(stats.last_verification_failure().is_none());
+
+        stats.record_verification_auto_failure("cargo check --locked".to_string(), "boom");
+        stats.reset_verification_recovery_episode();
+        assert_eq!(stats.verification_consecutive_failures(), 0);
+        assert_eq!(stats.verification_auto_recovery_turns(), 0);
+        assert!(stats.last_verification_failure().is_none());
     }
 
     #[test]

@@ -14,7 +14,7 @@ use crate::agent::runloop::unified::turn::context::{
     PreparedAssistantToolCall, TurnHandlerOutcome, TurnLoopResult, TurnProcessingContext, TurnProcessingResult,
 };
 use crate::agent::runloop::unified::turn::guards::handle_turn_balancer;
-use crate::agent::runloop::unified::turn::tool_outcomes::{ToolOutcomeContext, helpers};
+use crate::agent::runloop::unified::turn::tool_outcomes::{ToolOutcomeContext, handle_tool_calls, helpers};
 use crate::agent::runloop::unified::turn::turn_loop::{
     MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN, PENDING_VERIFICATION_BLOCK_REASON, RECOVERY_CONTRACT_VIOLATION_REASON,
 };
@@ -92,17 +92,73 @@ fn record_assistant_tool_calls(
     );
 }
 
+/// Outcome of accounting for one text response while verification is pending.
+pub(crate) enum PendingVerificationTextOutcome {
+    /// Keep the turn alive (under the text cap, or a directive retry grant).
+    Continue,
+    /// End the turn as verification-blocked.
+    Block { reason: String },
+    /// Directive retries are exhausted: the harness should execute `command`
+    /// itself through the normal tool pipeline instead of blocking.
+    AutoVerify { command: String },
+}
+
+/// Whether a pending-gate text response claims the work is done. A completion
+/// claim without verification is the highest-risk moment in the gate's
+/// lifecycle — the model is asserting success with no evidence — so claims
+/// jump straight to harness verification instead of spending directive
+/// rounds. Deliberately recall-biased: a false positive costs one safe,
+/// bounded verifier execution, while a false negative just falls back to the
+/// ordinary cap accounting. Mirrors the result-claim marker philosophy of
+/// `should_suppress_pre_tool_result_claim` (same vocabulary family).
+fn is_completion_claim_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "is complete",
+        "is done",
+        "is finished",
+        "are complete",
+        "are done",
+        "completed",
+        "all done",
+        "good to go",
+        "ready for review",
+        "task complete",
+        "work complete",
+        "implementation complete",
+        "successfully",
+        "verified",
+        "tests pass",
+        "test passes",
+        "build passes",
+        "no errors",
+        "working correctly",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
 impl TurnProcessingContext<'_> {
     /// Account for a text response while verification is pending.
     ///
-    /// The model response is intentionally not stored or rendered. Once the
-    /// shared per-turn cap is reached, return a blocked result so the outer
-    /// turn loop can publish its deterministic fallback without claiming
-    /// unverified work.
+    /// The model response is intentionally not stored or rendered. Under the
+    /// shared per-turn cap the turn continues; each cap-hit then grants a
+    /// bounded autonomous directive retry (project-aware directive + fresh
+    /// text budget). Only after those are exhausted does the harness run the
+    /// verifier itself (one shot per turn, fail-closed on missing commands
+    /// and denied permissions), and only after that fails or is unavailable
+    /// does the outer turn loop publish its deterministic fallback without
+    /// claiming unverified work; the session loop may then schedule bounded
+    /// cross-turn auto-recovery turns before writing a blocked handoff.
+    ///
+    /// Tool-free recovery synthesis bypasses this accounting entirely (see the
+    /// caller): with tools disabled no text could verify, so recovery budgets
+    /// govern those responses instead.
     pub(crate) fn handle_pending_verification_text_response(
         &mut self,
         repeated_tool_attempts: &mut helpers::LoopTracker,
-    ) -> Result<Option<TurnLoopResult>> {
+        assistant_text: &str,
+    ) -> Result<PendingVerificationTextOutcome> {
         repeated_tool_attempts.mark_verification_pending();
         if !repeated_tool_attempts.verification_warning_emitted {
             // When the failed-verifier fix window is active the verifier already
@@ -120,15 +176,195 @@ impl TurnProcessingContext<'_> {
             repeated_tool_attempts.verification_warning_emitted = true;
         }
 
-        let response_count = self.harness_state.record_assistant_text_response();
-        if response_count < MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN {
-            return Ok(None);
+        // Completion claims skip the explanatory budget: asserting "done"
+        // without verification is the exact moment that needs evidence, not
+        // another directive round. Falls through to ordinary cap accounting
+        // when auto-verification is unavailable.
+        if is_completion_claim_text(assistant_text)
+            && let Some(command) = self.try_harness_auto_verify(repeated_tool_attempts)
+        {
+            return Ok(PendingVerificationTextOutcome::AutoVerify { command });
         }
 
-        Ok(Some(TurnLoopResult::Blocked {
-            reason: Some(PENDING_VERIFICATION_BLOCK_REASON.to_string()),
-        }))
+        let response_count = self.harness_state.record_assistant_text_response();
+        if response_count < MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN {
+            return Ok(PendingVerificationTextOutcome::Continue);
+        }
+
+        // In-turn autonomous recovery: name the exact project verifier and
+        // grant a fresh text budget once more, instead of blocking immediately.
+        // The streak reset mirrors the failed-verifier path (a verifier outcome
+        // that grants fix-ups also resets the streak so the model can diagnose
+        // before the cap re-applies): here the "outcome" is the harness
+        // deciding the turn is still salvageable without user intervention.
+        let max_attempts = helpers::verification_in_turn_attempts(self.vt_cfg);
+        if repeated_tool_attempts.record_verification_auto_recovery_with_limit(max_attempts) {
+            let attempt = repeated_tool_attempts.verification_auto_recovery_attempts();
+            let workspace_root = self.tool_registry.workspace_root();
+            let default_verifier =
+                vtcode_core::tools::tool_intent::default_verifier_for_workspace(workspace_root.as_path());
+            let directive = vtcode_core::tools::tool_intent::verification_recovery_directive(
+                default_verifier.as_deref(),
+                attempt,
+                max_attempts,
+            );
+            self.renderer
+                .line(MessageStyle::Info, helpers::VERIFICATION_AUTO_RECOVERY_WARNING)
+                .unwrap_or(());
+            self.working_history.push(uni::Message::system(directive));
+            self.harness_state.reset_assistant_text_response_streak();
+            self.session_stats
+                .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
+            return Ok(PendingVerificationTextOutcome::Continue);
+        }
+
+        if let Some(command) = self.try_harness_auto_verify(repeated_tool_attempts) {
+            return Ok(PendingVerificationTextOutcome::AutoVerify { command });
+        }
+
+        Ok(PendingVerificationTextOutcome::Block {
+            reason: PENDING_VERIFICATION_BLOCK_REASON.to_string(),
+        })
     }
+
+    /// Shared gate for harness-executed verification: kill-switch,
+    /// never-passing escalation budget, per-turn one-shot, and a resolvable
+    /// command must ALL pass, else `None` (caller falls back to cap
+    /// accounting or the manual handoff). Pure decision — no side effects —
+    /// so both the cap-exhaustion path and the completion-claim fast path
+    /// share one fail-closed predicate.
+    fn try_harness_auto_verify(&mut self, repeated_tool_attempts: &mut helpers::LoopTracker) -> Option<String> {
+        let max_failures = helpers::verification_max_consecutive_failures(self.vt_cfg);
+        if helpers::verification_auto_execute_enabled(self.vt_cfg)
+            && self.session_stats.verification_consecutive_failures() < max_failures
+            && repeated_tool_attempts.should_auto_execute_verifier()
+        {
+            return helpers::resolve_harness_verifier_command(
+                self.vt_cfg,
+                self.tool_registry.workspace_root().as_path(),
+            );
+        }
+        None
+    }
+}
+
+/// Find the latest tool response for `call_id` within `history[window_start..]`,
+/// if any. The window must start where the current execution's assistant
+/// message was appended: the harness reuses one fixed call id across turns,
+/// so an unbounded scan could attribute a previous turn's response to this
+/// execution and inflate the never-passing escalation counter for work that
+/// never ran. Out-of-range starts yield `None` (fail-safe: a missed count,
+/// never a phantom one).
+/// Used to attribute the harness auto-verification outcome (and bound its
+/// failure excerpt) without threading pipeline internals through the caller.
+fn last_tool_response_text(history: &[uni::Message], call_id: &str, window_start: usize) -> Option<String> {
+    history.get(window_start..)?.iter().rev().find_map(|message| {
+        (message.role == uni::MessageRole::Tool && message.tool_call_id.as_deref() == Some(call_id))
+            .then(|| message.content.as_text().to_string())
+    })
+}
+
+/// Execute the project verifier on the harness's behalf after the model
+/// exhausted its directive retries without verifying.
+///
+/// The synthesized call flows through the normal [`handle_tool_calls`]
+/// pipeline — mutation guard, validation, permissions, budget, repetition
+/// tracker — so harness execution can neither bypass policy nor corrupt gate
+/// accounting: a model-issued verifier and this call converge on identical
+/// `LoopTracker`/`SessionStats` transitions. Outcomes:
+///
+/// - Gate cleared → record success (drops the consecutive-failure count),
+///   note it in history, and continue the turn.
+/// - Gate still pending → record the failure with a bounded output excerpt
+///   for the escalated handoff, note the active fix window, and continue so
+///   the model can repair from real evidence.
+/// - Break outcome from the pipeline (exit, cancel, budget synthesis) →
+///   bookkeep the same way, then honor it.
+/// - No tool response landed (pre-flight rejection, guard block) → do not
+///   count it as a verifier failure; fall through to the turn balancer so a
+///   denial surfaces through the established recovery paths instead of
+///   polluting the escalation counter.
+pub(crate) async fn execute_harness_auto_verification(
+    ctx: &mut TurnProcessingContext<'_>,
+    repeated_tool_attempts: &mut helpers::LoopTracker,
+    turn_modified_files: &mut BTreeSet<PathBuf>,
+    step_count: usize,
+    max_tool_loops: usize,
+    tool_repeat_limit: usize,
+    command: String,
+) -> Result<TurnHandlerOutcome> {
+    use vtcode_core::config::constants::tools as tool_names;
+
+    repeated_tool_attempts.record_auto_verification_executed();
+    ctx.renderer
+        .line(MessageStyle::Info, &format!("{} `{command}`", helpers::HARNESS_AUTO_VERIFICATION_WARNING))
+        .unwrap_or(());
+    ctx.working_history.push(uni::Message::system(format!(
+        "Harness auto-verification: running `{command}` via exec_command (standalone, output capped). \
+        This call is harness-issued autonomous recovery, not a model action; its result carries the same weight as a model-run verifier."
+    )));
+
+    let raw_call = uni::ToolCall::function(
+        helpers::HARNESS_AUTO_VERIFY_CALL_ID.to_string(),
+        tool_names::EXEC_COMMAND.to_string(),
+        serde_json::json!({"cmd": command}).to_string(),
+    );
+    let synthetic = PreparedAssistantToolCall::new(raw_call);
+    if synthetic.args().is_none() {
+        // We built the JSON above; absence means a serialization regression.
+        // Fail closed to the manual handoff rather than executing blind.
+        return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+            reason: Some(PENDING_VERIFICATION_BLOCK_REASON.to_string()),
+        }));
+    }
+    let history_len_before_assistant = ctx.working_history.len();
+    record_assistant_tool_calls(ctx.working_history, std::slice::from_ref(&synthetic), history_len_before_assistant);
+
+    let break_outcome = {
+        let mut t_ctx_inner = ToolOutcomeContext {
+            ctx: &mut *ctx,
+            repeated_tool_attempts: &mut *repeated_tool_attempts,
+            turn_modified_files: &mut *turn_modified_files,
+        };
+        let outcome = handle_tool_calls(&mut t_ctx_inner, std::slice::from_ref(&synthetic)).await?;
+        if t_ctx_inner.repeated_tool_attempts.verification_is_pending() {
+            // Gate still pending: success and failure both need bookkeeping,
+            // but only an executed verifier (one that left a tool response)
+            // counts toward the never-passing escalation budget.
+            if let Some(response_text) = last_tool_response_text(
+                t_ctx_inner.ctx.working_history,
+                helpers::HARNESS_AUTO_VERIFY_CALL_ID,
+                history_len_before_assistant,
+            ) {
+                let failures = t_ctx_inner
+                    .ctx
+                    .session_stats
+                    .record_verification_auto_failure(command.clone(), &response_text);
+                t_ctx_inner.ctx.working_history.push(uni::Message::system(format!(
+                    "Harness auto-verification `{command}` did not clear the gate (consecutive failure {failures} this episode). \
+                    A bounded fix window is active: repair the reported failure, then re-run the standalone verifier."
+                )));
+            }
+        } else {
+            t_ctx_inner.ctx.session_stats.record_verification_auto_success();
+            t_ctx_inner.ctx.working_history.push(uni::Message::system(format!(
+                "Harness auto-verification `{command}` exited 0; the verification gate is cleared. Resume the request."
+            )));
+        }
+        t_ctx_inner
+            .ctx
+            .session_stats
+            .set_verification_snapshot(t_ctx_inner.repeated_tool_attempts.verification_snapshot());
+        outcome
+    };
+
+    if let Some(res) = break_outcome {
+        return Ok(res);
+    }
+
+    // Mirror the ToolCalls branch: run the balancer before continuing so
+    // navigation churn converging during verification still converges.
+    Ok(handle_turn_balancer(ctx, step_count, repeated_tool_attempts, max_tool_loops, tool_repeat_limit).await)
 }
 
 /// Dispatch the appropriate response handler based on the processing result.
@@ -201,8 +437,7 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                     turn_modified_files: &mut *params.turn_modified_files,
                 };
 
-                crate::agent::runloop::unified::turn::tool_outcomes::handle_tool_calls(&mut t_ctx_inner, &tool_calls)
-                    .await?
+                handle_tool_calls(&mut t_ctx_inner, &tool_calls).await?
             };
 
             if let Some(res) = outcome {
@@ -248,16 +483,36 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             // completes, but the plan draft counts towards the unverified-text
             // cap and the turn blocks every time.
             let is_planning_synthesis = proposed_plan.is_some() || params.ctx.is_planning_active();
-            if params.repeated_tool_attempts.verification_is_pending() && !is_planning_synthesis {
-                return Ok(
-                    match params
-                        .ctx
-                        .handle_pending_verification_text_response(params.repeated_tool_attempts)?
-                    {
-                        Some(result) => TurnHandlerOutcome::Break(result),
-                        None => TurnHandlerOutcome::Continue,
-                    },
-                );
+            // Tool-free recovery synthesis cannot verify (tools are disabled
+            // at the API level), so its texts bypass verification accounting
+            // entirely: counting them toward the verification cap would punish
+            // the model for obeying the recovery contract. Recovery budgets
+            // bound this path instead, and the generic cap still refuses
+            // unverified completion.
+            let tool_free_synthesis = params.ctx.in_tool_free_recovery_synthesis();
+            if params.repeated_tool_attempts.verification_is_pending() && !is_planning_synthesis && !tool_free_synthesis
+            {
+                match params
+                    .ctx
+                    .handle_pending_verification_text_response(params.repeated_tool_attempts, &text)?
+                {
+                    PendingVerificationTextOutcome::Continue => return Ok(TurnHandlerOutcome::Continue),
+                    PendingVerificationTextOutcome::Block { reason } => {
+                        return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) }));
+                    }
+                    PendingVerificationTextOutcome::AutoVerify { command } => {
+                        return execute_harness_auto_verification(
+                            &mut *params.ctx,
+                            &mut *params.repeated_tool_attempts,
+                            &mut *params.turn_modified_files,
+                            params.step_count,
+                            params.max_tool_loops,
+                            params.tool_repeat_limit,
+                            command,
+                        )
+                        .await;
+                    }
+                }
             }
 
             if params.ctx.is_recovery_active()
@@ -586,57 +841,458 @@ mod tests {
 
     #[tokio::test]
     async fn anti_blind_guard_blocks_repeated_unverified_text_responses() {
+        use crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS;
+
         let mut backing = TestTurnProcessingBacking::new(4).await;
         let mut repeated_tool_attempts = LoopTracker::new();
         repeated_tool_attempts.consecutive_mutations =
             crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
         let mut turn_modified_files = BTreeSet::new();
 
-        let first_outcome = {
-            let mut ctx = backing.turn_processing_context();
-            handle_turn_processing_result(HandleTurnProcessingResultParams {
-                ctx: &mut ctx,
-                processing_result: TurnProcessingResult::TextResponse {
-                    text: "The change is complete.".to_string(),
-                    reasoning: Vec::new(),
-                    reasoning_details: None,
-                    proposed_plan: None,
-                },
-                response_streamed: false,
-                step_count: 1,
-                repeated_tool_attempts: &mut repeated_tool_attempts,
-                turn_modified_files: &mut turn_modified_files,
-                max_tool_loops: 4,
-                tool_repeat_limit: 4,
-            })
-            .await
-            .expect("first anti-blind response should be handled")
-        };
-        assert!(matches!(first_outcome, TurnHandlerOutcome::Continue));
+        // The per-turn text cap is 2, but each cap-hit now consumes one
+        // bounded autonomous recovery attempt (fresh streak + project-aware
+        // directive) instead of blocking immediately. With
+        // MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS grants, the turn blocks only
+        // after 2 * (1 + MAX) text responses.
+        let expected_texts = 2 * (1 + u32::from(MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS));
+        for step in 1..=expected_texts {
+            let outcome = {
+                let mut ctx = backing.turn_processing_context();
+                handle_turn_processing_result(HandleTurnProcessingResultParams {
+                    ctx: &mut ctx,
+                    processing_result: TurnProcessingResult::TextResponse {
+                        text: "The change is complete.".to_string(),
+                        reasoning: Vec::new(),
+                        reasoning_details: None,
+                        proposed_plan: None,
+                    },
+                    response_streamed: false,
+                    step_count: step as usize,
+                    repeated_tool_attempts: &mut repeated_tool_attempts,
+                    turn_modified_files: &mut turn_modified_files,
+                    max_tool_loops: 4,
+                    tool_repeat_limit: 4,
+                })
+                .await
+                .expect("anti-blind response should be handled")
+            };
+            if step < expected_texts {
+                assert!(matches!(outcome, TurnHandlerOutcome::Continue), "step {step} should continue");
+            } else {
+                assert!(
+                    matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(_) })),
+                    "step {step} should block after auto-recovery exhaustion"
+                );
+            }
+        }
 
-        let second_outcome = {
-            let mut ctx = backing.turn_processing_context();
-            handle_turn_processing_result(HandleTurnProcessingResultParams {
-                ctx: &mut ctx,
-                processing_result: TurnProcessingResult::TextResponse {
-                    text: "The change is complete.".to_string(),
-                    reasoning: Vec::new(),
-                    reasoning_details: None,
-                    proposed_plan: None,
-                },
-                response_streamed: false,
-                step_count: 2,
-                repeated_tool_attempts: &mut repeated_tool_attempts,
-                turn_modified_files: &mut turn_modified_files,
-                max_tool_loops: 4,
-                tool_repeat_limit: 4,
-            })
-            .await
-            .expect("second anti-blind response should be handled")
-        };
-
-        assert!(matches!(second_outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(_) })));
         assert!(!backing.last_history_message_contains("The change is complete."));
+        assert_eq!(
+            repeated_tool_attempts.verification_auto_recovery_attempts(),
+            MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS
+        );
+    }
+
+    #[tokio::test]
+    async fn anti_blind_auto_recovery_names_project_verifier() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        for step in 1..=2 {
+            let mut ctx = backing.turn_processing_context();
+            let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::TextResponse {
+                    text: "Still working.".to_string(),
+                    reasoning: Vec::new(),
+                    reasoning_details: None,
+                    proposed_plan: None,
+                },
+                response_streamed: false,
+                step_count: step,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+                max_tool_loops: 4,
+                tool_repeat_limit: 4,
+            })
+            .await
+            .expect("auto-recovery response should be handled");
+            assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        }
+
+        assert_eq!(
+            repeated_tool_attempts.verification_auto_recovery_attempts(),
+            1,
+            "second text response should consume the first auto-recovery attempt"
+        );
+        assert!(
+            backing.last_history_message_contains("AUTONOMOUS VERIFICATION RECOVERY (1/"),
+            "recovery directive must carry attempt counts"
+        );
+        assert!(
+            backing.last_history_message_contains("max_output_tokens"),
+            "recovery directive must name the truncation mechanism"
+        );
+    }
+
+    /// Drive `step` text responses through the handler, returning the last outcome.
+    async fn drive_pending_texts(
+        backing: &mut TestTurnProcessingBacking,
+        repeated_tool_attempts: &mut LoopTracker,
+        turn_modified_files: &mut BTreeSet<std::path::PathBuf>,
+        steps: u32,
+    ) -> TurnHandlerOutcome {
+        let mut outcome = TurnHandlerOutcome::Continue;
+        for step in 1..=steps {
+            let mut ctx = backing.turn_processing_context();
+            outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::TextResponse {
+                    text: "Still working.".to_string(),
+                    reasoning: Vec::new(),
+                    reasoning_details: None,
+                    proposed_plan: None,
+                },
+                response_streamed: false,
+                step_count: step as usize,
+                repeated_tool_attempts: &mut *repeated_tool_attempts,
+                turn_modified_files: &mut *turn_modified_files,
+                max_tool_loops: 8,
+                tool_repeat_limit: 4,
+            })
+            .await
+            .expect("pending-verification text should be handled");
+            if !matches!(outcome, TurnHandlerOutcome::Continue) {
+                break;
+            }
+        }
+        outcome
+    }
+
+    #[tokio::test]
+    async fn harness_auto_verification_success_clears_gate_and_continues() {
+        // `rustc --version` exits 0 without touching workspace files: a
+        // hermetic passing verifier for the harness-executed path.
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.set_verification_override_for_test("rustc --version");
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        // Six texts exhaust the 2+2 directive budget; the sixth fires the
+        // one-shot harness execution instead of blocking.
+        let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(
+            !repeated_tool_attempts.verification_is_pending(),
+            "harness-executed `rustc --version` must clear the gate"
+        );
+        assert_eq!(repeated_tool_attempts.consecutive_mutations, 0);
+        assert!(
+            !repeated_tool_attempts.should_auto_execute_verifier(),
+            "a cleared gate must not re-arm harness execution"
+        );
+        assert!(
+            backing.last_history_message_contains("gate is cleared"),
+            "success must leave an explicit gate-cleared note"
+        );
+    }
+
+    #[tokio::test]
+    async fn harness_auto_verification_failure_grants_fix_window_and_records_episode() {
+        // Unrecognized rustc flag: fast deterministic non-zero exit, no files.
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.set_verification_override_for_test("rustc --invalid-flag-xyz");
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(repeated_tool_attempts.verification_is_pending(), "a failed verifier must keep the gate pending");
+        assert_eq!(
+            repeated_tool_attempts.fix_edits_remaining,
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE,
+            "harness-executed failure must grant the same fix window as a model-run verifier"
+        );
+        assert!(
+            repeated_tool_attempts.auto_verification_executed,
+            "the one-shot flag must stick while the gate stays pending"
+        );
+        assert!(
+            backing.last_history_message_contains("did not clear the gate"),
+            "failure must leave an explicit fix-window note"
+        );
+    }
+
+    /// Drive one model-issued tool call through the normal dispatch pipeline,
+    /// returning nothing; assertions read the tracker and history afterwards.
+    async fn drive_model_tool_call(
+        backing: &mut TestTurnProcessingBacking,
+        repeated_tool_attempts: &mut LoopTracker,
+        turn_modified_files: &mut BTreeSet<std::path::PathBuf>,
+        tool_name: &str,
+        args_json: &str,
+    ) {
+        use crate::agent::runloop::unified::turn::tool_outcomes::ToolOutcomeContext;
+        use crate::agent::runloop::unified::turn::tool_outcomes::handle_tool_calls;
+
+        let mut ctx = backing.turn_processing_context();
+        let call = PreparedAssistantToolCall::new(uni::ToolCall::function(
+            "call-rewrite-e2e".to_string(),
+            tool_name.to_string(),
+            args_json.to_string(),
+        ));
+        let mut t_ctx = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut *repeated_tool_attempts,
+            turn_modified_files: &mut *turn_modified_files,
+        };
+        handle_tool_calls(&mut t_ctx, std::slice::from_ref(&call))
+            .await
+            .expect("model tool call should dispatch");
+    }
+
+    #[tokio::test]
+    async fn piped_verifier_executes_standalone_with_truthful_status() {
+        // End-to-end proof of the root fix: the model types a piped verifier,
+        // the kernel elides the truncator, and the gate follows the VERIFIER's
+        // real exit status — not the tail's. `rustc --version | head -c 5`
+        // would report exit 0 with 5 chars of output under pipeline semantics;
+        // rewritten, the full version surfaces and the gate clears.
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        assert!(repeated_tool_attempts.verification_is_pending());
+        let mut turn_modified_files = BTreeSet::new();
+
+        drive_model_tool_call(
+            &mut backing,
+            &mut repeated_tool_attempts,
+            &mut turn_modified_files,
+            "exec_command",
+            r#"{"cmd": "rustc --version | head -c 5"}"#,
+        )
+        .await;
+
+        assert!(
+            !repeated_tool_attempts.verification_is_pending(),
+            "truthful exit 0 from the elided verifier must clear the gate"
+        );
+        assert_eq!(repeated_tool_attempts.consecutive_mutations, 0);
+    }
+
+    #[tokio::test]
+    async fn piped_verifier_failure_surfaces_instead_of_tail_success() {
+        // Converse proof: `rustc --invalid-flag-xyz | tail -5` exits 0 as a
+        // pipeline (tail's status) while the verifier fails. Rewritten, the
+        // failure surfaces: gate stays pending with the fix window granted.
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        drive_model_tool_call(
+            &mut backing,
+            &mut repeated_tool_attempts,
+            &mut turn_modified_files,
+            "exec_command",
+            r#"{"cmd": "rustc --invalid-flag-xyz | tail -5"}"#,
+        )
+        .await;
+
+        assert!(
+            repeated_tool_attempts.verification_is_pending(),
+            "truthful verifier failure must keep the gate pending"
+        );
+        assert_eq!(
+            repeated_tool_attempts.fix_edits_remaining,
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE,
+            "truthful failure must grant the fix window"
+        );
+    }
+
+    #[test]
+    fn auto_verification_attribution_ignores_prior_turn_responses() {
+        use super::last_tool_response_text;
+
+        let history = vec![
+            uni::Message::user("do the work".to_string()),
+            uni::Message::tool_response("harness-auto-verify".to_string(), "stale failure".to_string()),
+            uni::Message::assistant("commentary".to_string()),
+        ];
+        // Window starting after the stale response: nothing attributable, so
+        // a dispatch that broke before executing records no phantom failure.
+        assert_eq!(last_tool_response_text(&history, "harness-auto-verify", 3), None);
+        // Out-of-range starts are fail-safe, never panics.
+        assert_eq!(last_tool_response_text(&history, "harness-auto-verify", 99), None);
+        // Window covering it: attributed normally.
+        assert_eq!(last_tool_response_text(&history, "harness-auto-verify", 0).as_deref(), Some("stale failure"));
+        // Wrong call id: never attributed.
+        assert_eq!(last_tool_response_text(&history, "call-other", 0), None);
+    }
+
+    #[test]
+    fn completion_claim_detector_targets_done_assertions_not_progress_chatter() {
+        use super::is_completion_claim_text;
+
+        for claim in [
+            "The change is complete.",
+            "All done — implementation complete.",
+            "Done. All tests pass.",
+            "The build passes with no errors.",
+            "Fixed and verified.",
+            "READY FOR REVIEW",
+        ] {
+            assert!(is_completion_claim_text(claim), "should detect claim: {claim}");
+        }
+        for chatter in [
+            "Still working on the refactor.",
+            "Let me check the remaining files.",
+            "Running the next batch of edits now.",
+            "",
+            "ok",
+        ] {
+            assert!(!is_completion_claim_text(chatter), "must not fire on chatter: {chatter}");
+        }
+    }
+
+    #[tokio::test]
+    async fn completion_claim_jumps_straight_to_harness_verification() {
+        // A "done" assertion on the FIRST pending text must not spend
+        // directive rounds: the harness verifies immediately.
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.set_verification_override_for_test("rustc --version");
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        let mut ctx = backing.turn_processing_context();
+        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: "The change is complete.".to_string(),
+                reasoning: Vec::new(),
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 1,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+            max_tool_loops: 8,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .expect("completion claim should be handled");
+
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(!repeated_tool_attempts.verification_is_pending(), "executed `rustc --version` must clear the gate");
+        assert_eq!(
+            repeated_tool_attempts.verification_auto_recovery_attempts(),
+            0,
+            "fast path must not consume directive budget"
+        );
+        assert!(!repeated_tool_attempts.auto_verification_executed, "success clears the one-shot flag with the gate");
+    }
+
+    #[tokio::test]
+    async fn harness_auto_execute_disabled_falls_back_to_block() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        let mut vt_cfg = vtcode_core::config::loader::VTCodeConfig::default();
+        vt_cfg.agent.harness.verification.auto_execute = false;
+        vt_cfg.agent.harness.verification.default_verifier_override = Some("rustc --version".to_string());
+        backing.set_vt_cfg_for_test(vt_cfg);
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
+            "disabled auto-execute must preserve the manual blocked handoff"
+        );
+        assert!(!repeated_tool_attempts.auto_verification_executed);
+        assert!(repeated_tool_attempts.verification_is_pending());
+    }
+
+    #[tokio::test]
+    async fn harness_auto_verification_escalated_suite_blocks_without_executing() {
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.set_verification_override_for_test("rustc --version");
+        {
+            let ctx = backing.turn_processing_context();
+            for _ in 0..3 {
+                ctx.session_stats
+                    .record_verification_auto_failure("rustc --version".to_string(), "boom");
+            }
+            assert_eq!(ctx.session_stats.verification_consecutive_failures(), 3);
+        }
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
+            "an escalated never-passing suite must block instead of executing again"
+        );
+        assert!(!repeated_tool_attempts.auto_verification_executed);
+    }
+
+    #[tokio::test]
+    async fn tool_free_recovery_texts_bypass_verification_accounting() {
+        // Regression: with tools disabled at the API level no text could
+        // verify, so counting recovery synthesis toward the verification cap
+        // punished the model for obeying the recovery contract. Recovery
+        // budgets govern this path instead; the generic cap still refuses
+        // unverified completion (cap_ends_completed requires a clear gate).
+        let mut backing = TestTurnProcessingBacking::new(8).await;
+        backing.set_verification_override_for_test("rustc --version");
+        let mut repeated_tool_attempts = LoopTracker::new();
+        repeated_tool_attempts.consecutive_mutations =
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+        let mut turn_modified_files = BTreeSet::new();
+
+        let mut ctx = backing.turn_processing_context();
+        ctx.activate_recovery("post-tool follow-up failure");
+        assert!(ctx.consume_recovery_pass());
+        assert!(ctx.in_tool_free_recovery_synthesis());
+        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: "Synthesizing the gathered evidence into a final answer.".to_string(),
+                reasoning: Vec::new(),
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 1,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+            max_tool_loops: 8,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .expect("recovery synthesis should be handled");
+
+        // Clean recovery prose completes via the recovery path — never via
+        // the verification-blocked handoff, and without consuming any
+        // verification budget or firing the harness executor.
+        assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })));
+        assert!(repeated_tool_attempts.verification_is_pending());
+        assert_eq!(repeated_tool_attempts.verification_auto_recovery_attempts(), 0);
+        assert!(!repeated_tool_attempts.auto_verification_executed);
     }
 
     #[tokio::test]

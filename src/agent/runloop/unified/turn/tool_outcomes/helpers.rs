@@ -44,11 +44,121 @@ pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verificatio
 /// Warning rendered when a piped verifier (e.g. `cargo check 2>&1 | tail -5`)
 /// succeeded while the gate is pending: the pipeline's exit status belongs to
 /// the tail command, so the verifier's success cannot clear the gate.
+/// NOTE: pure `head`/`tail` truncator shapes no longer reach this notice —
+/// the exec layer elides them into standalone verifiers with truthful exit
+/// codes. Only non-rewritable pipelines (filtering tails, `;` joins) land
+/// here.
 pub(crate) const PIPED_VERIFICATION_WARNING: &str = "[!] Piped verifier did not clear the verification gate: the pipeline exit status is the truncator's, not the verifier's.";
 /// Model-facing directive paired with [`PIPED_VERIFICATION_WARNING`]: without
 /// this feedback a piped success reads as "verified" to the model and the
 /// pending gate deadlocks the turn on unverified text responses.
 pub(crate) const PIPED_VERIFICATION_DIRECTIVE: &str = "The verification command ran inside a pipeline, so its exit status is the pipeline tail's (e.g. `tail`/`head`), not the verifier's, and it did not clear the verification gate. Re-run the verifier standalone or as a pure `&&` chain of verifiers without `|`, `;`, or `||` (pass `max_output_tokens` instead of piping) to clear verification.";
+/// Bounded in-turn autonomous recovery attempts when the model emits text
+/// instead of a verifier while the gate is pending.
+///
+/// Without this, two explanatory text responses end the turn as `Blocked` and
+/// force the user to type `continue` — a manual step that stalls long-running
+/// autonomous work. Each attempt resets the text-response streak once and
+/// injects a project-aware directive naming the exact verifier command (see
+/// `default_verifier_for_workspace`), giving the model one more bounded
+/// chance to verify before the turn blocks. Mirrors Codex's Stop-hook test
+/// gate philosophy: the harness keeps the turn alive until verification is
+/// attempted, rather than punishing the first explanatory responses.
+pub(crate) const MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS: u8 = 2;
+/// Renderer line paired with the autonomous verification-recovery directive.
+/// Distinct from [`ANTI_BLIND_EDITING_WARNING`] so transcripts show that the
+/// harness granted an automatic retry (with attempt counts) instead of
+/// repeating the initial warning.
+pub(crate) const VERIFICATION_AUTO_RECOVERY_WARNING: &str =
+    "[i] Verification still pending — autonomous recovery: run the named verifier now instead of replying with text.";
+/// Warning rendered when the harness executes the project verifier itself
+/// after the model exhausted its directive retries. Distinct from
+/// [`VERIFICATION_AUTO_RECOVERY_WARNING`] (a directive grant) so transcripts
+/// show the harness took action rather than asking once more.
+pub(crate) const HARNESS_AUTO_VERIFICATION_WARNING: &str =
+    "[i] Harness auto-verification: running the project verifier now instead of blocking.";
+/// Cross-turn counterpart to [`MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS`]:
+/// how many additional autonomous turns the session loop may schedule after
+/// a verification-blocked turn before requiring manual `continue`.
+pub(crate) const MAX_VERIFICATION_AUTO_RECOVERY_TURNS: u8 = 2;
+/// Consecutive failed harness auto-verifications before the harness stops
+/// executing verifiers itself and escalates to a manual blocked handoff
+/// carrying the failure log. Reset by any success, completed turn, or fresh
+/// user input, so only a genuinely stuck suite trips it.
+pub(crate) const MAX_VERIFICATION_CONSECUTIVE_FAILURES: u8 = 3;
+/// Bound (in chars) for the harness auto-verification failure excerpt kept
+/// for the escalated blocked handoff. The full tool output stays in history
+/// and the spool; the handoff carries only the tail needed to triage.
+pub(crate) const VERIFICATION_FAILURE_EXCERPT_CHARS: usize = 2000;
+/// Tool-call id for the harness-synthesized verifier execution. Fixed (not
+/// model-issued) so transcripts and history unambiguously attribute the call
+/// to autonomous recovery rather than the model.
+pub(crate) const HARNESS_AUTO_VERIFY_CALL_ID: &str = "harness-auto-verify";
+
+/// Effective in-turn directive-retry budget, honoring
+/// `[agent.harness.verification].in_turn_attempts` with the compiled constant
+/// as fallback when no workspace config is present (tests, headless paths).
+pub(crate) fn verification_in_turn_attempts(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> u8 {
+    vt_cfg
+        .map(|cfg| cfg.agent.harness.verification.in_turn_attempts)
+        .unwrap_or(MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS)
+}
+
+/// Effective cross-turn recovery-turn budget, honoring
+/// `[agent.harness.verification].cross_turn_turns`.
+pub(crate) fn verification_cross_turn_turns(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> u8 {
+    vt_cfg
+        .map(|cfg| cfg.agent.harness.verification.cross_turn_turns)
+        .unwrap_or(MAX_VERIFICATION_AUTO_RECOVERY_TURNS)
+}
+
+/// Whether the harness may execute the project verifier itself when the model
+/// exhausts its directive retries. Kill-switch:
+/// `[agent.harness.verification].auto_execute = false` restores
+/// directive-only recovery.
+pub(crate) fn verification_auto_execute_enabled(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> bool {
+    vt_cfg.map(|cfg| cfg.agent.harness.verification.auto_execute).unwrap_or(true)
+}
+
+/// Effective consecutive-failure escalation threshold, honoring
+/// `[agent.harness.verification].max_consecutive_failures`.
+pub(crate) fn verification_max_consecutive_failures(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> u8 {
+    vt_cfg
+        .map(|cfg| cfg.agent.harness.verification.max_consecutive_failures)
+        .unwrap_or(MAX_VERIFICATION_CONSECUTIVE_FAILURES)
+}
+
+/// Resolve the verifier command the harness should run itself: the explicit
+/// `[agent.harness.verification].default_verifier_override` first (validated
+/// as a standalone verifier or pure `&&` chain — anything else falls back to
+/// detection so a misconfigured override can never smuggle a mutation or a
+/// status-masking pipeline into autonomous execution), then
+/// [`vtcode_core::tools::tool_intent::default_verifier_for_workspace`].
+/// Returns `None` when neither yields a runnable verifier; callers must then
+/// fall through to the manual blocked handoff.
+pub(crate) fn resolve_harness_verifier_command(
+    vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>,
+    workspace_root: &Path,
+) -> Option<String> {
+    if let Some(override_command) = vt_cfg
+        .and_then(|cfg| cfg.agent.harness.verification.default_verifier_override.as_deref())
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    {
+        let args = serde_json::json!({"cmd": override_command});
+        if matches!(
+            classify_shell_activity(vtcode_core::config::constants::tools::EXEC_COMMAND, &args),
+            ShellActivity::Verification
+        ) {
+            return Some(override_command.to_string());
+        }
+        tracing::warn!(
+            override_command,
+            "Ignoring [agent.harness.verification].default_verifier_override: not a standalone verifier or pure && chain; falling back to workspace detection"
+        );
+    }
+    vtcode_core::tools::tool_intent::default_verifier_for_workspace(workspace_root)
+}
 
 /// Threshold: number of consecutive read/search operations before the Navigation
 /// Loop warning fires.
@@ -116,6 +226,19 @@ pub(crate) struct LoopTracker {
     /// never persisted in [`Self::verification_snapshot`] because it is
     /// turn-scoped coaching, not gate state.
     pub piped_verification_notice_pending: bool,
+    /// Bounded in-turn autonomous recovery attempts consumed when the model
+    /// emits text instead of a verifier while the gate is pending. Turn-scoped
+    /// (reset each turn, cleared on verification success); never persisted in
+    /// [`Self::verification_snapshot`] because it is retry budget, not gate
+    /// state. Survives [`Self::reset_after_balancer_recovery`] like the other
+    /// verification fields — navigation recovery is not verification.
+    pub verification_auto_recovery_attempts: u8,
+    /// Whether the harness has already executed the project verifier itself
+    /// this turn (one shot per turn). Set when the auto-execute path fires,
+    /// regardless of outcome, so a failing verifier cannot trigger an
+    /// unbounded execute→text→execute cycle inside one turn. Cleared on
+    /// verification success with the rest of the gate; never persisted.
+    pub auto_verification_executed: bool,
     /// Counter for consecutive read/search operations without action or synthesis
     pub consecutive_navigations: usize,
     /// Number of times navigation-loop recovery has fired in this session.
@@ -151,6 +274,8 @@ impl LoopTracker {
             verification_block_notice_emitted: false,
             verification_result_lost_notice_pending: false,
             piped_verification_notice_pending: false,
+            verification_auto_recovery_attempts: 0,
+            auto_verification_executed: false,
             consecutive_navigations: 0,
             navigation_loop_recoveries: 0,
             consecutive_low_signal_navigations: 0,
@@ -300,9 +425,10 @@ impl LoopTracker {
         self.reset_low_signal_attempts();
         self.nav_signatures.clear();
         // Navigation recovery is not verification. Preserve mutation pressure,
-        // an active verification checkpoint, its bounded fix window, and the
-        // associated one-shot notices. Only a successful standalone verifier
-        // may clear those fields.
+        // an active verification checkpoint, its bounded fix window, the
+        // in-turn auto-recovery budget, the harness-executed once-flag, and
+        // the associated one-shot notices. Only a successful standalone
+        // verifier may clear those fields.
         self.consecutive_navigations = 0;
         self.reset_low_signal_navigation_counters();
     }
@@ -359,6 +485,39 @@ impl LoopTracker {
         }
     }
 
+    /// Config-aware attempt recorder; prefer it at call sites with workspace
+    /// config access so `[agent.harness.verification].in_turn_attempts` is
+    /// honored. Returns `true` when budget remained (the caller should reset
+    /// the text-response streak, inject the project-aware recovery directive,
+    /// and `Continue` the turn instead of `Block`ing); `false` once exhausted.
+    pub(crate) fn record_verification_auto_recovery_with_limit(&mut self, max_attempts: u8) -> bool {
+        if self.verification_auto_recovery_attempts >= max_attempts {
+            return false;
+        }
+        self.verification_auto_recovery_attempts = self.verification_auto_recovery_attempts.saturating_add(1);
+        true
+    }
+
+    pub(crate) fn verification_auto_recovery_attempts(&self) -> u8 {
+        self.verification_auto_recovery_attempts
+    }
+
+    /// Whether the harness may execute the project verifier itself this turn.
+    /// One shot per turn: once fired (any outcome), further text responses
+    /// consume only directive retries, then the turn blocks for cross-turn
+    /// recovery. Never true when the gate is clear.
+    pub(crate) fn should_auto_execute_verifier(&self) -> bool {
+        self.verification_is_pending() && !self.auto_verification_executed
+    }
+
+    /// Record that the harness executed the project verifier itself this
+    /// turn. Unconditional: every outcome (success, failure, lost result)
+    /// flows through the normal tracker paths, which clear or preserve the
+    /// gate; the flag only prevents a second harness execution this turn.
+    pub(crate) fn record_auto_verification_executed(&mut self) {
+        self.auto_verification_executed = true;
+    }
+
     fn mark_verification_complete(&mut self) {
         self.consecutive_mutations = 0;
         self.verification_pending = false;
@@ -367,6 +526,8 @@ impl LoopTracker {
         self.verification_block_notice_emitted = false;
         self.verification_result_lost_notice_pending = false;
         self.piped_verification_notice_pending = false;
+        self.verification_auto_recovery_attempts = 0;
+        self.auto_verification_executed = false;
     }
 }
 
@@ -2449,6 +2610,106 @@ mod tests {
         assert_eq!(tracker.verification_snapshot(), (true, FAILED_VERIFICATION_FIX_ALLOWANCE));
         let cleared = LoopTracker::with_verification_snapshot((false, FAILED_VERIFICATION_FIX_ALLOWANCE));
         assert_eq!(cleared.verification_snapshot(), (false, 0));
+    }
+
+    #[test]
+    fn harness_verifier_override_must_be_standalone_or_pure_chain() {
+        use super::resolve_harness_verifier_command;
+
+        let dir = tempfile::TempDir::new().expect("workspace");
+        let config_with = |override_command: &str| {
+            let mut vt_cfg = vtcode_core::config::loader::VTCodeConfig::default();
+            vt_cfg.agent.harness.verification.default_verifier_override = Some(override_command.to_string());
+            vt_cfg
+        };
+
+        // Valid overrides win over detection (empty dir detects nothing).
+        let vt_cfg = config_with("cargo nextest run -p mycrate");
+        assert_eq!(
+            resolve_harness_verifier_command(Some(&vt_cfg), dir.path()).as_deref(),
+            Some("cargo nextest run -p mycrate")
+        );
+        // Pure-`&&` verifier chains are truthful and accepted.
+        let vt_cfg = config_with("cargo fmt --all -- --check && cargo check --locked");
+        assert!(resolve_harness_verifier_command(Some(&vt_cfg), dir.path()).is_some());
+        // Piped, joined, and mutating overrides fall back to detection, which
+        // finds nothing here — never executing attacker- or typo-shaped text.
+        for bad in [
+            "cargo check --locked | tail -5",
+            "cargo check; cargo test",
+            "cargo check || cargo test",
+            "rm -rf /tmp/scratch",
+            "   ",
+        ] {
+            let vt_cfg = config_with(bad);
+            assert_eq!(resolve_harness_verifier_command(Some(&vt_cfg), dir.path()), None, "must not resolve: {bad:?}");
+        }
+        // Fallback works when detection finds a marker: the override loses.
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("Cargo.toml");
+        let vt_cfg = config_with("cargo check | tail -5");
+        assert_eq!(
+            resolve_harness_verifier_command(Some(&vt_cfg), dir.path()).as_deref(),
+            Some("cargo check --locked")
+        );
+    }
+
+    #[test]
+    fn verification_auto_recovery_budget_is_bounded_and_cleared_on_success() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        for _ in 0..MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS {
+            assert!(tracker.record_verification_auto_recovery_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS));
+        }
+        assert!(!tracker.record_verification_auto_recovery_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS));
+        assert_eq!(tracker.verification_auto_recovery_attempts(), MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS);
+        // A fresh turn starts with a fresh budget.
+        let fresh = LoopTracker::with_verification_snapshot((true, 0));
+        assert_eq!(fresh.verification_auto_recovery_attempts(), 0);
+
+        // A successful standalone verifier clears the budget with the gate.
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        update_repetition_tracker(&mut tracker, &success, tools::EXEC_COMMAND, &json!({"cmd": "cargo check --locked"}));
+        assert!(!tracker.verification_is_pending());
+        assert_eq!(tracker.verification_auto_recovery_attempts(), 0);
+    }
+
+    #[test]
+    fn auto_execute_verifier_is_one_shot_per_turn_until_success() {
+        let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+        assert!(tracker.should_auto_execute_verifier());
+
+        tracker.record_auto_verification_executed();
+        assert!(!tracker.should_auto_execute_verifier());
+
+        // A failed verifier keeps the gate but does not re-arm execution.
+        let failed = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 1}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: false,
+        });
+        update_repetition_tracker(&mut tracker, &failed, tools::EXEC_COMMAND, &json!({"cmd": "cargo check --locked"}));
+        assert!(tracker.verification_is_pending());
+        assert!(!tracker.should_auto_execute_verifier());
+
+        // A fresh turn re-arms; success clears the flag with the gate.
+        let fresh = LoopTracker::with_verification_snapshot((true, 0));
+        assert!(fresh.should_auto_execute_verifier());
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        update_repetition_tracker(&mut tracker, &success, tools::EXEC_COMMAND, &json!({"cmd": "cargo check --locked"}));
+        assert!(!tracker.verification_is_pending());
+        assert!(!tracker.auto_verification_executed);
     }
 
     #[test]

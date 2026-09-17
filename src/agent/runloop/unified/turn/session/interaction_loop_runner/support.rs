@@ -328,6 +328,24 @@ pub(super) fn stalled_follow_up_recovery_prompt(stall_reason: &str, has_fallback
     }
 }
 
+/// Verifier-first resume directive for a stall with the verification gate
+/// still pending. Unlike the generic stalled-follow-up directive (which pushes
+/// toward a conclusion), this keeps the original task alive: verify the
+/// pending edits with the detected project command first, then resume.
+/// `default_verifier` should come from `default_verifier_for_workspace`;
+/// `None` falls back to the generic Rust gate example rather than naming a
+/// command that may not exist.
+pub(super) fn stalled_verification_resume_directive(default_verifier: Option<&str>) -> String {
+    let command = default_verifier.unwrap_or("cargo check --locked");
+    format!(
+        "Previous turn stalled with edits still awaiting verification: run `{command}` with exec_command \
+        standalone or as a pure `&&` chain (no pipes, no `;`/`||`; cap output with `max_output_tokens`) \
+        and let it exit 0 first, then resume the original request from where it stalled. Do not conclude, \
+        summarize, or claim completion until the verification gate clears; a failed verifier grants bounded \
+        fix-up edits before re-verify is required."
+    )
+}
+
 fn append_trailing_text_part(content: &mut uni::MessageContent, trailing_text: String) {
     match content {
         uni::MessageContent::Text(text) => text.push_str(&trailing_text),
@@ -1494,6 +1512,24 @@ mod tests {
 
         assert!(prompt.contains("Stall reason: turn blocked"));
         assert!(prompt.contains("Use the recovered fallback hint"));
+    }
+
+    #[test]
+    fn stalled_verification_resume_directive_names_verifier_and_forbids_concluding() {
+        let directive = stalled_verification_resume_directive(Some("go test ./..."));
+
+        assert!(directive.contains("go test ./..."));
+        assert!(directive.contains("resume the original request"));
+        assert!(directive.contains("Do not conclude"));
+        assert!(directive.contains("max_output_tokens"));
+    }
+
+    #[test]
+    fn stalled_verification_resume_directive_falls_back_without_project_marker() {
+        let directive = stalled_verification_resume_directive(None);
+
+        assert!(directive.contains("cargo check --locked"));
+        assert!(directive.contains("resume the original request"));
     }
 
     #[test]

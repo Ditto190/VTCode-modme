@@ -524,6 +524,12 @@ pub struct AgentHarnessConfig {
     /// Opt-in (default: disabled).
     #[serde(default)]
     pub skeptic_panel: SkepticPanelConfig,
+    /// Autonomous recovery for the anti-blind-editing verification gate.
+    /// When the model emits text instead of running a verifier, the harness
+    /// grants bounded directive retries and (optionally) runs the detected
+    /// project verifier itself instead of forcing manual `continue`.
+    #[serde(default)]
+    pub verification: VerificationAutoRecoveryConfig,
 }
 
 impl Default for AgentHarnessConfig {
@@ -550,6 +556,59 @@ impl Default for AgentHarnessConfig {
             confidence_escalation: ConfidenceEscalationConfig::default(),
             async_approval: AsyncApprovalConfig::default(),
             skeptic_panel: SkepticPanelConfig::default(),
+            verification: VerificationAutoRecoveryConfig::default(),
+        }
+    }
+}
+
+/// Autonomous recovery policy for the anti-blind-editing verification gate.
+///
+/// After 6 consecutive successful mutations without verification, text-only
+/// responses no longer block the turn immediately: the harness grants bounded
+/// directive retries naming the exact project verifier, then (when
+/// `auto_execute` is set) runs that verifier itself through the normal tool
+/// pipeline instead of forcing the user to type `continue`. A verifier that
+/// keeps failing escalates to a manual blocked handoff carrying the failure
+/// log after `max_consecutive_failures` consecutive failures.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VerificationAutoRecoveryConfig {
+    /// Run the detected project verifier through the normal tool pipeline
+    /// when the model exhausts its directive retries without verifying.
+    /// Default: true. Set to false to restore directive-only recovery.
+    #[serde(default = "default_verification_auto_execute")]
+    pub auto_execute: bool,
+    /// Bounded in-turn directive retries granted when the model emits text
+    /// instead of a verifier while the gate is pending. Each grant resets the
+    /// text-response streak once and injects a project-aware directive.
+    /// Default: 2.
+    #[serde(default = "default_verification_in_turn_attempts")]
+    pub in_turn_attempts: u8,
+    /// Autonomous cross-turn recovery turns scheduled after a
+    /// verification-blocked turn before a manual blocked handoff is written.
+    /// Default: 2.
+    #[serde(default = "default_verification_cross_turn_turns")]
+    pub cross_turn_turns: u8,
+    /// Explicit verifier command overriding project-marker detection
+    /// (e.g. `"cargo nextest run -p mycrate"`). Must be a standalone verifier
+    /// or pure `&&` chain; pipes and `;`/`||` joins are rejected at use.
+    #[serde(default)]
+    pub default_verifier_override: Option<String>,
+    /// Consecutive failed harness auto-verifications before escalation to a
+    /// manual blocked handoff carrying the failure log. Reset by any success,
+    /// completed turn, or fresh user input. Default: 3.
+    #[serde(default = "default_verification_max_consecutive_failures")]
+    pub max_consecutive_failures: u8,
+}
+
+impl Default for VerificationAutoRecoveryConfig {
+    fn default() -> Self {
+        Self {
+            auto_execute: default_verification_auto_execute(),
+            in_turn_attempts: default_verification_in_turn_attempts(),
+            cross_turn_turns: default_verification_cross_turn_turns(),
+            default_verifier_override: None,
+            max_consecutive_failures: default_verification_max_consecutive_failures(),
         }
     }
 }
@@ -1188,6 +1247,26 @@ const fn default_harness_compact_on_model_switch() -> bool {
 #[inline]
 const fn default_harness_context_reset_stall_threshold() -> u32 {
     2
+}
+
+#[inline]
+const fn default_verification_auto_execute() -> bool {
+    true
+}
+
+#[inline]
+const fn default_verification_in_turn_attempts() -> u8 {
+    2
+}
+
+#[inline]
+const fn default_verification_cross_turn_turns() -> u8 {
+    2
+}
+
+#[inline]
+const fn default_verification_max_consecutive_failures() -> u8 {
+    3
 }
 
 #[inline]
@@ -1964,6 +2043,40 @@ mod tests {
         let fallback: AgentHarnessConfig =
             toml::from_str("orchestration_mode = \"unexpected\"").expect("fallback config");
         assert_eq!(fallback.orchestration_mode, HarnessOrchestrationMode::PlanBuildEvaluate);
+    }
+
+    #[test]
+    fn test_verification_auto_recovery_defaults_to_bounded_auto_execute() {
+        let config = VerificationAutoRecoveryConfig::default();
+        assert!(config.auto_execute);
+        assert_eq!(config.in_turn_attempts, 2);
+        assert_eq!(config.cross_turn_turns, 2);
+        assert_eq!(config.default_verifier_override, None);
+        assert_eq!(config.max_consecutive_failures, 3);
+    }
+
+    #[test]
+    fn test_verification_auto_recovery_survives_missing_field_for_backward_compatibility() {
+        // Older vtcode.toml files predate [agent.harness.verification]: the
+        // whole table and each field must fall back to defaults.
+        let without_table: AgentHarnessConfig = toml::from_str("").expect("default harness config");
+        assert!(without_table.verification.auto_execute);
+        assert_eq!(without_table.verification.in_turn_attempts, 2);
+
+        let partial: VerificationAutoRecoveryConfig =
+            toml::from_str("auto_execute = false").expect("minimal verification config parses");
+        assert!(!partial.auto_execute);
+        assert_eq!(partial.in_turn_attempts, 2);
+        assert_eq!(partial.max_consecutive_failures, 3);
+
+        let full: VerificationAutoRecoveryConfig = toml::from_str(
+            "auto_execute = true\nin_turn_attempts = 1\ncross_turn_turns = 0\ndefault_verifier_override = \"cargo nextest run -p mycrate\"\nmax_consecutive_failures = 5",
+        )
+        .expect("full verification config parses");
+        assert_eq!(full.in_turn_attempts, 1);
+        assert_eq!(full.cross_turn_turns, 0);
+        assert_eq!(full.default_verifier_override.as_deref(), Some("cargo nextest run -p mycrate"));
+        assert_eq!(full.max_consecutive_failures, 5);
     }
 
     #[test]

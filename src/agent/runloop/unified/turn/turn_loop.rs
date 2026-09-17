@@ -117,10 +117,12 @@ pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
     "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.";
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
     "Turn blocked after repeated unverified assistant responses; verification is still pending.";
-const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending. \
+const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending \
+    after bounded autonomous recovery. \
     Inspection-only checks do not clear the verification gate; run a verification command — your project's \
     build/test/lint tool, e.g. `cargo check --locked`, `go test`, or `cargo nextest run` (standalone or as a pure \
-    `&&` chain, no `| head` pipes and no `;`/`||`/`|` joins) — to exit 0, then resume the request. \
+    `&&` chain, no `| head` pipes and no `;`/`||`/`|` joins; cap output with `max_output_tokens`) — to exit 0, \
+    then type `continue` to resume with the gate preserved. \
     A failed verifier grants ";
 const PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX: &str = " fix-up edits before re-verify is required.";
 
@@ -714,8 +716,9 @@ pub(crate) async fn run_turn_loop(
     use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnProcessingResult};
     use crate::agent::runloop::unified::turn::guards::run_proactive_guards;
     use crate::agent::runloop::unified::turn::turn_processing::{
-        HandleTurnProcessingResultParams, execute_llm_request, handle_turn_processing_result,
-        maybe_force_planning_workflow_interview, process_llm_response, resolve_effective_request_model,
+        HandleTurnProcessingResultParams, PendingVerificationTextOutcome, execute_harness_auto_verification,
+        execute_llm_request, handle_turn_processing_result, maybe_force_planning_workflow_interview,
+        process_llm_response, resolve_effective_request_model,
     };
 
     // Initialize the outcome result
@@ -1489,14 +1492,54 @@ pub(crate) async fn run_turn_loop(
                 if turn_processing_ctx.is_approved_plan_execution()
                     && is_stale_approved_plan_pause_response(text)
         );
-        if stale_approved_plan_pause && repeated_tool_attempts.verification_is_pending() {
-            if let Some(blocked_result) =
-                turn_processing_ctx.handle_pending_verification_text_response(&mut repeated_tool_attempts)?
-            {
-                result = blocked_result;
-                break;
+        if stale_approved_plan_pause
+            && repeated_tool_attempts.verification_is_pending()
+            && !turn_processing_ctx.in_tool_free_recovery_synthesis()
+        {
+            // The stale text was discarded (never committed), so no content
+            // is available for completion-claim detection; pass empty text.
+            match turn_processing_ctx.handle_pending_verification_text_response(&mut repeated_tool_attempts, "")? {
+                PendingVerificationTextOutcome::Continue => continue,
+                PendingVerificationTextOutcome::Block { reason } => {
+                    result = TurnLoopResult::Blocked { reason: Some(reason) };
+                    break;
+                }
+                // The stale pause was discarded, so the normal text path never
+                // sees it: execute the verifier here rather than looping on
+                // another pause echo.
+                PendingVerificationTextOutcome::AutoVerify { command } => {
+                    match execute_harness_auto_verification(
+                        &mut turn_processing_ctx,
+                        &mut repeated_tool_attempts,
+                        &mut turn_modified_files,
+                        step_count,
+                        current_max_tool_loops,
+                        turn_config.tool_repeat_limit,
+                        command,
+                    )
+                    .await?
+                    {
+                        TurnHandlerOutcome::Continue => continue,
+                        TurnHandlerOutcome::Break(outcome_result) => {
+                            result = outcome_result;
+                            break;
+                        }
+                        // Agent-switch/policy outcomes have no producer for a lone
+                        // verifier execution today (`pending_primary_agent` is
+                        // never set by exec paths); keep the turn alive on
+                        // them, loudly, so a future producer surfaces in logs
+                        // instead of vanishing.
+                        TurnHandlerOutcome::SwitchPrimaryAgent(_)
+                        | TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { .. }
+                        | TurnHandlerOutcome::BreakWithPolicy { .. } => {
+                            tracing::warn!(
+                                "harness auto-verification produced an unexpected agent-switch/policy outcome; keeping the turn alive"
+                            );
+                            continue;
+                        }
+                    }
+                }
             }
-            continue;
         }
         if stale_approved_plan_pause {
             // The stale pause text is discarded (never committed to history),

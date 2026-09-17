@@ -157,11 +157,13 @@ pub fn generate_tool_guidelines_for_profile(
     if has_exec {
         lines.push(shell_task_guidance(shell_profile).to_string());
         // Verifier discipline ships with every exec-capable profile: the
-        // anti-blind-editing gate only clears on an unpiped exit 0, and a
-        // piped verifier leaves the model believing it verified (checkpoint
+        // anti-blind-editing gate only clears on a truthful exit 0. Pure
+        // `| head`/`| tail` truncators are elided at execution (the verifier
+        // runs standalone with capped output), but filtering tails, `;`, and
+        // `||` still mask the status and stay unverified (checkpoint
         // session-vtcode-20260912T083718Z).
         lines.push(
-            "- Run verifiers unpiped — standalone or pure `&&`; `|`/`;`/`||` masks the exit status so piped checks stay unverified; prefer `max_output_tokens`."
+            "- Run verifiers unpiped — standalone or pure `&&`; prefer `max_output_tokens`; `| head`/`| tail` elided, other pipes/`;`/`||` stay unverified."
                 .to_string(),
         );
         // Tool-latency tail is dominated by full builds (observed p90 ~18s):
@@ -870,8 +872,11 @@ mod tests {
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("code_search"));
         // Shipped verifier discipline: every exec-capable profile must carry
-        // the no-piping rule, and the budget test proves it fits.
-        assert!(guidelines.contains("piped checks stay unverified"));
+        // the truthful-status rule (unpiped/pure-`&&`, truncators elided at
+        // execution, other pipes stay unverified), and the budget test proves
+        // it fits.
+        assert!(guidelines.contains("stay unverified"));
+        assert!(guidelines.contains("elided"));
         assert!(guidelines.contains("max_output_tokens"));
         assert!(guidelines.contains("Build and Auto share tools and safety gates"));
         let approx_tokens = vtcode_commons::estimate_tokens(&guidelines);
@@ -906,9 +911,9 @@ mod tests {
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("`read_file` ranges"));
         assert!(guidelines.contains("serialize mutations"));
-        // No exec tools in this profile: the verifier no-pipe rule is
+        // No exec tools in this profile: the verifier truthful-status rule is
         // exec-conditional and must not spend budget here.
-        assert!(!guidelines.contains("piped checks stay unverified"));
+        assert!(!guidelines.contains("stay unverified"));
     }
 
     #[test]

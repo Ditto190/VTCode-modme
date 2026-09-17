@@ -104,6 +104,85 @@ fn contains_verification_invocation(command: &str) -> bool {
         .is_some_and(|commands| commands.iter().any(|words| is_verification_invocation(words)))
 }
 
+/// Detect a project-appropriate default verifier for autonomous recovery.
+///
+/// Inspects well-known project markers under `workspace_root` and returns a
+/// concrete standalone verification command the agent can run via
+/// `exec_command` (no pipes, no `;`/`||` joins). Priority follows the
+/// existing `is_verification_invocation` coverage: Rust → Go → Deno/Bun →
+/// Node → Python → Make/Just. Returns `None` when no marker is found so
+/// callers can fall back to the generic verifier examples.
+///
+/// This is intentionally synchronous and allocation-light (existence checks
+/// plus one small `package.json` read): it runs on the turn hot path when
+/// the anti-blind-editing gate needs an actionable recovery directive.
+/// Codex-style harness-managed verification (Stop-hook test gates,
+/// auto-review) shows that naming the exact command — rather than listing
+/// examples — is what unblocks long-running autonomous work.
+pub fn default_verifier_for_workspace(workspace_root: &Path) -> Option<String> {
+    if workspace_root.join("Cargo.toml").is_file() {
+        return Some("cargo check --locked".to_string());
+    }
+    if workspace_root.join("go.mod").is_file() {
+        return Some("go test ./...".to_string());
+    }
+    if workspace_root.join("deno.json").is_file() || workspace_root.join("deno.jsonc").is_file() {
+        return Some("deno test".to_string());
+    }
+    if workspace_root.join("bun.lockb").is_file() || workspace_root.join("bun.lock").is_file() {
+        return Some("bun test".to_string());
+    }
+    let package_json = workspace_root.join("package.json");
+    if package_json.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&package_json)
+            && let Ok(parsed) = serde_json::from_str::<Value>(&content)
+            && let Some(scripts) = parsed.get("scripts").and_then(Value::as_object)
+        {
+            if scripts.contains_key("test") {
+                return Some("npm test".to_string());
+            }
+            if scripts.contains_key("check") {
+                return Some("npm run check".to_string());
+            }
+            if scripts.contains_key("lint") {
+                return Some("npm run lint".to_string());
+            }
+            if scripts.contains_key("build") {
+                return Some("npm run build".to_string());
+            }
+        }
+        return Some("npm test".to_string());
+    }
+    for marker in ["pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"] {
+        if workspace_root.join(marker).is_file() {
+            return Some("pytest -q".to_string());
+        }
+    }
+    if workspace_root.join("Makefile").is_file() || workspace_root.join("makefile").is_file() {
+        return Some("make test".to_string());
+    }
+    if workspace_root.join("justfile").is_file() || workspace_root.join("Justfile").is_file() {
+        return Some("just test".to_string());
+    }
+    // No recognised project marker; callers fall back to generic examples.
+    None
+}
+
+/// Build the actionable verification-recovery directive with a concrete
+/// command. `default_verifier` should come from
+/// [`default_verifier_for_workspace`]; when `None`, the generic examples are
+/// kept so the directive never names a command that does not exist.
+pub fn verification_recovery_directive(default_verifier: Option<&str>, attempt: u8, max_attempts: u8) -> String {
+    let command = default_verifier.unwrap_or("cargo check --locked");
+    format!(
+        "AUTONOMOUS VERIFICATION RECOVERY ({attempt}/{max_attempts}): verification is still pending and the turn will block without it. \
+        Stop editing and run one verifier NOW with `exec_command` — `{command}` — standalone or as a pure `&&` chain of verifiers \
+        (no `|`, `;`, or `||`; cap output with `max_output_tokens` instead of piping). Pure `| head`/`| tail` truncators are elided at execution. \
+        Let it exit 0 before another mutation. \
+        A failed verifier grants bounded fix-up edits before re-verify is required; filtering pipes (`| grep`), `;`, and `||` joins never clear the gate."
+    )
+}
+
 /// Return whether a shell tool call is an admitted truncation-only verification
 /// attempt while the anti-blind-editing gate is pending.
 ///
@@ -146,6 +225,152 @@ pub fn shell_command_is_admitted_verification_attempt(args: &Value) -> bool {
 
 fn has_logical_sequencing(words: &[String]) -> bool {
     words.iter().any(|word| matches!(word.as_str(), "&&" | "||" | ";"))
+}
+
+/// Split a command on top-level `|` operators, tracking single/double quotes
+/// and backslash escapes with the same discipline as
+/// [`shell_uses_only_and_chaining`]. Returns the pipe-separated stages in
+/// order, or `None` when no top-level pipe exists. `||` is not special-cased:
+/// it yields an empty stage, which stage validation rejects — fail-closed
+/// without a second operator table to keep in sync.
+fn split_top_level_pipes(command: &str) -> Option<Vec<&str>> {
+    if !command.contains('|') {
+        return None;
+    }
+    let mut stages = Vec::new();
+    let mut start = 0;
+    let mut saw_pipe = false;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut chars = command.char_indices().peekable();
+    while let Some((index, character)) = chars.next() {
+        // Outside single quotes a backslash escapes the next character for the
+        // shell, so `\|` is a literal pipe, not a stage separator. Consume the
+        // pair to stay aligned with the shell (mirrors the `&&`-chain scanner).
+        if character == '\\' && !in_single_quote {
+            chars.next();
+            continue;
+        }
+        if character == '\'' && !in_double_quote {
+            in_single_quote = !in_single_quote;
+            continue;
+        }
+        if character == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            continue;
+        }
+        if in_single_quote || in_double_quote {
+            continue;
+        }
+        if character == '|' {
+            saw_pipe = true;
+            stages.push(&command[start..index]);
+            start = index + character.len_utf8();
+        }
+    }
+    if !saw_pipe {
+        return None;
+    }
+    stages.push(&command[start..]);
+    Some(stages)
+}
+
+/// Whether a pipeline tail stage is a pure output truncator: a bare `head` or
+/// `tail` invocation (any flags) with no shell operators of its own. Anything
+/// else (`grep`, `wc`, `sort`, redirects, backgrounding, chaining) keeps its
+/// pipeline semantics and must not be elided — dropping it would discard work
+/// the caller asked for or change what the exit status means.
+fn is_pure_truncation_stage(stage: &str) -> bool {
+    let trimmed = stage.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // A truncator stage is one simple command: reject any operator that would
+    // indicate chaining, backgrounding, redirection, or nesting. The scan is
+    // quote-aware so quoted flag values (e.g. `--sep=';'`) do not false-reject;
+    // an unaware scan could only over-reject, which stays fail-closed.
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut chars = trimmed.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\\' && !in_single_quote {
+            chars.next();
+            continue;
+        }
+        if character == '\'' && !in_double_quote {
+            in_single_quote = !in_single_quote;
+            continue;
+        }
+        if character == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            continue;
+        }
+        if in_single_quote || in_double_quote {
+            continue;
+        }
+        if matches!(character, ';' | '&' | '<' | '>' | '\n' | '|') {
+            return false;
+        }
+    }
+    let words = match shell_words::split(trimmed) {
+        Ok(words) if !words.is_empty() => words,
+        _ => return false,
+    };
+    let program = Path::new(&words[0])
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&words[0])
+        .to_ascii_lowercase();
+    matches!(program.as_str(), "head" | "tail")
+}
+
+/// Rewrite a truncation-only piped verifier (`cargo check 2>&1 | head -c 4000`)
+/// to its standalone verifier prefix so the observed exit status is the
+/// verifier's, not the truncator's.
+///
+/// A pipeline's status belongs to its tail: running `cargo check | tail`
+/// reports `tail`'s success even when the build fails, and the model reads
+/// that exit 0 as "verified" while the anti-blind gate (correctly) stays
+/// pending — a deadlock manufactured by shell exit-status semantics, observed
+/// in real sessions. Eliding the truncator (output stays capped via
+/// `max_output_tokens`) makes the status truthful in one round trip.
+///
+/// Fail-closed gates, all required:
+/// - the full command is an admitted verification attempt (no dynamic
+///   syntax; every segment independently verification-or-readonly), so shapes
+///   like `cargo check | tail; rm …` can never reach the rewrite;
+/// - the head classifies as [`ShellActivity::Verification`] on its own, so
+///   `;`/`||`/background joins and smuggled mutations behind a verifier
+///   prefix are rejected (only standalone verifiers and pure `&&` verifier
+///   chains pass, whose `&&` exit status is truthful; output redirects such
+///   as `> build.log` are preserved verbatim in the head and do not mask the
+///   status, so they rewrite safely);
+/// - every tail stage is a pure [`is_pure_truncation_stage`] truncator, so
+///   `grep`/`wc`/`sort` tails (whose filtering is real work) are preserved.
+///
+/// Returns the standalone verifier text, or `None` when the command must run
+/// (or be rejected) exactly as typed. Only commands whose raw text carries a
+/// top-level `|` are candidates; array and indexed spellings re-quote
+/// operators when joined, so they never present a top-level pipe and keep
+/// today's behavior.
+pub fn rewrite_truncation_only_verifier(args: &Value) -> Option<String> {
+    use crate::config::constants::tools as tool_names;
+
+    let command = crate::tools::command_args::raw_command_text(args)?;
+    if !shell_command_is_admitted_verification_attempt(args) {
+        return None;
+    }
+    let stages = split_top_level_pipes(&command)?;
+    let (head, tails) = stages.split_first()?;
+    let head = head.trim();
+    if head.is_empty() || tails.iter().any(|stage| !is_pure_truncation_stage(stage)) {
+        return None;
+    }
+    let head_args = serde_json::json!({"cmd": head});
+    if !matches!(classify_shell_activity(tool_names::EXEC_COMMAND, &head_args), ShellActivity::Verification) {
+        return None;
+    }
+    Some(head.to_string())
 }
 
 fn is_known_inspection(words: &[String]) -> bool {
@@ -608,5 +833,95 @@ mod tests {
         assert!(shell_uses_only_and_chaining("echo \"path\" && cargo fmt --check"));
         // Backslash is literal inside single quotes.
         assert!(shell_uses_only_and_chaining("echo 'a\\b' && cargo check --locked"));
+    }
+
+    #[test]
+    fn default_verifier_prefers_manifest_priority_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(default_verifier_for_workspace(dir.path()), None);
+
+        std::fs::write(dir.path().join("justfile"), "test:\n\techo ok\n").expect("justfile");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("just test"));
+        std::fs::write(dir.path().join("pyproject.toml"), "[tool.pytest]\n").expect("pyproject");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("pytest -q"));
+        std::fs::write(dir.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).expect("package.json");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("npm test"));
+        std::fs::write(dir.path().join("go.mod"), "module example\n").expect("go.mod");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("go test ./..."));
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("Cargo.toml");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("cargo check --locked"));
+    }
+
+    #[test]
+    fn default_verifier_reads_npm_script_fallbacks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("package.json"), r#"{"scripts":{"lint":"eslint ."}}"#).expect("package.json");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("npm run lint"));
+    }
+
+    #[test]
+    fn verification_recovery_directive_names_concrete_command() {
+        let directive = verification_recovery_directive(Some("go test ./..."), 1, 2);
+        assert!(directive.contains("go test ./..."));
+        assert!(directive.contains("1/2"));
+        assert!(directive.contains("max_output_tokens"));
+        assert!(directive.contains("elided at execution"));
+        let fallback = verification_recovery_directive(None, 2, 2);
+        assert!(fallback.contains("cargo check --locked"));
+        assert!(fallback.contains("2/2"));
+    }
+
+    #[test]
+    fn truncation_only_verifier_rewrites_to_standalone_prefix() {
+        for (command, expected) in [
+            ("cargo check --locked 2>&1 | head -c 4000", "cargo check --locked 2>&1"),
+            ("cargo check --locked -p vtcode 2>&1 | tail -20", "cargo check --locked -p vtcode 2>&1"),
+            ("cargo nextest run 2>&1 | tail -15", "cargo nextest run 2>&1"),
+            (
+                "cargo check --locked && cargo nextest run --locked -p vtcode | tail -5",
+                "cargo check --locked && cargo nextest run --locked -p vtcode",
+            ),
+            ("cargo check | tail -5 | head -20", "cargo check"),
+            ("RUSTFLAGS=-Dwarnings cargo check | head -20", "RUSTFLAGS=-Dwarnings cargo check"),
+            // File-output redirects are preserved verbatim in the head slice
+            // (only the status-masking pipe tail is elided), and `>` does not
+            // mask the exit status — so the rewrite stays truthful here too.
+            ("cargo check > build.log | tail -5", "cargo check > build.log"),
+        ] {
+            assert_eq!(
+                rewrite_truncation_only_verifier(&exec_command(command)).as_deref(),
+                Some(expected),
+                "expected rewrite: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_truncation_pipelines_and_mutations_are_never_rewritten() {
+        // Filtering tails do real work; dropping them would discard evidence.
+        // Smuggled mutations, joins, redirects, and array forms must run (or
+        // be rejected) exactly as typed — the rewrite must stay silent.
+        for command in [
+            "cargo check | grep error",
+            "cargo check | wc -l",
+            "cargo check | sort | uniq",
+            "cargo check && rm -rf target | tail -5",
+            "cargo check; git status | tail -5",
+            "cargo check || cargo test | tail -5",
+            "cargo check | tail -5; rm foo.txt",
+            "cargo check | tail &",
+            "cargo check",
+            "echo done | tail -5",
+            "rg -n 'pattern' src | head -20",
+            "echo $(date) | tail -5",
+        ] {
+            assert_eq!(rewrite_truncation_only_verifier(&exec_command(command)), None, "must not rewrite: {command}");
+        }
+        assert_eq!(
+            rewrite_truncation_only_verifier(&serde_json::json!({"command": ["cargo", "check", "|", "tail"]})),
+            None,
+            "array-form commands keep today's behavior"
+        );
+        assert_eq!(rewrite_truncation_only_verifier(&serde_json::json!({})), None);
     }
 }

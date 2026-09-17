@@ -416,6 +416,22 @@ pub(super) fn normalize_tool_args<'a>(
         if shell_args != *normalized.as_ref() {
             normalized = std::borrow::Cow::Owned(shell_args);
         }
+        // Truthful verifier status: a truncation-only piped verifier
+        // (`cargo check 2>&1 | tail -N`) reports the truncator's exit status,
+        // which reads as "verified" on success even when the build failed.
+        // Elide pure `head`/`tail` tails so the executed command is the
+        // standalone verifier and the observed status is its own. Pure
+        // function of the args (idempotent: rewritten text has no pipe), so
+        // validation below and every later normalize pass agree on the text.
+        // Non-matching shapes (filtering tails, joins, array forms) return
+        // `None` and run as typed. Only the canonical `command` key is
+        // replaced; the caller's original `cmd`/`raw_command` spellings are
+        // left intact as the typed record.
+        if let Some(rewritten) = crate::tools::tool_intent::rewrite_truncation_only_verifier(normalized.as_ref())
+            && let Some(payload) = normalized.to_mut().as_object_mut()
+        {
+            payload.insert("command".to_string(), Value::String(rewritten));
+        }
     }
 
     if let Some(alias_args) = normalize_details_aliases(normalized.as_ref(), parameter_schema) {
@@ -440,6 +456,14 @@ fn public_exec_validation_args(normalized_tool_name: &str, args: &Value) -> Resu
         _ => return Ok(None),
     };
     let mut exec_args = crate::tools::command_args::normalize_shell_args(args).map_err(|error| anyhow!(error))?;
+    // Same truthful-status rewrite as `normalize_tool_args` (see above):
+    // `EXEC_COMMAND` normalizes here rather than there, so the hook must be
+    // repeated to keep validation and execution agreed on one command text.
+    if let Some(rewritten) = crate::tools::tool_intent::rewrite_truncation_only_verifier(&exec_args)
+        && let Some(payload) = exec_args.as_object_mut()
+    {
+        payload.insert("command".to_string(), Value::String(rewritten));
+    }
     let payload = exec_args
         .as_object_mut()
         .ok_or_else(|| anyhow!("{normalized_tool_name} requires a JSON object"))?;
@@ -704,7 +728,7 @@ mod tests {
         ToolRegistry, coerce_string_to_schema_type_in_place, configured_file_operation_max_payload_bytes,
         enforce_file_operation_payload_limit, is_missing_required_arg, normalize_tool_args,
         parse_file_operation_max_payload_bytes, parse_string_as_schema_type, preflight_validate_call,
-        preflight_validate_resolved_call,
+        preflight_validate_resolved_call, public_exec_validation_args,
     };
     use crate::config::constants::tools as tool_names;
     use crate::tools::command_args::parse_indexed_command_parts;
@@ -717,6 +741,56 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp workspace");
         let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
         (temp, registry)
+    }
+
+    #[test]
+    fn normalize_elides_truncation_only_piped_verifier() {
+        // The pipeline exit status belongs to the truncator, so the piped
+        // form must never reach validation or execution: the standalone
+        // verifier runs instead and its status is truthful.
+        let args = json!({"action": "run", "command": "cargo check --locked 2>&1 | head -c 4000"});
+        let normalized =
+            normalize_tool_args(tool_names::UNIFIED_EXEC, &args, None).expect("rewrite must not fail normalization");
+        assert_eq!(normalized.as_ref()["command"], "cargo check --locked 2>&1");
+        // The caller's `cmd` spelling is left intact as the typed record.
+        assert_eq!(normalized.as_ref()["cmd"], Value::Null);
+
+        let via_cmd = json!({"action": "run", "cmd": "cargo nextest run 2>&1 | tail -15"});
+        let via_cmd =
+            normalize_tool_args(tool_names::UNIFIED_EXEC, &via_cmd, None).expect("rewrite must not fail normalization");
+        assert_eq!(via_cmd.as_ref()["command"], "cargo nextest run 2>&1");
+        assert_eq!(via_cmd.as_ref()["cmd"], "cargo nextest run 2>&1 | tail -15");
+    }
+
+    #[test]
+    fn normalize_leaves_non_rewritable_pipelines_untouched() {
+        for command in [
+            "cargo check | grep error",
+            "cargo check && rm -rf target | tail -5",
+            "cargo check | tail -5; rm foo.txt",
+            "rg -n 'pattern' src | head -20",
+            "cargo check --locked",
+        ] {
+            let args = json!({"action": "run", "command": command});
+            let normalized =
+                normalize_tool_args(tool_names::UNIFIED_EXEC, &args, None).expect("normalization must succeed");
+            assert_eq!(
+                normalized.as_ref()["command"],
+                Value::String(command.to_string()),
+                "must run as typed: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn exec_command_validation_path_rewrites_piped_verifier() {
+        let args = json!({"cmd": "cargo check --locked | tail -8"});
+        let Some(exec_args) =
+            public_exec_validation_args(tool_names::EXEC_COMMAND, &args).expect("validation args must build")
+        else {
+            panic!("EXEC_COMMAND run must produce exec validation args");
+        };
+        assert_eq!(exec_args["command"], "cargo check --locked");
     }
 
     #[tokio::test]

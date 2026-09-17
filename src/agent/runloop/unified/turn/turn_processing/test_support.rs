@@ -136,6 +136,7 @@ pub(crate) struct TestTurnProcessingBacking {
     provider_client: Box<dyn uni::LLMProvider>,
     traj: TrajectoryLogger,
     turn_metadata_cache: Option<Option<Value>>,
+    vt_cfg: Option<vtcode_core::config::loader::VTCodeConfig>,
 }
 
 impl TestTurnProcessingBacking {
@@ -245,6 +246,7 @@ impl TestTurnProcessingBacking {
             provider_client: Box::new(NoopProvider),
             traj: TrajectoryLogger::disabled(),
             turn_metadata_cache: None,
+            vt_cfg: None,
         }
     }
 
@@ -332,6 +334,22 @@ impl TestTurnProcessingBacking {
     /// Replace the backing's LLM provider (used by `run_turn_loop` integration tests).
     pub(crate) fn set_provider(&mut self, provider: Box<dyn uni::LLMProvider>) {
         self.provider_client = provider;
+    }
+
+    /// Install a workspace config for the turn contexts (e.g. a verification
+    /// override for hermetic auto-verification tests). Defaults to `None`,
+    /// which resolves every recovery knob to its compiled default.
+    pub(crate) fn set_vt_cfg_for_test(&mut self, vt_cfg: vtcode_core::config::loader::VTCodeConfig) {
+        self.vt_cfg = Some(vt_cfg);
+    }
+
+    /// Install a verification-command override for hermetic auto-verification
+    /// tests (e.g. `"rustc --version"`, which exits 0 without workspace
+    /// files, or `"rustc --invalid-flag-xyz"` for the failure path).
+    pub(crate) fn set_verification_override_for_test(&mut self, command: &str) {
+        let mut vt_cfg = vtcode_core::config::loader::VTCodeConfig::default();
+        vt_cfg.agent.harness.verification.default_verifier_override = Some(command.to_string());
+        self.vt_cfg = Some(vt_cfg);
     }
 
     pub(crate) fn enable_harness_emitter(&mut self) -> std::path::PathBuf {
@@ -425,7 +443,7 @@ impl TestTurnProcessingBacking {
             &mut self.harness_state,
             self.harness_emitter.as_ref(),
             &mut self.config,
-            None,
+            self.vt_cfg.as_ref(),
             &mut self.turn_metadata_cache,
             &mut self.provider_client,
             &self.traj,
@@ -456,7 +474,7 @@ impl TestTurnProcessingBacking {
         let llm = LLMContext {
             provider_client: &mut self.provider_client,
             config: &mut self.config,
-            vt_cfg: None,
+            vt_cfg: self.vt_cfg.as_ref(),
             context_manager: &mut self.context_manager,
             active_primary_agent: &self.active_primary_agent,
             decision_ledger: &self.decision_ledger,

@@ -1547,9 +1547,106 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     );
                 }
                 if let RunLoopTurnLoopResult::Blocked { reason } = &outcome_result {
+                    use crate::agent::runloop::unified::turn::tool_outcomes::helpers as verification_gate;
+
                     let base = reason.as_deref().unwrap_or("Turn blocked due to repeated failing behavior.");
+                    let is_verification_block = base
+                        .contains(crate::agent::runloop::unified::turn::turn_loop::PENDING_VERIFICATION_BLOCK_REASON);
+                    let max_failures = verification_gate::verification_max_consecutive_failures(vt_cfg.as_ref());
+                    let escalated = session_stats.verification_consecutive_failures() >= max_failures;
+                    // Autonomous cross-turn recovery for verification blocks:
+                    // queue another turn with a project-aware verifier directive
+                    // instead of forcing the user to type `continue`. Bounded by
+                    // the configured cross-turn budget, and skipped once the
+                    // never-passing suite escalated: more turns cannot fix a
+                    // verifier that keeps failing, so surface the manual
+                    // handoff (enriched with the failure log below) instead.
+                    // This mirrors Codex's Stop-hook red-green loop (test gate
+                    // feeds failures back as continued work) rather than a
+                    // human-gated stop.
+                    if is_verification_block
+                        && !escalated
+                        && session_stats.record_verification_auto_recovery_turn_with_limit(
+                            verification_gate::verification_cross_turn_turns(vt_cfg.as_ref()),
+                        )
+                    {
+                        let attempt = session_stats.verification_auto_recovery_turns();
+                        let max = verification_gate::verification_cross_turn_turns(vt_cfg.as_ref());
+                        let default_verifier = verification_gate::resolve_harness_verifier_command(
+                            vt_cfg.as_ref(),
+                            config.workspace.as_path(),
+                        );
+                        let directive = vtcode_core::tools::tool_intent::verification_recovery_directive(
+                            default_verifier.as_deref(),
+                            attempt,
+                            max,
+                        );
+                        let verifier_command = default_verifier.as_deref().unwrap_or("cargo check --locked");
+                        let follow_up = format!(
+                            "Continue autonomously from the last stalled turn. Verification is still pending: run `{verifier_command}` \
+                            with exec_command standalone or as a pure `&&` chain (no pipes, no `;`/`||`; cap output with \
+                            `max_output_tokens`), let it exit 0, then resume the request. Do not reply with text instead of verifying."
+                        );
+                        // Queue first: on a full queue the turn must fall
+                        // through to the manual blocked handoff without leaving
+                        // an orphan recovery directive in history.
+                        match runtime.try_queue_follow_up_input(follow_up) {
+                            Ok(()) => {
+                                std::sync::Arc::make_mut(&mut runtime.state.messages)
+                                    .push(vtcode_core::llm::provider::Message::system(directive));
+                                let _ = renderer.line(
+                                    MessageStyle::Info,
+                                    &format!(
+                                        "[i] Verification gate auto-recovery turn {attempt}/{max}: retrying `{verifier_command}` without manual `continue`."
+                                    ),
+                                );
+                                session_stats.mark_turn_stalled(
+                                    true,
+                                    reason.clone().or_else(|| {
+                                        Some(
+                                            "Turn blocked waiting for verification; auto-recovery turn scheduled."
+                                                .to_string(),
+                                        )
+                                    }),
+                                );
+                                // No `suppress_next_follow_up_prompt`: the
+                                // queued input bypasses the interaction loop
+                                // (`run_until_idle`), so no suppression is
+                                // consumed here; setting it would leak into the
+                                // next genuine user `continue` and delay its
+                                // stalled-recovery handling by one prompt.
+                                if matches!(session_end_reason, SessionEndReason::Exit) {
+                                    break;
+                                }
+                                continue;
+                            }
+                            Err(err) => {
+                                tracing::warn!(error = %err, "Verification auto-recovery queue full; writing blocked handoff");
+                                session_stats.reset_verification_recovery_episode();
+                            }
+                        }
+                    }
+                    let base_owned: String = if is_verification_block {
+                        let verifier = verification_gate::resolve_harness_verifier_command(
+                            vt_cfg.as_ref(),
+                            config.workspace.as_path(),
+                        );
+                        let command = verifier.as_deref().unwrap_or("cargo check --locked");
+                        match (escalated, session_stats.last_verification_failure()) {
+                            (true, Some(failure)) => format!(
+                                "{base} The harness auto-verification `{}` failed {} time(s) consecutively, so autonomous recovery stopped. Last output tail:\n{}\nFix the reported failure, then run `{}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0 before typing `continue`.",
+                                failure.command, failure.consecutive_failures, failure.excerpt_tail, failure.command,
+                            ),
+                            _ => format!(
+                                "{base} Autonomous verification recovery was exhausted without a passing verifier. \
+                                Run `{command}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0, then type `continue`."
+                            ),
+                        }
+                    } else {
+                        base.to_string()
+                    };
                     let summary = super::blocked_handoff::blocker_summary_with_diagnostics(
-                        base,
+                        &base_owned,
                         last_turn_diagnostics.as_ref(),
                         &session_stats.sorted_tools(),
                     );
@@ -1586,6 +1683,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             Err(err) => tracing::warn!(error = %err, "Failed to resolve current blocked handoff"),
                         }
                         session_stats.mark_turn_stalled(false, None);
+                        session_stats.reset_verification_recovery_episode();
                     }
                     RunLoopTurnLoopResult::Aborted => {
                         session_stats
@@ -1612,6 +1710,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     }
                     _ => {
                         session_stats.mark_turn_stalled(false, None);
+                        // Cancelled/Exit ends the stall episode: a later
+                        // verification block starts with a fresh auto-recovery
+                        // budget and failure count instead of inheriting them.
+                        session_stats.reset_verification_recovery_episode();
                     }
                 }
                 if matches!(session_end_reason, SessionEndReason::Exit) {

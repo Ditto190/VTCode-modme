@@ -279,7 +279,38 @@ that inspection-only checks, link checks, and `git diff --check` do not clear th
 anti-blind checkpoint and directs the operator to run `cargo check --locked` or
 the relevant `cargo nextest run`. The gate trips after 6 consecutive successful
 mutations; docs-only prose edits stay allowed while pending and never increment
-the counter. A context-capacity response explains that
+the counter. Before blocking, the harness grants bounded autonomous recovery
+without manual `continue`: each in-turn text-response cap-hit (2 consecutive
+texts) consumes one of the configured in-turn attempts (default 2) that reset
+the streak and inject a project-aware directive naming the exact detected
+verifier (`default_verifier_for_workspace`: `Cargo.toml` → `cargo check --locked`,
+`go.mod` → `go test ./...`, `package.json` scripts → `npm test`/`npm run
+check`/`lint`/`build`, pytest markers → `pytest -q`, `Makefile` → `make test`,
+`justfile` → `just test`; standalone or pure-`&&` chain, `max_output_tokens`
+for truncation; `[agent.harness.verification].default_verifier_override` wins
+when set and valid). When the directive budget is exhausted, the harness runs
+that verifier itself once per turn through the normal tool pipeline
+(admission, permissions, budget, and gate accounting identical to a model-run
+verifier; kill-switch `[agent.harness.verification].auto_execute = false`):
+exit 0 clears the gate and the turn continues, a non-zero exit grants the
+fix-up window with the failure in history, and a denied/unresolvable command
+falls through to the manual handoff. A completion claim ("done", "complete",
+"all tests pass") while pending skips the directive rounds and jumps straight
+to harness verification — asserting success without evidence is the moment
+that needs evidence most. Tool-free recovery synthesis bypasses verification
+accounting entirely (its texts cannot verify by design; recovery budgets and
+the generic cap, which still refuses unverified completion, govern it).
+Consecutive harness failures escalate:
+after `[agent.harness.verification].max_consecutive_failures` (default 3) the
+harness stops executing and writes a handoff carrying the failing command and
+its output tail. If the turn still blocks on verification, the session loop
+schedules up to the configured cross-turn recovery turns (default 2; skipped
+once escalated) as system directive + queued follow-up with no blocked
+handoff and input staying enabled, before writing
+`.vtcode/tasks/current_blocked.md` and requiring manual `continue`. A user-typed
+`continue` after a verification stall resumes verifier-first with the detected
+project command instead of the generic conclude-oriented recovery. A
+context-capacity response explains that
 bounded compaction could not reduce the request, retains completed tool outputs,
 and directs the operator to resume after reducing context or switching models.
 Other blocked reasons use a generic retry handoff. Existing recovery text is
@@ -291,11 +322,16 @@ exec session ended before the verifier's output was captured, reported by a
 `write_stdin` or non-run `unified_exec` session follow-up as a missing session)
 grants the same bounded fix-up window as a
 genuine failed verifier and surfaces a "Verification result lost" directive; the
-gate still only clears on a successful standalone verifier re-run. The same
-feedback rule covers piped verifiers: while the gate is pending, an admitted
-`cargo check … 2>&1 | tail -5` success queues a one-shot "piped verifier did
-not clear the gate" directive, because the pipeline's exit status belongs to
-the tail command and the model would otherwise read the silence as verified.
+gate still only clears on a successful standalone verifier re-run. Pure
+`head`/`tail` truncator pipelines are elided at execution into the standalone
+verifier (capped via `max_output_tokens`), so their exit status is the
+verifier's own and a success clears the gate like any standalone run. The same
+feedback rule covers the remaining non-rewritable pipelines: while the gate is
+pending, an admitted `cargo check … 2>&1 | tail -5`-shaped success that the
+elider cannot prove safe (filtering tails such as `| grep`, `;` joins) queues
+a one-shot "piped verifier did not clear the gate" directive, because the
+pipeline's exit status belongs to the tail command and the model would
+otherwise read the silence as verified.
 The `turn.blocked` event also populates `last_tool`, `consecutive_cap`, and
 `total_cap` from the blocked-tool-call fuse when it tripped, and transcript
 block reasons are truncated (~600 chars) with a pointer to the handoff file,

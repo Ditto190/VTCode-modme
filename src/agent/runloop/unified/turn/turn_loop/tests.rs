@@ -618,6 +618,9 @@ fn blocked_turn_final_response_explains_pending_verification() {
     assert!(response.contains("Inspection-only checks do not clear the verification gate"));
     assert!(response.contains("cargo check --locked"));
     assert!(response.contains("cargo nextest run"));
+    assert!(response.contains("autonomous recovery"));
+    assert!(response.contains("max_output_tokens"));
+    assert!(response.contains("continue"));
 }
 
 #[test]
@@ -1070,7 +1073,7 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
     }
 
     let requests = Arc::new(AtomicUsize::new(0));
-    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut backing = TestTurnProcessingBacking::new(8).await;
     backing.set_provider(Box::new(TextOnlyProvider { requests: requests.clone() }));
 
     let mut history = vec![uni::Message::user("continue the implementation".to_string())];
@@ -1086,17 +1089,108 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
             reason: Some(ref reason)
         } if reason == PENDING_VERIFICATION_BLOCK_REASON
     ));
-    assert_eq!(requests.load(Ordering::SeqCst), 2, "the gate must cap repeated unverified responses");
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        6,
+        "the gate must cap repeated unverified responses after bounded auto-recovery"
+    );
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
         message.role == uni::MessageRole::System
             && message.content.as_text().contains("run one verifier with `exec_command`")
+    }));
+    assert!(history.iter().any(|message| {
+        message.role == uni::MessageRole::System
+            && message.content.as_text().contains("AUTONOMOUS VERIFICATION RECOVERY")
     }));
     assert!(
         !history
             .iter()
             .any(|message| { message.content.as_text().contains("The requested work is complete.") })
     );
+}
+
+#[tokio::test]
+async fn harness_auto_verification_completes_text_only_turn_without_manual_continue() {
+    #[derive(Clone)]
+    struct TextOnlyProvider {
+        requests: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for TextOnlyProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            Ok(uni::LLMResponse {
+                content: Some("The requested work is complete.".to_string()),
+                model: request.model.clone(),
+                tool_calls: None,
+                usage: None,
+                finish_reason: uni::FinishReason::Stop,
+                reasoning: None,
+                reasoning_details: None,
+                organization_id: None,
+                request_id: None,
+                tool_references: Vec::new(),
+                compaction: None,
+            })
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".to_string()]
+        }
+
+        fn validate_request(&self, _request: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(12).await;
+    backing.set_provider(Box::new(TextOnlyProvider { requests: requests.clone() }));
+    // Hermetic passing verifier: `rustc --version` exits 0 with no files.
+    backing.set_verification_override_for_test("rustc --version");
+
+    let mut history = vec![uni::Message::user("continue the implementation".to_string())];
+    let turn_context = backing.turn_loop_context();
+    turn_context.session_stats.set_verification_snapshot((true, 0));
+    let outcome = run_turn_loop(&mut history, turn_context)
+        .await
+        .expect("harness auto-verification should complete the turn");
+
+    // The provider claims completion on its FIRST text, so the claim fast
+    // path fires immediately: the harness runs `rustc --version` itself, the
+    // gate clears, and the second response completes normally — two requests,
+    // zero directive rounds, no manual `continue`, no blocked handoff.
+    assert!(
+        matches!(outcome.result, TurnLoopResult::Completed { .. }),
+        "expected Completed, got: {:?}",
+        outcome.result
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert!(!outcome.final_response_was_fallback);
+    assert!(
+        !history.iter().any(|message| {
+            message.role == uni::MessageRole::System
+                && message.content.as_text().contains("AUTONOMOUS VERIFICATION RECOVERY")
+        }),
+        "fast path must skip directive rounds entirely"
+    );
+    assert!(history.iter().any(|message| {
+        message.role == uni::MessageRole::System && message.content.as_text().contains("gate is cleared")
+    }));
+    assert!(history.iter().any(|message| {
+        message.role == uni::MessageRole::Assistant
+            && message.content.as_text().contains("The requested work is complete.")
+    }));
 }
 
 #[tokio::test]
@@ -1320,9 +1414,13 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
 
         async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
             let request_number = self.requests.fetch_add(1, Ordering::SeqCst);
+            // Texts at 0, 2, 3, 5, 6, 7 (six total = 2 * (1 + 2 auto-recovery
+            // attempts)); blocked mutations at 1 and 4 must retain — never
+            // reset — the text-response streak, so the cap-hits (and recovery
+            // grants) land exactly on the even texts.
             let (content, tool_calls) = match request_number {
                 0 => (Some("The unverified change is complete.".to_string()), None),
-                1 => (
+                1 | 4 => (
                     None,
                     Some(vec![uni::ToolCall::function(
                         "blocked-mutation".to_string(),
@@ -1334,6 +1432,10 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
                     )]),
                 ),
                 2 => (Some("The unverified change is still complete.".to_string()), None),
+                3 => (Some("The unverified change is still complete (2).".to_string()), None),
+                5 => (Some("The unverified change is still complete (3).".to_string()), None),
+                6 => (Some("The unverified change is still complete (4).".to_string()), None),
+                7 => (Some("The unverified change is still complete (5).".to_string()), None),
                 _ => panic!("blocked mutation incorrectly reset the response streak"),
             };
             Ok(uni::LLMResponse {
@@ -1361,7 +1463,7 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
     }
 
     let requests = Arc::new(AtomicUsize::new(0));
-    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut backing = TestTurnProcessingBacking::new(12).await;
     backing.set_provider(Box::new(TextBlockedMutationTextProvider { requests: requests.clone() }));
 
     let mut history = vec![uni::Message::user("finish the pending change".to_string())];
@@ -1372,12 +1474,16 @@ async fn blocked_mutation_does_not_reset_consecutive_text_response_cap() {
         .expect("blocked mutation should retain the text-response streak");
 
     assert!(matches!(outcome.result, TurnLoopResult::Blocked { .. }));
-    assert_eq!(requests.load(Ordering::SeqCst), 3, "the second text response must reach the cap");
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        8,
+        "the sixth text response must reach the cap after auto-recovery exhaustion"
+    );
     assert!(!backing.workspace_path().join("must-not-exist.rs").exists());
 }
 
 #[tokio::test]
-async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_responses() {
+async fn anti_blind_guard_stops_outer_loop_after_bounded_pending_stale_plan_pause_responses() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1452,7 +1558,7 @@ async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_re
 
     let requests = Arc::new(AtomicUsize::new(0));
     let text_responses = Arc::new(AtomicUsize::new(0));
-    let mut backing = TestTurnProcessingBacking::new(12).await;
+    let mut backing = TestTurnProcessingBacking::new(16).await;
     backing.set_provider(Box::new(RepeatedTextAfterMutationsProvider {
         requests: requests.clone(),
         text_responses: text_responses.clone(),
@@ -1472,8 +1578,20 @@ async fn anti_blind_guard_stops_outer_loop_after_two_pending_stale_plan_pause_re
             reason: Some(ref reason)
         } if reason == "Turn blocked after repeated unverified assistant responses; verification is still pending."
     ));
-    assert_eq!(text_responses.load(Ordering::SeqCst), 2);
-    assert_eq!(requests.load(Ordering::SeqCst), 8, "the provider must not receive a third pending text request");
+    // The per-turn text cap is 2, but each cap-hit consumes one bounded
+    // autonomous recovery attempt (fresh streak + project-aware directive):
+    // 2 * (1 + MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS) texts before block.
+    assert_eq!(
+        text_responses.load(Ordering::SeqCst),
+        2 * (1 + usize::from(
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS
+        ))
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        12,
+        "the provider must not receive requests beyond the auto-recovery budget"
+    );
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
         message.phase == Some(uni::AssistantPhase::FinalAnswer)
@@ -1628,7 +1746,7 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
 
     let requests = Arc::new(AtomicUsize::new(0));
     let steps = Arc::new(Mutex::new(Vec::new()));
-    let mut backing = TestTurnProcessingBacking::new(16).await;
+    let mut backing = TestTurnProcessingBacking::new(20).await;
     let harness_path = backing.enable_harness_emitter();
     backing.set_provider(Box::new(VerificationRecoveryProvider { requests: requests.clone(), steps: steps.clone() }));
 
@@ -1650,7 +1768,7 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
         outcome.result,
         steps.lock().expect("step trace lock").as_slice()
     );
-    assert_eq!(requests.load(Ordering::SeqCst), 12, "two pending text responses are the terminal cap");
+    assert_eq!(requests.load(Ordering::SeqCst), 16, "ten tool steps plus six bounded auto-recovery texts");
     assert_eq!(
         steps.lock().expect("step trace lock").as_slice(),
         [
@@ -1664,6 +1782,10 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
             "link_check",
             "diff_check",
             "successful_edit",
+            "unverified_text",
+            "unverified_text",
+            "unverified_text",
+            "unverified_text",
             "unverified_text",
             "unverified_text",
         ]
@@ -1754,7 +1876,7 @@ async fn exhausted_previews_pending_verification_done_claim_is_blocked() {
             reason: Some(ref reason)
         } if reason == PENDING_VERIFICATION_BLOCK_REASON
     ));
-    assert_eq!(requests.load(Ordering::SeqCst), 2, "the two Done claims are the bounded text-response cap");
+    assert_eq!(requests.load(Ordering::SeqCst), 6, "six bounded auto-recovery texts are the terminal cap");
     assert!(outcome.turn_diagnostics.model_visible_tool_preview_budget_exhausted);
     assert!(outcome.turn_diagnostics.suppressed_tool_previews >= 1);
     assert_blocked_response_surfaces(&mut backing, &history, &harness_path, PENDING_VERIFICATION_RESPONSE_MARKER);
