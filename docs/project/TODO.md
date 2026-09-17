@@ -343,6 +343,24 @@ So I can’t read that DeepWiki page through MCP in this session. The DeepWiki t
 backend isn’t connected.
 Worked for 57s
 
+┏Logs╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
+╏[2026-09-17T06:43:40Z] INFO vtcode_mcp::connection_pool Successfully initialized MCP provider 'deepwiki' ╏
+╏[2026-09-17T06:43:40Z] INFO vtcode_mcp::client MCP client initialization complete. Active providers: 1 ╏
+╏[2026-09-17T06:43:40Z] INFO vtcode::agent::runloop::unified::async_mcp_manager MCP client initialized successfully╏
+╏[2026-09-17T06:43:40Z] INFO vtcode::agent::runloop::unified::async_mcp_manager Found 3 MCP tools ╏
+╏[2026-09-17T06:43:40Z] INFO vtcode::agent::runloop::unified::async_mcp_manager MCP client initialized successfully╏
+╏[2026-09-17T06:43:40Z] DEBUG vtcode_core::tools::registry::mcp_facade Refreshing MCP tools for 1 providers ╏
+╏[2026-09-17T06:43:40Z] INFO vtcode_core::tools::registry::tool_catalog_facade tool catalog cache epoch bumped ╏
+╏cache_epoch=5 version=5 reason=mcp_tool_refresh pending_refreshes={} ╏
+╏[2026-09-17T06:43:43Z] INFO vtcode_mcp::client Shutting down 1 MCP providers ╏
+╏[2026-09-17T06:43:43Z] INFO vtcode::agent::runloop::unified::async_mcp_manager Initializing MCP client with 1 ╏
+╏providers ╏
+╏[2026-09-17T06:43:43Z] INFO vtcode_mcp::client Initializing MCP client with 1 configured providers ╏
+╏[2026-09-17T06:43:43Z] INFO vtcode_mcp::connection_pool Initializing MCP provider 'deepwiki' ╏
+╏[2026-09-17T06:43:43Z] INFO vtcode_mcp::rmcp_client Connecting to MCP HTTP provider 'deepwiki' at ╏
+╏https://mcp.deepwiki.com/mcp ╏
+┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
 ===
 
 check if mcp config is correct
@@ -404,3 +422,7 @@ CRITICAL: check failure `
 Execution summary: blocked; changed files: none recorded; verification: see the final response and task tracker;
 blockers: the approved-plan turn produced no file changes, so implementation completion was not confirmed.
 MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.` and fix
+
+===
+
+check and fix duplicated TODO/task block entries when task system is updated '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-17 at 13.45.47.png'

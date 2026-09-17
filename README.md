@@ -80,10 +80,9 @@ The full documentation catalog lives in the
 
 ## Why VT Code
 
-VT Code is built for work that takes more than one prompt. The model provides
-the reasoning; the **harness** provides the context, tools, safeguards, state,
-and verification needed to turn that reasoning into dependable, reviewable
-progress.
+VT Code is built for work that takes more than one prompt: the model reasons,
+and the **harness** supplies the context, tools, safeguards, state, and
+verification that turn reasoning into dependable, reviewable progress.
 
 In practice, that means:
 
@@ -93,11 +92,13 @@ In practice, that means:
 | **Generated commands can cause damage** | Policy checks and sandboxed, fail-closed execution limit what commands can do, with defenses against injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)                               |
 | **A session is interrupted**            | Durable sessions can be resumed with `vtcode continue`; workspace snapshots make changes easy to inspect and restore with `vtcode snapshots` and `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                                    |
 | **“Done” is asserted without proof**    | Built-in evals verify the environment instead of trusting the agent’s report, using pass@k and pass^k for repeatable measurement. [Eval guide](./docs/guides/eval.md)                                                                                          |
+| **Big changes ship unreviewed**         | The Planning Workflow keeps planning read-only: iterate on a `/plan` draft, approve it at a review gate, then hand off to `build` or `auto` for implementation. [Planning workflow](./docs/guides/planning-workflow.md)                                         |
 
 You get a terminal-native workflow that is:
 
 - **Inspectable**: every run has a durable [`ThreadEvent`](./crates/common/vtcode-exec-events) record.
 - **Resumable**: continue where you left off, or fork a session for a new direction.
+- **Parallelizable**: run isolated loops in git worktrees with propose/verify sub-agents ([Loop engineering](./docs/loop-engineering.md)).
 - **Extensible**: connect model providers and capabilities through MCP, Skills, Plugins, ACP, A2A, and WebMCP ([MCP](./docs/guides/mcp-integration.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md)).
 - **Keyboard-first**: work comfortably in the TUI, with the terminal remaining the source of truth.
 
