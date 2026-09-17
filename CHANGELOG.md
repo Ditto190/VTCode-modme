@@ -2,6 +2,62 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.163.0 - 2026-09-17
+
+### Highlights
+#### Bug Fixes
+
+- Ignore broken pipe when printing man page output (64e1d788) 
+- Omit tools payload for ToolChoice::None on all Merge Gateway routes (67bce9ff) 
+- Route requests through collect_single_response (57a61e56) 
+- Discard rebuilds that grow instead of shrinking history (1a180455) 
+- Expand context capacity markers and fix recovery tips (80634a62) 
+- Add concrete verify examples to plan directives (648afe93) 
+- Auto-start background initialization on session setup (842403ee) 
+- Refine plan-approval modal rendering and sizing (93df04b6) 
+- Keep prompt cache key stable without per-turn suffix (c714e459) 
+- Seed allowlists for new providers and legacy proxy fallback (69e0e152) 
+- Attach eagerly initialized MCP client to non-interactive runners (c83d3d94) 
+- Cap initialize protocol version at 2025-11-25 for legacy servers (a945efca) 
+#### Documentation
+
+- Reframe "Why VT Code" section around harness concept (3730e50b) 
+- Rewrite "Why VT Code" section for clarity (8154ed50) 
+- Rewrite "Why VT Code" section for clarity (0a714549) 
+- Prune resolved vtcode.toml alignment note, add check-failure item (20edc0ba) 
+- Document Planning Workflow and loop engineering in README (96ea7618) 
+- Add TypeSafe System One plugin plan to TODO (dbf8d342) 
+#### Features
+
+- Add per-route compaction policy with provider tails (a5a0e300) 
+- Inject auto-resume note on model switch compaction (6a1652a7) 
+- Namespace merge-gateway cache keys (4c6db148) 
+- Add anthropic/claude-sonnet-5 route (cb093291) 
+- Add Claude Haiku 4.5 via Merge Gateway (f4e16990) 
+- Unify file-op headings and strip diff file headers (75dc9018) 
+- Add Tab-to-queue and line-wise editing shortcuts (89b13946) 
+- Add nested verification knobs for anti-blind recovery (3f302c39) 
+### Other Changes
+#### Other
+
+- Update TODO (25cf9e37) 
+- Render exec tool output at normal contrast (9060bd32) 
+- Update TODO (a71b6f84) 
+- Update TODO (3aae0811) 
+- Update README (bd09e3be) 
+- Update TODO (f27fabec) 
+- Update TODO (04202b97) 
+- Update TODO (680ac68c) 
+- Update TODO (1055cef0) 
+- Update TODO (ca651013) 
+#### Refactors
+
+- Reuse commons memory sampler, simplify error handling (1420a28a) 
+- Add color-gated styling to diff headings and summaries (5420fccc) 
+- Treat native provider output as canonical (032f890e) 
+#### Tests
+
+- Verify build and auto agents share identical tool authority (03a5b6d3) 
 ## 0.162.4 - 2026-09-15
 
 ### Highlights
