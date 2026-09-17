@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.163.1 - 2026-09-17
+
+### Highlights
+#### Bug Fixes
+
+- Per-file asset upload retry with push-access preflight (badd9d07) 
+### Other Changes
 ## 0.163.0 - 2026-09-17
 
 ### Highlights
