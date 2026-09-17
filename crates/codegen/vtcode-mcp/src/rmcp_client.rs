@@ -28,6 +28,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
+
+const DISCOVER_PREFERRED_VERSIONS: &[rmcp::model::ProtocolVersion] = &[
+    rmcp::model::ProtocolVersion::V_2025_11_25,
+    rmcp::model::ProtocolVersion::V_2025_06_18,
+    rmcp::model::ProtocolVersion::V_2025_03_26,
+    rmcp::model::ProtocolVersion::V_2024_11_05,
+];
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use tokio::time;
@@ -352,6 +359,10 @@ impl RmcpClient {
         params: InitializeRequestParams,
         timeout: Option<Duration>,
     ) -> Result<ServerPeerInfo> {
+        let mut params = params;
+        if params.protocol_version > rmcp::model::ProtocolVersion::V_2025_11_25 {
+            params.protocol_version = rmcp::model::ProtocolVersion::V_2025_11_25;
+        }
         let handler = LoggingClientHandler::new(
             self.provider_name.clone(),
             params,
@@ -369,11 +380,7 @@ impl RmcpClient {
                             service_handler.clone(),
                             transport,
                             ClientLifecycleMode::Auto {
-                                preferred_versions: rmcp::model::ProtocolVersion::KNOWN_VERSIONS
-                                    .iter()
-                                    .rev()
-                                    .cloned()
-                                    .collect(),
+                                preferred_versions: DISCOVER_PREFERRED_VERSIONS.to_vec(),
                                 legacy_version: Some(rmcp::model::ProtocolVersion::V_2024_11_05),
                             },
                         )
@@ -384,14 +391,7 @@ impl RmcpClient {
                         service::serve_client_with_lifecycle(
                             service_handler.clone(),
                             transport,
-                            ClientLifecycleMode::Auto {
-                                preferred_versions: rmcp::model::ProtocolVersion::KNOWN_VERSIONS
-                                    .iter()
-                                    .rev()
-                                    .cloned()
-                                    .collect(),
-                                legacy_version: Some(rmcp::model::ProtocolVersion::V_2024_11_05),
-                            },
+                            ClientLifecycleMode::Initialize,
                         )
                         .boxed(),
                         "http",
@@ -1060,6 +1060,17 @@ where
 mod tests {
     use super::*;
     use rmcp::model::{BooleanSchema, ElicitationSchema, PrimitiveSchemaDefinition};
+
+    #[test]
+    fn discover_preferred_versions_exclude_unsupported_draft_and_remain_newest_first() {
+        let versions: Vec<&str> = DISCOVER_PREFERRED_VERSIONS
+            .iter()
+            .map(rmcp::model::ProtocolVersion::as_str)
+            .collect();
+
+        assert_eq!(versions, vec!["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05",]);
+        assert!(!versions.contains(&"2026-07-28"));
+    }
 
     #[test]
     fn restore_context_meta_adds_request_meta_and_removes_progress_token() {

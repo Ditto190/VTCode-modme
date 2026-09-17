@@ -98,7 +98,7 @@ pub struct AddMcpTransportArgs {
 #[derive(Debug, Clone, Args)]
 pub struct AddMcpStdioArgs {
     /// Command to launch the MCP server. Use `--url` for HTTP servers.
-    #[arg(num_args = 0.., allow_hyphen_values = true)]
+    #[arg(long = "command", num_args = 1.., allow_hyphen_values = true, value_name = "COMMAND")]
     pub command: Vec<String>,
 
     /// Environment variables to export when launching the server.
@@ -708,8 +708,36 @@ fn print_http_table(rows: &[[String; 6]]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{GLOBAL_CONFIG_PATH_OVERRIDE, parse_env_pair, validate_provider_name};
+    use super::{
+        AddArgs, AddMcpStdioArgs, AddMcpTransportArgs, GLOBAL_CONFIG_PATH_OVERRIDE, parse_env_pair,
+        validate_provider_name,
+    };
+    use clap::{Args, Command, FromArgMatches};
     use std::path::PathBuf;
+
+    #[test]
+    fn add_args_accepts_documented_command_flag() {
+        let command = AddArgs::augment_args(Command::new("add"));
+        let matches = command
+            .try_get_matches_from([
+                "add",
+                "test-provider",
+                "--command",
+                "uvx",
+                "mcp-server-time",
+                "--local-timezone=Asia/Ho_Chi_Minh",
+            ])
+            .expect("documented --command form should parse");
+        let args = AddArgs::from_arg_matches(&matches).expect("parsed matches should map to AddArgs");
+
+        let AddMcpTransportArgs { stdio: Some(stdio), streamable_http: None } = args.transport_args else {
+            panic!("stdio transport should be selected");
+        };
+        let AddMcpStdioArgs { command, env, working_directory } = stdio;
+        assert_eq!(command, ["uvx", "mcp-server-time", "--local-timezone=Asia/Ho_Chi_Minh"]);
+        assert!(env.is_empty());
+        assert_eq!(working_directory, None);
+    }
 
     #[test]
     fn parse_env_pair_accepts_valid_input() {

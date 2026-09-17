@@ -71,6 +71,43 @@ mod types;
 mod validation;
 mod workspace_detection;
 
+/// Attach an eagerly initialized MCP client to the runner's tool registry.
+///
+/// Exec and other non-interactive runner sessions do not drive the async MCP
+/// manager, so MCP tools would otherwise remain invisible for the whole run.
+async fn attach_mcp_client(
+    tool_registry: &ToolRegistry,
+    session_config: &ResolvedSessionConfig,
+    workspace: &Path,
+) -> Result<()> {
+    let config = session_config.effective();
+    let sandbox_context = if config.sandbox.enabled
+        && !matches!(config.sandbox.default_policy, vtcode_config::SandboxPolicy::DangerFullAccess)
+    {
+        let policy = crate::tools::registry::sandbox_policy_from_runtime_config(&config.sandbox, workspace)?;
+        Some(crate::mcp::McpSandboxContext::new(policy, workspace))
+    } else {
+        None
+    };
+
+    let mut client = crate::mcp::McpClient::with_sandbox_context(config.mcp.clone(), sandbox_context);
+    let startup_timeout = std::time::Duration::from_secs(config.mcp.startup_timeout_seconds.unwrap_or(30));
+    let result = tokio::time::timeout(startup_timeout, client.initialize()).await;
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => return Err(err).context("MCP client initialization failed"),
+        Err(_) => anyhow::bail!("MCP client initialization timed out after {} seconds", startup_timeout.as_secs()),
+    }
+
+    let client = Arc::new(client);
+    tool_registry.set_mcp_client(client).await;
+    if let Err(err) = tool_registry.refresh_mcp_tools().await {
+        warn!("Failed to refresh MCP tools after attach: {err:#}");
+    }
+    info!("MCP client attached to runner tool registry");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -303,7 +340,9 @@ impl AgentRunner {
             if let Err(err) = crate::mcp::validate_mcp_config(&session_config.effective().mcp) {
                 warn!("MCP configuration validation error: {err}");
             }
-            info!("Deferring MCP client initialization to on-demand activation");
+            if let Err(err) = attach_mcp_client(&tool_registry, &session_config, &workspace).await {
+                warn!("Failed to attach MCP client: {err:#}");
+            }
         }
         if session_config.effective().context.dynamic.enabled
             && let Err(err) =

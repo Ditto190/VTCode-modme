@@ -105,6 +105,9 @@ fn build_public_routes(catalog: &SessionToolCatalog) -> FxHashMap<String, Public
 
         let resolution = PublicToolResolution::new(entry.registration_name.clone(), entry.default_permission.clone());
         public_routes.insert(entry.public_name.clone(), resolution.clone());
+        public_routes
+            .entry(entry.registration_name.clone())
+            .or_insert_with(|| resolution.clone());
         for alias in &entry.aliases {
             if is_removed_public_tool_name(alias) {
                 continue;
@@ -222,6 +225,25 @@ mod tests {
             Some("visible_tool".to_string())
         );
         assembly.resolve_public_tool("missing_alias").unwrap_err();
+    }
+
+    #[test]
+    fn public_routes_resolve_canonical_mcp_registration_names() {
+        let registration =
+            ToolRegistration::new("mcp::time::get_current_time", CapabilityLevel::Bash, true, noop_executor)
+                .with_description("Get the current time")
+                .with_parameter_schema(json!({"type": "object"}))
+                .with_permission(ToolPolicy::Prompt)
+                .with_aliases(["mcp__time__get_current_time"]);
+
+        let assembly = ToolAssembly::from_registrations(vec![registration]);
+
+        for requested_name in ["mcp__time__get_current_time", "mcp::time::get_current_time"] {
+            let resolution = assembly
+                .resolve_public_tool(requested_name)
+                .unwrap_or_else(|err| panic!("expected {requested_name} to resolve, got error: {err}"));
+            assert_eq!(resolution.registration_name(), "mcp::time::get_current_time");
+        }
     }
 
     #[test]
