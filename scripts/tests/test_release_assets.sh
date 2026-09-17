@@ -223,6 +223,52 @@ else
     fail_test "upload ordering: compat=$first_compat_line normal=$first_normal_line"
 fi
 
+echo "Testing upload_release_asset_with_retry..."
+
+# Stub sleep to keep the test fast; count gh invocations via a file so
+# command substitution / subshells do not lose the counter.
+sleep() { :; }
+retry_calls="$tmp/retry-calls"
+: >"$retry_calls"
+gh() {
+    printf 'call\n' >>"$retry_calls"
+    local remaining
+    remaining=$(cat "$tmp/retry-failures-left" 2>/dev/null || echo 0)
+    if [[ "$remaining" -gt 0 ]]; then
+        echo "$((remaining - 1))" >"$tmp/retry-failures-left"
+        return 1
+    fi
+    return 0
+}
+export -f gh
+export -f sleep
+
+# Transient HTTP 500s (2 failures) then success.
+echo 2 >"$tmp/retry-failures-left"
+: >"$retry_calls"
+if upload_release_asset_with_retry "$version" "$stage/vtcode-${version}-x86_64-apple-darwin.tar.gz" 5; then
+    if [[ $(wc -l <"$retry_calls") -eq 3 ]]; then
+        pass "transient failures retried to success (3 attempts)"
+    else
+        fail_test "expected 3 attempts, got $(wc -l <"$retry_calls")"
+    fi
+else
+    fail_test "transient failures should be retried to success"
+fi
+
+# Persistent failure exhausts attempts and returns nonzero.
+echo 10 >"$tmp/retry-failures-left"
+: >"$retry_calls"
+if upload_release_asset_with_retry "$version" "$stage/vtcode-${version}-x86_64-apple-darwin.tar.gz" 3 >/dev/null 2>&1; then
+    fail_test "persistent failure should return nonzero"
+else
+    if [[ $(wc -l <"$retry_calls") -eq 3 ]]; then
+        pass "persistent failure exhausts max attempts (3)"
+    else
+        fail_test "expected 3 attempts on persistent failure, got $(wc -l <"$retry_calls")"
+    fi
+fi
+
 if [[ "$fail" -ne 0 ]]; then
     echo "FAIL: release-assets tests failed"
     exit 1

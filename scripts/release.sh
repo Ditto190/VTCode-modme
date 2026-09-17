@@ -1496,43 +1496,57 @@ main() {
 		local upload_failed=0
 		if [[ ${#compat_assets[@]} -gt 0 ]]; then
 			print_info "Uploading compatibility assets (legacy bridge)..."
-			if ! gh release upload "$released_version" "${compat_assets[@]}" --clobber; then
+			# Per-file upload with retry: uploads.github.com intermittently
+			# returns HTTP 500 on large (~40-80MB) raw compat binaries. A
+			# single batch upload would fail all remaining assets on one
+			# transient error, so each asset is retried independently.
+			local compat_file
+			for compat_file in "${compat_assets[@]}"; do
+				if ! upload_release_asset_with_retry "$released_version" "$compat_file"; then
+					print_error "Failed to upload compatibility asset $(basename "$compat_file") to GitHub Release"
+					upload_failed=1
+				fi
+			done
+			if [[ "$upload_failed" -ne 0 ]]; then
 				print_error "Failed to upload compatibility assets to GitHub Release"
-				upload_failed=1
 			fi
 		fi
 
-		if [[ "$upload_failed" -eq 0 ]]; then
-			shopt -s nullglob
-			local -a normal_release_files=(
-				"$binaries_dir"/vtcode-*.tar.gz
-				"$binaries_dir"/vtcode-*.zip
-				"$binaries_dir"/vtcode-*.sha256
-				"$SCRIPT_DIR/install.sh"
-				"$SCRIPT_DIR/install.ps1"
-			)
-			shopt -u nullglob
-			# Exclude compatibility assets from the normal upload glob; they
-			# start with `compat-` so `vtcode-*.tar.gz`/`vtcode-*.zip` already
-			# skip them, but this guard defends against re-runs/renames.
-			local -a filtered_normal_files=()
-			local nf
-			for nf in "${normal_release_files[@]}"; do
-				case "$(basename "$nf")" in
-				compat-*.tar.gz.compat) continue ;;
-				esac
-				filtered_normal_files+=("$nf")
-			done
-			# Only include checksums.txt if it has content
-			if [[ -s "$binaries_dir/checksums.txt" ]]; then
-				filtered_normal_files+=("$binaries_dir/checksums.txt")
-			fi
-			if [[ ${#filtered_normal_files[@]} -gt 0 ]]; then
-				print_info "Uploading normal archives, checksums, and install scripts..."
-				if ! gh release upload "$released_version" "${filtered_normal_files[@]}" --clobber; then
-					print_error "Failed to upload binaries to GitHub Release"
+		shopt -s nullglob
+		local -a normal_release_files=(
+			"$binaries_dir"/vtcode-*.tar.gz
+			"$binaries_dir"/vtcode-*.zip
+			"$binaries_dir"/vtcode-*.sha256
+			"$SCRIPT_DIR/install.sh"
+			"$SCRIPT_DIR/install.ps1"
+		)
+		shopt -u nullglob
+		# Exclude compatibility assets from the normal upload glob; they
+		# start with `compat-` so `vtcode-*.tar.gz`/`vtcode-*.zip` already
+		# skip them, but this guard defends against re-runs/renames.
+		local -a filtered_normal_files=()
+		local nf
+		for nf in "${normal_release_files[@]}"; do
+			case "$(basename "$nf")" in
+			compat-*.tar.gz.compat) continue ;;
+			esac
+			filtered_normal_files+=("$nf")
+		done
+		# Only include checksums.txt if it has content
+		if [[ -s "$binaries_dir/checksums.txt" ]]; then
+			filtered_normal_files+=("$binaries_dir/checksums.txt")
+		fi
+		if [[ ${#filtered_normal_files[@]} -gt 0 ]]; then
+			print_info "Uploading normal archives, checksums, and install scripts..."
+			local normal_file
+			for normal_file in "${filtered_normal_files[@]}"; do
+				if ! upload_release_asset_with_retry "$released_version" "$normal_file"; then
+					print_error "Failed to upload $(basename "$normal_file") to GitHub Release"
 					upload_failed=1
 				fi
+			done
+			if [[ "$upload_failed" -ne 0 ]]; then
+				print_error "Failed to upload binaries to GitHub Release"
 			fi
 		fi
 

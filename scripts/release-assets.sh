@@ -166,6 +166,40 @@ generate_checksums_manifest() {
     mv "$manifest_tmp" "$stage_dir/checksums.txt"
 }
 
+# Upload a single release asset with retry on transient failures.
+#
+#   upload_release_asset_with_retry <version> <file> [max-attempts]
+#
+# `gh release upload` of large raw compat binaries (~40-80MB) intermittently
+# fails with HTTP 500 from uploads.github.com. Uploading all compat assets in
+# one invocation means a single flaky asset fails the whole batch. Upload
+# per-file with exponential backoff so a transient 500 is retried instead of
+# aborting the release. Returns nonzero after exhausting attempts.
+upload_release_asset_with_retry() {
+    if [[ $# -lt 2 || $# -gt 3 ]]; then
+        echo "usage: upload_release_asset_with_retry <version> <file> [max-attempts]" >&2
+        return 2
+    fi
+    local version=$1
+    local file=$2
+    local max_attempts=${3:-5}
+    local attempt=1
+    while [[ "$attempt" -le "$max_attempts" ]]; do
+        if gh release upload "$version" "$file" --clobber; then
+            return 0
+        fi
+        if [[ "$attempt" -eq "$max_attempts" ]]; then
+            echo "failed to upload $file after $max_attempts attempts" >&2
+            return 1
+        fi
+        local backoff=$((5 * (1 << (attempt - 1))))
+        [[ "$backoff" -gt 60 ]] && backoff=60
+        echo "upload of $file failed (attempt $attempt/$max_attempts); retrying in ${backoff}s..." >&2
+        sleep "$backoff"
+        attempt=$((attempt + 1))
+    done
+}
+
 # Validate a staged release directory has complete target coverage.
 #
 #   validate_release_assets <stage-dir> <version>
