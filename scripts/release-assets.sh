@@ -200,6 +200,37 @@ upload_release_asset_with_retry() {
     done
 }
 
+# Ensure `gh` authenticates with push access to the release repo.
+#
+#   ensure_release_push_access <owner/repo>
+#
+# Harness/CI environments often export a pull-only GITHUB_TOKEN, under which
+# `gh release upload` fails with HTTP 404 from uploads.github.com (GitHub
+# returns 404 instead of 403 when the token cannot write). If the current
+# auth lacks push, fall back to stored (keyring) credentials by unsetting
+# GITHUB_TOKEN/GH_TOKEN for the remainder of the release process. Fails when
+# neither auth has push so the release aborts before building/uploading.
+ensure_release_push_access() {
+    if [[ $# -ne 1 ]]; then
+        echo "usage: ensure_release_push_access <owner/repo>" >&2
+        return 2
+    fi
+    local repo=$1
+    if [[ "$(gh api "repos/$repo" --jq .permissions.push 2>/dev/null)" == "true" ]]; then
+        return 0
+    fi
+    if [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
+        echo "current gh auth lacks push access to $repo; falling back to stored credentials (unsetting GITHUB_TOKEN/GH_TOKEN)..." >&2
+        unset GITHUB_TOKEN GH_TOKEN
+        if [[ "$(gh api "repos/$repo" --jq .permissions.push 2>/dev/null)" == "true" ]]; then
+            echo "using stored gh credentials with push access to $repo" >&2
+            return 0
+        fi
+    fi
+    echo "gh auth lacks push access to $repo; authenticate with an account that has write access (e.g. 'gh auth login')" >&2
+    return 1
+}
+
 # Validate a staged release directory has complete target coverage.
 #
 #   validate_release_assets <stage-dir> <version>

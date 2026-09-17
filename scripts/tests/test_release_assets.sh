@@ -3,8 +3,9 @@
 #
 # Covers compatibility asset naming, byte-identity with the extracted
 # executable, rejection of ambiguous/missing binaries, required-target
-# coverage validation, and two-phase upload ordering (compat assets before
-# normal archives) via an instrumented `gh` stub.
+# coverage validation, two-phase upload ordering (compat assets before
+# normal archives), per-file upload retry, and push-access preflight with
+# stored-credential fallback via an instrumented `gh` stub.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -268,6 +269,79 @@ else
         fail_test "expected 3 attempts on persistent failure, got $(wc -l <"$retry_calls")"
     fi
 fi
+
+echo "Testing ensure_release_push_access..."
+
+# Save harness-provided tokens; the fallback path unsets them.
+_saved_github_token="${GITHUB_TOKEN:-__unset__}"
+_saved_gh_token="${GH_TOKEN:-__unset__}"
+
+# Current auth already has push -> success, env tokens untouched.
+export GITHUB_TOKEN="pull-only-token"
+gh() {
+    if [[ "$1" == "api" ]]; then
+        printf 'true'
+    fi
+    return 0
+}
+export -f gh
+if ensure_release_push_access "owner/repo" >/dev/null 2>&1; then
+    if [[ "${GITHUB_TOKEN:-}" == "pull-only-token" ]]; then
+        pass "auth with push keeps current env tokens"
+    else
+        fail_test "auth with push should not unset env tokens"
+    fi
+else
+    fail_test "auth with push should succeed"
+fi
+
+# Env token is pull-only but stored credentials have push -> auto-unset.
+gh() {
+    if [[ "$1" == "api" ]]; then
+        if [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
+            printf 'false'
+        else
+            printf 'true'
+        fi
+    fi
+    return 0
+}
+export -f gh
+export GITHUB_TOKEN="pull-only-token"
+export GH_TOKEN="pull-only-token"
+if ensure_release_push_access "owner/repo" >/dev/null 2>&1; then
+    if [[ -z "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
+        pass "pull-only env tokens auto-unset to stored credentials"
+    else
+        fail_test "fallback should unset env tokens"
+    fi
+else
+    fail_test "stored-credential fallback should succeed"
+fi
+
+# Neither auth has push -> nonzero, fast failure.
+gh() {
+    if [[ "$1" == "api" ]]; then
+        printf 'false'
+    fi
+    return 0
+}
+export -f gh
+if ensure_release_push_access "owner/repo" >/dev/null 2>&1; then
+    fail_test "no-push auth should fail"
+else
+    pass "no-push auth fails fast"
+fi
+
+if ensure_release_push_access >/dev/null 2>&1; then
+    fail_test "missing arg should fail"
+else
+    pass "missing arg rejected"
+fi
+
+# Restore harness tokens.
+if [[ "$_saved_github_token" == "__unset__" ]]; then unset GITHUB_TOKEN; else export GITHUB_TOKEN="$_saved_github_token"; fi
+if [[ "$_saved_gh_token" == "__unset__" ]]; then unset GH_TOKEN; else export GH_TOKEN="$_saved_gh_token"; fi
 
 if [[ "$fail" -ne 0 ]]; then
     echo "FAIL: release-assets tests failed"

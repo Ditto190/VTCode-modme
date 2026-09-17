@@ -1253,6 +1253,20 @@ main() {
 		local binaries_dir="/tmp/vtcode-release-$released_version"
 		mkdir -p "$binaries_dir"
 
+		# Preflight: uploads need push access, but harness environments often
+		# export a pull-only GITHUB_TOKEN (uploads then 404). Fail fast here
+		# -- before the expensive macOS builds -- instead of after uploading.
+		local release_repo
+		release_repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)
+		if [[ -n "$release_repo" ]]; then
+			if ! ensure_release_push_access "$release_repo"; then
+				print_error "Cannot upload release assets without push access to $release_repo; aborting"
+				exit 1
+			fi
+		else
+			print_warning "Could not determine repo slug; skipping push-access preflight check"
+		fi
+
 		# Generate the full man page set (main + every subcommand) once and
 		# include it in every platform archive.
 		local man_stage="$binaries_dir/man/man1"
