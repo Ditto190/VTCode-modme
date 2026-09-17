@@ -403,6 +403,12 @@ impl TestTurnProcessingBacking {
         self.harness_state.set_approved_plan_execution(active);
     }
 
+    /// Take prose recorded via `record_recovery_rejected_synthesis`, so tests
+    /// can assert what a violation path preserved for the labeled fallback.
+    pub(crate) fn take_recovery_rejected_synthesis_for_test(&mut self) -> Option<String> {
+        self.harness_state.take_recovery_rejected_synthesis()
+    }
+
     pub(crate) fn last_history_message_contains(&self, needle: &str) -> bool {
         self.working_history
             .last()

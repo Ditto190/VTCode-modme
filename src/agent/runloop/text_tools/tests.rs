@@ -264,6 +264,25 @@ fn test_detect_tagged_tool_call_parses_basic_command() {
 }
 
 #[test]
+fn test_detect_tagged_tool_call_parses_cmd_arg_with_prose_preamble() {
+    // Exact shape from the approved-plan recovery failure: a prose preamble
+    // followed by a complete `<tool_call>` block using the `cmd` alias. The
+    // recovery guard relies on this parsing successfully to distinguish an
+    // action attempt (contract violation) from stray markup.
+    let message = "•   I have sufficient evidence from prior reads. Applying the section rewrite now.\
+                   <tool_call>exec_command<arg_key>cmd\n\
+                   </arg_key><arg_value>grep -n \"## Why VT Code\" README.md</arg_value></tool_call>";
+    let (name, args) = detect_textual_tool_call(message).expect("should parse complete tagged call");
+    assert_eq!(name, tools::EXEC_COMMAND);
+    assert_eq!(args["cmd"], serde_json::json!("grep -n \"## Why VT Code\" README.md"));
+    assert!(contains_pseudo_tool_call_markers(message));
+    let stripped = strip_textual_tool_call_regions(message);
+    assert!(detect_textual_tool_call(&stripped).is_none());
+    assert!(!stripped.contains("<tool_call>"));
+    assert!(stripped.contains("Applying the section rewrite"));
+}
+
+#[test]
 fn test_detect_tagged_tool_call_respects_indexed_arguments() {
     let message = "<tool_call>run_pty_cmd\n<arg_key>command.0\n<arg_value>python\n<arg_key>command.1\n<arg_value>-c\n<arg_key>command.2\n<arg_value>print('hi')\n</tool_call>";
     let (name, args) = detect_textual_tool_call(message).expect("should parse");

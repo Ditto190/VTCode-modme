@@ -357,35 +357,6 @@ check and audit vtcode.toml for broken configurations and missing dependencies, 
 
 ===
 
-Shipped-binary alignment deep-dive — vtcode.toml (524-line full dump) vs compiled defaults. No edits (Plan mode).
-Shipped defaults source of truth: vtcode-config/src/constants/defaults.rs, tool_limits.rs, ui.rs, core/agent.rs, core/provider.rs, core/tools.rs, mcp.rs, telemetry.rs, root.rs. Sparse example intent: vtcode.toml.example:2 “keep only overrides” — your file does the opposite (dumps everything).
-Remove — redundant (= shipped default, pure noise):
-
-- security.encrypt_payloads=false, zero_trust_mode=false (vtcode.toml:299-304) = defaults.
-- commands.allow*glob/allow_list/allow_regex/deny*\*=[] = defaults. Keep only if you add rules; delete approval_prefixes=["echo hi"] test leftover.
-- ui.notifications.delivery_mode="desktop" = default. Keep tool_failure=true (default false per root.rs:522-524) only if intentional.
-- tools.web_fetch.allowed_domains=[] is worse than redundant — default is curated allowlist (core/tools.rs:323-329: github, crates.io, pypi, etc.). [] wipes it. Delete key to inherit.
-- mcp.server.version="0.96.12" — default is CARGO_PKG_VERSION (mcp.rs:650-652) = 0.162.4. Stale pin, delete.
-- provider.mimo_auth_method="unknown" — default is None (absent). Unknown is #[serde(other)] catch-all (models/mimo_auth.rs:23-25). Delete.
-- ui.status_line.mode="unknown" — default auto (status_line.rs:83). Unknown disables it. Fix to auto or delete.
-- Empty [providers.env], [providers.env_http_headers], [providers.http_headers] tables — delete.
-  Keep — valid true overrides (ensure intentional):
-- agent.provider="openai", api_key_env="OPENAI_API_KEY", default_model="gpt-5.6-luna" vs shipped openrouter / OPENROUTER_API_KEY / openrouter default (constants/defaults.rs:5-6). Pairing is coherent, and Luna supports xhigh reasoning (constants/models/openai.rs:28-38) + flex tier (openai.rs:41). Problem is env: you have OPENROUTER_API_KEY + ANTHROPIC_API_KEY in .env, no OPENAI_API_KEY. Either add key or realign to openrouter to match what you ship with.
-- agent.theme="mono" vs ciapre — valid, exists (vtcode-ui/src/theme/registry.rs:820-822) + contrast test passes. Keep.
-- tools.profile="advanced_vtcode" vs vt_code (core/tools.rs:15-22) — valid, enables code_search. Keep.
-- provider.anthropic.effort="low" vs shipped xhigh (core/provider.rs:645-647), thinking_display="summarized" vs None (inherit), tool_search.enabled=false vs true (core/provider.rs:605-607) — valid downgrades, just note you lose hosted search and force client-side.
-- provider.openai.service_tier="flex" vs None (inherit project default) — valid only if project supports flex, else API 400. Safer to unset unless you know.
-- telemetry.atif_enabled=true (def false), retention_days=5 (def 14 per telemetry.rs:70-72), bottleneck_tracing=false (code def true per telemetry.rs:57 — docs say false, drift to flag).
-  Fix — below planning floors / flood-prone:
-- agent.harness.max_tool_calls_per_turn=32 (shipped 120), tools.max_tool_loops=40 (shipped 60 per tool_limits.rs:2-6), automation.full_auto.max_turns=30 (shipped 100). Planning floor is 120 calls / 60 loops (tool_limits.rs:13-14,29). Current values guarantee limit-grant prompts in planning/approved-plan. Align to >=120 / >=60 or 0 for unlimited.
-- tools.max_consecutive_blocked=3 (def 8), optimization.\* 10-50x off defaults (optimization.rs:376-384), ui.tool_output_max_lines=600/30, spool_bytes=200k/80k, allow_tool_ansi=true/false, bold_is_bright=true/false, show_turn_timer=true/false, reasoning_visible_default=false/true (constants/ui.rs:4) — all valid but noisy. Keep only if you measured need.
-- tools.policies 38 keys vs 6 shipped (core/tools.rs:447-456). Prune to overrides; ast-grep hyphen never matches [a-z0-9_] gate.
-- agent.codex_app_server.experimental_features=true (def false), debug.enable_tracing=true (def false) — dev-only, disable for shipped parity.
-  Target end-state: ~40-line sparse vtcode.toml like .example — provider/model/key, theme, profile, real policy deltas, real tuning deltas. Everything = default deleted.
-  To implement the prune + env realignment, switch to a Build agent — I can't edit in Plan mode. Want auto-prune to sparse, or patch proposal first?
-
-===
-
 for web policy approval modal confirmation -> show full URL in the modal description
 
 ===
@@ -423,3 +394,13 @@ ref 2 states:
 
 • Compacting context...
 • Context compacted · 1m 34s
+
+===
+
+CRITICAL: check failure `
+•   I have sufficient evidence from prior reads. Applying the section rewrite now.<tool_call>exec_command<arg_key>cmd
+</arg_key><arg_value>grep -n "## Why VT Code" README.md</arg_value></tool_call>
+[i] Cleaned recovery response (removed tool-call markup).
+Execution summary: blocked; changed files: none recorded; verification: see the final response and task tracker;
+blockers: the approved-plan turn produced no file changes, so implementation completion was not confirmed.
+MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.` and fix

@@ -56,7 +56,6 @@ fn should_suppress_pre_tool_result_claim(assistant_text: &str, tool_calls: &[Pre
     .iter()
     .any(|marker| lower.contains(marker))
 }
-
 fn record_assistant_tool_calls(
     history: &mut Vec<uni::Message>,
     tool_calls: &[PreparedAssistantToolCall],
@@ -521,54 +520,66 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 && (crate::agent::runloop::text_tools::detect_textual_tool_call(&text).is_some()
                     || crate::agent::runloop::text_tools::contains_pseudo_tool_call_markers(&text))
             {
-                let cleaned = crate::agent::runloop::text_tools::strip_dsml_markup(&text).trim().to_string();
-                // If DSML stripping produced a clean, markup-free text, use it.
-                // Otherwise try stripping the entire detected non-DSML tool-call
-                // region while preserving surrounding prose.
-                if !cleaned.is_empty()
-                    && crate::agent::runloop::text_tools::detect_textual_tool_call(&cleaned).is_none()
-                    && !crate::agent::runloop::text_tools::contains_pseudo_tool_call_markers(&cleaned)
-                {
-                    let _ = params
-                        .ctx
-                        .renderer
-                        .line(MessageStyle::Info, "[i] Cleaned recovery response (removed tool-call markup).");
-                    return params
-                        .ctx
-                        .handle_text_response(
-                            cleaned,
-                            reasoning,
-                            reasoning_details,
-                            proposed_plan,
-                            params.response_streamed,
-                        )
-                        .await;
+                // A complete, parseable textual tool call is an action attempt,
+                // not a synthesis. Publishing the stripped preamble ("Applying
+                // the fix now.") as the final answer would fabricate completion
+                // while doing no work, so complete calls skip the prose-salvage
+                // attempts below and take the contract-violation path: the
+                // bounded retry asks for a plain-text summary, and the salvaged
+                // prose feeds the labeled fallback instead of the canned answer.
+                let attempted_complete_tool_call =
+                    crate::agent::runloop::text_tools::detect_textual_tool_call(&text).is_some();
+                if !attempted_complete_tool_call {
+                    let cleaned = crate::agent::runloop::text_tools::strip_dsml_markup(&text).trim().to_string();
+                    // If DSML stripping produced a clean, markup-free text, use it.
+                    // Otherwise try stripping the entire detected non-DSML tool-call
+                    // region while preserving surrounding prose.
+                    if !cleaned.is_empty()
+                        && crate::agent::runloop::text_tools::detect_textual_tool_call(&cleaned).is_none()
+                        && !crate::agent::runloop::text_tools::contains_pseudo_tool_call_markers(&cleaned)
+                    {
+                        let _ = params
+                            .ctx
+                            .renderer
+                            .line(MessageStyle::Info, "[i] Cleaned recovery response (removed tool-call markup).");
+                        return params
+                            .ctx
+                            .handle_text_response(
+                                cleaned,
+                                reasoning,
+                                reasoning_details,
+                                proposed_plan,
+                                params.response_streamed,
+                            )
+                            .await;
+                    }
+                    let cleaned = crate::agent::runloop::text_tools::strip_textual_tool_call_regions(&text)
+                        .trim()
+                        .to_string();
+                    if !cleaned.is_empty()
+                        && crate::agent::runloop::text_tools::detect_textual_tool_call(&cleaned).is_none()
+                        && !crate::agent::runloop::text_tools::contains_pseudo_tool_call_markers(&cleaned)
+                    {
+                        let _ = params
+                            .ctx
+                            .renderer
+                            .line(MessageStyle::Info, "[i] Cleaned recovery response (removed tool-call markup).");
+                        return params
+                            .ctx
+                            .handle_text_response(
+                                cleaned,
+                                reasoning,
+                                reasoning_details,
+                                proposed_plan,
+                                params.response_streamed,
+                            )
+                            .await;
+                    }
                 }
-                let cleaned = crate::agent::runloop::text_tools::strip_textual_tool_call_regions(&text)
-                    .trim()
-                    .to_string();
-                if !cleaned.is_empty()
-                    && crate::agent::runloop::text_tools::detect_textual_tool_call(&cleaned).is_none()
-                    && !crate::agent::runloop::text_tools::contains_pseudo_tool_call_markers(&cleaned)
-                {
-                    let _ = params
-                        .ctx
-                        .renderer
-                        .line(MessageStyle::Info, "[i] Cleaned recovery response (removed tool-call markup).");
-                    return params
-                        .ctx
-                        .handle_text_response(
-                            cleaned,
-                            reasoning,
-                            reasoning_details,
-                            proposed_plan,
-                            params.response_streamed,
-                        )
-                        .await;
-                }
-                // Both cleanup attempts failed. Salvage the best-effort
-                // stripped prose so an exhausted-retries fallback can use it
-                // instead of the canned answer.
+                // Both cleanup attempts failed (or the response attempted a
+                // complete tool call, which skips the attempts above). Salvage
+                // the best-effort stripped prose so an exhausted-retries
+                // fallback can use it instead of the canned answer.
                 let salvage = crate::agent::runloop::text_tools::strip_textual_tool_call_regions(
                     &crate::agent::runloop::text_tools::strip_dsml_markup(&text),
                 )
@@ -1528,8 +1539,16 @@ mod tests {
         ));
     }
 
+    /// A complete, parseable tool call takes the contract-violation path even
+    /// when the surrounding prose honestly reports the disabled state: the
+    /// disclosure is preserved via the recorded salvage (which feeds the
+    /// labeled fallback), but the turn must not complete with an action
+    /// attempt pending. No disclosure exception exists because the retry
+    /// directive itself contains "tools are disabled", so any exception would
+    /// be echoable from history (see
+    /// `recovery_complete_tool_call_with_appended_disclosure_still_breaks`).
     #[tokio::test]
-    async fn recovery_textual_tool_markup_with_prose_strips_region_and_completes() {
+    async fn recovery_complete_tool_call_with_disclosure_breaks_as_violation() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         let mut ctx = backing.turn_processing_context();
         ctx.activate_recovery("loop detector");
@@ -1562,16 +1581,27 @@ Please re-run with tools enabled."#
             tool_repeat_limit: 4,
         })
         .await
-        .expect("recovery textual tool markup should be stripped");
+        .expect("complete tool-call markup should take the violation path");
 
-        assert!(matches!(
-            outcome,
-            TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: _ })
-        ));
         assert!(
-            backing.last_history_message_contains("The requested change was not applied because tools were disabled.")
+            matches!(
+                outcome,
+                TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) })
+                if reason == RECOVERY_CONTRACT_VIOLATION_REASON
+            ),
+            "a complete textual tool call must break with a contract violation even with honest disclosure prose"
         );
-        assert!(backing.last_history_message_contains("Please re-run with tools enabled."));
+        let salvaged = backing
+            .take_recovery_rejected_synthesis_for_test()
+            .expect("violation should record salvaged prose");
+        assert!(
+            salvaged.contains("The requested change was not applied because tools were disabled."),
+            "honest disclosure prose must be preserved for the fallback, got: {salvaged}"
+        );
+        assert!(
+            salvaged.contains("Please re-run with tools enabled."),
+            "trailing guidance must be preserved for the fallback, got: {salvaged}"
+        );
         assert!(!backing.last_history_message_contains("<invoke"));
     }
 
@@ -1760,6 +1790,152 @@ Please re-run with tools enabled."#
             matches!(outcome, TurnHandlerOutcome::Break(_)),
             "recovery with non-parseable tool_call tag should break, not continue"
         );
+    }
+
+    /// Regression test for the approved-plan "no file changes" failure: a
+    /// tool-free recovery response that bundles a prose preamble with a
+    /// COMPLETE, parseable `<tool_call>` block must take the
+    /// contract-violation path (salvage + Blocked) instead of publishing the
+    /// stripped preamble ("Applying the section rewrite now.") as a final
+    /// answer that fabricates completion.
+    #[tokio::test]
+    async fn recovery_parseable_tool_call_with_preamble_breaks_turn() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.activate_recovery("loop detector");
+        assert!(ctx.consume_recovery_pass());
+
+        let text = "•   I have sufficient evidence from prior reads. Applying the section rewrite now.\
+                    <tool_call>exec_command<arg_key>cmd\n\
+                    </arg_key><arg_value>grep -n \"## Why VT Code\" README.md</arg_value></tool_call>";
+
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: text.to_string(),
+                reasoning: Vec::new(),
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 1,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+            max_tool_loops: 4,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .expect("parseable tool-call markup should not panic");
+
+        assert!(
+            matches!(
+                outcome,
+                TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) })
+                if reason == RECOVERY_CONTRACT_VIOLATION_REASON
+            ),
+            "recovery with a complete textual tool call must break with a contract violation, not complete with the preamble"
+        );
+        assert!(
+            !backing.last_history_message_contains("Applying the section rewrite"),
+            "stripped preamble must not be published as the final answer"
+        );
+        let salvaged = backing
+            .take_recovery_rejected_synthesis_for_test()
+            .expect("violation should record salvaged prose");
+        assert!(
+            salvaged.contains("Applying the section rewrite"),
+            "preamble must be preserved for the labeled fallback, got: {salvaged}"
+        );
+    }
+
+    /// Anti-gameability pin: appending a disabled-tools disclosure to an action
+    /// preamble must not launder a complete tool call into a completion. The
+    /// retry directive itself contains "tools are disabled", so a disclosure
+    /// exception would be echoable from history on the very next pass.
+    #[tokio::test]
+    async fn recovery_complete_tool_call_with_appended_disclosure_still_breaks() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.activate_recovery("loop detector");
+        assert!(ctx.consume_recovery_pass());
+
+        let text = "Applying the section rewrite now.\
+                    <tool_call>exec_command<arg_key>cmd</arg_key><arg_value>grep -n x README.md</arg_value></tool_call> \
+                    (tools were disabled, so this could not run)";
+
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: text.to_string(),
+                reasoning: Vec::new(),
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 1,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+            max_tool_loops: 4,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .expect("appended disclosure must not bypass the violation path");
+
+        assert!(
+            matches!(
+                outcome,
+                TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) })
+                if reason == RECOVERY_CONTRACT_VIOLATION_REASON
+            ),
+            "a complete textual tool call with appended disclosure must still break with a contract violation"
+        );
+    }
+
+    /// Planning-mode complete calls take the planning violation tail (bounded
+    /// repair or resumable handoff), never a normal text completion.
+    #[tokio::test]
+    async fn recovery_complete_tool_call_in_planning_takes_handoff() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        backing.activate_planning_for_test();
+        let mut ctx = backing.turn_processing_context();
+        ctx.activate_recovery("loop detector");
+        assert!(ctx.consume_recovery_pass());
+
+        let text = "•   I have sufficient evidence from prior reads. Applying the section rewrite now.\
+                    <tool_call>exec_command<arg_key>cmd</arg_key><arg_value>grep -n x README.md</arg_value></tool_call>";
+
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+
+        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: text.to_string(),
+                reasoning: Vec::new(),
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 1,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+            max_tool_loops: 4,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .expect("planning complete tool-call markup should take the handoff path");
+
+        assert!(
+            matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })),
+            "planning complete tool-call markup must break with a resumable handoff, not complete"
+        );
+        assert!(backing.last_history_message_contains("Planning remains active"));
     }
 
     /// Regression test: recovery text that contains only prose (no markers)
