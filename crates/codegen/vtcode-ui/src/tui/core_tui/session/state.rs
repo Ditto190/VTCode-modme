@@ -37,8 +37,9 @@ const INPUT_REQUIRED_STATUS_TEXT: &str = "Input required";
 const ACTIVE_PTY_STATUS_TEXT: &str = "Running PTY command...";
 
 impl Session {
-    pub(crate) fn set_task_panel_lines(&mut self, lines: Vec<String>) {
-        self.terminal_title_task_progress = extract_task_progress(&lines);
+    /// Mark dirty after task-panel body content changed. Terminal-title progress
+    /// is owned by typed panel metadata, not by parsing body lines.
+    pub(crate) fn mark_task_panel_content_dirty(&mut self) {
         self.mark_dirty();
     }
 
@@ -983,12 +984,4 @@ impl Session {
         self.mark_dirty();
         self.emit_inline_event(&InlineEvent::ScrollLineUp, events, callback);
     }
-}
-
-fn extract_task_progress(lines: &[String]) -> Option<String> {
-    let line = lines
-        .iter()
-        .find_map(|line| line.trim().strip_prefix("Progress: ").map(str::trim))?;
-    let summary = line.split_whitespace().next()?.trim();
-    (!summary.is_empty()).then(|| summary.to_string())
 }

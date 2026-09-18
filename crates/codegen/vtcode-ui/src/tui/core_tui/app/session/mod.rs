@@ -824,14 +824,17 @@ impl AppSession {
                 self.show_transient_surface(TransientSurface::SlashPalette);
             }
             TransientRequest::TaskPanel(TaskPanelTransientRequest { lines, visible, metadata }) => {
-                self.core.set_task_panel_lines(lines.clone());
-                self.task_panel_lines = lines;
-                if let Some(metadata) = &metadata {
-                    self.core
-                        .set_task_panel_progress_label(Some(format!("{}/{}", metadata.completed, metadata.total)));
-                }
+                // Visibility-only requests (show/hide) must not mutate panel body,
+                // metadata, or terminal-title progress. Content updates own those
+                // fields; typed metadata is the authoritative progress source.
                 if visible.is_none() {
-                    self.task_panel_metadata = metadata;
+                    self.task_panel_lines = lines;
+                    self.core.mark_task_panel_content_dirty();
+                    if let Some(metadata) = metadata {
+                        self.core
+                            .set_task_panel_progress_label(Some(format!("{}/{}", metadata.completed, metadata.total)));
+                        self.task_panel_metadata = Some(metadata);
+                    }
                 }
                 if let Some(visible) = visible {
                     let suppressed = visible && !self.core.appearance.should_show_task_panel();

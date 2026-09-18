@@ -2806,6 +2806,44 @@ mod tests {
     }
 
     #[test]
+    fn task_panel_visibility_requests_retain_body_and_metadata_progress() {
+        use crate::tui::core_tui::app::types::{TaskPanelMetadata, TaskPanelTransientRequest, TransientRequest};
+
+        let mut session = build_session();
+        let tree = vec!["  └ □ Implement".to_string(), "  └ [x] Verify".to_string()];
+        let metadata = TaskPanelMetadata {
+            title: "Release".to_string(),
+            completed: 1,
+            total: 2,
+        };
+
+        session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
+            lines: tree.clone(),
+            visible: None,
+            metadata: Some(metadata),
+        }));
+        assert_eq!(session.task_panel_lines, tree);
+        assert_eq!(session.task_panel_metadata.as_ref().map(|m| m.title.as_str()), Some("Release"));
+
+        session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
+            lines: Vec::new(),
+            visible: Some(true),
+            metadata: None,
+        }));
+        // Appearance may suppress auto-show; visibility must never wipe content.
+        assert_eq!(session.task_panel_lines, tree, "show_task_panel must not wipe the panel body");
+        assert_eq!(session.task_panel_metadata.as_ref().map(|m| m.completed), Some(1));
+
+        session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
+            lines: Vec::new(),
+            visible: Some(false),
+            metadata: None,
+        }));
+        assert!(!session.show_task_panel);
+        assert_eq!(session.task_panel_lines, tree, "hide_task_panel must not wipe the panel body");
+    }
+
+    #[test]
     fn ctrl_home_and_end_jump_transcript_in_fullscreen() {
         let mut session = build_session();
         for index in 0..40 {

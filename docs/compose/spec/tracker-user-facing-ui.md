@@ -57,8 +57,9 @@ pub(crate) fn tracker_tree_body_lines(val: &serde_json::Value) -> Vec<String>
    - Same split; approval handoff may still `show_task_panel()` once
    - Transcript append / replace uses progress-only lines (dedupe on those lines)
 3. Terminal title (`vtcode-ui` session):
-   - When task-panel metadata updates, set `terminal_title_task_progress` from `format!("{completed}/{total}")`
-   - Stop depending on parsing a `Progress: ` row out of panel body lines for this path
+   - Typed `TaskPanelMetadata` is the **only** writer of `terminal_title_task_progress` (`completed/total`)
+   - Visibility-only TaskPanel requests (`show_task_panel` / `hide_task_panel`) must **not** mutate body lines, metadata, or progress
+   - Line-parse `Progress:` extraction is removed (panel body has no such row)
 
 **Panel UI** (`vtcode-ui` task panel — unchanged layout rules)
 
@@ -75,6 +76,11 @@ pub(crate) fn tracker_tree_body_lines(val: &serde_json::Value) -> Vec<String>
 
 No new config keys. Presentation is unconditional under the existing tracker UI; kill-switches for continuation remain `[agent.harness.continuation]`.
 
+### Intentional contract clarifications (post-review)
+
+- `tracker_panel_metadata` falls back to title `"Task tracker"` when checklist title is missing and derives `completed`/`total` via `tracker_progress_counts` (explicit counts win; otherwise count renderable items). This is required for terminal-title progress without explicit count fields.
+- Successful checklists with progress counts but empty tree body still emit the one-line progress surface in the transcript.
+
 ## [S3] Out of Scope
 
 - Changing `task_tracker` tool schema, persistence, or model-facing payload shape
@@ -87,6 +93,6 @@ No new config keys. Presentation is unconditional under the existing tracker UI;
 
 - [ ] T1: Add `tracker_progress_lines` + `tracker_tree_body_lines` with unit tests — acceptance: success emits one title+progress line (no next/tree); errors keep diagnostics; tree body has no summary header and no metadata rows (covers: S2)
 - [ ] T2: Wire tool_output_handler + planning approval handoff to the view split — acceptance: transcript replace uses progress-only; panel receives tree body + metadata; existing dedupe still holds (covers: S2; depends: T1)
-- [ ] T3: Terminal title progress from panel metadata — acceptance: metadata update sets `N/M` progress for terminal title without parsing tree lines (covers: S2; depends: T2)
+- [ ] T3: Terminal title progress from panel metadata only — acceptance: metadata update sets `N/M`; visibility-only show/hide does not wipe body/metadata/progress; no line-parse path (covers: S2; depends: T2)
 - [ ] T4: Update transcript/panel tests that assert full-tree user-facing blocks — acceptance: tests assert progress-only transcript rows and tree rows only on the panel path (covers: S2; depends: T2)
 - [ ] T5: Update AGENTS/gotcha/docs presentation contract — acceptance: binary gotcha no longer mandates shared full-tree transcript rendering; docs describe title+progress transcript vs panel tree (covers: S2; depends: T2)

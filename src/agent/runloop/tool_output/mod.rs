@@ -337,10 +337,14 @@ fn is_git_diff_payload(val: &Value) -> bool {
 
 /// User-facing transcript surface for a tracker payload: title + progress only.
 ///
-/// Successful checklists collapse to one line (`• Release 2/5`). Errors and
-/// empty trackers keep diagnostic lines. The compact tree stays panel-only.
+/// Successful checklists collapse to one line (`• Release 2/5`) when progress
+/// counts exist (explicit or derived from items), even if the tree body is
+/// empty. Errors and empty trackers keep diagnostic lines. The compact tree
+/// stays panel-only.
 pub(crate) fn tracker_progress_lines(val: &Value) -> Vec<String> {
-    if tracker_response_is_successful(val) && !tracker_visible_tree_rows(val).is_empty() {
+    if tracker_response_is_successful(val)
+        && (!tracker_visible_tree_rows(val).is_empty() || tracker_progress_counts(val).is_some())
+    {
         return vec![tracker_progress_header(val)];
     }
     let diagnostics = tracker_summary_lines(val);
@@ -495,9 +499,8 @@ fn render_tracker_view(renderer: &mut AnsiRenderer, val: &Value) -> Result<bool>
         return Ok(false);
     }
 
-    // Render through the markdown pipeline so `` `code` `` and other inline
-    // formatting display styled instead of raw source. Tree prefixes (`├`,
-    // `└`, `□`) are plain text and survive the parser untouched.
+    // Render through the markdown pipeline so inline formatting displays styled
+    // instead of raw source on the single progress/diagnostic line.
     for line in lines {
         renderer.render_markdown_output(MessageStyle::ToolDetail, &line)?;
     }
@@ -1416,6 +1419,26 @@ mod tests {
         let lines = tracker_summary_lines(&payload);
         assert!(lines.iter().any(|line| line == "  Tracker status: empty"));
         assert!(lines.iter().any(|line| line == "  Update: No active checklist."));
+    }
+
+    #[test]
+    fn tracker_progress_lines_keep_counts_when_tree_body_is_empty() {
+        // Explicit completed/total without renderable step titles still answers
+        // "how far along is this work?" on the user-facing surface.
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "completed": 2,
+                "total": 5,
+                "items": []
+            }
+        });
+
+        let rows = tracker_progress_lines(&payload);
+
+        assert_eq!(rows, vec!["• Release 2/5"]);
+        assert!(tracker_tree_body_lines(&payload).is_empty());
     }
 
     #[test]
