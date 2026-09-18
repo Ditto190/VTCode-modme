@@ -2,6 +2,35 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.163.2 - 2026-09-18
+
+### Highlights
+#### Bug Fixes
+
+- Add configurable HTTP handshake mode and pin protocol versions (b2457b80) (@vinhnx)
+- Strip MCP policy framing from compact summaries (6f09d8d6) (@vinhnx)
+- Run session hooks after hydration and defer MCP init (228ef2f0) (@vinhnx)
+- Unify Cmd line-editing across kitty-protocol and legacy terminals (b1be4082) 
+- Safety-cap diff expand notice and non-greedy review matching (ccc9f7f2) 
+#### Documentation
+
+- Add provider lock-in row to README highlights table (bf459f0b) 
+- Tighten "Why VT Code" intro and reformat comparison table (9ad492f8) 
+#### Features
+
+- Bounded deterministic turn diffs, themed previews, and whole-side syntax highlighting (a566c716) (@vinhnx)
+- Prose-style transcript sections with dim dividers (91a0d2c1) 
+- Word-wrap transcript diffs and expand review overlay (11c7eb73) 
+- Wire completed-edit diff review expand (6053cdb6) 
+### Other Changes
+#### Other
+
+- Refine README (33d5c21d) (@vinhnx)
+- Bound deferred tools section, simplify verifier guidance (f03860c7) (@vinhnx)
+- Update README (32015f82) (@vinhnx)
+#### Performance
+
+- Split session bootstrap for faster first frame (0931606e) (@vinhnx)
 ## 0.163.1 - 2026-09-17
 
 ### Highlights
