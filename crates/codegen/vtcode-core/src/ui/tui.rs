@@ -103,6 +103,7 @@ mod headless {
             segments: Vec<InlineSegment>,
         },
         AppendCompactActivity(CompactActivityMetadata),
+        RecordDiffReview(vtcode_commons::ui_protocol::DiffReviewAnchor),
         ReplaceCompactActivity(CompactActivityMetadata),
         CollapsePtyBlock(CompactActivityMetadata),
         SetKeyBindings {
@@ -185,8 +186,10 @@ mod headless {
         pub fn append_compact_activity(&self, activity: CompactActivityMetadata) {
             self.send_command(InlineCommand::AppendCompactActivity(activity));
         }
-        pub fn record_diff_review(&self, _anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) {
-            // Headless sinks have no transcript expand affordance.
+        pub fn record_diff_review(&self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) {
+            // Headless sinks have no transcript expand affordance, but tests
+            // still need to observe that an anchor was recorded.
+            self.send_command(InlineCommand::RecordDiffReview(anchor));
         }
         pub fn replace_compact_activity(&self, activity: CompactActivityMetadata) {
             self.send_command(InlineCommand::ReplaceCompactActivity(activity));

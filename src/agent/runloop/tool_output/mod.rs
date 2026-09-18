@@ -686,10 +686,28 @@ pub(crate) fn collect_inline_output(
                         .map(|line| line.into_iter().map(|segment| segment.text).collect::<String>()),
                 );
             }
+            vtcode_core::ui::InlineCommand::RecordDiffReview(anchor) => {
+                lines.push(format!("RecordDiffReview {}", anchor.file_path));
+                lines.push(anchor.notice);
+            }
             _ => {}
         }
     }
     lines.join("\n")
+}
+
+/// Drain test-sink commands and return recorded diff-review anchors.
+#[cfg(test)]
+pub(crate) fn collect_inline_diff_review_anchors(
+    receiver: &mut tokio::sync::mpsc::UnboundedReceiver<vtcode_core::ui::InlineCommand>,
+) -> Vec<vtcode_commons::ui_protocol::DiffReviewAnchor> {
+    let mut anchors = Vec::new();
+    while let Ok(command) = receiver.try_recv() {
+        if let vtcode_core::ui::InlineCommand::RecordDiffReview(anchor) = command {
+            anchors.push(anchor);
+        }
+    }
+    anchors
 }
 
 #[cfg(test)]
@@ -1192,9 +1210,33 @@ mod tests {
         assert!(inline_output.contains("for"));
         assert!(!inline_output.contains("use read_file for full view"));
         assert!(
-            inline_output.contains("RecordDiffReview") || inline_output.contains("review full diff"),
-            "expandable notice must be present for activation"
+            inline_output.contains("RecordDiffReview"),
+            "expandable notice must record DiffReviewAnchor for activation: {inline_output:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_write_file_diff_records_path_bearing_anchor() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        let payload = json!({
+            "diff_preview": {
+                "content": "@@ -1 +1 @@\n-old\n+new\n",
+                "truncated": true,
+                "omitted_line_count": 5,
+                "path": "src/main.rs"
+            }
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::WRITE_FILE), &payload, None)
+            .await
+            .expect("write file diff payload should render");
+
+        let anchors = super::collect_inline_diff_review_anchors(&mut receiver);
+        assert_eq!(anchors.len(), 1, "expected one expand anchor: {anchors:?}");
+        assert_eq!(anchors[0].file_path, "src/main.rs");
+        assert!(anchors[0].notice.contains("review full diff for src/main.rs"));
+        assert!(!anchors[0].unified.is_empty());
     }
 
     #[tokio::test]

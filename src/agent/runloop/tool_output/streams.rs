@@ -324,6 +324,60 @@ fn language_hint_for_display_line(line: &DiffDisplayLine) -> Option<String> {
     None
 }
 
+/// Workspace-visible path from unified/apply-patch headers, when present.
+fn file_path_from_diff_content(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        for path in [
+            git_b_path(trimmed),
+            marker_path(trimmed),
+            parse_apply_patch_path(trimmed),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let path = path.trim();
+            if !path.is_empty() && path != "/dev/null" && path != "file" {
+                return Some(path.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Parse `... N lines omitted ...` / `… +N lines …` omission copy.
+fn parse_omitted_line_count(text: &str) -> Option<u64> {
+    let idx = text.find("lines omitted").or_else(|| text.find("lines —"))?;
+    let before = text[..idx]
+        .trim()
+        .trim_end_matches('…')
+        .trim_end_matches('.')
+        .trim_end_matches(' ')
+        .trim_start_matches('…')
+        .trim_start_matches('.')
+        .trim_start_matches(' ')
+        .trim_start_matches('+');
+    let digits: String = before.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+fn is_generic_diff_review_label(path: &str) -> bool {
+    path.is_empty() || path == "diff" || path == "file" || path.starts_with("diff.")
+}
+
+/// Whether any laid-out body/metadata row would exceed the reflow safety cap.
+fn line_exceeds_wrap_safety_cap(line: &DiffDisplayLine, line_number_width: usize, show_gutter: bool) -> bool {
+    match line.kind {
+        DiffDisplayKind::Addition | DiffDisplayKind::Deletion | DiffDisplayKind::Context => {
+            display_width(&line.text) > DIFF_WRAP_SOURCE_MAX_WIDTH
+        }
+        _ => {
+            let text = diff_display_text(line, line_number_width, show_gutter);
+            display_width(&text) > DIFF_WRAP_SOURCE_MAX_WIDTH
+        }
+    }
+}
+
 /// Syntax segments for a diff body line, or `None` when solid tint applies.
 ///
 /// Prose (`md`/`txt`), unknown/plain grammars, and foreground-less results
@@ -791,6 +845,25 @@ pub(crate) fn render_diff_content_block_with_language(
     let vertical_omitted = lines_slice.len() < diff_lines.len();
     let line_number_width = diff_display_line_number_width(lines_slice);
     let available_width = renderer.diff_content_width(fallback_style);
+    let wrap_for_reflow = renderer.prefers_untruncated_output();
+    let review_path = file_path_from_diff_content(diff_content)
+        .or_else(|| {
+            diff_language_hint_from_content(diff_content)
+                .map(|hint| format!("diff.{hint}"))
+                .filter(|path| !is_generic_diff_review_label(path))
+        })
+        .unwrap_or_else(|| "diff".to_owned());
+    let has_row_background = git_styles.add.as_ref().is_some_and(|style| style.get_bg_color().is_some());
+    let show_gutter_probe = should_show_diff_gutter(
+        renderer.capabilities().supports_color(),
+        has_row_background,
+        available_width,
+        line_number_width,
+    );
+    let safety_capped = wrap_for_reflow
+        && lines_slice
+            .iter()
+            .any(|line| line_exceeds_wrap_safety_cap(line, line_number_width, show_gutter_probe));
 
     // Bound syntect cost: large previews fall back to solid tints so a
     // 100-file `apply_patch` stays O(n) tinting instead of O(n) parses.
@@ -802,8 +875,13 @@ pub(crate) fn render_diff_content_block_with_language(
     {
         let result =
             render_diff_content_side_by_side_with_language(renderer, lines_slice, git_styles, fallback_style, language);
-        if vertical_omitted {
-            attach_diff_review_anchor(renderer, diff_content, diff_lines.len().saturating_sub(lines_slice.len()));
+        if vertical_omitted || safety_capped {
+            attach_diff_review_anchor(
+                renderer,
+                diff_content,
+                diff_lines.len().saturating_sub(lines_slice.len()),
+                safety_capped,
+            );
         }
         return result;
     }
@@ -811,13 +889,7 @@ pub(crate) fn render_diff_content_block_with_language(
     // Without ANSI styling the row tint and foreground fallback disappear,
     // so keep the marker/line-number gutter as the only remaining add/delete
     // distinction even when the content width is narrow.
-    let has_row_background = git_styles.add.as_ref().is_some_and(|style| style.get_bg_color().is_some());
-    let show_gutter = should_show_diff_gutter(
-        renderer.capabilities().supports_color(),
-        has_row_background,
-        available_width,
-        line_number_width,
-    );
+    let show_gutter = show_gutter_probe;
     let result = render_diff_content_inline_with_language(
         renderer,
         lines_slice,
@@ -828,22 +900,45 @@ pub(crate) fn render_diff_content_block_with_language(
         line_number_width,
         show_gutter,
         language,
+        review_path.as_str(),
     );
-    if vertical_omitted {
-        attach_diff_review_anchor(renderer, diff_content, diff_lines.len().saturating_sub(lines_slice.len()));
+    if vertical_omitted || safety_capped {
+        attach_diff_review_anchor(
+            renderer,
+            diff_content,
+            diff_lines.len().saturating_sub(lines_slice.len()),
+            safety_capped,
+        );
+        if safety_capped && !vertical_omitted && wrap_for_reflow {
+            // Spec S2.1: safety-cap truncation must advertise expand even when
+            // the vertical budget retained every logical row.
+            let notice = format!("… diff truncated — review full diff for {review_path}");
+            renderer.line(MessageStyle::ToolDetail, &notice)?;
+        }
     }
     result
 }
 
 /// Attach a UI-only expand payload when the transcript body was clipped.
-fn attach_diff_review_anchor(renderer: &AnsiRenderer, diff_content: &str, omitted_lines: usize) {
-    if omitted_lines == 0 || diff_content.is_empty() {
+///
+/// `omitted_lines > 0` covers vertical omission. `safety_capped` covers body
+/// rows that exceeded `DIFF_WRAP_SOURCE_MAX_WIDTH` and were ellipsis-truncated.
+fn attach_diff_review_anchor(renderer: &AnsiRenderer, diff_content: &str, omitted_lines: usize, safety_capped: bool) {
+    if diff_content.is_empty() || (omitted_lines == 0 && !safety_capped) {
         return;
     }
-    let file_path = diff_language_hint_from_content(diff_content)
-        .map(|hint| format!("diff.{hint}"))
+    let file_path = file_path_from_diff_content(diff_content)
+        .or_else(|| {
+            diff_language_hint_from_content(diff_content)
+                .map(|hint| format!("diff.{hint}"))
+                .filter(|path| !is_generic_diff_review_label(path))
+        })
         .unwrap_or_else(|| "diff".to_owned());
-    let notice = format!("… +{omitted_lines} lines — review full diff for {file_path}");
+    let notice = if omitted_lines > 0 {
+        format!("… +{omitted_lines} lines — review full diff for {file_path}")
+    } else {
+        format!("… diff truncated — review full diff for {file_path}")
+    };
     renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
         file_path,
         unified: diff_content.to_owned(),
@@ -866,6 +961,7 @@ fn render_diff_content_inline_with_language(
     line_number_width: usize,
     show_gutter: bool,
     language: Option<&str>,
+    review_path: &str,
 ) -> Result<()> {
     let color_enabled = renderer.capabilities().supports_color();
     let target_width = renderer.diff_content_width(fallback_style);
@@ -899,7 +995,17 @@ fn render_diff_content_inline_with_language(
         if raw_line.is_empty() {
             continue;
         }
-        if display_width(&raw_line) > max_line_width {
+        // Spec S2.1: vertical omission notices become expandable copy when a
+        // DiffReviewAnchor payload is retained for this block.
+        if wrap_for_reflow && raw_line.contains("lines omitted") {
+            if let Some(omitted) = parse_omitted_line_count(&raw_line) {
+                display_buffer.push_str(&format!("… +{omitted} lines — review full diff for {review_path}"));
+            } else if !raw_line.contains("review full diff") {
+                display_buffer.push_str(&format!("{raw_line} — review full diff for {review_path}"));
+            } else {
+                display_buffer.push_str(&raw_line);
+            }
+        } else if display_width(&raw_line) > max_line_width {
             display_buffer.push_str(&truncate_with_ellipsis(&raw_line, max_line_width, "..."));
         } else {
             display_buffer.push_str(&raw_line);
@@ -951,7 +1057,16 @@ fn render_diff_content_inline_with_language(
         render_preview_line(
             renderer,
             &display_buffer,
-            rendered_owned.filter(|r| *r != display_buffer.as_str()),
+            rendered_owned.filter(|r| {
+                // Expandable omission copy in `display_buffer` is authoritative
+                // when present; do not let the raw numbered formatter replace it
+                // with a path-less variant.
+                if display_buffer.contains("review full diff") {
+                    false
+                } else {
+                    *r != display_buffer.as_str()
+                }
+            }),
             None,
             false,
             fallback_style,
@@ -1568,7 +1683,40 @@ mod tests {
         let output = strip_ansi_codes(&collected);
         assert!(output.contains("old-0"), "head should be retained: {output:?}");
         assert!(output.contains("new-599"), "tail should be retained: {output:?}");
-        assert!(output.contains("lines omitted"), "omission marker should be rendered: {output:?}");
+        assert!(output.contains("review full diff"), "vertical omission must advertise expand: {output:?}");
+        assert!(
+            output.contains("lines") && (output.contains("omitted") || output.contains('+')),
+            "omission count should remain discoverable: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn safety_capped_diff_body_advertises_expand_and_records_anchor() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        // One logical addition row far above DIFF_WRAP_SOURCE_MAX_WIDTH (2000).
+        let long_row = format!("+{}", "x".repeat(2_050));
+        let diff = format!("@@ -1,1 +1,1 @@\n{long_row}\n");
+
+        render_diff_content_block(
+            &mut renderer,
+            &diff,
+            Some("apply_patch"),
+            &GitStyles::new(),
+            &LsStyles::from_env(),
+            MessageStyle::ToolDetail,
+            ToolOutputMode::Full,
+            50,
+        )
+        .expect("safety-capped diff should render");
+
+        let collected = collect_inline_output(&mut receiver);
+        let output = strip_ansi_codes(&collected);
+        assert!(output.contains("review full diff"), "safety-cap truncation must advertise expand: {output:?}");
+        assert!(
+            output.contains("RecordDiffReview") || output.contains("diff truncated"),
+            "safety-cap path must record an expand payload: {output:?}"
+        );
     }
 
     fn test_diff_line(

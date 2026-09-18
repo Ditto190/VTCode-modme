@@ -471,20 +471,56 @@ impl AppSession {
     }
 
     /// Open full-viewport ReadonlyReview for a completed-edit expand notice.
+    ///
+    /// Matching order:
+    /// 1. stored `notice` contained in the clicked transcript text
+    /// 2. longest specific workspace `file_path` contained in that text
+    /// 3. the sole stored anchor, when only one exists
+    /// Refuse rather than open an arbitrary last anchor when multiple payloads
+    /// are present and the notice carries no distinctive path.
     pub(crate) fn open_diff_review_for_notice(&mut self, notice_text: &str) -> bool {
         if !notice_text.contains("review full diff") {
             return false;
         }
-        let Some(anchor) = self
+
+        fn is_generic_label(path: &str) -> bool {
+            path.is_empty() || path == "diff" || path == "file" || path.starts_with("diff.")
+        }
+
+        let by_notice = self
             .diff_review_anchors
             .iter()
             .rev()
-            .find(|anchor| !anchor.file_path.is_empty() && notice_text.contains(anchor.file_path.as_str()))
-            .or_else(|| self.diff_review_anchors.last())
-            .cloned()
-        else {
+            .find(|anchor| !anchor.notice.is_empty() && notice_text.contains(anchor.notice.as_str()))
+            .cloned();
+
+        let mut by_path: Option<vtcode_commons::ui_protocol::DiffReviewAnchor> = None;
+        for anchor in self.diff_review_anchors.iter() {
+            if is_generic_label(anchor.file_path.as_str()) {
+                continue;
+            }
+            if !notice_text.contains(anchor.file_path.as_str()) {
+                continue;
+            }
+            let better = match &by_path {
+                None => true,
+                Some(prev) => anchor.file_path.len() > prev.file_path.len(),
+            };
+            if better {
+                by_path = Some(anchor.clone());
+            }
+        }
+
+        let anchor = by_notice
+            .or(by_path)
+            .or_else(|| (self.diff_review_anchors.len() == 1).then(|| self.diff_review_anchors[0].clone()));
+        let Some(anchor) = anchor else {
             return false;
         };
+        self.open_diff_review_anchor(anchor)
+    }
+
+    fn open_diff_review_anchor(&mut self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) -> bool {
         self.show_diff_overlay(DiffOverlayRequest {
             file_path: anchor.file_path.clone(),
             before: String::new(),

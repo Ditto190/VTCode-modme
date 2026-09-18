@@ -290,6 +290,53 @@ fn diff_review_anchor_activation_opens_readonly_review() {
 }
 
 #[test]
+fn diff_review_activation_prefers_specific_path_over_generic_label() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+        file_path: "diff".to_string(),
+        unified: "@@ -1 +1 @@\n-generic\n+body\n".to_string(),
+        omitted_lines: 3,
+        notice: "… +3 lines — review full diff for diff".to_string(),
+    });
+    session.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+        file_path: "src/main.rs".to_string(),
+        unified: "@@ -1 +1 @@\n-old\n+let new = 2;\n".to_string(),
+        omitted_lines: 5,
+        notice: "… +5 lines — review full diff for src/main.rs".to_string(),
+    });
+
+    let notice = "… +5 lines — review full diff for src/main.rs".to_string();
+    assert!(session.open_diff_review_for_notice(&notice));
+    let state = session.diff_preview_state().expect("specific path activation");
+    assert!(
+        state.display_lines.iter().any(|line| line.text.contains("let new = 2")),
+        "must open the path-matched payload, not the generic last anchor: {:?}",
+        state.display_lines
+    );
+}
+
+#[test]
+fn diff_review_activation_refuses_ambiguous_notice_with_multiple_anchors() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+        file_path: "src/a.rs".to_string(),
+        unified: "@@ -1 +1 @@\n-a\n+A\n".to_string(),
+        omitted_lines: 2,
+        notice: "… +2 lines — review full diff for src/a.rs".to_string(),
+    });
+    session.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+        file_path: "src/b.rs".to_string(),
+        unified: "@@ -1 +1 @@\n-b\n+B\n".to_string(),
+        omitted_lines: 4,
+        notice: "… +4 lines — review full diff for src/b.rs".to_string(),
+    });
+
+    // Path-less streams-style omission copy must not open an arbitrary body.
+    assert!(!session.open_diff_review_for_notice("... 4 lines omitted ... — review full diff"));
+    assert!(session.diff_preview_state().is_none());
+}
+
+#[test]
 fn remaining_inline_rows_counts_wrapped_laid_out_rows() {
     use ratatui::layout::Rect;
 

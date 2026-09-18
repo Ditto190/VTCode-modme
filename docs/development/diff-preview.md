@@ -83,6 +83,10 @@ User-facing behavior for long diffs in the TUI:
   (`vtcode_commons::ui_protocol`) so activating the notice opens full-viewport
   `ReadonlyReview` via `DiffOverlayRequest.unified`. Overlays do not auto-open
   after a completed edit mid-turn.
+- **Safety-cap expand** — when an inline-TUI body row exceeds
+  `DIFF_WRAP_SOURCE_MAX_WIDTH`, the transcript still ellipsis-truncates that
+  row but also advertises expand (`… diff truncated — review full diff for
+  <path>`) and records a `DiffReviewAnchor` with the retained unified payload.
 - **Review overlay** — approval/conflict/readonly-review overlays use the full
   viewport. Layout keeps `LayoutOptions.wrap = true`; long lines wrap inside
   the overlay. When laid-out **wrapped** rows exceed content height the
