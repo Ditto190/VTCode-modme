@@ -1,7 +1,7 @@
 use super::{CompactConversationCommand, SessionLogExportFormat};
 use vtcode_core::compaction::ManualCompactionOptions;
 use vtcode_core::config::{ReasoningEffortLevel, VerbosityLevel};
-use vtcode_core::review::{ReviewSpec, build_review_spec, build_review_spec_with_instructions};
+use vtcode_core::review::{ReviewSpec, ReviewTarget, build_review_spec, build_review_spec_with_instructions};
 
 /// Iterate over whitespace-separated tokens in `args`, normalising each to
 /// lowercase ASCII before passing it to `f`.  Returns the first `Err` produced
@@ -266,12 +266,7 @@ pub(super) fn parse_review_input(args: &str) -> Result<ReviewSpec, String> {
         Ok(spec) => {
             // Guard the mixed case: `--style security Review the full diff ...`
             // parses but its "files" are prose, not paths.
-            if let ReviewSpec {
-                target: vtcode_core::review::ReviewTarget::Files(files),
-                style,
-                ..
-            } = &spec
-            {
+            if let ReviewSpec { target: ReviewTarget::Files(files), style, .. } = &spec {
                 if !files.iter().all(|file| is_path_like_token(file)) {
                     return build_review_spec_with_instructions(
                         false,
@@ -310,7 +305,7 @@ fn is_path_like_token(token: &str) -> bool {
     if token.starts_with('-') {
         return false;
     }
-    token.contains('/') || token.contains('\\') || token.contains('.') || token.starts_with('.')
+    token.contains('/') || token.contains('\\') || token.contains('.')
 }
 
 /// Fast pre-check: does this look like legacy CLI at all?
@@ -327,8 +322,9 @@ fn looks_like_cli_review(trimmed: &str) -> bool {
     if tokens.len() == 1 {
         return true;
     }
-    // Short all-path lists such as `src/main.rs src/lib.rs` stay CLI.
-    tokens.len() <= 4 && tokens.iter().all(|token| is_path_like_token(token))
+    // Any-length all-path lists such as `src/main.rs src/lib.rs` stay CLI.
+    // Prose always contains a non-path word, so no length cap is needed.
+    tokens.iter().all(|token| is_path_like_token(token))
 }
 
 /// Strict CLI shape: every token is a known flag, `flag=value`, or path-like.
@@ -564,6 +560,15 @@ mod tests {
         assert!(
             matches!(spec.target, ReviewTarget::Files(ref files) if files == &["src/main.rs".to_string(), "src/lib.rs".to_string()])
         );
+        assert_eq!(spec.instructions, None);
+    }
+
+    #[test]
+    fn review_input_keeps_long_file_lists_as_cli() {
+        // Regression: the file list must not be capped; five paths are still
+        // a target, not prose, and must not fall back to the current diff.
+        let spec = parse_review_input("a.rs b.rs c.rs d.rs e.rs").expect("long file list should parse");
+        assert!(matches!(spec.target, ReviewTarget::Files(ref files) if files.len() == 5));
         assert_eq!(spec.instructions, None);
     }
 

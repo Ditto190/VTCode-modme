@@ -74,35 +74,47 @@ pub fn build_review_spec_with_instructions(
 
 /// Returns true only when the natural-language instructions explicitly ask the
 /// reviewer to implement or apply fixes. `/review` stays read-only otherwise.
+///
+/// Matching is whole-word: substring matching would escalate ordinary prose
+/// such as "review the implementation" (`implement` ⊂ `implementation`) or
+/// "how we apply theming" (`apply them` ⊂ `apply theming`).
 pub fn review_allows_mutation(spec: &ReviewSpec) -> bool {
     let Some(instructions) = spec.instructions.as_deref() else {
         return false;
     };
     let lowered = instructions.to_ascii_lowercase();
+    let words = split_instruction_words(&lowered);
     // Intentionally narrow: "fix" alone (e.g. "focus on fixes") must not escalate.
     // Require an action verb directed at making the change.
-    const MARKERS: &[&str] = &[
-        "implement the fix",
-        "implement fixes",
-        "implement it",
-        "implement them",
-        "apply the fix",
-        "apply fixes",
-        "apply them",
-        "go ahead and fix",
-        "please fix",
-        "fix it",
-        "fix them",
-        "fix all",
-        "make the fix",
-        "make the changes",
+    const MARKERS: &[&[&str]] = &[
+        &["implement", "the", "fix"],
+        &["implement", "fixes"],
+        &["implement", "it"],
+        &["implement", "them"],
+        &["implement"],
+        &["apply", "the", "fix"],
+        &["apply", "fixes"],
+        &["apply", "them"],
+        &["go", "ahead", "and", "fix"],
+        &["please", "fix"],
+        &["fix", "it"],
+        &["fix", "them"],
+        &["fix", "all"],
+        &["make", "the", "fix"],
+        &["make", "the", "changes"],
     ];
-    if MARKERS.iter().any(|marker| lowered.contains(marker)) {
-        return true;
-    }
-    // Bare "implement ..." is an escalation ("don't stop, start implement fixes").
-    // Bare "apply ..." without an object is too ambiguous, so it stays read-only.
-    lowered.contains("implement")
+    MARKERS.iter().any(|marker| contains_word_sequence(&words, marker))
+}
+
+fn split_instruction_words(lowered: &str) -> Vec<&str> {
+    lowered
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
+fn contains_word_sequence(words: &[&str], marker: &[&str]) -> bool {
+    !marker.is_empty() && marker.len() <= words.len() && words.windows(marker.len()).any(|window| window == marker)
 }
 
 pub fn build_review_prompt(spec: &ReviewSpec) -> String {
@@ -206,7 +218,7 @@ pub fn build_review_prompt(spec: &ReviewSpec) -> String {
         prompt.push_str(
             "\n## Requirements\n\n\
              - Review only. Do not modify files or run mutating commands.\n\
-             - Fix, refactor, or implement changes only when the input explicitly asks for it (e.g. contains \"implement\", \"apply the fix\", \"fix it\"). Otherwise report findings only.\n\
+             - Fix, refactor, or implement changes only when the input explicitly asks for it (standalone word \"implement\", or phrases like \"apply the fix\" or \"fix it\"). Otherwise report findings only.\n\
              - Focus on bugs, regressions, security issues, performance issues, and missing tests.\n\
              - Present findings first, ordered by severity.\n\
              - Include concrete file paths and line numbers when possible.\n\
@@ -311,5 +323,22 @@ mod tests {
         .expect("spec");
         assert!(review_allows_mutation(&fix_mode));
         assert!(build_review_prompt(&fix_mode).contains("Fix Mode"));
+    }
+
+    #[test]
+    fn review_fix_escalation_ignores_substring_false_positives() {
+        // Asymmetric regression tests: "implement" ⊂ "implementation" and
+        // "apply them" ⊂ "apply theming" must not escalate.
+        for prose in [
+            "Review the implementation for correctness",
+            "Check how we apply theming in the TUI",
+            "Focus on suffix handling and prefix fixes",
+        ] {
+            let spec =
+                super::build_review_spec_with_instructions(false, None, Vec::new(), None, Some(prose.to_string()))
+                    .expect("spec");
+            assert!(!review_allows_mutation(&spec), "{prose:?} must stay read-only");
+            assert!(build_review_prompt(&spec).contains("Review only."));
+        }
     }
 }

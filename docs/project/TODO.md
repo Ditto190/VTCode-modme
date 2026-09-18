@@ -385,29 +385,12 @@ cache."
 
 ===
 
-revamp command permission popup: adjust wording, remove `COMMAND` and `WHY` sections and `|` also add a brief explanation section for asking permission, eg: what the agent trying to do and why it needs the permission
-
-```
-Tool Permission Required
-─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Tool: exec_command
-COMMAND
-  │ awk 'BEGIN{p=0} /^## Why VT Code/{p=1} p{print} /^## Architecture/{exit}' README.md
-WHY
-```
-
-===
-
 check and improve compaction logic and UI/UX,
 
 ref 2 states:
 
 • Compacting context...
 • Context compacted · 1m 34s
-
-===
-
-check and fix duplicated TODO/task block entries when task system is updated '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-17 at 13.45.47.png'
 
 ===
 

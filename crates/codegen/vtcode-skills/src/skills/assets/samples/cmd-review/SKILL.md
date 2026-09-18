@@ -102,7 +102,7 @@ Use best judgement when processing input.
 ## Read-Only Default
 
 - Review only. Do not modify files or run mutating commands.
-- Fix, refactor, or implement changes only when the input explicitly asks for it (e.g. contains "implement", "apply the fix", "fix it"). Otherwise report findings only and stop.
+- Fix, refactor, or implement changes only when the input explicitly asks for it (standalone word "implement", or phrases like "apply the fix" or "fix it"). Otherwise report findings only and stop.
 
 ---
 
