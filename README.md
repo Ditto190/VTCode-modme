@@ -48,8 +48,11 @@
 
 <div align="center">
 
+<a href="https://www.producthunt.com/products/vt-code?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-vt-code" target="_blank" rel="noopener noreferrer"><img alt="VT Code - Open-source coding agent harness built for long-running work | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1248210&amp;theme=light&amp;t=1789739815450"></a>
+
 <img src="./resources/gif/vtcode.gif" alt="VT Code demo" width="60%" />
 <br />
+
 <em>Secure, open, universal.</em>
 
 </div>
@@ -87,15 +90,15 @@ prompt to the final diff.
 
 In practice, that means:
 
-| What can go wrong                        | How VT Code responds                                                                                                                                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Long tasks lose focus**                | Dynamic context assembly, project instructions, auto-compaction, and bounded tool output keep the active window useful. [Runtime guidance](./docs/development/runtime-guidance.md) · [Architecture](./docs/ARCHITECTURE.md) |
-| **Generated commands can cause damage**  | Policy checks and sandboxed, fail-closed execution defend against injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)                               |
-| **A session is interrupted**             | Resume with `vtcode continue`, fork with `--session-id`, and inspect or restore changes with `vtcode snapshots` and `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                              |
-| **“Done” is asserted without proof**     | Built-in evals verify the environment instead of trusting the agent's report, measured with pass@k and pass^k. [Eval guide](./docs/guides/eval.md)                                                                          |
-| **Big changes ship unreviewed**          | The Planning Workflow keeps planning read-only: draft with `/plan`, approve at a review gate, then hand off to `build` or `auto`. [Planning workflow](./docs/guides/planning-workflow.md)                                    |
-| **Edits drift from project conventions** | Project instructions (`AGENTS.md`) are loaded into every turn, so the agent codes to your rules instead of rediscovering them. [Getting started](./docs/user-guide/getting-started.md)                                       |
-| **Interactive only is not enough**       | Headless `vtcode exec` with JSON events, scheduled tasks via `vtcode schedule`, and isolated eval worktrees support CI, cron, and agent-to-agent flows. [Full automation](./docs/guides/full-automation.md)                   |
+| What can go wrong                        | How VT Code responds                                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Long tasks lose focus**                | Dynamic context assembly, project instructions, auto-compaction, and bounded tool output keep the active window useful. [Runtime guidance](./docs/development/runtime-guidance.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                     |
+| **Generated commands can cause damage**  | Policy checks and sandboxed, fail-closed execution defend against injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)                                                                                                   |
+| **A session is interrupted**             | Resume with `vtcode continue`, fork with `--session-id`, and inspect or restore changes with `vtcode snapshots` and `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                                                                                                  |
+| **“Done” is asserted without proof**     | Built-in evals verify the environment instead of trusting the agent's report, measured with pass@k and pass^k. [Eval guide](./docs/guides/eval.md)                                                                                                                                              |
+| **Big changes ship unreviewed**          | The Planning Workflow keeps planning read-only: draft with `/plan`, approve at a review gate, then hand off to `build` or `auto`. [Planning workflow](./docs/guides/planning-workflow.md)                                                                                                       |
+| **Edits drift from project conventions** | Project instructions (`AGENTS.md`) are loaded into every turn, so the agent codes to your rules instead of rediscovering them. [Getting started](./docs/user-guide/getting-started.md)                                                                                                          |
+| **Interactive only is not enough**       | Headless `vtcode exec` with JSON events, scheduled tasks via `vtcode schedule`, and isolated eval worktrees support CI, cron, and agent-to-agent flows. [Full automation](./docs/guides/full-automation.md)                                                                                     |
 | **One provider locks you in**            | Built-in adapters for Gemini, OpenAI, Anthropic, DeepSeek, xAI, Meta, NVIDIA NIM, and more — plus OpenAI-compatible custom providers, local inference via Ollama, LM Studio, and llama.cpp, and a `providers_whitelist` for air-gapped setups. [Providers](./docs/providers/PROVIDER_GUIDES.md) |
 
 The result is a terminal-native workflow that is:
