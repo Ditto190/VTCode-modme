@@ -1,4 +1,4 @@
-use super::skill_setup::{discover_skills, register_skill_tools};
+use super::skill_setup::{SkillSetupState, discover_skills, register_skill_tools};
 use super::types::{
     SessionMetadataContext, SessionState, ToolExecutionContext, build_conversation_history_from_resume,
 };
@@ -8,11 +8,12 @@ use crate::agent::runloop::telemetry::build_trajectory_logger;
 use crate::agent::runloop::unified::async_mcp_manager::{
     AsyncMcpManager, McpInitStatus, approval_policy_from_human_in_the_loop,
 };
-use crate::agent::runloop::unified::prompts::read_system_prompt;
+use crate::agent::runloop::unified::context_manager::ContextManager;
+use crate::agent::runloop::unified::prompts::{fallback_base_system_prompt, read_system_prompt};
 use crate::agent::runloop::unified::state::should_enforce_safe_mode_prompts;
 use crate::agent::runloop::unified::tool_call_safety::ToolCallSafetyValidator;
 use crate::agent::runloop::unified::tool_catalog::ToolCatalogState;
-use crate::agent::runloop::welcome::prepare_session_bootstrap;
+use crate::agent::runloop::welcome::{SessionBootstrapMode, prepare_session_bootstrap_with_mode};
 use anyhow::{Context, Result};
 use hashbrown::HashMap;
 use std::path::Path;
@@ -119,7 +120,59 @@ pub(crate) fn resolve_provider_label(config: &CoreAgentConfig, vt_cfg: Option<&V
     key.to_string()
 }
 
+/// Combined interactive/non-UI session bootstrap is intentionally split into
+/// [`initialize_session_critical`] + [`hydrate_session_runtime`]. Tests that
+/// need a fully hydrated session without a TUI call both helpers in order.
+#[cfg(test)]
 pub(crate) async fn initialize_session(
+    config: &CoreAgentConfig,
+    vt_cfg: Option<&VTCodeConfig>,
+    full_auto: bool,
+    primary_agent_explicitly_configured: bool,
+    resume: Option<&ResumeSession>,
+    parent_session_id: &str,
+    session_primary_agent_override: Option<&str>,
+) -> Result<SessionState> {
+    let mut session_state = initialize_session_critical(
+        config,
+        vt_cfg,
+        full_auto,
+        primary_agent_explicitly_configured,
+        resume,
+        parent_session_id,
+        session_primary_agent_override,
+    )
+    .await?;
+    let mut context_manager = ContextManager::new(
+        session_state.base_system_prompt.clone(),
+        (),
+        session_state.loaded_skills.clone(),
+        vt_cfg.map(|cfg| cfg.agent.clone()),
+    );
+    context_manager.set_workspace_root(&config.workspace);
+    hydrate_session_runtime(
+        &mut session_state,
+        &mut context_manager,
+        config,
+        vt_cfg,
+        full_auto,
+        primary_agent_explicitly_configured,
+        resume,
+        parent_session_id,
+        session_primary_agent_override,
+    )
+    .await?;
+    Ok(session_state)
+}
+
+/// Critical-path session state required to spawn the TUI.
+///
+/// Completes provider construction, one primary-agent discovery pass, a
+/// lightweight tool registry, resume history, and cheap bootstrap metadata.
+/// Full tool catalog projection, system-prompt composition, subagent
+/// controller creation, CGP wiring, and MCP reconfigure run in
+/// [`hydrate_session_runtime`] after first paint.
+pub(crate) async fn initialize_session_critical(
     config: &CoreAgentConfig,
     vt_cfg: Option<&VTCodeConfig>,
     full_auto: bool,
@@ -136,15 +189,13 @@ pub(crate) async fn initialize_session(
         tracing::debug!("Notification manager already initialized or unavailable: {}", err);
     }
 
-    let tool_documentation_mode = vt_cfg.map(|cfg| cfg.agent.tool_documentation_mode).unwrap_or_default();
     let async_mcp_manager = create_async_mcp_manager(vt_cfg, None, &config.workspace);
-    // These operations are independent; overlap workspace inspection with the
-    // optional release-notes request instead of extending startup serially.
-    let (mcp_error, mut session_bootstrap, startup_update_check, release_highlights) = tokio::join!(
+    let (mcp_error, mut session_bootstrap, startup_update_check, release_highlights, conversation_history) = tokio::join!(
         determine_mcp_bootstrap_error(async_mcp_manager.as_ref()),
-        prepare_session_bootstrap(config, vt_cfg, None),
+        prepare_session_bootstrap_with_mode(config, vt_cfg, None, SessionBootstrapMode::Critical),
         async { load_startup_update_check() },
         load_release_highlights_for_startup(),
+        build_conversation_history_from_resume(resume),
     );
     session_bootstrap.mcp_error = mcp_error;
     session_bootstrap.search_tools_notice = take_search_tools_bundle_notice().await;
@@ -153,224 +204,47 @@ pub(crate) async fn initialize_session(
     }
     session_bootstrap.release_highlights = release_highlights;
 
-    // Register custom OpenAI-compatible providers from config
     if let Some(cfg) = vt_cfg {
         vtcode_core::llm::factory::register_custom_providers(&cfg.custom_providers);
     }
 
     let provider_client = create_provider_client(config, vt_cfg)?;
-    let deferred_tool_policy = active_deferred_tool_policy(config, vt_cfg, &*provider_client);
-    let mut full_auto_allowlist = None;
-
-    let (skill_setup, mut conversation_history) =
-        tokio::join!(discover_skills(config, resume), build_conversation_history_from_resume(resume),);
-    let decision_ledger = Arc::new(RwLock::new(DecisionTracker::new()));
+    let skill_setup = discover_skills(config, resume).await;
+    let mut conversation_history = conversation_history;
     recover_history_from_crash(&mut conversation_history);
+    let decision_ledger = Arc::new(RwLock::new(DecisionTracker::new()));
     let mcp_panel_state = if let Some(cfg) = vt_cfg {
         mcp_events::McpPanelState::new(cfg.mcp.ui.max_events, cfg.mcp.enabled)
     } else {
         mcp_events::McpPanelState::default()
     };
 
-    let mut tool_registry = ToolRegistry::new(config.workspace.clone()).await;
-    tool_registry.initialize_async().await?;
+    let tool_registry = ToolRegistry::new(config.workspace.clone()).await;
     tool_registry.set_harness_session(parent_session_id.to_string());
-    if let Some(cfg) = vt_cfg {
-        if let Err(err) = tool_registry
-            .apply_session_runtime_config(&cfg.commands, &cfg.permissions, &cfg.sandbox, &cfg.timeouts, &cfg.tools)
-            .await
-        {
-            warn!("Failed to apply tool policies from config: {}", err);
-        }
-        maybe_attach_mcp_client(&mut tool_registry, cfg, async_mcp_manager.as_ref()).await;
-    }
-
-    let workspace_trust_level = match session_bootstrap.acp_workspace_trust {
-        Some(level) => Some(level.to_workspace_trust_level()),
-        None => load_workspace_trust_level(&config.workspace)
-            .await
-            .context("Failed to determine workspace trust level for tool policy")?,
-    };
-    let auto_permission_review_active = full_auto;
-    apply_workspace_trust_prompt_policy(&mut tool_registry, auto_permission_review_active, workspace_trust_level).await;
 
     // Archive metadata is authoritative when resuming an existing thread.
-    // A fresh `/new` session can carry the live mode explicitly so it does
-    // not silently fall back to the configured default after a handoff.
+
+    // One workspace+plugin discovery pass on the critical path, matching the
+    // controller's discovery input so primary-agent selection (hooks, header)
+    // is not computed from a plugin-blind subset. Subagent controller
+    // construction still happens during hydration.
     let resumed_primary_agent = resume
         .and_then(|r| r.snapshot().metadata.primary_agent.clone())
         .or_else(|| session_primary_agent_override.map(str::to_owned));
-
-    let subagent_controller = if resume.is_none_or(ResumeSession::is_root_thread)
-        && let Some(cfg) = vt_cfg
-        && cfg.subagents.enabled
-    {
-        // Discover primary agents up front so the subagent lifecycle engine can
-        // be gated exactly like the main session: workspace-controlled hook
-        // content (workspace vtcode.toml/.vtcode layers OR a project-sourced
-        // primary agent spec contributing hooks) must not run without user
-        // approval in a subagent context either.
-        let discovered =
-            vtcode_config::discover_subagents(&vtcode_config::SubagentDiscoveryInput::new(config.workspace.clone()))
-                .with_context(|| format!("Failed to discover primary agents in {}", config.workspace.display()))?;
-        let active_primary_agent = active_primary_agent_from_specs_for_mode(
-            &discovered.effective,
-            vt_cfg,
-            full_auto,
-            primary_agent_explicitly_configured,
-            resumed_primary_agent.clone(),
-        )?;
-        let workspace_gated = cfg.workspace_lifecycle_hooks.as_ref().is_some_and(|hooks| !hooks.is_empty())
-            || active_primary_agent.active().contributes_workspace_controlled_hooks();
-        match SubagentController::new(SubagentControllerConfig {
-            workspace_root: config.workspace.clone(),
-            parent_session_id: parent_session_id.to_string(),
-            parent_model: config.model.clone(),
-            parent_provider: config.provider.clone(),
-            parent_reasoning_effort: config.reasoning_effort,
-            api_key: config.api_key.clone(),
-            vt_cfg: cfg.clone(),
-            openai_chatgpt_auth: config.openai_chatgpt_auth.clone(),
-            depth: 0,
-            workspace_gated,
-            exec_sessions: tool_registry.exec_session_manager(),
-            pty_manager: tool_registry.pty_manager().clone(),
-            managed_background_runtime: false,
-        })
+    let discovered = vtcode_core::subagents::discover_controller_subagents(&config.workspace)
         .await
-        {
-            Ok(controller) => {
-                controller.set_parent_messages(&conversation_history).await;
-                let controller = Arc::new(controller);
-                tool_registry.set_subagent_controller(controller.clone());
-                if cfg.subagents.background.auto_restore
-                    && let Err(err) = controller.restore_background_subagents().await
-                {
-                    warn!("Failed to restore background subagents: {}", err);
-                }
-                Some(controller)
-            }
-            Err(err) => {
-                warn!("Failed to initialize subagent controller: {}", err);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // CGP Phase 5: Wrap registered tools through the CGP approval → sandbox → middleware pipeline.
-    let cgp_mode = if full_auto {
-        vtcode_core::tools::CgpRuntimeMode::Ci
-    } else {
-        vtcode_core::tools::CgpRuntimeMode::Interactive
-    };
-    tool_registry.enable_cgp_pipeline(cgp_mode).await;
+        .with_context(|| format!("Failed to discover primary agents in {}", config.workspace.display()))?;
+    let active_primary_agent = active_primary_agent_from_specs_for_mode(
+        &discovered.effective,
+        vt_cfg,
+        full_auto,
+        primary_agent_explicitly_configured,
+        resumed_primary_agent.clone(),
+    )?;
 
     let tool_catalog = tool_registry.tool_catalog_state();
-    let anthropic_native_memory_enabled = active_anthropic_native_memory(config, vt_cfg, provider_client.as_ref());
-
-    let tools = Arc::new(RwLock::new(
-        tool_registry
-            .model_tools(interactive_session_base_tools_config(
-                &config.model,
-                vt_cfg,
-                tool_documentation_mode,
-                deferred_tool_policy.clone(),
-                anthropic_native_memory_enabled,
-            ))
-            .await,
-    ));
+    let tools = Arc::new(RwLock::new(Vec::new()));
     tool_registry.attach_session_model_tools(tools.clone());
-    register_skill_tools(
-        &mut tool_registry,
-        &tools,
-        &tool_catalog,
-        config,
-        vt_cfg,
-        tool_documentation_mode,
-        deferred_tool_policy.clone(),
-        anthropic_native_memory_enabled,
-        &skill_setup,
-    )
-    .await?;
-    refresh_tool_snapshot(
-        &tool_registry,
-        &tools,
-        &tool_catalog,
-        config,
-        vt_cfg,
-        tool_documentation_mode,
-        &deferred_tool_policy,
-    )
-    .await;
-
-    if full_auto && let Some(cfg) = vt_cfg {
-        let session_tools_config = interactive_session_tools_config(
-            &config.model,
-            vt_cfg,
-            tool_documentation_mode,
-            deferred_tool_policy.clone(),
-            anthropic_native_memory_enabled,
-            tool_registry.is_planning_active(),
-        );
-        tool_registry
-            .enable_full_auto_permission_for_session(&cfg.automation.full_auto.allowed_tools, session_tools_config)
-            .await;
-        full_auto_allowlist = Some(tool_registry.current_full_auto_allowlist().await.unwrap_or_default());
-    }
-
-    let trajectory = build_trajectory_logger(&config.workspace, vt_cfg).await;
-    let available_subagents = if let Some(controller) = subagent_controller.as_ref() {
-        controller
-            .effective_specs()
-            .await
-            .into_iter()
-            .filter(|spec| spec.is_subagent())
-            .map(|spec| {
-                let read_only = spec.is_read_only();
-                (spec.name, spec.description, read_only)
-            })
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-    let (base_system_prompt, system_prompt_report) =
-        read_system_prompt(&config.workspace, session_bootstrap.prompt_addendum.as_deref(), &available_subagents).await;
-    session_bootstrap.system_prompt_report = system_prompt_report;
-    let active_primary_agent = if let Some(controller) = subagent_controller.as_ref() {
-        active_primary_agent_from_specs_for_mode(
-            &controller.effective_specs().await,
-            vt_cfg,
-            full_auto,
-            primary_agent_explicitly_configured,
-            resumed_primary_agent.clone(),
-        )?
-    } else {
-        let discovered =
-            vtcode_config::discover_subagents(&vtcode_config::SubagentDiscoveryInput::new(config.workspace.clone()))
-                .with_context(|| format!("Failed to discover primary agents in {}", config.workspace.display()))?;
-        active_primary_agent_from_specs_for_mode(
-            &discovered.effective,
-            vt_cfg,
-            full_auto,
-            primary_agent_explicitly_configured,
-            resumed_primary_agent.clone(),
-        )?
-    };
-    if let (Some(manager), Some(cfg)) = (async_mcp_manager.as_ref(), vt_cfg) {
-        // Rebuild the full session config (primary-agent MCP merge + plugin
-        // providers) so reconfigure does not drop plugin-provided providers.
-        let mcp_config = session_mcp_config(Some(cfg), Some(active_primary_agent.active()), &config.workspace);
-        manager.reconfigure(mcp_config).await?;
-        // `reconfigure` aborts any background init task started by
-        // `create_async_mcp_manager` and leaves status as "activation pending".
-        // Deferred auto-load: restart in background so MCP becomes available
-        // without manual `/mcp repair`. Non-blocking to keep Ctrl+C responsive.
-        if let Err(err) = manager.start_initialization() {
-            warn!("MCP background initialization did not restart after session config merge: {err:#}");
-        }
-    }
 
     let tool_result_cache = Arc::new(RwLock::new(ToolResultCache::new(128)));
     let tool_permission_cache = Arc::new(RwLock::new(ToolPermissionCache::new()));
@@ -385,20 +259,15 @@ pub(crate) async fn initialize_session(
     ];
     let approval_recorder = Arc::new(ApprovalRecorder::new_with_legacy_cache_dirs(cache_dir, legacy_cache_dirs));
     let permissions_state = Arc::new(RwLock::new(vt_cfg.map(|cfg| cfg.permissions.clone()).unwrap_or_default()));
-    if let Some(cfg) = vt_cfg
-        && cfg.context.dynamic.enabled
-        && let Err(err) =
-            vtcode_core::context::initialize_dynamic_context(&config.workspace, &cfg.context.dynamic).await
-    {
-        warn!("Failed to initialize dynamic context directories: {}", err);
-    }
-
     let circuit_breaker = Arc::new(vtcode_core::tools::circuit_breaker::CircuitBreaker::with_metrics(
         vtcode_config_circuit_breaker_to_core(vt_cfg, config),
         tool_registry.metrics_collector(),
     ));
     tool_registry.set_shared_circuit_breaker(circuit_breaker.clone());
     let shared_safety_gateway = tool_registry.safety_gateway();
+
+    // Seed prompt only; full composition runs after first paint.
+    let base_system_prompt = fallback_base_system_prompt(vt_cfg).to_string();
 
     Ok(SessionState {
         session_bootstrap,
@@ -430,17 +299,240 @@ pub(crate) async fn initialize_session(
         },
         metadata: SessionMetadataContext {
             decision_ledger,
-            trajectory,
+            trajectory: vtcode_core::core::trajectory::TrajectoryLogger::disabled(),
             telemetry: Arc::new(vtcode_core::core::telemetry::TelemetryManager::new()),
             error_recovery: Arc::new(RwLock::new(vtcode_core::core::agent::error_recovery::ErrorRecoveryState::new())),
         },
         base_system_prompt,
-        full_auto_allowlist,
+        full_auto_allowlist: None,
         async_mcp_manager,
         mcp_panel_state,
         loaded_skills: skill_setup.active_skills_map,
         active_primary_agent,
     })
+}
+
+/// Finish session runtime setup after the TUI first frame.
+///
+/// Must complete before the interaction loop dispatches the first model turn.
+/// Failures here abort the session with the same setup error surface as the
+/// previous pre-paint `initialize_session` path.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "session hydration mirrors initialize_session_critical inputs"
+)]
+pub(crate) async fn hydrate_session_runtime(
+    session_state: &mut SessionState,
+    context_manager: &mut ContextManager,
+    config: &CoreAgentConfig,
+    vt_cfg: Option<&VTCodeConfig>,
+    full_auto: bool,
+    primary_agent_explicitly_configured: bool,
+    resume: Option<&ResumeSession>,
+    parent_session_id: &str,
+    session_primary_agent_override: Option<&str>,
+) -> Result<()> {
+    let tool_documentation_mode = vt_cfg.map(|cfg| cfg.agent.tool_documentation_mode).unwrap_or_default();
+    let resumed_primary_agent = resume
+        .and_then(|r| r.snapshot().metadata.primary_agent.clone())
+        .or_else(|| session_primary_agent_override.map(str::to_owned));
+
+    // Enrich bootstrap metadata that required workspace scans.
+    let full_bootstrap = prepare_session_bootstrap_with_mode(config, vt_cfg, None, SessionBootstrapMode::Full).await;
+    session_state.session_bootstrap.prompt_addendum = full_bootstrap.prompt_addendum;
+    if session_state.session_bootstrap.placeholder.is_none() {
+        session_state.session_bootstrap.placeholder = full_bootstrap.placeholder;
+    }
+
+    let deferred_tool_policy = active_deferred_tool_policy(config, vt_cfg, &*session_state.provider_client);
+
+    let tool_registry = &mut session_state.tool_registry;
+    tool_registry.initialize_async().await?;
+    if let Some(cfg) = vt_cfg {
+        if let Err(err) = tool_registry
+            .apply_session_runtime_config(&cfg.commands, &cfg.permissions, &cfg.sandbox, &cfg.timeouts, &cfg.tools)
+            .await
+        {
+            warn!("Failed to apply tool policies from config: {}", err);
+        }
+        maybe_attach_mcp_client(tool_registry, cfg, session_state.async_mcp_manager.as_ref()).await;
+    }
+
+    let workspace_trust_level = match session_state.session_bootstrap.acp_workspace_trust {
+        Some(level) => Some(level.to_workspace_trust_level()),
+        None => load_workspace_trust_level(&config.workspace)
+            .await
+            .context("Failed to determine workspace trust level for tool policy")?,
+    };
+    apply_workspace_trust_prompt_policy(tool_registry, full_auto, workspace_trust_level).await;
+
+    let subagent_controller = if resume.is_none_or(ResumeSession::is_root_thread)
+        && let Some(cfg) = vt_cfg
+        && cfg.subagents.enabled
+    {
+        let workspace_gated = cfg.workspace_lifecycle_hooks.as_ref().is_some_and(|hooks| !hooks.is_empty())
+            || session_state
+                .active_primary_agent
+                .active()
+                .contributes_workspace_controlled_hooks();
+        match SubagentController::new(SubagentControllerConfig {
+            workspace_root: config.workspace.clone(),
+            parent_session_id: parent_session_id.to_string(),
+            parent_model: config.model.clone(),
+            parent_provider: config.provider.clone(),
+            parent_reasoning_effort: config.reasoning_effort,
+            api_key: config.api_key.clone(),
+            vt_cfg: cfg.clone(),
+            openai_chatgpt_auth: config.openai_chatgpt_auth.clone(),
+            depth: 0,
+            workspace_gated,
+            exec_sessions: tool_registry.exec_session_manager(),
+            pty_manager: tool_registry.pty_manager().clone(),
+            managed_background_runtime: false,
+        })
+        .await
+        {
+            Ok(controller) => {
+                controller.set_parent_messages(&session_state.conversation_history).await;
+                let controller = Arc::new(controller);
+                tool_registry.set_subagent_controller(controller.clone());
+                if cfg.subagents.background.auto_restore
+                    && let Err(err) = controller.restore_background_subagents().await
+                {
+                    warn!("Failed to restore background subagents: {}", err);
+                }
+                Some(controller)
+            }
+            Err(err) => {
+                warn!("Failed to initialize subagent controller: {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let cgp_mode = if full_auto {
+        vtcode_core::tools::CgpRuntimeMode::Ci
+    } else {
+        vtcode_core::tools::CgpRuntimeMode::Interactive
+    };
+    tool_registry.enable_cgp_pipeline(cgp_mode).await;
+
+    let tool_catalog = session_state.tool_catalog.clone();
+    let anthropic_native_memory_enabled =
+        active_anthropic_native_memory(config, vt_cfg, &*session_state.provider_client);
+    let tools = session_state.tools.clone();
+    {
+        let next_tools = tool_registry
+            .model_tools(interactive_session_base_tools_config(
+                &config.model,
+                vt_cfg,
+                tool_documentation_mode,
+                deferred_tool_policy.clone(),
+                anthropic_native_memory_enabled,
+            ))
+            .await;
+        *tools.write().await = next_tools;
+    }
+    tool_registry.attach_session_model_tools(tools.clone());
+    let skill_setup = SkillSetupState {
+        active_skills_map: session_state.loaded_skills.clone(),
+    };
+    register_skill_tools(
+        tool_registry,
+        &tools,
+        &tool_catalog,
+        config,
+        vt_cfg,
+        tool_documentation_mode,
+        deferred_tool_policy.clone(),
+        anthropic_native_memory_enabled,
+        &skill_setup,
+    )
+    .await?;
+    refresh_tool_snapshot(
+        tool_registry,
+        &tools,
+        &tool_catalog,
+        config,
+        vt_cfg,
+        tool_documentation_mode,
+        &deferred_tool_policy,
+    )
+    .await;
+
+    if full_auto && let Some(cfg) = vt_cfg {
+        let session_tools_config = interactive_session_tools_config(
+            &config.model,
+            vt_cfg,
+            tool_documentation_mode,
+            deferred_tool_policy.clone(),
+            anthropic_native_memory_enabled,
+            tool_registry.is_planning_active(),
+        );
+        tool_registry
+            .enable_full_auto_permission_for_session(&cfg.automation.full_auto.allowed_tools, session_tools_config)
+            .await;
+        session_state.full_auto_allowlist = Some(tool_registry.current_full_auto_allowlist().await.unwrap_or_default());
+    }
+
+    session_state.metadata.trajectory = build_trajectory_logger(&config.workspace, vt_cfg).await;
+
+    let available_subagents = if let Some(controller) = subagent_controller.as_ref() {
+        controller
+            .effective_specs()
+            .await
+            .into_iter()
+            .filter(|spec| spec.is_subagent())
+            .map(|spec| {
+                let read_only = spec.is_read_only();
+                (spec.name, spec.description, read_only)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let (base_system_prompt, system_prompt_report) = read_system_prompt(
+        &config.workspace,
+        session_state.session_bootstrap.prompt_addendum.as_deref(),
+        &available_subagents,
+    )
+    .await;
+    session_state.session_bootstrap.system_prompt_report = system_prompt_report;
+    session_state.base_system_prompt = base_system_prompt.clone();
+    context_manager.set_base_system_prompt(base_system_prompt);
+
+    if let Some(controller) = subagent_controller.as_ref() {
+        // Controller specs are authoritative once constructed.
+        session_state.active_primary_agent = active_primary_agent_from_specs_for_mode(
+            &controller.effective_specs().await,
+            vt_cfg,
+            full_auto,
+            primary_agent_explicitly_configured,
+            resumed_primary_agent.clone(),
+        )?;
+    }
+
+    if let (Some(manager), Some(cfg)) = (session_state.async_mcp_manager.as_ref(), vt_cfg) {
+        let mcp_config =
+            session_mcp_config(Some(cfg), Some(session_state.active_primary_agent.active()), &config.workspace);
+        manager.reconfigure(mcp_config).await?;
+        if let Err(err) = manager.start_initialization() {
+            warn!("MCP background initialization did not restart after session config merge: {err:#}");
+        }
+    }
+
+    if let Some(cfg) = vt_cfg
+        && cfg.context.dynamic.enabled
+        && let Err(err) =
+            vtcode_core::context::initialize_dynamic_context(&config.workspace, &cfg.context.dynamic).await
+    {
+        warn!("Failed to initialize dynamic context directories: {}", err);
+    }
+
+    Ok(())
 }
 
 fn load_startup_update_check() -> crate::updater::StartupUpdateCheck {
@@ -886,6 +978,66 @@ mod tests {
         assert!(
             manager.has_initialization_task(),
             "session MCP background task must survive primary-agent merge without manual /mcp repair"
+        );
+    }
+
+    #[tokio::test]
+    async fn hydrate_replaces_critical_seed_prompt_and_fills_tools() {
+        let temp = TempDir::new().expect("temp dir");
+        let cfg = VTCodeConfig::default();
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &cfg,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        let mut critical =
+            initialize_session_critical(&runtime_config, Some(&cfg), false, false, None, "test-hydrate", None)
+                .await
+                .expect("critical session");
+        assert!(
+            critical.tools.read().await.is_empty(),
+            "critical path must leave model tools empty for first-frame deferral"
+        );
+        let seed_prompt = critical.base_system_prompt.clone();
+        assert!(!seed_prompt.trim().is_empty(), "critical path seeds a fallback system prompt");
+
+        let mut context_manager = ContextManager::new(
+            critical.base_system_prompt.clone(),
+            (),
+            critical.loaded_skills.clone(),
+            Some(cfg.agent.clone()),
+        );
+        context_manager.set_workspace_root(&runtime_config.workspace);
+        hydrate_session_runtime(
+            &mut critical,
+            &mut context_manager,
+            &runtime_config,
+            Some(&cfg),
+            false,
+            false,
+            None,
+            "test-hydrate",
+            None,
+        )
+        .await
+        .expect("hydrate session");
+        assert!(
+            !critical.tools.read().await.is_empty(),
+            "hydration must project model tools before the first model turn"
+        );
+        assert_ne!(
+            critical.base_system_prompt, seed_prompt,
+            "hydration must replace the seed system prompt with the composed workspace prompt"
         );
     }
 

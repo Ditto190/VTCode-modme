@@ -52,7 +52,7 @@ use vtcode_ui::tui::app::{
 };
 
 pub(crate) use self::header_context::apply_ide_context_snapshot;
-use self::header_context::{HeaderContextInit, initialize_header_context};
+use self::header_context::{HeaderContextInit, initialize_header_context, maybe_render_system_prompt_budget_warning};
 pub(crate) use self::local_agents::refresh_local_agents;
 use self::resume_render::render_resume_state_if_present;
 pub(crate) use self::resume_render::{build_structured_resume_lines, render_resume_lines};
@@ -595,6 +595,94 @@ pub(crate) async fn initialize_session_ui(
         editor_open_sender,
         editor_open_coordinator_task_guard,
     })
+}
+
+/// Re-drive UI surfaces that depend on fields completed in deferred session
+/// hydration (agent palette, background refresh, primary-agent header,
+/// full-auto banner, system-prompt budget warning).
+///
+/// Returns a background-refresh task guard when a subagent controller is
+/// present after hydration.
+pub(crate) fn apply_post_hydration_ui(
+    vt_cfg: Option<&VTCodeConfig>,
+    full_auto: bool,
+    session_state: &SessionState,
+    ui_setup: &mut SessionUISetup,
+) -> Result<Option<BackgroundTaskGuard>> {
+    let handle = ui_setup.handle.clone();
+
+    let primary_agent_name = session_state.active_primary_agent.active().display_name.clone();
+    let primary_agent_color = session_state
+        .active_primary_agent
+        .active()
+        .color
+        .clone()
+        .filter(|c| !c.trim().is_empty());
+    ui_setup.header_context.primary_agent = Some(primary_agent_name.clone());
+    ui_setup.header_context.primary_agent_color = primary_agent_color.clone();
+    handle.set_primary_agent(Some(primary_agent_name), primary_agent_color);
+
+    if full_auto && let Some(allowlist) = session_state.full_auto_allowlist.as_ref() {
+        if allowlist.is_empty() {
+            ui_setup.renderer.line(
+                MessageStyle::Info,
+                "Full-auto permission review enabled with no execution tool permissions; only workflow-coordination tools (task_tracker, start_planning, request_user_input) stay available.",
+            )?;
+        } else {
+            ui_setup.renderer.line(
+                MessageStyle::Info,
+                &format!(
+                    "Full-auto permission review enabled. Permitted tools: {} (plus workflow-coordination tools: task_tracker, start_planning, request_user_input).",
+                    allowlist.join(", ")
+                ),
+            )?;
+        }
+    }
+
+    maybe_render_system_prompt_budget_warning(&mut ui_setup.renderer, vt_cfg, &session_state.session_bootstrap)?;
+
+    let mut background_subprocess_task_guard = None;
+    if let Some(controller) = session_state.tool_registry.subagent_controller() {
+        let handle_for_agents = handle.clone();
+        let controller_for_agents = controller.clone();
+        tokio::spawn(async move {
+            let specs = controller_for_agents.effective_specs().await;
+            if specs.is_empty() {
+                return;
+            }
+
+            handle_for_agents.configure_agent_palette(
+                specs
+                    .into_iter()
+                    .filter(|spec| spec.is_subagent())
+                    .map(|spec| AgentPaletteItem {
+                        name: spec.name,
+                        description: Some(spec.description),
+                    })
+                    .collect(),
+            );
+        });
+
+        let handle_for_subprocesses = handle.clone();
+        let controller_for_subprocesses = controller.clone();
+        let refresh_interval_ms = vt_cfg
+            .map(|cfg| cfg.subagents.background.refresh_interval_ms)
+            .unwrap_or(2_000)
+            .max(250);
+        background_subprocess_task_guard = Some(BackgroundTaskGuard::new(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(refresh_interval_ms));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                interval.tick().await;
+                if let Err(err) = refresh_local_agents(&handle_for_subprocesses, &controller_for_subprocesses).await {
+                    tracing::warn!("Failed to refresh background subprocesses: {}", err);
+                }
+            }
+        })));
+    }
+
+    Ok(background_subprocess_task_guard)
 }
 
 #[cfg(test)]

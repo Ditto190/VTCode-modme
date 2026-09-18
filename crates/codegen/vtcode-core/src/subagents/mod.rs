@@ -22,6 +22,7 @@ pub use config::{
     ResolvedAgentRuntimeView, build_child_config, compose_subagent_instructions, filter_child_tools,
     normalize_background_child_max_turns, normalize_child_max_turns, prepare_child_runtime_config,
 };
+pub use discovery::discover_controller_subagents;
 pub use model::{
     agent_type_for_spec, load_memory_appendix, load_memory_appendix_async, load_primary_memory_appendix,
     load_primary_memory_appendix_async,
@@ -103,7 +104,6 @@ use vtcode_config::auth::OpenAIChatGptAuthHandle;
 use self::background::*;
 use self::config::*;
 use self::constants::*;
-use self::discovery::discover_controller_subagents;
 use self::model::*;
 use vtcode_config::subagents::SUBAGENT_HARD_CONCURRENCY_LIMIT;
 

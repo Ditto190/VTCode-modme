@@ -80,3 +80,22 @@ changes. `VTCODE_STARTUP_TRACE=1` is for a separate diagnostic run only; it
 emits bootstrap phase durations to stderr without changing normal CLI output.
 Metadata commands report `dispatch_ready`, while the interactive path reports
 its first rendered frame separately.
+
+## Interactive session readiness
+
+Interactive launches split session bootstrap so first paint does not wait on the
+full agent runtime:
+
+1. `initialize_session_critical` — provider, one primary-agent discovery pass,
+   lightweight `ToolRegistry`, resume history, cheap `SessionBootstrap`
+   (workspace language/guideline scans skipped), seed system prompt.
+2. `initialize_session_ui` — spawn TUI / first frame.
+3. `hydrate_session_runtime` — tool registry async init + policy + CGP +
+   model-tool projection + skill tools, system-prompt composition into
+   `ContextManager`, subagent controller, trajectory, dynamic context, MCP
+   reconfigure/restart.
+
+Hydration is awaited before the interaction loop dispatches the first model
+turn. Setup failures still abort the session. Trace phases:
+`session_setup_critical`, `session_setup_ui`, `session_setup_hydrate`,
+`session_setup`, `first_ui_render`.

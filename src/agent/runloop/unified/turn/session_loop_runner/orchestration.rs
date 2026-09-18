@@ -52,7 +52,8 @@ use crate::agent::runloop::unified::planning_workflow_state::{
 use crate::agent::runloop::unified::postamble::{ExitData, print_exit_summary};
 use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, TurnId, TurnRunId};
 use crate::agent::runloop::unified::session_setup::{
-    SessionState, initialize_session, initialize_session_ui, spawn_signal_handler,
+    SessionState, apply_post_hydration_ui, hydrate_session_runtime, initialize_session_critical, initialize_session_ui,
+    spawn_signal_handler,
 };
 use crate::agent::runloop::unified::state::SessionStats;
 use crate::agent::runloop::unified::status_line::InputStatusState;
@@ -256,7 +257,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         }
         let session_setup_phase = vtcode_commons::startup_trace::phase_started();
         let session_primary_agent_override = next_session_primary_agent.take();
-        let mut session_state = initialize_session(
+        let session_critical_phase = vtcode_commons::startup_trace::phase_started();
+        let mut session_state = initialize_session_critical(
             &config,
             vt_cfg.as_ref(),
             full_auto,
@@ -266,6 +268,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             session_primary_agent_override.as_deref(),
         )
         .await?;
+        vtcode_commons::startup_trace::record_phase("session_setup_critical", session_critical_phase);
         // Persist the active primary agent ("mode") so a future resume restores
         // it instead of falling back to the config default.
         persist_primary_agent(&mut session_archive, &session_state.active_primary_agent);
@@ -300,6 +303,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         } else {
             None
         };
+        let session_ui_phase = vtcode_commons::startup_trace::phase_started();
         let ui_setup = initialize_session_ui(
             &config,
             vt_cfg.as_ref(),
@@ -315,7 +319,38 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             },
         )
         .await;
-        let ui_setup = harness_try!(ui_setup);
+        let mut ui_setup = harness_try!(ui_setup);
+        vtcode_commons::startup_trace::record_phase("session_setup_ui", session_ui_phase);
+
+        // Deferred hydration runs after the TUI first frame is available.
+        // The interaction loop must not dispatch a model turn until this
+        // completes; setup failures abort with the historical setup error.
+        let session_hydrate_phase = vtcode_commons::startup_trace::phase_started();
+        harness_try!(
+            hydrate_session_runtime(
+                &mut session_state,
+                &mut ui_setup.context_manager,
+                &config,
+                vt_cfg.as_ref(),
+                full_auto,
+                primary_agent_explicitly_configured,
+                resume_ref,
+                thread_handle.thread_id().as_str(),
+                session_primary_agent_override.as_deref(),
+            )
+            .await
+        );
+        vtcode_commons::startup_trace::record_phase("session_setup_hydrate", session_hydrate_phase);
+
+        // Re-drive UI surfaces that depend on hydrated session state.
+        let post_hydrate_guard =
+            harness_try!(apply_post_hydration_ui(vt_cfg.as_ref(), full_auto, &session_state, &mut ui_setup,));
+        if let Some(guard) = post_hydrate_guard {
+            // Prefer the post-hydrate refresh task when a controller appeared
+            // after first paint.
+            ui_setup.background_subprocess_task_guard = Some(guard);
+        }
+
         vtcode_commons::startup_trace::record_phase("session_setup", session_setup_phase);
         let mut renderer = ui_setup.renderer;
         let mut session = ui_setup.session;

@@ -878,6 +878,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Platform Detection, Release Binaries, GitHub Releases Setup, Testing Installers
   - **User Questions**: "What can you tell me about Installer Development Guide?", "How does Overview work?", "How does Platform Detection work?"
 
+- **File**: `docs/compose/spec/instant-tui-startup.md`
+  - **Content**: Instant TUI Startup
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Instant TUI Startup?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/protocols/KITTY_KEYBOARD_PROTOCOL_RESTORATION.md`
   - **Content**: Kitty Keyboard Protocol Restoration
   - **Topics**: Overview, Architecture, Files Modified/Restored, Configuration, Data Flow

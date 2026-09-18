@@ -41,15 +41,41 @@ impl SessionBootstrap {
     }
 }
 
+/// Controls how much workspace I/O `prepare_session_bootstrap` performs.
+///
+/// `Critical` is used on the interactive first-frame path: placeholders and
+/// cheap onboarding highlights are still built, but workspace language scans
+/// and guideline-file reads are deferred until after the TUI paints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionBootstrapMode {
+    Critical,
+    Full,
+}
+
+#[cfg(test)]
 pub(crate) async fn prepare_session_bootstrap(
     runtime_cfg: &CoreAgentConfig,
     vt_cfg: Option<&VTCodeConfig>,
     mcp_error: Option<String>,
 ) -> SessionBootstrap {
+    prepare_session_bootstrap_with_mode(runtime_cfg, vt_cfg, mcp_error, SessionBootstrapMode::Full).await
+}
+
+pub(crate) async fn prepare_session_bootstrap_with_mode(
+    runtime_cfg: &CoreAgentConfig,
+    vt_cfg: Option<&VTCodeConfig>,
+    mcp_error: Option<String>,
+    mode: SessionBootstrapMode,
+) -> SessionBootstrap {
     let onboarding_cfg = vt_cfg.map(|cfg| cfg.agent.onboarding.clone()).unwrap_or_default();
     let todo_planning_enabled = vt_cfg.map(|cfg| cfg.agent.todo_planning_mode).unwrap_or(true);
+    let skip_workspace_scans = matches!(mode, SessionBootstrapMode::Critical);
 
-    let language_summary = summarize_workspace_languages(&runtime_cfg.workspace);
+    let language_summary = if skip_workspace_scans {
+        None
+    } else {
+        summarize_workspace_languages(&runtime_cfg.workspace)
+    };
     let extra_instruction_files = vt_cfg.map(|cfg| cfg.agent.instruction_files.clone()).unwrap_or_default();
     let instruction_budget = vt_cfg
         .map(|cfg| cfg.agent.instruction_max_bytes)
@@ -59,7 +85,7 @@ pub(crate) async fn prepare_session_bootstrap(
         .unwrap_or(prompt_budget_constants::DEFAULT_MAX_BYTES);
     let effective_budget = instruction_budget.min(project_doc_budget);
 
-    let guideline_highlights = if onboarding_cfg.include_guideline_highlights {
+    let guideline_highlights = if onboarding_cfg.include_guideline_highlights && !skip_workspace_scans {
         extract_guideline_highlights(
             &runtime_cfg.workspace,
             onboarding_cfg.guideline_highlight_limit,
