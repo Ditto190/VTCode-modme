@@ -652,10 +652,4 @@ try to implement instant VT Code TUI app startup. Focus on reducing initializati
 
 ===
 
-auto resize and expand diff view in the TUI to improve readability and user experience, ensuring that long diffs are fully visible without manual scrolling.
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-18 at 17.12.26.png'
-
-===
-
 https://deepwiki.com/search/how-do-codex-implement-backgro_c378a0fa-eca4-4357-b365-03824dacd499?mode=deep
