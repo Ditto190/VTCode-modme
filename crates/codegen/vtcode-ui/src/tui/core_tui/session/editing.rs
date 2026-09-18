@@ -322,29 +322,6 @@ impl Session {
         self.refresh_input_edit_state();
     }
 
-    /// Delete from cursor to start of current line (Command+Backspace on macOS)
-    pub(crate) fn delete_to_start_of_line(&mut self) {
-        if self.input_manager.delete_selection() {
-            self.refresh_input_edit_state();
-            return;
-        }
-        let content = self.input_manager.content();
-        let cursor = self.input_manager.cursor();
-
-        let before = &content[..cursor];
-        let delete_start = if let Some(newline_pos) = before.rfind('\n') {
-            newline_pos + 1
-        } else {
-            0
-        };
-
-        if delete_start < cursor {
-            self.input_manager.replace_range(delete_start, cursor, "");
-            self.input_manager.set_cursor(delete_start);
-            self.refresh_input_edit_state();
-        }
-    }
-
     /// Delete from cursor to end of current line (Command+Delete on macOS)
     pub(crate) fn delete_to_end_of_line(&mut self) {
         if self.input_manager.delete_selection() {

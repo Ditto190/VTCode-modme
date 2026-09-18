@@ -4,7 +4,7 @@ Single source of truth for VT Code terminal keyboard shortcuts. Press `?` on an 
 
 > Platform notes:
 > - `Cmd` means `Super`/`Meta` (`KeyModifiers::SUPER | META`): macOS Command, Windows Super, Linux Meta/Super. It is not `Ctrl`.
-> - `Ctrl+A` remains readline move-to-start; it does not clear.
+> - **Unified across terminals**: terminals using the Kitty keyboard protocol report `Cmd+Left/Right/Backspace` as `SUPER`-modified keys. Legacy macOS terminals (Terminal.app, iTerm2, VS Code, older emulators) instead map them to C0 control codes — `Cmd+Left` → `0x01` (`Ctrl+A`), `Cmd+Right` → `0x05` (`Ctrl+E`), `Cmd+Backspace` → `0x15` (`Ctrl+U`), `Cmd+Delete` → `0x0B` (`Ctrl+K`). VT Code folds both families into the same line-wise handlers, so the composer behaves identically either way. Because the legacy encoding cannot distinguish `Ctrl+A` from `Cmd+Left`, `Ctrl+A`/`Ctrl+E` are line-wise and `Ctrl+U` clears the current line by design.
 > - Terminals report `Shift+Tab` as `BackTab` (sometimes with the `SHIFT` bit); some report `Tab+SHIFT` or `Char('\t')+SHIFT`. All three cycle agents. Plain `Tab` never cycles — it enqueues.
 > - Some terminals deliver `Tab` as `Char('\t')` and `Ctrl+Enter` as forked sequences; behavior is identical in both encodings.
 > - `Esc Esc` must be consecutive presses within ~800ms; any other key disarms the timer.
@@ -21,7 +21,7 @@ Single source of truth for VT Code terminal keyboard shortcuts. Press `?` on an 
 
 Palettes consume `Tab`/`Enter`/`Esc` first: agent/file palettes select best match on `Tab`, slash navigation autocompletes on `Tab`, history picker consumes navigation keys.
 
-## Composer line editing (new)
+## Composer line editing
 
 | Shortcut | Single-line input | Multiline input |
 | :-- | :-- | :-- |
@@ -30,18 +30,18 @@ Palettes consume `Tab`/`Enter`/`Esc` first: agent/file palettes select best matc
 | `Esc Esc` (focused composer, content present) | Clear entire input. | Clear current logical line. First press arms, second clears. Empty input emits cancel. |
 | `Cmd+E` | Line end. | Current line end. |
 
-`Cmd` never means `Ctrl` here. Secure-prompt (single-line secret) mirrors this: `Cmd+Backspace`/`Cmd+A` clear, `Cmd+Left/Right` jump to edges, `Esc` cancels immediately without double-press.
+On terminals that send the legacy control-code aliases, the same behavior is reachable without the Kitty protocol: `Ctrl+A`/`Ctrl+E` move to the current line's edges and `Ctrl+U` clears the current line (see the readline table below). No extra terminal setup is needed beyond the terminal's own Cmd mapping. Secure-prompt (single-line secret) mirrors this: `Cmd+Backspace`/`Cmd+A` clear, `Cmd+Left/Right` jump to edges, `Esc` cancels immediately without double-press.
 
-## Readline and word editing (unchanged)
+## Readline and word editing
 
 | Shortcut | Action |
 | :-- | :-- |
-| `Ctrl+A` / `Ctrl+E` | Buffer start / end. |
+| `Ctrl+A` / `Ctrl+E` | Current line start / end (buffer edges when single-line; legacy `Cmd+Left`/`Cmd+Right`). |
 | `Ctrl+F` / `Ctrl+B` | Char forward / back. |
 | `Alt+F` / `Alt+B`, `Alt+Left/Right` | Word forward / back. |
 | `Ctrl+P` / `Ctrl+N`, `Up`/`Down` | History previous / next (`Up`/`Down` move within multiline first). |
 | `Ctrl+W`, `Alt+D` | Delete previous / next word. |
-| `Ctrl+U` / `Ctrl+K` | Delete to line start / end. |
+| `Ctrl+U` / `Ctrl+K` | Clear current line / delete to line end (legacy `Cmd+Backspace`/`Cmd+Delete`). |
 | `Ctrl+T` | Transpose chars (when Transcript Review is unbound; otherwise opens review). |
 | `Alt+T` | Transpose words / toggle tool summaries per binding. |
 | `Alt+U` / `Alt+L` / `Alt+C`, `Alt+\` | Uppercase / lowercase / capitalize word, delete whitespace around cursor. |

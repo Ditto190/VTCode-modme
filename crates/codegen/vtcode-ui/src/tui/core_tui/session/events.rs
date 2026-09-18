@@ -408,9 +408,29 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
 
     match key.code {
         // --- Emacs-style editing shortcuts (hardcoded, not rebindable) ---
+        //
+        // Unified line-wise composer controls. The same operations serve two
+        // input families so the behavior is identical everywhere:
+        //   1. Kitty-protocol terminals report Cmd/Command as SUPER
+        //      (`Cmd+Left`, `Cmd+Right`, `Cmd+Backspace`, `Cmd+A`).
+        //   2. Legacy macOS terminals (Terminal.app, iTerm2, VS Code, …) map
+        //      those same keys to C0 control codes — Cmd+Left → `0x01`
+        //      (Ctrl+A), Cmd+Right → `0x05` (Ctrl+E), Cmd+Backspace → `0x15`
+        //      (Ctrl+U), Cmd+Delete → `0x0B` (Ctrl+K). `normalize_terminal_`
+        //      `control_event` folds those bytes into Ctrl+<letter>, so both
+        //      families dispatch through the Ctrl+A/E/U/K arms below.
+        // Single-line input degenerates to buffer edges, satisfying the
+        // "clear/move the entire input" contract without a separate branch.
         KeyCode::Char('a') | KeyCode::Char('A') if has_control && !has_command && !has_alt => {
             if session.input_enabled {
-                session.move_to_start();
+                session.move_to_start_of_line();
+                session.mark_dirty();
+            }
+            None
+        }
+        KeyCode::Char('e') | KeyCode::Char('E') if has_control && !has_command && !has_alt => {
+            if session.input_enabled {
+                session.move_to_end_of_line();
                 session.mark_dirty();
             }
             None
@@ -429,7 +449,10 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
         }
         KeyCode::Char('u') | KeyCode::Char('U') if has_control && !has_command && !has_alt => {
             if session.input_enabled {
-                session.delete_to_start_of_line();
+                // Clear the current logical line (or the whole input when
+                // single-line). Matches Cmd+Backspace on kitty-protocol
+                // terminals; legacy terminals send 0x15 (Ctrl+U).
+                session.clear_current_line_or_all();
                 session.mark_dirty();
             }
             None

@@ -312,14 +312,18 @@ fn handle_secure_prompt_key(
         }
         KeyCode::Char(ch) => {
             // Readline-style Ctrl+<ch> editing/navigation (no Alt/Cmd).
+            // These double as the legacy macOS mappings for terminals that
+            // encode Cmd+Left/Right/Backspace as C0 control codes (0x01, 0x05,
+            // 0x15), so the line-wise operations below are shared with the
+            // kitty-protocol Cmd/SUPER path in the main composer handler.
             if has_control && !has_alt && !has_command {
                 match ch {
                     'a' | 'A' => {
-                        session.move_to_start();
+                        session.move_to_start_of_line();
                         session.mark_dirty();
                     }
                     'e' | 'E' => {
-                        session.move_to_end();
+                        session.move_to_end_of_line();
                         session.mark_dirty();
                     }
                     'b' | 'B' => {
@@ -335,7 +339,7 @@ fn handle_secure_prompt_key(
                         session.mark_dirty();
                     }
                     'u' | 'U' => {
-                        session.delete_to_start_of_line();
+                        session.clear_current_line_or_all();
                         session.mark_dirty();
                     }
                     'k' | 'K' => {
@@ -800,7 +804,16 @@ pub(super) fn process_key_with_clipboard_image_reader(
         }
         KeyCode::Char('a') | KeyCode::Char('A') if has_control && !has_command && !has_alt => {
             if session.core.input_enabled() {
-                session.move_to_start();
+                // Line-wise so legacy Cmd+Left (0x01) matches the kitty path.
+                session.move_to_start_of_line();
+                session.mark_dirty();
+            }
+            None
+        }
+        KeyCode::Char('e') | KeyCode::Char('E') if has_control && !has_command && !has_alt => {
+            if session.core.input_enabled() {
+                // Line-wise so legacy Cmd+Right (0x05) matches the kitty path.
+                session.move_to_end_of_line();
                 session.mark_dirty();
             }
             None
@@ -822,7 +835,9 @@ pub(super) fn process_key_with_clipboard_image_reader(
         }
         KeyCode::Char('u') | KeyCode::Char('U') if has_control && !has_command && !has_alt => {
             if session.core.input_enabled() {
-                session.delete_to_start_of_line();
+                // Clear the current line (or entire input when single-line);
+                // legacy Cmd+Backspace sends 0x15 and folds to Ctrl+U.
+                session.clear_current_line_or_all();
                 session.update_input_triggers();
                 session.mark_dirty();
             }

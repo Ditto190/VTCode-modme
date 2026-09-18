@@ -295,13 +295,15 @@ fn super_arrow_right_moves_cursor_to_end() {
 }
 
 #[test]
-fn super_a_moves_cursor_to_start() {
+fn super_a_clears_current_line() {
     let text = "hello world";
     let mut session = session_with_input(text, text.len());
 
     let event = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::SUPER);
     session.process_key(event);
 
+    // Single-line input: Cmd+A clears the whole input (matches Cmd+Backspace).
+    assert_eq!(session.input_manager.content(), "");
     assert_eq!(session.cursor(), 0);
 }
 
@@ -362,13 +364,81 @@ fn control_w_deletes_previous_cjk_segment() {
 }
 
 #[test]
-fn control_u_deletes_to_start_of_line() {
+fn control_u_clears_current_line() {
     let mut session = session_with_input("hello world", 5);
 
     let result = session.process_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
 
     assert!(result.is_none());
-    assert_eq!(session.input_manager.content(), " world");
+    // Single-line input: clearing the line clears the whole input.
+    assert_eq!(session.input_manager.content(), "");
+    assert_eq!(session.cursor(), 0);
+}
+
+#[test]
+fn control_u_clears_only_current_line_in_multiline() {
+    let mut session = session_with_input("first\nsecond\nthird", 8);
+
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+
+    assert!(result.is_none());
+    assert_eq!(session.input_manager.content(), "first\n\nthird");
+    assert_eq!(session.cursor(), 6);
+}
+
+#[test]
+fn control_a_moves_to_line_start_and_control_e_to_line_end() {
+    let mut session = session_with_input("first\nsecond\nthird", 8);
+
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    assert!(result.is_none());
+    assert_eq!(session.cursor(), 6);
+
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+    assert!(result.is_none());
+    assert_eq!(session.cursor(), 12);
+}
+
+#[test]
+fn legacy_control_codes_match_cmd_line_editing() {
+    // Terminals without the Kitty keyboard protocol send Cmd+Left/Right/
+    // Backspace/Delete as bare C0 control bytes. `normalize_terminal_control_
+    // event` folds them into Ctrl+<letter>; each must reach the same line-wise
+    // handler as the SUPER path.
+    //
+    // Cmd+Left (0x01) → line start.
+    let mut session = session_with_input("first\nsecond\nthird", 8);
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('\u{1}'), KeyModifiers::NONE));
+    assert!(result.is_none());
+    assert_eq!(session.cursor(), 6);
+
+    // Cmd+Right (0x05) → line end.
+    let mut session = session_with_input("first\nsecond\nthird", 8);
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('\u{5}'), KeyModifiers::NONE));
+    assert!(result.is_none());
+    assert_eq!(session.cursor(), 12);
+
+    // Cmd+Delete (0x0B) → delete to line end.
+    let mut session = session_with_input("first\nsecond\nthird", 8);
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('\u{b}'), KeyModifiers::NONE));
+    assert!(result.is_none());
+    assert_eq!(session.input_manager.content(), "first\nse\nthird");
+
+    // Cmd+Backspace (0x15) → clear current line.
+    let mut session = session_with_input("first\nsecond\nthird", 8);
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('\u{15}'), KeyModifiers::NONE));
+    assert!(result.is_none());
+    assert_eq!(session.input_manager.content(), "first\n\nthird");
+}
+
+#[test]
+fn legacy_control_fifteen_clears_single_line_entirely() {
+    let mut session = session_with_input("hello world", 5);
+
+    let result = session.process_key(KeyEvent::new(KeyCode::Char('\u{15}'), KeyModifiers::NONE));
+
+    assert!(result.is_none());
+    assert_eq!(session.input_manager.content(), "");
     assert_eq!(session.cursor(), 0);
 }
 

@@ -888,3 +888,25 @@ fn app_double_escape_clears_current_line_in_multiline() {
     assert!(second.is_none());
     assert_eq!(session.core.input_manager.content(), "first\n\nthird");
 }
+
+#[test]
+fn app_legacy_control_codes_match_cmd_line_editing() {
+    // Legacy terminals encode Cmd+Left/Right/Backspace as 0x01/0x05/0x15.
+    // They must reach the same line-wise handlers as the SUPER path in the app
+    // session (the interactive TUI entry point).
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.core.set_input("first\nsecond\nthird".to_string());
+    session.core.input_manager.set_cursor(8);
+
+    let left = session.process_key(KeyEvent::new(KeyCode::Char('\u{1}'), KeyModifiers::NONE));
+    assert!(left.is_none());
+    assert_eq!(session.core.input_manager.cursor(), 6);
+
+    let right = session.process_key(KeyEvent::new(KeyCode::Char('\u{5}'), KeyModifiers::NONE));
+    assert!(right.is_none());
+    assert_eq!(session.core.input_manager.cursor(), 12);
+
+    let clear = session.process_key(KeyEvent::new(KeyCode::Char('\u{15}'), KeyModifiers::NONE));
+    assert!(clear.is_none());
+    assert_eq!(session.core.input_manager.content(), "first\n\nthird");
+}
