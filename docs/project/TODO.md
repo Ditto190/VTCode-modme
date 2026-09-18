@@ -541,3 +541,188 @@ Command security check failed: Potential dangerous command: curl
 Likely cause: The call was rejected before execution because its arguments or safety preflight were invalid.
 Next action: Correct the arguments using the declared schema, then retry once.
 • curl was blocked by the security preflight. Let me use the dedicated web_fetch tool instead.
+
+===
+
+fix vtcode harness is blocked only on 1 turn
+Execution summary: blocked; changed files: crates/codegen/vtcode-core/src/tools/handlers/turn_diff_tracker.rs;
+verification: see the final response and task tracker; blockers: pending checklist items: Extend the authoritative
+event contract: add optional `unified_diff`, `additions`, `deletions` fields to `FileChangeItem` (serde `
+skip_serializing_if = "Option::is_none"` for backward compatibility) and populate them from the tracker so consumers
+get Codex-style per-change diffs without recomputation, Harden `vtcode-diff` computation: add a binary-content guard
+(NUL-byte detection -> skip intraline refinement), and regression tests for CRLF preservation, missing-final-newline
+round-trips, and zero-context hunk headers (`@@ -0,0 +1,N @@`), Upgrade diff syntax highlighting to the Codex
+approach: highlight the full post-image once (still bounded by the existing `MAX_DIFF_SYNTAX_BYTES`
+/`MAX_DIFF_SYNTAX_LINES` caps) and map per-line segments, instead of re-highlighting each reconstructed hunk — this
+preserves parser state across hunk boundaries and fixes mis-highlighting of multi-line strings/commments split by
+hunks, Add selectable diff themes (github, ayu, gruvbox, nord, solarized, dracula) as diff palettes in the design
+layer with a live-preview selection command; every accent must meet WCAG AA 4.5:1 per AGENTS.md.
+MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.
+
+===
+
+check and fix TODO tasks continuation doesn't work. the agent seems only end each turn and doesn't continue, it nudge the user to take action instead. This is not the desired behavior; the agent should be able to continue tasks across multiple turns seamlessly. session: session-vtcode-20260918T030054Z_141498-26410
+
+===
+
+update /review command to accept natural language instead of plain cli
+
+example:
+
+```
+/review Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
+  unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
+  positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
+  stop, start  implement fixes for each one
+```
+
+where `/review {user_prompt}`
+
+-> prompt send to the model:
+
+```
+
+You are a code reviewer. Your job is to review code changes and provide actionable feedback.
+
+---
+
+Input: {user_prompt}
+
+---
+
+## Determining What to Review
+
+Based on the input provided, determine which type of review to perform:
+
+1. **No arguments (default)**: Review all uncommitted changes
+    - Run: `git diff` for unstaged changes
+    - Run: `git diff --cached` for staged changes
+    - Run: `git status --short` to identify untracked (net new) files
+
+2. **Commit hash** (40-char SHA or short hash): Review that specific commit
+    - Run: `git show Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
+unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
+positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
+stop, start  implement fixes for each one`
+
+3. **Branch name**: Compare current branch to the specified branch
+    - Run: `git diff Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
+unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
+positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
+stop, start  implement fixes for each one...HEAD`
+
+4. **PR URL or number** (contains "github.com" or "pull" or looks like a PR number): Review the pull request
+    - Run: `gh pr view Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
+unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
+positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
+stop, start  implement fixes for each one` to get PR context
+    - Run: `gh pr diff Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
+unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
+positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
+stop, start  implement fixes for each one` to get the diff
+
+Use best judgement when processing input.
+
+---
+
+## Gathering Context
+
+**Diffs alone are not enough.** After getting the diff, read the entire file(s) being modified to understand the full context. Code that looks wrong in isolation may be correct given surrounding logic—and vice versa.
+
+- Use the diff to identify which files changed
+- Use `git status --short` to identify untracked files, then read their full contents
+- Read the full file to understand existing patterns, control flow, and error handling
+- Check for existing style guide or conventions files (CONVENTIONS.md, AGENTS.md, .editorconfig, etc.)
+
+---
+
+## What to Look For
+
+**Bugs** - Your primary focus.
+
+- Logic errors, off-by-one mistakes, incorrect conditionals
+- If-else guards: missing guards, incorrect branching, unreachable code paths
+- Edge cases: null/empty/undefined inputs, error conditions, race conditions
+- Security issues: injection, auth bypass, data exposure
+- Broken error handling that swallows failures, throws unexpectedly or returns error types that are not caught.
+
+**Structure** - Does the code fit the codebase?
+
+- Does it follow existing patterns and conventions?
+- Are there established abstractions it should use but doesn't?
+- Excessive nesting that could be flattened with early returns or extraction
+
+**Performance** - Only flag if obviously problematic.
+
+- O(n²) on unbounded data, N+1 queries, blocking I/O on hot paths
+
+**Behavior Changes** - If a behavioral change is introduced, raise it (especially if it's possibly unintentional).
+
+---
+
+## Before You Flag Something
+
+**Be certain.** If you're going to call something a bug, you need to be confident it actually is one.
+
+- Only review the changes - do not review pre-existing code that wasn't modified
+- Don't flag something as a bug if you're unsure - investigate first
+- Don't invent hypothetical problems - if an edge case matters, explain the realistic scenario where it breaks
+- If you need more context to be sure, use the tools below to get it
+
+**Don't be a zealot about style.** When checking code against conventions:
+
+- Verify the code is _actually_ in violation. Don't complain about else statements if early returns are already being used correctly.
+- Some "violations" are acceptable when they're the simplest option. A `let` statement is fine if the alternative is convoluted.
+- Excessive nesting is a legitimate concern regardless of other style choices.
+
+---
+
+## Tools
+
+Use these to inform your review:
+
+- **Explore agent** - Find how existing code handles similar problems. Check patterns, conventions, and prior art before claiming something doesn't fit.
+- **Available documentation and code-search tools** - Verify correct usage of libraries/APIs before flagging something as wrong.
+- **Web Search** - Research best practices if you're unsure about a pattern.
+
+If you're uncertain about something and can't verify it with these tools, say "I'm not sure about X" rather than flagging it as a definite issue.
+
+---
+
+## Output
+
+1. If there is a bug, be direct and clear about why it is a bug.
+2. Clearly communicate severity of issues. Do not overstate severity.
+3. Critiques should clearly and explicitly communicate the scenarios, environments, or inputs that are necessary for the bug to arise. The comment should immediately indicate that the issue's severity depends on these factors.
+4. Your tone should be matter-of-fact and not accusatory or overly positive. It should read as a helpful AI assistant suggestion without sounding too much like a human reviewer.
+5. Write so the reader can quickly understand the issue without reading too closely.
+6. AVOID flattery, do not give any comments that are not helpful to the reader.
+```
+
+===
+
+check and improve tool loop usage limit HITL and logic.
+
+Reached maximum tool loops (20)
+Tool loop limit increased to 60 (+40, cap 60)
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-18 at 11.30.53.png'
+
+when user select +50 but the tool loop limit is already at its cap (60), review the logic to ensure it handles this scenario correctly both on the proposed tool loop modal and in the backend logic. also this change should apply to subsequent increments loop to avoid repeatly hitting the cap.
+
+===
+
+check VT Code run loop, the agent constantly end turn and nudge user to resume and continue, instead of running in a continuous loop automatically. Review the logic to ensure the agent behaves as expected and only prompts the user when necessary.
+log: session-vtcode-20260918T030054Z_141498-26410
+
+===
+
+remove bold styling for multiline command in the TUI, keeping it consistent with single-line commands. '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-18 at 11.35.13.png'
+
+====
+
+try to implement Live PTY stdout streaming for real-time command output in the TUI. example: cargo run, cargo test and other long-running commands.
+
+===
+
+try to implement instant VT Code TUI app startup. Focus on reducing initialization time and optimizing the loading sequence to achieve near-instant launch. Deep dive and analyze the current initialization process to identify bottlenecks and areas for improvement. Document findings and propose actionable optimizations. Then implement the changes and measure the impact on startup time to ensure the improvements are effective. Ensure that all optimizations maintain the stability and functionality of the application.

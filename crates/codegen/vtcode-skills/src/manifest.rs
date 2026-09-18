@@ -164,7 +164,17 @@ pub fn parse_skill_content(content: &str) -> anyhow::Result<(SkillManifest, Stri
     validate_frontmatter_keys(yaml_str);
 
     // Parse YAML frontmatter
-    let yaml: SkillYaml = serde_saphyr::from_str(yaml_str).context("Failed to parse SKILL.md YAML frontmatter")?;
+    let yaml: SkillYaml = match serde_saphyr::from_str(yaml_str) {
+        Ok(yaml) => yaml,
+        Err(first_err) => match fold_bare_description_to_block_scalar(yaml_str) {
+            Some(fixed) => {
+                tracing::debug!("SKILL.md frontmatter needed description block-scalar fallback to parse");
+                serde_saphyr::from_str(&fixed)
+                    .with_context(|| format!("Failed to parse SKILL.md YAML frontmatter ({first_err:#})"))?
+            }
+            None => return Err(first_err).context("Failed to parse SKILL.md YAML frontmatter"),
+        },
+    };
 
     let name = yaml.name.trim().to_string();
     anyhow::ensure!(!name.is_empty(), "name is required and must not be empty");
@@ -209,6 +219,72 @@ pub fn parse_skill_content(content: &str) -> anyhow::Result<(SkillManifest, Stri
 
     Ok((manifest, instructions))
 }
+/// Whether `line` looks like a new top-level `key:` mapping entry.
+///
+/// Column-0 lines starting a mapping key terminate description folding; `- `
+/// sequence entries, comments, blank lines, and `scheme://...` runs (colon not
+/// followed by space/end) stay inside the folded value, matching YAML plain
+/// scalar rules closely enough for a last-resort retry.
+fn looks_like_top_level_key(line: &str) -> bool {
+    match line.as_bytes().first() {
+        None | Some(b' ') | Some(b'\t') | Some(b'#') | Some(b'-') => return false,
+        _ => {}
+    }
+    let trimmed = line.trim_start();
+    let Some(colon_pos) = trimmed.find(':') else {
+        return false;
+    };
+    if colon_pos == 0 {
+        return false;
+    }
+    matches!(trimmed.as_bytes().get(colon_pos + 1), None | Some(b' ') | Some(b'\t'))
+}
+
+/// Retry helper for cross-client SKILL.md files whose unquoted `description:`
+/// value contains a colon (invalid YAML that lenient parsers accept, e.g.
+/// `description: Use this skill when: the user asks about PDFs`).
+///
+/// Rewrites the description value as a `|` block scalar and returns the
+/// rewritten frontmatter, or `None` when there is no bare top-level
+/// `description:` key to repair. Only runs after a hard parse failure, so it
+/// can never break a file that already parses.
+fn fold_bare_description_to_block_scalar(yaml_str: &str) -> Option<String> {
+    const KEY: &str = "description:";
+    let lines: Vec<&str> = yaml_str.lines().collect();
+    let desc_idx = lines.iter().position(|line| {
+        if matches!(line.as_bytes().first(), None | Some(b' ') | Some(b'\t') | Some(b'#')) {
+            return false;
+        }
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with(KEY) {
+            return false;
+        }
+        matches!(trimmed.as_bytes().get(KEY.len()), None | Some(b' ') | Some(b'\t'))
+    })?;
+    let first_value = lines[desc_idx].trim_start()[KEY.len()..].trim_start();
+    // Only engage for the classic failure: an unquoted scalar containing a
+    // colon. Explicit `|`/`>`/quoted scalars and empty values fail elsewhere.
+    if first_value.is_empty() || first_value.starts_with(['|', '>', '"', '\'']) || !first_value.contains(':') {
+        return None;
+    }
+
+    let mut rebuilt: Vec<String> = lines[..desc_idx].iter().map(|line| line.to_string()).collect();
+    rebuilt.push("description: |".to_string());
+    rebuilt.push(format!("  {first_value}"));
+    let mut folding = true;
+    for line in &lines[desc_idx + 1..] {
+        if folding && looks_like_top_level_key(line) {
+            folding = false;
+        }
+        if folding && !line.is_empty() {
+            rebuilt.push(format!("  {}", line.trim_start()));
+        } else {
+            rebuilt.push(line.to_string());
+        }
+    }
+    Some(rebuilt.join("\n"))
+}
+
 fn normalize_allowed_tools(field: AllowedToolsField) -> anyhow::Result<String> {
     match field {
         AllowedToolsField::List(tools) => {
@@ -411,6 +487,40 @@ disable-model-invocation: true
 
         let (manifest, _) = parse_skill_content(content).expect("flag should parse");
         assert_eq!(manifest.disable_model_invocation, Some(true));
+    }
+
+    #[test]
+    fn test_parse_skill_description_with_bare_colon() {
+        let content = r#"---
+name: colon-skill
+description: Use this skill when: the user asks about PDFs
+---
+
+# Body
+"#;
+
+        let (manifest, _) = parse_skill_content(content).expect("bare colon should fold to block scalar");
+        assert_eq!(manifest.name, "colon-skill");
+        assert_eq!(manifest.description, "Use this skill when: the user asks about PDFs");
+    }
+
+    #[test]
+    fn test_parse_skill_multiline_description_with_colon() {
+        let content = "---\nname: multi-skill\ndescription: First line: overview\ncontinued second line\nlicense: MIT\n---\n\n# Body\n";
+
+        let (manifest, _) = parse_skill_content(content).expect("multiline description should fold");
+        assert_eq!(manifest.name, "multi-skill");
+        assert!(manifest.description.contains("First line: overview"), "got: {}", manifest.description);
+        assert!(manifest.description.contains("continued second line"), "got: {}", manifest.description);
+        assert_eq!(manifest.license.as_deref(), Some("MIT"));
+    }
+
+    #[test]
+    fn test_parse_skill_garbage_frontmatter_still_fails() {
+        let content = "---\nname: [unclosed\ndescription: Broken\n---\n\n# Body\n";
+
+        let err = parse_skill_content(content).expect_err("unrelated YAML failure must still error");
+        assert!(err.to_string().contains("frontmatter"), "got: {err:#}");
     }
 
     #[test]

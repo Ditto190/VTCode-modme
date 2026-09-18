@@ -218,7 +218,23 @@ fn add_system_cli_tools(outcome: &mut SkillLoadOutcome) {
 
 fn dedup_and_sort(outcome: &mut SkillLoadOutcome) {
     let mut seen: HashSet<String> = HashSet::new();
-    outcome.skills.retain(|skill| seen.insert(skill.name.clone()));
+    let mut shadowed: Vec<String> = Vec::new();
+    outcome.skills.retain(|skill| {
+        if seen.insert(skill.name.clone()) {
+            return true;
+        }
+        // Agent Skills interop: same-name skills must not silently replace one
+        // another. First discovery wins (project roots precede user roots);
+        // warn so the shadowing is visible instead of silent.
+        shadowed.push(format!("{} ({})", skill.name, skill.path.display()));
+        false
+    });
+    if !shadowed.is_empty() {
+        tracing::warn!(
+            shadowed = ?shadowed,
+            "duplicate skill names shadowed by earlier discovery; only the first occurrence is loaded"
+        );
+    }
     outcome.skills.sort_by(|a, b| a.name.cmp(&b.name));
 }
 
@@ -1187,6 +1203,54 @@ mod tests {
             !third.skills.iter().any(|skill| skill.name == "process-wide-cache-skill"),
             "expected cleared cache to force rediscovery",
         );
+    }
+
+    #[test]
+    #[serial]
+    fn lightweight_discovery_honors_disable_model_invocation() {
+        use crate::skills::command_skills::is_model_catalog_eligible;
+
+        clear_lightweight_skill_metadata_cache();
+
+        let codex_home = tempdir().expect("codex home");
+        let workspace = tempdir().expect("workspace");
+        let hidden_dir = workspace.path().join(".agents/skills/manual-only-skill");
+        fs::create_dir_all(&hidden_dir).expect("create hidden skill dir");
+        fs::write(
+            hidden_dir.join("SKILL.md"),
+            "---\nname: manual-only-skill\ndescription: human invoked only\ndisable-model-invocation: true\n---\n# Body\n",
+        )
+        .expect("write hidden skill");
+        let visible_dir = workspace.path().join(".agents/skills/auto-skill");
+        fs::create_dir_all(&visible_dir).expect("create visible skill dir");
+        fs::write(visible_dir.join("SKILL.md"), "---\nname: auto-skill\ndescription: model invocable\n---\n# Body\n")
+            .expect("write visible skill");
+
+        let config = SkillLoaderConfig {
+            codex_home: codex_home.path().to_path_buf(),
+            cwd: workspace.path().to_path_buf(),
+            project_root: Some(workspace.path().to_path_buf()),
+            include_bundled_system_skills: false,
+        };
+
+        let outcome = discover_skill_metadata_lightweight_hermetic(&config);
+        let hidden = outcome
+            .skills
+            .iter()
+            .find(|skill| skill.name == "manual-only-skill")
+            .expect("hidden skill is still discovered");
+        assert!(
+            !is_model_catalog_eligible(hidden),
+            "disable-model-invocation skill must stay out of the model catalog",
+        );
+        let visible = outcome
+            .skills
+            .iter()
+            .find(|skill| skill.name == "auto-skill")
+            .expect("visible skill is discovered");
+        assert!(is_model_catalog_eligible(visible));
+
+        clear_lightweight_skill_metadata_cache();
     }
 
     #[tokio::test]

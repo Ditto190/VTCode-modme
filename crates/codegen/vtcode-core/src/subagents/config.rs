@@ -812,16 +812,18 @@ mod tests {
         // `mcp_deferral_keeps_first_request_wire_payload_near_baseline` and
         // `child_config_uses_lightweight_default_profile`. This test pins the
         // system-prompt portion: the child must be materially (and strictly)
-        // cheaper, and a regression that bloats the Minimal profile above 80% of
-        // the Default composed prompt must fail here.
+        // cheaper, and a regression that bloats the Minimal profile above 85% of
+        // the Default composed prompt must fail here. The bar is 85% rather
+        // than 80% because lean cuts to the parent (shared contract/operating
+        // lines) narrow the ratio without bloating the child.
         assert!(
             child_tokens < parent_tokens,
             "default subagent composed prompt ({child_tokens}) must be strictly cheaper \
              than parent ({parent_tokens})"
         );
         assert!(
-            child_tokens * 5 <= parent_tokens * 4,
-            "default subagent composed prompt ({child_tokens}) must be <= 80% of parent \
+            child_tokens * 20 <= parent_tokens * 17,
+            "default subagent composed prompt ({child_tokens}) must be <= 85% of parent \
              ({parent_tokens}); a bloat of the Minimal profile is a regression"
         );
     }

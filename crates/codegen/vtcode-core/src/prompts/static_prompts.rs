@@ -38,6 +38,40 @@ fn append_runtime_guidance(prompt: &mut String) {
     prompt.push('\n');
 }
 
+fn append_contract_block(prompt: &mut String, specific_lines: &[&str]) {
+    for line in SHARED_CONTRACT_LINES {
+        prompt.push_str("- ");
+        prompt.push_str(line);
+        prompt.push('\n');
+    }
+    for line in specific_lines {
+        prompt.push_str("- ");
+        prompt.push_str(line);
+        prompt.push('\n');
+    }
+    prompt.pop();
+    prompt.push('\n');
+    prompt.push('\n');
+}
+
+fn build_static_prompt(include_role: bool, specific_lines: &[&str], operating_delta: &str) -> String {
+    let mut prompt = String::new();
+    prompt.push_str(PROMPT_TITLE);
+    prompt.push_str("\n\n");
+    prompt.push_str(PROMPT_INTRO);
+    prompt.push_str("\n\n");
+    if include_role {
+        prompt.push_str(PROMPT_ROLE_PARAGRAPH);
+        prompt.push_str("\n\n");
+    }
+    append_runtime_guidance(&mut prompt);
+    prompt.push_str(CONTRACT_HEADER);
+    prompt.push_str("\n\n");
+    append_contract_block(&mut prompt, specific_lines);
+    prompt.push_str(operating_delta);
+    prompt
+}
+
 pub fn default_system_prompt() -> &'static str {
     static_profile_prompt(SystemPromptMode::Default)
 }
@@ -68,118 +102,14 @@ pub fn specialized_instruction_text() -> String {
 
 pub fn static_profile_prompt(prompt_mode: SystemPromptMode) -> &'static str {
     match prompt_mode {
-        SystemPromptMode::Default => DEFAULT_SYSTEM_PROMPT.get_or_init(|| {
-            let mut prompt = String::new();
-            prompt.push_str(PROMPT_TITLE);
-            prompt.push_str("\n\n");
-            prompt.push_str(PROMPT_INTRO);
-            prompt.push_str("\n\n");
-            prompt.push_str(PROMPT_ROLE_PARAGRAPH);
-            prompt.push_str("\n\n");
-            append_runtime_guidance(&mut prompt);
-            prompt.push_str(CONTRACT_HEADER);
-            prompt.push_str("\n\n");
-            for line in SHARED_CONTRACT_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            for line in DEFAULT_SPECIFIC_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            prompt.push('\n');
-            prompt.push_str(DEFAULT_OPERATING_PROFILE_DELTA);
-            prompt
-        }),
-        SystemPromptMode::Minimal => MINIMAL_SYSTEM_PROMPT.get_or_init(|| {
-            let mut prompt = String::new();
-            prompt.push_str(PROMPT_TITLE);
-            prompt.push_str("\n\n");
-            prompt.push_str(PROMPT_INTRO);
-            prompt.push_str("\n\n");
-            append_runtime_guidance(&mut prompt);
-            prompt.push_str(CONTRACT_HEADER);
-            prompt.push_str("\n\n");
-            for line in SHARED_CONTRACT_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            for line in MINIMAL_SPECIFIC_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            prompt.push('\n');
-            prompt.push_str(MINIMAL_OPERATING_PROFILE_DELTA);
-            prompt
-        }),
-        SystemPromptMode::Lightweight => DEFAULT_LIGHTWEIGHT_PROMPT.get_or_init(|| {
-            let mut prompt = String::new();
-            prompt.push_str(PROMPT_TITLE);
-            prompt.push_str("\n\n");
-            prompt.push_str(PROMPT_INTRO);
-            prompt.push_str("\n\n");
-            append_runtime_guidance(&mut prompt);
-            prompt.push_str(CONTRACT_HEADER);
-            prompt.push_str("\n\n");
-            for line in SHARED_CONTRACT_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            for line in DEFAULT_SPECIFIC_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            prompt.push('\n');
-            prompt.push_str(LIGHTWEIGHT_OPERATING_PROFILE_DELTA);
-            prompt
-        }),
-        SystemPromptMode::Specialized => DEFAULT_SPECIALIZED_PROMPT.get_or_init(|| {
-            let mut prompt = String::new();
-            prompt.push_str(PROMPT_TITLE);
-            prompt.push_str("\n\n");
-            prompt.push_str(PROMPT_INTRO);
-            prompt.push_str("\n\n");
-            prompt.push_str(PROMPT_ROLE_PARAGRAPH);
-            prompt.push_str("\n\n");
-            append_runtime_guidance(&mut prompt);
-            prompt.push_str(CONTRACT_HEADER);
-            prompt.push_str("\n\n");
-            for line in SHARED_CONTRACT_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            for line in DEFAULT_SPECIFIC_LINES {
-                prompt.push_str("- ");
-                prompt.push_str(line);
-                prompt.push('\n');
-            }
-            prompt.pop();
-            prompt.push('\n');
-            prompt.push('\n');
-            prompt.push_str(SPECIALIZED_OPERATING_PROFILE_DELTA);
-            prompt
-        }),
+        SystemPromptMode::Default => DEFAULT_SYSTEM_PROMPT
+            .get_or_init(|| build_static_prompt(true, DEFAULT_SPECIFIC_LINES, DEFAULT_OPERATING_PROFILE_DELTA)),
+        SystemPromptMode::Minimal => MINIMAL_SYSTEM_PROMPT
+            .get_or_init(|| build_static_prompt(false, MINIMAL_SPECIFIC_LINES, MINIMAL_OPERATING_PROFILE_DELTA)),
+        SystemPromptMode::Lightweight => DEFAULT_LIGHTWEIGHT_PROMPT
+            .get_or_init(|| build_static_prompt(false, DEFAULT_SPECIFIC_LINES, LIGHTWEIGHT_OPERATING_PROFILE_DELTA)),
+        SystemPromptMode::Specialized => DEFAULT_SPECIALIZED_PROMPT
+            .get_or_init(|| build_static_prompt(true, DEFAULT_SPECIFIC_LINES, SPECIALIZED_OPERATING_PROFILE_DELTA)),
     }
 }
 

@@ -156,16 +156,12 @@ pub fn generate_tool_guidelines_for_profile(
     }
     if has_exec {
         lines.push(shell_task_guidance(shell_profile).to_string());
-        // Verifier discipline ships with every exec-capable profile: the
-        // anti-blind-editing gate only clears on a truthful exit 0. Pure
-        // `| head`/`| tail` truncators are elided at execution (the verifier
-        // runs standalone with capped output), but filtering tails, `;`, and
-        // `||` still mask the status and stay unverified (checkpoint
-        // session-vtcode-20260912T083718Z).
-        lines.push(
-            "- Run verifiers unpiped — standalone or pure `&&`; prefer `max_output_tokens`; `| head`/`| tail` elided, other pipes/`;`/`||` stay unverified."
-                .to_string(),
-        );
+        // Verifier discipline: the anti-blind-editing gate only clears on a
+        // truthful exit 0. Runtime owns truncator elision and unverified
+        // classification (`tool_intent/activity.rs`, spool processing); the
+        // prompt keeps only the outcome rule so wording cannot drift from
+        // enforcement.
+        lines.push("- Run verifiers standalone or pure `&&`; pipes/`;`/`||` stay unverified.".to_string());
         // Tool-latency tail is dominated by full builds (observed p90 ~18s):
         // verify incrementally first. Kept tool-agnostic: fast checks exist
         // in every stack (`cargo check`, `tsc --noEmit`, `pytest --collect-only`).
@@ -187,7 +183,10 @@ pub fn generate_tool_guidelines_for_profile(
             "- Build and Auto share tools and safety gates; Auto changes confirmation behavior only after explicit approval or full-auto policy."
                 .to_string(),
         );
-        lines.push("- On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call. Run one verifier (`&&` chain, no pipes), then synthesize.".to_string());
+        lines.push(
+            "- On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call."
+                .to_string(),
+        );
     }
     if has_search || has_exec {
         lines.push("- Run independent tools in parallel when inputs do not depend on each other.".to_string());
@@ -301,16 +300,32 @@ pub fn append_runtime_tool_prompt_sections_for_model(
 }
 
 /// Append a compact summary of tools omitted from a client-local wire payload.
+///
+/// The listing is bounded like the `## Skills` routing section: at most
+/// `DEFERRED_TOOLS_MAX_GROUPS` groups are named and the rest collapse into one
+/// overflow line, so MCP-heavy sessions cannot bloat every request. Group
+/// descriptions are server-provided and unbounded, so each line is truncated
+/// to `DEFERRED_TOOLS_MAX_DESC_CHARS` characters.
 pub fn append_deferred_tools_prompt_section(prompt: &mut String, tools: &[ToolDefinition]) {
     remove_prompt_section(prompt, "[Deferred Tools]");
 
-    let mut lines: Vec<String> = tool_groups(tools)
+    let mut groups: Vec<_> = tool_groups(tools)
         .into_iter()
         .filter(|group| group.deferred_count > 0)
+        .collect();
+    let overflow = groups.len().saturating_sub(DEFERRED_TOOLS_MAX_GROUPS);
+    groups.truncate(DEFERRED_TOOLS_MAX_GROUPS);
+
+    let mut lines: Vec<String> = groups
+        .into_iter()
         .map(|group| {
-            format!("- {} ({} tools): {}", group.name, group.deferred_count, group.description.unwrap_or_default())
+            let description = truncate_deferred_description(group.description.as_deref().unwrap_or_default());
+            format!("- {} ({} tools): {}", group.name, group.deferred_count, description)
         })
         .collect();
+    if overflow > 0 {
+        lines.push(format!("(+{overflow} more deferred groups available — use `search_tools` to find them)"));
+    }
 
     let unnamespaced_deferred = tools
         .iter()
@@ -329,6 +344,21 @@ pub fn append_deferred_tools_prompt_section(prompt: &mut String, tools: &[ToolDe
         lines.join("\n")
     );
     append_prompt_block(prompt, &section);
+}
+
+/// Maximum deferred-tool groups named in the `[Deferred Tools]` prompt
+/// section before the rest collapse into one overflow line.
+const DEFERRED_TOOLS_MAX_GROUPS: usize = 8;
+/// Maximum characters of a group description in the section. Mirrors the
+/// `## Skills` line truncation: server-provided text must not bloat the prompt.
+const DEFERRED_TOOLS_MAX_DESC_CHARS: usize = 120;
+
+fn truncate_deferred_description(description: &str) -> String {
+    if description.chars().count() <= DEFERRED_TOOLS_MAX_DESC_CHARS {
+        return description.to_string();
+    }
+    let truncated: String = description.chars().take(DEFERRED_TOOLS_MAX_DESC_CHARS).collect();
+    format!("{}...", truncated.trim_end())
 }
 
 fn append_prompt_block(prompt: &mut String, block: &str) {
@@ -872,19 +902,81 @@ mod tests {
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("code_search"));
         // Shipped verifier discipline: every exec-capable profile must carry
-        // the truthful-status rule (unpiped/pure-`&&`, truncators elided at
-        // execution, other pipes stay unverified), and the budget test proves
-        // it fits.
+        // the truthful-status outcome rule (standalone/pure-`&&`, other
+        // pipes stay unverified). Elision and `max_output_tokens` detail
+        // lives in runtime enforcement, not prompt text.
         assert!(guidelines.contains("stay unverified"));
-        assert!(guidelines.contains("elided"));
-        assert!(guidelines.contains("max_output_tokens"));
+        assert!(guidelines.contains("pure `&&`"));
+        assert!(!guidelines.contains("elided"));
+        assert!(!guidelines.contains("max_output_tokens"));
         assert!(guidelines.contains("Build and Auto share tools and safety gates"));
         let approx_tokens = vtcode_commons::estimate_tokens(&guidelines);
         // The batching, bounded-diff, and shipped verifier-discipline
         // guardrails are intentionally part of the compact shared prompt; the
         // Keep the compact prompt bounded while retaining the explicit
         // Build/Auto parity contract and no-pipe verifier rule.
-        assert!(approx_tokens < 460, "got ~{approx_tokens} tokens");
+        assert!(approx_tokens < 500, "got ~{approx_tokens} tokens");
+    }
+
+    #[test]
+    fn deferred_tools_section_caps_groups_and_truncates_descriptions() {
+        use crate::llm::provider::ToolNamespace;
+
+        fn deferred_mcp_tool(server: &str, tool: &str, description: &str) -> ToolDefinition {
+            let mut definition = ToolDefinition::function(
+                format!("mcp__{server}__{tool}"),
+                "deferred".to_string(),
+                serde_json::json!({"type": "object"}),
+            );
+            definition.namespace = Some(ToolNamespace {
+                name: server.to_string(),
+                description: description.to_string(),
+            });
+            definition.defer_loading = Some(true);
+            definition
+        }
+
+        let mut tools = Vec::new();
+        for index in 0..10 {
+            tools.push(deferred_mcp_tool(&format!("server-{index:02}"), "search", "Tools provided by MCP server"));
+        }
+        // One group with an unbounded server-provided description.
+        tools.push(deferred_mcp_tool("server-long", "search", &"d".repeat(500)));
+
+        let mut prompt = "Base prompt".to_string();
+        append_deferred_tools_prompt_section(&mut prompt, &tools);
+
+        assert!(prompt.contains("[Deferred Tools]"));
+        assert!(prompt.contains("server-00 (1 tools)"));
+        assert!(prompt.contains("server-07 (1 tools)"));
+        assert!(!prompt.contains("server-08 (1 tools)"), "groups past the cap must collapse into overflow");
+        assert!(!prompt.contains("server-09 (1 tools)"));
+        assert!(
+            prompt.contains("(+3 more deferred groups available"),
+            "10 named groups + 1 long group over the 8-group cap overflows by 3"
+        );
+        assert!(!prompt.contains(&"d".repeat(121)), "group descriptions must stay truncated");
+        assert!(prompt.contains("Use `search_tools` to find a deferred capability"));
+
+        // Idempotent: re-appending replaces the section instead of duplicating it.
+        append_deferred_tools_prompt_section(&mut prompt, &tools);
+        assert_eq!(prompt.matches("[Deferred Tools]").count(), 1);
+    }
+
+    #[test]
+    fn deferred_tools_section_omits_empty_and_fully_loaded_groups() {
+        let mut prompt = "Base prompt".to_string();
+        append_deferred_tools_prompt_section(&mut prompt, &[]);
+        assert!(!prompt.contains("[Deferred Tools]"));
+
+        let loaded = ToolDefinition::function(
+            "exec_command".to_string(),
+            "Shell".to_string(),
+            serde_json::json!({"type": "object"}),
+        );
+        let mut prompt = "Base prompt".to_string();
+        append_deferred_tools_prompt_section(&mut prompt, &[loaded]);
+        assert!(!prompt.contains("[Deferred Tools]"));
     }
 
     #[test]
