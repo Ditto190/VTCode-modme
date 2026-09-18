@@ -1230,6 +1230,40 @@ impl AgentRunner {
                                 }
                             }
                         }
+                    } else {
+                        // Tracker-aware status continuation: text-only responses
+                        // that are not completion candidates still must not end
+                        // the run while the task tracker has incomplete steps.
+                        let tracker_auto_continue = self.config().agent.harness.continuation.auto_continue_tracker;
+                        let idle_limit = self.config().agent.idle_turn_limit;
+                        let idle_limit_hit = runtime.state.consecutive_idle_turns >= idle_limit;
+                        let asks_user = response.content_text().contains('?');
+                        let tracker_assessment = if tracker_auto_continue && !idle_limit_hit && !asks_user {
+                            continuation_controller
+                                .assess_completion(&effective_task, &runtime.state)
+                                .await?
+                        } else {
+                            CompletionAssessment::SkipAccept {
+                                reason: "tracker status continuation skipped".to_string(),
+                            }
+                        };
+                        if let CompletionAssessment::Continue { prompt, reason } = tracker_assessment {
+                            if super::continuation::tracker_status_force_continue_eligible(
+                                tracker_auto_continue,
+                                idle_limit_hit,
+                                asks_user,
+                                &reason,
+                            ) {
+                                self.runner_println(format_args!(
+                                    "[{}] {}: {}",
+                                    self.agent_type,
+                                    style("[TRACKER CONTINUE]").yellow().bold(),
+                                    reason
+                                ));
+                                runtime.state.add_user_message(prompt);
+                                forced_continuation = true;
+                            }
+                        }
                     }
                 }
 

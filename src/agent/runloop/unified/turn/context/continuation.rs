@@ -183,6 +183,37 @@ pub(super) fn evaluate_interim_text_continuation(
     d(false, "interactive_mode")
 }
 
+/// Tracker-aware override: when `task_tracker` still has incomplete steps,
+/// status-only responses (including "blocked by budget" / "next step on
+/// resume" recaps) must not end the turn and nudge the user. Force a
+/// non-relaxed continuation unless the text genuinely needs user input.
+pub(super) fn apply_tracker_continuation_override(
+    mut decision: InterimTextContinuationDecision,
+    tracker_incomplete: bool,
+    planning_active: bool,
+    text: &str,
+) -> InterimTextContinuationDecision {
+    if !tracker_incomplete || planning_active || decision.should_continue {
+        return decision;
+    }
+    let lower = text.to_ascii_lowercase();
+    if text.trim().is_empty() {
+        return decision;
+    }
+    // Genuine user decision / interview handoff still ends the turn.
+    if text.contains('?') || contains_user_input_request(&lower) {
+        return decision;
+    }
+    // Explicit blocked-handoff phrases that require the user (not budget).
+    if lower.contains("requires manual intervention") || lower.contains("missing credentials") {
+        return decision;
+    }
+    decision.should_continue = true;
+    decision.reason = "tracker_incomplete_continuation";
+    decision.is_relaxed_continuation = false;
+    decision
+}
+
 /// Classify the outcome emitted with the text-response telemetry record.
 ///
 /// The canonical turn events still describe completed and blocked turns. This
@@ -1508,5 +1539,34 @@ mod tests {
             !evaluate_interim_text_continuation(true, false, &history, &recap, 0).should_continue,
             "a conclusive recap closing with an optional-work offer must end the turn"
         );
+    }
+
+    #[test]
+    fn tracker_incomplete_override_continues_status_recaps() {
+        use super::apply_tracker_continuation_override;
+        let history: Vec<uni::Message> = Vec::new();
+        let recap = "## Status\nBlocked by turn budget. Next step on resume: read design/diff.rs.";
+        let base = evaluate_interim_text_continuation(true, false, &history, recap, 0);
+        assert!(!base.should_continue);
+        let overridden = apply_tracker_continuation_override(base, true, false, recap);
+        assert!(overridden.should_continue);
+        assert_eq!(overridden.reason, "tracker_incomplete_continuation");
+        assert!(!overridden.is_relaxed_continuation);
+
+        let question = "Should I proceed with the remaining steps?";
+        let q_base = evaluate_interim_text_continuation(true, false, &history, question, 0);
+        let q_over = apply_tracker_continuation_override(q_base, true, false, question);
+        assert!(!q_over.should_continue);
+
+        let plan_over = apply_tracker_continuation_override(
+            evaluate_interim_text_continuation(true, true, &history, recap, 0),
+            true,
+            true,
+            recap,
+        );
+        assert!(!plan_over.should_continue);
+
+        let complete_tracker = apply_tracker_continuation_override(base, false, false, recap);
+        assert!(!complete_tracker.should_continue);
     }
 }

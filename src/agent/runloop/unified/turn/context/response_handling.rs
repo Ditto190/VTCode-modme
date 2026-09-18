@@ -677,6 +677,27 @@ impl<'a> TurnProcessingContext<'a> {
             )
         };
 
+        // Tracker-aware override (shipped runloop surface): when task_tracker
+        // still has incomplete steps, status recaps must continue instead of
+        // ending the turn and nudging the user. Tool-free recovery and
+        // completed-plan branches above stay terminal in-turn; the outer
+        // session loop schedules the next tracker turn after those ends.
+        let continuation_decision = if !continuation_decision.should_continue
+            && !tool_free_recovery_pass
+            && proposed_plan.is_none()
+            && !self.is_planning_active()
+            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
+            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::incomplete_tracker_items(
+                self.tool_registry,
+            )
+            .await
+            .is_some()
+        {
+            apply_tracker_continuation_override(continuation_decision, true, self.is_planning_active(), &text)
+        } else {
+            continuation_decision
+        };
+
         // Track consecutive relaxed continuations to prevent infinite loops.
         if continuation_decision.should_continue && continuation_decision.is_relaxed_continuation {
             self.harness_state.consecutive_relaxed_continuations += 1;

@@ -93,6 +93,10 @@ pub(crate) struct SessionStats {
     /// long-running autonomous work survive transient verification misses
     /// without user intervention.
     verification_auto_recovery_turns: u8,
+    /// Bounded autonomous turns scheduled after a recoverable turn end while
+    /// `task_tracker` still has incomplete steps. Separate from the
+    /// verification budget; reset on genuine user input and completed tracker.
+    tracker_continuation_turns: u8,
     /// Consecutive failed harness auto-verifications this stall episode.
     /// Incremented by [`Self::record_verification_auto_failure`], reset by
     /// [`Self::record_verification_auto_success`] and every
@@ -527,6 +531,7 @@ impl SessionStats {
             self.turn_stalled = false;
             self.turn_stall_reason = None;
             self.reset_verification_recovery_episode();
+            self.reset_tracker_continuation_budget();
             return FollowUpPromptAction::None;
         }
 
@@ -586,6 +591,24 @@ impl SessionStats {
         self.verification_auto_recovery_turns
     }
 
+    /// Record one tracker auto-continue turn. Returns `true` when budget
+    /// remained (`max_turns`); `false` once exhausted.
+    pub(crate) fn record_tracker_continuation_turn_with_limit(&mut self, max_turns: u8) -> bool {
+        if self.tracker_continuation_turns >= max_turns {
+            return false;
+        }
+        self.tracker_continuation_turns = self.tracker_continuation_turns.saturating_add(1);
+        true
+    }
+
+    pub(crate) fn tracker_continuation_turns(&self) -> u8 {
+        self.tracker_continuation_turns
+    }
+
+    pub(crate) fn reset_tracker_continuation_budget(&mut self) {
+        self.tracker_continuation_turns = 0;
+    }
+
     /// Record a failed harness auto-verification of `command`, keeping a
     /// bounded tail of its output for the escalated handoff. Returns the new
     /// consecutive-failure count so callers can compare against the
@@ -632,6 +655,7 @@ impl SessionStats {
         self.verification_auto_recovery_turns = 0;
         self.verification_consecutive_failures = 0;
         self.last_verification_failure = None;
+        self.reset_tracker_continuation_budget();
     }
 
     #[cfg(test)]
