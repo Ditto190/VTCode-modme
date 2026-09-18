@@ -571,7 +571,6 @@ pub(crate) struct HarnessTurnState {
     streamed_tool_call_item_ids: HashMap<String, StreamedToolCallItem>,
     pub stop_hook_active: bool,
     pub seen_task_tracker_create_signatures: HashSet<String>,
-    pub replaceable_task_tracker_block: Option<Vec<String>>,
     pub recently_written_files: HashSet<String>,
     pub tool_budget_warning_emitted: bool,
     pub tool_budget_exhausted_emitted: bool,
@@ -724,7 +723,6 @@ impl HarnessTurnState {
             streamed_tool_call_item_ids: HashMap::new(),
             stop_hook_active: false,
             seen_task_tracker_create_signatures: HashSet::new(),
-            replaceable_task_tracker_block: None,
             recently_written_files: HashSet::new(),
             tool_budget_warning_emitted: false,
             tool_budget_exhausted_emitted: false,
@@ -1652,19 +1650,6 @@ impl HarnessTurnState {
     /// they do not dangle as `item.started` forever.
     pub(crate) fn take_all_streamed_tool_call_item_ids(&mut self) -> Vec<(String, StreamedToolCallItem)> {
         self.streamed_tool_call_item_ids.drain().collect()
-    }
-
-    pub(crate) fn replaceable_task_tracker_count(&self) -> Option<usize> {
-        let lines = self.replaceable_task_tracker_block.as_ref()?;
-        vtcode_core::utils::transcript::tail_matches(lines).then_some(lines.len())
-    }
-
-    pub(crate) fn is_same_as_remembered_task_tracker_block(&self, lines: &[String]) -> bool {
-        self.replaceable_task_tracker_block.as_deref() == Some(lines)
-    }
-
-    pub(crate) fn remember_task_tracker_block(&mut self, lines: Vec<String>) {
-        self.replaceable_task_tracker_block = (!lines.is_empty()).then_some(lines);
     }
 
     pub(crate) fn set_phase(&mut self, phase: TurnPhase) {

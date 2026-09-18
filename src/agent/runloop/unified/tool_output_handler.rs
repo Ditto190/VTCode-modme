@@ -318,39 +318,66 @@ fn render_tracker_inline_row(
     wrote_body.then_some(segments)
 }
 
-fn apply_task_tracker_block(
-    handle: &InlineHandle,
-    harness_state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
-    lines: Vec<String>,
-) {
-    // Identical repeats (approval handoff followed by the same pipeline
-    // result, or unchanged `list` calls) must not stack a second full block
-    // in the transcript. The docked panel already reflects the latest state.
-    if harness_state.is_same_as_remembered_task_tracker_block(&lines) {
+/// Single writer for user-facing tracker transcript blocks.
+///
+/// Approval handoff and the tool pipeline must share replace/dedupe so progress
+/// updates never stack a second block. Replace only when the remembered tracker
+/// block is still the transcript tail (or the tail itself looks like a tracker
+/// progress line) — never blindly truncate intervening content.
+pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Vec<String>) {
+    if lines.is_empty() {
         return;
     }
-    // The approval handoff appends directly without updating `HarnessTurnState`,
-    // so an identical pipeline replay would otherwise stack a second block.
-    // Remember it here so later updates still replace this block instead of
-    // appending.
     if transcript::tail_matches(&lines) {
-        harness_state.remember_task_tracker_block(lines);
+        transcript::remember_tracker_block(lines);
         return;
     }
-    let replace_count = harness_state.replaceable_task_tracker_count();
     let segments = task_tracker_block_segments(&lines);
-
-    if let Some(count) = replace_count {
+    if let Some(count) = transcript::tracker_block_len_if_at_tail() {
         handle.replace_last(count, InlineMessageKind::Tool, segments);
         transcript::replace_last(count, &lines);
-    } else {
-        for (segments, plain_line) in segments.into_iter().zip(lines.iter()) {
-            handle.append_line(InlineMessageKind::Tool, segments);
-            transcript::append(plain_line);
-        }
+        transcript::remember_tracker_block(lines);
+        return;
     }
+    // Design fallback: remembered block drifted; if the tail itself is a
+    // tracker progress line, replace that single line instead of stacking.
+    if transcript::last_line().is_some_and(|last| looks_like_tracker_progress_line(&last)) {
+        handle.replace_last(1, InlineMessageKind::Tool, segments);
+        transcript::replace_last(1, &lines);
+        transcript::remember_tracker_block(lines);
+        return;
+    }
+    for (segments, plain_line) in segments.into_iter().zip(lines.iter()) {
+        handle.append_line(InlineMessageKind::Tool, segments);
+        transcript::append(plain_line);
+    }
+    transcript::remember_tracker_block(lines);
+}
 
-    harness_state.remember_task_tracker_block(lines);
+fn looks_like_tracker_progress_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("• ") {
+        return false;
+    }
+    if trimmed.starts_with("• Plan") || trimmed.starts_with("• Ran") {
+        return false;
+    }
+    trimmed.starts_with("• Tasks")
+        || trimmed.split_whitespace().any(|token| {
+            let mut parts = token.split('/');
+            matches!((parts.next(), parts.next(), parts.next()), (Some(a), Some(b), None) if !a.is_empty()
+                && !b.is_empty()
+                && a.chars().all(|c| c.is_ascii_digit())
+                && b.chars().all(|c| c.is_ascii_digit()))
+        })
+}
+
+fn apply_task_tracker_block(
+    handle: &InlineHandle,
+    _harness_state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
+    lines: Vec<String>,
+) {
+    write_tracker_progress_transcript(handle, lines);
 }
 
 /// Extract the command string from tool call arguments for display.
@@ -1665,6 +1692,7 @@ mod tests {
     fn identical_task_tracker_block_is_not_appended_twice() {
         // Approval handoff + pipeline replay (or repeated `list` calls) emit
         // the same payload. The transcript must keep one block, not two.
+        transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut harness_state = build_harness_state();
@@ -1673,6 +1701,7 @@ mod tests {
             "checklist": {
                 "completed": 1,
                 "total": 3,
+                "title": "Release",
                 "items": [
                     { "index_path": "1", "description": "Release", "status": "in_progress" },
                     { "index_path": "1.1", "description": "Update version", "status": "completed" },
@@ -1688,6 +1717,91 @@ mod tests {
         apply_task_tracker_block(&handle, &mut harness_state, lines);
 
         assert!(receiver.try_recv().is_err(), "identical tracker repeat must not emit another transcript command");
+        transcript::clear();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn write_tracker_progress_transcript_replaces_previous_block_on_change() {
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let first = vec!["• Release 0/2".to_string()];
+        let second = vec!["• Release 1/2".to_string()];
+
+        write_tracker_progress_transcript(&handle, first);
+        while receiver.try_recv().is_ok() {}
+        write_tracker_progress_transcript(&handle, second.clone());
+
+        let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
+            InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
+            _ => None,
+        });
+        let (count, rows) = replacement.expect("changed progress must replace the previous tracker block");
+        let rows = rows
+            .into_iter()
+            .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(count, 1);
+        assert_eq!(rows, second);
+        transcript::clear();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn write_tracker_progress_transcript_does_not_clobber_intervening_lines() {
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        write_tracker_progress_transcript(&handle, vec!["• Release 0/2".to_string()]);
+        while receiver.try_recv().is_ok() {}
+        // Intervening transcript content after the tracker block.
+        transcript::append("Now applying the edit");
+
+        write_tracker_progress_transcript(&handle, vec!["• Release 1/2".to_string()]);
+
+        let commands: Vec<InlineCommand> = std::iter::from_fn(|| receiver.try_recv().ok()).collect();
+        let appended = commands
+            .iter()
+            .any(|command| matches!(command, InlineCommand::AppendLine { .. }));
+        let replaced = commands
+            .iter()
+            .any(|command| matches!(command, InlineCommand::ReplaceLast { .. }));
+        assert!(appended && !replaced, "must append after intervening lines instead of replace_last clobber");
+        let snap = transcript::snapshot();
+        assert!(snap.contains(&"Now applying the edit".to_string()));
+        assert_eq!(
+            snap.iter().filter(|line| line.starts_with("• Release")).count(),
+            2,
+            "old block remains under intervening line; new block appended (no silent clobber)"
+        );
+        transcript::clear();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn write_tracker_progress_transcript_replaces_tail_tracker_progress_line() {
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        transcript::append("• Tasks 0/1");
+        while receiver.try_recv().is_ok() {}
+
+        write_tracker_progress_transcript(&handle, vec!["• Release 1/1".to_string()]);
+
+        let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
+            InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
+            _ => None,
+        });
+        let (count, rows) = replacement.expect("tail tracker progress line should be replaced");
+        let rows = rows
+            .into_iter()
+            .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(count, 1);
+        assert_eq!(rows, vec!["• Release 1/1".to_string()]);
+        assert_eq!(transcript::snapshot(), vec!["• Release 1/1".to_string()]);
+        transcript::clear();
     }
 
     #[test]
@@ -1725,7 +1839,7 @@ mod tests {
             receiver.try_recv().is_err(),
             "pipeline replay after approval handoff must not emit another transcript command"
         );
-        assert!(harness_state.is_same_as_remembered_task_tracker_block(&lines));
+        assert!(transcript::tracker_block_matches(&lines));
         transcript::clear();
     }
 

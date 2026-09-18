@@ -4,7 +4,7 @@ use vtcode_commons::paths::ensure_path_within_workspace_resolved;
 use vtcode_core::config::constants::tools;
 use vtcode_core::tools::handlers::task_tracking::split_task_description_metadata;
 use vtcode_core::tools::registry::ToolRegistry;
-use vtcode_ui::tui::app::{InlineHandle, InlineMessageKind, PlanContent};
+use vtcode_ui::tui::app::{InlineHandle, PlanContent};
 
 use super::tracker_response::resolve_tracker_file_response;
 use super::validate_plan_content;
@@ -18,21 +18,14 @@ fn render_created_task_tracker(handle: &InlineHandle, output: &serde_json::Value
 
     // Approval creates the tracker outside the normal tool pipeline, so make
     // the same panel/transcript updates that a regular task_tracker call gets.
-    // Panel body keeps the compact tree; transcript stays title+progress only.
+    // Panel body keeps the compact tree; transcript stays title+progress only
+    // and uses the shared single-writer path (never stacks duplicates).
     handle.update_task_panel_with_metadata(
         panel_lines,
         crate::agent::runloop::tool_output::tracker_panel_metadata(output),
     );
     handle.show_task_panel();
-    if progress_lines.is_empty() {
-        return;
-    }
-    // Skip the transcript append when the same progress line is already visible
-    // so the approval handoff and its pipeline replay do not stack duplicates.
-    if vtcode_core::utils::transcript::tail_matches(&progress_lines) {
-        return;
-    }
-    handle.append_pasted_message(InlineMessageKind::Tool, progress_lines.join("\n"), progress_lines.len());
+    crate::agent::runloop::unified::tool_output_handler::write_tracker_progress_transcript(handle, progress_lines);
 }
 
 #[derive(Debug, Clone)]
@@ -360,6 +353,21 @@ mod tests {
         let error = resolve_tracker_file_response(&result, Some(workspace), fallback).unwrap_err();
 
         assert!(error.to_string().contains("escapes workspace"));
+    }
+
+    #[test]
+    fn scope_section_is_not_distilled_into_tracker_items() {
+        let plan = PlanContent::from_markdown(
+            "scope-test".to_string(),
+            "## Summary\nShip a focused change.\n\n## Scope\n- In: README intro\n- Out: unrelated modules\n\n## Implementation Steps\n1. Tighten intro -> files: [README.md] -> verify: [rg -n 'Why VT Code' README.md]\n\n## Test Cases and Validation\n- rg check\n\n## Assumptions and Defaults\n- Leave unrelated modules alone.\n",
+            None,
+        );
+        let items = task_items_from_plan(&plan);
+        assert_eq!(items.len(), 1, "only Implementation Steps become tracker items: {items:?}");
+        let description = items[0].get("description").and_then(|value| value.as_str()).unwrap_or_default();
+        assert!(description.contains("Tighten intro"));
+        assert!(!description.contains("Out:"));
+        assert!(!description.contains("In:"));
     }
 
     #[test]
