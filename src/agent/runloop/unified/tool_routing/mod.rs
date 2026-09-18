@@ -1528,8 +1528,17 @@ pub(crate) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
     ctrl_c_state: &Arc<CtrlCState>,
     ctrl_c_notify: &Arc<Notify>,
     max_limit: usize,
+    hard_cap: usize,
     agent_name: Option<&str>,
 ) -> Result<Option<usize>> {
-    limit_prompts::prompt_tool_loop_limit_increase(handle, session, ctrl_c_state, ctrl_c_notify, max_limit, agent_name)
-        .await
+    limit_prompts::prompt_tool_loop_limit_increase(
+        handle,
+        session,
+        ctrl_c_state,
+        ctrl_c_notify,
+        max_limit,
+        hard_cap,
+        agent_name,
+    )
+    .await
 }

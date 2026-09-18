@@ -391,7 +391,7 @@ impl TurnDiffTracker {
     /// Get unified diff for all tracked changes (from Codex)
     ///
     /// Output is deterministic: entries are emitted in sorted path order.
-    /// Entries whose content exceeds [`MAX_TRACKED_CONTENT_BYTES`] render as a
+    /// Entries whose content exceeds [`MAX_PREVIEW_BYTES`] render as a
     /// one-line summary instead of a full diff to keep previews bounded.
     pub fn get_unified_diff(&self) -> String {
         let mut diff = String::new();

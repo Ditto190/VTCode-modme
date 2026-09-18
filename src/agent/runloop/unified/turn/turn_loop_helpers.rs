@@ -222,6 +222,7 @@ fn apply_tool_loop_grant(
     ctx: &mut TurnLoopContext<'_>,
     current_max_tool_loops: &mut usize,
     increment: usize,
+    requested_increment: usize,
     hard_cap: usize,
     auto_granted: bool,
 ) -> Result<ToolLoopLimitAction> {
@@ -260,6 +261,11 @@ fn apply_tool_loop_grant(
         format!(
             "Full-auto auto-granted +{} tool loops (limit {}, cap {})",
             increment, *current_max_tool_loops, hard_cap,
+        )
+    } else if requested_increment != increment {
+        format!(
+            "Tool loop limit increased to {} (+{}, requested +{}, cap {})",
+            *current_max_tool_loops, increment, requested_increment, hard_cap,
         )
     } else {
         format!("Tool loop limit increased to {} (+{}, cap {})", *current_max_tool_loops, increment, hard_cap,)
@@ -672,10 +678,13 @@ pub(super) async fn maybe_handle_tool_loop_limit(
                 hard_cap,
                 "no_remaining_headroom",
             );
-            display_status(ctx.renderer, "Tool loop limit cannot be increased further for this turn.")?;
+            display_status(
+                ctx.renderer,
+                &format!("Tool loop limit cannot be increased further for this turn (already at cap {hard_cap})."),
+            )?;
             return Ok(ToolLoopLimitAction::BreakLoop);
         }
-        return apply_tool_loop_grant(ctx, current_max_tool_loops, increment, hard_cap, true);
+        return apply_tool_loop_grant(ctx, current_max_tool_loops, increment, increment, hard_cap, true);
     } else {
         crate::agent::runloop::unified::tool_routing::prompt_tool_loop_limit_increase(
             ctx.handle,
@@ -683,6 +692,7 @@ pub(super) async fn maybe_handle_tool_loop_limit(
             ctx.ctrl_c_state,
             ctx.ctrl_c_notify,
             *current_max_tool_loops,
+            hard_cap,
             Some(ctx.active_primary_agent.active().name()),
         )
         .await
@@ -700,10 +710,13 @@ pub(super) async fn maybe_handle_tool_loop_limit(
                     hard_cap,
                     "no_remaining_headroom",
                 );
-                display_status(ctx.renderer, "Tool loop limit cannot be increased further for this turn.")?;
+                display_status(
+                    ctx.renderer,
+                    &format!("Tool loop limit cannot be increased further for this turn (already at cap {hard_cap})."),
+                )?;
                 return Ok(ToolLoopLimitAction::BreakLoop);
             }
-            apply_tool_loop_grant(ctx, current_max_tool_loops, increment, hard_cap, false)
+            apply_tool_loop_grant(ctx, current_max_tool_loops, increment, requested_increment, hard_cap, false)
         }
         _ => {
             display_status(

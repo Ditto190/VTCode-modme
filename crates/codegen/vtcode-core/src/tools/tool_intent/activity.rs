@@ -345,7 +345,7 @@ fn is_pure_truncation_stage(stage: &str) -> bool {
 ///   chains pass, whose `&&` exit status is truthful; output redirects such
 ///   as `> build.log` are preserved verbatim in the head and do not mask the
 ///   status, so they rewrite safely);
-/// - every tail stage is a pure [`is_pure_truncation_stage`] truncator, so
+/// - every tail stage is a pure `is_pure_truncation_stage` truncator, so
 ///   `grep`/`wc`/`sort` tails (whose filtering is real work) are preserved.
 ///
 /// Returns the standalone verifier text, or `None` when the command must run
