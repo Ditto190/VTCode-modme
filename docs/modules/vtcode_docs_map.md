@@ -120,7 +120,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/diff-preview.md`
   - **Content**: Diff Preview Architecture
-  - **User Questions**: "What can you tell me about Diff Preview Architecture?"
+  - **Topics**: Turn aggregation, event fields, and themes
+  - **User Questions**: "What can you tell me about Diff Preview Architecture?", "How does Turn aggregation, event fields, and themes work?"
 
 - **File**: `docs/development/EXTENSION_BOUNDARIES.md`
   - **Content**: Extension Boundaries in VT Code

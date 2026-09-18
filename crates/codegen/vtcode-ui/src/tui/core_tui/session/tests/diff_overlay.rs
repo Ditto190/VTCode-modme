@@ -47,6 +47,27 @@ fn diff_overlay_renders_inline_by_default() {
 }
 
 #[test]
+fn diff_overlay_header_keeps_counts_visible_for_long_paths() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let long_path = format!("src/{}", "very/long/directory/segment/".repeat(12) + "component.rs");
+    session.show_diff_overlay(app_types::DiffOverlayRequest {
+        file_path: long_path,
+        before: "fn old() {}\n".to_string(),
+        after: "fn new() {}\n".to_string(),
+        hunks: Vec::new(),
+        current_hunk: 0,
+        mode: app_types::DiffPreviewMode::EditApproval,
+    });
+
+    let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
+    let header_line = lines
+        .iter()
+        .find(|line| line.contains("← Edit"))
+        .expect("header line should render");
+    assert!(header_line.contains("(+1 -1)"), "counts must stay visible: {header_line}");
+}
+
+#[test]
 fn diff_overlay_edit_approval_keys_remain_unchanged() {
     let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
 

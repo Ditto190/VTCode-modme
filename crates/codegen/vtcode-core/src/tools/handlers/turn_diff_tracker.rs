@@ -6,9 +6,11 @@
 //! Supports Agent Trace attribution tracking for AI-generated code.
 
 use hashbrown::HashMap;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::config::constants::diff::MAX_PREVIEW_BYTES;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use vtcode_diff::{DiffOptions, format_unified_diff};
@@ -251,6 +253,23 @@ pub struct TurnDiffTracker {
     current_attribution: Option<ChangeAttribution>,
 }
 
+impl FileChange {
+    /// Whether any stored content side exceeds `limit` bytes.
+    pub fn exceeds_content_limit(&self, limit: usize) -> bool {
+        match &self.kind {
+            FileChangeKind::Add { content } => content.len() > limit,
+            FileChangeKind::Delete { original_content } => original_content.len() > limit,
+            FileChangeKind::Update { old_content, new_content } => {
+                old_content.len() > limit || new_content.len() > limit
+            }
+            FileChangeKind::Rename { old_content, new_content, .. } => {
+                old_content.as_deref().is_some_and(|content| content.len() > limit)
+                    || new_content.as_deref().is_some_and(|content| content.len() > limit)
+            }
+        }
+    }
+}
+
 impl TurnDiffTracker {
     pub fn new() -> Self {
         Self::default()
@@ -370,11 +389,26 @@ impl TurnDiffTracker {
     }
 
     /// Get unified diff for all tracked changes (from Codex)
+    ///
+    /// Output is deterministic: entries are emitted in sorted path order.
+    /// Entries whose content exceeds [`MAX_TRACKED_CONTENT_BYTES`] render as a
+    /// one-line summary instead of a full diff to keep previews bounded.
     pub fn get_unified_diff(&self) -> String {
         let mut diff = String::new();
 
-        for (path, change) in &self.changes {
+        let mut entries: Vec<(&PathBuf, &FileChange)> = self.changes.iter().collect();
+        entries.sort_by(|(left, _), (right, _)| (*left).cmp(*right));
+
+        for (path, change) in entries {
             let path_str = path.display();
+            if change.exceeds_content_limit(MAX_PREVIEW_BYTES) {
+                let _ = write!(
+                    diff,
+                    "diff --git a/{path_str} b/{path_str}\n@@ summary: content exceeds {MAX_PREVIEW_BYTES} bytes; full diff suppressed\n"
+                );
+                diff.push('\n');
+                continue;
+            }
             match &change.kind {
                 FileChangeKind::Add { content } => {
                     let new_label = path_str.to_string();

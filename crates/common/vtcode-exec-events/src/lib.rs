@@ -1060,6 +1060,18 @@ pub struct FileChangeItem {
     pub changes: Vec<FileUpdateChange>,
     /// Whether the patch application succeeded.
     pub status: PatchApplyStatus,
+    /// Optional precomputed unified diff for the change set.
+    ///
+    /// Populated by the turn diff tracker so consumers can render per-change
+    /// previews without recomputation. Absent in older events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unified_diff: Option<String>,
+    /// Optional added-line count for the change set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u64>,
+    /// Optional deleted-line count for the change set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1299,6 +1311,38 @@ mod tests {
         assert!(size_of::<Option<Box<McpToolCallItem>>>() < size_of::<Option<McpToolCallItem>>());
         assert!(size_of::<Option<Box<WebSearchItem>>>() < size_of::<Option<WebSearchItem>>());
         assert!(size_of::<Option<Box<HarnessEventItem>>>() < size_of::<Option<HarnessEventItem>>());
+    }
+
+    #[test]
+    fn file_change_item_optional_diff_fields_round_trip() -> Result<(), Box<dyn Error>> {
+        // Legacy payload without the new optional fields must deserialize.
+        let legacy_json = r#"{
+            "changes": [{"path": "src/main.rs", "kind": "add"}],
+            "status": "completed"
+        }"#;
+        let legacy: FileChangeItem = serde_json::from_str(legacy_json)?;
+        assert!(legacy.unified_diff.is_none());
+        assert!(legacy.additions.is_none());
+        assert!(legacy.deletions.is_none());
+
+        // New fields are omitted from output when unset.
+        let legacy_reserialized = serde_json::to_value(&legacy)?;
+        assert!(legacy_reserialized.get("unified_diff").is_none());
+        assert!(legacy_reserialized.get("additions").is_none());
+        assert!(legacy_reserialized.get("deletions").is_none());
+
+        // Populated fields survive a round trip.
+        let populated = FileChangeItem {
+            changes: legacy.changes.clone(),
+            status: PatchApplyStatus::Completed,
+            unified_diff: Some("diff --git a/x b/x\n".to_string()),
+            additions: Some(3),
+            deletions: Some(1),
+        };
+        let json = serde_json::to_string(&populated)?;
+        let restored: FileChangeItem = serde_json::from_str(&json)?;
+        assert_eq!(restored, populated);
+        Ok(())
     }
 
     #[test]

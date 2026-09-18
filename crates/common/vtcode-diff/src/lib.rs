@@ -1120,6 +1120,11 @@ pub fn annotate_word_level_diffs(lines: &mut [DiffDisplayLine]) {
 }
 
 fn annotate_word_level_diffs_with_timeout(lines: &mut [DiffDisplayLine], timeout: Duration) {
+    // Binary content (NUL bytes) makes word-level refinement meaningless and
+    // expensive; skip it entirely so intraline work stays within budget.
+    if lines.iter().any(|line| line.text.as_bytes().contains(&0)) {
+        return;
+    }
     let deadline = Instant::now().checked_add(timeout);
     let mut index = 0usize;
     while index < lines.len() {
@@ -2136,6 +2141,47 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(document.stats.additions > 0);
         assert!(document.stats.deletions > 0);
+    }
+
+    #[test]
+    fn crlf_line_endings_are_preserved() {
+        let document = DiffDocument::between("a\r\nb\r\n", "a\r\nc\r\n", DiffOptions::default());
+        assert_eq!(document.hunks.len(), 1);
+        let texts: Vec<&str> = document.hunks[0].lines.iter().map(|line| line.text.as_str()).collect();
+        assert!(texts.contains(&"a\r\n"));
+        assert!(texts.contains(&"b\r\n"));
+        assert!(texts.contains(&"c\r\n"));
+    }
+
+    #[test]
+    fn missing_final_newline_emits_hint() {
+        let document = DiffDocument::between("a\nb", "a\nb\n", DiffOptions::default());
+        let formatted = format_unified_hunks(&document.hunks, &DiffOptions::default());
+        assert!(formatted.contains("\\ No newline at end of file"));
+    }
+
+    #[test]
+    fn zero_context_insert_hunk_header_is_git_compatible() {
+        let options = DiffOptions { context_lines: 0, ..DiffOptions::default() };
+        let document = DiffDocument::between("", "x\ny\n", options.clone());
+        let formatted = format_unified_hunks(&document.hunks, &options);
+        assert!(formatted.contains("@@ -0,0 +1,2 @@"));
+    }
+
+    #[test]
+    fn binary_content_skips_intraline_annotation() {
+        let binary_old = "data\u{0}one\nshared\n";
+        let binary_new = "data\u{0}two\nshared\n";
+        let lines =
+            display_lines_from_hunks(&DiffDocument::between(binary_old, binary_new, DiffOptions::default()).hunks);
+        let annotated: Vec<_> = lines.iter().filter(|line| !line.changed.is_empty()).collect();
+        assert!(annotated.is_empty(), "binary lines must not receive intraline ranges");
+
+        // Sanity: text content still gets intraline ranges.
+        let text_lines = display_lines_from_hunks(
+            &DiffDocument::between("alpha beta\n", "alpha gamma\n", DiffOptions::default()).hunks,
+        );
+        assert!(text_lines.iter().any(|line| !line.changed.is_empty()));
     }
 
     #[cfg(feature = "ansi")]
