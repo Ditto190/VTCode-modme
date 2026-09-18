@@ -10,6 +10,10 @@ Also, idea, in the plan mode approval modal, add a summarized section that provi
 
 ===
 
+fix plan mode summarization text being truncated and not showing full text. '/Users/vinhnguyenxuan/Documents/vtcode-resources/bugs/Screenshot 2026-09-18 at 10.04.42.png'
+
+===
+
 CRITICAL: check the message queues system. currently when it picking messages from the queue, it only use the last message and ignores the rest and the queue get cleared. This is CRITICAL and needs immediate attention.
 
 ===
@@ -479,32 +483,61 @@ System One produces structured outputs optimized for code, with type correctness
 
 PLAN: TypeSafe System One plugin for VT Code harness (opt-in, user-configured, not tightly integrated)
 
-Goal: ship `typesafe-systemone` as an Agent Plugin (plugin.json + skills/*/SKILL.md + optional mcp.json) that gives users calibrated smart if-statements (Choice/Score/Noul + confidence) for safety gating, context filtering, and claim verification. No core changes, default off, zero behavior change without TYPESAFE_API_KEY.
+Goal: ship `typesafe-systemone` as an Agent Plugin (plugin.json + skills/\*/SKILL.md + optional mcp.json) that gives users calibrated smart if-statements (Choice/Score/Noul + confidence) for safety gating, context filtering, and claim verification. No core changes, default off, zero behavior change without TYPESAFE_API_KEY.
 
 Step 1 — Scaffold plugin dir (no core touch):
+
 - Create `plugins/typesafe-systemone/` with `plugin.json` (passive manifest: name, version, description), `skills/systemone-guard/SKILL.md`. Keep discovery within `skills/*/SKILL.md` immediate children per vtcode-agent-plugins spec; all joined paths via validate_name/validate_plugin_relative.
 - Vendor/adapt TypeSafe agent skill (https://github.com/typesafe-ai/skills) as reference inside SKILL.md; keep all questions + thresholds in one constants block per skill for reviewability.
 
 Step 2 — User config surface (loose coupling):
+
 - Add `systemone.local.json` (gitignored) + per-project `./.vtcode/systemone.json` override: { enabled:false, skills:{guard:true, context:false, verify:false, search:false}, model:"jev-1.13.0" pinned, review_threshold:0.35, action_threshold:0.70, severity_block:2.0, max_calls_per_session, max_input_tokens, cache_ttl_s, only_ambiguous:true }.
 - Secrets via TYPESAFE_API_KEY env only, never in files/logs. No key => skills no-op with one-line notice.
 
 Step 3 — systemone-guard skill (Phase 1, highest value, lowest cost):
+
 - State {command, argv, cwd, policy_excerpt}; one batched system_one call: 5 Nouls (destructive_fs, exfiltrates_secrets, net_egress, priv_esc, prompt_injection) + severity Score 0-3.
 - Routing in code: severity>=2 or any>=action_threshold => block/ask; any>=review_threshold => ask; else => existing heuristic decides. Advisory only: command_might_be_dangerous() + SandboxPolicy stay authoritative; timeout/offline => fail closed to current behavior.
 - Call only when local heuristic is ambiguous (only_ambiguous:true); cache results keyed (model, state_hash, questions_hash); 429/529 backoff.
 
 Step 4 — Eval suites (no traffic needed, open-source friendly):
+
 - Add checked-in suites: safety ambiguous-command set (expected block/ask/allow), RAG set with planted injection + false-premise queries, citation set (fabricated/contradicted/unsupported). Run via `vtcode eval --suite suite.json` (pass@k). Promote a skill only on measured error-rate/cost improvement; log response.model and re-tune thresholds on version bump.
 
 Step 5 — systemone-context + systemone-verify (Phase 2, flagged off by default):
+
 - context: per retrieved passage, 4 Nouls (relevant, usable_evidence, contradicts_premise, injection) + route() order injection>0.70 drop, contradicts>0.70 conflict block, relevant<0.45 drop, evidence>0.55 include. Passages stay untrusted text.
 - verify: exact string match first (fabricated, no call); survivors get Choice{supports, contradicts, says_nothing} over claim+section; confidence>=0.8 auto else human review. Wire into `vtcode review` path as optional flag.
 
 Step 6 — systemone-search (Phase 3, on-demand only):
+
 - Code rerank: indexer shortlist K=8-12 => Noul per (query, candidate) pair, sort by noul. Line finder: Choice over <=255 line IDs + exists Noul (0.35/0.70 gates), two-pass beyond 255 lines. Never per-turn automatic.
 
 Step 7 — Docs + hygiene:
+
 - User-facing guide under docs/ + quick-reference row; keep per-module AGENTS.md untouched unless conventions change. Conventional Commits; verify with ./scripts/check-dev.sh and cargo nextest run (never cargo test).
 
 Acceptance: Phase 1 done when guard skill + suite + docs ship, default-off, zero behavior change without key, fail-closed tests pass. Removal must stay free (delete plugin dir).
+
+===
+
+check mcp not working:
+
+log: vtcode-20260918T023938Z_017828-04718
+
+Diagnosis: mcp::deepwiki::ask_question
+Observed: The 'mcp::deepwiki::ask_question' tool reported a execution failure (Execution failed): MCP client not
+available
+Likely cause: The tool reported an execution error without enough evidence for a narrower cause.
+Next action: Inspect the bounded error evidence and retry with corrected arguments.
+• The DeepWiki MCP server isn't connected right now (MCP client not available), so I'll fall back to fetching the
+page directly.
+• Ran echo 'checking web_fetch availability via direct fetch fallback' · … +1 lines · Ctrl+T transcript · click to
+expand
+Diagnosis: exec_command
+Observed: Tool preflight validation failed for 'exec_command': Tool preflight validation failed for 'exec_command':
+Command security check failed: Potential dangerous command: curl
+Likely cause: The call was rejected before execution because its arguments or safety preflight were invalid.
+Next action: Correct the arguments using the declared schema, then retry once.
+• curl was blocked by the security preflight. Let me use the dedicated web_fetch tool instead.

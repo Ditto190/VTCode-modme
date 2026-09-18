@@ -176,16 +176,93 @@ impl DiffPreviewState {
     }
 }
 
+/// One reconstructed side (pre-image or post-image) of a diff, in original
+/// file order, with the 1-based line number each joined source line maps to.
+struct HunkSideSource {
+    source: String,
+    numbers: Vec<Option<u32>>,
+}
+
+/// Reconstructs one side of the diff in original file order so the
+/// highlighter sees contiguous source instead of per-hunk fragments.
+fn hunk_side_source(hunks: &[SharedDiffHunk], old_side: bool) -> HunkSideSource {
+    let mut source = String::new();
+    let mut numbers = Vec::new();
+    for hunk in hunks {
+        for line in &hunk.lines {
+            let included = if old_side {
+                line.kind != vtcode_diff::DiffLineKind::Addition
+            } else {
+                line.kind != vtcode_diff::DiffLineKind::Deletion
+            };
+            if !included {
+                continue;
+            }
+            if !source.is_empty() {
+                source.push('\n');
+            }
+            source.push_str(trim_line_ending(&line.text));
+            numbers.push(if old_side { line.old_line } else { line.new_line });
+        }
+    }
+    HunkSideSource { source, numbers }
+}
+
 fn syntax_segments_for_hunks(hunks: &[SharedDiffHunk], file_path: &str) -> HashMap<DiffLineKey, DiffSyntaxSegments> {
     let language = language_hint_from_path(file_path);
     if is_prose_language_hint(language.as_deref()) {
         return HashMap::new();
     }
     let theme = syntax_highlight::get_active_syntax_theme();
+
+    // Codex-style: highlight each side of the file once, in original order,
+    // so parser state survives hunk boundaries (multi-line strings and
+    // comments split across hunks stay correctly highlighted).
+    let old_side = hunk_side_source(hunks, true);
+    let new_side = hunk_side_source(hunks, false);
+    let within_budget = |side: &HunkSideSource| {
+        side.source.len() <= MAX_DIFF_SYNTAX_BYTES && side.numbers.len() <= MAX_DIFF_SYNTAX_LINES
+    };
+    if within_budget(&old_side) && within_budget(&new_side) {
+        let mut syntax_lines = HashMap::new();
+        for (side, reconstruct_old) in [(&old_side, true), (&new_side, false)] {
+            if side.source.is_empty() {
+                continue;
+            }
+            let highlighted = syntax_highlight::highlight_code_to_anstyle_line_segments(
+                &side.source,
+                language.as_deref(),
+                theme,
+                true,
+            );
+            // Map segments back in the same zip order the source was built,
+            // so each highlighted line lands on its exact hunk line without a
+            // second pass or a number-keyed lookup (which could collide when
+            // the same line number appears in repeated context).
+            let mut included_lines = side.numbers.iter().zip(highlighted);
+            for hunk in hunks {
+                for line in &hunk.lines {
+                    let included = if reconstruct_old {
+                        line.kind != vtcode_diff::DiffLineKind::Addition
+                    } else {
+                        line.kind != vtcode_diff::DiffLineKind::Deletion
+                    };
+                    if !included {
+                        continue;
+                    }
+                    if let Some((_, segments)) = included_lines.next() {
+                        syntax_lines.insert((diff_display_kind(line.kind), line.old_line, line.new_line), segments);
+                    }
+                }
+            }
+        }
+        return syntax_lines;
+    }
+
+    // Oversized: fall back to per-hunk highlighting under the shared budget.
     let mut syntax_lines = HashMap::new();
     let mut remaining_bytes = MAX_DIFF_SYNTAX_BYTES;
     let mut remaining_lines = MAX_DIFF_SYNTAX_LINES;
-
     for hunk in hunks {
         let mut source = String::new();
         for (index, line) in hunk.lines.iter().enumerate() {
@@ -205,7 +282,6 @@ fn syntax_segments_for_hunks(hunks: &[SharedDiffHunk], file_path: &str) -> HashM
             syntax_lines.insert((diff_display_kind(line.kind), line.old_line, line.new_line), segments);
         }
     }
-
     syntax_lines
 }
 

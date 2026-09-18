@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod transport;
-pub use transport::{McpHttpServerConfig, McpProviderConfig, McpStdioServerConfig, McpTransportConfig};
+pub use transport::{
+    MCP_LEGACY_PROTOCOL_VERSION, MCP_STABLE_PROTOCOL_VERSION, McpHttpHandshakeMode, McpHttpServerConfig,
+    McpProviderConfig, McpStdioServerConfig, McpTransportConfig,
+};
 
 /// Top-level MCP configuration
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

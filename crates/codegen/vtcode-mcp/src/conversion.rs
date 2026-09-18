@@ -67,6 +67,8 @@ fn definition_to_mcp_tool(tool: &ToolDefinition, provider: &str) -> Option<McpTo
         description: func.description.clone(),
         provider: provider.to_owned(),
         input_schema: func.parameters.clone(),
+        // Native tool definitions carry no output schema today.
+        output_schema: None,
     })
 }
 
@@ -129,6 +131,7 @@ mod tests {
                 },
                 "required": ["url"]
             }),
+            output_schema: None,
         }
     }
 

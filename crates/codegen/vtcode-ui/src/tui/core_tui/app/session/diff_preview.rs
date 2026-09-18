@@ -78,9 +78,19 @@ fn render_file_header(
     layout_mode: DiffLayoutMode,
 ) {
     let header_style = Style::default().fg(ratatui_color_from_ansi(palette.header_fg));
+    // Keep the (+N -N) counts visible: truncate the path to the width left
+    // after the action label, counts, and optional layout badge.
+    let badge_width = usize::from(layout_mode == DiffLayoutMode::SideBySide) * "  [side-by-side]".chars().count();
+    let counts_width = format!(" (+{additions} -{deletions})").chars().count();
+    let action_width = header_action_label(preview.mode).chars().count();
+    let path_budget = (area.width as usize)
+        .saturating_sub(action_width)
+        .saturating_sub(counts_width)
+        .saturating_sub(badge_width);
+    let file_path = truncate_to_width(&preview.file_path, path_budget);
     let mut spans = vec![
         Span::styled(header_action_label(preview.mode), header_style),
-        Span::styled(&preview.file_path, header_style),
+        Span::styled(file_path, header_style),
         Span::styled(" (", header_style),
         Span::styled(format!("+{additions}"), Style::default().fg(ratatui_color_from_ansi(palette.added_fg))),
         Span::styled(" ", header_style),

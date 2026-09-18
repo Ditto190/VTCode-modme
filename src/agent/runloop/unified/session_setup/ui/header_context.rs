@@ -130,7 +130,7 @@ fn maybe_render_openai_priority_notice(
 /// exceeded its configured token budget. Mirrors the headless path's warning
 /// (pushed into `runtime.state.warnings` in `task_setup.rs`) so interactive
 /// and headless sessions surface the same signal.
-fn maybe_render_system_prompt_budget_warning(
+pub(crate) fn maybe_render_system_prompt_budget_warning(
     renderer: &mut AnsiRenderer,
     vt_cfg: Option<&VTCodeConfig>,
     session_bootstrap: &SessionBootstrap,

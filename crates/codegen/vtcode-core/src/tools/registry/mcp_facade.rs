@@ -14,10 +14,34 @@ use crate::tools::mcp::build_mcp_registration;
 
 use super::ToolRegistry;
 use super::mcp_helpers::normalize_mcp_tool_identifier;
+use super::registration::ToolCatalogSource;
 
 impl ToolRegistry {
+    /// Remove every MCP proxy registration from the inventory.
+    ///
+    /// Proxy tools hold a cloned `Arc<McpClient>` from registration time, so
+    /// they outlive a client detach/replace unless explicitly removed. Leaving
+    /// them behind advertises tools that the canonical `mcp::provider::tool`
+    /// execution path (which requires the registry-level client) cannot run,
+    /// producing the confusing "visible but not executable" state.
+    fn remove_all_mcp_proxy_tools(&self) {
+        let stale: Vec<String> = self
+            .inventory
+            .registrations_snapshot()
+            .into_iter()
+            .filter(|registration| registration.catalog_source() == ToolCatalogSource::Mcp)
+            .map(|registration| registration.name().to_string())
+            .collect();
+        for name in stale {
+            if let Err(err) = self.inventory.remove_tool(&name) {
+                warn!(tool = %name, error = %err, "failed to remove stale MCP proxy tool");
+            }
+        }
+    }
+
     /// Set the MCP client for this registry.
     pub async fn with_mcp_client(self, mcp_client: Arc<McpClient>) -> Self {
+        self.remove_all_mcp_proxy_tools();
         *self.mcp_client.write() = Some(mcp_client);
         self.mcp_tool_index.write().await.clear();
         self.mcp_reverse_index.write().await.clear();
@@ -28,6 +52,7 @@ impl ToolRegistry {
 
     /// Attach an MCP client without consuming the registry.
     pub async fn set_mcp_client(&self, mcp_client: Arc<McpClient>) {
+        self.remove_all_mcp_proxy_tools();
         *self.mcp_client.write() = Some(mcp_client);
         self.mcp_tool_index.write().await.clear();
         self.mcp_reverse_index.write().await.clear();
@@ -36,12 +61,22 @@ impl ToolRegistry {
     }
 
     /// Detach the current MCP client and clear MCP tool indexes.
+    ///
+    /// Also removes MCP proxy registrations from the inventory and rebuilds
+    /// the tool assembly so `model_tools()` no longer advertises MCP tools
+    /// that cannot be executed. Without this, a primary-agent switch (which
+    /// clears the client pending re-attach) leaves stale `mcp__*` tools on
+    /// the wire that fail with "MCP client not available".
     pub async fn clear_mcp_client(&self) {
+        self.remove_all_mcp_proxy_tools();
         *self.mcp_client.write() = None;
         self.mcp_tool_index.write().await.clear();
         self.mcp_reverse_index.write().await.clear();
         *self.cached_available_tools.write() = None;
         self.initialized.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.rebuild_tool_assembly().await;
+        self.tool_catalog_state.note_explicit_refresh("mcp_client_cleared");
+        self.sync_policy_catalog().await;
     }
 
     /// Get the MCP client if available.
@@ -66,6 +101,10 @@ impl ToolRegistry {
                         description: registration.metadata().description().unwrap_or("").to_string(),
                         provider: provider.clone(),
                         input_schema: registration.parameter_schema().cloned().unwrap_or(Value::Null),
+                        // The registry index path rebuilds from stored metadata,
+                        // which carries no output schema; live discovery via
+                        // `ToolDiscovery` retains it.
+                        output_schema: None,
                     });
                 }
             }
@@ -85,7 +124,9 @@ impl ToolRegistry {
         if let Some(mcp_client) = client_opt {
             mcp_client.execute_mcp_tool(tool_name, &args).await
         } else {
-            Err(anyhow!("MCP client not available"))
+            Err(anyhow!(
+                "MCP client not available (no active MCP connections). The requested MCP tool '{tool_name}' cannot run while disconnected. Use `/mcp repair` or `mcp connect <server>` to reconnect, then retry."
+            ))
         }
     }
 
@@ -230,7 +271,14 @@ impl ToolRegistry {
             self.mcp_circuit_breaker.record_success();
             Ok(())
         } else {
-            debug!("No MCP client configured, nothing to refresh");
+            debug!("No MCP client configured, pruning stale MCP proxy tools");
+            self.remove_all_mcp_proxy_tools();
+            self.mcp_tool_index.write().await.clear();
+            self.mcp_reverse_index.write().await.clear();
+            *self.cached_available_tools.write() = None;
+            self.rebuild_tool_assembly().await;
+            self.tool_catalog_state.note_explicit_refresh("mcp_tool_refresh_no_client");
+            self.sync_policy_catalog().await;
             Ok(())
         }
     }

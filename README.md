@@ -86,21 +86,21 @@ verification that turn reasoning into dependable, reviewable progress.
 
 In practice, that means:
 
-| What can go wrong                       | How VT Code responds                                                                                                                                                                                                                                           |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Long tasks lose focus**               | Dynamic context assembly, project instructions, auto-compaction, and bounded tool output keep the active context useful while preserving recoverable work. [Runtime guidance](./docs/development/runtime-guidance.md) · [Architecture](./docs/ARCHITECTURE.md) |
-| **Generated commands can cause damage** | Policy checks and sandboxed, fail-closed execution limit what commands can do, with defenses against injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)                               |
-| **A session is interrupted**            | Durable sessions can be resumed with `vtcode continue`; workspace snapshots make changes easy to inspect and restore with `vtcode snapshots` and `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                                    |
-| **“Done” is asserted without proof**    | Built-in evals verify the environment instead of trusting the agent’s report, using pass@k and pass^k for repeatable measurement. [Eval guide](./docs/guides/eval.md)                                                                                          |
-| **Big changes ship unreviewed**         | The Planning Workflow keeps planning read-only: iterate on a `/plan` draft, approve it at a review gate, then hand off to `build` or `auto` for implementation. [Planning workflow](./docs/guides/planning-workflow.md)                                         |
+| What can go wrong                       | How VT Code responds                                                                                                                                                                                                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------------------------- | -----------------------------------------------------------------------------------------------------------------------------------------------------------------                                                           |
+| **Long tasks lose focus**               | Dynamic context assembly, project instructions, auto-compaction, and bounded tool output keep the active window useful. [Runtime guidance](./docs/development/runtime-guidance.md) · [Architecture](./docs/ARCHITECTURE.md) |
+| **Generated commands can cause damage** | Policy checks and sandboxed, fail-closed execution defend against injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)                               |
+| **A session is interrupted**            | Resume with `vtcode continue`, fork with `--session-id`, and inspect or restore changes with `vtcode snapshots` and `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                              |
+| **“Done” is asserted without proof**    | Built-in evals verify the environment instead of trusting the agent’s report, measured with pass@k and pass^k. [Eval guide](./docs/guides/eval.md)                                                                          |
+| **Big changes ship unreviewed**         | The Planning Workflow keeps planning read-only: draft with `/plan`, approve at a review gate, then hand off to `build` or `auto`. [Planning workflow](./docs/guides/planning-workflow.md)                                   |
 
-You get a terminal-native workflow that is:
+The result is a terminal-native workflow that is:
 
-- **Inspectable**: every run has a durable [`ThreadEvent`](./crates/common/vtcode-exec-events) record.
-- **Resumable**: continue where you left off, or fork a session for a new direction.
-- **Parallelizable**: run isolated loops in git worktrees with propose/verify sub-agents ([Loop engineering](./docs/loop-engineering.md)).
-- **Extensible**: connect model providers and capabilities through MCP, Skills, Plugins, ACP, A2A, and WebMCP ([MCP](./docs/guides/mcp-integration.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md)).
-- **Keyboard-first**: work comfortably in the TUI, with the terminal remaining the source of truth.
+- **Inspectable** — every run leaves a durable [`ThreadEvent`](./crates/common/vtcode-exec-events) record.
+- **Parallelizable** — run isolated loops in git worktrees with propose/verify sub-agents ([Loop engineering](./docs/loop-engineering.md)).
+- **Extensible** — bring your own providers and capabilities via MCP, Skills, Plugins, ACP, A2A, and WebMCP ([MCP](./docs/guides/mcp-integration.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md)).
+- **Keyboard-first** — a TUI built for the keyboard, with the terminal remaining the source of truth.
 
 VT Code is not just a model producing a plausible next response. It is a
 runtime you can inspect, resume, extend, and verify.

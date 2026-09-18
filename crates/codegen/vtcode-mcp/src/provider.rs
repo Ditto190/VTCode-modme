@@ -5,6 +5,7 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResult, GetPromptRequestParams, InitializeRequestParams, Prompt,
     ReadResourceRequestParams, Resource, ServerPeerInfo, Tool,
 };
+use rmcp::service::ClientLifecycleMode;
 use serde_json::{Map, Value};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -14,10 +15,11 @@ use tokio::sync::{Mutex, Semaphore};
 use tracing::{Instrument, Span, warn};
 use url::Url;
 
+use super::rmcp_client::{auto_lifecycle_mode, latest_protocol_version};
 use super::{LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS};
 
 use vtcode_config::auth::McpOAuthService;
-use vtcode_config::mcp::{McpAllowListConfig, McpProviderConfig, McpTransportConfig};
+use vtcode_config::mcp::{McpAllowListConfig, McpHttpHandshakeMode, McpProviderConfig, McpTransportConfig};
 use vtcode_utility_tool_specs::parse_mcp_tool;
 
 use super::{McpClient, McpSandboxContext, RmcpClient};
@@ -162,7 +164,7 @@ impl McpProvider {
         _allowlist: &McpAllowListConfig,
     ) -> Result<()> {
         let client = self.client.load_full();
-        let result = client.initialize(params, startup_timeout).await?;
+        let result = client.initialize(params, startup_timeout, self.handshake_lifecycle()).await?;
 
         let protocol_version_str = result.protocol_version.to_string();
         if !SUPPORTED_PROTOCOL_VERSIONS
@@ -178,6 +180,32 @@ impl McpProvider {
 
         *self.initialize_result.lock().await = Some(result);
         Ok(())
+    }
+
+    /// Lifecycle mode for the rmcp handshake, derived from the transport.
+    ///
+    /// stdio always probes `server/discover` first (`Auto`) since a local
+    /// child process answers immediately either way. HTTP defaults to the
+    /// direct legacy handshake so legacy-only servers (e.g. DeepWiki) are not
+    /// penalized by the discover-timeout fallback; opt in to `Auto` per
+    /// provider via `handshake = "auto"` for modern servers.
+    fn handshake_lifecycle(&self) -> ClientLifecycleMode {
+        match &self.config.transport {
+            McpTransportConfig::Stdio(_) => auto_lifecycle_mode(),
+            McpTransportConfig::Http(http) => match http.handshake {
+                McpHttpHandshakeMode::Legacy => ClientLifecycleMode::Initialize,
+                McpHttpHandshakeMode::Auto => auto_lifecycle_mode(),
+            },
+        }
+    }
+
+    /// Protocol version negotiated during the last successful handshake, if any.
+    pub(super) async fn negotiated_protocol_version(&self) -> Option<String> {
+        self.initialize_result
+            .lock()
+            .await
+            .as_ref()
+            .map(|info| info.protocol_version.to_string())
     }
 
     pub(super) async fn list_tools(
@@ -549,7 +577,7 @@ impl McpProvider {
             rmcp::model::ClientCapabilities::default(),
             super::utils::build_client_implementation(),
         )
-        .with_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28);
+        .with_protocol_version(latest_protocol_version());
         self.initialize(init_params, startup_timeout, tool_timeout, allowlist)
             .await
             .with_context(|| format!("MCP re-initialization failed for provider '{}'", self.name))?;
@@ -567,6 +595,7 @@ impl McpProvider {
                 McpToolInfo {
                     description: parsed.description,
                     input_schema: parsed.input_schema,
+                    output_schema: parsed.output_schema,
                     provider: self.name.clone(),
                     name: parsed.name,
                 }
@@ -696,6 +725,7 @@ mod tests {
                     api_key_env: None,
                     oauth: None,
                     protocol_version: "2024-11-05".to_string(),
+                    handshake: McpHttpHandshakeMode::Legacy,
                     http_headers: Default::default(),
                     env_http_headers: Default::default(),
                 }),
@@ -728,5 +758,71 @@ mod tests {
         );
 
         assert_eq!(span.metadata().expect("metadata").name(), "mcp.tools.call");
+    }
+
+    use rmcp::model::{ProtocolVersion, ServerCapabilities, ServerPeerInfo};
+    use rmcp::service::ClientLifecycleMode;
+    use vtcode_config::mcp::{McpHttpHandshakeMode, McpProviderConfig};
+
+    async fn stdio_provider(name: &str) -> super::McpProvider {
+        let config = McpProviderConfig {
+            name: name.to_string(),
+            transport: McpTransportConfig::Stdio(McpStdioServerConfig {
+                command: "true".to_string(),
+                args: Vec::new(),
+                working_directory: None,
+            }),
+            ..McpProviderConfig::default()
+        };
+        super::McpProvider::connect(config, None, None)
+            .await
+            .expect("stdio provider connects")
+    }
+
+    async fn http_provider(name: &str, handshake: McpHttpHandshakeMode) -> super::McpProvider {
+        let config = McpProviderConfig {
+            name: name.to_string(),
+            transport: McpTransportConfig::Http(McpHttpServerConfig {
+                endpoint: "https://example.com/mcp".to_string(),
+                handshake,
+                ..McpHttpServerConfig::default()
+            }),
+            ..McpProviderConfig::default()
+        };
+        super::McpProvider::connect(config, None, None)
+            .await
+            .expect("http provider connects")
+    }
+
+    #[tokio::test]
+    async fn handshake_lifecycle_defaults_to_legacy_initialize_for_http() {
+        let provider = http_provider("legacy", McpHttpHandshakeMode::Legacy).await;
+        assert!(matches!(provider.handshake_lifecycle(), ClientLifecycleMode::Initialize));
+    }
+
+    #[tokio::test]
+    async fn handshake_lifecycle_uses_auto_for_stdio_and_opt_in_http() {
+        let stdio = stdio_provider("local").await;
+        match stdio.handshake_lifecycle() {
+            ClientLifecycleMode::Auto { preferred_versions, legacy_version } => {
+                let versions: Vec<String> = preferred_versions.iter().map(ToString::to_string).collect();
+                assert_eq!(versions, vec!["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
+                assert_eq!(legacy_version.map(|version| version.to_string()), Some("2024-11-05".to_string()));
+            }
+            other => panic!("expected Auto lifecycle, got {other:?}"),
+        }
+
+        let modern = http_provider("modern", McpHttpHandshakeMode::Auto).await;
+        assert!(matches!(modern.handshake_lifecycle(), ClientLifecycleMode::Auto { .. }));
+    }
+
+    #[tokio::test]
+    async fn negotiated_protocol_version_tracks_last_handshake() {
+        let provider = http_provider("probe", McpHttpHandshakeMode::Legacy).await;
+        assert_eq!(provider.negotiated_protocol_version().await, None);
+
+        *provider.initialize_result.lock().await =
+            Some(ServerPeerInfo::new(ProtocolVersion::V_2025_11_25, ServerCapabilities::default()));
+        assert_eq!(provider.negotiated_protocol_version().await.as_deref(), Some("2025-11-25"));
     }
 }

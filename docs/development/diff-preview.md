@@ -37,5 +37,36 @@ asymmetric insert/delete cases, UTF-8 boundaries, display-width wrapping,
 deadlines, pairing, exact omission accounting, and both sides of these width
 boundaries.
 
+## Turn aggregation, event fields, and themes
+
+- `TurnDiffTracker` (`vtcode-core`) aggregates per-file changes within a turn.
+  `get_unified_diff` output is deterministic (entries sorted by path) and
+  bounded: entries whose stored content exceeds 200 000 bytes render as a
+  one-line summary instead of a full diff.
+- The `ThreadEvent::FileChange` payload (`FileChangeItem` in
+  `vtcode-exec-events`) carries optional `unified_diff`, `additions`, and
+  `deletions` fields. They are populated from the tracker so consumers can
+  render per-change previews without recomputation; older events without the
+  fields deserialize unchanged, and the fields are omitted from output when
+  unset.
+- `vtcode-diff` skips intraline refinement when any line contains a NUL byte
+  (binary content), preserving line-level diffs without paying the word-level
+  cost. CRLF terminators, missing-final-newline hints, and git-compatible
+  zero-context hunk headers (`@@ -0,0 +1,N @@`) are covered by regression
+  tests.
+- Diff syntax highlighting reconstructs each side (pre-image and post-image)
+  in original file order and highlights it once, bounded by the existing
+  byte/line caps, so parser state survives hunk boundaries (multi-line strings
+  and comments split across hunks stay correctly highlighted). Oversized
+  content falls back to per-hunk highlighting.
+- Selectable diff themes live in `vtcode-ui`'s design layer
+  (`DiffTheme`: github, ayu, gruvbox, nord, solarized, dracula). Every accent
+  in every theme is contrast-checked against its background at WCAG AA
+  4.5:1 by `every_theme_meets_wcag_aa_contrast`. Use
+  `format_colored_diff_with_theme` for themed rendering; the default theme
+  keeps the canonical `format_colored_diff` colors.
+- The overlay header truncates the file path so the action label and
+  `(+N -N)` counts remain visible at any width.
+
 The presentation architecture was informed by the open-source Codex terminal
 diff design. VT Code's implementation and state model remain independent.

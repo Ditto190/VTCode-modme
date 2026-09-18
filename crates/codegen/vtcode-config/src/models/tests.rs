@@ -302,7 +302,7 @@ fn test_models_for_provider() {
     assert!(ollama_cloud_models.contains(&ModelId::OllamaMinimaxM3Cloud));
     assert!(ollama_cloud_models.contains(&ModelId::OllamaMinimaxM3Cloud));
 
-    let hf_models = ModelId::models_for_provider(Provider::HuggingFace);
+    let _hf_models = ModelId::models_for_provider(Provider::HuggingFace);
 }
 
 #[test]
@@ -434,7 +434,7 @@ fn test_generated_model_capability_lookup() {
     assert!(catalog_provider_keys().contains(&"openai"));
     let openrouter_models = supported_models_for_provider("openrouter").expect("openrouter models");
     assert!(openrouter_models.contains(&"openai/gpt-6-astra"));
-    let meta_models = supported_models_for_provider("meta-ai").expect("Meta AI models");
+    let _meta_models = supported_models_for_provider("meta-ai").expect("Meta AI models");
     let _opencode_zen_models = supported_models_for_provider("opencode-zen");
     let opencode_go_models = supported_models_for_provider("opencode-go").expect("opencode go models");
     assert!(opencode_go_models.contains(&models::opencode_go::MINIMAX_M3));

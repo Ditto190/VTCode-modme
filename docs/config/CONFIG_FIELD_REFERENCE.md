@@ -468,7 +468,8 @@ python3 scripts/generate_config_field_reference.py
 | `mcp.providers[].oauth.scopes` | `array` | no | `[]` | Requested scopes. |
 | `mcp.providers[].oauth.scopes[]` | `string` | no | `-` | - |
 | `mcp.providers[].oauth.token_url` | `string` | no | `""` | OAuth token endpoint. |
-| `mcp.providers[].protocol_version` | `string` | no | `"2024-11-05"` | Protocol version |
+| `mcp.providers[].handshake` | `string` | no | `"legacy"` | Handshake strategy (`legacy` direct initialize, or `auto` discover with legacy fallback). Defaults to `legacy`. |
+| `mcp.providers[].protocol_version` | `string` | no | `"2025-11-25"` | Protocol version |
 | `mcp.providers[].startup_timeout_ms` | `integer \| null` | no | `null` | Startup timeout in milliseconds for this provider |
 | `mcp.providers[].working_directory` | `null \| string` | no | `null` | Working directory for the command |
 | `mcp.request_timeout_seconds` | `integer` | no | `30` | Request timeout in seconds |

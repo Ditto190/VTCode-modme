@@ -741,6 +741,7 @@ mod tests {
                 description: "Read a file".to_string(),
                 provider: "test".to_string(),
                 input_schema: json!({}),
+                output_schema: None,
             }])
         }
 

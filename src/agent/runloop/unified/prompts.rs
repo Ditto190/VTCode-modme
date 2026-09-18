@@ -8,7 +8,9 @@ use vtcode_core::prompts::system::{
     minimal_system_prompt, specialized_system_prompt,
 };
 
-fn fallback_base_system_prompt(vt_cfg: Option<&vtcode_core::config::VTCodeConfig>) -> &'static str {
+/// Seed system prompt used on the interactive critical path before full
+/// workspace prompt composition finishes after the first UI frame.
+pub(crate) fn fallback_base_system_prompt(vt_cfg: Option<&vtcode_core::config::VTCodeConfig>) -> &'static str {
     match vt_cfg.map(|cfg| cfg.agent.system_prompt_mode) {
         Some(SystemPromptMode::Minimal) => minimal_system_prompt(),
         Some(SystemPromptMode::Lightweight) => default_lightweight_prompt(),

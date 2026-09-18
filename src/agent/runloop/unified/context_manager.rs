@@ -81,6 +81,11 @@ impl ContextManager {
         self.workspace_root = Some(workspace_root.to_path_buf());
     }
 
+    /// Replace the composed base system prompt after deferred session hydration.
+    pub(crate) fn set_base_system_prompt(&mut self, base_system_prompt: String) {
+        self.base_system_prompt = base_system_prompt;
+    }
+
     #[cfg(test)]
     pub(crate) fn default_for_test() -> Self {
         Self::new(String::new(), (), Arc::new(RwLock::new(HashMap::new())), None)

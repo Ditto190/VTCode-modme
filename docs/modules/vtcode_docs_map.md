@@ -120,7 +120,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/diff-preview.md`
   - **Content**: Diff Preview Architecture
-  - **User Questions**: "What can you tell me about Diff Preview Architecture?"
+  - **Topics**: Turn aggregation, event fields, and themes
+  - **User Questions**: "What can you tell me about Diff Preview Architecture?", "How does Turn aggregation, event fields, and themes work?"
 
 - **File**: `docs/development/EXTENSION_BOUNDARIES.md`
   - **Content**: Extension Boundaries in VT Code
@@ -876,6 +877,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Installer Development Guide
   - **Topics**: Overview, Platform Detection, Release Binaries, GitHub Releases Setup, Testing Installers
   - **User Questions**: "What can you tell me about Installer Development Guide?", "How does Overview work?", "How does Platform Detection work?"
+
+- **File**: `docs/compose/spec/instant-tui-startup.md`
+  - **Content**: Instant TUI Startup
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Instant TUI Startup?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/protocols/KITTY_KEYBOARD_PROTOCOL_RESTORATION.md`
   - **Content**: Kitty Keyboard Protocol Restoration

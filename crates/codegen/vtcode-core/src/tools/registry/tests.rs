@@ -1521,6 +1521,7 @@ async fn mcp_alias_prevalidation_preserves_canonical_registration_name() -> Resu
         description: "Ask a DeepWiki question".to_string(),
         provider: "deepwiki".to_string(),
         input_schema: json!({"type": "object"}),
+        output_schema: None,
     };
     let registration = crate::tools::mcp::build_mcp_registration(
         Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default())),
@@ -1580,6 +1581,7 @@ async fn mcp_proxy_harness_fallback_resolves_single_mcp_tool() -> Result<()> {
         description: "Ask a DeepWiki question".to_string(),
         provider: "deepwiki".to_string(),
         input_schema: json!({"type": "object"}),
+        output_schema: None,
     };
     let registration = crate::tools::mcp::build_mcp_registration(
         Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default())),
@@ -1613,6 +1615,7 @@ async fn mcp_proxy_harness_fallback_rejects_ambiguous_mcp_tools() -> Result<()> 
             description: "MCP tool".to_string(),
             provider: provider.to_string(),
             input_schema: json!({"type": "object"}),
+            output_schema: None,
         };
         let registration = crate::tools::mcp::build_mcp_registration(
             Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default())),
@@ -1630,6 +1633,82 @@ async fn mcp_proxy_harness_fallback_rejects_ambiguous_mcp_tools() -> Result<()> 
     assert!(message.contains("Ambiguous MCP proxy call"));
     assert!(message.contains("mcp__deepwiki__ask_question"));
     assert!(message.contains("mcp__context7__search-docs"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn clear_mcp_client_removes_stale_proxy_tools() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let tool = vtcode_mcp::McpToolInfo {
+        name: "ask_question".to_string(),
+        description: "Ask a DeepWiki question".to_string(),
+        provider: "deepwiki".to_string(),
+        input_schema: json!({"type": "object"}),
+        output_schema: None,
+    };
+    let client = Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default()));
+    let registration = crate::tools::mcp::build_mcp_registration(Arc::clone(&client), "deepwiki", &tool, None)?;
+    registry.register_tool(registration).await?;
+    registry
+        .mcp_tool_index
+        .write()
+        .await
+        .insert("deepwiki".to_string(), vec!["ask_question".to_string()]);
+    registry.set_mcp_client(Arc::clone(&client)).await;
+    // `set_mcp_client` drops proxies bound to the previous client; re-register
+    // against the newly attached client to simulate a completed refresh.
+    let registration = crate::tools::mcp::build_mcp_registration(Arc::clone(&client), "deepwiki", &tool, None)?;
+    registry.register_tool(registration).await?;
+    registry
+        .mcp_tool_index
+        .write()
+        .await
+        .insert("deepwiki".to_string(), vec!["ask_question".to_string()]);
+    assert!(registry.inventory.get_registration("mcp::deepwiki::ask_question").is_some());
+
+    registry.clear_mcp_client().await;
+
+    assert!(registry.mcp_client().is_none());
+    assert!(registry.mcp_tool_index.read().await.is_empty());
+    assert!(
+        registry.inventory.get_registration("mcp::deepwiki::ask_question").is_none(),
+        "stale MCP proxy must not survive client detach"
+    );
+    let err = registry
+        .execute_mcp_tool("ask_question", json!({}))
+        .await
+        .expect_err("execution without a client should fail");
+    assert!(err.to_string().contains("MCP client not available"));
+    assert!(err.to_string().contains("/mcp repair"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn set_mcp_client_drops_proxies_bound_to_previous_client() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let tool = vtcode_mcp::McpToolInfo {
+        name: "ask_question".to_string(),
+        description: "Ask a DeepWiki question".to_string(),
+        provider: "deepwiki".to_string(),
+        input_schema: json!({"type": "object"}),
+        output_schema: None,
+    };
+    let first = Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default()));
+    let registration = crate::tools::mcp::build_mcp_registration(Arc::clone(&first), "deepwiki", &tool, None)?;
+    registry.register_tool(registration).await?;
+    assert!(registry.inventory.get_registration("mcp::deepwiki::ask_question").is_some());
+
+    let second = Arc::new(McpClient::new(vtcode_config::mcp::McpClientConfig::default()));
+    registry.set_mcp_client(second).await;
+
+    assert!(
+        registry.inventory.get_registration("mcp::deepwiki::ask_question").is_none(),
+        "proxies bound to the old client must not survive a client swap"
+    );
 
     Ok(())
 }

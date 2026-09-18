@@ -716,7 +716,7 @@ mod tests {
     /// resolve to) native provider variants. They are reachable only through
     /// picker selection or provider prefixes (`opencode*/`).
     fn round_trip_exempt(model: &ModelId) -> bool {
-        let exempt = matches!(model.provider(), Provider::OpenCodeZen | Provider::OpenCodeGo | Provider::Qwen)
+        matches!(model.provider(), Provider::OpenCodeZen | Provider::OpenCodeGo | Provider::Qwen)
             || *model == ModelId::LlamaCppGptOss20b
             || matches!(
                 model,
@@ -737,8 +737,7 @@ mod tests {
                     | ModelId::VercelGoogleGemini38Flash
                     | ModelId::VercelDeepseekFlash
                     | ModelId::VercelMoonshotaiKimiK3
-            );
-        exempt
+            )
     }
 
     #[test]
