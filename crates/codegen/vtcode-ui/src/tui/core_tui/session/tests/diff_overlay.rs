@@ -57,6 +57,7 @@ fn diff_overlay_header_keeps_counts_visible_for_long_paths() {
         hunks: Vec::new(),
         current_hunk: 0,
         mode: app_types::DiffPreviewMode::EditApproval,
+        unified: None,
     });
 
     let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
@@ -108,6 +109,7 @@ fn diff_overlay_scrolls_and_hunk_navigation_updates_cached_position() {
         hunks: Vec::new(),
         current_hunk: 0,
         mode: app_types::DiffPreviewMode::ReadonlyReview,
+        unified: None,
     });
 
     let down = session.process_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -139,6 +141,7 @@ fn diff_overlay_keeps_large_preview_visible_after_scrolling() {
         hunks: Vec::new(),
         current_hunk: 0,
         mode: app_types::DiffPreviewMode::ReadonlyReview,
+        unified: None,
     });
 
     for index in 0..200 {
@@ -231,6 +234,34 @@ fn diff_overlay_readonly_review_ignores_reload_shortcut() {
         session.diff_preview_state().map(|preview| preview.mode),
         Some(app_types::DiffPreviewMode::ReadonlyReview)
     ));
+}
+
+#[test]
+fn diff_overlay_opens_from_unified_preview_for_completed_edit_review() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let unified = "@@ -1,3 +1,3 @@\n fn main() {\n-    let old = 1;\n+    let new = 2;\n }\n";
+    session.show_diff_overlay(app_types::DiffOverlayRequest {
+        file_path: "src/main.rs".to_string(),
+        before: String::new(),
+        after: String::new(),
+        hunks: Vec::new(),
+        current_hunk: 0,
+        mode: app_types::DiffPreviewMode::ReadonlyReview,
+        unified: Some(unified.to_string()),
+    });
+
+    let state = session.diff_preview_state().expect("unified review overlay opens");
+    assert_eq!(state.mode, app_types::DiffPreviewMode::ReadonlyReview);
+    assert!(
+        state.display_lines.iter().any(|line| line.text.contains("let new = 2")),
+        "unified body must populate display lines: {:?}",
+        state.display_lines
+    );
+
+    let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
+    let joined = lines.join("\n");
+    assert!(joined.contains("← Review"), "full-viewport review header should render");
+    assert!(joined.contains("let new = 2") || joined.contains("+"), "wrapped review body should be visible");
 }
 
 #[test]

@@ -1187,7 +1187,8 @@ mod tests {
             .expect("write file diff payload should render");
 
         let inline_output = collect_inline_output(&mut receiver);
-        assert!(inline_output.contains("use exec_command with sed for full view"));
+        assert!(inline_output.contains("review full diff"));
+        assert!(inline_output.contains("+5 lines"));
         assert!(!inline_output.contains("use read_file for full view"));
     }
 

@@ -41,6 +41,10 @@ pub struct DiffOverlayRequest {
     pub hunks: Vec<DiffHunk>,
     pub current_hunk: usize,
     pub mode: DiffPreviewMode,
+    /// Retained unified preview for completed-edit review expand. When set,
+    /// the overlay builds its document from this content instead of
+    /// recomputing `before`/`after`.
+    pub unified: Option<String>,
 }
 
 #[derive(Clone, Debug)]

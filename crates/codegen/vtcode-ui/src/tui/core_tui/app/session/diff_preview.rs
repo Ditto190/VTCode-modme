@@ -45,11 +45,42 @@ pub(crate) fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area
     let configured_layout = session.core.appearance.diff_preview_mode;
     let layout_mode = effective_diff_layout(configured_layout, content.width);
     render_file_header(frame, header, preview, &palette, counts.additions, counts.deletions, layout_mode);
-    match layout_mode {
-        DiffLayoutMode::SideBySide => render_diff_content_side_by_side(frame, content, preview),
-        _ => render_diff_content(frame, content, preview),
-    }
-    render_controls(frame, controls, preview);
+    let remaining_rows = match layout_mode {
+        DiffLayoutMode::SideBySide => {
+            render_diff_content_side_by_side(frame, content, preview);
+            remaining_side_by_side_rows(preview, content)
+        }
+        _ => {
+            render_diff_content(frame, content, preview);
+            remaining_inline_rows(preview, content)
+        }
+    };
+    render_controls(frame, controls, preview, remaining_rows);
+}
+
+/// Rows still hidden below the viewport after the current scroll offset.
+fn remaining_inline_rows(preview: &DiffPreviewState, content: Rect) -> usize {
+    let total = preview.display_lines.len();
+    let visible = content.height.saturating_sub(1) as usize;
+    let start = preview.scroll_offset.min(total);
+    total.saturating_sub(start.saturating_add(visible))
+}
+
+fn remaining_side_by_side_rows(preview: &DiffPreviewState, content: Rect) -> usize {
+    let header_h = 1u16.min(content.height);
+    let visible = content.height.saturating_sub(header_h) as usize;
+    let lines = side_by_side_display_lines(preview);
+    let rows = layout_display_lines(
+        lines,
+        LayoutOptions {
+            layout: DiffLayout::SideBySide,
+            width: content.width as usize,
+            max_rows: 2_000,
+            min_side_by_side_width: vtcode_diff::DIFF_MIN_SIDE_BY_SIDE_WIDTH,
+            ..LayoutOptions::default()
+        },
+    );
+    rows.len().saturating_sub(visible)
 }
 
 fn effective_diff_layout(configured: DiffLayoutMode, width: u16) -> DiffLayoutMode {
@@ -719,8 +750,11 @@ fn header_action_label(mode: DiffPreviewMode) -> &'static str {
     }
 }
 
-fn render_controls(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState) {
-    let lines = control_lines(preview);
+fn render_controls(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState, remaining_rows: usize) {
+    let mut lines = control_lines(preview);
+    if remaining_rows > 0 {
+        lines.push(Line::from(Span::styled(format!(" +{remaining_rows} more"), Style::default().fg(Color::DarkGray))));
+    }
 
     frame.render_widget(
         Paragraph::new(lines).block(
@@ -811,7 +845,8 @@ fn control_lines(preview: &DiffPreviewState) -> Vec<Line<'static>> {
 mod tests {
     use super::{
         build_inline_diff_line, build_side_pane_line, control_lines, effective_diff_layout, header_action_label,
-        pad_line_to_width, should_show_inline_gutter, side_by_side_display_lines, styled_content_spans,
+        pad_line_to_width, remaining_inline_rows, should_show_inline_gutter, side_by_side_display_lines,
+        styled_content_spans,
     };
     use crate::tui::core_tui::app::types::{DiffPreviewMode, DiffPreviewState};
     use crate::tui::ui::syntax_highlight::DiffScopeBackgroundRgbs;
@@ -838,6 +873,22 @@ mod tests {
         assert!(first_line.contains("Proceed"));
         assert!(first_line.contains("Reload"));
         assert!(first_line.contains("Abort"));
+    }
+
+    #[test]
+    fn remaining_inline_rows_reports_hidden_wrapped_content() {
+        let before = (0..40).map(|index| format!("old-{index}\n")).collect::<String>();
+        let after = (0..40).map(|index| format!("new-{index}\n")).collect::<String>();
+        let preview = DiffPreviewState::new_with_mode(
+            "src/main.rs".to_string(),
+            before,
+            after,
+            Vec::new(),
+            DiffPreviewMode::ReadonlyReview,
+        );
+        let content = ratatui::layout::Rect::new(0, 0, 80, 8);
+
+        assert!(remaining_inline_rows(&preview, content) > 0);
     }
 
     #[test]

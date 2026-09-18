@@ -305,6 +305,7 @@ pub(crate) fn show_diff_overlay(session: &mut AppSession, mode: app_types::DiffP
         }],
         current_hunk: 0,
         mode,
+        unified: None,
     });
 }
 

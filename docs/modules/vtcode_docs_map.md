@@ -120,8 +120,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/diff-preview.md`
   - **Content**: Diff Preview Architecture
-  - **Topics**: Turn aggregation, event fields, and themes
-  - **User Questions**: "What can you tell me about Diff Preview Architecture?", "How does Turn aggregation, event fields, and themes work?"
+  - **Topics**: Turn aggregation, event fields, and themes, Readability: wrap and expand
+  - **User Questions**: "What can you tell me about Diff Preview Architecture?", "How does Turn aggregation, event fields, and themes work?", "How does Readability: wrap and expand work?"
 
 - **File**: `docs/development/EXTENSION_BOUNDARIES.md`
   - **Content**: Extension Boundaries in VT Code
@@ -997,6 +997,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Styling Quick Start Guide
   - **Topics**: For CLI Output, For TUI Widgets, Unified Theme, Color Reference, Common Patterns
   - **User Questions**: "What can you tell me about Styling Quick Start Guide?", "How does For CLI Output work?", "How does For TUI Widgets work?"
+
+- **File**: `docs/compose/spec/tui-diff-auto-expand.md`
+  - **Content**: TUI Diff Auto-Resize and Expand
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about TUI Diff Auto-Resize and Expand?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/harness/TECH_DEBT_TRACKER.md`
   - **Content**: Tech Debt Tracker

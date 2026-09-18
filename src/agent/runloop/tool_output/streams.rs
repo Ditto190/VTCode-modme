@@ -77,6 +77,12 @@ const RUN_COMMAND_HEAD_PREVIEW_LINES: usize = 3;
 const RUN_COMMAND_TAIL_PREVIEW_LINES: usize = 3;
 /// Maximum line length before truncation to prevent TUI hang
 const MAX_LINE_LENGTH: usize = 150;
+/// Safety cap for inline-TUI diff rows that opt into reflow wrapping.
+///
+/// Rows under this width are emitted whole so transcript reflow can word-wrap
+/// them with a hanging gutter indent. Pathological minified lines above the
+/// cap still ellipsis-truncate so a single row cannot flood the transcript.
+const DIFF_WRAP_SOURCE_MAX_WIDTH: usize = 2_000;
 /// Size threshold (bytes) below which output is displayed inline vs. spooled
 const DEFAULT_SPOOL_THRESHOLD: usize = 50_000; // 50KB — UI render truncation
 /// Maximum number of lines to display in code fence blocks before truncating.
@@ -506,6 +512,7 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
         None,
         true,
         None,
+        false,
         out,
     )
 }
@@ -519,6 +526,7 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
     target_width: Option<usize>,
     show_gutter: bool,
     language: Option<&str>,
+    wrap_for_reflow: bool,
     out: &'a mut String,
 ) -> &'a str {
     use std::fmt::Write as _;
@@ -529,7 +537,11 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
         DiffDisplayKind::Deletion => ('-', line.text.as_str()),
         DiffDisplayKind::Context => (' ', line.text.as_str()),
         DiffDisplayKind::Metadata | DiffDisplayKind::HunkHeader => {
-            let max_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
+            let max_width = if wrap_for_reflow {
+                DIFF_WRAP_SOURCE_MAX_WIDTH
+            } else {
+                target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH))
+            };
             let text = line.numbered_text(line_number_width);
             let text = if display_width(&text) > max_width {
                 truncate_with_ellipsis(&text, max_width, "...")
@@ -549,10 +561,20 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
     }
 
     // Keep the complete rendered row within the measured width when one is
-    // available; otherwise retain the generic preview cap.
+    // available; otherwise retain the generic preview cap. Inline TUI sinks
+    // opt into reflow wrapping: emit the logical body whole so transcript
+    // hanging-indent wrap can show the full line without ellipsis.
     let prefix_width: usize = if show_gutter { 4 + line_number_width } else { 1 };
-    let max_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
-    let content_width = max_width.saturating_sub(prefix_width);
+    let max_width = if wrap_for_reflow {
+        DIFF_WRAP_SOURCE_MAX_WIDTH
+    } else {
+        target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH))
+    };
+    let content_width = if wrap_for_reflow {
+        max_width
+    } else {
+        max_width.saturating_sub(prefix_width)
+    };
     let content_owned;
     let mut truncated = false;
     let content: &str = if display_width(content) > content_width {
@@ -645,9 +667,11 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
 
     // Continue the base row tint through the unused cells on the right. Word
     // chips above remain stronger because padding is appended only after the
-    // body has restored the base row state.
+    // body has restored the base row state. Reflow-wrapped rows already exceed
+    // the measured width, so skip padding rather than inventing overflow.
     if let Some(bg) = bg
         && let Some(target_width) = target_width
+        && !wrap_for_reflow
     {
         let visible_width = prefix_width.saturating_add(display_width(content));
         let padding = target_width.saturating_sub(visible_width);
@@ -819,10 +843,15 @@ fn render_diff_content_inline_with_language(
 ) -> Result<()> {
     let color_enabled = renderer.capabilities().supports_color();
     let target_width = renderer.diff_content_width(fallback_style);
-    // A measured content width is a stricter bound than the generic preview
-    // cap. Compact rows must not wrap in the transcript after their gutter is
-    // hidden on a narrow terminal.
-    let max_line_width = target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH));
+    // Inline TUI sinks word-wrap transcript rows with a hanging gutter indent,
+    // so emit logical bodies whole instead of ellipsis-truncating to the
+    // measured width. CLI/no-sink renders keep the bounded preview cap.
+    let wrap_for_reflow = renderer.prefers_untruncated_output();
+    let max_line_width = if wrap_for_reflow {
+        DIFF_WRAP_SOURCE_MAX_WIDTH
+    } else {
+        target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH))
+    };
     let mut formatted_buffer = String::with_capacity(256);
     let mut display_buffer = String::with_capacity(256);
     // Explicit `language` (single-file file-ops previews) wins for every row.
@@ -886,6 +915,7 @@ fn render_diff_content_inline_with_language(
                 target_width,
                 show_gutter,
                 effective_language,
+                wrap_for_reflow,
                 &mut formatted_buffer,
             ))
         } else {
@@ -924,6 +954,7 @@ fn render_diff_content_side_by_side_with_language(
     let rows = side_by_side_rows(lines_slice);
     let line_number_width = diff_display_line_number_width(lines_slice);
     let color_enabled = renderer.capabilities().supports_color();
+    let wrap_for_reflow = renderer.prefers_untruncated_output();
     let mut formatted_buffer = String::with_capacity(512);
     let mut display_buffer = String::with_capacity(512);
 
@@ -932,7 +963,11 @@ fn render_diff_content_side_by_side_with_language(
     // fallback for non-terminal tests and redirected output.
     let total_width = renderer.diff_content_width(fallback_style).unwrap_or(MAX_LINE_LENGTH);
     let pane_width = ((total_width.saturating_sub(3)) / 2).max(20);
-    let full_width_limit = total_width.min(MAX_LINE_LENGTH);
+    let full_width_limit = if wrap_for_reflow {
+        DIFF_WRAP_SOURCE_MAX_WIDTH
+    } else {
+        total_width.min(MAX_LINE_LENGTH)
+    };
     let mut current_hint: Option<String> = None;
 
     for row in rows {
@@ -948,7 +983,7 @@ fn render_diff_content_side_by_side_with_language(
         }
         let effective_language = language.or(current_hint.as_deref());
         display_buffer.clear();
-        let raw_line = format_side_by_side_row_plain(&row, line_number_width, pane_width);
+        let raw_line = format_side_by_side_row_plain_to_width(&row, line_number_width, pane_width, wrap_for_reflow);
         if raw_line.is_empty() {
             continue;
         }
@@ -1008,16 +1043,26 @@ fn render_diff_content_side_by_side_with_language(
 }
 
 /// Plain-text dual-pane row for fallback / truncation.
-fn format_side_by_side_row_plain(row: &SideBySideRow, number_width: usize, pane_width: usize) -> String {
+fn format_side_by_side_row_plain_to_width(
+    row: &SideBySideRow,
+    number_width: usize,
+    pane_width: usize,
+    wrap_for_reflow: bool,
+) -> String {
     if row.is_full_width() {
         return row.left.as_ref().map(|l| l.text.clone()).unwrap_or_default();
     }
-    let left = pane_cell_plain(row.left.as_ref(), number_width, pane_width);
-    let right = pane_cell_plain(row.right.as_ref(), number_width, pane_width);
+    let left = pane_cell_plain(row.left.as_ref(), number_width, pane_width, wrap_for_reflow);
+    let right = pane_cell_plain(row.right.as_ref(), number_width, pane_width, wrap_for_reflow);
     format!("{left}│{right}")
 }
 
-fn pane_cell_plain(line: Option<&DiffDisplayLine>, number_width: usize, pane_width: usize) -> String {
+fn pane_cell_plain(
+    line: Option<&DiffDisplayLine>,
+    number_width: usize,
+    pane_width: usize,
+    wrap_for_reflow: bool,
+) -> String {
     let Some(line) = line else {
         return " ".repeat(pane_width);
     };
@@ -1028,9 +1073,15 @@ fn pane_cell_plain(line: Option<&DiffDisplayLine>, number_width: usize, pane_wid
     };
     let no = number.map(|n| n.to_string()).unwrap_or_default();
     let gutter = format!("{marker}{no:>number_width$}│");
-    let body_width = pane_width.saturating_sub(gutter.chars().count());
+    let body_width = if wrap_for_reflow {
+        DIFF_WRAP_SOURCE_MAX_WIDTH
+    } else {
+        pane_width.saturating_sub(gutter.chars().count())
+    };
     let body = truncate_chars_to_width(&line.text, body_width);
-    let pad = body_width.saturating_sub(display_width(&body));
+    let pad = pane_width
+        .saturating_sub(gutter.chars().count())
+        .saturating_sub(display_width(&body));
     format!("{gutter}{body}{}", " ".repeat(pad))
 }
 
@@ -1728,6 +1779,7 @@ mod tests {
             Some(48),
             true,
             None,
+            false,
             &mut buffer,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1752,6 +1804,7 @@ mod tests {
             Some(28),
             false,
             None,
+            false,
             &mut buffer,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1780,6 +1833,7 @@ mod tests {
             Some(28),
             false,
             None,
+            false,
             &mut buffer,
         );
         let stripped = strip_ansi_codes(rendered);
@@ -1810,13 +1864,14 @@ mod tests {
     }
 
     #[test]
-    fn narrow_inline_diff_rows_fit_the_measured_content_width() {
+    fn narrow_inline_diff_rows_emit_full_logical_bodies_for_reflow() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
         renderer.set_diff_preview_mode(vtcode_commons::ui_protocol::DiffPreviewMode::Inline);
         renderer.set_table_max_width(Some(28));
         let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
-        let diff = format!("@@ -1 +1 @@\n-{}\n+{}\n", "old ".repeat(30), "new ".repeat(30));
+        let marker = "old ".repeat(30);
+        let diff = format!("@@ -1 +1 @@\n-{}\n+{}\n", marker, "new ".repeat(30));
 
         render_diff_content_block(
             &mut renderer,
@@ -1832,12 +1887,37 @@ mod tests {
 
         let collected = collect_inline_output(&mut receiver);
         let output = strip_ansi_codes(&collected);
+        assert!(!output.contains("..."), "inline TUI diff rows must not ellipsis-truncate: {output:?}");
         assert!(
-            output.lines().all(|line| {
-                let content = line.strip_prefix(MessageStyle::ToolDetail.indent()).unwrap_or(line);
-                vtcode_commons::preview::display_width(content) <= 20
-            }),
-            "rows must fit the measured content width after indentation: {output:?}"
+            output.contains(marker.trim_end()),
+            "logical body must reach the transcript so reflow can wrap it: {output:?}"
+        );
+    }
+
+    #[test]
+    fn wrap_for_reflow_keeps_long_diff_bodies_whole() {
+        let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
+        let long_text = format!("| {} | {} |", "What can go wrong".to_string(), "How VT Code responds".repeat(4));
+        let line = test_diff_line(DiffDisplayKind::Addition, None, Some(83), &long_text);
+        let mut buffer = String::new();
+        let rendered = format_diff_line_with_gutter_and_syntax_to_width(
+            &line,
+            git.add,
+            3,
+            git.add_word.and_then(|style| style.get_bg_color()),
+            &git,
+            Some(28),
+            true,
+            None,
+            true,
+            &mut buffer,
+        );
+        let stripped = strip_ansi_codes(rendered);
+        assert!(!stripped.contains("..."), "wrap mode must not ellipsize: {stripped:?}");
+        assert!(stripped.contains("How VT Code responds"), "body must stay whole: {stripped:?}");
+        assert!(
+            vtcode_commons::preview::display_width(&stripped) > 28,
+            "wrap mode logical row may exceed measured width: {stripped:?}"
         );
     }
 
@@ -1909,7 +1989,7 @@ mod tests {
     }
 
     #[test]
-    fn side_by_side_metadata_fits_the_measured_content_width() {
+    fn side_by_side_metadata_emits_full_paths_for_reflow() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
         renderer.set_diff_preview_mode(vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide);
@@ -1932,12 +2012,10 @@ mod tests {
 
         let collected = collect_inline_output(&mut receiver);
         let output = strip_ansi_codes(&collected);
+        assert!(output.contains(path), "inline TUI metadata must keep the full path for reflow wrap: {output:?}");
         assert!(
-            output.lines().all(|line| {
-                let content = line.strip_prefix(MessageStyle::ToolDetail.indent()).unwrap_or(line);
-                vtcode_commons::preview::display_width(content) <= 72
-            }),
-            "full-width rows must fit measured content width: {output:?}"
+            !output.contains("..."),
+            "inline TUI metadata must not ellipsis-truncate under the safety cap: {output:?}"
         );
     }
 

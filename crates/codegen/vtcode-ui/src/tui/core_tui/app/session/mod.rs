@@ -426,13 +426,16 @@ impl AppSession {
             return;
         }
 
-        let mut state = DiffPreviewState::new_with_mode(
-            request.file_path,
-            request.before,
-            request.after,
-            request.hunks,
-            request.mode,
-        );
+        let mut state = match request.unified.as_deref() {
+            Some(unified) => DiffPreviewState::from_unified(request.file_path, unified, request.mode),
+            None => DiffPreviewState::new_with_mode(
+                request.file_path,
+                request.before,
+                request.after,
+                request.hunks,
+                request.mode,
+            ),
+        };
         state.focus_hunk(request.current_hunk);
         self.diff_preview_state = Some(state);
         self.show_transient_surface(TransientSurface::DiffPreview);

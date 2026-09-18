@@ -68,5 +68,27 @@ boundaries.
 - The overlay header truncates the file path so the action label and
   `(+N -N)` counts remain visible at any width.
 
+## Readability: wrap and expand
+
+User-facing behavior for long diffs in the TUI:
+
+- **Transcript wrap** — when tool output renders into the inline TUI sink,
+  edit/patch body rows are word-wrapped instead of ellipsis-truncated, up to a
+  2 000-cell safety cap (`DIFF_WRAP_SOURCE_MAX_WIDTH` in
+  `src/agent/runloop/tool_output/streams.rs`). Continuation rows hang under the
+  visible gutter or, for compact tinted rows without a gutter, under the single
+  marker cell. CLI / no-sink renders keep the bounded `MAX_LINE_LENGTH` cap.
+- **Vertical omission** — clipped completed-edit bodies advertise
+  `review full diff` rather than only an `exec_command` hint.
+- **Review overlay** — approval/conflict/readonly-review overlays use the full
+  viewport. Layout keeps `LayoutOptions.wrap = true`; long lines wrap inside
+  the overlay. When laid-out rows exceed content height the controls footer
+  shows `+N more`. Completed-edit review can open from a retained unified
+  preview via `DiffOverlayRequest { unified: Some(...), mode: ReadonlyReview }`
+  / `DiffPreviewState::from_unified`. Overlays do not auto-open after a
+  completed edit mid-turn.
+
+Spec: `docs/compose/spec/tui-diff-auto-expand.md`.
+
 The presentation architecture was informed by the open-source Codex terminal
 diff design. VT Code's implementation and state model remain independent.

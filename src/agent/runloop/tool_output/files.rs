@@ -284,9 +284,12 @@ fn render_diff_entry_details(
 
     if get_bool(diff, "truncated") {
         if let Some(omitted) = get_u64(diff, "omitted_line_count") {
-            render_tree_detail(renderer, &format!("… +{omitted} lines (use exec_command with sed for full view)"))?;
+            render_tree_detail(
+                renderer,
+                &format!("… +{omitted} lines — review full diff (Ctrl+T transcript for complete capture)"),
+            )?;
         } else {
-            render_tree_detail(renderer, "… diff truncated")?;
+            render_tree_detail(renderer, "… diff truncated — review full diff")?;
         }
     }
     Ok(())
