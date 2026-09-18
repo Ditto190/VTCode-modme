@@ -149,6 +149,21 @@ pub fn tracker_block_matches(lines: &[String]) -> bool {
     REPLACEABLE_TRACKER_BLOCK.read().as_deref() == Some(lines)
 }
 
+/// Length of the remembered tracker block **only if** it is still the transcript tail.
+pub fn tracker_block_len_if_at_tail() -> Option<usize> {
+    let remembered = REPLACEABLE_TRACKER_BLOCK.read().clone()?;
+    if tail_matches(&remembered) {
+        Some(remembered.len())
+    } else {
+        None
+    }
+}
+
+/// Last non-empty transcript line, if any.
+pub fn last_line() -> Option<String> {
+    TRANSCRIPT.read().iter().rev().find(|line| !line.trim().is_empty()).cloned()
+}
+
 pub fn snapshot() -> Vec<String> {
     TRANSCRIPT.read().clone()
 }

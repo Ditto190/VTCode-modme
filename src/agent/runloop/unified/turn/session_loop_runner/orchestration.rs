@@ -1663,25 +1663,22 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         incomplete.as_deref(),
                         max_turns,
                     );
-                    // Plan-mode outer auto-continue: incomplete planning with no
-                    // user decision/approval required queues another planning turn
-                    // instead of nudging the user to resume. Never auto-approves.
+                    // Plan-mode outer auto-continue: only recoverable *blocked*
+                    // planning ends (budget/safety-cap/tool-free recovery) queue
+                    // another turn. Completed planning turns may be interview or
+                    // approval handoffs and must wait for the user. Never auto-approves.
                     let plan_auto_continue_enabled =
                         planning_active && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref());
                     let plan_state = tool_registry.planning_workflow_state();
                     let plan_ready_for_approval = planning_active
                         && crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state)
                             .await;
-                    // Core PlanningWorkflowState has no interview/approval flags.
-                    // Plan-mode auto-continue therefore fires only on recoverable
-                    // budget/recovery blocked ends — ordinary completed planning
-                    // turns may be interview or approval handoffs and must wait.
                     let should_queue_plan = tracker_continue::should_queue_plan_mode_auto_continue(
                         plan_auto_continue_enabled,
                         planning_active,
                         plan_ready_for_approval,
                         false,
-                        false,
+                        turn_completed,
                         blocked_reason,
                         is_verification_block,
                         max_turns,
