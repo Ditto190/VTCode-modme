@@ -543,6 +543,11 @@ fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
                 target_width.map_or(MAX_LINE_LENGTH, |width| width.min(MAX_LINE_LENGTH))
             };
             let text = line.numbered_text(line_number_width);
+            let text = if wrap_for_reflow && text.contains("lines omitted") && !text.contains("review full diff") {
+                format!("{text} — review full diff")
+            } else {
+                text
+            };
             let text = if display_width(&text) > max_width {
                 truncate_with_ellipsis(&text, max_width, "...")
             } else {
@@ -783,6 +788,7 @@ pub(crate) fn render_diff_content_block_with_language(
     };
     let bounded_lines = bounded_display_lines(&diff_lines, effective_limit);
     let lines_slice = bounded_lines.as_slice();
+    let vertical_omitted = lines_slice.len() < diff_lines.len();
     let line_number_width = diff_display_line_number_width(lines_slice);
     let available_width = renderer.diff_content_width(fallback_style);
 
@@ -794,13 +800,12 @@ pub(crate) fn render_diff_content_block_with_language(
     if renderer.diff_preview_mode() == vtcode_commons::ui_protocol::DiffPreviewMode::SideBySide
         && diff_side_by_side_fits(available_width)
     {
-        return render_diff_content_side_by_side_with_language(
-            renderer,
-            lines_slice,
-            git_styles,
-            fallback_style,
-            language,
-        );
+        let result =
+            render_diff_content_side_by_side_with_language(renderer, lines_slice, git_styles, fallback_style, language);
+        if vertical_omitted {
+            attach_diff_review_anchor(renderer, diff_content, diff_lines.len().saturating_sub(lines_slice.len()));
+        }
+        return result;
     }
 
     // Without ANSI styling the row tint and foreground fallback disappear,
@@ -813,7 +818,7 @@ pub(crate) fn render_diff_content_block_with_language(
         available_width,
         line_number_width,
     );
-    render_diff_content_inline_with_language(
+    let result = render_diff_content_inline_with_language(
         renderer,
         lines_slice,
         tool_name,
@@ -823,7 +828,28 @@ pub(crate) fn render_diff_content_block_with_language(
         line_number_width,
         show_gutter,
         language,
-    )
+    );
+    if vertical_omitted {
+        attach_diff_review_anchor(renderer, diff_content, diff_lines.len().saturating_sub(lines_slice.len()));
+    }
+    result
+}
+
+/// Attach a UI-only expand payload when the transcript body was clipped.
+fn attach_diff_review_anchor(renderer: &AnsiRenderer, diff_content: &str, omitted_lines: usize) {
+    if omitted_lines == 0 || diff_content.is_empty() {
+        return;
+    }
+    let file_path = diff_language_hint_from_content(diff_content)
+        .map(|hint| format!("diff.{hint}"))
+        .unwrap_or_else(|| "diff".to_owned());
+    let notice = format!("… +{omitted_lines} lines — review full diff for {file_path}");
+    renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+        file_path,
+        unified: diff_content.to_owned(),
+        omitted_lines: omitted_lines as u64,
+        notice,
+    });
 }
 
 #[allow(

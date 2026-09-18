@@ -117,7 +117,7 @@ impl DiffPreviewState {
     /// Build review state from a retained unified preview (completed edits).
     pub(crate) fn from_unified(file_path: String, unified: &str, mode: DiffPreviewMode) -> Self {
         let document = DiffDocument::from_unified(unified)
-            .unwrap_or_else(|_| DiffDocument::between("", unified, DiffOptions::default()));
+            .unwrap_or_else(|_| DiffDocument::between("", "", DiffOptions::default()));
         Self::from_document(file_path, String::new(), unified.to_owned(), document, mode)
     }
 

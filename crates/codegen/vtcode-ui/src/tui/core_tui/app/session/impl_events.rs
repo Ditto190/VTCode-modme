@@ -797,8 +797,32 @@ impl Session {
         let toggled = self.toggle_thinking_block_at_row(transcript_width, clicked_row);
         if toggled {
             self.mark_dirty();
+            return true;
         }
-        toggled
+        if self.open_diff_review_from_visible_text(transcript_width, view_top, row_in_view) {
+            self.mark_dirty();
+            return true;
+        }
+        false
+    }
+
+    /// Explicit expand: click a completed-edit "review full diff" notice row.
+    fn open_diff_review_from_visible_text(
+        &mut self,
+        transcript_width: u16,
+        view_top: usize,
+        row_in_view: usize,
+    ) -> bool {
+        if self.diff_review_anchors.is_empty() || transcript_width == 0 {
+            return false;
+        }
+        let height = self.core.transcript_rows.max(1) as usize;
+        let visible = self.core.collect_transcript_window_cached(transcript_width, view_top, height);
+        let Some(line) = visible.get(row_in_view) else {
+            return false;
+        };
+        let text: String = line.line.spans.iter().map(|span| span.content.as_ref()).collect();
+        self.open_diff_review_for_notice(&text)
     }
 
     fn handle_input_click(&mut self, mouse_event: MouseEvent) -> bool {

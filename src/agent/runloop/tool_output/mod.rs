@@ -1189,7 +1189,12 @@ mod tests {
         let inline_output = collect_inline_output(&mut receiver);
         assert!(inline_output.contains("review full diff"));
         assert!(inline_output.contains("+5 lines"));
+        assert!(inline_output.contains("for"));
         assert!(!inline_output.contains("use read_file for full view"));
+        assert!(
+            inline_output.contains("RecordDiffReview") || inline_output.contains("review full diff"),
+            "expandable notice must be present for activation"
+        );
     }
 
     #[tokio::test]

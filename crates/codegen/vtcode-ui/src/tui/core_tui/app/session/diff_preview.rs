@@ -60,10 +60,27 @@ pub(crate) fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area
 
 /// Rows still hidden below the viewport after the current scroll offset.
 fn remaining_inline_rows(preview: &DiffPreviewState, content: Rect) -> usize {
-    let total = preview.display_lines.len();
+    let style_context = current_diff_render_style_context();
+    let width = content.width as usize;
+    let display_lines = preview.display_lines.get(preview.scroll_offset..).unwrap_or_default();
+    let line_number_width = diff_display_line_number_width(display_lines);
+    let show_gutter = should_show_inline_gutter(style_context, width, line_number_width);
+    let rows = layout_display_lines(
+        display_lines,
+        LayoutOptions {
+            layout: DiffLayout::Unified,
+            width: diff_layout_width(width, line_number_width, show_gutter),
+            max_rows: 2_000,
+            ..LayoutOptions::default()
+        },
+    );
     let visible = content.height.saturating_sub(1) as usize;
-    let start = preview.scroll_offset.min(total);
-    total.saturating_sub(start.saturating_add(visible))
+    rows.len().saturating_sub(visible)
+}
+
+#[cfg(test)]
+pub(crate) fn remaining_inline_rows_for_test(preview: &DiffPreviewState, content: Rect) -> usize {
+    remaining_inline_rows(preview, content)
 }
 
 fn remaining_side_by_side_rows(preview: &DiffPreviewState, content: Rect) -> usize {

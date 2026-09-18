@@ -720,9 +720,11 @@ fn compact_tinted_diff_rows_keep_hanging_indent_when_wrapped() {
     let content_lines: Vec<String> = rendered.iter().map(line_text).filter(|text| !text.trim().is_empty()).collect();
     assert!(content_lines.len() >= 2, "expected wrapped compact diff row: {content_lines:?}");
     assert!(content_lines[0].contains("What can go wrong"));
+    // Tool blocks already pad continuations; require hang depth for the
+    // compact marker cell plus tool prefix, not a vacuous single space.
     assert!(
-        content_lines[1].starts_with(' '),
-        "compact continuation should hang under the marker cell, got: {:?}",
+        content_lines[1].starts_with("  ") && !content_lines[1].starts_with("   |"),
+        "compact continuation should hang under the marker/tool prefix, got: {:?}",
         content_lines[1]
     );
 }

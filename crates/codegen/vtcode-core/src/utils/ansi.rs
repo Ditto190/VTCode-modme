@@ -257,6 +257,13 @@ impl AnsiRenderer {
         self.diff_preview_mode = mode;
     }
 
+    /// Attach a completed-edit review payload so the TUI can expand on demand.
+    pub fn record_diff_review(&self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) {
+        if let Some(sink) = &self.sink {
+            sink.handle.record_diff_review(anchor);
+        }
+    }
+
     pub fn diff_preview_mode(&self) -> vtcode_commons::ui_protocol::DiffPreviewMode {
         self.diff_preview_mode
     }

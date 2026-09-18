@@ -283,13 +283,37 @@ fn render_diff_entry_details(
     }
 
     if get_bool(diff, "truncated") {
+        let path = {
+            let candidate = diff_path(diff);
+            if candidate.trim().is_empty() {
+                get_string(diff, "path").map(str::to_owned).unwrap_or_else(|| "diff".to_owned())
+            } else {
+                candidate.to_owned()
+            }
+        };
+        let content = get_string(diff, "content").unwrap_or("").to_string();
         if let Some(omitted) = get_u64(diff, "omitted_line_count") {
-            render_tree_detail(
-                renderer,
-                &format!("… +{omitted} lines — review full diff (Ctrl+T transcript for complete capture)"),
-            )?;
+            let notice = format!("… +{omitted} lines — review full diff for {path}");
+            render_tree_detail(renderer, &notice)?;
+            if !content.is_empty() {
+                renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+                    file_path: path.clone(),
+                    unified: content,
+                    omitted_lines: omitted,
+                    notice,
+                });
+            }
         } else {
-            render_tree_detail(renderer, "… diff truncated — review full diff")?;
+            let notice = format!("… diff truncated — review full diff for {path}");
+            render_tree_detail(renderer, &notice)?;
+            if !content.is_empty() {
+                renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+                    file_path: path,
+                    unified: content,
+                    omitted_lines: 0,
+                    notice,
+                });
+            }
         }
     }
     Ok(())

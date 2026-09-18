@@ -185,6 +185,9 @@ mod headless {
         pub fn append_compact_activity(&self, activity: CompactActivityMetadata) {
             self.send_command(InlineCommand::AppendCompactActivity(activity));
         }
+        pub fn record_diff_review(&self, _anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) {
+            // Headless sinks have no transcript expand affordance.
+        }
         pub fn replace_compact_activity(&self, activity: CompactActivityMetadata) {
             self.send_command(InlineCommand::ReplaceCompactActivity(activity));
         }

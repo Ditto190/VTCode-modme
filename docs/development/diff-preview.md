@@ -79,14 +79,16 @@ User-facing behavior for long diffs in the TUI:
   visible gutter or, for compact tinted rows without a gutter, under the single
   marker cell. CLI / no-sink renders keep the bounded `MAX_LINE_LENGTH` cap.
 - **Vertical omission** — clipped completed-edit bodies advertise
-  `review full diff` rather than only an `exec_command` hint.
+  `review full diff for <path>` and record a UI-only `DiffReviewAnchor`
+  (`vtcode_commons::ui_protocol`) so activating the notice opens full-viewport
+  `ReadonlyReview` via `DiffOverlayRequest.unified`. Overlays do not auto-open
+  after a completed edit mid-turn.
 - **Review overlay** — approval/conflict/readonly-review overlays use the full
   viewport. Layout keeps `LayoutOptions.wrap = true`; long lines wrap inside
-  the overlay. When laid-out rows exceed content height the controls footer
-  shows `+N more`. Completed-edit review can open from a retained unified
-  preview via `DiffOverlayRequest { unified: Some(...), mode: ReadonlyReview }`
-  / `DiffPreviewState::from_unified`. Overlays do not auto-open after a
-  completed edit mid-turn.
+  the overlay. When laid-out **wrapped** rows exceed content height the
+  controls footer shows `+N more`. Completed-edit review can open from a
+  retained unified preview via `DiffOverlayRequest { unified: Some(...), mode: ReadonlyReview }`
+  / `DiffPreviewState::from_unified`.
 
 Spec: `docs/compose/spec/tui-diff-auto-expand.md`.
 

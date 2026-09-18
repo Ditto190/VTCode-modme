@@ -10,19 +10,19 @@ commits: 9ad492f8e..<head>
 
 ## Report
 
-**What was built** — Inline TUI transcript diffs no longer ellipsis-truncate ordinary edit/patch body rows: the tool-output renderer emits logical bodies whole (up to a 2 000-cell safety cap) so transcript reflow can word-wrap them with a hanging gutter indent. Compact tinted rows that omit the visible gutter hang under the marker cell. Side-by-side transcript rows use the same wrap policy for pane bodies and full-width metadata. The review overlay stays full-viewport, keeps `LayoutOptions.wrap = true`, and discloses `+N more` when laid-out rows exceed the content height. Completed-edit review can open from a retained unified preview via `DiffOverlayRequest.unified` / `DiffPreviewState::from_unified` in `ReadonlyReview`. Clipped edit bodies advertise `review full diff` instead of only an `exec_command` hint. Overlays do not auto-open after a completed edit.
+**What was built** — Inline TUI transcript diffs no longer ellipsis-truncate ordinary edit/patch body rows: the tool-output renderer emits logical bodies whole (up to a 2 000-cell safety cap) so transcript reflow can word-wrap them with a hanging gutter indent. Compact tinted rows that omit the visible gutter hang under the marker cell. Side-by-side transcript rows use the same wrap policy for pane bodies and full-width metadata. Clipped completed-edit bodies advertise `review full diff for <path>` and record a UI-only `DiffReviewAnchor`; activating that notice opens full-viewport `ReadonlyReview` via `DiffOverlayRequest.unified` / `DiffPreviewState::from_unified`. The review overlay stays full-viewport, keeps `LayoutOptions.wrap = true`, and discloses `+N more` using laid-out wrapped row counts. Overlays do not auto-open after a completed edit.
 
 **Verification**
-- `RUSTFLAGS="-D warnings" cargo check -p vtcode-ui -p vtcode --tests --locked` — PASS
-- `cargo nextest run -p vtcode-ui` — PASS (1202 tests)
-- `cargo nextest run -p vtcode -E "test(tool_output) or test(side_by_side) or test(wrap_for_reflow) or test(narrow_inline) or test(format_diff) or test(compact_diff)"` — PASS (219 tests)
+- `RUSTFLAGS="-D warnings" cargo check -p vtcode-commons -p vtcode-ui -p vtcode --tests --locked` — PASS
+- `cargo nextest run -p vtcode-ui` — PASS (1204 tests)
+- `cargo nextest run -p vtcode -E "test(render_tool_output) or test(format_diff) or test(wrap_for_reflow) or test(narrow_inline) or test(side_by_side)"` — PASS (38 tests)
 
 **Journey log**
 - The screenshot was transcript truncation, not modal height: `render_diff_content_inline_with_language` ellipsized before reflow ever saw the line.
 - `vtcode-diff` already had `LayoutOptions.wrap = true`; the overlay problem was leftover truncate-to-width and a missing more-rows cue.
 - Compact rows used a single marker cell as the prefix; hanging indent needed a tint-aware fallback when `+/-` text was absent.
-- Old tests encoded the truncate-to-measured-width contract for inline UI; they were updated to the wrap-for-reflow contract.
-- Mouse hit-region binding from a completed-edit notice row to a stored `DiffReviewAnchor` is the remaining edge; the unified overlay open path is implemented and tested.
+- First review flagged expand as type-level-only and `remaining_inline_rows` as wrap-blind; both are now wired/counted from laid-out rows.
+- `DiffPreviewState::from_unified` parse failure yields an empty document instead of fabricating an all-additions file body.
 
 ## [S1] Problem
 
@@ -89,7 +89,7 @@ User-approved decisions:
 
 - [x] T1: Transcript wrap without ellipsis — acceptance: inline TUI edit-diff rows longer than content width render wrapped with hanging gutter indent; no `...` on rows under the safety cap; CLI/sink-absent tests still pass (covers: S2.1)
 - [x] T2: Compact-row wrap hanging indent — acceptance: gutter-hidden narrow rows wrap with marker-cell indent; no unpainted hanging strip (covers: S2.1)
-- [ ] T3: Expandable omission notice + DiffReviewAnchor — acceptance: clipped completed-edit bodies show an expandable notice; activating it opens ReadonlyReview; no auto-modal after edit (covers: S2.1; S2.2)
+- [x] T3: Expandable omission notice + DiffReviewAnchor — acceptance: clipped completed-edit bodies show an expandable notice; activating it opens ReadonlyReview; no auto-modal after edit (covers: S2.1; S2.2)
 - [x] T4: DiffPreview unified constructor + overlay expand wiring — acceptance: `DiffOverlayRequest` can open from unified content; activation from transcript notice produces full-viewport wrapped review (covers: S2.2; S2.3)
 - [x] T5: Overlay wrap + more-rows indicator — acceptance: long lines in overlay are wrapped (not ellipsized) when wrap=true; footer discloses remaining rows when content exceeds height (covers: S2.3)
 - [x] T6: Regression tests + docs — acceptance: nextest green for touched crates; docs guide + AGENTS gotcha updated if needed (covers: S2.1–S2.5; depends: T1–T5)

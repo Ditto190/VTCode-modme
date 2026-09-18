@@ -55,6 +55,7 @@ fn inline_command_variant_name(command: &InlineCommand) -> &'static str {
         InlineCommand::ClearInput => "ClearInput",
         InlineCommand::ForceRedraw => "ForceRedraw",
         InlineCommand::ShowTransient { .. } => "ShowTransient",
+        InlineCommand::RecordDiffReview(_) => "RecordDiffReview",
         InlineCommand::CloseTransient => "CloseTransient",
         InlineCommand::ClearScreen => "ClearScreen",
         InlineCommand::SuspendEventLoop => "SuspendEventLoop",

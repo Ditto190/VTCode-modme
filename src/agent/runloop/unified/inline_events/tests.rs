@@ -1134,6 +1134,7 @@ fn other_name(command: &InlineCommand) -> &'static str {
         InlineCommand::RecordToolOutput { .. } => "RecordToolOutput",
         InlineCommand::AppendToolOutputLine { .. } => "AppendToolOutputLine",
         InlineCommand::AppendCompactActivity(_) => "AppendCompactActivity",
+        InlineCommand::RecordDiffReview(_) => "RecordDiffReview",
         InlineCommand::ReplaceCompactActivity(_) => "ReplaceCompactActivity",
         InlineCommand::CollapsePtyBlock(_) => "CollapsePtyBlock",
         InlineCommand::SetKeyBindings { .. } => "SetKeyBindings",

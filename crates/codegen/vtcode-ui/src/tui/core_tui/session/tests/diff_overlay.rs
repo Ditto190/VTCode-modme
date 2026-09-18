@@ -261,7 +261,60 @@ fn diff_overlay_opens_from_unified_preview_for_completed_edit_review() {
     let lines = rendered_app_session_lines(&mut session, VIEW_ROWS);
     let joined = lines.join("\n");
     assert!(joined.contains("← Review"), "full-viewport review header should render");
-    assert!(joined.contains("let new = 2") || joined.contains("+"), "wrapped review body should be visible");
+    assert!(
+        joined.contains("let new = 2"),
+        "wrapped review body must show the unified addition text: {joined:?}"
+    );
+}
+
+#[test]
+fn diff_review_anchor_activation_opens_readonly_review() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    let unified = "@@ -1,1 +1,1 @@\n-let old = 1;\n+let new = 2;\n";
+    let notice = "… +5 lines — review full diff for src/main.rs".to_string();
+    session.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
+        file_path: "src/main.rs".to_string(),
+        unified: unified.to_string(),
+        omitted_lines: 5,
+        notice: notice.clone(),
+    });
+
+    assert!(session.open_diff_review_for_notice(&notice));
+    let state = session.diff_preview_state().expect("review overlay opens from anchor");
+    assert_eq!(state.mode, app_types::DiffPreviewMode::ReadonlyReview);
+    assert!(
+        state.display_lines.iter().any(|line| line.text.contains("let new = 2")),
+        "activation must load unified body: {:?}",
+        state.display_lines
+    );
+}
+
+#[test]
+fn remaining_inline_rows_counts_wrapped_laid_out_rows() {
+    use ratatui::layout::Rect;
+
+    let before = (0..5)
+        .map(|index| format!("old-{index} {}\n", "x".repeat(80)))
+        .collect::<String>();
+    let after = (0..5)
+        .map(|index| format!("new-{index} {}\n", "y".repeat(80)))
+        .collect::<String>();
+    let preview = app_types::DiffPreviewState::new_with_mode(
+        "src/main.rs".to_string(),
+        before,
+        after,
+        Vec::new(),
+        app_types::DiffPreviewMode::ReadonlyReview,
+    );
+    let content = Rect::new(0, 0, 40, 6);
+    let remaining = crate::tui::core_tui::app::session::diff_preview::remaining_inline_rows_for_test(&preview, content);
+    // Long lines wrap under a short viewport, so laid-out remaining exceeds
+    // a logical-line undercount.
+    assert!(
+        remaining >= preview.display_lines.len(),
+        "wrap-aware remaining should not undercount logical lines: {remaining} vs {}",
+        preview.display_lines.len()
+    );
 }
 
 #[test]
