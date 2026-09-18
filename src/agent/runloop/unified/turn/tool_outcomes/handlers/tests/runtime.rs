@@ -1422,6 +1422,78 @@ async fn end_to_end_blocked_calls_do_not_burn_budget_before_valid_call() {
 }
 
 #[tokio::test]
+async fn control_plane_wait_survives_exhausted_tool_budget() {
+    let mut backing = TestContextBacking::new(1).await;
+    backing.select_build_primary_agent();
+    let sample_file = backing.sample_file.to_string_lossy().to_string();
+    let mut turn_modified_files: BTreeSet<std::path::PathBuf> = BTreeSet::new();
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut tp_ctx = backing.turn_processing_context();
+
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut tp_ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+
+    // Exhaust the one-call budget with a real work call.
+    let work_args = json!({"path": sample_file});
+    let work = handle_single_tool_call(&mut outcome_ctx, "work_1", tool_names::READ_FILE, work_args)
+        .await
+        .expect("work call should execute");
+    assert!(work.is_none());
+    assert!(outcome_ctx.ctx.harness_state.tool_budget_exhausted());
+
+    // A control-plane wait must still be admitted after exhaustion and must
+    // not push a budget-exhaustion rejection into the tool history.
+    let wait_args = json!({"action": "wait", "session_id": "run-test-1"});
+    let wait = handle_single_tool_call(&mut outcome_ctx, "wait_1", tool_names::UNIFIED_EXEC, wait_args)
+        .await
+        .expect("wait call should return a structured outcome");
+    assert!(wait.is_none() || wait.is_some(), "wait must not hard-fail the turn");
+    assert!(
+        !outcome_ctx
+            .ctx
+            .working_history
+            .iter()
+            .any(|message| message.role == uni::MessageRole::Tool
+                && message.content.as_text().contains("exceeded max tool calls per turn")
+                && message.content.as_text().contains("wait")),
+        "wait must not be rejected by the budget-exhaustion gate"
+    );
+    // The exempt call must not increment the ordinary tool-call counter.
+    assert_eq!(outcome_ctx.ctx.harness_state.tool_calls, 1);
+
+    // The exempt call must also not consume the one-shot budget-exhaustion
+    // notice: the next real (non-exempt) call still receives the full policy
+    // message rather than the compact "call skipped" stub.
+    let follow_up_args = json!({"path": sample_file});
+    let follow_up = handle_single_tool_call(&mut outcome_ctx, "work_2", tool_names::READ_FILE, follow_up_args)
+        .await
+        .expect("exhausted follow-up should return a structured outcome");
+    assert!(follow_up.is_none());
+    let tool_messages = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .filter(|message| message.role == uni::MessageRole::Tool)
+        .map(|message| message.content.as_text())
+        .collect::<Vec<_>>();
+    assert!(
+        tool_messages
+            .iter()
+            .any(|text| text.contains("Policy violation: exceeded max tool calls per turn")),
+        "the first real rejection must keep the full policy message: {tool_messages:?}"
+    );
+    assert!(
+        !tool_messages
+            .iter()
+            .any(|text| text.contains("Tool-call budget exhausted for this turn; call skipped.")),
+        "an exempt call must not consume the first-notice: {tool_messages:?}"
+    );
+}
+
+#[tokio::test]
 async fn pending_verification_blocks_patch_before_filesystem_mutation() {
     let mut backing = TestContextBacking::new(4).await;
     backing.select_build_primary_agent();

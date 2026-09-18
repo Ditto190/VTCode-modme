@@ -1803,7 +1803,8 @@ pub(crate) async fn run_turn_loop(
         .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
     let turn_diagnostics = ctx
         .harness_state
-        .snapshot_turn_diagnostics(turn_usage.clone(), repeated_tool_attempts.low_signal_tool_calls);
+        .snapshot_turn_diagnostics(turn_usage.clone(), repeated_tool_attempts.low_signal_tool_calls)
+        .with_in_progress_exec_sessions(ctx.tool_registry.in_progress_exec_sessions(4).await);
     // Touched files include reads/searches recorded during this turn plus
     // every modified file, so checkpoint replay shows evidence even for
     // read-only turns without snapshotting file contents. `recent_touched_files`

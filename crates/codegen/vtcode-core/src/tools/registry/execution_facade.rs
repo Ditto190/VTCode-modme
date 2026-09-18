@@ -35,7 +35,7 @@ use super::execution_kernel;
 use super::normalize_tool_output;
 use super::{
     ExecSettlementMode, ExecutionPolicySnapshot, ToolErrorType, ToolExecutionError, ToolExecutionOutcome,
-    ToolExecutionRecord, ToolExecutionRequest, ToolHandler, ToolRegistry, ToolTimeoutCategory,
+    ToolExecutionRecord, ToolExecutionRequest, ToolHandler, ToolRegistry,
 };
 use vtcode_config::constants::execution::{LOOP_THROTTLE_MAX_MS, LOOP_THROTTLE_REGISTRY_BASE_MS};
 
@@ -1533,16 +1533,10 @@ impl ToolRegistry {
         // Execute the appropriate tool based on its type
         // The _pty_guard will automatically decrement the session count when dropped
         let execution_started_at = Instant::now();
-        // Explicit command waits enforce their own deadline inside the command
-        // session executor. Do not wrap them in a second equal deadline here:
-        // response draining and settlement need a little time after the child
-        // wait returns, and an outer timeout must not terminate a reusable
-        // in-progress session.
-        let effective_timeout = if timeout_category == ToolTimeoutCategory::LongRunningCommand {
-            None
-        } else {
-            self.effective_timeout(timeout_category)
-        };
+        // Effective timeout: explicit waits self-bound inside the command
+        // session executor (no outer deadline); long-running runs get the
+        // generous long-running ceiling. See `effective_timeout_for_call`.
+        let effective_timeout = self.effective_timeout_for_call(timeout_category, &args);
         let effective_timeout_ms = effective_timeout.map(|d| d.as_millis() as u64);
 
         let fail_open = self.optimization_config.tool_registry.middleware_fail_open;

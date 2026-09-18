@@ -89,4 +89,10 @@ impl ToolRegistry {
         self.close_exec_session(session_id).await?;
         Ok(())
     }
+
+    /// Bounded snapshot of exec sessions still running, for cross-turn resume
+    /// hints. Newest first; capped by the caller.
+    pub async fn in_progress_exec_sessions(&self, cap: usize) -> Vec<crate::tools::types::VTCodeExecSession> {
+        self.exec_sessions.in_progress_exec_sessions(cap).await
+    }
 }

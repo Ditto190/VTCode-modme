@@ -664,7 +664,11 @@ impl<'a> CopilotRuntimeHost<'a> {
             }
         }
 
-        if let Some(exhaustion) = self.harness_state.tool_budget_exhaustion() {
+        // Control-plane exec calls (wait/inspect) bypass the per-turn budget
+        // exhaustion rejection so a long build stays observable.
+        if !vtcode_core::tools::tool_intent::is_turn_budget_exempt_call(tool_name, safety_args)
+            && let Some(exhaustion) = self.harness_state.tool_budget_exhaustion()
+        {
             // Nothing will execute for this call id; drop the pending
             // rewrite so a later retry with the same id cannot inherit stale
             // arguments.
@@ -674,7 +678,15 @@ impl<'a> CopilotRuntimeHost<'a> {
         }
 
         self.harness_state.record_admitted_tool_call();
-        if let Some(warning) = self.harness_state.record_tool_call_with_default_warning() {
+        // Control-plane exec calls (wait/inspect) do not consume the per-turn
+        // tool-call budget; see `record_tool_call_budget_usage` for rationale.
+        // The exemption is judged on `safety_args` — the same arguments the
+        // safety gateway and permission flow evaluated — so a hook rewrite
+        // that changes the action cannot swap the budget treatment after
+        // admission.
+        if !vtcode_core::tools::tool_intent::is_turn_budget_exempt_call(tool_name, safety_args)
+            && let Some(warning) = self.harness_state.record_tool_call_with_default_warning()
+        {
             warning.log_threshold_reached("Tool-call budget warning threshold reached in copilot ACP path");
         }
 

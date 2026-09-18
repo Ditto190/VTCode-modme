@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use serde_json::Value;
+
 use super::{ToolLatencyStats, ToolRegistry, ToolTimeoutCategory};
 
 impl ToolRegistry {
@@ -12,6 +14,26 @@ impl ToolRegistry {
         let millis = duration.as_millis();
         let scaled = millis.saturating_mul(num as u128).saturating_div(denom as u128);
         Duration::from_millis(scaled as u64)
+    }
+
+    /// Effective outer timeout for a call, including the long-running special
+    /// case that depends on the call's action.
+    ///
+    /// Explicit waits (`action: "wait"`) enforce their own deadline inside the
+    /// command-session executor, so wrapping them in a second deadline would
+    /// race the session settlement — they get no outer timeout. Long-running
+    /// *runs* (an explicit long `yield_time_ms`) have no internal deadline, so
+    /// they get the generous long-running ceiling: enough that the adaptively
+    /// shrunk default ceiling cannot kill a healthy build, while still
+    /// bounding a hung command instead of blocking the turn forever.
+    pub(super) fn effective_timeout_for_call(&self, category: ToolTimeoutCategory, args: &Value) -> Option<Duration> {
+        if category == ToolTimeoutCategory::LongRunningCommand {
+            if crate::tools::tool_intent::command_session_action_is(args, "wait") {
+                return None;
+            }
+            return self.timeout_policy.read().ceiling_for(category);
+        }
+        self.effective_timeout(category)
     }
 
     pub(super) fn effective_timeout(&self, category: ToolTimeoutCategory) -> Option<Duration> {
@@ -138,5 +160,60 @@ impl ToolRegistry {
             .get(&category)
             .filter(|tracker| tracker.should_circuit_break())
             .map(|tracker| tracker.backoff_duration())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::constants::tools;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn explicit_wait_has_no_outer_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        let wait = registry.effective_timeout_for_call(
+            ToolTimeoutCategory::LongRunningCommand,
+            &json!({"action": "wait", "session_id": "run-1"}),
+        );
+        assert!(wait.is_none(), "waits self-bound, so no outer timeout must apply");
+    }
+
+    #[tokio::test]
+    async fn long_running_run_is_bounded_by_the_long_ceiling() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        let run = registry.effective_timeout_for_call(
+            ToolTimeoutCategory::LongRunningCommand,
+            &json!({"action": "run", "command": "cargo build", "yield_time_ms": 20_000}),
+        );
+        assert!(run.is_some(), "a settling long run has no internal deadline and must stay bounded");
+        // The long-running ceiling is far above the adaptively-shrunk default
+        // that would otherwise kill a healthy build.
+        assert!(run.unwrap() >= Duration::from_secs(300));
+    }
+
+    #[tokio::test]
+    async fn ordinary_calls_keep_the_adaptive_ceiling() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        let ordinary = registry.effective_timeout_for_call(ToolTimeoutCategory::Default, &json!({"cmd": "echo hi"}));
+        assert!(ordinary.is_some(), "ordinary calls keep their safety ceiling");
+    }
+
+    #[tokio::test]
+    async fn long_run_yield_is_classified_and_bounded_end_to_end() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+        let args = json!({"cmd": "cargo build", "yield_time_ms": 30_000});
+
+        let category = registry.timeout_category_for_args(tools::EXEC_COMMAND, &args).await;
+        assert_eq!(category, ToolTimeoutCategory::LongRunningCommand);
+        let timeout = registry.effective_timeout_for_call(category, &args);
+        assert!(timeout.is_some(), "the long-run classification must not disable the outer timeout");
     }
 }

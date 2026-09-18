@@ -18,6 +18,14 @@ CRITICAL: check the message queues system. currently when it picking messages fr
 
 ===
 
+Improve cross-turn exec-session resume (Plan item D — long-output tool-call follow-up, complements the shipped control-plane budget exemption):
+
+Context: with wait/inspect budget-exempt and the single-call long run (yield_time_ms > 10000) shipped, the remaining gap is turn boundaries. When a turn ends while a `run-*` exec session is still in progress (e.g. check-dev.sh hit the wall-clock or turn limit mid-build), the next turn starts blind: the model must remember the session_id, and a resumed/compacted session may not have it at all.
+
+Status: SHIPPED (this session). Implementation: (1) `ExecSessionManager::in_progress_exec_sessions(cap)` queries the live registry with backend-checked completion (exited sessions filtered); (2) `build_exec_session_resume_note` in `session_loop_runner/support.rs` builds a bounded (<1 KiB) system message carrying session id, command, elapsed time, and a pre-filled `write_stdin` wait shape; (3) injected via `append_transient_turn_notes` at every turn start — this single site covers both the normal next-turn case and session restore/resume (both flow through the turn loop), which is the compaction-safety layer; (4) `SnapshotTurnDiagnostics.in_progress_exec_sessions` (serde-default Vec, bounded to 4) records the ids at turn end for diagnostics/ATIF correlation. Tests: registry filter/cap test, note-builder test (identity + wait args + bounded size + cleared-after-close), snapshot round-trip. Remaining follow-up: if the injected message shape becomes part of the runtime contract, update `docs/harness/` + prompt golden tests.
+
+===
+
 idea: improve both on the user experience and the VT Code harness system itself. when hitting:
 
 ```
@@ -108,39 +116,6 @@ add /feedback to open new issues on github: https://github.com/vinhnx/VTCode/iss
 ---
 
 quality of life improvement idea: when the plan mode Turn blocked, Mutation blocked => suggest or ask user to switch to build/auto modes(agents) to use the system effectively without being hindered by blocked states and blocked permissions. also, try to trigger user HITL popup to let user choose and switch modes or stay at the current plan mode. explain the reasoning behind the suggestion and provide clear guidance to the user.
-
----
-
-help me improve for long output stdio tool call. the vtcode harness often hits the tool-call limit, causing incomplete execution of scripts and tests.
-
-```
-•   The turn hit the tool-call limit while
-./scripts/check-dev.sh was still running (session run-
-2b7098be). The check may still be running in the
-background — I'll pick it up next turn.
-  Status:
-  • All plan steps (1–4) implemented and verified: cargo
-    check -p vtcode-core ✅ , cargo nextest run -p vtcode
-    -core -E 'test(analyze)' ✅  (5/5 tests pass)
-  • Two follow-up fixes from the smoke test applied:
-    max_items: 200 (root cause of the 20-entry cap) and
-    the duplicated Detected literal removed
-  • ./scripts/check-dev.sh was re-run after those fixes
-    but the turn ended before it completed
-  Next turn: confirm check-dev.sh result, re-run the
-smoke test, then commit as requested.
-  Tool budget for this turn is exhausted — I can't run
-./scripts/check-dev.sh right now. All code changes are
-complete and previously verified (cargo check ✅ , cargo
-nextest run -p vtcode-core -E 'test(analyze)' ✅  5/5).
-The remaining step is re-running the fast gate after the
-last two small fixes (max_items: 200, Detected literal),
-then the smoke test and commit.
-  Please send any message (e.g. "continue") to start a
-  fresh turn so I can run the final gate and commit.
-```
-
-==> find a solution to handle long output from stdio tool calls more effectively, ensuring that the VTCode harness can continue execution without hitting the tool-call limit prematurely.
 
 ===
 
@@ -444,36 +419,6 @@ make sure vtcode cli run smoothly in headless mode out of the box
 
 ===
 
-fix DeepWiki MCP provider connection failure: `mcp connect deepwiki` fails with "Failed to initialize MCP provider 'deepwiki' — uncorrelated error response: expected id 0, error response carried server-error", even though the server itself is healthy.
-
-Evidence gathered (2026-09-17):
-
-- Raw HTTP probes to https://mcp.deepwiki.com/mcp succeed: single-object JSON-RPC `initialize` returns HTTP 200 + SSE result for every protocol version (2024-11-05 … 2026-07-28), negotiating down to 2025-11-25.
-- Replicated VT Code's exact initialize payload (protocolVersion 2026-07-28, capabilities roots.listChanged + elicitation.form.schemaValidation, clientInfo vtcode/0.159.0) → HTTP 200 OK. Wire protocol is NOT the problem.
-- rmcp 3.1.4 streamable HTTP transport (transport/common/reqwest/streamable_http_client.rs:211) sends a single message per POST via request.json(&message) — batch arrays are never sent, ruling out the batching-removal hypothesis.
-- The literal id "server-error" in the error message matches DeepWiki's 400-batch-response body, so the failing step is inside VT Code's own connection path, not the HTTP exchange.
-
-Plan:
-
-1. Read the deepwiki provider entry in MCP config (.vtcode/config.toml or equivalent) — check transport type (sse vs streamable_http), stale protocol_version field, or extra headers VT Code adds that raw probes did not replicate.
-2. Read the full error chain in .vtcode/logs/trajectory.jsonl around the `mcp connect` failures (turns 6 and 8) — debug_context only surfaced the top-level message; the underlying rmcp error pinpoints the failing step.
-3. Inspect transport selection logic in crates/codegen/vtcode-mcp/src/provider.rs:67-138 (client vs protocol_version decision) — a config-declared protocol_version unsupported by DeepWiki would fail before the HTTP request.
-4. Patch the actual failing step in vtcode-mcp (likely provider.rs transport selection or rmcp_client.rs handshake handling), keeping changes surgical.
-5. Verify: cargo check --locked -p vtcode-mcp, then a real `mcp connect deepwiki` session (initialize → tools/list → tools/call ask_question) to confirm end-to-end.
-6. If the root cause turns out to be an rmcp upstream issue, file an issue with the probe evidence instead of working around it in VT Code.
-
-Session log excerpt (.vtcode/logs/trajectory.jsonl, session 2026-09-17):
-
-- turn 6 ts=1789641712 mcp {action: connect, name: deepwiki} → ok=false "Failed to initialize MCP provider 'deepwiki': uncorrelated error response: expected id 0, error response carried server-error" (retry also failed)
-- turn 8 ts=1789641723 mcp {action: connect, name: deepwiki} → ok=false (same error, retry_delay_ms=null, circuit_breaker_impact=true)
-- turn 16 ts=1789641792 exec_command python3 probe initialize 2025-06-18 → HTTP 200 OK, DeepWiki v2.14.3, tools: read_wiki_structure / read_wiki_contents / ask_question / …
-- turn ~40 python3 probe initialize × 4 protocol versions (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05) → all OK, negotiated 2025-11-25 for every request
-- turn ~55 python3 probe batch-array POST → HTTP 400 id="server-error" code=-32602 (server rejects batch arrays; matches the "server-error" id seen in the VT Code error)
-- turn ~70 python3 probe with VT Code's exact initialize payload (protocolVersion 2026-07-28, roots.listChanged + elicitation.form.schemaValidation, clientInfo vtcode/0.159.0) → HTTP 200 OK
-- Note: trajectory.jsonl records tool calls with ok flags only; the full rmcp error chain is not persisted, so step 2 of the plan (reproduce with RUST_LOG=trace) is still needed to capture the underlying failing step.
-
-===
-
 https://console.typesafe.ai/hook
 https://docs.typesafe.ai/llms.txt
 
@@ -519,28 +464,6 @@ Step 7 — Docs + hygiene:
 - User-facing guide under docs/ + quick-reference row; keep per-module AGENTS.md untouched unless conventions change. Conventional Commits; verify with ./scripts/check-dev.sh and cargo nextest run (never cargo test).
 
 Acceptance: Phase 1 done when guard skill + suite + docs ship, default-off, zero behavior change without key, fail-closed tests pass. Removal must stay free (delete plugin dir).
-
-===
-
-check mcp not working:
-
-log: vtcode-20260918T023938Z_017828-04718
-
-Diagnosis: mcp::deepwiki::ask_question
-Observed: The 'mcp::deepwiki::ask_question' tool reported a execution failure (Execution failed): MCP client not
-available
-Likely cause: The tool reported an execution error without enough evidence for a narrower cause.
-Next action: Inspect the bounded error evidence and retry with corrected arguments.
-• The DeepWiki MCP server isn't connected right now (MCP client not available), so I'll fall back to fetching the
-page directly.
-• Ran echo 'checking web_fetch availability via direct fetch fallback' · … +1 lines · Ctrl+T transcript · click to
-expand
-Diagnosis: exec_command
-Observed: Tool preflight validation failed for 'exec_command': Tool preflight validation failed for 'exec_command':
-Command security check failed: Potential dangerous command: curl
-Likely cause: The call was rejected before execution because its arguments or safety preflight were invalid.
-Next action: Correct the arguments using the declared schema, then retry once.
-• curl was blocked by the security preflight. Let me use the dedicated web_fetch tool instead.
 
 ===
 
@@ -726,3 +649,13 @@ try to implement Live PTY stdout streaming for real-time command output in the T
 ===
 
 try to implement instant VT Code TUI app startup. Focus on reducing initialization time and optimizing the loading sequence to achieve near-instant launch. Deep dive and analyze the current initialization process to identify bottlenecks and areas for improvement. Document findings and propose actionable optimizations. Then implement the changes and measure the impact on startup time to ensure the improvements are effective. Ensure that all optimizations maintain the stability and functionality of the application.
+
+===
+
+auto resize and expand diff view in the TUI to improve readability and user experience, ensuring that long diffs are fully visible without manual scrolling.
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-18 at 17.12.26.png'
+
+===
+
+https://deepwiki.com/search/how-do-codex-implement-backgro_c378a0fa-eca4-4357-b365-03824dacd499?mode=deep

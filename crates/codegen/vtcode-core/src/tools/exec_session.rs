@@ -636,6 +636,42 @@ impl ExecSessionManager {
         listed
     }
 
+    /// Bounded snapshot of exec sessions that are still running (not exited).
+    ///
+    /// Used for cross-turn resume hints: when a turn ends with a long command
+    /// still in progress, the next turn needs the session identity to settle
+    /// it. Ordered newest-first by `started_at` (sessions without a timestamp
+    /// last), capped so a pathological session count cannot inflate the
+    /// injected hint. Completion is checked against the backend (not the
+    /// cached metadata) so a session that exited after its last metadata
+    /// refresh is correctly excluded.
+    pub(crate) async fn in_progress_exec_sessions(&self, cap: usize) -> Vec<VTCodeExecSession> {
+        if cap == 0 {
+            return Vec::new();
+        }
+        let ids = {
+            let sessions = self.sessions.read().await;
+            sessions.keys().cloned().collect::<Vec<_>>()
+        };
+        let mut in_progress = Vec::new();
+        for id in ids {
+            let Ok(session) = self.snapshot_session(id.as_str()).await else {
+                continue;
+            };
+            if session.exit_code.is_none() {
+                in_progress.push(session);
+            }
+        }
+        in_progress.sort_by(|left, right| match (left.started_at, right.started_at) {
+            (Some(left), Some(right)) => right.cmp(&left),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => right.id.cmp(&left.id),
+        });
+        in_progress.truncate(cap);
+        in_progress
+    }
+
     pub(crate) async fn read_session_output(&self, session_id: &str, drain: bool) -> Result<Option<String>> {
         let record = self.session_record(session_id).await?;
         match record.backend {
@@ -929,6 +965,68 @@ mod tests {
         assert!(loser.to_string().contains("already exists"), "loser error should report duplicate: {loser}");
 
         manager.close_session("same-id").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn in_progress_exec_sessions_filters_exited_orders_and_caps() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+        let workspace_root = canonicalize_workspace(temp_dir.path());
+        let pty_sessions = PtySessionManager::new(workspace_root.clone(), PtyConfig::default());
+        let manager = ExecSessionManager::new(workspace_root.clone(), pty_sessions);
+
+        // One long-running session, then a newer one.
+        manager
+            .create_pipe_session(
+                "run-old".to_string().into(),
+                vec!["/bin/sh".to_string(), "-c".to_string(), "sleep 5".to_string()],
+                workspace_root.clone(),
+                HashMap::new(),
+            )
+            .await?;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        manager
+            .create_pipe_session(
+                "run-new".to_string().into(),
+                vec!["/bin/sh".to_string(), "-c".to_string(), "sleep 5".to_string()],
+                workspace_root.clone(),
+                HashMap::new(),
+            )
+            .await?;
+        // One quick session that exits on its own.
+        manager
+            .create_pipe_session(
+                "run-quick".to_string().into(),
+                vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
+                workspace_root.clone(),
+                HashMap::new(),
+            )
+            .await?;
+
+        // Wait for the quick session to exit.
+        for _ in 0..50 {
+            if manager.is_session_completed("run-quick").await?.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let in_progress = manager.in_progress_exec_sessions(4).await;
+        assert_eq!(in_progress.len(), 2, "exited sessions must be filtered: {in_progress:?}");
+        assert_eq!(in_progress[0].id.as_str(), "run-new", "newest session must be listed first: {in_progress:?}");
+        assert_eq!(in_progress[1].id.as_str(), "run-old");
+        assert!(in_progress.iter().all(|session| session.exit_code.is_none()));
+
+        // Cap is honored, keeping the newest.
+        let capped = manager.in_progress_exec_sessions(1).await;
+        assert_eq!(capped.len(), 1);
+        assert_eq!(capped[0].id.as_str(), "run-new");
+        // Cap of 0 returns nothing.
+        assert!(manager.in_progress_exec_sessions(0).await.is_empty());
+
+        manager.close_session("run-old").await?;
+        manager.close_session("run-new").await?;
         Ok(())
     }
 

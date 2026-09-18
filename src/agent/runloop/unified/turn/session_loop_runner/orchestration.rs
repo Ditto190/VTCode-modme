@@ -1140,7 +1140,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     config.workspace.as_path(),
                     &tool_registry,
                     unrelated_dirty_note,
-                );
+                )
+                .await;
                 let turn_started_at = Instant::now();
                 let history_snapshot_bytes = estimate_history_bytes(working_history);
                 let mut turn_metadata_cache = None;

@@ -251,9 +251,10 @@ pub(super) fn attach_long_command_wait_steering(response: &mut Value, session_id
     let hint = format!(
         "Command still running after {elapsed_secs}s. To avoid burning tokens on short polls, \
          call `write_stdin` with `next_wait_args` (action:\"wait\") — it blocks until the command \
-         exits or the deadline elapses with no model round-trips while waiting. If the deadline \
-         returns an in-progress session, call `wait` again. Use `next_continue_args` only when \
-         you need to peek at incremental output mid-run."
+         exits or the deadline elapses with no model round-trips while waiting, and wait/inspect \
+         calls are exempt from the per-turn tool-call budget. If the deadline returns an \
+         in-progress session, call `wait` again. Use `next_continue_args` only when you need to \
+         peek at incremental output mid-run."
     );
     response["next_action_hint"] = json!(hint);
 }

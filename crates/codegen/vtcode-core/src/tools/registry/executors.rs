@@ -1050,6 +1050,7 @@ mod pty_context_tests {
         assert!(hint.contains("write_stdin"));
         assert!(hint.contains("next_wait_args"));
         assert!(hint.contains("no model round-trips"));
+        assert!(hint.contains("exempt from the per-turn tool-call budget"));
         assert!(hint.contains("next_continue_args"));
         assert_eq!(response["is_exited"], false);
         assert_eq!(response["process_id"], "run-abc");

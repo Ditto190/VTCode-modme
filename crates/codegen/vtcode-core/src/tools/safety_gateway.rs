@@ -32,7 +32,7 @@ use crate::tools::tool_intent::{
     file_operation_action_is,
 };
 use vtcode_config::constants::tool_limits::{
-    DEFAULT_MAX_TOOL_CALLS_PER_TURN, DEFAULT_SAFETY_MAX_TOOL_CALLS_PER_SESSION,
+    DEFAULT_MAX_TOOL_CALLS_PER_TURN, DEFAULT_SAFETY_MAX_TOOL_CALLS_PER_SESSION, MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN,
 };
 use vtcode_config::core::DotfileProtectionConfig;
 
@@ -187,6 +187,11 @@ struct RateLimiterState {
     calls_per_minute: std::collections::VecDeque<Instant>,
     current_turn_count: usize,
     session_count: usize,
+    /// Count of control-plane calls (`wait`/`inspect`) recorded this turn.
+    /// These are exempt from `current_turn_count` so a long build does not
+    /// consume the budget its follow-up work needs, but they remain bounded
+    /// by their own per-turn cap and the session fuse.
+    control_plane_turn_count: usize,
 }
 
 /// Unified Safety Gateway
@@ -476,6 +481,7 @@ impl SafetyGateway {
     pub fn start_turn(&self) {
         let mut state = self.rate_state.lock();
         state.current_turn_count = 0;
+        state.control_plane_turn_count = 0;
         state.calls_per_second.clear();
         state.calls_per_minute.clear();
     }
@@ -486,6 +492,7 @@ impl SafetyGateway {
         self.set_limits(max_per_turn, max_per_session);
         let mut state = self.rate_state.lock();
         state.current_turn_count = 0;
+        state.control_plane_turn_count = 0;
         state.session_count = 0;
         state.calls_per_second.clear();
         state.calls_per_minute.clear();
@@ -551,7 +558,8 @@ impl SafetyGateway {
             "SafetyGateway: checking safety"
         );
 
-        if let Err(err) = self.check_rate_limits() {
+        if let Err(err) = self.check_rate_limits(crate::tools::tool_intent::is_turn_budget_exempt_call(tool_name, args))
+        {
             tracing::warn!(
                 invocation_id = %inv_id,
                 error = %err,
@@ -592,11 +600,12 @@ impl SafetyGateway {
             return SafetyCheckResult { decision, retry_after: None, violation: None };
         }
 
+        let control_plane = crate::tools::tool_intent::is_turn_budget_exempt_call(tool_name, args);
         let now = Instant::now();
         let mut state = self.rate_state.lock();
-        match self.check_rate_limits_locked(&mut state, now) {
+        match self.check_rate_limits_locked(&mut state, now, control_plane) {
             Ok(()) => {
-                self.record_execution_locked(&mut state, now);
+                self.record_execution_locked(&mut state, now, control_plane);
                 SafetyCheckResult { decision, retry_after: None, violation: None }
             }
             Err(err) => {
@@ -692,16 +701,21 @@ impl SafetyGateway {
     /// Record that a tool call was executed (for rate limiting)
     pub fn record_execution(&self) {
         let mut state = self.rate_state.lock();
-        self.record_execution_locked(&mut state, Instant::now());
+        self.record_execution_locked(&mut state, Instant::now(), false);
     }
 
     /// Check rate limits without recording
-    fn check_rate_limits(&self) -> Result<(), SafetyError> {
+    fn check_rate_limits(&self, control_plane: bool) -> Result<(), SafetyError> {
         let mut state = self.rate_state.lock();
-        self.check_rate_limits_locked(&mut state, Instant::now())
+        self.check_rate_limits_locked(&mut state, Instant::now(), control_plane)
     }
 
-    fn check_rate_limits_locked(&self, state: &mut RateLimiterState, now: Instant) -> Result<(), SafetyError> {
+    fn check_rate_limits_locked(
+        &self,
+        state: &mut RateLimiterState,
+        now: Instant,
+        control_plane: bool,
+    ) -> Result<(), SafetyError> {
         let config = self.config.read();
         self.prune_rate_windows(state, now);
 
@@ -725,7 +739,14 @@ impl SafetyGateway {
             }
         }
 
-        if state.current_turn_count >= config.max_per_turn {
+        if control_plane {
+            // Control-plane calls bypass the per-turn work budget but keep
+            // their own bounded cap so the exemption cannot become the
+            // dominant spend path.
+            if state.control_plane_turn_count >= MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN {
+                return Err(SafetyError::TurnLimitReached { max: MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN });
+            }
+        } else if state.current_turn_count >= config.max_per_turn {
             return Err(SafetyError::TurnLimitReached { max: config.max_per_turn });
         }
 
@@ -736,11 +757,15 @@ impl SafetyGateway {
         Ok(())
     }
 
-    fn record_execution_locked(&self, state: &mut RateLimiterState, now: Instant) {
-        state.current_turn_count = state.current_turn_count.saturating_add(1);
-        state.session_count = state.session_count.saturating_add(1);
+    fn record_execution_locked(&self, state: &mut RateLimiterState, now: Instant, control_plane: bool) {
         state.calls_per_second.push_back(now);
         state.calls_per_minute.push_back(now);
+        state.session_count = state.session_count.saturating_add(1);
+        if control_plane {
+            state.control_plane_turn_count = state.control_plane_turn_count.saturating_add(1);
+        } else {
+            state.current_turn_count = state.current_turn_count.saturating_add(1);
+        }
     }
 
     fn prune_rate_windows(&self, state: &mut RateLimiterState, now: Instant) {
@@ -1273,5 +1298,128 @@ mod tests {
 
         let third = gateway.check_and_record(&ctx, "read_file", &serde_json::json!({})).await;
         assert!(third.decision.is_allowed());
+    }
+
+    #[tokio::test]
+    async fn control_plane_wait_does_not_consume_per_turn_budget() {
+        let config = SafetyGatewayConfig { max_per_turn: 1, ..Default::default() };
+        let gateway = SafetyGateway::with_config(config);
+        let ctx = make_ctx();
+
+        // The one ordinary slot is consumed by a real work call.
+        let work = gateway
+            .check_and_record(&ctx, "read_file", &serde_json::json!({"path": "x.txt"}))
+            .await;
+        assert!(work.decision.is_allowed());
+
+        // A blocking wait is control-plane: it must not be denied by the
+        // per-turn counter even though the budget is exhausted.
+        let wait = gateway
+            .check_and_record(&ctx, tools::UNIFIED_EXEC, &serde_json::json!({"action": "wait", "session_id": "run-1"}))
+            .await;
+        assert!(wait.decision.is_allowed(), "wait must bypass the per-turn work budget");
+
+        // Ordinary calls remain denied while the turn budget stays exhausted.
+        let denied = gateway
+            .check_and_record(&ctx, "read_file", &serde_json::json!({"path": "y.txt"}))
+            .await;
+        assert!(denied.decision.is_denied());
+    }
+
+    #[tokio::test]
+    async fn control_plane_calls_are_bounded_by_their_own_cap() {
+        let config = SafetyGatewayConfig {
+            max_per_turn: 1_000,
+            enforce_rate_limits: false,
+            ..Default::default()
+        };
+        let gateway = SafetyGateway::with_config(config);
+        let ctx = make_ctx();
+
+        for _ in 0..MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN {
+            let call = gateway
+                .check_and_record(
+                    &ctx,
+                    tools::UNIFIED_EXEC,
+                    &serde_json::json!({"action": "wait", "session_id": "run-1"}),
+                )
+                .await;
+            assert!(call.decision.is_allowed());
+        }
+
+        // The exempt bucket has its own ceiling; the next wait is denied.
+        let overflow = gateway
+            .check_and_record(&ctx, tools::UNIFIED_EXEC, &serde_json::json!({"action": "wait", "session_id": "run-1"}))
+            .await;
+        assert!(overflow.decision.is_denied());
+        assert!(overflow.decision.reason().is_some_and(|reason| reason.contains("limit")));
+    }
+
+    #[tokio::test]
+    async fn control_plane_calls_still_consume_session_and_rate_budget() {
+        // A tiny session fuse must still trip on control-plane calls.
+        let config = SafetyGatewayConfig {
+            max_per_turn: 1_000,
+            max_per_session: 2,
+            enforce_rate_limits: false,
+            ..Default::default()
+        };
+        let gateway = SafetyGateway::with_config(config);
+        let ctx = make_ctx();
+
+        for _ in 0..2 {
+            let call = gateway
+                .check_and_record(
+                    &ctx,
+                    tools::UNIFIED_EXEC,
+                    &serde_json::json!({"action": "wait", "session_id": "run-1"}),
+                )
+                .await;
+            assert!(call.decision.is_allowed());
+        }
+        let third = gateway
+            .check_and_record(&ctx, tools::UNIFIED_EXEC, &serde_json::json!({"action": "wait", "session_id": "run-1"}))
+            .await;
+        assert!(third.decision.is_denied(), "session fuse must bound control-plane calls");
+    }
+
+    #[tokio::test]
+    async fn start_turn_resets_control_plane_counter() {
+        let config = SafetyGatewayConfig {
+            max_per_turn: 1_000,
+            enforce_rate_limits: false,
+            ..Default::default()
+        };
+        let gateway = SafetyGateway::with_config(config);
+        let ctx = make_ctx();
+        let wait_args = serde_json::json!({"action": "wait", "session_id": "run-1"});
+
+        for _ in 0..MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN {
+            assert!(
+                gateway
+                    .check_and_record(&ctx, tools::UNIFIED_EXEC, &wait_args)
+                    .await
+                    .decision
+                    .is_allowed()
+            );
+        }
+        assert!(
+            gateway
+                .check_and_record(&ctx, tools::UNIFIED_EXEC, &wait_args)
+                .await
+                .decision
+                .is_denied()
+        );
+
+        gateway.start_turn();
+
+        assert!(
+            gateway
+                .check_and_record(&ctx, tools::UNIFIED_EXEC, &wait_args)
+                .await
+                .decision
+                .is_allowed(),
+            "a fresh turn must refill the control-plane bucket"
+        );
     }
 }

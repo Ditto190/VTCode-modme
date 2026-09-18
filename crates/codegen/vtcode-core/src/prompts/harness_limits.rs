@@ -44,7 +44,9 @@ pub fn upsert_harness_limits_section(
          - max_tool_wall_clock_secs: {max_tool_wall_clock_label} (per turn; run long builds with exec_command, then wait through write_stdin next_wait_args)\n\
          - max_tool_retries: {max_tool_retries}\n\
          - max_readonly_tool_calls: {MAX_TOTAL_READONLY_CALLS} (global budget across all read-only tools; produce output before exhausting)\n\
-         - max_same_file_path_reads: {MAX_SAME_FILE_PATH_READS} (per file path per turn; read a file once in full rather than paginating)"
+         - max_same_file_path_reads: {MAX_SAME_FILE_PATH_READS} (per file path per turn; read a file once in full rather than paginating)\n\
+         - exec wait/inspect are exempt from max_tool_calls_per_turn: prefer blocking waits (write_stdin action:\"wait\" / next_wait_args) over short polls, and inspect spool_path/session output instead of re-running commands\n\
+         - long commands: set yield_time_ms above 10000 on the initial run for a single-call long run (no outer timeout), or omit it and steer with next_wait_args; both stay budget-exempt"
     );
 
     if prompt.is_empty() {
@@ -70,6 +72,8 @@ mod tests {
         assert!(prompt.contains("- max_tool_retries: 2"));
         assert!(prompt.contains("- max_readonly_tool_calls: 30"));
         assert!(prompt.contains("- max_same_file_path_reads: 6"));
+        assert!(prompt.contains("exec wait/inspect are exempt from max_tool_calls_per_turn"));
+        assert!(prompt.contains("single-call long run"));
     }
 
     #[test]

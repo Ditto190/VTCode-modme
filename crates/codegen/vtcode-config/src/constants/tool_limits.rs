@@ -42,6 +42,16 @@ pub const PLANNING_WORKFLOW_MAX_TOOL_LOOP_INCREMENT_PER_PROMPT: usize = 80;
 /// grants are uncapped; only the automatic path consults this budget.
 pub const MAX_SESSION_AUTO_GRANT_TOTAL_HEADROOM: usize = 2000;
 
+/// Per-turn cap on budget-exempt control-plane exec calls (blocking `wait`
+/// and bounded `inspect` of running sessions or spooled output).
+///
+/// These calls coordinate long-running commands without producing new
+/// execution work, so they are exempt from `max_tool_calls_per_turn` — a
+/// long build must not consume the budget its follow-up work needs. The
+/// exemption is still bounded so a model cannot replace all work with
+/// exempt calls; the ordinary loop detector and rate limits keep applying.
+pub const MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN: usize = 64;
+
 /// Increment a full-auto run grants itself against the session headroom cap.
 ///
 /// Pure so the grant arithmetic stays unit tested without standing up a
@@ -83,6 +93,15 @@ pub const fn tool_loop_hard_cap(base_limit: usize, planning_active: bool) -> usi
     scaled
 }
 
+// Control-plane exemption invariants, checked at compile time: the exempt
+// bucket must stay strictly below the ordinary per-turn budget (so it can
+// never become the dominant spend path) and generous enough that a
+// multi-hour build's wait/poll/inspect cadence fits.
+const _: () = {
+    assert!(MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN < DEFAULT_MAX_TOOL_CALLS_PER_TURN);
+    assert!(MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN >= 32);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +122,14 @@ mod tests {
         assert_eq!(MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP, 120);
         assert_eq!(PLANNING_WORKFLOW_MAX_TOOL_LOOP_LIMIT_ABSOLUTE_CAP, 240);
         assert_eq!(APPROVED_PLAN_TOOL_LOOP_INCREMENT, 50);
+    }
+
+    #[test]
+    fn control_plane_exempt_budget_is_bounded_but_generous() {
+        // The compile-time invariants live in the `const _` block above; this
+        // test documents the intent and keeps the guard-rail visible to test
+        // runners.
+        assert_eq!(MAX_CONTROL_PLANE_TOOL_CALLS_PER_TURN, 64);
     }
 
     #[test]

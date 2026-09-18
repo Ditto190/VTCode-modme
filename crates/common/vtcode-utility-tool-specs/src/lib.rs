@@ -208,7 +208,7 @@ pub fn exec_command_parameters() -> Value {
         "required": ["cmd"],
         "properties": {
             "cmd": {"type": "string", "description": "Shell command to execute, subject to command policy. Examples include `ls`, `rg`, `find`, `cat`, `sed`, `awk`, build tools, and test tools."},
-            "yield_time_ms": {"type": "integer", "description": "Wait before returning output (ms). If the command is still running, the response includes a session_id for write_stdin.", "default": 10000},
+            "yield_time_ms": {"type": "integer", "description": "Wait before returning output (ms). If the command is still running, the response includes a session_id for write_stdin. Values above 10000 turn this into a single-call long run: no outer timeout applies and the response returns after the yield window or command exit, whichever is first.", "default": 10000},
             "max_output_tokens": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 10000, "description": "Output token cap. Large or truncated output can return a spool_path; an active session may set spool_complete=false for a readable partial snapshot, while an exited pending spool is withheld until a later wait."},
             "workdir": {"type": "string", "description": "Working directory."},
             "tty": {"type": "boolean", "description": "Run the command in PTY mode for interactive or terminal-sensitive commands.", "default": false},
@@ -409,6 +409,12 @@ mod tests {
                 .as_str()
                 .expect("exec yield description")
                 .contains("session_id")
+        );
+        assert!(
+            exec_params["properties"]["yield_time_ms"]["description"]
+                .as_str()
+                .expect("exec yield description")
+                .contains("single-call long run")
         );
         assert!(
             exec_params["properties"]["max_output_tokens"]["description"]

@@ -123,7 +123,31 @@ pub struct SnapshotTurnDiagnostics {
     pub low_signal_tool_calls: u32,
     #[serde(default, deserialize_with = "deserialize_null_as_default")]
     pub recovery_activations: u32,
+    /// Exec sessions still running when the turn ended (bounded, newest
+    /// first). Downstream consumers use this to correlate cross-turn resume
+    /// hints; empty when every command settled within the turn.
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
+    pub in_progress_exec_sessions: Vec<CompactStr>,
 }
+
+impl SnapshotTurnDiagnostics {
+    /// Attach the in-progress exec session ids captured at turn end.
+    ///
+    /// Kept as a builder step because the ids come from the live exec-session
+    /// registry (async), not from the synchronous turn-state counters.
+    #[must_use]
+    pub fn with_in_progress_exec_sessions(mut self, sessions: Vec<crate::tools::types::VTCodeExecSession>) -> Self {
+        self.in_progress_exec_sessions = sessions
+            .into_iter()
+            .take(MAX_IN_PROGRESS_EXEC_SESSIONS)
+            .map(|session| CompactStr::from(session.id.as_str().to_string()))
+            .collect();
+        self
+    }
+}
+
+/// Bound on exec session ids recorded in one turn's diagnostics.
+const MAX_IN_PROGRESS_EXEC_SESSIONS: usize = 4;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotTurnContext {
@@ -1083,6 +1107,7 @@ mod tests {
             model_visible_tool_preview_budget_exhausted: true,
             low_signal_tool_calls: 4,
             recovery_activations: 1,
+            in_progress_exec_sessions: vec![CompactStr::from("run-42")],
         };
         let context = SnapshotTurnContext {
             session_id: Some(CompactStr::from("session-911")),

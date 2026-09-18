@@ -142,13 +142,13 @@ pub(super) fn build_unrelated_dirty_worktree_note(
 /// `unrelated_dirty_note` is pre-fetched by the caller via `spawn_blocking`
 /// (see `orchestration.rs`) because `build_unrelated_dirty_worktree_note`
 /// spawns blocking `git` subprocesses — see the `# Blocking` docs in `git.rs`.
-pub(super) fn append_transient_turn_notes(
+pub(super) async fn append_transient_turn_notes(
     history: &mut Vec<vtcode_core::llm::provider::Message>,
     workspace: &std::path::Path,
     tool_registry: &ToolRegistry,
     unrelated_dirty_note: Option<String>,
 ) -> Vec<String> {
-    let mut transient_system_notes = Vec::with_capacity(2);
+    let mut transient_system_notes = Vec::with_capacity(3);
 
     if let Some(note) = {
         let stale_paths = tool_registry.edited_file_monitor_ref().stale_tracked_paths();
@@ -163,7 +163,72 @@ pub(super) fn append_transient_turn_notes(
         history.push(vtcode_core::llm::provider::Message::system(note));
     }
 
+    // Cross-turn exec-session resume: when the previous turn ended with a
+    // long command still running, hand the model the settled identity and a
+    // pre-filled wait call so it needs zero reconstruction. This also covers
+    // session restore — both paths flow through the same turn loop.
+    if let Some(note) = build_exec_session_resume_note(tool_registry).await {
+        transient_system_notes.push(note.clone());
+        history.push(vtcode_core::llm::provider::Message::system(note));
+    }
+
     transient_system_notes
+}
+
+/// Cap on exec sessions surfaced in one cross-turn resume hint.
+const EXEC_SESSION_RESUME_HINT_CAP: usize = 4;
+
+/// Per-session command display cap in the resume hint. Keeps the injected
+/// message bounded even for a command with a long inlined script body.
+const EXEC_SESSION_RESUME_COMMAND_MAX_BYTES: usize = 160;
+
+/// Build the bounded cross-turn exec-session resume note, or `None` when no
+/// exec session is still running.
+///
+/// The note carries the session id, command display, and a pre-filled
+/// `next_wait_args` shape so the model can settle the session without
+/// reconstructing anything. Bounded to a few hundred bytes.
+pub(super) async fn build_exec_session_resume_note(tool_registry: &ToolRegistry) -> Option<String> {
+    let sessions = tool_registry.in_progress_exec_sessions(EXEC_SESSION_RESUME_HINT_CAP).await;
+    if sessions.is_empty() {
+        return None;
+    }
+
+    let lines = sessions
+        .iter()
+        .map(|session| {
+            let raw_command = if session.args.is_empty() {
+                session.command.clone()
+            } else {
+                format!("{} {}", session.command, session.args.join(" "))
+            };
+            let command_display = vtcode_commons::formatting::truncate_byte_budget(
+                &raw_command,
+                EXEC_SESSION_RESUME_COMMAND_MAX_BYTES,
+                "…",
+            );
+            let elapsed = session
+                .started_at
+                .map(|started| {
+                    let secs = chrono::Utc::now().signed_duration_since(started).num_seconds().max(0);
+                    format!(", running {secs}s")
+                })
+                .unwrap_or_default();
+            format!("- {} (`{}`{})", session.id.as_str(), command_display, elapsed)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let first_session_id = sessions[0].id.as_str().to_string();
+    Some(format!(
+        "Exec session resume: the following command session(s) from earlier in this session are still running:\n\
+         {lines}\n\
+         Settle them before starting new work: call `write_stdin` with \
+         {{\"session_id\": \"{first_session_id}\", \"action\": \"wait\", \
+         \"wait_timeout_seconds\": 600}} — wait/inspect calls are exempt from the per-turn \
+         tool-call budget. A deadline-expired wait returns an in-progress session that can be \
+         waited on again."
+    ))
 }
 
 pub(super) fn latest_assistant_result_text(messages: &[vtcode_core::llm::provider::Message]) -> Option<String> {
@@ -481,6 +546,70 @@ mod tests {
     use super::{ExecutionSummaryStatus, classify_execution_summary};
     use crate::agent::runloop::unified::turn::context::TurnLoopResult;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn exec_session_resume_note_is_none_without_sessions() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        let note = super::build_exec_session_resume_note(&registry).await;
+        assert!(note.is_none(), "no sessions must produce no hint");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn exec_session_resume_note_carries_identity_and_wait_args() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        // Start a long-running command through the public exec surface so the
+        // session lands in the live registry.
+        let run = registry
+            .execute_public_tool_ref(
+                vtcode_core::config::constants::tools::EXEC_COMMAND,
+                &json!({"cmd": "sleep 5", "yield_time_ms": 100}),
+            )
+            .await
+            .expect("run should start");
+        let session_id = run["session_id"].as_str().expect("session id present").to_string();
+
+        let note = super::build_exec_session_resume_note(&registry).await.expect("hint present");
+        assert!(note.contains(&session_id), "hint must carry the session id: {note}");
+        assert!(note.contains("sleep 5"), "hint must carry the command: {note}");
+        assert!(note.contains("\"action\": \"wait\""), "hint must pre-fill the wait action: {note}");
+        assert!(note.contains("wait_timeout_seconds"), "hint must pre-fill the deadline: {note}");
+        assert!(note.len() < 1_024, "hint must stay bounded: {} bytes", note.len());
+
+        registry.close_harness_exec_session(&session_id).await.expect("close session");
+        let note_after = super::build_exec_session_resume_note(&registry).await;
+        assert!(note_after.is_none(), "closed session must clear the hint");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn exec_session_resume_note_bounds_a_long_command() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        // A command body large enough to blow any per-line bound if inlined
+        // whole; the note must still stay within its few-hundred-byte budget.
+        let long_command = format!("sleep 5 # {}", "x".repeat(4_000));
+        let run = registry
+            .execute_public_tool_ref(
+                vtcode_core::config::constants::tools::EXEC_COMMAND,
+                &json!({"cmd": long_command, "yield_time_ms": 100}),
+            )
+            .await
+            .expect("run should start");
+        let session_id = run["session_id"].as_str().expect("session id present").to_string();
+
+        let note = super::build_exec_session_resume_note(&registry).await.expect("hint present");
+        assert!(note.len() < 1_024, "a long command must not inflate the hint: {} bytes", note.len());
+        assert!(!note.contains(&"x".repeat(4_000)), "the command body must be truncated");
+        assert!(note.contains(&session_id));
+
+        registry.close_harness_exec_session(&session_id).await.expect("close session");
+    }
 
     #[test]
     fn pending_approved_plan_checklist_cannot_be_completed() {

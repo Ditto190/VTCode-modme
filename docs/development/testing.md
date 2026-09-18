@@ -107,6 +107,20 @@ prevent the checks from running. `check-dev.sh --changed` performs its own
 changed-package filtering because Nextest does not provide Cargo's
 `--changed --since` selection flags.
 
+### Agent-Friendly Quiet Mode
+
+`check-dev.sh --quiet` (or `-q`) suppresses progress banners and cargo noise so
+an agent turn or CI job sees only the outcome: per-check success banners,
+errors/warnings with full diagnostics, and the final timing summary. Failure
+output is never suppressed — a failing check still prints its rustfmt diff,
+clippy diagnostics, or test failures in full.
+
+```bash
+# Agent/CI run: minimal output, full failure detail
+./scripts/check-dev.sh --quiet
+./scripts/check-dev.sh --quiet --test
+```
+
 ### Structural Rule Checks
 
 VT Code bundles a generic `ast-grep` project scaffold and materializes it into the current workspace when you run `vtcode init`.

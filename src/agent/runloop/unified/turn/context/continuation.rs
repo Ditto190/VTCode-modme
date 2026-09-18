@@ -180,14 +180,7 @@ pub(super) fn evaluate_interim_text_continuation(
         return d(true, "full_auto_continuation");
     }
 
-    d(
-        false,
-        if full_auto {
-            "awaiting_model_action"
-        } else {
-            "interactive_mode"
-        },
-    )
+    d(false, "interactive_mode")
 }
 
 /// Classify the outcome emitted with the text-response telemetry record.
