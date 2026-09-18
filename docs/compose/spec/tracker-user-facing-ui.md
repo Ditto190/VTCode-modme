@@ -59,6 +59,7 @@ pub(crate) fn tracker_tree_body_lines(val: &serde_json::Value) -> Vec<String>
 3. Terminal title (`vtcode-ui` session):
    - Typed `TaskPanelMetadata` is the **only** writer of `terminal_title_task_progress` (`completed/total`)
    - Visibility-only TaskPanel requests (`show_task_panel` / `hide_task_panel`) must **not** mutate body lines, metadata, or progress
+   - Content updates **own** metadata state: `Some(metadata)` sets `N/M`; `None` (session clear) clears metadata and progress
    - Line-parse `Progress:` extraction is removed (panel body has no such row)
 
 **Panel UI** (`vtcode-ui` task panel — unchanged layout rules)

@@ -830,10 +830,21 @@ impl AppSession {
                 if visible.is_none() {
                     self.task_panel_lines = lines;
                     self.core.mark_task_panel_content_dirty();
-                    if let Some(metadata) = metadata {
-                        self.core
-                            .set_task_panel_progress_label(Some(format!("{}/{}", metadata.completed, metadata.total)));
-                        self.task_panel_metadata = Some(metadata);
+                    match metadata {
+                        Some(metadata) => {
+                            self.core.set_task_panel_progress_label(Some(format!(
+                                "{}/{}",
+                                metadata.completed, metadata.total
+                            )));
+                            self.task_panel_metadata = Some(metadata);
+                        }
+                        None => {
+                            // Content updates without typed metadata (session
+                            // clear) must not leave stale title/progress on the
+                            // panel header or terminal title.
+                            self.task_panel_metadata = None;
+                            self.core.set_task_panel_progress_label(None);
+                        }
                     }
                 }
                 if let Some(visible) = visible {

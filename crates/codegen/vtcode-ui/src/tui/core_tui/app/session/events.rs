@@ -2841,6 +2841,16 @@ mod tests {
         }));
         assert!(!session.show_task_panel);
         assert_eq!(session.task_panel_lines, tree, "hide_task_panel must not wipe the panel body");
+
+        // Session clear is a content update without metadata: it must drop
+        // stale panel metadata so the terminal title cannot keep old N/M.
+        session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
+            lines: Vec::new(),
+            visible: None,
+            metadata: None,
+        }));
+        assert!(session.task_panel_lines.is_empty());
+        assert!(session.task_panel_metadata.is_none(), "clear must drop panel metadata");
     }
 
     #[test]

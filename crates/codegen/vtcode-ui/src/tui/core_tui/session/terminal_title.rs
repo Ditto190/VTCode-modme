@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn task_progress_item_uses_parsed_summary() {
+    fn task_progress_item_uses_metadata_progress_label() {
         let mut session = session_for_title_tests();
         session.terminal_title_items = Some(vec!["task-progress".to_string(), "project".to_string()]);
         session.terminal_title_task_progress = Some("2/5".to_string());
