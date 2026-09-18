@@ -940,7 +940,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/compose/spec/plan-mode-tracker-continuity.md`
   - **Content**: Planning Workflow + Tracker Continuity (Dedupe, Scope/Task, Continuation, Progress)
-  - **Topics**: Report, [S1] Problem, [S2] Design, Scope, Tasks
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Planning Workflow + Tracker Continuity (Dedupe, Scope/Task, Continuation, Progress)?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/harness/prompt-architecture.md`
