@@ -110,17 +110,25 @@ pub struct JustificationExtractor;
     b. Check approval patterns (ApprovalRecorder)
        - If high-approval-rate → auto-approve (no dialog shown)
     c. Format justification for TUI display
-       - Approval dialog uses minimal single-row fields (`Reason:` / `Risk:` only),
-         first logical line only + middle-truncation (160 chars, 32 for risk), via
+       - Approval dialog uses minimal single-row fields
+         (`What the agent is trying to do:` / `Risk:` only), first logical
+         line only + middle-truncation (160 chars, 32 for risk), via
          `compact_justification_lines()` in `permission_prompt.rs` so the HITL popup stays scannable.
          Expected outcome and auto-approval suggestions remain in logs only.
          `format_for_dialog()` remains the verbose log/test format.
     d. Show approval dialog with:
+       - A plain permission intro (no `Tool:` jargon, no `COMMAND` / `WHY`
+         headers, no `│` gutter). Command tools show an indented,
+         syntax-highlighted command block; file tools show the diff preview
+         directly.
        - A bounded shell-command preview for command tools. Long lines retain
          their beginning and end; multiline commands retain head and tail rows
          with an explicit omitted-line count.
-       - Tool name plus a one-line action summary for non-command tools
-       - Agent reason + risk level under a separated `WHY` section
+       - A human-friendly action sentence for non-command tools
+         (for example, `The agent wants to edit file src/main.rs and needs
+         your approval.`)
+       - Agent goal + risk level as subordinate context rows, with a fallback
+         explanation when the agent provided no details
        - Concise options; the permanent option truncates long command labels to 60 chars
     e. Wait for user decision
    ↓
@@ -168,7 +176,8 @@ Stored in the user cache directory's approval-pattern file:
 
 -   `prompt_tool_permission()` - Extended with optional justification parameter
 -   `ensure_tool_permission()` - Routes justification to approval dialog
--   Dialog displays the minimal justification (`Reason:` / `Risk:` single rows);
+-   Dialog displays the minimal justification
+    (`What the agent is trying to do:` / `Risk:` single rows);
     the verbose `format_for_dialog()` output remains for logs/tests
 
 ### 2. Session Management (`src/agent/runloop/unified/turn/session.rs`)
@@ -202,13 +211,12 @@ User requests: "Run the build and check for errors"
 3. Justification extraction:
    - Decision ledger contains: "Need to verify code compiles before refactoring"
    - Extracted reason: "Need to verify code compiles before refactoring"
-4. Approval dialog shows (minimal single-row fields):
+4. Approval dialog shows (plain permission language, no COMMAND / WHY headers):
 
     Tool Permission Required
-    Tool: exec_command
-    cargo build                ← command shown here only, no command block
-    ## Why
-      Reason: Need to verify code compiles before refactoring
+    The agent wants to run a shell command and needs your approval.
+        cargo build
+      What the agent is trying to do: Need to verify code compiles before refactoring
       Risk: High
 
      Approve Once               Allow this time only

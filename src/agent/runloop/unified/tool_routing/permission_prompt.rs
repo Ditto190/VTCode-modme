@@ -360,6 +360,11 @@ fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
     preview
 }
 
+/// Friendly label for the agent's goal in the permission popup. The modal
+/// renderer styles this as a subordinate context row (no bullet), matching
+/// the previous `Reason:` treatment without the technical `WHY` header.
+const AGENT_GOAL_LABEL: &str = "What the agent is trying to do";
+
 fn push_context_line(description_lines: &mut Vec<String>, label: &str, value: &str) {
     push_capped_context_line(description_lines, label, value, MAX_CONTEXT_LINE_CHARS);
 }
@@ -371,14 +376,17 @@ fn push_capped_context_line(description_lines: &mut Vec<String>, label: &str, va
     }
 }
 
-/// Compact agent-justification lines for the approval dialog: `Reason` + `Risk`
-/// only so the popup stays minimal and scannable. Full reasoning (including
-/// expected outcome) remains in logs.
+/// Compact agent-justification lines for the approval dialog: agent goal +
+/// `Risk` only so the popup stays minimal and scannable. Full reasoning
+/// (including expected outcome) remains in logs.
 fn compact_justification_lines(just: &vtcode_core::tools::ToolJustification) -> Vec<String> {
     let mut lines = Vec::new();
     let reason = just.reason.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
     if !reason.is_empty() {
-        lines.push(format!("Reason: {}", vtcode_commons::formatting::truncate_middle(reason, MAX_CONTEXT_LINE_CHARS)));
+        lines.push(format!(
+            "{AGENT_GOAL_LABEL}: {}",
+            vtcode_commons::formatting::truncate_middle(reason, MAX_CONTEXT_LINE_CHARS)
+        ));
     }
     let risk = just.risk_level.trim();
     if !risk.is_empty() {
@@ -464,23 +472,39 @@ fn tool_args_diff_preview(tool_name: &str, tool_args: Option<&Value>) -> Option<
     Some(preview)
 }
 
-/// Header rows for the approval popup. Shell commands use a dedicated command
-/// block, so their truncated action summary is omitted. Other tools retain the
-/// summary that identifies the target or action.
+/// Intro rows for the approval popup, written as plain permission language.
+/// Shell commands get a dedicated command block below, so their truncated
+/// action summary is omitted. Other tools reuse the human-friendly action
+/// summary directly in the intro sentence.
 fn tool_permission_header_lines(
     tool_name: &str,
     display_name: &str,
     has_command_preview: bool,
     source_thread_label: Option<&str>,
 ) -> Vec<String> {
-    let mut lines = vec![format!("Tool: {tool_name}")];
-    if let Some(source_label) = source_thread_label {
-        lines.push(format!("Source: {source_label}"));
+    let mut lines = Vec::new();
+    if has_command_preview {
+        lines.push("The agent wants to run a shell command and needs your approval.".to_string());
+    } else if !display_name.trim().is_empty() {
+        lines.push(format!(
+            "The agent wants to {} and needs your approval.",
+            lowercase_first_action(display_name.trim())
+        ));
+    } else {
+        lines.push(format!("The agent wants to use {tool_name} and needs your approval."));
     }
-    if !has_command_preview && !display_name.trim().is_empty() {
-        lines.push(display_name.trim().to_string());
+    if let Some(source_label) = source_thread_label {
+        lines.push(format!("Requested from: {source_label}"));
     }
     lines
+}
+
+fn lowercase_first_action(action: &str) -> String {
+    let mut chars = action.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+    }
 }
 
 fn build_tool_permission_options(
@@ -624,36 +648,41 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
         tool_permission_header_lines(tool_name, display_name, command_preview.is_some(), source_thread_label);
 
     if let Some(command_lines) = command_preview {
-        description_lines.push("## Command".to_string());
         description_lines.extend(format_command_preview_lines(command_lines));
     }
 
     if let Some(diff_lines) = diff_preview {
-        description_lines.push("## Preview".to_string());
         description_lines.extend(diff_lines);
     }
 
     let shell_justification = extract_shell_approval_justification(tool_name, tool_args);
-    let has_context = approval_reason.is_some() || justification.is_some() || shell_justification.is_some();
-    if has_context {
-        description_lines.push("## Why".to_string());
-    }
+    let mut has_reason_content = false;
 
     if let Some(reason) = approval_reason {
-        push_context_line(&mut description_lines, "Reason", reason);
+        push_context_line(&mut description_lines, AGENT_GOAL_LABEL, reason);
+        has_reason_content = true;
     } else if let Some(shell_reason) = shell_justification {
-        push_context_line(&mut description_lines, "Reason", &shell_reason);
+        push_context_line(&mut description_lines, AGENT_GOAL_LABEL, &shell_reason);
+        has_reason_content = true;
     }
 
     if let Some(just) = justification {
-        // `compact_justification_lines` emits Reason + Risk only; skip a
-        // duplicate Reason row when an explicit approval reason already covers it.
+        // `compact_justification_lines` emits the agent goal + Risk only; skip
+        // a duplicate goal row when an explicit approval reason already covers it.
         for line in compact_justification_lines(just) {
-            if line.starts_with("Reason:") && approval_reason.is_some() {
+            if line.starts_with(AGENT_GOAL_LABEL) && approval_reason.is_some() {
                 continue;
+            }
+            if !line.trim().is_empty() {
+                has_reason_content = true;
             }
             description_lines.push(line);
         }
+    }
+
+    if !has_reason_content {
+        description_lines
+            .push("No additional details were provided. Review the action above before allowing.".to_string());
     }
 
     description_lines.push(choose_handling_line("this run"));
@@ -1153,21 +1182,33 @@ mod tests {
     }
 
     #[test]
-    fn shell_header_omits_truncated_summary_when_command_block_is_present() {
+    fn shell_header_uses_permission_intro_without_tool_jargon() {
         let lines = tool_permission_header_lines("exec_command", "python3 -c 'truncated…'", true, None);
-        assert_eq!(lines, vec!["Tool: exec_command"]);
+        assert_eq!(lines, vec!["The agent wants to run a shell command and needs your approval."]);
     }
 
     #[test]
     fn header_keeps_action_summary_for_diff_preview_file_identity() {
         let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", false, None);
-        assert_eq!(lines, vec!["Tool: edit_file", "Edit file src/main.rs"]);
+        assert_eq!(lines, vec!["The agent wants to edit file src/main.rs and needs your approval."]);
     }
 
     #[test]
     fn header_lists_source_above_action_summary() {
         let lines = tool_permission_header_lines("edit_file", "Edit file src/main.rs", false, Some("agent-1"));
-        assert_eq!(lines, vec!["Tool: edit_file", "Source: agent-1", "Edit file src/main.rs"]);
+        assert_eq!(
+            lines,
+            vec![
+                "The agent wants to edit file src/main.rs and needs your approval.",
+                "Requested from: agent-1"
+            ]
+        );
+    }
+
+    #[test]
+    fn header_falls_back_to_tool_name_when_action_is_empty() {
+        let lines = tool_permission_header_lines("exec_command", "   ", false, None);
+        assert_eq!(lines, vec!["The agent wants to use exec_command and needs your approval."]);
     }
 
     #[test]
@@ -1197,7 +1238,7 @@ mod tests {
         };
         let lines = compact_justification_lines(&just);
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].starts_with("Reason: Build the project"));
+        assert!(lines[0].starts_with("What the agent is trying to do: Build the project"));
         assert!(!lines[0].contains('\n'));
         assert!(!lines.iter().any(|line| line.starts_with("Expected:")));
         assert_eq!(lines[1], "Risk: High");
@@ -1214,7 +1255,7 @@ mod tests {
         };
         let lines = compact_justification_lines(&just);
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].chars().count() <= "Reason: ".len() + super::MAX_CONTEXT_LINE_CHARS);
+        assert!(lines[0].chars().count() <= super::AGENT_GOAL_LABEL.len() + 2 + super::MAX_CONTEXT_LINE_CHARS);
     }
 
     #[test]

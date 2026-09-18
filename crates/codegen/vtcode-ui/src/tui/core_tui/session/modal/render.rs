@@ -708,9 +708,10 @@ fn is_plan_overflow_row(trimmed: &str) -> bool {
     trimmed.starts_with('…') || trimmed.starts_with("...") || trimmed.starts_with("·")
 }
 
-/// Split `Label: value` metadata rows (`Reason`, `Risk`, `Source`, …) so the
-/// label can render dimmed and the value in body style. Returns the trimmed
-/// label and value; `Tool:` stays a header and never matches here.
+/// Split `Label: value` metadata rows (`Risk`, `Source`, the permission-popup
+/// agent goal, …) so the label can render dimmed and the value in body style.
+/// Returns the trimmed label and value; `Tool:` stays a header and never
+/// matches here.
 fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
     const CONTEXT_LABELS: &[&str] = &[
         "Reason",
@@ -722,6 +723,8 @@ fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
         "Source",
         "Summary",
         "Plan",
+        "What the agent is trying to do",
+        "Requested from",
     ];
     let (label, value) = trimmed.split_once(':')?;
     let label = label.trim();
@@ -788,10 +791,11 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
     let bullet_prefix = format!("{} ", ui::MODAL_INSTRUCTIONS_BULLET);
     let bullet_indent = " ".repeat(UnicodeWidthStr::width(bullet_prefix.as_str()));
     let shell_styles = ShellLineStyles::new();
-    let approval_shell_styles = shell_styles.muted_for_approval();
-    // Gutter marking highlighted command rows as one code block; distinct
-    // from the `•` bullet used for prose so sections stay scannable.
-    let code_gutter = "  │ ";
+    // Full syntax highlighting for the approval command block: command,
+    // options, strings, variables, and separators keep distinct token
+    // colors so the reviewable invocation stays scannable. Indented (not
+    // `•`-bulleted) to read as one code block without the old `│` gutter.
+    let code_gutter = "    ";
 
     for line in instructions {
         let trimmed = line.trim();
@@ -801,8 +805,8 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
         }
 
         if let Some(header) = trimmed.strip_prefix("## ") {
-            // Blank row before each new section gives COMMAND / WHY /
-            // PREVIEW clear visual separation without extra chrome.
+            // Blank row before each new section gives header-led sections
+            // clear visual separation without extra chrome.
             if first_content_rendered {
                 items.push(vec![Line::default()]);
             }
@@ -818,7 +822,7 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
             let command = code.trim();
             first_content_rendered = true;
             let mut spans = vec![Span::styled(code_gutter.to_string(), styles.divider)];
-            for segment in shell_syntax_segments(command, &approval_shell_styles, true) {
+            for segment in shell_syntax_segments(command, &shell_styles, true) {
                 spans.push(Span::styled(segment.text, ratatui_style_from_inline(&segment.style, None)));
             }
             items.push(vec![Line::from(spans)]);
@@ -1300,13 +1304,12 @@ mod tests {
     }
 
     #[test]
-    fn modal_instruction_command_uses_code_gutter_without_bullet() {
+    fn modal_instruction_command_uses_indent_without_pipe_or_bullet() {
         let styles = modal_render_styles();
         let lines = modal_instruction_lines(
             Rect::new(0, 0, 80, 6),
             &[
-                "Tool: exec_command".to_string(),
-                "## Command".to_string(),
+                "The agent wants to run a shell command and needs your approval.".to_string(),
                 "`cargo test`".to_string(),
             ],
             &styles,
@@ -1317,8 +1320,35 @@ mod tests {
             .find(|line| line_text(line).contains("cargo"))
             .expect("command row");
         let text = line_text(command_line);
-        assert!(text.contains('│'), "command row should use code gutter, got: {text}");
+        assert!(!text.contains('│'), "command row must not use pipe gutter, got: {text}");
         assert!(!text.contains('•'), "command row must not use prose bullet, got: {text}");
+    }
+
+    #[test]
+    fn modal_instruction_command_keeps_syntax_token_colors() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 6),
+            &[
+                "The agent wants to run a shell command and needs your approval.".to_string(),
+                "`cargo test --locked`".to_string(),
+            ],
+            &styles,
+        );
+
+        let command_line = lines
+            .iter()
+            .find(|line| line_text(line).contains("cargo"))
+            .expect("command row");
+        // Gutter + at least command/args/option segments.
+        assert!(command_line.spans.len() > 2, "command should be tokenized, got: {command_line:?}");
+        let token_styles: std::collections::HashSet<String> = command_line
+            .spans
+            .iter()
+            .skip(1)
+            .map(|span| format!("{:?}", span.style))
+            .collect();
+        assert!(token_styles.len() > 1, "command tokens should keep distinct syntax colors, got: {token_styles:?}");
     }
 
     #[test]
@@ -1348,8 +1378,7 @@ mod tests {
         let lines = modal_instruction_lines(
             Rect::new(0, 0, 80, 6),
             &[
-                "Tool: exec_command".to_string(),
-                "## Why".to_string(),
+                "The agent wants to run a shell command and needs your approval.".to_string(),
                 "Risk: High".to_string(),
             ],
             &styles,
@@ -1359,6 +1388,28 @@ mod tests {
         let text = line_text(risk_line);
         assert!(!text.contains('•'), "context row must not use bullet, got: {text}");
         assert!(risk_line.spans.len() > 1, "label and value should be separate spans");
+    }
+
+    #[test]
+    fn modal_instruction_permission_labels_render_without_bullets() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 8),
+            &[
+                "The agent wants to run a shell command and needs your approval.".to_string(),
+                "`cargo test`".to_string(),
+                "What the agent is trying to do: verify build".to_string(),
+                "Requested from: agent-1".to_string(),
+            ],
+            &styles,
+        );
+
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+        let goal = texts.iter().find(|text| text.contains("verify build")).expect("goal row");
+        assert!(!goal.contains('•'), "goal row must not use bullet, got: {goal}");
+        let source = texts.iter().find(|text| text.contains("agent-1")).expect("source row");
+        assert!(!source.contains('•'), "source row must not use bullet, got: {source}");
+        assert!(!texts.iter().any(|text| text.contains('│')), "no pipe gutter expected, got: {texts:?}");
     }
 
     #[test]
