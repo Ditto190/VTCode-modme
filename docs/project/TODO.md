@@ -653,3 +653,127 @@ try to implement instant VT Code TUI app startup. Focus on reducing initializati
 ===
 
 https://deepwiki.com/search/how-do-codex-implement-backgro_c378a0fa-eca4-4357-b365-03824dacd499?mode=deep
+
+===
+
+Improve task tracking structure in VT Code to ensure seamless continuation of tasks across turns and session resumes. reference this structure:
+
+```
+feature: tracker-continuation
+status: in-progress
+updated: 2026-09-18
+branch: fix/tracker-continuation
+commits:
+Tracker Continuation (Run Loop + TODO Resume)
+Report
+[S1] Problem
+VT Code ends turns and nudges the user to resume even when task_tracker still has incomplete TODO steps. Evidence from .vtcode/sessions/session-vtcode-20260918T030054Z_141498-26410/events.jsonl: the agent repeatedly emits ## Status recaps ("blocked by turn budget", "Next step on resume: …") and then turn.completed, requiring the user to type continue after every budget/recovery boundary. TODO tasks therefore do not continue seamlessly across turns or across session resume.
+
+Root causes observed in code:
+
+Binary interim-text continuation (src/agent/runloop/unified/turn/context/continuation.rs) treats status recaps containing conclusive/blocker phrases (blocked by, next action, completed) as terminal, even when tracker work remains. Interactive mode returns interactive_mode (no continue) for interim progress without recent tool activity.
+Tool-free recovery is forced terminal in-turn (response_handling.rs), and BLOCKED_TOOL_RECOVERY_DIRECTIVE tells the model to "end your turn". The outer session loop auto-queues only verification-blocked turns, not tracker-incomplete budget/recovery ends.
+Session resume injects pending user prompts but never loads incomplete task_tracker state or auto-queues an implementation turn.
+AgentRunner::ContinuationController assesses the tracker only when check_completion_candidate matches; status recaps are not completion candidates, so incomplete checklists never force continuation on that path either.
+[S2] Design
+Decision (user-confirmed):
+
+Auto-continue whenever task_tracker has incomplete items and no genuine user-input/permission need — in Build/Auto/full-auto and interactive TUI.
+On resume with incomplete tracker items, auto-queue one continuation turn after injecting remaining-step context.
+After budget/recovery turn ends with tracker work remaining, auto-queue the next turn when the blocker is recoverable (budget/preview/tool-free recovery), not user-input or permission.
+Contracts
+Tracker incomplete helper. Reuse task_tracker action=list via ToolRegistry (same shape as approved_plan_execution_summary). Expose:
+
+rust
+
+Copy
+// binary: session_loop_runner/support.rs
+pub(super) async fn incomplete_tracker_items(tool_registry: &ToolRegistry) -> Option<Vec<String>>
+Returns None when tracker is empty/absent; Some(items) with incomplete step descriptions otherwise. Cap display at 4 items (existing pending_checklist_items pattern).
+
+In-turn continuation override. After evaluate_interim_text_continuation, apply tracker-aware override when tracker incomplete:
+
+Still end turn when: planning active; text asks for user input (? / request-user-input phrases); empty response; hard permission/policy handoff already classified.
+Otherwise force should_continue = true, reason tracker_incomplete_continuation, not relaxed (does not burn relaxed cap).
+Status phrases like "blocked by turn budget" / "next step on resume" are not terminal when tracker incomplete.
+Signature (pure, unit-testable):
+
+rust
+
+Copy
+pub(super) fn apply_tracker_continuation_override(
+    decision: InterimTextContinuationDecision,
+    tracker_incomplete: bool,
+    planning_active: bool,
+    text: &str,
+) -> InterimTextContinuationDecision
+Call site: response_handling.rs after evaluating continuation, before phase/outcome wiring. Tool-free recovery stays terminal this turn (existing infinite-cycle guard); outer loop handles the next turn.
+
+Outer session auto-queue. In orchestration.rs after turn finalization, when:
+
+continuation.auto_continue_tracker is enabled (default true), and
+planner is not active, and
+turn outcome is Completed or Blocked with a recoverable reason (preview/turn budget, tool-free recovery, repeated status without user-input), and
+tracker has incomplete items, and
+cross-turn tracker-continuation budget not exhausted,
+then try_queue_follow_up_input a continuation prompt listing remaining steps and instructing the agent to execute next steps now (not ask the user to resume). Mirror the verification auto-recovery path: queue first, inject system directive, emit Info line, continue the session loop. On queue-full, fall through to blocked handoff.
+
+Budget: [agent.harness.continuation].cross_turn_turns (default 8). Separate from verification budget. Reset on genuine user input and on completed tracker.
+
+Resume auto-queue. After session bootstrap when resume_ref.is_some() and no pending resumed user prompt is already queued:
+
+Load incomplete tracker items via the helper.
+If present and auto-continue enabled, push a system note with remaining steps.
+Queue one follow-up: resume the first pending/in-progress tracker step.
+Prompt guidance (shipped surface). Add a compiled runtime-guidance line in crates/codegen/vtcode-core/src/prompts/runtime_guidance.rs:
+
+Continue remaining task_tracker work in-run; do not end the turn asking the user to resume when steps remain and no user decision is required.
+Update the presence/budget assertion in the same module.
+
+AgentRunner parity. In runner/execute.rs, when a text-only response is not a completion candidate, has no tool calls, and tracker is incomplete, treat as forced continuation (inject the existing tracker Continue prompt from ContinuationController::assess_completion) instead of idle-end, unless idle-turn hard limit already tripped.
+
+Config
+Under existing agent.harness (no new top-level subsystem):
+
+toml
+
+Copy
+[agent.harness.continuation]
+auto_continue_tracker = true   # default
+cross_turn_turns = 8           # default; 0 disables cross-turn tracker auto-queue
+[S3] Out of Scope
+Changing tool budgets, preview budgets, or permission policy semantics.
+Auto-approving tools outside existing allow-lists.
+Redesigning planning workflow (planning remains terminal for continuation).
+Infinite auto-run when tracker never progresses — bounded by cross_turn_turns, verification escalation, hard turn/session caps, and user Esc/interrupt.
+Fixing unrelated TODO.md owner notes.
+Tasks
+ T1: Add AgentHarnessConfig.continuation knobs — acceptance: defaults auto_continue_tracker=true, cross_turn_turns=8; parse tests in vtcode-config (covers: S2)
+ T2: Implement incomplete_tracker_items + apply_tracker_continuation_override with unit tests — acceptance: pure tests cover terminal user-input vs tracker-incomplete continue (covers: S2; depends: T1)
+ T3: Wire override into binary response handling + outer auto-queue for Completed/Blocked recoverable ends — acceptance: new unit/integration tests show queue when tracker incomplete; no queue when planner active or user asked (covers: S2; depends: T2)
+ T4: Resume auto-queue when tracker incomplete — acceptance: test covers resume path injects directive + queues follow-up (covers: S2; depends: T2)
+ T5: AgentRunner forced continuation on incomplete tracker for text-only status — acceptance: unit test in runner harness continues instead of idle end (covers: S2; depends: T2)
+ T6: Update runtime_guidance + docs (agent-loop-contract / harness notes) — acceptance: presence test asserts new guidance; docs mention tracker auto-continue bounds (covers: S2; depends: T3)
+```
+
+===
+
+warning: unresolved link to `MAX_TRACKED_CONTENT_BYTES`
+--> crates/codegen/vtcode-core/src/tools/handlers/turn_diff_tracker.rs:394:41
+|
+394 | /// Entries whose content exceeds [`MAX_TRACKED_CONTENT_BYTES`] render as a
+| ^^^^^^^^^^^^^^^^^^^^^^^^^ no item named `MAX_TRACKED_CONTENT_BYTES` in scope
+|
+= help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+= note: `#[warn(rustdoc::broken_intra_doc_links)]` on by default
+
+warning: public documentation for `rewrite_truncation_only_verifier` links to private item `is_pure_truncation_stage`
+--> crates/codegen/vtcode-core/src/tools/tool_intent/activity.rs:348:36
+|
+348 | /// - every tail stage is a pure [`is_pure_truncation_stage`] truncator, so
+| ^^^^^^^^^^^^^^^^^^^^^^^^ this item is private
+|
+= note: this link will resolve properly if you pass `--document-private-items`
+= note: `#[warn(rustdoc::private_intra_doc_links)]` on by default
+
+warning: `vtcode-core` (lib doc) generated 2 warnings
