@@ -417,6 +417,16 @@ mod tests {
     }
 
     #[test]
+    fn task_panel_metadata_drives_progress_label() {
+        let mut session = session_for_title_tests();
+        session.terminal_title_items = Some(vec!["task-progress".to_string()]);
+        session.set_task_panel_progress_label(Some("3/8".to_string()));
+
+        assert_eq!(session.terminal_title_task_progress.as_deref(), Some("3/8"));
+        assert_eq!(session.render_terminal_title().as_deref(), Some("3/8"));
+    }
+
+    #[test]
     fn invalid_terminal_title_items_are_ignored() {
         let mut session = session_for_title_tests();
         session.terminal_title_items = Some(vec!["not-real".to_string(), "project".to_string()]);

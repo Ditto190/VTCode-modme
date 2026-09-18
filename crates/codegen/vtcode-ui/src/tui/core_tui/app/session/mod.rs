@@ -826,6 +826,10 @@ impl AppSession {
             TransientRequest::TaskPanel(TaskPanelTransientRequest { lines, visible, metadata }) => {
                 self.core.set_task_panel_lines(lines.clone());
                 self.task_panel_lines = lines;
+                if let Some(metadata) = &metadata {
+                    self.core
+                        .set_task_panel_progress_label(Some(format!("{}/{}", metadata.completed, metadata.total)));
+                }
                 if visible.is_none() {
                     self.task_panel_metadata = metadata;
                 }

@@ -186,7 +186,11 @@ fn is_task_tracker_tool(name: &str) -> bool {
 }
 
 fn task_tracker_block_lines(output: &serde_json::Value) -> Vec<String> {
-    crate::agent::runloop::tool_output::tracker_view_lines(output)
+    crate::agent::runloop::tool_output::tracker_progress_lines(output)
+}
+
+fn task_tracker_panel_body_lines(output: &serde_json::Value) -> Vec<String> {
+    crate::agent::runloop::tool_output::tracker_tree_body_lines(output)
 }
 
 fn task_tracker_block_segments(lines: &[String]) -> Vec<Vec<InlineSegment>> {
@@ -1303,13 +1307,18 @@ async fn handle_success_common(
         record_mcp_outcome_event(ctx.mcp_panel_state, tool_name, args_val, payload.command_success);
     } else if is_task_tracker_tool(name) && ctx.renderer.supports_inline_ui() {
         ctx.renderer.flush_compact_command_group();
-        let block_lines = task_tracker_block_lines(payload.output);
-        if !block_lines.is_empty() {
+        // User-facing split: transcript shows title+progress only; the docked
+        // panel body keeps the compact tree when the user opens it.
+        let panel_lines = task_tracker_panel_body_lines(payload.output);
+        let progress_lines = task_tracker_block_lines(payload.output);
+        if !panel_lines.is_empty() || !progress_lines.is_empty() {
             ctx.handle.update_task_panel_with_metadata(
-                block_lines.clone(),
+                panel_lines,
                 crate::agent::runloop::tool_output::tracker_panel_metadata(payload.output),
             );
-            apply_task_tracker_block(ctx.handle, ctx.harness_state, block_lines);
+            if !progress_lines.is_empty() {
+                apply_task_tracker_block(ctx.handle, ctx.harness_state, progress_lines);
+            }
         }
     } else {
         render_tool_output_common(
@@ -1588,16 +1597,16 @@ mod tests {
 
     #[test]
     #[serial_test::serial(transcript_state)]
-    fn successful_task_tracker_replacement_contains_only_compact_tree_rows() {
-        // Successful updates replace the prior tracker block as one compact
-        // tree. Tool-call arguments are operational detail, not task-panel or
-        // transcript content.
+    fn successful_task_tracker_replacement_contains_only_progress_line() {
+        // User-facing transcript contract: title + progress only. The compact
+        // tree is panel-body content, not transcript content.
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut harness_state = build_harness_state();
         let first = serde_json::json!({
             "status": "updated",
             "checklist": {
+                "title": "Release",
                 "items": [
                     { "index_path": "1", "level": 0, "description": "Release", "status": "in_progress" },
                     { "index_path": "1.1", "level": 1, "description": "Update version", "status": "completed" },
@@ -1608,6 +1617,7 @@ mod tests {
         let second = serde_json::json!({
             "status": "updated",
             "checklist": {
+                "title": "Release",
                 "items": [
                     { "index_path": "1", "level": 0, "description": "Release", "status": "completed" },
                     { "index_path": "1.1", "level": 1, "description": "Update version", "status": "completed" },
@@ -1616,29 +1626,38 @@ mod tests {
             }
         });
 
-        apply_task_tracker_block(&handle, &mut harness_state, task_tracker_block_lines(&first));
-        apply_task_tracker_block(&handle, &mut harness_state, task_tracker_block_lines(&second));
+        let first_progress = task_tracker_block_lines(&first);
+        let second_progress = task_tracker_block_lines(&second);
+        let first_panel = task_tracker_panel_body_lines(&first);
+        let second_panel = task_tracker_panel_body_lines(&second);
+
+        assert_eq!(first_progress, vec!["• Release 1/3"]);
+        assert_eq!(second_progress, vec!["• Release 3/3"]);
+        assert!(
+            first_panel.iter().any(|line| line.contains("Update version")),
+            "panel body keeps the compact tree: {first_panel:?}"
+        );
+        assert!(
+            second_panel.iter().all(|line| !line.starts_with("• ")),
+            "panel body must not re-include the transcript progress header"
+        );
+
+        apply_task_tracker_block(&handle, &mut harness_state, first_progress);
+        apply_task_tracker_block(&handle, &mut harness_state, second_progress);
 
         let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
             InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
             _ => None,
         });
-        let (count, rows) = replacement.expect("second tracker update should replace the previous compact tree");
+        let (count, rows) = replacement.expect("second tracker update should replace the previous progress line");
         let rows = rows
             .into_iter()
             .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
             .collect::<Vec<_>>();
 
-        assert_eq!(count, 4);
-        assert_eq!(
-            rows,
-            vec![
-                "• Tasks 3/3",
-                "  └ Release",
-                "    [x] Update version",
-                "    [x] Run checks",
-            ]
-        );
+        assert_eq!(count, 1);
+        assert_eq!(rows, vec!["• Release 3/3"]);
+        assert!(rows.iter().all(|row| !row.contains("next:") && !row.contains("├")));
     }
 
     #[test]

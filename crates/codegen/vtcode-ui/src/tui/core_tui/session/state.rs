@@ -42,6 +42,13 @@ impl Session {
         self.mark_dirty();
     }
 
+    /// Drive terminal-title task progress from typed panel metadata (`N/M`).
+    /// Panel body lines no longer carry a parseable `Progress:` row.
+    pub(crate) fn set_task_panel_progress_label(&mut self, label: Option<String>) {
+        self.terminal_title_task_progress = label;
+        self.mark_dirty();
+    }
+
     pub(crate) fn clear_inline_prompt_suggestion(&mut self) {
         if self.inline_prompt_suggestion.suggestion.is_none() {
             return;

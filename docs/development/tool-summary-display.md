@@ -3,7 +3,7 @@
 VT Code has two independent tool-display settings:
 
 - `ui.tool_output_mode` controls how command and tool result bodies are truncated or spooled.
-- `ui.tool_display_mode` controls the transition summaries shown before those bodies. It defaults to `compact`; contiguous successful command/PTY calls share a compact activity row while non-command tools retain their compact tree formatting.
+- `ui.tool_display_mode` controls the transition summaries shown before those bodies. It defaults to `compact`; contiguous successful command/PTY calls share a compact activity row while successful `task_tracker` updates show a title+progress line in the transcript (the compact tree stays on the TODO panel body).
 
 ```toml
 [ui]

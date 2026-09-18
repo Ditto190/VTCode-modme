@@ -1013,6 +1013,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Tracker Continuation (Run Loop + TODO Resume)?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/tracker-user-facing-ui.md`
+  - **Content**: Tracker User-Facing UI (Title + Progress Only)
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Tracker User-Facing UI (Title + Progress Only)?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/huggingface/vtcode.md`
   - **Content**: VT Code
   - **Topics**: Overview, Configuration, Supported Models, Features with HF Integration, Common Use Cases
