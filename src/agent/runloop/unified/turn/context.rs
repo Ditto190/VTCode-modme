@@ -26,8 +26,8 @@ use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_ui::tui::app::InlineHandle;
 
 use self::continuation::{
-    AUTONOMOUS_CONTINUE_DIRECTIVE, InterimTextContinuationDecision, evaluate_interim_text_continuation,
-    push_system_directive_once,
+    AUTONOMOUS_CONTINUE_DIRECTIVE, InterimTextContinuationDecision, continuation_telemetry_outcome,
+    evaluate_interim_text_continuation, push_system_directive_once,
 };
 use self::message_history::{
     build_combined_reasoning, parse_reasoning_detail_value, push_assistant_message, reasoning_duplicates_content,

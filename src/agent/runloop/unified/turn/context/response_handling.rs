@@ -844,6 +844,7 @@ impl<'a> TurnProcessingContext<'a> {
             turn_id = %self.harness_state.turn_id.0,
             should_continue = continuation_decision.should_continue,
             reason = continuation_decision.reason,
+            outcome = continuation_telemetry_outcome(self.full_auto, &continuation_decision),
             is_interim_progress = continuation_decision.is_interim_progress,
             last_user_follow_up = continuation_decision.last_user_follow_up,
             recent_tool_activity = continuation_decision.recent_tool_activity,

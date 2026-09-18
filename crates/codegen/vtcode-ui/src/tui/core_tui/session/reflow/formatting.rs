@@ -30,11 +30,16 @@ impl Session {
     /// - List items with consistent formatting
     /// - Diff rows (background-aware with a foreground-only fallback, never
     ///   justified as prose)
+    ///
+    /// Rows carrying projected transcript links (`row_has_links`) are never
+    /// justified: justification inserts interior spaces, which would shift
+    /// the text under the precomputed link ranges and misalign underlines.
     pub(super) fn justify_wrapped_lines(
         &self,
         lines: Vec<Line<'static>>,
         max_width: usize,
         kind: InlineMessageKind,
+        row_has_links: &[bool],
     ) -> Vec<Line<'static>> {
         if max_width == 0 {
             return lines;
@@ -74,6 +79,7 @@ impl Session {
             } else if kind == InlineMessageKind::Agent
                 && !in_fenced_block
                 && !is_fence_line
+                && !row_has_links.get(index).copied().unwrap_or(false)
                 && self.should_justify_message_line(&line, max_width, is_last)
             {
                 self.justify_message_line(&line, max_width)

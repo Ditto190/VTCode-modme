@@ -1837,6 +1837,23 @@ async fn finalize_turn(
     result: &TurnLoopResult,
     turn_usage: &HarnessUsage,
 ) {
+    if let TurnLoopResult::Blocked { reason } = result {
+        let reason_text = reason.as_deref().unwrap_or("turn blocked");
+        let outcome = if reason_text.contains(ASSISTANT_TEXT_RESPONSE_CAP_REASON) {
+            "safety_cap_handoff"
+        } else {
+            "blocked_handoff"
+        };
+        tracing::info!(
+            target: "vtcode.turn.metrics",
+            metric = "turn_handoff",
+            outcome,
+            reason = reason_text,
+            run_id = %ctx.harness_state.run_id.0,
+            turn_id = %ctx.harness_state.turn_id.0,
+            "turn handoff metric"
+        );
+    }
     if matches!(result, TurnLoopResult::Cancelled | TurnLoopResult::Exit)
         && let Err(err) = ctx.tool_registry.terminate_all_exec_sessions_async().await
     {

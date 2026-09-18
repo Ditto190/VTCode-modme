@@ -100,6 +100,30 @@ pub(super) fn evaluate_interim_text_continuation(
         return d(false, "planning_active");
     }
 
+    // Full-auto sessions must not mistake an ordinary progress update for a
+    // completed turn. The model often emits a short, non-interim sentence
+    // before it makes its next tool call; returning here would hand control
+    // back to the TUI input prompt and require a manual `continue`.
+    //
+    // Keep explicit terminal signals ahead of this autonomous fallback. A
+    // response cap and the existing loop guards remain the authoritative
+    // bounds when the model keeps producing non-conclusive text.
+    if full_auto {
+        let asks_user_input = text.contains('?') || contains_user_input_request(&lower);
+        if text.trim().is_empty() {
+            return d(false, "full_auto_empty_response");
+        }
+        if asks_user_input {
+            return d(false, "full_auto_user_input_handoff");
+        }
+        if has_explicit_blocker(&lower) {
+            return d(false, "full_auto_blocked_handoff");
+        }
+        if full_auto_response_is_conclusive(&lower) {
+            return d(false, "full_auto_final_completion");
+        }
+    }
+
     if !is_interim_progress {
         let not_conclusive = !last_clause_contains_conclusive_marker(&lower);
         let has_relaxed_continuation_intent = has_relaxed_continuation_intent(&lower);
@@ -131,6 +155,12 @@ pub(super) fn evaluate_interim_text_continuation(
         {
             return d_relaxed(true, "progressive_relaxed");
         }
+        if full_auto {
+            if relaxed_budget_exhausted {
+                return d(false, "full_auto_relaxed_cap");
+            }
+            return d_relaxed(true, "full_auto_continuation");
+        }
         return d(false, "non_interim_text");
     }
 
@@ -146,6 +176,10 @@ pub(super) fn evaluate_interim_text_continuation(
         return d(true, "progressive_request");
     }
 
+    if full_auto {
+        return d(true, "full_auto_continuation");
+    }
+
     d(
         false,
         if full_auto {
@@ -154,6 +188,32 @@ pub(super) fn evaluate_interim_text_continuation(
             "interactive_mode"
         },
     )
+}
+
+/// Classify the outcome emitted with the text-response telemetry record.
+///
+/// The canonical turn events still describe completed and blocked turns. This
+/// finer-grained metric makes the continuation decision visible before the
+/// outer turn loop finalizes, including the intentional input handoff and the
+/// bounded full-auto continuation path.
+pub(super) fn continuation_telemetry_outcome(
+    full_auto: bool,
+    decision: &InterimTextContinuationDecision,
+) -> &'static str {
+    if decision.should_continue {
+        return if full_auto {
+            "full_auto_continuation"
+        } else {
+            "continuation"
+        };
+    }
+
+    match decision.reason {
+        "full_auto_user_input_handoff" => "user_input_handoff",
+        "full_auto_relaxed_cap" => "safety_cap_handoff",
+        "full_auto_blocked_handoff" | "full_auto_empty_response" => "blocked_handoff",
+        _ => "final_completion",
+    }
 }
 
 pub(super) fn push_system_directive_once(history: &mut Vec<uni::Message>, directive: &str) {
@@ -199,6 +259,102 @@ fn last_clause_contains_conclusive_marker(lower: &str) -> bool {
         .map(|(idx, ch)| lower[idx + ch.len_utf8()..].trim_start())
         .unwrap_or(lower);
     conclusive_markers.iter().any(|marker| last_clause.contains(marker))
+}
+
+/// Full-auto responses need to recognize a conclusive marker even when the
+/// final sentence ends with punctuation. The legacy helper intentionally keeps
+/// its existing clause behavior for interactive relaxed continuation; this
+/// companion handles the terminal full-auto classification without broadening
+/// the interactive path.
+fn full_auto_response_is_conclusive(lower: &str) -> bool {
+    let conclusive_markers = [
+        "completed",
+        "complete",
+        "done",
+        "fixed",
+        "resolved",
+        "summary",
+        "result summary",
+        "final review",
+        "final blocker",
+        "next action",
+        "what changed",
+        "validation",
+        "validated",
+        "passed",
+        "passes",
+        "finished",
+        "successful",
+        "successfully",
+        "no issues",
+        "no errors",
+        "nothing to fix",
+        "all set",
+        "that's all",
+        "that’s all",
+    ];
+    // Strip terminal sentence/Markdown punctuation before looking for the
+    // last clause. This keeps an inline-code `!` from becoming the apparent
+    // final clause in text such as ``printing `Hello!`.``.
+    let terminal_text =
+        lower.trim_end_matches(|ch| ['.', '!', '\n', '—', '…', '`', '*', '_', ')', ']', '}'].contains(&ch));
+    let last_non_empty_clause = terminal_text
+        .split(|ch| ['.', '!', '\n', '—', '…'].contains(&ch))
+        .rfind(|clause| !clause.trim().is_empty())
+        .unwrap_or(terminal_text)
+        .trim();
+    // A future action can mention a successful outcome as part of its plan,
+    // e.g. "I'll run the linter again to verify the warnings are resolved."
+    // Treat only a final clause that is not itself continuation intent as a
+    // completed result.
+    let last_clause_has_continuation_intent =
+        has_interim_intent_clause(last_non_empty_clause) || has_relaxed_continuation_intent(last_non_empty_clause);
+    if !last_clause_has_continuation_intent
+        && (last_clause_contains_conclusive_marker(terminal_text)
+            || conclusive_markers.iter().any(|marker| last_non_empty_clause.contains(marker)))
+    {
+        return true;
+    }
+
+    let has_summary_heading = lower.lines().any(|line| {
+        let line = line.trim().trim_start_matches(['#', '*', '-', '>', ' ']);
+        ["summary:", "result:", "results:", "what changed:", "final answer:"]
+            .iter()
+            .any(|marker| line.starts_with(marker))
+    });
+    has_summary_heading && !has_interim_intent_clause(lower)
+}
+
+fn has_explicit_blocker(lower: &str) -> bool {
+    [
+        "i'm blocked",
+        "im blocked",
+        "i’m blocked",
+        "i am blocked",
+        "is blocked",
+        "blocked by",
+        "cannot proceed",
+        "can't proceed",
+        "can’t proceed",
+        "unable to proceed",
+        "cannot continue",
+        "can't continue",
+        "can’t continue",
+        "unable to continue",
+        "cannot complete",
+        "can't complete",
+        "can’t complete",
+        "unable to complete",
+        "no access to",
+        "permission denied",
+        "access denied",
+        "missing credentials",
+        "credentials are missing",
+        "not possible to proceed",
+        "requires manual intervention",
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
 }
 
 pub(super) fn is_interim_progress_update(text: &str) -> bool {
@@ -327,6 +483,24 @@ fn contains_user_input_request(lower: &str) -> bool {
         "awaiting your",
         "your choice",
         "your decision",
+        "need approval",
+        "need your approval",
+        "requires approval",
+        "require approval",
+        "approval is required",
+        "please approve",
+        "need permission",
+        "need your permission",
+        "requires permission",
+        "require permission",
+        "permission is required",
+        "grant permission",
+        "authorize this",
+        "need a decision",
+        "need clarification",
+        "waiting for input",
+        "awaiting input",
+        "waiting on you",
         // Closing offers of optional follow-up work ("…say the word and I'll
         // do a larger pass"): the model has finished and is waiting on the
         // user, so the relaxed continuation paths must not re-prompt past the
@@ -668,6 +842,100 @@ mod tests {
             )
             .should_continue
         );
+    }
+
+    #[test]
+    fn full_auto_continues_after_non_conclusive_text_without_tool_activity() {
+        let history = vec![uni::Message::user("work through the requested task".to_string())];
+        let decision = evaluate_interim_text_continuation(
+            true,
+            false,
+            &history,
+            "I reviewed the request and have more work to do.",
+            0,
+        );
+
+        assert!(decision.should_continue);
+        assert_eq!(decision.reason, "full_auto_continuation");
+        assert!(decision.is_relaxed_continuation);
+    }
+
+    #[test]
+    fn full_auto_continues_after_inspect_fix_and_check_updates() {
+        let history = vec![uni::Message::user("complete the requested work".to_string())];
+        for text in [
+            "I'll inspect the remaining files now.",
+            "I'll fix the parser branch next.",
+            "I'll check the targeted test output before summarizing.",
+        ] {
+            let decision = evaluate_interim_text_continuation(true, false, &history, text, 0);
+            assert!(decision.should_continue, "expected continuation for {text:?}");
+        }
+    }
+
+    #[test]
+    fn full_auto_stops_on_completion_summaries() {
+        let history = vec![uni::Message::user("finish the requested task".to_string())];
+        for text in [
+            "Completed the requested changes. All targeted tests passed.",
+            "Summary:\n- Updated the parser and verified the targeted test.",
+            "The result is complete.",
+        ] {
+            let decision = evaluate_interim_text_continuation(true, false, &history, text, 0);
+            assert!(!decision.should_continue, "expected terminal completion for {text:?}");
+            assert_eq!(decision.reason, "full_auto_final_completion");
+        }
+    }
+
+    #[test]
+    fn full_auto_stops_on_questions_approval_requests_and_blockers() {
+        let history = vec![uni::Message::user("complete the requested task".to_string())];
+        let cases = [
+            ("Should I continue with the migration?", "full_auto_user_input_handoff"),
+            ("I need your approval before I proceed.", "full_auto_user_input_handoff"),
+            ("I’m blocked by missing credentials.", "full_auto_blocked_handoff"),
+        ];
+
+        for (text, reason) in cases {
+            let decision = evaluate_interim_text_continuation(true, false, &history, text, 0);
+            assert!(!decision.should_continue, "expected terminal handoff for {text:?}");
+            assert_eq!(decision.reason, reason);
+        }
+    }
+
+    #[test]
+    fn interactive_mode_keeps_non_conclusive_text_terminal() {
+        let history = vec![uni::Message::user("work through the requested task".to_string())];
+        let decision = evaluate_interim_text_continuation(
+            false,
+            false,
+            &history,
+            "I reviewed the request and have more work to do.",
+            0,
+        );
+
+        assert!(!decision.should_continue);
+        assert_eq!(decision.reason, "non_interim_text");
+    }
+
+    #[test]
+    fn continuation_telemetry_distinguishes_terminal_paths() {
+        let history = vec![uni::Message::user("complete the requested task".to_string())];
+        let continuing = evaluate_interim_text_continuation(true, false, &history, "I reviewed the request.", 0);
+        assert_eq!(continuation_telemetry_outcome(true, &continuing), "full_auto_continuation");
+
+        let completed = evaluate_interim_text_continuation(true, false, &history, "The result is complete.", 0);
+        assert_eq!(continuation_telemetry_outcome(true, &completed), "final_completion");
+
+        let input = evaluate_interim_text_continuation(true, false, &history, "Should I continue?", 0);
+        assert_eq!(continuation_telemetry_outcome(true, &input), "user_input_handoff");
+
+        let capped = evaluate_interim_text_continuation(true, false, &history, "I have more work to do.", 3);
+        assert_eq!(capped.reason, "full_auto_relaxed_cap");
+        assert_eq!(continuation_telemetry_outcome(true, &capped), "safety_cap_handoff");
+
+        let blocked = evaluate_interim_text_continuation(true, false, &history, "I cannot proceed without access.", 0);
+        assert_eq!(continuation_telemetry_outcome(true, &blocked), "blocked_handoff");
     }
 
     #[test]

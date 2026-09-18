@@ -1590,3 +1590,31 @@ fn eviction_shifts_surviving_paste_indices() {
     let text: String = preview_line.segments.iter().map(|segment| segment.text.as_str()).collect();
     assert!(text.contains("showing last"));
 }
+
+#[test]
+fn agent_prose_links_stay_aligned_when_rows_justify() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_workspace_root(Some(vtcode_tui_workspace_root()));
+    // Plain single-style prose: rows stay single-span so mid-length rows are
+    // justification candidates. The inline path must keep exact link bounds
+    // even when its row is padded out to full width.
+    let path = transcript_file_fixture_relative_path();
+    let text = format!(
+        "Verified the implementation across all of the modules and then confirmed the behavior in {path}, and continued checking the remaining pieces of the transcript afterwards today"
+    );
+    session.push_line(InlineMessageKind::Agent, vec![make_segment(&text)]);
+
+    let rows = session.reflow_message_lines(0, 80, false);
+    assert!(rows.len() > 1, "expected the prose to wrap");
+
+    let mut found = 0;
+    for row in &rows {
+        let row_text: String = row.line.spans.iter().map(|span| span.content.as_ref()).collect();
+        for link in &row.explicit_links {
+            let slice = row_text.get(link.start..link.end).unwrap_or_default();
+            assert_eq!(slice, path, "link underline misaligned after reflow: {slice:?} in {row_text:?}");
+            found += 1;
+        }
+    }
+    assert_eq!(found, 1, "expected the inline path to stay linked");
+}

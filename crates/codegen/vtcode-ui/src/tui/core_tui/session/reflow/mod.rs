@@ -202,7 +202,9 @@ impl Session {
         } else {
             let mut lines = self.wrap_line(base_line, max_width);
             if !lines.is_empty() {
-                lines = self.justify_wrapped_lines(lines, max_width, message.kind);
+                // Links on this path are detected after justification (see
+                // `into_transcript_lines`), so no row carries links yet.
+                lines = self.justify_wrapped_lines(lines, max_width, message.kind, &[]);
             }
             if lines.is_empty() {
                 lines.push(Line::default());
@@ -448,7 +450,11 @@ impl Session {
         };
 
         if !wrapped.is_empty() {
-            wrapped = self.justify_wrapped_lines(wrapped, content_width, message.kind);
+            // Justification inserts interior spaces, so rows carrying
+            // projected links keep their wrapped text: their link ranges were
+            // computed against it and would otherwise drift out of alignment.
+            let row_has_links: Vec<bool> = explicit_links.iter().map(|links| !links.is_empty()).collect();
+            wrapped = self.justify_wrapped_lines(wrapped, content_width, message.kind, &row_has_links);
         }
         if wrapped.is_empty() {
             wrapped.push(Line::default());

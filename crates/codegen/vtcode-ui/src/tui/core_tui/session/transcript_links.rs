@@ -513,31 +513,115 @@ fn may_contain_link_candidate_text(text: &str) -> bool {
         || text.contains("../")
 }
 
-fn line_local_link_bounds(
+/// A wrapped display row anchored in the original unwrapped text.
+///
+/// Dimension key: `start`/`end` are byte offsets into the original text,
+/// `indent` counts leading wrapped-row bytes (hanging indent) that are
+/// absent from the original.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LocatedRow {
+    /// Byte offset where the row body starts in the original text.
+    start: usize,
+    /// Byte offset where the row body ends in the original text.
+    end: usize,
+    /// Leading row bytes (hanging indent) absent from the original text.
+    indent: usize,
+}
+
+/// Locate a wrapped display row inside the original unwrapped text.
+///
+/// Word-boundary wrapping is not lossless: the break whitespace is dropped
+/// and bullet-aware wrapping prepends a hanging indent (e.g. `  ` under
+/// `• `) that never existed in the source. Accumulating row byte lengths
+/// therefore drifts a little further with every wrap, projecting link ranges
+/// onto the wrong columns so underlines spill into neighboring words.
+/// Instead, anchor each row by searching for its body text from the current
+/// cursor, which transparently skips dropped break whitespace and added
+/// indents.
+///
+/// Returns `None` when the row body cannot be found (defensive only: the
+/// wrappers preserve mid-row text, so this means the row carries no
+/// mappable content and callers should leave it undecorated).
+fn locate_wrapped_row(original_text: &str, cursor: usize, wrapped_text: &str) -> Option<LocatedRow> {
+    if wrapped_text.is_empty() {
+        return Some(LocatedRow { start: cursor, end: cursor, indent: 0 });
+    }
+    let rest = original_text.get(cursor..)?;
+    // Fast path: the row continues exactly where the cursor is (no wrapping
+    // transformation at this boundary).
+    if rest.starts_with(wrapped_text) {
+        return Some(LocatedRow {
+            start: cursor,
+            end: cursor + wrapped_text.len(),
+            indent: 0,
+        });
+    }
+    // General path: strip the wrapper-added hanging indent, then locate the
+    // body text. Leading content indent that genuinely exists in the source
+    // is harmless here: link matches never start inside whitespace, and the
+    // indent offset is added back when translating to row space.
+    let body = wrapped_text.trim_start_matches([' ', '\t']);
+    let indent = wrapped_text.len() - body.len();
+    if body.is_empty() {
+        return Some(LocatedRow { start: cursor, end: cursor, indent });
+    }
+    let offset = rest.find(body)?;
+    let row_start = cursor + offset;
+    Some(LocatedRow {
+        start: row_start,
+        end: row_start + body.len(),
+        indent,
+    })
+}
+
+/// Translate an original-space link range onto a located wrapped row.
+///
+/// Returns row-space byte bounds (char-boundary fixed), or `None` when the
+/// match does not overlap the row.
+fn project_match_onto_located_row(
     link_start: usize,
     link_end: usize,
-    line_start: usize,
-    line_end: usize,
-    line_text: &str,
+    located: &LocatedRow,
+    wrapped_text: &str,
 ) -> Option<(usize, usize)> {
-    let relative_start = link_start.max(line_start).saturating_sub(line_start);
-    let relative_end = link_end.min(line_end).saturating_sub(line_start);
-    if relative_start >= relative_end {
+    let overlap_start = link_start.max(located.start);
+    let overlap_end = link_end.min(located.end);
+    if overlap_start >= overlap_end {
         return None;
     }
 
-    let start = if line_text.is_char_boundary(relative_start) {
-        relative_start
-    } else {
-        floor_char_boundary_impl(line_text, relative_start)
-    };
-    let end = if line_text.is_char_boundary(relative_end) {
-        relative_end
-    } else {
-        ceil_char_boundary_impl(line_text, relative_end)
-    };
+    let mut relative_start = overlap_start - located.start + located.indent;
+    let mut relative_end = overlap_end - located.start + located.indent;
+    if !wrapped_text.is_char_boundary(relative_start) {
+        relative_start = floor_char_boundary_impl(wrapped_text, relative_start);
+    }
+    if !wrapped_text.is_char_boundary(relative_end) {
+        relative_end = ceil_char_boundary_impl(wrapped_text, relative_end);
+    }
 
-    (start < end && end <= line_text.len()).then_some((start, end))
+    (relative_start < relative_end && relative_end <= wrapped_text.len()).then_some((relative_start, relative_end))
+}
+
+/// Emit one callback per detected link overlapping a located row, with
+/// row-space byte bounds. Centralizes the overlap/width filtering so both
+/// decoration sites stay consistent.
+fn each_projected_row_link(
+    matches: &[DetectedLinkMatch],
+    located: &LocatedRow,
+    wrapped_text: &str,
+    mut emit: impl FnMut(usize, usize, &DetectedLinkMatch),
+) {
+    for link_match in matches {
+        let Some((relative_start, relative_end)) =
+            project_match_onto_located_row(link_match.start, link_match.end, located, wrapped_text)
+        else {
+            continue;
+        };
+        if UnicodeWidthStr::width(&wrapped_text[relative_start..relative_end]) == 0 {
+            continue;
+        }
+        emit(relative_start, relative_end, link_match);
+    }
 }
 
 fn floor_char_boundary_impl(s: &str, i: usize) -> usize {
@@ -657,15 +741,18 @@ pub(crate) fn decorate_detected_link_lines(
             break;
         }
 
-        let original_text = transcript_line_text(&line);
+        let original_text = transcript_line_text(&line).into_owned();
         let matches = detect_transcript_link_matches(&original_text, workspace_root);
-        let line_width: usize = UnicodeWidthStr::width(original_text.as_ref());
+        let line_width: usize = UnicodeWidthStr::width(original_text.as_str());
         let wrapped_lines = if line_width <= usize::from(area.width).max(1) {
             vec![line]
         } else {
             wrapping::wrap_line_preserving_urls(line, area.width.max(1) as usize)
         };
-        let mut original_offset = 0usize;
+        // Rows are anchored by searching for their body text (see
+        // `locate_wrapped_row`): wrapping drops break whitespace and may
+        // prepend a hanging indent, so byte lengths do not accumulate.
+        let mut cursor = 0usize;
 
         for wrapped_line in wrapped_lines {
             if row_idx >= usize::from(area.height) {
@@ -673,38 +760,32 @@ pub(crate) fn decorate_detected_link_lines(
             }
 
             let wrapped_text = transcript_line_text(&wrapped_line);
-            let wrapped_start = original_offset;
-            let wrapped_end = wrapped_start + wrapped_text.len();
-            original_offset = wrapped_end;
-
             let mut styled_matches = Vec::new();
-            for DetectedLinkMatch { start, end, target } in &matches {
-                let local_start = (*start).max(wrapped_start);
-                let local_end = (*end).min(wrapped_end);
-                if local_start >= local_end {
-                    continue;
-                }
+            if let Some(located) = locate_wrapped_row(&original_text, cursor, &wrapped_text) {
+                cursor = located.end;
+                each_projected_row_link(
+                    &matches,
+                    &located,
+                    &wrapped_text,
+                    |relative_start, relative_end, link_match| {
+                        let start_col = UnicodeWidthStr::width(&wrapped_text[..relative_start]);
+                        let width = UnicodeWidthStr::width(&wrapped_text[relative_start..relative_end]);
 
-                let Some((relative_start, relative_end)) =
-                    line_local_link_bounds(*start, *end, wrapped_start, wrapped_end, &wrapped_text)
-                else {
-                    continue;
-                };
-                let start_col = UnicodeWidthStr::width(&wrapped_text[..relative_start]);
-                let width = UnicodeWidthStr::width(&wrapped_text[relative_start..relative_end]);
-                if width == 0 {
-                    continue;
-                }
-
-                let target_area = Rect::new(
-                    area.x.saturating_add(start_col as u16),
-                    area.y.saturating_add(row_idx as u16),
-                    width as u16,
-                    1,
+                        let target_area = Rect::new(
+                            area.x.saturating_add(start_col as u16),
+                            area.y.saturating_add(row_idx as u16),
+                            width as u16,
+                            1,
+                        );
+                        let hovered =
+                            last_mouse_position.is_some_and(|(column, row)| point_in_rect(target_area, column, row));
+                        targets.push(TranscriptFileLinkTarget {
+                            area: target_area,
+                            target: link_match.target.clone(),
+                        });
+                        styled_matches.push(StyledLinkMatch { start: relative_start, end: relative_end, hovered });
+                    },
                 );
-                let hovered = last_mouse_position.is_some_and(|(column, row)| point_in_rect(target_area, column, row));
-                targets.push(TranscriptFileLinkTarget { area: target_area, target: target.clone() });
-                styled_matches.push(StyledLinkMatch { start: relative_start, end: relative_end, hovered });
             }
 
             if styled_matches.is_empty() {
@@ -731,39 +812,27 @@ pub(crate) fn project_detected_links_onto_wrapped_lines(
 ) -> Vec<Vec<RenderedTranscriptLink>> {
     let matches = detect_transcript_link_matches(original_text, workspace_root);
     let mut projected = Vec::with_capacity(wrapped_lines.len());
-    let mut original_offset = 0usize;
+    // Rows are anchored by searching for their body text (see
+    // `locate_wrapped_row`): wrapping drops break whitespace and may prepend
+    // a hanging indent, so byte lengths do not accumulate.
+    let mut cursor = 0usize;
 
     for wrapped_line in wrapped_lines {
         let wrapped_text = transcript_line_text(wrapped_line);
-        let wrapped_start = original_offset;
-        let wrapped_end = wrapped_start + wrapped_text.len();
-        original_offset = wrapped_end;
-
         let mut line_links = Vec::new();
-        for DetectedLinkMatch { start, end, target } in &matches {
-            let local_start = (*start).max(wrapped_start);
-            let local_end = (*end).min(wrapped_end);
-            if local_start >= local_end {
-                continue;
-            }
+        if let Some(located) = locate_wrapped_row(original_text, cursor, &wrapped_text) {
+            cursor = located.end;
+            each_projected_row_link(&matches, &located, &wrapped_text, |relative_start, relative_end, link_match| {
+                let start_col = UnicodeWidthStr::width(&wrapped_text[..relative_start]);
+                let width = UnicodeWidthStr::width(&wrapped_text[relative_start..relative_end]);
 
-            let Some((relative_start, relative_end)) =
-                line_local_link_bounds(*start, *end, wrapped_start, wrapped_end, &wrapped_text)
-            else {
-                continue;
-            };
-            let start_col = UnicodeWidthStr::width(&wrapped_text[..relative_start]);
-            let width = UnicodeWidthStr::width(&wrapped_text[relative_start..relative_end]);
-            if width == 0 {
-                continue;
-            }
-
-            line_links.push(RenderedTranscriptLink {
-                start: relative_start,
-                end: relative_end,
-                start_col,
-                width,
-                target: InlineLinkTarget::Url(transcript_link_target_string(target)),
+                line_links.push(RenderedTranscriptLink {
+                    start: relative_start,
+                    end: relative_end,
+                    start_col,
+                    width,
+                    target: InlineLinkTarget::Url(transcript_link_target_string(&link_match.target)),
+                });
             });
         }
 
@@ -1045,5 +1114,38 @@ mod tests {
         assert_eq!(projected[0][0].start, 0);
         assert!(projected[0][0].end <= "crates/codegen/vtcode-core/src/tool_policy.rs —".len());
         assert!("crates/codegen/vtcode-core/src/tool_policy.rs —".is_char_boundary(projected[0][0].end));
+    }
+
+    #[test]
+    fn projected_links_align_with_wrapped_bullet_rows() {
+        let root = find_workspace_root();
+        // Long bullet item: the real wrapper wraps it across several display
+        // rows with a hanging indent and drops the break whitespace, so naive
+        // byte-length accumulation drifts and the underline spills into
+        // neighboring words. Links sit on different rows so accumulating
+        // drift would corrupt the later one more.
+        let original = "• Verified the implementation across all of the modules in Cargo.toml and then confirmed the behavior in Cargo.lock, and continued checking the remaining pieces afterwards";
+        let wrapped = wrapping::wrap_line_preserving_urls(Line::from(original), 60);
+        assert!(wrapped.len() > 2, "expected multiple wrapped rows, got {}", wrapped.len());
+
+        let projected = project_detected_links_onto_wrapped_lines(&wrapped, original, Some(&root));
+        assert_eq!(projected.len(), wrapped.len());
+
+        let mut found = Vec::new();
+        for (row, links) in wrapped.iter().zip(projected.iter()) {
+            let row_text = transcript_line_text(row);
+            for link in links {
+                let slice = &row_text.as_ref()[link.start..link.end];
+                assert!(
+                    slice == "Cargo.toml" || slice == "Cargo.lock",
+                    "link underline spilled outside the path: {slice:?} in {row_text:?}"
+                );
+                assert_eq!(link.start_col, UnicodeWidthStr::width(&row_text.as_ref()[..link.start]));
+                assert_eq!(link.width, UnicodeWidthStr::width(slice));
+                found.push(slice.to_string());
+            }
+        }
+        found.sort();
+        assert_eq!(found, vec!["Cargo.lock".to_string(), "Cargo.toml".to_string()]);
     }
 }
