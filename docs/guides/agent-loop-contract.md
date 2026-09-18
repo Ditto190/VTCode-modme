@@ -25,6 +25,10 @@ ending the turn and nudging the user to resume:
   cross-turn auto-queue. Verification-blocked turns keep their own recovery path.
 - Resume: sessions restored with incomplete tracker steps auto-queue one
   continuation turn after injecting remaining-step context.
+- Plan mode: while planning is active and no validated plan is ready for
+  approval, recoverable turn ends auto-queue another planning turn (same
+  `cross_turn_turns` budget) unless an interview or approval is pending.
+  Planning never auto-approves or auto-implements.
 - Kill-switch: `[agent.harness.continuation].auto_continue_tracker = false`.
 
 The closest concept mapping is:

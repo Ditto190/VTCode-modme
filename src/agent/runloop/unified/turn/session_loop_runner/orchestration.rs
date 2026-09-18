@@ -1655,7 +1655,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     };
                     let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
                     let should_queue = tracker_continue::should_queue_tracker_auto_continue(
-                        auto_continue_enabled,
+                        auto_continue_enabled && !planning_active,
                         planning_active,
                         turn_completed,
                         blocked_reason,
@@ -1663,7 +1663,67 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         incomplete.as_deref(),
                         max_turns,
                     );
-                    if should_queue {
+                    // Plan-mode outer auto-continue: incomplete planning with no
+                    // user decision/approval required queues another planning turn
+                    // instead of nudging the user to resume. Never auto-approves.
+                    let plan_auto_continue_enabled =
+                        planning_active && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref());
+                    let plan_state = tool_registry.planning_workflow_state();
+                    let plan_ready_for_approval = planning_active
+                        && crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state)
+                            .await;
+                    // Core PlanningWorkflowState has no interview/approval flags.
+                    // Plan-mode auto-continue therefore fires only on recoverable
+                    // budget/recovery blocked ends — ordinary completed planning
+                    // turns may be interview or approval handoffs and must wait.
+                    let should_queue_plan = tracker_continue::should_queue_plan_mode_auto_continue(
+                        plan_auto_continue_enabled,
+                        planning_active,
+                        plan_ready_for_approval,
+                        false,
+                        false,
+                        blocked_reason,
+                        is_verification_block,
+                        max_turns,
+                    );
+                    if should_queue_plan {
+                        let follow_up = tracker_continue::plan_mode_continue_follow_up();
+                        let directive = "Plan-mode auto-continue: planning remains active and no validated plan is ready for approval. \
+                             Continue read-only research/synthesis toward one compact `<proposed_plan>` now; \
+                             do not ask the user to resume and do not implement."
+                            .to_string();
+                        let budget_remaining = session_stats.tracker_continuation_turns() < max_turns;
+                        let queued = budget_remaining
+                            && match runtime.try_queue_follow_up_input(follow_up) {
+                                Ok(()) => {
+                                    session_stats.record_tracker_continuation_turn_with_limit(max_turns);
+                                    std::sync::Arc::make_mut(&mut runtime.state.messages)
+                                        .push(vtcode_core::llm::provider::Message::system(directive));
+                                    let _ = renderer.line(
+                                        MessageStyle::Info,
+                                        &format!(
+                                            "[i] Plan-mode auto-continue turn {}/{}: planning still active.",
+                                            session_stats.tracker_continuation_turns(),
+                                            max_turns
+                                        ),
+                                    );
+                                    true
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        %err,
+                                        "Plan-mode auto-continue queue full; falling through to turn end"
+                                    );
+                                    false
+                                }
+                            };
+                        if queued {
+                            if matches!(session_end_reason, SessionEndReason::Exit) {
+                                break;
+                            }
+                            continue;
+                        }
+                    } else if should_queue {
                         let incomplete = incomplete.unwrap_or_default();
                         let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
                         let directive = format!(
@@ -1710,6 +1770,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume.",
                             );
                         }
+                    } else if planning_active && !plan_ready_for_approval && !should_queue_plan {
+                        // User-facing plan progress (title + phase only; no internal dump).
+                        let _ =
+                            renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
                     } else if incomplete.as_ref().is_none_or(|items| items.is_empty()) {
                         // Tracker work cleared (or none): reset the episode budget.
                         session_stats.reset_tracker_continuation_budget();

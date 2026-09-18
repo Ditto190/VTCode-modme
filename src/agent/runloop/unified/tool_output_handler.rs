@@ -318,29 +318,20 @@ fn render_tracker_inline_row(
     wrote_body.then_some(segments)
 }
 
-fn apply_task_tracker_block(
-    handle: &InlineHandle,
-    harness_state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
-    lines: Vec<String>,
-) {
-    // Identical repeats (approval handoff followed by the same pipeline
-    // result, or unchanged `list` calls) must not stack a second full block
-    // in the transcript. The docked panel already reflects the latest state.
-    if harness_state.is_same_as_remembered_task_tracker_block(&lines) {
+/// Single writer for user-facing tracker transcript blocks.
+///
+/// Approval handoff and the tool pipeline must share replace/dedupe so progress
+/// updates never stack a second block in the transcript.
+pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Vec<String>) {
+    if lines.is_empty() {
         return;
     }
-    // The approval handoff appends directly without updating `HarnessTurnState`,
-    // so an identical pipeline replay would otherwise stack a second block.
-    // Remember it here so later updates still replace this block instead of
-    // appending.
-    if transcript::tail_matches(&lines) {
-        harness_state.remember_task_tracker_block(lines);
+    if transcript::tail_matches(&lines) || transcript::tracker_block_matches(&lines) {
+        transcript::remember_tracker_block(lines);
         return;
     }
-    let replace_count = harness_state.replaceable_task_tracker_count();
     let segments = task_tracker_block_segments(&lines);
-
-    if let Some(count) = replace_count {
+    if let Some(count) = transcript::tracker_block_len() {
         handle.replace_last(count, InlineMessageKind::Tool, segments);
         transcript::replace_last(count, &lines);
     } else {
@@ -349,7 +340,15 @@ fn apply_task_tracker_block(
             transcript::append(plain_line);
         }
     }
+    transcript::remember_tracker_block(lines);
+}
 
+fn apply_task_tracker_block(
+    handle: &InlineHandle,
+    harness_state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
+    lines: Vec<String>,
+) {
+    write_tracker_progress_transcript(handle, lines.clone());
     harness_state.remember_task_tracker_block(lines);
 }
 
@@ -1665,6 +1664,7 @@ mod tests {
     fn identical_task_tracker_block_is_not_appended_twice() {
         // Approval handoff + pipeline replay (or repeated `list` calls) emit
         // the same payload. The transcript must keep one block, not two.
+        transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut harness_state = build_harness_state();
@@ -1673,6 +1673,7 @@ mod tests {
             "checklist": {
                 "completed": 1,
                 "total": 3,
+                "title": "Release",
                 "items": [
                     { "index_path": "1", "description": "Release", "status": "in_progress" },
                     { "index_path": "1.1", "description": "Update version", "status": "completed" },
@@ -1688,6 +1689,34 @@ mod tests {
         apply_task_tracker_block(&handle, &mut harness_state, lines);
 
         assert!(receiver.try_recv().is_err(), "identical tracker repeat must not emit another transcript command");
+        transcript::clear();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn write_tracker_progress_transcript_replaces_previous_block_on_change() {
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let first = vec!["• Release 0/2".to_string()];
+        let second = vec!["• Release 1/2".to_string()];
+
+        write_tracker_progress_transcript(&handle, first);
+        while receiver.try_recv().is_ok() {}
+        write_tracker_progress_transcript(&handle, second.clone());
+
+        let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
+            InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
+            _ => None,
+        });
+        let (count, rows) = replacement.expect("changed progress must replace the previous tracker block");
+        let rows = rows
+            .into_iter()
+            .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(count, 1);
+        assert_eq!(rows, second);
+        transcript::clear();
     }
 
     #[test]
@@ -1725,7 +1754,7 @@ mod tests {
             receiver.try_recv().is_err(),
             "pipeline replay after approval handoff must not emit another transcript command"
         );
-        assert!(harness_state.is_same_as_remembered_task_tracker_block(&lines));
+        assert!(transcript::tracker_block_matches(&lines));
         transcript::clear();
     }
 

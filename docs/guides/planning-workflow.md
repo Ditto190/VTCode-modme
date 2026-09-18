@@ -284,6 +284,11 @@ Next open decision: [if any], otherwise: No remaining scope decisions.
 
 [1-3 lines: goal, user impact, what changes / what does not]
 
+## Scope
+
+- In: [concrete surfaces/behaviours this plan changes]
+- Out: [explicit non-goals; keep aligned with Assumptions when material]
+
 ## Implementation Steps
 
 1. [Action] -> files: [path/to/file.rs] -> verify: [check]
@@ -310,6 +315,12 @@ Next open decision: [if any], otherwise: No remaining scope decisions.
 
 </proposed_plan>
 ```
+
+`Scope` records in/out boundaries for the user and for later plan review. Scope
+lines are **plan context only**: `task_tracker` items are distilled from
+`Implementation Steps` / `Steps`, never from `Scope`. The runtime validator
+still requires the canonical four sections below and treats `Scope` as a
+documented section for new drafts (older plans without it remain valid).
 
 `Expected Outcomes` and `Dependencies and Prerequisites` are optional sections:
 add them when they are material to the request — what observable end state the

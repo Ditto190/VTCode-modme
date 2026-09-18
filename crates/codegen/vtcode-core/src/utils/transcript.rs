@@ -12,6 +12,9 @@ const MAX_QUEUE_SIZE: usize = 100;
 
 static TRANSCRIPT: Lazy<RwLock<Vec<String>>> = Lazy::new(|| RwLock::new(Vec::new()));
 static INLINE_HANDLE: Lazy<RwLock<Option<Arc<InlineHandle>>>> = Lazy::new(|| RwLock::new(None));
+/// Session-scoped replaceable tracker transcript block. Shared by every tracker
+/// writer (pipeline + plan-approval handoff) so one surface owns replace/dedupe.
+static REPLACEABLE_TRACKER_BLOCK: Lazy<RwLock<Option<Vec<String>>>> = Lazy::new(|| RwLock::new(None));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TranscriptMode {
@@ -131,6 +134,21 @@ pub fn tail_matches(lines: &[String]) -> bool {
         .all(|(left, right)| left == right)
 }
 
+/// Remember the current user-facing tracker transcript block.
+pub fn remember_tracker_block(lines: Vec<String>) {
+    *REPLACEABLE_TRACKER_BLOCK.write() = (!lines.is_empty()).then_some(lines);
+}
+
+/// Line count of the remembered tracker transcript block, if any.
+pub fn tracker_block_len() -> Option<usize> {
+    REPLACEABLE_TRACKER_BLOCK.read().as_ref().map(|lines| lines.len())
+}
+
+/// Whether `lines` match the remembered tracker transcript block exactly.
+pub fn tracker_block_matches(lines: &[String]) -> bool {
+    REPLACEABLE_TRACKER_BLOCK.read().as_deref() == Some(lines)
+}
+
 pub fn snapshot() -> Vec<String> {
     TRANSCRIPT.read().clone()
 }
@@ -141,6 +159,7 @@ pub fn len() -> usize {
 
 pub fn clear() {
     TRANSCRIPT.write().clear();
+    *REPLACEABLE_TRACKER_BLOCK.write() = None;
 }
 
 /// Set the inline handle for immediate message display
@@ -367,5 +386,19 @@ mod tests {
         let snap = snapshot();
         assert_eq!(snap, vec!["visible".to_owned()]);
         clear();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn tracker_block_store_replaces_and_clears() {
+        clear();
+        assert_eq!(tracker_block_len(), None);
+        remember_tracker_block(vec!["• Plan 0/1".to_string()]);
+        assert_eq!(tracker_block_len(), Some(1));
+        assert!(tracker_block_matches(&["• Plan 0/1".to_string()]));
+        remember_tracker_block(vec!["• Plan 1/1".to_string()]);
+        assert!(!tracker_block_matches(&["• Plan 0/1".to_string()]));
+        clear();
+        assert_eq!(tracker_block_len(), None);
     }
 }
