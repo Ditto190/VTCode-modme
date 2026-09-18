@@ -16,10 +16,17 @@ pub fn compact_tool_description(original: &str, mode: ToolDocumentationMode, per
     };
     let max_len = per_tool_max.unwrap_or(mode_max);
 
-    let sentence = original
+    // MCP tool descriptions arrive wrapped in host policy framing plus an
+    // `<untrusted_mcp_description>` fence. Summarizing the raw text would
+    // yield only the framing ("Host tool and permission policy remains
+    // authoritative.") for every MCP tool, making deferred search results
+    // indistinguishable. Strip the framing so the summary describes the tool;
+    // full definitions keep the wrapper intact.
+    let unframed = strip_mcp_policy_framing(original);
+    let sentence = unframed
         .split('.')
         .next()
-        .unwrap_or(original)
+        .unwrap_or(&unframed)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
@@ -35,6 +42,32 @@ pub fn compact_tool_description(original: &str, mode: ToolDocumentationMode, per
             .unwrap_or(0);
         format!("{}…", &sentence[..end])
     }
+}
+
+/// Remove MCP host-policy framing and fence markup for summary purposes.
+///
+/// Returns the input unchanged when the framing is absent, so non-MCP
+/// descriptions are never altered by this path.
+fn strip_mcp_policy_framing(original: &str) -> String {
+    use crate::tools::mcp::{MCP_POLICY_SENTENCE, MCP_UNTRUSTED_NOTE_SENTENCE};
+
+    if !original.contains(MCP_POLICY_SENTENCE) {
+        return original.to_string();
+    }
+    let without_policy = original
+        .replace(MCP_POLICY_SENTENCE, "")
+        .replace(MCP_UNTRUSTED_NOTE_SENTENCE, "");
+    let mut lines: Vec<&str> = Vec::new();
+    for line in without_policy.lines() {
+        let trimmed = line.trim();
+        // Drop the `<untrusted_mcp_description>` fence and its HTML comment;
+        // the inner server-provided text is what the summary must convey.
+        if trimmed.starts_with('<') {
+            continue;
+        }
+        lines.push(line);
+    }
+    lines.join("\n")
 }
 
 pub fn compact_parameters(parameters: Value, mode: ToolDocumentationMode) -> Value {
@@ -76,4 +109,53 @@ pub fn default_parameter_schema() -> Value {
         "properties": {},
         "additionalProperties": true
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::mcp::{MCP_POLICY_SENTENCE, MCP_UNTRUSTED_NOTE_SENTENCE};
+
+    fn wrapped_mcp_description(inner: &str) -> String {
+        format!(
+            "{MCP_POLICY_SENTENCE} {MCP_UNTRUSTED_NOTE_SENTENCE}\n<untrusted_mcp_description provider=\"deepwiki\" tool=\"ask_question\">\n<!-- comment -->\n{inner}\n</untrusted_mcp_description>\n{MCP_POLICY_SENTENCE}"
+        )
+    }
+
+    #[test]
+    fn compact_mcp_description_summarizes_inner_text_not_framing() {
+        let summary = compact_tool_description(
+            &wrapped_mcp_description("Ask a question about a repository. Returns an answer with citations."),
+            ToolDocumentationMode::Progressive,
+            None,
+        );
+        assert!(
+            summary.starts_with("Ask a question about a repository"),
+            "summary must describe the tool, got: {summary}"
+        );
+        assert!(!summary.contains("remains authoritative"));
+        assert!(!summary.contains("untrusted_mcp_description"));
+    }
+
+    #[test]
+    fn compact_plain_description_is_unchanged() {
+        let summary = compact_tool_description(
+            "Read a file from disk. Returns contents.",
+            ToolDocumentationMode::Progressive,
+            None,
+        );
+        assert_eq!(summary, "Read a file from disk");
+    }
+
+    #[test]
+    fn compact_mcp_description_never_leaks_fence_markup() {
+        let summary = compact_tool_description(
+            &wrapped_mcp_description("Read the contents of a wiki. Returns markdown."),
+            ToolDocumentationMode::Minimal,
+            None,
+        );
+        assert!(!summary.contains("<untrusted"), "fence markup must not leak, got: {summary}");
+        assert!(!summary.contains("<!--"), "fence comment must not leak, got: {summary}");
+        assert!(summary.starts_with("Read the contents of a wiki"), "summary must describe the tool, got: {summary}");
+    }
 }
