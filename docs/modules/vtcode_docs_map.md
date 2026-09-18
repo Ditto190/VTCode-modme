@@ -1008,6 +1008,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Priority Levels, Status Values, Debt Items, How to Add a New Item, How to Resolve an Item
   - **User Questions**: "What can you tell me about Tech Debt Tracker?", "How does Priority Levels work?", "How does Status Values work?"
 
+- **File**: `docs/compose/spec/tracker-continuation.md`
+  - **Content**: Tracker Continuation (Run Loop + TODO Resume)
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Tracker Continuation (Run Loop + TODO Resume)?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/huggingface/vtcode.md`
   - **Content**: VT Code
   - **Topics**: Overview, Configuration, Supported Models, Features with HF Integration, Common Use Cases

@@ -476,6 +476,7 @@ impl AppSession {
     /// 1. stored `notice` contained in the clicked transcript text
     /// 2. longest specific workspace `file_path` contained in that text
     /// 3. the sole stored anchor, when only one exists
+    ///
     /// Refuse rather than open an arbitrary last anchor when multiple payloads
     /// are present and the notice carries no distinctive path.
     pub(crate) fn open_diff_review_for_notice(&mut self, notice_text: &str) -> bool {

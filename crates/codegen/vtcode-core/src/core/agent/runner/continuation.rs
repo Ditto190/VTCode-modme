@@ -560,6 +560,28 @@ pub(super) fn is_review_like_task(task: &Task) -> bool {
     })
 }
 
+/// Pure eligibility gate for AgentRunner tracker status continuation.
+///
+/// Honors the `[agent.harness.continuation].auto_continue_tracker` kill-switch,
+/// the idle-turn hard limit exception, and genuine user-question handoffs.
+/// Only Continue assessments whose reason names incomplete tracker work force
+/// another turn.
+pub(super) fn tracker_status_force_continue_eligible(
+    auto_continue_tracker: bool,
+    idle_limit_hit: bool,
+    asks_user: bool,
+    assessment_reason: &str,
+) -> bool {
+    if !auto_continue_tracker || idle_limit_hit || asks_user {
+        return false;
+    }
+    let reason_lower = assessment_reason.to_ascii_lowercase();
+    reason_lower.contains("incomplete")
+        || reason_lower.contains("task tracker still")
+        || reason_lower.contains("tracker is missing")
+        || reason_lower.contains("tracker could not be loaded")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -689,5 +711,16 @@ mod tests {
             .expect("assessment");
 
         assert!(matches!(assessment, CompletionAssessment::SkipAccept { .. }));
+    }
+
+    #[test]
+    fn tracker_status_force_continue_eligible_gates() {
+        use super::tracker_status_force_continue_eligible as eligible;
+        assert!(eligible(true, false, false, "Task tracker is incomplete: #2 change (pending)."));
+        assert!(eligible(true, false, false, "Task tracker could not be loaded."));
+        assert!(!eligible(false, false, false, "Task tracker is incomplete: #2 change (pending)."));
+        assert!(!eligible(true, true, false, "Task tracker is incomplete: #2 change (pending)."));
+        assert!(!eligible(true, false, true, "Task tracker is incomplete: #2 change (pending)."));
+        assert!(!eligible(true, false, false, "Scaffold created for analysis."));
     }
 }

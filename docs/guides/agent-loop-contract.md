@@ -11,6 +11,22 @@ This guide describes the public lifecycle semantics shared by interactive runs,
 VT Code does not expose Claude-specific SDK structs. The canonical stream stays
 `vtcode_exec_events::ThreadEvent`.
 
+### Tracker-aware auto-continuation
+
+When `task_tracker` still has incomplete steps, the harness continues instead of
+ending the turn and nudging the user to resume:
+
+- In-turn: status-only assistant text (including budget/recovery recaps) is
+  forced to continue unless it asks a genuine user question or hits a hard
+  permission/policy handoff. Planning remains terminal for continuation.
+- Cross-turn: after a Completed or recoverable Blocked turn, the session loop
+  queues the next tracker implementation turn, bounded by
+  `[agent.harness.continuation].cross_turn_turns` (default 8). `0` disables
+  cross-turn auto-queue. Verification-blocked turns keep their own recovery path.
+- Resume: sessions restored with incomplete tracker steps auto-queue one
+  continuation turn after injecting remaining-step context.
+- Kill-switch: `[agent.harness.continuation].auto_continue_tracker = false`.
+
 The closest concept mapping is:
 
 | Agent SDK concept | VT Code event |

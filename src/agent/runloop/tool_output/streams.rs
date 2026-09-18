@@ -571,6 +571,10 @@ fn format_diff_line_with_gutter_and_syntax<'a>(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Intentional compatibility, platform, or test-only suppression."
+)]
 fn format_diff_line_with_gutter_and_syntax_to_width<'a>(
     line: &DiffDisplayLine,
     base_style: Option<AnsiStyle>,
@@ -2071,7 +2075,7 @@ mod tests {
     #[test]
     fn wrap_for_reflow_keeps_long_diff_bodies_whole() {
         let git = GitStyles::new_for(DiffTheme::Dark, DiffColorLevel::TrueColor);
-        let long_text = format!("| {} | {} |", "What can go wrong".to_string(), "How VT Code responds".repeat(4));
+        let long_text = format!("| {} | {} |", "What can go wrong", "How VT Code responds".repeat(4));
         let line = test_diff_line(DiffDisplayKind::Addition, None, Some(83), &long_text);
         let mut buffer = String::new();
         let rendered = format_diff_line_with_gutter_and_syntax_to_width(

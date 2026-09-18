@@ -530,6 +530,11 @@ pub struct AgentHarnessConfig {
     /// project verifier itself instead of forcing manual `continue`.
     #[serde(default)]
     pub verification: VerificationAutoRecoveryConfig,
+    /// Tracker-aware auto-continuation: when `task_tracker` still has
+    /// incomplete steps, keep looping / auto-queue the next turn instead of
+    /// ending and nudging the user to resume.
+    #[serde(default)]
+    pub continuation: TrackerContinuationConfig,
 }
 
 impl Default for AgentHarnessConfig {
@@ -557,8 +562,50 @@ impl Default for AgentHarnessConfig {
             async_approval: AsyncApprovalConfig::default(),
             skeptic_panel: SkepticPanelConfig::default(),
             verification: VerificationAutoRecoveryConfig::default(),
+            continuation: TrackerContinuationConfig::default(),
         }
     }
+}
+
+/// Tracker-aware auto-continuation policy.
+///
+/// When `task_tracker` still has incomplete items, the binary runloop
+/// continues in-turn for status-only responses and, after recoverable
+/// budget/recovery turn ends (or on session resume), auto-queues a bounded
+/// follow-up turn instead of requiring the user to type `continue`.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrackerContinuationConfig {
+    /// Auto-continue while the task tracker has incomplete steps.
+    /// Default: true.
+    #[serde(default = "default_tracker_auto_continue")]
+    pub auto_continue_tracker: bool,
+    /// Bounded cross-turn auto-continue turns after a recoverable end
+    /// (budget/preview/tool-free recovery) or on resume while tracker work
+    /// remains. `0` disables cross-turn tracker auto-queue (in-turn
+    /// continuation still applies when `auto_continue_tracker` is true).
+    /// Default: 8.
+    #[serde(default = "default_tracker_cross_turn_turns")]
+    pub cross_turn_turns: u8,
+}
+
+impl Default for TrackerContinuationConfig {
+    fn default() -> Self {
+        Self {
+            auto_continue_tracker: default_tracker_auto_continue(),
+            cross_turn_turns: default_tracker_cross_turn_turns(),
+        }
+    }
+}
+
+#[inline]
+const fn default_tracker_auto_continue() -> bool {
+    true
+}
+
+#[inline]
+const fn default_tracker_cross_turn_turns() -> u8 {
+    8
 }
 
 /// Autonomous recovery policy for the anti-blind-editing verification gate.
@@ -1998,6 +2045,20 @@ mod tests {
         assert_eq!(ContinuationPolicy::parse("exec-only"), Some(ContinuationPolicy::ExecOnly));
         assert_eq!(ContinuationPolicy::parse("all"), Some(ContinuationPolicy::All));
         assert_eq!(ContinuationPolicy::parse("invalid"), None);
+    }
+
+    #[test]
+    fn test_tracker_continuation_defaults_and_deserializes() {
+        assert!(TrackerContinuationConfig::default().auto_continue_tracker);
+        assert_eq!(TrackerContinuationConfig::default().cross_turn_turns, 8);
+        let parsed: AgentHarnessConfig =
+            toml::from_str("[continuation]\nauto_continue_tracker = false\ncross_turn_turns = 3")
+                .expect("valid harness config");
+        assert!(!parsed.continuation.auto_continue_tracker);
+        assert_eq!(parsed.continuation.cross_turn_turns, 3);
+        let fallback: AgentHarnessConfig = toml::from_str("").expect("empty harness config");
+        assert!(fallback.continuation.auto_continue_tracker);
+        assert_eq!(fallback.continuation.cross_turn_turns, 8);
     }
 
     #[test]

@@ -457,6 +457,46 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             if let Err(error) = runtime_steering.try_queue_follow_up_input(pending_prompt) {
                 tracing::warn!(%error, "Unable to queue resumed user prompt");
             }
+        } else if resume_ref.is_some() {
+            use crate::agent::runloop::unified::turn::tool_outcomes::helpers as tracker_continue;
+            let auto_continue_enabled = tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref());
+            let cross_turn_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
+            let incomplete = if auto_continue_enabled && cross_turn_turns > 0 {
+                tracker_continue::incomplete_tracker_items(&tool_registry).await
+            } else {
+                None
+            };
+            if tracker_continue::should_queue_tracker_resume_continuation(
+                auto_continue_enabled,
+                cross_turn_turns,
+                incomplete.as_deref(),
+            ) {
+                let incomplete = incomplete.unwrap_or_default();
+                // Resume with open TODO/tracker steps: auto-queue one continuation
+                // turn instead of waiting for the user to type continue.
+                let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
+                let directive = format!(
+                    "Resume continuation: task_tracker still has incomplete steps: {}. \
+                     Execute the next concrete tracker step now; do not ask the user to resume.",
+                    incomplete.join(", ")
+                );
+                {
+                    let messages = std::sync::Arc::make_mut(&mut runtime.state.messages);
+                    messages.push(vtcode_core::llm::provider::Message::system(directive));
+                }
+                let (_, runtime_steering) = runtime.split_mut();
+                match runtime_steering.try_queue_follow_up_input(follow_up) {
+                    Ok(()) => {
+                        let _ = renderer.line(
+                            MessageStyle::Info,
+                            "[i] Resumed session has incomplete task_tracker steps; auto-continuing without manual `continue`.",
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Unable to queue tracker resume continuation");
+                    }
+                }
+            }
         }
         let tool_result_cache = execution.tool_result_cache;
         let tool_permission_cache = execution.tool_permission_cache;
@@ -1587,6 +1627,93 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         session_id = %harness_snapshot.session_id,
                         "Failed to refresh session memory envelope after turn"
                     );
+                }
+                // Tracker-aware outer auto-continue after checkpoint/persistence:
+                // incomplete tracker work + recoverable turn end → queue the next
+                // turn instead of nudging the user. Verification blocks keep their
+                // existing recovery path first (handled below).
+                {
+                    use crate::agent::runloop::unified::turn::tool_outcomes::helpers as tracker_continue;
+                    let planning_active = tool_registry.is_planning_active();
+                    let auto_continue_enabled =
+                        tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref()) && !planning_active;
+                    let is_verification_block = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { reason }
+                    if reason.as_deref().is_some_and(|r| {
+                        r.contains(
+                            crate::agent::runloop::unified::turn::turn_loop::PENDING_VERIFICATION_BLOCK_REASON,
+                        )
+                    }));
+                    let turn_completed = matches!(&outcome_result, RunLoopTurnLoopResult::Completed { .. });
+                    let blocked_reason = match &outcome_result {
+                        RunLoopTurnLoopResult::Blocked { reason } => reason.as_deref(),
+                        _ => None,
+                    };
+                    let incomplete = if auto_continue_enabled && !planning_active {
+                        tracker_continue::incomplete_tracker_items(&tool_registry).await
+                    } else {
+                        None
+                    };
+                    let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
+                    let should_queue = tracker_continue::should_queue_tracker_auto_continue(
+                        auto_continue_enabled,
+                        planning_active,
+                        turn_completed,
+                        blocked_reason,
+                        is_verification_block,
+                        incomplete.as_deref(),
+                        max_turns,
+                    );
+                    if should_queue {
+                        let incomplete = incomplete.unwrap_or_default();
+                        let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
+                        let directive = format!(
+                            "Tracker auto-continue: incomplete steps remain: {}. \
+                             Execute the next concrete step now; do not ask the user to resume \
+                             and do not end with a status-only recap while work remains.",
+                            incomplete.join(", ")
+                        );
+                        let budget_remaining = session_stats.tracker_continuation_turns() < max_turns;
+                        let queued = budget_remaining
+                            && match runtime.try_queue_follow_up_input(follow_up) {
+                                Ok(()) => {
+                                    session_stats.record_tracker_continuation_turn_with_limit(max_turns);
+                                    std::sync::Arc::make_mut(&mut runtime.state.messages)
+                                        .push(vtcode_core::llm::provider::Message::system(directive));
+                                    let _ = renderer.line(
+                                        MessageStyle::Info,
+                                        &format!(
+                                            "[i] Tracker auto-continue turn {}/{}: {} incomplete step(s) remain.",
+                                            session_stats.tracker_continuation_turns(),
+                                            max_turns,
+                                            incomplete.len()
+                                        ),
+                                    );
+                                    true
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        %err,
+                                        "Tracker auto-continue queue full; falling through to turn end"
+                                    );
+                                    false
+                                }
+                            };
+                        if queued {
+                            if matches!(session_end_reason, SessionEndReason::Exit) {
+                                break;
+                            }
+                            continue;
+                        }
+                        if !budget_remaining {
+                            let _ = renderer.line(
+                                MessageStyle::Info,
+                                "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume.",
+                            );
+                        }
+                    } else if incomplete.as_ref().is_none_or(|items| items.is_empty()) {
+                        // Tracker work cleared (or none): reset the episode budget.
+                        session_stats.reset_tracker_continuation_budget();
+                    }
                 }
                 if let RunLoopTurnLoopResult::Blocked { reason } = &outcome_result {
                     use crate::agent::runloop::unified::turn::tool_outcomes::helpers as verification_gate;

@@ -112,6 +112,324 @@ pub(crate) fn verification_cross_turn_turns(vt_cfg: Option<&vtcode_core::config:
         .unwrap_or(MAX_VERIFICATION_AUTO_RECOVERY_TURNS)
 }
 
+/// Whether tracker-aware auto-continuation is enabled
+/// (`[agent.harness.continuation].auto_continue_tracker`).
+pub(crate) fn tracker_auto_continue_enabled(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> bool {
+    vt_cfg
+        .map(|cfg| cfg.agent.harness.continuation.auto_continue_tracker)
+        .unwrap_or(true)
+}
+
+/// Effective cross-turn tracker auto-continue budget
+/// (`[agent.harness.continuation].cross_turn_turns`).
+pub(crate) fn tracker_cross_turn_turns(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> u8 {
+    vt_cfg.map(|cfg| cfg.agent.harness.continuation.cross_turn_turns).unwrap_or(8)
+}
+
+/// Cap on incomplete tracker items listed in continuation prompts.
+const TRACKER_CONTINUE_ITEM_CAP: usize = 4;
+
+/// Parse a `task_tracker` `action=list` payload into incomplete step labels.
+///
+/// Returns `None` when the tracker is empty/absent or every step is completed.
+pub(crate) fn parse_incomplete_tracker_items(payload: &serde_json::Value) -> Option<Vec<String>> {
+    let status = payload.get("status").and_then(serde_json::Value::as_str)?;
+    if status == "empty" {
+        return None;
+    }
+    let checklist = payload.get("checklist")?;
+    let items: Vec<String> = checklist
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("status").and_then(serde_json::Value::as_str) != Some("completed"))
+        .filter_map(|item| {
+            let description = item.get("description").and_then(serde_json::Value::as_str)?;
+            let status = item.get("status").and_then(serde_json::Value::as_str).unwrap_or("pending");
+            let index = item.get("index").and_then(serde_json::Value::as_u64);
+            Some(match index {
+                Some(index) if index > 0 => format!("#{} {} ({})", index, description, status),
+                _ => format!("{} ({})", description, status),
+            })
+        })
+        .take(TRACKER_CONTINUE_ITEM_CAP)
+        .collect();
+    if items.is_empty() {
+        return None;
+    }
+    Some(items)
+}
+
+/// Load incomplete `task_tracker` step descriptions via the live tool registry.
+///
+/// Returns `None` when the tracker is absent or empty; `Some(items)` when a
+/// checklist exists and at least one step is not `completed`.
+pub(crate) async fn incomplete_tracker_items(
+    tool_registry: &vtcode_core::tools::registry::ToolRegistry,
+) -> Option<Vec<String>> {
+    let tool = tool_registry.get_tool(vtcode_core::config::constants::tools::TASK_TRACKER)?;
+    let payload = tool.execute(serde_json::json!({ "action": "list" })).await.ok()?;
+    parse_incomplete_tracker_items(&payload)
+}
+
+/// Build the model-facing auto-continue follow-up for incomplete tracker work.
+pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
+    let joined = incomplete.join(", ");
+    format!(
+        "Continue working autonomously. The task tracker still has incomplete steps: {joined}. \
+         Execute the next concrete tracker step now using tools; do not ask the user to resume, \
+         do not end with a status-only recap, and update task_tracker as steps complete. \
+         Stop only for a genuine user decision, permission/policy block, or when the tracker is complete."
+    )
+}
+
+/// Whether a blocked/completed turn reason is recoverable for tracker auto-queue
+/// (budget/preview/tool-free recovery) rather than a user-input handoff.
+///
+/// Matches the **literal production blocked-reason constants** emitted by the
+/// turn loop / post-tool recovery, plus an explicit deny-list for user-input,
+/// permission, verification, context-capacity, and contract-violation ends.
+/// Unknown `Some(_)` reasons are not auto-queued.
+pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -> bool {
+    let Some(reason) = reason.map(str::to_ascii_lowercase) else {
+        // Completed turns with remaining tracker work are recoverable.
+        return true;
+    };
+    // Deny-list first (production constants that must never auto-queue).
+    if reason.contains("permission")
+        || reason.contains("user input")
+        || reason.contains("request_user_input")
+        || reason.contains("safety fuse")
+        || reason.contains("manual intervention")
+        || reason.contains("verification is still pending")
+        || reason.contains("planning turn ended")
+        || reason.contains("context exceeded")
+        || reason.contains("compaction could not reduce")
+        || reason.contains("unmatched tool result")
+        || reason.contains("contract violation")
+        || reason.contains("approval-ready plan")
+    {
+        return false;
+    }
+    // Recoverable production reason shapes.
+    // COMPLETED_TURN_FALLBACK_REASON: "Turn ended with a recovery fallback..."
+    // ASSISTANT_TEXT_RESPONSE_CAP_REASON: "Turn blocked after repeated assistant responses reached the safety cap..."
+    // POST_TOOL_TOOL_ENABLED_RETRY_FAILED_REASON: "Post-tool recovery could not confirm..."
+    // preview / turn budget / wall-clock budget ends.
+    reason.contains("recovery fallback")
+        || reason.contains("recovery could not confirm")
+        || reason.contains("reached the safety cap")
+        || reason.contains("preview budget")
+        || reason.contains("tool preview budget")
+        || reason.contains("turn budget")
+        || reason.contains("wall clock")
+        || reason.contains("tool-free")
+        || reason.contains("blocked due to repeated")
+        || reason.contains("blocked after repeated")
+}
+
+/// Pure gate for outer-loop tracker auto-continue after a turn end.
+pub(crate) fn should_queue_tracker_auto_continue(
+    auto_continue_enabled: bool,
+    planning_active: bool,
+    turn_completed: bool,
+    blocked_reason: Option<&str>,
+    is_verification_block: bool,
+    incomplete_items: Option<&[String]>,
+    cross_turn_turns: u8,
+) -> bool {
+    if !auto_continue_enabled || planning_active || cross_turn_turns == 0 {
+        return false;
+    }
+    if incomplete_items.is_none_or(|items| items.is_empty()) {
+        return false;
+    }
+    if turn_completed {
+        return true;
+    }
+    if is_verification_block {
+        return false;
+    }
+    tracker_auto_continue_is_recoverable_block(blocked_reason)
+}
+
+/// Pure gate for resume auto-queue of incomplete tracker work.
+pub(crate) fn should_queue_tracker_resume_continuation(
+    auto_continue_enabled: bool,
+    cross_turn_turns: u8,
+    incomplete_items: Option<&[String]>,
+) -> bool {
+    auto_continue_enabled && cross_turn_turns > 0 && incomplete_items.is_some_and(|items| !items.is_empty())
+}
+
+#[cfg(test)]
+mod tracker_continue_tests {
+    use super::*;
+
+    #[test]
+    fn parse_incomplete_tracker_items_shapes() {
+        assert!(parse_incomplete_tracker_items(&serde_json::json!({"status":"empty"})).is_none());
+        let complete = serde_json::json!({
+            "status":"ok",
+            "checklist":{"items":[{"description":"a","status":"completed"}]}
+        });
+        assert!(parse_incomplete_tracker_items(&complete).is_none());
+        let mixed = serde_json::json!({
+            "status":"ok",
+            "checklist":{"items":[
+                {"index":1,"description":"analyze","status":"completed"},
+                {"index":2,"description":"change","status":"in_progress"},
+                {"index":3,"description":"verify","status":"pending"}
+            ]}
+        });
+        let items = parse_incomplete_tracker_items(&mixed).expect("incomplete");
+        assert_eq!(items, vec!["#2 change (in_progress)".to_string(), "#3 verify (pending)".to_string()]);
+    }
+
+    #[test]
+    fn tracker_follow_up_lists_items_and_forbids_nudge() {
+        let prompt =
+            tracker_continue_follow_up(&["#2 change (pending)".to_string(), "#3 verify (blocked)".to_string()]);
+        assert!(prompt.contains("#2 change (pending)"));
+        assert!(prompt.contains("#3 verify (blocked)"));
+        assert!(prompt.contains("do not ask the user to resume"));
+    }
+
+    #[test]
+    fn recoverable_block_classification_allow_list() {
+        assert!(tracker_auto_continue_is_recoverable_block(None));
+        // Production constants that MUST auto-queue when tracker work remains.
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained."
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved."
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Post-tool recovery could not confirm the requested work after one bounded tool-enabled retry. The completed tool outputs and resume handoff were retained; retry from the pending step."
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("preview budget exhausted")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("Turn blocked due to repeated failing behavior.")));
+        // Production constants that must NOT auto-queue.
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Turn blocked after repeated unverified assistant responses; verification is still pending."
+        )));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "The provider rejected the follow-up because the context exceeded its capacity, and the bounded recovery compaction could not reduce the request."
+        )));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Provider rejected an unmatched tool result after one bounded request-history repair."
+        )));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
+        )));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some("exec_command is denied by permission policy")));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "I hit the tool-call safety fuse mid-verification"
+        )));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some("request_user_input is required")));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some("some unknown block")));
+    }
+
+    #[test]
+    fn outer_queue_gate_respects_planning_verification_and_budget() {
+        let incomplete = ["#2 change (pending)".to_string()];
+        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8));
+        assert!(!should_queue_tracker_auto_continue(false, false, true, None, false, Some(&incomplete), 8));
+        assert!(!should_queue_tracker_auto_continue(true, true, true, None, false, Some(&incomplete), 8));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 0));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("pending verification; type continue"),
+            true,
+            Some(&incomplete),
+            8
+        ));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("preview budget exhausted"),
+            false,
+            Some(&incomplete),
+            8
+        ));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some(
+                "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained."
+            ),
+            false,
+            Some(&incomplete),
+            8
+        ));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some(
+                "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved."
+            ),
+            false,
+            Some(&incomplete),
+            8
+        ));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("permission denied"),
+            false,
+            Some(&incomplete),
+            8
+        ));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("unknown block reason"),
+            false,
+            Some(&incomplete),
+            8
+        ));
+    }
+
+    #[test]
+    fn resume_gate_honors_zero_cross_turn_budget() {
+        let incomplete = ["#1 analyze (in_progress)".to_string()];
+        assert!(should_queue_tracker_resume_continuation(true, 8, Some(&incomplete)));
+        assert!(!should_queue_tracker_resume_continuation(true, 0, Some(&incomplete)));
+        assert!(!should_queue_tracker_resume_continuation(false, 8, Some(&incomplete)));
+        assert!(!should_queue_tracker_resume_continuation(true, 8, None));
+    }
+
+    #[test]
+    fn tracker_config_defaults() {
+        assert!(tracker_auto_continue_enabled(None));
+        assert_eq!(tracker_cross_turn_turns(None), 8);
+    }
+
+    #[test]
+    fn session_stats_resets_tracker_budget_with_verification_episode() {
+        let mut stats = crate::agent::runloop::unified::state::SessionStats::default();
+        assert!(stats.record_tracker_continuation_turn_with_limit(8));
+        assert!(stats.record_tracker_continuation_turn_with_limit(8));
+        assert_eq!(stats.tracker_continuation_turns(), 2);
+        stats.reset_verification_recovery_episode();
+        assert_eq!(stats.tracker_continuation_turns(), 0);
+        assert!(stats.record_tracker_continuation_turn_with_limit(1));
+        assert!(!stats.record_tracker_continuation_turn_with_limit(1));
+        stats.reset_tracker_continuation_budget();
+        assert_eq!(stats.tracker_continuation_turns(), 0);
+    }
+}
+
 /// Whether the harness may execute the project verifier itself when the model
 /// exhausts its directive retries. Kill-switch:
 /// `[agent.harness.verification].auto_execute = false` restores
