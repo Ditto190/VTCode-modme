@@ -180,10 +180,21 @@ impl Session {
             return vec![Line::from(spans)];
         }
 
-        let diff_continuation_prefix = content.first().and_then(|span| {
-            let text: &str = span.content.as_ref();
-            Self::wrapped_diff_continuation_prefix(text)
-        });
+        let diff_continuation_prefix = content
+            .first()
+            .and_then(|span| {
+                let text: &str = span.content.as_ref();
+                Self::wrapped_diff_continuation_prefix(text)
+            })
+            .or_else(|| {
+                // Compact tinted rows omit the visible +/- gutter; hang under
+                // the marker cell so wrap does not start at the row edge.
+                if diff_row_bg(&content).is_some() {
+                    Some(" ".to_owned())
+                } else {
+                    None
+                }
+            });
         // Wrapping removes the original marker from continuation fragments,
         // so keep the source row's tint before turning the spans into lines.
         let content_diff_bg = diff_row_bg(&content);

@@ -57,6 +57,22 @@ impl CompactActivityMetadata {
     }
 }
 
+/// UI-only payload that reopens a completed-edit diff as full-viewport review.
+///
+/// Not part of `ThreadEvent`. The transcript notice text is the activation
+/// target; `unified` is the retained preview used when before/after are absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffReviewAnchor {
+    /// Workspace-visible file path for the review header.
+    pub file_path: String,
+    /// Retained unified preview body.
+    pub unified: String,
+    /// Rows omitted from the compact transcript body, when known.
+    pub omitted_lines: u64,
+    /// Exact notice text that should activate this review.
+    pub notice: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::CompactActivityMetadata;

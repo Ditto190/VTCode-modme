@@ -705,6 +705,31 @@ fn tool_diff_numbered_lines_keep_hanging_indent_when_wrapped() {
 }
 
 #[test]
+fn compact_tinted_diff_rows_keep_hanging_indent_when_wrapped() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    // Compact layout: one leading marker cell, no +/- gutter or line numbers.
+    let body = format!(" | {} | {} |", "What can go wrong", "How VT Code responds ".repeat(6));
+    let style = InlineTextStyle {
+        color: Some(anstyle::Color::Ansi(anstyle::AnsiColor::BrightBlack)),
+        bg_color: Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)),
+        ..InlineTextStyle::default()
+    };
+    session.push_line(InlineMessageKind::Tool, vec![InlineSegment { text: body.clone(), style: Arc::new(style) }]);
+
+    let rendered = session.reflow_transcript_lines(40);
+    let content_lines: Vec<String> = rendered.iter().map(line_text).filter(|text| !text.trim().is_empty()).collect();
+    assert!(content_lines.len() >= 2, "expected wrapped compact diff row: {content_lines:?}");
+    assert!(content_lines[0].contains("What can go wrong"));
+    // Tool blocks already pad continuations; require hang depth for the
+    // compact marker cell plus tool prefix, not a vacuous single space.
+    assert!(
+        content_lines[1].starts_with("  ") && !content_lines[1].starts_with("   |"),
+        "compact continuation should hang under the marker/tool prefix, got: {:?}",
+        content_lines[1]
+    );
+}
+
+#[test]
 fn agent_numbered_code_lines_keep_hanging_indent_when_wrapped() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(

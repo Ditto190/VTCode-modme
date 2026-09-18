@@ -303,6 +303,7 @@ where
                     hunks: Vec::new(),
                     current_hunk: 0,
                     mode: DiffPreviewMode::FileConflict,
+                    unified: None,
                 }),
                 ctrl_c_state,
                 ctrl_c_notify,

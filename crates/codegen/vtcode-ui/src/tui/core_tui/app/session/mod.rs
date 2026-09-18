@@ -8,9 +8,9 @@ pub(super) use ratatui::widgets::Clear;
 pub(super) use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::tui::core_tui::app::types::{
-    CompactActivityMetadata, DiffOverlayRequest, DiffPreviewState, InlineCommand, InlineEvent, InlineMessageKind,
-    InlineSegment, LocalAgentsTransientRequest, SlashCommandItem, TaskPanelMetadata, TaskPanelTransientRequest,
-    ToolOutputId, TransientActivitySignal, TransientRequest,
+    CompactActivityMetadata, DiffOverlayRequest, DiffPreviewMode, DiffPreviewState, InlineCommand, InlineEvent,
+    InlineMessageKind, InlineSegment, LocalAgentsTransientRequest, SlashCommandItem, TaskPanelMetadata,
+    TaskPanelTransientRequest, ToolOutputId, TransientActivitySignal, TransientRequest,
 };
 use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::Session as CoreSessionState;
@@ -110,6 +110,7 @@ pub struct AppSession {
     pub(crate) tool_output_revision: u64,
     pub(crate) compact_activity_entries: Vec<CompactActivityEntry>,
     pub(crate) compact_activity_hit_regions: Vec<CompactActivityHitRegion>,
+    pub(crate) diff_review_anchors: Vec<vtcode_commons::ui_protocol::DiffReviewAnchor>,
     diff_overlay_queue: VecDeque<DiffOverlayRequest>,
     transient_host: TransientHost,
     transient_active_signal: Option<Arc<TransientActivitySignal>>,
@@ -151,6 +152,7 @@ impl AppSession {
             tool_output_revision: 0,
             compact_activity_entries: Vec::new(),
             compact_activity_hit_regions: Vec::new(),
+            diff_review_anchors: Vec::new(),
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
             transient_active_signal: None,
@@ -199,6 +201,7 @@ impl AppSession {
             tool_output_revision: 0,
             compact_activity_entries: Vec::new(),
             compact_activity_hit_regions: Vec::new(),
+            diff_review_anchors: Vec::new(),
             diff_overlay_queue: VecDeque::new(),
             transient_host: TransientHost::default(),
             transient_active_signal: None,
@@ -426,13 +429,16 @@ impl AppSession {
             return;
         }
 
-        let mut state = DiffPreviewState::new_with_mode(
-            request.file_path,
-            request.before,
-            request.after,
-            request.hunks,
-            request.mode,
-        );
+        let mut state = match request.unified.as_deref() {
+            Some(unified) => DiffPreviewState::from_unified(request.file_path, unified, request.mode),
+            None => DiffPreviewState::new_with_mode(
+                request.file_path,
+                request.before,
+                request.after,
+                request.hunks,
+                request.mode,
+            ),
+        };
         state.focus_hunk(request.current_hunk);
         self.diff_preview_state = Some(state);
         self.show_transient_surface(TransientSurface::DiffPreview);
@@ -450,6 +456,81 @@ impl AppSession {
         }
         self.close_transient_surface(TransientSurface::DiffPreview);
         self.core.mark_dirty();
+    }
+
+    pub(crate) fn record_diff_review(&mut self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) {
+        self.diff_review_anchors.push(anchor);
+        // Bound session-local anchors so a long edit-heavy session cannot grow
+        // without limit; the newest notices stay available for explicit expand.
+        const MAX_DIFF_REVIEW_ANCHORS: usize = 32;
+        if self.diff_review_anchors.len() > MAX_DIFF_REVIEW_ANCHORS {
+            let excess = self.diff_review_anchors.len() - MAX_DIFF_REVIEW_ANCHORS;
+            self.diff_review_anchors.drain(..excess);
+        }
+        self.core.mark_dirty();
+    }
+
+    /// Open full-viewport ReadonlyReview for a completed-edit expand notice.
+    ///
+    /// Matching order:
+    /// 1. stored `notice` contained in the clicked transcript text
+    /// 2. longest specific workspace `file_path` contained in that text
+    /// 3. the sole stored anchor, when only one exists
+    /// Refuse rather than open an arbitrary last anchor when multiple payloads
+    /// are present and the notice carries no distinctive path.
+    pub(crate) fn open_diff_review_for_notice(&mut self, notice_text: &str) -> bool {
+        if !notice_text.contains("review full diff") {
+            return false;
+        }
+
+        fn is_generic_label(path: &str) -> bool {
+            path.is_empty() || path == "diff" || path == "file" || path.starts_with("diff.")
+        }
+
+        let by_notice = self
+            .diff_review_anchors
+            .iter()
+            .rev()
+            .find(|anchor| !anchor.notice.is_empty() && notice_text.contains(anchor.notice.as_str()))
+            .cloned();
+
+        let mut by_path: Option<vtcode_commons::ui_protocol::DiffReviewAnchor> = None;
+        for anchor in self.diff_review_anchors.iter() {
+            if is_generic_label(anchor.file_path.as_str()) {
+                continue;
+            }
+            if !notice_text.contains(anchor.file_path.as_str()) {
+                continue;
+            }
+            let better = match &by_path {
+                None => true,
+                Some(prev) => anchor.file_path.len() > prev.file_path.len(),
+            };
+            if better {
+                by_path = Some(anchor.clone());
+            }
+        }
+
+        let anchor = by_notice
+            .or(by_path)
+            .or_else(|| (self.diff_review_anchors.len() == 1).then(|| self.diff_review_anchors[0].clone()));
+        let Some(anchor) = anchor else {
+            return false;
+        };
+        self.open_diff_review_anchor(anchor)
+    }
+
+    fn open_diff_review_anchor(&mut self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) -> bool {
+        self.show_diff_overlay(DiffOverlayRequest {
+            file_path: anchor.file_path.clone(),
+            before: String::new(),
+            after: String::new(),
+            hunks: Vec::new(),
+            current_hunk: 0,
+            mode: DiffPreviewMode::ReadonlyReview,
+            unified: Some(anchor.unified),
+        });
+        true
     }
 
     fn close_history_picker(&mut self) {
@@ -978,11 +1059,13 @@ impl AppSession {
                 self.tool_output_blocks.clear();
                 self.compact_activity_entries.clear();
                 self.compact_activity_hit_regions.clear();
+                self.diff_review_anchors.clear();
                 self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
                 self.handle_core_command(crate::tui::core_tui::types::InlineCommand::ClearScreen);
             }
             InlineCommand::CloseTransient => self.close_transient(),
             InlineCommand::ShowTransient { request } => self.show_transient(*request),
+            InlineCommand::RecordDiffReview(anchor) => self.record_diff_review(anchor),
             InlineCommand::UpdateFilePaletteSearch { files } => {
                 if let Some(palette) = &mut self.file_palette {
                     palette.set_search_index(files);
@@ -1135,7 +1218,9 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
         InlineCommand::SetSkipConfirmations(skip) => CoreCommand::SetSkipConfirmations(*skip),
         InlineCommand::Shutdown => CoreCommand::Shutdown,
         InlineCommand::SetReasoningStage(stage) => CoreCommand::SetReasoningStage(stage.clone()),
-        InlineCommand::ShowTransient { .. } | InlineCommand::CloseTransient => return None,
+        InlineCommand::ShowTransient { .. } | InlineCommand::CloseTransient | InlineCommand::RecordDiffReview(_) => {
+            return None;
+        }
     })
 }
 

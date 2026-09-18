@@ -102,6 +102,8 @@ pub enum InlineCommand {
     /// outcome, not a new source of truth: grouping must stay consistent with
     /// `vtcode_commons::ui_protocol::tool_summary` boundaries.
     AppendCompactActivity(CompactActivityMetadata),
+    /// Store a completed-edit review payload for explicit expand activation.
+    RecordDiffReview(vtcode_commons::ui_protocol::DiffReviewAnchor),
     /// Replace the current compact successful-command activity row with an
     /// updated contiguous group.
     ///
@@ -414,6 +416,9 @@ impl InlineHandle {
 
     pub fn append_compact_activity(&self, activity: CompactActivityMetadata) {
         self.send_command(InlineCommand::AppendCompactActivity(activity));
+    }
+    pub fn record_diff_review(&self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) {
+        self.send_command(InlineCommand::RecordDiffReview(anchor));
     }
 
     pub fn replace_compact_activity(&self, activity: CompactActivityMetadata) {
