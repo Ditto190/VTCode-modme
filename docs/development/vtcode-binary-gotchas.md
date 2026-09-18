@@ -86,16 +86,22 @@ its first rendered frame separately.
 Interactive launches split session bootstrap so first paint does not wait on the
 full agent runtime:
 
-1. `initialize_session_critical` — provider, one primary-agent discovery pass,
-   lightweight `ToolRegistry`, resume history, cheap `SessionBootstrap`
-   (workspace language/guideline scans skipped), seed system prompt.
-2. `initialize_session_ui` — spawn TUI / first frame.
+1. `initialize_session_critical` — provider, one plugin-aware primary-agent
+   discovery pass (`discover_controller_subagents`), lightweight `ToolRegistry`,
+   resume history, cheap `SessionBootstrap` (workspace language/guideline scans
+   skipped), seed system prompt. MCP manager is created but background
+   initialization is deferred.
+2. `initialize_session_ui` — spawn TUI / first frame. Hook approval prompts may
+   run here; session-start hooks do not.
 3. `hydrate_session_runtime` — tool registry async init + policy + CGP +
    model-tool projection + skill tools, system-prompt composition into
    `ContextManager`, subagent controller, trajectory, dynamic context, MCP
-   reconfigure/restart.
+   reconfigure/restart (first MCP init starts here).
+4. `apply_post_hydration_ui` + `run_session_start_hooks` — re-drive agent
+   palette/refresh/header/full-auto banner/budget warning, then execute
+   session-start hooks against the hydrated tool registry.
 
-Hydration is awaited before the interaction loop dispatches the first model
-turn. Setup failures still abort the session. Trace phases:
-`session_setup_critical`, `session_setup_ui`, `session_setup_hydrate`,
-`session_setup`, `first_ui_render`.
+Hydration and post-hydration hook execution are awaited before the interaction
+loop dispatches the first model turn. Setup failures still abort the session.
+Trace phases: `session_setup_critical`, `session_setup_ui`,
+`session_setup_hydrate`, `session_setup`, `first_ui_render`.

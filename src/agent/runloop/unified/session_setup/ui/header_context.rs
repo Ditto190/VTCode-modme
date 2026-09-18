@@ -54,7 +54,8 @@ pub(super) async fn initialize_header_context(
         notice.render(renderer)?;
     }
     maybe_render_openai_priority_notice(renderer, config, vt_cfg)?;
-    maybe_render_system_prompt_budget_warning(renderer, vt_cfg, session_bootstrap)?;
+    // System-prompt budget warning is rendered after session hydration via
+    // `apply_post_hydration_ui`, when the composed report is available.
 
     handle.set_theme(vtcode_core::ui::inline_theme_from_core_styles(&vtcode_core::ui::theme::active_styles()));
     palettes::apply_prompt_style(handle);

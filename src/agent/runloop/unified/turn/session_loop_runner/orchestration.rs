@@ -53,7 +53,7 @@ use crate::agent::runloop::unified::postamble::{ExitData, print_exit_summary};
 use crate::agent::runloop::unified::run_loop_context::{HarnessTurnState, TurnId, TurnRunId};
 use crate::agent::runloop::unified::session_setup::{
     SessionState, apply_post_hydration_ui, hydrate_session_runtime, initialize_session_critical, initialize_session_ui,
-    spawn_signal_handler,
+    run_session_start_hooks, spawn_signal_handler,
 };
 use crate::agent::runloop::unified::state::SessionStats;
 use crate::agent::runloop::unified::status_line::InputStatusState;
@@ -350,6 +350,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             // after first paint.
             ui_setup.background_subprocess_task_guard = Some(guard);
         }
+
+        // Session-start hooks run only after hydration so they observe the
+        // fully initialized tool registry.
+        harness_try!(
+            run_session_start_hooks(&ui_setup.lifecycle_hooks, &mut ui_setup.renderer, &mut session_state).await
+        );
 
         vtcode_commons::startup_trace::record_phase("session_setup", session_setup_phase);
         let mut renderer = ui_setup.renderer;

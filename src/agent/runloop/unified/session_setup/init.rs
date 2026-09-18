@@ -189,7 +189,7 @@ pub(crate) async fn initialize_session_critical(
         tracing::debug!("Notification manager already initialized or unavailable: {}", err);
     }
 
-    let async_mcp_manager = create_async_mcp_manager(vt_cfg, None, &config.workspace);
+    let async_mcp_manager = create_async_mcp_manager_inner(vt_cfg, None, &config.workspace, false);
     let (mcp_error, mut session_bootstrap, startup_update_check, release_highlights, conversation_history) = tokio::join!(
         determine_mcp_bootstrap_error(async_mcp_manager.as_ref()),
         prepare_session_bootstrap_with_mode(config, vt_cfg, None, SessionBootstrapMode::Critical),
@@ -568,10 +568,27 @@ async fn load_release_highlights_for_startup() -> Option<(semver::Version, Vec<S
     crate::updater::cached_current_release_highlights()
 }
 
+/// Test helper that creates the MCP manager and starts background init
+/// immediately (pre-split production behavior).
+#[cfg(test)]
 fn create_async_mcp_manager(
     vt_cfg: Option<&VTCodeConfig>,
     active_primary_agent: Option<&ActivePrimaryAgent>,
     workspace_root: &Path,
+) -> Option<Arc<AsyncMcpManager>> {
+    create_async_mcp_manager_inner(vt_cfg, active_primary_agent, workspace_root, true)
+}
+
+/// Create the session MCP manager.
+///
+/// `start_background_init=false` is used on the interactive critical path so
+/// first paint does not pay MCP process startup; hydration reconfigures with
+/// the resolved primary agent and then starts initialization once.
+fn create_async_mcp_manager_inner(
+    vt_cfg: Option<&VTCodeConfig>,
+    active_primary_agent: Option<&ActivePrimaryAgent>,
+    workspace_root: &Path,
+    start_background_init: bool,
 ) -> Option<Arc<AsyncMcpManager>> {
     let cfg = vt_cfg?;
     if !cfg.mcp.enabled {
@@ -606,9 +623,10 @@ fn create_async_mcp_manager(
         sandbox_context,
     );
     let manager = Arc::new(manager);
-    if let Err(err) = manager
-        .start_initialization()
-        .context("failed to start MCP initialization task")
+    if start_background_init
+        && let Err(err) = manager
+            .start_initialization()
+            .context("failed to start MCP initialization task")
     {
         warn!("MCP background initialization did not start: {err:#}");
     }
@@ -948,6 +966,59 @@ mod tests {
         let manager = create_async_mcp_manager(Some(&cfg), None, Path::new("/tmp")).expect("manager should exist");
 
         assert!(manager.has_initialization_task(), "enabled session MCP manager should start in the background");
+    }
+
+    #[tokio::test]
+    async fn critical_path_defers_mcp_init_until_hydrate() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut cfg = VTCodeConfig::default();
+        cfg.mcp.enabled = true;
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &cfg,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        let mut critical =
+            initialize_session_critical(&runtime_config, Some(&cfg), false, false, None, "test-mcp-defer", None)
+                .await
+                .expect("critical session");
+        let manager = critical.async_mcp_manager.clone().expect("MCP manager when enabled");
+        assert!(
+            !manager.has_initialization_task(),
+            "critical path must not start MCP background init before first paint"
+        );
+
+        let mut context_manager = ContextManager::new(
+            critical.base_system_prompt.clone(),
+            (),
+            critical.loaded_skills.clone(),
+            Some(cfg.agent.clone()),
+        );
+        context_manager.set_workspace_root(&runtime_config.workspace);
+        hydrate_session_runtime(
+            &mut critical,
+            &mut context_manager,
+            &runtime_config,
+            Some(&cfg),
+            false,
+            false,
+            None,
+            "test-mcp-defer",
+            None,
+        )
+        .await
+        .expect("hydrate session");
+        assert!(manager.has_initialization_task(), "hydration must start MCP init after primary-agent reconfigure");
     }
 
     #[tokio::test]
