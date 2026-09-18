@@ -36,6 +36,7 @@ use vtcode_core::hooks::{LifecycleHookEngine, SessionEndReason, SessionStartTrig
 use vtcode_core::notifications::{set_global_notification_hook_engine, set_global_terminal_focused};
 use vtcode_core::primary_agent::build_primary_agent_hook_config;
 use vtcode_core::prompts::discover_prompt_templates;
+use vtcode_core::subagents::SubagentController;
 use vtcode_core::ui::slash::visible_commands;
 use vtcode_core::ui::theme;
 use vtcode_core::ui::{
@@ -47,8 +48,8 @@ use vtcode_core::utils::dot_config::{load_user_config, take_startup_user_config}
 use vtcode_core::utils::session_archive::SessionArchive;
 use vtcode_core::utils::transcript;
 use vtcode_ui::tui::app::{
-    AgentPaletteItem, FocusChangeCallback, InlineEvent, InlineEventCallback, InlineListSelection, PreviewCallback,
-    SessionOptions, SlashCommandItem, spawn_session_with_options,
+    AgentPaletteItem, FocusChangeCallback, InlineEvent, InlineEventCallback, InlineHandle, InlineListSelection,
+    PreviewCallback, SessionOptions, SlashCommandItem, spawn_session_with_options,
 };
 
 pub(crate) use self::header_context::apply_ide_context_snapshot;
@@ -343,43 +344,8 @@ pub(crate) async fn initialize_session_ui(
     }));
     let mut background_subprocess_task_guard = None;
     if let Some(controller) = session_state.tool_registry.subagent_controller() {
-        let handle_for_agents = handle.clone();
-        let controller_for_agents = controller.clone();
-        tokio::spawn(async move {
-            let specs = controller_for_agents.effective_specs().await;
-            if specs.is_empty() {
-                return;
-            }
-
-            handle_for_agents.configure_agent_palette(
-                specs
-                    .into_iter()
-                    .filter(|spec| spec.is_subagent())
-                    .map(|spec| AgentPaletteItem {
-                        name: spec.name,
-                        description: Some(spec.description),
-                    })
-                    .collect(),
-            );
-        });
-
-        let handle_for_subprocesses = handle.clone();
-        let controller_for_subprocesses = controller.clone();
-        let refresh_interval_ms = vt_cfg
-            .map(|cfg| cfg.subagents.background.refresh_interval_ms)
-            .unwrap_or(2_000)
-            .max(250);
-        background_subprocess_task_guard = Some(BackgroundTaskGuard::new(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_millis(refresh_interval_ms));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-            loop {
-                interval.tick().await;
-                if let Err(err) = refresh_local_agents(&handle_for_subprocesses, &controller_for_subprocesses).await {
-                    tracing::warn!("Failed to refresh background subprocesses: {}", err);
-                }
-            }
-        })));
+        background_subprocess_task_guard =
+            Some(spawn_agent_palette_and_background_refresh(&handle, controller.clone(), vt_cfg));
     }
 
     transcript::clear();
@@ -417,86 +383,62 @@ pub(crate) async fn initialize_session_ui(
     // A persisted approval matching the current command-set digest is restored
     // silently; otherwise interactive sessions prompt, and auto/non-interactive
     // sessions fail closed by skipping the lifecycle hooks.
-    if let Some(hooks) = &lifecycle_hooks
-        && hooks.workspace_hooks_need_approval().await
-    {
-        let digest = hooks.command_digest().to_string();
-        let pre_approved = matches!(
-            vtcode_core::load_lifecycle_hook_approval(&config.workspace).await,
-            Ok(Some(record)) if record.config_digest == digest
-        );
-        if pre_approved {
-            hooks.approve_workspace_hooks().await;
-        } else if full_auto || skip_confirmations {
-            renderer.line(
-                MessageStyle::Warning,
-                "Workspace lifecycle hooks require approval and were skipped (auto/non-interactive mode). \
-                 Run an interactive session to review and approve them.",
-            )?;
-        } else {
-            match hook_approval::prompt_workspace_hook_approval(
-                &handle,
-                &mut session,
-                &ctrl_c_state,
-                &ctrl_c_notify,
-                &config.workspace,
-                &hooks.command_previews(),
-            )
-            .await
-            {
-                Ok(hook_approval::HookApprovalDecision::Approved) => {
-                    if let Err(err) = vtcode_core::update_lifecycle_hook_approval(&config.workspace, digest).await {
-                        tracing::warn!(
-                            error = %err,
-                            "Failed to persist workspace lifecycle hook approval; approval applies to this session only"
-                        );
-                    }
-                    hooks.approve_workspace_hooks().await;
-                }
-                Ok(hook_approval::HookApprovalDecision::Denied) => {
-                    renderer.line(
-                        MessageStyle::Warning,
-                        "Workspace lifecycle hooks were not approved and will be skipped.",
-                    )?;
-                }
-                Err(err) => {
-                    renderer.line(
-                        MessageStyle::Warning,
-                        &format!("Could not prompt for workspace lifecycle hook approval; skipping them: {err}"),
-                    )?;
-                }
-            }
-        }
-    }
-
     if let Some(hooks) = &lifecycle_hooks {
-        match hooks.run_session_start().await {
-            Ok(outcome) => {
-                render_hook_messages(&mut renderer, &outcome.messages)?;
-                append_additional_context(&mut session_state.conversation_history, outcome.additional_context);
-            }
-            Err(err) => {
-                renderer.line(MessageStyle::Error, &format!("Failed to run session start hooks: {err}"))?;
+        // Approval / skip notices stay on the first-frame path. Executing
+        // session-start hooks waits until after hydration so they observe the
+        // fully initialized tool registry (`run_session_start_hooks`).
+        if hooks.workspace_hooks_need_approval().await {
+            let digest = hooks.command_digest().to_string();
+            let pre_approved = matches!(
+                vtcode_core::load_lifecycle_hook_approval(&config.workspace).await,
+                Ok(Some(record)) if record.config_digest == digest
+            );
+            if pre_approved {
+                hooks.approve_workspace_hooks().await;
+            } else if full_auto || skip_confirmations {
+                renderer.line(
+                    MessageStyle::Warning,
+                    "Workspace lifecycle hooks require approval and were skipped (auto/non-interactive mode). \
+                     Run an interactive session to review and approve them.",
+                )?;
+            } else {
+                match hook_approval::prompt_workspace_hook_approval(
+                    &handle,
+                    &mut session,
+                    &ctrl_c_state,
+                    &ctrl_c_notify,
+                    &config.workspace,
+                    &hooks.command_previews(),
+                )
+                .await
+                {
+                    Ok(hook_approval::HookApprovalDecision::Approved) => {
+                        if let Err(err) = vtcode_core::update_lifecycle_hook_approval(&config.workspace, digest).await {
+                            tracing::warn!(
+                                error = %err,
+                                "Failed to persist workspace lifecycle hook approval; approval applies to this session only"
+                            );
+                        }
+                        hooks.approve_workspace_hooks().await;
+                    }
+                    Ok(hook_approval::HookApprovalDecision::Denied) => {
+                        renderer.line(
+                            MessageStyle::Warning,
+                            "Workspace lifecycle hooks were not approved and will be skipped.",
+                        )?;
+                    }
+                    Err(err) => {
+                        renderer.line(
+                            MessageStyle::Warning,
+                            &format!("Could not prompt for workspace lifecycle hook approval; skipping them: {err}"),
+                        )?;
+                    }
+                }
             }
         }
     }
 
-    if full_auto && let Some(allowlist) = session_state.full_auto_allowlist.as_ref() {
-        if allowlist.is_empty() {
-            renderer.line(
-                MessageStyle::Info,
-                "Full-auto permission review enabled with no execution tool permissions; only workflow-coordination tools (task_tracker, start_planning, request_user_input) stay available.",
-            )?;
-        } else {
-            renderer.line(
-                MessageStyle::Info,
-                &format!(
-                    "Full-auto permission review enabled. Permitted tools: {} (plus workflow-coordination tools: task_tracker, start_planning, request_user_input).",
-                    allowlist.join(", ")
-                ),
-            )?;
-        }
-    }
+    render_full_auto_allowlist_banner(&mut renderer, full_auto, session_state.full_auto_allowlist.as_ref())?;
 
     handle.set_placeholder(default_placeholder.clone());
 
@@ -597,6 +539,102 @@ pub(crate) async fn initialize_session_ui(
     })
 }
 
+/// Shared agent-palette + background-refresh wiring used both when a
+/// controller already exists at UI spawn and when it appears during hydration.
+fn spawn_agent_palette_and_background_refresh(
+    handle: &InlineHandle,
+    controller: Arc<SubagentController>,
+    vt_cfg: Option<&VTCodeConfig>,
+) -> BackgroundTaskGuard {
+    let handle_for_agents = handle.clone();
+    let controller_for_agents = controller.clone();
+    tokio::spawn(async move {
+        let specs = controller_for_agents.effective_specs().await;
+        if specs.is_empty() {
+            return;
+        }
+
+        handle_for_agents.configure_agent_palette(
+            specs
+                .into_iter()
+                .filter(|spec| spec.is_subagent())
+                .map(|spec| AgentPaletteItem {
+                    name: spec.name,
+                    description: Some(spec.description),
+                })
+                .collect(),
+        );
+    });
+
+    let handle_for_subprocesses = handle.clone();
+    let controller_for_subprocesses = controller;
+    let refresh_interval_ms = vt_cfg
+        .map(|cfg| cfg.subagents.background.refresh_interval_ms)
+        .unwrap_or(2_000)
+        .max(250);
+    BackgroundTaskGuard::new(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(refresh_interval_ms));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            if let Err(err) = refresh_local_agents(&handle_for_subprocesses, &controller_for_subprocesses).await {
+                tracing::warn!("Failed to refresh background subprocesses: {}", err);
+            }
+        }
+    }))
+}
+
+fn render_full_auto_allowlist_banner(
+    renderer: &mut AnsiRenderer,
+    full_auto: bool,
+    allowlist: Option<&Vec<String>>,
+) -> Result<()> {
+    if !full_auto {
+        return Ok(());
+    }
+    let Some(allowlist) = allowlist else {
+        return Ok(());
+    };
+    if allowlist.is_empty() {
+        renderer.line(
+            MessageStyle::Info,
+            "Full-auto permission review enabled with no execution tool permissions; only workflow-coordination tools (task_tracker, start_planning, request_user_input) stay available.",
+        )?;
+    } else {
+        renderer.line(
+            MessageStyle::Info,
+            &format!(
+                "Full-auto permission review enabled. Permitted tools: {} (plus workflow-coordination tools: task_tracker, start_planning, request_user_input).",
+                allowlist.join(", ")
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+/// Execute session-start lifecycle hooks after hydration so they observe a
+/// fully initialized tool registry.
+pub(crate) async fn run_session_start_hooks(
+    lifecycle_hooks: &Option<LifecycleHookEngine>,
+    renderer: &mut AnsiRenderer,
+    session_state: &mut SessionState,
+) -> Result<()> {
+    let Some(hooks) = lifecycle_hooks.as_ref() else {
+        return Ok(());
+    };
+    match hooks.run_session_start().await {
+        Ok(outcome) => {
+            render_hook_messages(renderer, &outcome.messages)?;
+            append_additional_context(&mut session_state.conversation_history, outcome.additional_context);
+        }
+        Err(err) => {
+            renderer.line(MessageStyle::Error, &format!("Failed to run session start hooks: {err}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Re-drive UI surfaces that depend on fields completed in deferred session
 /// hydration (agent palette, background refresh, primary-agent header,
 /// full-auto banner, system-prompt budget warning).
@@ -622,65 +660,13 @@ pub(crate) fn apply_post_hydration_ui(
     ui_setup.header_context.primary_agent_color = primary_agent_color.clone();
     handle.set_primary_agent(Some(primary_agent_name), primary_agent_color);
 
-    if full_auto && let Some(allowlist) = session_state.full_auto_allowlist.as_ref() {
-        if allowlist.is_empty() {
-            ui_setup.renderer.line(
-                MessageStyle::Info,
-                "Full-auto permission review enabled with no execution tool permissions; only workflow-coordination tools (task_tracker, start_planning, request_user_input) stay available.",
-            )?;
-        } else {
-            ui_setup.renderer.line(
-                MessageStyle::Info,
-                &format!(
-                    "Full-auto permission review enabled. Permitted tools: {} (plus workflow-coordination tools: task_tracker, start_planning, request_user_input).",
-                    allowlist.join(", ")
-                ),
-            )?;
-        }
-    }
-
+    render_full_auto_allowlist_banner(&mut ui_setup.renderer, full_auto, session_state.full_auto_allowlist.as_ref())?;
     maybe_render_system_prompt_budget_warning(&mut ui_setup.renderer, vt_cfg, &session_state.session_bootstrap)?;
 
-    let mut background_subprocess_task_guard = None;
-    if let Some(controller) = session_state.tool_registry.subagent_controller() {
-        let handle_for_agents = handle.clone();
-        let controller_for_agents = controller.clone();
-        tokio::spawn(async move {
-            let specs = controller_for_agents.effective_specs().await;
-            if specs.is_empty() {
-                return;
-            }
-
-            handle_for_agents.configure_agent_palette(
-                specs
-                    .into_iter()
-                    .filter(|spec| spec.is_subagent())
-                    .map(|spec| AgentPaletteItem {
-                        name: spec.name,
-                        description: Some(spec.description),
-                    })
-                    .collect(),
-            );
-        });
-
-        let handle_for_subprocesses = handle.clone();
-        let controller_for_subprocesses = controller.clone();
-        let refresh_interval_ms = vt_cfg
-            .map(|cfg| cfg.subagents.background.refresh_interval_ms)
-            .unwrap_or(2_000)
-            .max(250);
-        background_subprocess_task_guard = Some(BackgroundTaskGuard::new(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_millis(refresh_interval_ms));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-            loop {
-                interval.tick().await;
-                if let Err(err) = refresh_local_agents(&handle_for_subprocesses, &controller_for_subprocesses).await {
-                    tracing::warn!("Failed to refresh background subprocesses: {}", err);
-                }
-            }
-        })));
-    }
+    let background_subprocess_task_guard = session_state
+        .tool_registry
+        .subagent_controller()
+        .map(|controller| spawn_agent_palette_and_background_refresh(&handle, controller.clone(), vt_cfg));
 
     Ok(background_subprocess_task_guard)
 }

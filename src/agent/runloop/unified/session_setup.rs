@@ -23,6 +23,6 @@ pub(crate) use signal::spawn_signal_handler;
 pub(crate) use types::SessionState;
 pub(crate) use ui::{
     SessionUiLaunchOptions, apply_ide_context_snapshot, apply_post_hydration_ui, initialize_session_ui,
-    refresh_local_agents,
+    refresh_local_agents, run_session_start_hooks,
 };
 pub(crate) use ui::{build_structured_resume_lines, render_resume_lines};

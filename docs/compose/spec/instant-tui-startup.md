@@ -43,21 +43,23 @@ User-approved goals:
 ### Critical vs deferred split
 
 1. **Critical path (before first frame)**
- - Provider client, plugin-aware primary-agent discovery, lightweight `ToolRegistry::new`, resume history, cheap `SessionBootstrap` (no workspace language/guideline scans), seed system prompt, execution-context shells.
+ - Provider client, plugin-aware primary-agent discovery, lightweight `ToolRegistry::new`, resume history, cheap `SessionBootstrap` (no workspace language/guideline scans), seed system prompt, execution-context shells. MCP manager is created without starting background init.
 2. **Deferred hydration (after first frame, before first model turn)**
  - `ToolRegistry::initialize_async`, runtime config, trust policy, CGP, `model_tools`, skill tools, snapshot refresh.
  - Full system-prompt composition + `ContextManager::set_base_system_prompt`.
  - Subagent controller / background restore when enabled.
- - Trajectory logger, dynamic-context init, MCP reconfigure + restart.
+ - Trajectory logger, dynamic-context init, MCP reconfigure + first `start_initialization`.
  - Bootstrap enrichment (prompt addendum from full workspace scans).
-3. **Post-hydration UI re-drive** (`apply_post_hydration_ui`)
+3. **Post-hydration UI re-drive** (`apply_post_hydration_ui` + `run_session_start_hooks`)
  - Agent palette + background refresh when a controller exists.
  - Primary-agent header, full-auto banner, system-prompt budget warning.
+ - Session-start lifecycle hooks run only after hydration (approval prompts may still run on the first-frame path).
 
 ### Contracts
 
 - Hydration failures abort the session before a model turn runs.
 - After hydration, tool surface/skills/system prompt/primary agent/MCP/permissions match prior post-setup behavior.
+- Session-start hooks observe the hydrated tool registry.
 - No ThreadEvent, safety, or product-surface changes.
 - Standalone `--version`/`--help`/`schema tools` must not regress.
 - Opt-in trace phases: `session_setup_critical`, `session_setup_ui`, `session_setup_hydrate`, `session_setup`, `first_ui_render`.
