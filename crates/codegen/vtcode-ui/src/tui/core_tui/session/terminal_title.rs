@@ -407,13 +407,23 @@ mod tests {
     }
 
     #[test]
-    fn task_progress_item_uses_parsed_summary() {
+    fn task_progress_item_uses_metadata_progress_label() {
         let mut session = session_for_title_tests();
         session.terminal_title_items = Some(vec!["task-progress".to_string(), "project".to_string()]);
         session.terminal_title_task_progress = Some("2/5".to_string());
         session.set_workspace_root(Some(std::path::PathBuf::from("/tmp/demo-project")));
 
         assert_eq!(session.render_terminal_title().as_deref(), Some("2/5 | demo-project"));
+    }
+
+    #[test]
+    fn task_panel_metadata_drives_progress_label() {
+        let mut session = session_for_title_tests();
+        session.terminal_title_items = Some(vec!["task-progress".to_string()]);
+        session.set_task_panel_progress_label(Some("3/8".to_string()));
+
+        assert_eq!(session.terminal_title_task_progress.as_deref(), Some("3/8"));
+        assert_eq!(session.render_terminal_title().as_deref(), Some("3/8"));
     }
 
     #[test]

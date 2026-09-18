@@ -10,26 +10,29 @@ use super::tracker_response::resolve_tracker_file_response;
 use super::validate_plan_content;
 
 fn render_created_task_tracker(handle: &InlineHandle, output: &serde_json::Value) {
-    let lines = crate::agent::runloop::tool_output::tracker_view_lines(output);
-    if lines.is_empty() {
+    let panel_lines = crate::agent::runloop::tool_output::tracker_tree_body_lines(output);
+    let progress_lines = crate::agent::runloop::tool_output::tracker_progress_lines(output);
+    if panel_lines.is_empty() && progress_lines.is_empty() {
         return;
     }
 
     // Approval creates the tracker outside the normal tool pipeline, so make
     // the same panel/transcript updates that a regular task_tracker call gets.
-    // Without this, the checklist exists on disk but remains invisible until
-    // the user manually opens the task panel.
+    // Panel body keeps the compact tree; transcript stays title+progress only.
     handle.update_task_panel_with_metadata(
-        lines.clone(),
+        panel_lines,
         crate::agent::runloop::tool_output::tracker_panel_metadata(output),
     );
     handle.show_task_panel();
-    // Skip the transcript append when the same block is already visible so the
-    // approval handoff and its pipeline replay do not stack identical lists.
-    if vtcode_core::utils::transcript::tail_matches(&lines) {
+    if progress_lines.is_empty() {
         return;
     }
-    handle.append_pasted_message(InlineMessageKind::Tool, lines.join("\n"), lines.len());
+    // Skip the transcript append when the same progress line is already visible
+    // so the approval handoff and its pipeline replay do not stack duplicates.
+    if vtcode_core::utils::transcript::tail_matches(&progress_lines) {
+        return;
+    }
+    handle.append_pasted_message(InlineMessageKind::Tool, progress_lines.join("\n"), progress_lines.len());
 }
 
 #[derive(Debug, Clone)]

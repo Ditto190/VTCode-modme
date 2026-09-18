@@ -45,10 +45,9 @@ pub(super) fn body_lines<'a>(lines: &'a [String], metadata: Option<&TaskPanelMet
         return lines;
     };
 
-    // Transcript blocks start with a summary header (`• Tasks 3/8 — next: …`)
-    // while the panel header already shows title + progress. Strip either the
-    // summary header or a legacy `• {title}` duplicate so tree rows are shown
-    // once without repetition.
+    // Panel body receives compact tree rows only. Defensive strip of legacy
+    // transcript headers keeps old fixtures/render paths from duplicating
+    // title/progress under the typed panel header.
     if first.starts_with("• Tasks") {
         return &lines[1..];
     }

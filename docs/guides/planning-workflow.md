@@ -47,8 +47,9 @@ updates accept positive flat indices or positive hierarchical `index_path`
 values such as `2.1`. Use `items` for bulk synchronization rather than an
 item index.
 
-Successful tracker updates render as one compact hierarchical tree in both the
-inline transcript and the TODO panel. Parent rows show their branch and
+Successful tracker updates keep the user-facing surface to title + progress
+(`• Release 1/4` in the transcript). The compact hierarchical tree is TODO-panel
+body content when the user opens the panel. Parent rows show their branch and
 description; leaf rows use `[-]`, `□`, `[x]`, or `[!]` for in-progress, pending,
 completed, and blocked work. Descriptions render inline markdown (code spans,
 emphasis, file paths); inline `-> files:` / `-> verify:` suffixes copied from
