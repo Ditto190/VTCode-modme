@@ -13,7 +13,8 @@ use tempfile::TempDir;
 use tokio::process::Command;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::mcp::{
-    McpClientConfig, McpHttpServerConfig, McpProviderConfig, McpStdioServerConfig, McpTransportConfig,
+    McpClientConfig, McpHttpHandshakeMode, McpHttpServerConfig, McpProviderConfig, McpStdioServerConfig,
+    McpTransportConfig,
 };
 use vtcode_core::mcp::McpClient;
 use vtcode_core::tools::registry::ToolRegistry;
@@ -384,6 +385,7 @@ max_concurrent_requests = 1
                     api_key_env: Some(MISSING_API_KEY_ENV.to_string()),
                     oauth: None,
                     protocol_version: "2024-11-05".to_string(),
+                    handshake: McpHttpHandshakeMode::Legacy,
                     http_headers: HashMap::new(),
                     env_http_headers: HashMap::new(),
                 }),

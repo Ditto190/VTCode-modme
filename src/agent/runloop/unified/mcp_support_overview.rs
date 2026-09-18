@@ -314,6 +314,7 @@ mod tests {
             description: String::new(),
             provider: provider.to_string(),
             input_schema: json!({}),
+            output_schema: None,
         }
     }
 

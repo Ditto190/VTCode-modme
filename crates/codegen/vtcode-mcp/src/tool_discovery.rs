@@ -53,6 +53,8 @@ pub struct ToolDiscoveryResult {
     relevance_score: f32,
     /// Present only when detail_level is Full or NameAndDescription
     input_schema: Option<Value>,
+    /// Present only when detail_level is Full and the server advertises it
+    output_schema: Option<Value>,
 }
 
 impl ToolDiscoveryResult {
@@ -68,12 +70,20 @@ impl ToolDiscoveryResult {
                 "provider": self.provider,
                 "description": self.description,
             }),
-            DetailLevel::Full => serde_json::json!({
-                "name": self.name,
-                "provider": self.provider,
-                "description": self.description,
-                "input_schema": self.input_schema,
-            }),
+            DetailLevel::Full => {
+                let mut item = serde_json::json!({
+                    "name": self.name,
+                    "provider": self.provider,
+                    "description": self.description,
+                    "input_schema": self.input_schema,
+                });
+                if let Some(schema) = self.output_schema.as_ref()
+                    && let Some(object) = item.as_object_mut()
+                {
+                    drop(object.insert("output_schema".to_string(), schema.clone()));
+                }
+                item
+            }
         }
     }
 }
@@ -131,10 +141,10 @@ impl ToolDiscovery {
                 continue;
             }
 
-            // Only clone input_schema when needed (Full detail level)
-            let input_schema = match detail_level {
-                DetailLevel::Full => Some(tool.input_schema.clone()),
-                _ => None,
+            // Only clone schemas when needed (Full detail level)
+            let (input_schema, output_schema) = match detail_level {
+                DetailLevel::Full => (Some(tool.input_schema.clone()), tool.output_schema.clone()),
+                _ => (None, None),
             };
 
             results.push(ToolDiscoveryResult {
@@ -143,6 +153,7 @@ impl ToolDiscovery {
                 description: tool.description.clone(),
                 relevance_score,
                 input_schema,
+                output_schema,
             });
         }
 
@@ -185,6 +196,7 @@ impl ToolDiscovery {
                     description: tool.description.clone(),
                     relevance_score: 1.0,
                     input_schema: Some(tool.input_schema),
+                    output_schema: tool.output_schema,
                 }));
             }
         }
@@ -202,6 +214,7 @@ impl ToolDiscovery {
             description: tool.description,
             relevance_score: 1.0,
             input_schema: None,
+            output_schema: None,
         })))
     }
 
@@ -272,6 +285,7 @@ mod tests {
             description: description.to_string(),
             provider: provider.to_string(),
             input_schema: json!({}),
+            output_schema: None,
         }
     }
 
@@ -293,6 +307,30 @@ mod tests {
     fn fuzzy_score_no_match() {
         let discovery = ToolDiscovery::new(Arc::new(MockMcpClient::default()));
         assert!(discovery.fuzzy_score("read_file", "xyz").abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn full_detail_json_includes_output_schema_only_when_advertised() {
+        let with_schema = ToolDiscoveryResult {
+            name: "ask".to_string(),
+            provider: "deepwiki".to_string(),
+            description: "Ask.".to_string(),
+            relevance_score: 1.0,
+            input_schema: Some(json!({"type": "object"})),
+            output_schema: Some(json!({"type": "object"})),
+        };
+        assert_eq!(with_schema.to_json(DetailLevel::Full)["output_schema"], json!({"type": "object"}));
+
+        let without_schema = ToolDiscoveryResult { output_schema: None, ..with_schema.clone() };
+        let full = without_schema.to_json(DetailLevel::Full);
+        assert!(full.get("output_schema").is_none(), "absent schema must stay absent");
+        assert!(
+            with_schema
+                .to_json(DetailLevel::NameAndDescription)
+                .get("output_schema")
+                .is_none(),
+            "compact levels must not carry schemas"
+        );
     }
 
     #[tokio::test]

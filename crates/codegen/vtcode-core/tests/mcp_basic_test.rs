@@ -60,10 +60,13 @@ mod tests {
 
     #[test]
     fn test_http_server_config_defaults() {
+        use vtcode_core::config::mcp::McpHttpHandshakeMode;
+
         let http_config = vtcode_core::config::mcp::McpHttpServerConfig::default();
         assert!(http_config.endpoint.is_empty());
         assert!(http_config.api_key_env.is_none());
-        assert_eq!(http_config.protocol_version, "2024-11-05");
+        assert_eq!(http_config.protocol_version, "2025-11-25");
+        assert_eq!(http_config.handshake, McpHttpHandshakeMode::Legacy);
         assert!(http_config.http_headers.is_empty());
         assert!(http_config.env_http_headers.is_empty());
     }
@@ -149,6 +152,7 @@ mod tests {
                     "input": {"type": "string"}
                 }
             }),
+            output_schema: None,
         };
 
         assert_eq!(tool_info.name, "test_tool");

@@ -292,28 +292,42 @@ impl McpClient {
     }
 
     /// Return configured MCP servers and their current connection state.
-    pub fn list_servers(&self) -> Vec<Value> {
-        let state = self.state.read();
-        self.config
-            .providers
-            .iter()
-            .map(|provider_config| {
-                let connected = state.providers.contains_key(&provider_config.name);
-                let (transport, target) = match &provider_config.transport {
-                    McpTransportConfig::Stdio(stdio) => ("stdio", Value::String(stdio.command.clone())),
-                    McpTransportConfig::Http(http) => ("http", Value::String(http.endpoint.clone())),
-                };
+    ///
+    /// Connected servers additionally report the protocol version settled
+    /// during the handshake (`negotiated_protocol_version`), which may differ
+    /// from the configured version when the server negotiates down.
+    pub async fn list_servers(&self) -> Vec<Value> {
+        let live: Vec<(McpProviderConfig, Option<Arc<McpProvider>>)> = {
+            let state = self.state.read();
+            self.config
+                .providers
+                .iter()
+                .map(|provider_config| (provider_config.clone(), state.providers.get(&provider_config.name).cloned()))
+                .collect()
+        };
+        let mut servers = Vec::with_capacity(live.len());
+        for (provider_config, provider) in live {
+            let negotiated = match &provider {
+                Some(provider) => provider.negotiated_protocol_version().await,
+                None => None,
+            };
+            let connected = provider.is_some();
+            let (transport, target) = match &provider_config.transport {
+                McpTransportConfig::Stdio(stdio) => ("stdio", Value::String(stdio.command.clone())),
+                McpTransportConfig::Http(http) => ("http", Value::String(http.endpoint.clone())),
+            };
 
-                json!({
-                    "name": provider_config.name,
-                    "enabled": provider_config.enabled,
-                    "connected": connected,
-                    "connection_state": if connected { "connected" } else { "disconnected" },
-                    "transport": transport,
-                    "target": target,
-                })
-            })
-            .collect()
+            servers.push(json!({
+                "name": provider_config.name,
+                "enabled": provider_config.enabled,
+                "connected": connected,
+                "connection_state": if connected { "connected" } else { "disconnected" },
+                "transport": transport,
+                "target": target,
+                "negotiated_protocol_version": negotiated.map(Value::String).unwrap_or(Value::Null),
+            }));
+        }
+        servers
     }
 
     /// Return whether model-callable lifecycle tools are enabled by config.
@@ -971,7 +985,7 @@ impl McpClient {
         }
 
         InitializeRequestParams::new(capabilities, super::utils::build_client_implementation())
-            .with_protocol_version(rmcp::model::ProtocolVersion::V_2026_07_28)
+            .with_protocol_version(super::rmcp_client::latest_protocol_version())
     }
 
     pub(super) fn normalize_arguments(args: &Value) -> Map<String, Value> {
@@ -1156,8 +1170,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn list_servers_includes_configured_provider_metadata() {
+    #[tokio::test]
+    async fn list_servers_includes_configured_provider_metadata() {
         let mut config = base_config();
         config.providers = vec![McpProviderConfig {
             name: "calendar".to_string(),
@@ -1169,13 +1183,17 @@ mod tests {
         }];
 
         let client = McpClient::new(config);
-        let servers = client.list_servers();
+        let servers = client.list_servers().await;
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0]["name"], "calendar");
         assert_eq!(servers[0]["connected"], false);
         assert_eq!(servers[0]["connection_state"], "disconnected");
         assert_eq!(servers[0]["transport"], "http");
         assert_eq!(servers[0]["target"], "https://calendar.example/mcp");
+        assert!(
+            servers[0]["negotiated_protocol_version"].is_null(),
+            "disconnected servers have no negotiated version"
+        );
     }
 
     #[tokio::test]

@@ -801,7 +801,7 @@ default_policy = "prompt"
 
 # Maximum number of tool loops allowed per turn
 # Set to 0 to disable the limit and let other turn safeguards govern termination.
-max_tool_loops = 40
+max_tool_loops = 60
 
 # Maximum number of repeated identical tool calls (prevents stuck loops)
 max_repeated_tool_calls = 2

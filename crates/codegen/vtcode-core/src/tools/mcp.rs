@@ -211,6 +211,7 @@ mod tests {
                     "query": { "type": "string" }
                 }
             }),
+            output_schema: None,
         };
 
         let registration = build_mcp_registration(client, "context7", &tool, Some("provider hint".to_string()))

@@ -61,6 +61,31 @@ pub struct McpStdioServerConfig {
     pub working_directory: Option<String>,
 }
 
+/// Pinned MCP protocol versions (single source of truth for version strings).
+///
+/// The typed rmcp counterparts live in `vtcode-mcp` (`stable_protocol_version`,
+/// `legacy_fallback_protocol_version`); keep both sides aligned when the spec
+/// publishes a new stable revision.
+pub const MCP_STABLE_PROTOCOL_VERSION: &str = "2025-11-25";
+pub const MCP_LEGACY_PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Handshake strategy for HTTP-based MCP servers.
+///
+/// `Legacy` performs the `initialize` / `notifications/initialized` handshake
+/// directly (rmcp `ClientLifecycleMode::Initialize`). `Auto` first probes
+/// `server/discover` and falls back to the legacy handshake when the peer
+/// reports a legacy server or stays silent past the discover timeout (rmcp
+/// `ClientLifecycleMode::Auto`). Legacy is the default: it avoids the
+/// discover-timeout penalty against legacy-only servers.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpHttpHandshakeMode {
+    #[default]
+    Legacy,
+    Auto,
+}
+
 /// Configuration for HTTP-based MCP servers
 ///
 /// Note: HTTP transport is partially implemented. Basic connectivity testing is supported,
@@ -84,6 +109,11 @@ pub struct McpHttpServerConfig {
     #[serde(default = "default_mcp_protocol_version")]
     pub protocol_version: String,
 
+    /// Handshake strategy (`legacy` direct initialize, or `auto` discover
+    /// with legacy fallback). Defaults to `legacy`.
+    #[serde(default)]
+    pub handshake: McpHttpHandshakeMode,
+
     /// Headers to include in requests
     #[serde(default, alias = "headers")]
     #[cfg_attr(feature = "schema", schemars(with = "BTreeMap<String, String>"))]
@@ -103,6 +133,7 @@ impl Default for McpHttpServerConfig {
             api_key_env: None,
             oauth: None,
             protocol_version: default_mcp_protocol_version(),
+            handshake: McpHttpHandshakeMode::default(),
             http_headers: HashMap::new(),
             env_http_headers: HashMap::new(),
         }
@@ -170,6 +201,7 @@ impl<'de> Deserialize<'de> for McpProviderConfig {
                 api_key_env: wire.api_key_env,
                 oauth: wire.oauth,
                 protocol_version: wire.protocol_version,
+                handshake: wire.handshake,
                 http_headers: wire.http_headers,
                 env_http_headers: wire.env_http_headers,
             })
@@ -215,6 +247,8 @@ struct McpProviderConfigWire {
     oauth: Option<McpOAuthConfig>,
     #[serde(default = "default_mcp_protocol_version")]
     protocol_version: String,
+    #[serde(default)]
+    handshake: McpHttpHandshakeMode,
     #[serde(default, alias = "headers")]
     http_headers: HashMap<String, String>,
     #[serde(default)]
@@ -252,7 +286,12 @@ fn default_provider_max_concurrent() -> usize {
 }
 
 fn default_mcp_protocol_version() -> String {
-    "2026-07-28".into()
+    // Default to the current stable spec revision, not the draft. Draft
+    // revisions are in-progress and not ready for consumption
+    // (https://modelcontextprotocol.io/docs/draft/learn/versioning.md);
+    // explicit opt-in to a draft remains possible via config and is still
+    // clamped to the last stable version on the legacy handshake path.
+    MCP_STABLE_PROTOCOL_VERSION.into()
 }
 
 #[cfg(test)]
@@ -358,5 +397,35 @@ endpoint = 42
 "#;
         let result: Result<McpProviderConfig, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "malformed known field on non-selected transport must error under the flat wire");
+    }
+
+    #[test]
+    fn test_mcp_http_handshake_defaults_to_legacy() {
+        let config = McpHttpServerConfig::default();
+        assert_eq!(config.handshake, McpHttpHandshakeMode::Legacy);
+
+        let toml_str = r#"
+name = "plain"
+endpoint = "https://example.com/mcp"
+"#;
+        let provider: McpProviderConfig = toml::from_str(toml_str).expect("http provider must parse");
+        match provider.transport {
+            McpTransportConfig::Http(http) => assert_eq!(http.handshake, McpHttpHandshakeMode::Legacy),
+            McpTransportConfig::Stdio(_) => panic!("expected HTTP transport"),
+        }
+    }
+
+    #[test]
+    fn test_mcp_http_handshake_parses_auto() {
+        let toml_str = r#"
+name = "modern"
+endpoint = "https://example.com/mcp"
+handshake = "auto"
+"#;
+        let provider: McpProviderConfig = toml::from_str(toml_str).expect("http provider must parse");
+        match provider.transport {
+            McpTransportConfig::Http(http) => assert_eq!(http.handshake, McpHttpHandshakeMode::Auto),
+            McpTransportConfig::Stdio(_) => panic!("expected HTTP transport"),
+        }
     }
 }

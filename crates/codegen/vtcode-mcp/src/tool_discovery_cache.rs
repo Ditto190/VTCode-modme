@@ -551,6 +551,7 @@ mod tests {
                 description: "Search for files".to_string(),
                 provider: "test".to_string(),
                 input_schema: serde_json::json!({}),
+                output_schema: None,
             },
             relevance_score: 0.9,
             detail_level,

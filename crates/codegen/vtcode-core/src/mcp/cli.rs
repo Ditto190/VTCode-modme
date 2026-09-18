@@ -3,7 +3,9 @@
 use crate::cli::input_hardening::validate_agent_safe_text;
 use crate::config::VTCodeConfig;
 use crate::config::loader::ConfigManager;
-use crate::config::mcp::{McpHttpServerConfig, McpProviderConfig, McpStdioServerConfig, McpTransportConfig};
+use crate::config::mcp::{
+    McpHttpHandshakeMode, McpHttpServerConfig, McpProviderConfig, McpStdioServerConfig, McpTransportConfig,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{ArgGroup, Args, Subcommand};
 use hashbrown::HashMap;
@@ -336,6 +338,13 @@ async fn run_get(get_args: GetArgs) -> Result<()> {
             println!("  auth: {}", http_auth_label(http));
             println!("  oauth_status: {}", http_oauth_status_label(&provider.name, http));
             println!("  protocol_version: {}", http.protocol_version);
+            println!(
+                "  handshake: {}",
+                match http.handshake {
+                    McpHttpHandshakeMode::Legacy => "legacy",
+                    McpHttpHandshakeMode::Auto => "auto",
+                }
+            );
             if !http.http_headers.is_empty() {
                 println!("  headers: {}", format_env_map(&http.http_headers));
             }
@@ -456,6 +465,7 @@ fn build_http_transport(args: AddMcpStreamableHttpArgs) -> Result<McpTransportCo
         api_key_env: args.bearer_token_env_var,
         oauth: None,
         protocol_version: default_config.protocol_version,
+        handshake: default_config.handshake,
         http_headers: headers,
         env_http_headers: env_headers,
     };
@@ -488,6 +498,7 @@ fn json_provider(provider: &McpProviderConfig) -> serde_json::Value {
             "api_key_env": http.api_key_env,
             "oauth": http.oauth,
             "protocol_version": http.protocol_version,
+            "handshake": http.handshake,
             "headers": http.http_headers,
             "env_headers": http.env_http_headers,
         }),
@@ -765,5 +776,22 @@ mod tests {
         let resolved = super::global_config_path().expect("global config path");
         assert_eq!(resolved, override_path);
         *GLOBAL_CONFIG_PATH_OVERRIDE.lock().expect("override mutex should be available") = None;
+    }
+
+    #[test]
+    fn json_provider_reports_http_handshake_mode() {
+        use crate::config::mcp::{McpHttpHandshakeMode, McpHttpServerConfig, McpProviderConfig, McpTransportConfig};
+
+        let provider = McpProviderConfig {
+            name: "modern".to_string(),
+            transport: McpTransportConfig::Http(McpHttpServerConfig {
+                endpoint: "https://example.com/mcp".to_string(),
+                handshake: McpHttpHandshakeMode::Auto,
+                ..McpHttpServerConfig::default()
+            }),
+            ..McpProviderConfig::default()
+        };
+
+        assert_eq!(super::json_provider(&provider)["transport"]["handshake"], "auto");
     }
 }

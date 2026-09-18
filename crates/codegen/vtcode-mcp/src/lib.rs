@@ -223,6 +223,13 @@ pub(crate) fn format_tool_markdown(tool: &McpToolInfo) -> String {
         .push_str(&serde_json::to_string_pretty(&tool.input_schema).unwrap_or_else(|_| tool.input_schema.to_string()));
     content.push_str("\n```\n\n");
 
+    if let Some(output_schema) = tool.output_schema.as_ref() {
+        content.push_str("## Output Schema\n\n");
+        content.push_str("```json\n");
+        content.push_str(&serde_json::to_string_pretty(output_schema).unwrap_or_else(|_| output_schema.to_string()));
+        content.push_str("\n```\n\n");
+    }
+
     // Extract required fields if present
     if let Some(obj) = tool.input_schema.as_object() {
         if let Some(required) = obj.get("required").and_then(|v| v.as_array())

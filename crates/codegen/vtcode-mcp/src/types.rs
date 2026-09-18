@@ -11,6 +11,11 @@ pub struct McpToolInfo {
     pub description: String,
     pub provider: String,
     pub input_schema: Value,
+    /// Optional output schema (`outputSchema`), when the server advertises
+    /// the structure of the tool's result. Carried for discovery fidelity so
+    /// the Full detail level returns the complete definition; execution paths
+    /// treat it as advisory metadata.
+    pub output_schema: Option<Value>,
 }
 
 /// Summary of an MCP resource exposed by a provider.

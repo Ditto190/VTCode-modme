@@ -163,6 +163,7 @@ impl ToolRegistry {
             .collect::<Vec<_>>();
         let available_servers = mcp_client
             .list_servers()
+            .await
             .into_iter()
             .filter(|server| server["connected"].as_bool() == Some(false))
             .collect::<Vec<_>>();
@@ -201,7 +202,7 @@ impl ToolRegistry {
 
     pub(super) async fn execute_mcp_list_servers(&self, _args: Value) -> Result<Value> {
         let mcp_client = self.mcp_client().ok_or_else(|| anyhow!("MCP client not available"))?;
-        let servers = mcp_client.list_servers();
+        let servers = mcp_client.list_servers().await;
         Ok(json!({
             "count": servers.len(),
             "servers": servers,

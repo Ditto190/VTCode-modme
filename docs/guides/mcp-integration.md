@@ -131,13 +131,24 @@ headers = { "X-Client" = "vtcode", "X-MCP-App" = "vtcode" }
 Environment variables defined under `[mcp.providers.env]` are forwarded to stdio transports and
 composed with the curated whitelist the loader already exposes. Use `working_directory` to stage
 local binaries, credentials, or fixtures that the provider expects on disk. For HTTP transports,
-`protocol_version` determines which MCP schema the client negotiates (the default matches
-`vtcode-config`'s `2024-11-05`, but you can adopt the `2025-06-18` release or later when providers
-publish compatible endpoints). Custom `headers` values help satisfy hosted provider requirements
+`protocol_version` determines which MCP schema the client negotiates (the default is the current
+stable `2025-11-25`; you can pin an older supported revision when providers publish compatible
+endpoints). The `handshake` strategy selects the rmcp lifecycle: `legacy` (default) performs the
+`initialize` handshake directly, while `auto` first probes `server/discover` and falls back to
+legacy. Prefer `auto` only for modern servers — legacy-only servers would otherwise pay the
+discover-timeout penalty on every connect. `vtcode mcp get <name>` reports the configured
+`handshake`, and the model-facing `mcp` `list_servers` action reports the actually
+`negotiated_protocol_version` per connected server. Custom `headers` values help satisfy hosted provider requirements
 for client identification—check the server's docs for required `Authorization` formats per the MCP
 [authorization guidance](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization.md).
 The `max_concurrent_requests` guard prevents a single provider from starving the global pool
-configured in `[mcp]`.
+configured in `[mcp]`. Two transport-level behaviors are fixed by policy rather than
+configuration: the HTTP client never follows redirects (custom auth headers must not leak to
+cross-origin redirect targets), and the rmcp peer response cache is bounded (128 entries),
+provider-partitioned, and never serves stale responses on transport errors — tool catalog
+staleness is owned by the registry's `list_changed` refresh instead. Full tool definitions
+(`get_tool_details`) additionally expose the server's `outputSchema` when advertised, so
+callers can type the result shape without an extra round trip.
 
 > **Note:** Streamable HTTP support is still evolving. The client negotiates the declared
 > `protocol_version`, but servers must expose Server-Sent Events per the transport spec. If an HTTP
