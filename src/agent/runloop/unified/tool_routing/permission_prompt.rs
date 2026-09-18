@@ -365,14 +365,17 @@ fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
 /// the previous `Reason:` treatment without the technical `WHY` header.
 const AGENT_GOAL_LABEL: &str = "What the agent is trying to do";
 
-fn push_context_line(description_lines: &mut Vec<String>, label: &str, value: &str) {
-    push_capped_context_line(description_lines, label, value, MAX_CONTEXT_LINE_CHARS);
+fn push_context_line(description_lines: &mut Vec<String>, label: &str, value: &str) -> bool {
+    push_capped_context_line(description_lines, label, value, MAX_CONTEXT_LINE_CHARS)
 }
 
-fn push_capped_context_line(description_lines: &mut Vec<String>, label: &str, value: &str, max_chars: usize) {
+fn push_capped_context_line(description_lines: &mut Vec<String>, label: &str, value: &str, max_chars: usize) -> bool {
     let first = value.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
     if !first.is_empty() {
         description_lines.push(format!("{label}: {}", vtcode_commons::formatting::truncate_middle(first, max_chars)));
+        true
+    } else {
+        false
     }
 }
 
@@ -486,10 +489,15 @@ fn tool_permission_header_lines(
     if has_command_preview {
         lines.push("The agent wants to run a shell command and needs your approval.".to_string());
     } else if !display_name.trim().is_empty() {
-        lines.push(format!(
-            "The agent wants to {} and needs your approval.",
-            lowercase_first_action(display_name.trim())
-        ));
+        let trimmed = display_name.trim();
+        // `describe_tool_action` prefixes MCP tools with "MCP " (e.g. "MCP Search
+        // code for docs"); move it to a trailing "via MCP" so the sentence keeps
+        // verb agreement and the acronym is never lowercased mid-word.
+        if let Some(rest) = trimmed.strip_prefix("MCP ") {
+            lines.push(format!("The agent wants to {} via MCP and needs your approval.", lowercase_first_action(rest)));
+        } else {
+            lines.push(format!("The agent wants to {} and needs your approval.", lowercase_first_action(trimmed)));
+        }
     } else {
         lines.push(format!("The agent wants to use {tool_name} and needs your approval."));
     }
@@ -499,12 +507,60 @@ fn tool_permission_header_lines(
     lines
 }
 
+/// Lowercase the initial of a Titlecase action ("Edit file" → "edit file") so
+/// it fits mid-sentence. Leading acronyms ("MCP", "URL") are left alone so
+/// they are never mangled into "mCP"/"uRL".
 fn lowercase_first_action(action: &str) -> String {
     let mut chars = action.chars();
     match chars.next() {
         None => String::new(),
-        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+        Some(first) => {
+            let rest = chars.as_str();
+            let next_is_upper = rest.chars().next().is_some_and(|next| next.is_uppercase());
+            if first.is_uppercase() && !next_is_upper {
+                first.to_lowercase().collect::<String>() + rest
+            } else {
+                action.to_string()
+            }
+        }
     }
+}
+
+/// Context rows explaining what the agent is trying to do and the risk level.
+/// Pure helper so the dedup/fallback rules stay unit-testable without a UI
+/// session: at most one agent-goal row (an explicit reason wins over the
+/// ledger justification), plus `Risk` when present, plus a fallback sentence
+/// when the agent provided no details at all.
+fn build_permission_context_lines(
+    approval_reason: Option<&str>,
+    shell_justification: Option<&str>,
+    justification: Option<&vtcode_core::tools::ToolJustification>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut goal_emitted = false;
+
+    if let Some(reason) = approval_reason {
+        goal_emitted = push_context_line(&mut lines, AGENT_GOAL_LABEL, reason);
+    } else if let Some(shell_reason) = shell_justification {
+        goal_emitted = push_context_line(&mut lines, AGENT_GOAL_LABEL, shell_reason);
+    }
+
+    if let Some(just) = justification {
+        // `compact_justification_lines` emits the agent goal + Risk only; skip
+        // a duplicate goal row when an explicit reason already covers it.
+        for line in compact_justification_lines(just) {
+            if line.starts_with(AGENT_GOAL_LABEL) && goal_emitted {
+                continue;
+            }
+            lines.push(line);
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push("No additional details were provided. Review the action above before allowing.".to_string());
+    }
+
+    lines
 }
 
 fn build_tool_permission_options(
@@ -656,34 +712,11 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     }
 
     let shell_justification = extract_shell_approval_justification(tool_name, tool_args);
-    let mut has_reason_content = false;
-
-    if let Some(reason) = approval_reason {
-        push_context_line(&mut description_lines, AGENT_GOAL_LABEL, reason);
-        has_reason_content = true;
-    } else if let Some(shell_reason) = shell_justification {
-        push_context_line(&mut description_lines, AGENT_GOAL_LABEL, &shell_reason);
-        has_reason_content = true;
-    }
-
-    if let Some(just) = justification {
-        // `compact_justification_lines` emits the agent goal + Risk only; skip
-        // a duplicate goal row when an explicit approval reason already covers it.
-        for line in compact_justification_lines(just) {
-            if line.starts_with(AGENT_GOAL_LABEL) && approval_reason.is_some() {
-                continue;
-            }
-            if !line.trim().is_empty() {
-                has_reason_content = true;
-            }
-            description_lines.push(line);
-        }
-    }
-
-    if !has_reason_content {
-        description_lines
-            .push("No additional details were provided. Review the action above before allowing.".to_string());
-    }
+    description_lines.extend(build_permission_context_lines(
+        approval_reason,
+        shell_justification.as_deref(),
+        justification,
+    ));
 
     description_lines.push(choose_handling_line("this run"));
     let mut navigation_hint = if prompt_kind == ToolPermissionPromptKind::Mcp {
@@ -871,12 +904,13 @@ mod tests {
     use vtcode_core::config::constants::tools;
 
     use super::{
-        ToolPermissionPromptKind, build_tool_permission_options, cancelled_prompt_decision,
-        compact_justification_lines, extract_shell_approval_command_prefix_words, extract_shell_approval_justification,
-        extract_shell_approval_scope_signature, extract_shell_command_text,
-        extract_shell_persistent_approval_prefix_rule, format_command_preview_lines, push_capped_context_line,
-        render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions, shell_command_preview_lines,
-        shell_permission_cache_suffix, tool_permission_header_lines, tool_permission_prompt_kind, truncate_arg_preview,
+        ToolPermissionPromptKind, build_permission_context_lines, build_tool_permission_options,
+        cancelled_prompt_decision, compact_justification_lines, extract_shell_approval_command_prefix_words,
+        extract_shell_approval_justification, extract_shell_approval_scope_signature, extract_shell_command_text,
+        extract_shell_persistent_approval_prefix_rule, format_command_preview_lines, lowercase_first_action,
+        push_capped_context_line, render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions,
+        shell_command_preview_lines, shell_permission_cache_suffix, tool_permission_header_lines,
+        tool_permission_prompt_kind, truncate_arg_preview,
     };
     use crate::agent::runloop::unified::tool_routing::shell_approval::PersistentApprovalTarget;
 
@@ -1209,6 +1243,63 @@ mod tests {
     fn header_falls_back_to_tool_name_when_action_is_empty() {
         let lines = tool_permission_header_lines("exec_command", "   ", false, None);
         assert_eq!(lines, vec!["The agent wants to use exec_command and needs your approval."]);
+    }
+
+    #[test]
+    fn header_moves_mcp_prefix_to_trailing_via_mcp() {
+        let lines = tool_permission_header_lines("mcp__calendar__list_events", "MCP Search code for docs", false, None);
+        assert_eq!(lines, vec!["The agent wants to search code for docs via MCP and needs your approval."]);
+    }
+
+    #[test]
+    fn lowercase_first_action_preserves_leading_acronyms() {
+        assert_eq!(lowercase_first_action("Edit file src/main.rs"), "edit file src/main.rs");
+        assert_eq!(lowercase_first_action("MCP Search code"), "MCP Search code");
+        assert_eq!(lowercase_first_action(""), "");
+    }
+
+    #[test]
+    fn permission_context_lines_fall_back_without_any_reason() {
+        let lines = build_permission_context_lines(None, None, None);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("No additional details were provided."));
+    }
+
+    #[test]
+    fn permission_context_lines_fall_back_when_reason_is_blank() {
+        let lines = build_permission_context_lines(Some("   \n  "), None, None);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("No additional details were provided."));
+    }
+
+    #[test]
+    fn permission_context_lines_dedupes_shell_goal_with_justification_goal() {
+        let just = vtcode_core::tools::ToolJustification {
+            tool_name: "exec_command".to_string(),
+            reason: "List the workspace".to_string(),
+            expected_outcome: None,
+            risk_level: "Low".to_string(),
+            timestamp: "now".to_string(),
+        };
+        let lines = build_permission_context_lines(None, Some("List the workspace"), Some(&just));
+        let goals = lines.iter().filter(|line| line.starts_with(super::AGENT_GOAL_LABEL)).count();
+        assert_eq!(goals, 1, "shell and ledger goals must not duplicate: {lines:?}");
+        assert!(lines.iter().any(|line| line == "Risk: Low"));
+    }
+
+    #[test]
+    fn permission_context_lines_keeps_risk_when_goal_comes_from_approval_reason() {
+        let just = vtcode_core::tools::ToolJustification {
+            tool_name: "exec_command".to_string(),
+            reason: "Ledger goal".to_string(),
+            expected_outcome: None,
+            risk_level: "High".to_string(),
+            timestamp: "now".to_string(),
+        };
+        let lines = build_permission_context_lines(Some("Explicit reason"), None, Some(&just));
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with(&format!("{}: Explicit reason", super::AGENT_GOAL_LABEL)));
+        assert_eq!(lines[1], "Risk: High");
     }
 
     #[test]
