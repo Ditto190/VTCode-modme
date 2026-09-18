@@ -519,7 +519,9 @@ async fn native_review_target(command: &ExecCommandKind, workspace: &Path) -> Re
         return Ok(None);
     };
 
-    if spec.style.is_some() {
+    // Style and free-form instructions need the full prompt review so the
+    // model sees focus guidance; only bare targets use the native fast path.
+    if spec.style.is_some() || spec.instructions.is_some() {
         return Ok(None);
     }
 
@@ -581,7 +583,11 @@ mod tests {
     #[tokio::test]
     async fn native_review_target_uses_uncommitted_changes_when_style_is_absent() {
         let command = super::ExecCommandKind::Review {
-            spec: ReviewSpec { target: ReviewTarget::CurrentDiff, style: None },
+            spec: ReviewSpec {
+                target: ReviewTarget::CurrentDiff,
+                style: None,
+                instructions: None,
+            },
         };
 
         let target = native_review_target(&command, Path::new("/tmp"))
@@ -597,6 +603,24 @@ mod tests {
             spec: ReviewSpec {
                 target: ReviewTarget::CurrentDiff,
                 style: Some("security".to_string()),
+                instructions: None,
+            },
+        };
+
+        let target = native_review_target(&command, Path::new("/tmp"))
+            .await
+            .expect("target resolution should succeed");
+
+        assert!(target.is_none());
+    }
+
+    #[tokio::test]
+    async fn native_review_target_falls_back_when_instructions_present() {
+        let command = super::ExecCommandKind::Review {
+            spec: ReviewSpec {
+                target: ReviewTarget::CurrentDiff,
+                style: None,
+                instructions: Some("Review the full diff for correctness".to_string()),
             },
         };
 
@@ -611,8 +635,9 @@ mod tests {
     async fn native_review_target_maps_custom_review_targets() {
         let command = super::ExecCommandKind::Review {
             spec: ReviewSpec {
-                target: ReviewTarget::Custom("review auth handling".to_string()),
+                target: ReviewTarget::Custom("HEAD~1..HEAD".to_string()),
                 style: None,
+                instructions: None,
             },
         };
 
@@ -620,6 +645,6 @@ mod tests {
             .await
             .expect("target resolution should succeed");
 
-        assert_eq!(target, Some(super::CodexReviewTarget::Custom { instructions: "review auth handling".to_string() }));
+        assert_eq!(target, Some(super::CodexReviewTarget::Custom { instructions: "HEAD~1..HEAD".to_string() }));
     }
 }

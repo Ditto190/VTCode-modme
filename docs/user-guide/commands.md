@@ -144,6 +144,7 @@ Configure the behaviour under **Settings › Extensions › VT Code**:
 - Slash commands are skill-backed. Each command routes through a namespaced command skill such as `cmd-status` or `cmd-review`.
 - The `/name` form remains the compatibility alias. You can also inspect or execute the same behavior through `/skills info cmd-name` and `/skills use cmd-name ...`.
 - Prompt-oriented slash commands such as `/review`, `/analyze`, and `/command` are shipped as bundled system skills in the release binary.
+- `/review` accepts free-form instructions (`/review Review the full diff for correctness and regressions`) or legacy flags (`--last-diff`, `--target <expr>`, `--file <path>`, positional files, `--style <style>`). Instructions describe focus only and are never used as shell arguments. The command stays read-only unless the text explicitly asks to implement fixes.
 - To keep the default prompt lean, command skills are not injected into the runtime `## Skills` prompt section; use slash completion or `/skills` discovery when you need them.
 - `/resume` opens archived sessions when the current run is idle.
 - `/fork` opens the session picker and then lets you choose between a full-copy fork and a summarized fork.

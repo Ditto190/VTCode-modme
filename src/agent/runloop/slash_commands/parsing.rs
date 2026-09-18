@@ -1,7 +1,7 @@
 use super::{CompactConversationCommand, SessionLogExportFormat};
 use vtcode_core::compaction::ManualCompactionOptions;
 use vtcode_core::config::{ReasoningEffortLevel, VerbosityLevel};
-use vtcode_core::review::{ReviewSpec, build_review_spec};
+use vtcode_core::review::{ReviewSpec, build_review_spec, build_review_spec_with_instructions};
 
 /// Iterate over whitespace-separated tokens in `args`, normalising each to
 /// lowercase ASCII before passing it to `f`.  Returns the first `Err` produced
@@ -245,6 +245,109 @@ pub(super) fn parse_review_spec(args: &str) -> Result<ReviewSpec, String> {
     build_review_spec(last_diff, target, files, style).map_err(|err| err.to_string())
 }
 
+/// Parse `/review` input that may be legacy CLI flags or free-form natural
+/// language. CLI-looking input keeps strict validation (errors propagate);
+/// anything else becomes read-only review instructions on the current diff.
+///
+/// Raw prose must never become shell arguments: `Review the full diff ...`
+/// yields `instructions`, not `Files(["Review", "the", ...])`.
+pub(super) fn parse_review_input(args: &str) -> Result<ReviewSpec, String> {
+    let trimmed = args.trim();
+    if trimmed.is_empty() {
+        return build_review_spec(false, None, Vec::new(), None).map_err(|err| err.to_string());
+    }
+
+    if !looks_like_cli_review(trimmed) {
+        return build_review_spec_with_instructions(false, None, Vec::new(), None, Some(trimmed.to_string()))
+            .map_err(|err| err.to_string());
+    }
+
+    match parse_review_spec(trimmed) {
+        Ok(spec) => {
+            // Guard the mixed case: `--style security Review the full diff ...`
+            // parses but its "files" are prose, not paths.
+            if let ReviewSpec {
+                target: vtcode_core::review::ReviewTarget::Files(files),
+                style,
+                ..
+            } = &spec
+            {
+                if !files.iter().all(|file| is_path_like_token(file)) {
+                    return build_review_spec_with_instructions(
+                        false,
+                        None,
+                        Vec::new(),
+                        style.clone(),
+                        Some(trimmed.to_string()),
+                    )
+                    .map_err(|err| err.to_string());
+                }
+            }
+            Ok(spec)
+        }
+        Err(err) => {
+            // Unknown flags alongside prose are treated as prose ("--bogus review
+            // the diff") rather than a hard error; bare CLI typos still error.
+            if err.starts_with("Unknown option:") && !looks_like_cli_review_strict(trimmed) {
+                let token_count = shell_words::split(trimmed).map(|tokens| tokens.len()).unwrap_or(0);
+                if token_count > 1 {
+                    return build_review_spec_with_instructions(
+                        false,
+                        None,
+                        Vec::new(),
+                        None,
+                        Some(trimmed.to_string()),
+                    )
+                    .map_err(|err| err.to_string());
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
+fn is_path_like_token(token: &str) -> bool {
+    if token.starts_with('-') {
+        return false;
+    }
+    token.contains('/') || token.contains('\\') || token.contains('.') || token.starts_with('.')
+}
+
+/// Fast pre-check: does this look like legacy CLI at all?
+fn looks_like_cli_review(trimmed: &str) -> bool {
+    if trimmed.starts_with('-') {
+        return true;
+    }
+    let Ok(tokens) = shell_words::split(trimmed) else {
+        return false;
+    };
+    if tokens.is_empty() {
+        return true;
+    }
+    if tokens.len() == 1 {
+        return true;
+    }
+    // Short all-path lists such as `src/main.rs src/lib.rs` stay CLI.
+    tokens.len() <= 4 && tokens.iter().all(|token| is_path_like_token(token))
+}
+
+/// Strict CLI shape: every token is a known flag, `flag=value`, or path-like.
+fn looks_like_cli_review_strict(trimmed: &str) -> bool {
+    let Ok(tokens) = shell_words::split(trimmed) else {
+        return false;
+    };
+    if tokens.is_empty() {
+        return true;
+    }
+    tokens.iter().all(|token| {
+        matches!(token.as_str(), "--last-diff" | "--target" | "--style" | "--file")
+            || token.starts_with("--target=")
+            || token.starts_with("--style=")
+            || token.starts_with("--file=")
+            || is_path_like_token(token)
+    })
+}
+
 pub(super) fn parse_analyze_scope(args: &str) -> Result<Option<String>, String> {
     let trimmed = args.trim();
     if trimmed.is_empty() {
@@ -268,7 +371,7 @@ pub(super) fn parse_analyze_scope(args: &str) -> Result<Option<String>, String> 
 mod tests {
     use super::{
         CompactConversationCommand, SessionLogExportFormat, parse_analyze_scope, parse_compact_command,
-        parse_review_spec, parse_session_log_export_format,
+        parse_review_input, parse_review_spec, parse_session_log_export_format,
     };
     use vtcode_core::compaction::ManualCompactionOptions;
     use vtcode_core::config::{ReasoningEffortLevel, VerbosityLevel};
@@ -433,6 +536,48 @@ mod tests {
     fn review_rejects_unknown_flag() {
         let err = parse_review_spec("--bogus").expect_err("unknown flag should fail");
         assert!(err.contains("Unknown option"));
+    }
+
+    #[test]
+    fn review_input_treats_prose_as_instructions_not_files() {
+        let spec = parse_review_input("Review the full diff and nearby code for correctness, regressions")
+            .expect("prose should parse");
+        assert!(matches!(spec.target, ReviewTarget::CurrentDiff));
+        assert_eq!(
+            spec.instructions.as_deref(),
+            Some("Review the full diff and nearby code for correctness, regressions")
+        );
+    }
+
+    #[test]
+    fn review_input_treats_bare_bogus_prose_as_instructions() {
+        // Asymmetric counterpart: same unknown flag with prose falls back to NL,
+        // while the bare flag above still errors in strict parsing.
+        let spec = parse_review_input("--bogus review the full diff").expect("prose should parse");
+        assert!(matches!(spec.target, ReviewTarget::CurrentDiff));
+        assert!(spec.instructions.as_deref() == Some("--bogus review the full diff"));
+    }
+
+    #[test]
+    fn review_input_keeps_short_file_lists_as_cli() {
+        let spec = parse_review_input("src/main.rs src/lib.rs").expect("files should parse");
+        assert!(
+            matches!(spec.target, ReviewTarget::Files(ref files) if files == &["src/main.rs".to_string(), "src/lib.rs".to_string()])
+        );
+        assert_eq!(spec.instructions, None);
+    }
+
+    #[test]
+    fn review_input_keeps_flags_as_cli_and_prose_with_flags_as_instructions() {
+        let cli = parse_review_input("--target HEAD~1..HEAD --style security").expect("flags should parse");
+        assert!(matches!(cli.target, ReviewTarget::Custom(ref value) if value == "HEAD~1..HEAD"));
+        assert_eq!(cli.instructions, None);
+
+        let mixed =
+            parse_review_input("--style security Review the full diff for regressions").expect("mixed should parse");
+        assert!(matches!(mixed.target, ReviewTarget::CurrentDiff));
+        assert_eq!(mixed.style.as_deref(), Some("security"));
+        assert!(mixed.instructions.as_deref() == Some("--style security Review the full diff for regressions"));
     }
 
     #[test]

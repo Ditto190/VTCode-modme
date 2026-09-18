@@ -25,4 +25,9 @@ pub struct ReviewArgs {
     /// Review specific files instead of a diff target (repeatable)
     #[arg(long, value_name = "FILE", conflicts_with = "target")]
     pub files: Vec<PathBuf>,
+    /// Free-form natural-language review instructions (focus, scope, depth).
+    /// Never interpolated into shell commands; stored as prompt guidance.
+    /// Mutations stay disabled unless the text explicitly asks to implement fixes.
+    #[arg(value_name = "INSTRUCTIONS")]
+    pub instructions: Vec<String>,
 }

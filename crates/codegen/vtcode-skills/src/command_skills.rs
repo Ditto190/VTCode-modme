@@ -217,8 +217,8 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     ),
     traditional_command_spec!(
         "review",
-        "Review the current diff or selected files (usage: /review [--last-diff|--target <expr>|--file <path>|files...] [--style <style>])",
-        "/review [--last-diff|--target <expr>|--file <path>|files...] [--style <style>]",
+        "Review the current diff or selected files (usage: /review [instructions | --last-diff | --target <expr> | --file <path> | files...] [--style <style>])",
+        "/review [instructions | --last-diff | --target <expr> | --file <path> | files...] [--style <style>]",
         "tools",
         ".system/cmd-review"
     ),

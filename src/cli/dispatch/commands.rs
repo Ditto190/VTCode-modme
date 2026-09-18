@@ -133,11 +133,17 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
         }
         Commands::Review(review) => {
             let files = review.files.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
-            let spec = vtcode_core::review::build_review_spec(
+            let instructions = if review.instructions.is_empty() {
+                None
+            } else {
+                Some(review.instructions.join(" "))
+            };
+            let spec = vtcode_core::review::build_review_spec_with_instructions(
                 review.last_diff,
                 review.target.clone(),
                 files,
                 review.style.clone(),
+                instructions,
             )?;
             let options = review::ReviewCommandOptions {
                 json: review.json,

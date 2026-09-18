@@ -7,7 +7,7 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::builtins::execute_built_in_command_skill;
 use super::models::SlashCommandOutcome;
-use super::parsing::{parse_analyze_scope, parse_prompt_template_args, parse_review_spec, split_command_and_args};
+use super::parsing::{parse_analyze_scope, parse_prompt_template_args, parse_review_input, split_command_and_args};
 
 pub(crate) async fn handle_slash_command(
     input: &str,
@@ -92,15 +92,17 @@ fn dispatch_traditional_command_skill(
             if matches!(args.trim(), "--help" | "help") {
                 renderer.line(
                     MessageStyle::Info,
-                    "Usage: /review [--last-diff] [--target <expr>] [--style <style>] [--file <path> | files...]",
+                    "Usage: /review [instructions | --last-diff | --target <expr> | --file <path> | files...] [--style <style>]",
                 )?;
                 return Ok(SlashCommandOutcome::Handled);
             }
-            if let Err(err) = parse_review_spec(args) {
+            // NL-first: free-form prose becomes review instructions; only
+            // malformed CLI-looking input errors here.
+            if let Err(err) = parse_review_input(args) {
                 renderer.line(MessageStyle::Error, &err)?;
                 renderer.line(
                     MessageStyle::Info,
-                    "Usage: /review [--last-diff] [--target <expr>] [--style <style>] [--file <path> | files...]",
+                    "Usage: /review [instructions | --last-diff | --target <expr> | --file <path> | files...] [--style <style>]",
                 )?;
                 return Ok(SlashCommandOutcome::Handled);
             }

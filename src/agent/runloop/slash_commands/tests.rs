@@ -774,6 +774,24 @@ async fn review_slash_routes_through_cmd_review_skill() {
 }
 
 #[tokio::test]
+async fn review_slash_routes_natural_language_through_cmd_review_skill() {
+    let workspace = tempfile::TempDir::new().expect("workspace");
+    let mut renderer = renderer_for_tests();
+
+    let input = "Review the full diff and nearby code for correctness, regressions";
+    let outcome = handle_slash_command(&format!("review {input}"), &mut renderer, workspace.path())
+        .await
+        .expect("natural-language review should parse");
+
+    assert!(matches!(
+        outcome,
+        SlashCommandOutcome::ManageSkills {
+            action: crate::agent::runloop::SkillCommandAction::Use { ref name, input: ref skill_input }
+        } if name == "cmd-review" && skill_input == input
+    ));
+}
+
+#[tokio::test]
 async fn command_alias_typo_routes_through_cmd_command_skill() {
     let workspace = tempfile::TempDir::new().expect("workspace");
     let mut renderer = renderer_for_tests();

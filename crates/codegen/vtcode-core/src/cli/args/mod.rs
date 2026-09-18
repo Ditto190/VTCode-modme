@@ -408,7 +408,7 @@ pub enum Commands {
 
     /// Headless code review for the current diff, selected files, or a custom git target
     #[command(
-        long_about = "Run a non-interactive code review.\n\nExamples:\n  vtcode review\n  vtcode review --last-diff\n  vtcode review --target HEAD~1..HEAD\n  vtcode review --file src/main.rs --file crates/codegen/vtcode-core/src/lib.rs\n  vtcode review --style security"
+        long_about = "Run a non-interactive code review.\n\nExamples:\n  vtcode review\n  vtcode review \"Review the full diff for correctness and regressions\"\n  vtcode review --last-diff\n  vtcode review --target HEAD~1..HEAD\n  vtcode review --file src/main.rs --file crates/codegen/vtcode-core/src/lib.rs\n  vtcode review --style security \"Focus on auth bypass and injection\""
     )]
     Review(ReviewArgs),
 
