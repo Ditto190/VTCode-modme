@@ -3,7 +3,7 @@ feature: tracker-continuation
 status: delivered
 updated: 2026-09-18
 branch: fix/tracker-continuation
-commits: 873c2c8d1..<HEAD>
+commits: 873c2c8d1..00118e99b
 ---
 
 # Tracker Continuation (Run Loop + TODO Resume)
