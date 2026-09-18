@@ -88,12 +88,12 @@ In practice, that means:
 
 | What can go wrong                       | How VT Code responds                                                                                                                                                                                                        |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| --------------------------------------- | -----------------------------------------------------------------------------------------------------------------------------------------------------------------                                                           |
 | **Long tasks lose focus**               | Dynamic context assembly, project instructions, auto-compaction, and bounded tool output keep the active window useful. [Runtime guidance](./docs/development/runtime-guidance.md) · [Architecture](./docs/ARCHITECTURE.md) |
 | **Generated commands can cause damage** | Policy checks and sandboxed, fail-closed execution defend against injection, path and symlink escape, and environment leakage. [Security model](./docs/development/COMMAND_SECURITY_MODEL.md)                               |
 | **A session is interrupted**            | Resume with `vtcode continue`, fork with `--session-id`, and inspect or restore changes with `vtcode snapshots` and `vtcode revert`. [Commands](./docs/user-guide/commands.md)                                              |
 | **“Done” is asserted without proof**    | Built-in evals verify the environment instead of trusting the agent’s report, measured with pass@k and pass^k. [Eval guide](./docs/guides/eval.md)                                                                          |
 | **Big changes ship unreviewed**         | The Planning Workflow keeps planning read-only: draft with `/plan`, approve at a review gate, then hand off to `build` or `auto`. [Planning workflow](./docs/guides/planning-workflow.md)                                   |
+| **Edits drift from project conventions** | Project instructions (`AGENTS.md`) are loaded into every turn, so the agent codes to your rules instead of rediscovering them. [Getting started](./docs/user-guide/getting-started.md)                                      |
 
 The result is a terminal-native workflow that is:
 
@@ -150,6 +150,12 @@ graph LR
   rollback.
 - **Extensions and models:** attach without patching the core; swap providers
   without touching your workflow.
+
+For contributors, the layers map to workspace crates: entry points live in
+`vtcode` (`src/`) and `vtcode-acp`; the harness is `vtcode-core` with
+`vtcode-safety` for policy and sandboxing; the `ThreadEvent` contract is
+`vtcode-exec-events`; extensions are `vtcode-mcp`, `vtcode-skills`, and
+`vtcode-agent-plugins`; provider clients live in `vtcode-llm`.
 
 For layer-by-layer details, extension seams, and internal composition rules,
 see the [Architecture guide](./docs/ARCHITECTURE.md).
