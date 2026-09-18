@@ -201,14 +201,12 @@ impl SessionStyles {
     }
 
     /// Get the message divider style
-    pub(crate) fn message_divider_style(&self, kind: InlineMessageKind) -> Style {
-        let mut style = InlineTextStyle::default();
-        if kind == InlineMessageKind::User {
-            style.color = self.theme.primary.or(self.theme.foreground);
-        } else {
-            style.color = self.text_fallback(kind).or(self.theme.foreground);
-        }
-        let resolved = ratatui_style_from_inline(&style, self.theme.foreground);
-        resolved.add_modifier(Modifier::DIM)
+    ///
+    /// Section dividers (`User` turn breaks and `Agent` synthesis after tool
+    /// work) share one quiet prose language: muted `secondary` border hue +
+    /// `DIM`, never bold or background. Full-width shape keeps the break
+    /// glanceable while the muted tone avoids clutter.
+    pub(crate) fn message_divider_style(&self, _kind: InlineMessageKind) -> Style {
+        self.dimmed_border_style(true)
     }
 }

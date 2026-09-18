@@ -181,6 +181,22 @@ impl Session {
             wrapped.push(transcript_line_with_detected_links(divider, self.workspace_root.as_deref()));
         }
 
+        // Section divider before Agent synthesis following tool work. Same
+        // single-ownership pattern as the User divider: the tool/PTY block
+        // owns the trailing gap above (tool blocks clamp to min 1), so only
+        // the thin accent rule is emitted here. Keeps long tool bursts and
+        // follow-up prose visually distinct without extra vertical clutter.
+        // Skipped for empty agent rows, reasoning flow (`Policy`), and
+        // consecutive agent lines so the transcript reads like prose.
+        if message.kind == InlineMessageKind::Agent && is_new_turn && max_width > 0 && index > 0 {
+            let prev_is_tool_section = self.lines.get(index - 1).is_some_and(|prev| next_is_tool_block(Some(prev)));
+            let agent_has_content = message.segments.iter().any(|segment| !segment.text.trim().is_empty());
+            if prev_is_tool_section && agent_has_content {
+                let divider = self.message_divider_line(max_width, InlineMessageKind::Agent);
+                wrapped.push(transcript_line_with_detected_links(divider, self.workspace_root.as_deref()));
+            }
+        }
+
         let lines = if message.kind == InlineMessageKind::Agent {
             self.reflow_agent_message_lines(message, max_width, !is_new_turn)
         } else {
@@ -241,14 +257,21 @@ impl Session {
                 push_spacing_transcript_lines(&mut wrapped, spacing);
             }
             InlineMessageKind::User => {}
-            // Check if next message is a different type (end of agent turn).
-            // Always separate an agent response from the following turn with at
-            // least one blank line (even when message_block_spacing is 0), so
-            // the response reads as a distinct block.
-            InlineMessageKind::Agent if next_kind.is_some() && next_kind != Some(InlineMessageKind::Agent) => {
+            // End of an agent turn. Prose glues directly to a following tool
+            // block like a caption to its work log (a tool block after an
+            // agent lead-in owns no top gap of its own, so no trailing gap
+            // either — the section rule provides the separation). Any other
+            // follower keeps at least one blank line (even when
+            // message_block_spacing is 0) so the response stays distinct.
+            InlineMessageKind::Agent
+                if next_kind.is_some()
+                    && next_kind != Some(InlineMessageKind::Agent)
+                    && !next_is_tool_block(next_line) =>
+            {
                 let gap = spacing.max(1);
                 push_spacing_transcript_lines(&mut wrapped, gap);
             }
+            InlineMessageKind::Agent => {}
             _ => {}
         }
 
@@ -462,8 +485,9 @@ impl Session {
         let mut lines = Vec::with_capacity(wrapped.len());
         for (index, (mut line, mut line_links)) in wrapped.into_iter().zip(explicit_links).enumerate() {
             let mut spans = Vec::new();
-            // Continuation rows start at column 0: agent, tool, and PTY rows
-            // share one left edge and are distinguished by bullet color only.
+            // Continuation rows start at column 0: agent prose (no bullet),
+            // tool, and PTY rows share one left edge; tool/PTY headers keep
+            // their own `•` markers while agent text reads as plain prose.
             let (prefix_len, prefix_col_width) = if index == 0 {
                 (first_line_prefix_text.len(), first_line_prefix_width)
             } else {

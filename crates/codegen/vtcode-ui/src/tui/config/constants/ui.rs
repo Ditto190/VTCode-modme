@@ -47,7 +47,9 @@ pub const INLINE_JSON_TAIL_LINES: usize = 30;
 pub const INLINE_JSON_COLLAPSE_LINE_THRESHOLD: usize = 200;
 pub const HEADER_HIGHLIGHT_PREVIEW_MAX_CHARS: usize = 48;
 pub const INLINE_AGENT_MESSAGE_LEFT_PADDING: &str = "";
-pub const INLINE_AGENT_QUOTE_PREFIX: &str = "• ";
+/// Agent message prefix — intentionally empty so assistant prose starts at
+/// column 0 with no bullet gap. Tool headers keep their own `• ` markers.
+pub const INLINE_AGENT_QUOTE_PREFIX: &str = "";
 pub const INLINE_USER_MESSAGE_DIVIDER_SYMBOL: &str = "─";
 
 /// Left gutter before tool summary headers (`• Ran`, `• Search code`, …).

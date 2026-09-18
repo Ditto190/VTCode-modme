@@ -658,8 +658,11 @@ fn agent_label_uses_accent_color_without_border() {
 
     assert!(!spans.is_empty());
 
-    let prefix_span = &spans[0];
-    assert_eq!(prefix_span.content.clone().into_owned(), ui::INLINE_AGENT_QUOTE_PREFIX);
+    // Agent prose has no bullet gap; the optional label leads when configured.
+    assert!(
+        !spans.iter().any(|span| span.content.as_ref().contains('•')),
+        "agent prose must not render a bullet gap"
+    );
 
     let label_index = spans
         .iter()

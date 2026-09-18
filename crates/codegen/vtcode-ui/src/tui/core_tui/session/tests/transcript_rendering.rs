@@ -220,7 +220,7 @@ fn user_messages_render_with_dividers() {
 }
 
 #[test]
-fn agent_messages_use_zero_indent_with_bullet_cue() {
+fn agent_messages_use_zero_indent_prose() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(
         InlineMessageKind::Agent,
@@ -235,39 +235,28 @@ fn agent_messages_use_zero_indent_with_bullet_cue() {
     let first_line = &content_lines[0];
     let second_line = &content_lines[1];
 
-    let expected_prefix = format!("{}{}", ui::INLINE_AGENT_QUOTE_PREFIX, ui::INLINE_AGENT_MESSAGE_LEFT_PADDING);
-
-    assert!(first_line.starts_with(&expected_prefix), "agent message should start with the bullet cue",);
+    assert!(
+        !first_line.starts_with(' ') && !first_line.starts_with('•'),
+        "agent prose should start at column 0 with no bullet gap, got: {first_line:?}",
+    );
     assert!(
         !second_line.starts_with(' '),
         "agent message continuation should start at column 0, got: {second_line:?}",
-    );
-    assert!(
-        !second_line.starts_with(&expected_prefix),
-        "agent message continuation should not repeat bullet prefix",
     );
     assert!(!first_line.contains('│'), "agent message should not render a left border",);
 }
 
 #[test]
-fn agent_bullet_uses_primary_color_cue() {
-    use anstyle::{Color as AnsiColorEnum, RgbColor};
-    use ratatui::style::Modifier;
-
-    let accent = AnsiColorEnum::Rgb(RgbColor(0x12, 0x34, 0x56));
-    let theme = InlineTheme { primary: Some(accent), ..Default::default() };
-    let mut session = Session::new(theme, None, VIEW_ROWS);
+fn agent_prose_has_no_bullet_gap() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(InlineMessageKind::Agent, vec![make_segment("Response")]);
 
     let index = session.lines.len().checked_sub(1).expect("agent message should be available");
     let spans = session.render_message_spans(index);
-    let bullet = spans
-        .iter()
-        .find(|span| span.content.clone().into_owned() == ui::INLINE_AGENT_QUOTE_PREFIX)
-        .expect("agent bullet span should be present");
-
-    assert_eq!(bullet.style.fg, Some(ratatui_color_from_ansi(accent)));
-    assert!(bullet.style.add_modifier.contains(Modifier::BOLD));
+    assert!(
+        !spans.iter().any(|span| span.content.as_ref().contains('•')),
+        "agent prose must not render a bullet gap, got {spans:?}"
+    );
 }
 
 #[test]
@@ -454,8 +443,7 @@ fn cached_reflow_refreshes_tool_and_pty_block_boundaries() {
         .iter()
         .position(|line| line.contains("Ran cargo check"))
         .expect("tool header");
-    assert_eq!(tool, agent + 2, "agent-to-tool boundary needs exactly one blank row: {rendered:?}");
-    assert!(rendered[agent + 1].trim().is_empty(), "tool gap must be blank: {rendered:?}");
+    assert_eq!(tool, agent + 1, "agent prose glues to its tool block: {rendered:?}");
 
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(InlineMessageKind::User, vec![make_segment("Run the check.")]);
@@ -1297,12 +1285,12 @@ fn tool_summary_details_are_tightly_grouped() {
     assert!(texts[6].trim().is_empty()); // bottom
 }
 
-/// Agent pre-announcement → tool block must have exactly one blank line,
-/// not a duplicated 2-line gap. `Agent` already contributes its trailing
-/// `tool_block_spacing` gap; `Tool`/`Info` must not add a second top gap
-/// when following an `Agent`.
+/// Agent pre-announcement → tool block glues directly with no blank line:
+/// prose reads as the caption of its work log. Neither side owns a gap here
+/// (`Agent` emits no trailing gap before tool blocks and `Tool`/`Info` add
+/// no top gap after an `Agent`).
 #[test]
-fn agent_to_tool_has_single_gap() {
+fn agent_to_tool_has_no_gap() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(
         InlineMessageKind::Agent,
@@ -1320,9 +1308,8 @@ fn agent_to_tool_has_single_gap() {
     // Find the Agent line and the following Ran line.
     let agent_idx = texts.iter().position(|t| t.contains("Got the doc")).expect("agent line");
     let ran_idx = texts.iter().position(|t| t.contains("Ran 2 commands")).expect("ran line");
-    // Exactly one empty line between them (unified spacing).
-    assert_eq!(ran_idx, agent_idx + 2, "expected single blank line, got texts: {texts:?}");
-    assert!(texts[agent_idx + 1].trim().is_empty());
+    // No blank line between them: prose glues to its work log.
+    assert_eq!(ran_idx, agent_idx + 1, "expected adjacent rows, got texts: {texts:?}");
     // Also verify the pure policy: Agent -> Tool should not add extra top gap.
     use crate::tui::core_tui::session::message::MessageLine;
     use crate::tui::core_tui::session::reflow::should_add_tool_block_top_spacing_for_kinds;
@@ -1340,6 +1327,206 @@ fn agent_to_tool_has_single_gap() {
         revision: 0,
     };
     assert!(!should_add_tool_block_top_spacing_for_kinds(&agent_line, &tool_line));
+}
+
+// ---------------------------------------------------------------------------
+// Agent section dividers (Tool/Pty -> Agent prose breaks)
+// ---------------------------------------------------------------------------
+
+fn divider_positions(texts: &[String]) -> Vec<usize> {
+    texts
+        .iter()
+        .enumerate()
+        .filter(|(_, text)| !text.is_empty() && text.chars().all(|ch| ch == '─'))
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
+#[test]
+fn tool_followed_by_agent_has_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Ran cargo check")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("synthesis of the check")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    let tool = texts
+        .iter()
+        .position(|text| text.contains("Ran cargo check"))
+        .expect("tool header");
+    let answer = texts.iter().position(|text| text.contains("synthesis")).expect("agent answer");
+    let dividers = divider_positions(&texts);
+    assert_eq!(dividers.len(), 1, "expected one section divider, got {texts:?}");
+    let divider = dividers[0];
+    assert!(divider > tool && divider < answer, "divider should sit between tool and agent, got {texts:?}");
+    let gap = &texts[tool + 1..divider];
+    assert_eq!(gap.len(), 1, "expected exactly one blank row before the divider, got {texts:?}");
+    assert!(gap[0].trim().is_empty());
+}
+
+#[test]
+fn pty_followed_by_agent_has_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    push_pty_line(&mut session, "• Ran git status");
+    push_pty_line(&mut session, "M src/main.rs");
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("working tree is dirty")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    let dividers = divider_positions(&texts);
+    assert_eq!(dividers.len(), 1, "pty burst should close with one divider, got {texts:?}");
+    let answer = texts.iter().position(|text| text.contains("dirty")).expect("agent answer");
+    assert!(dividers[0] < answer);
+}
+
+#[test]
+fn info_summary_followed_by_agent_has_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Search code")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("  └ Path: src/")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("found the loop")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    let dividers = divider_positions(&texts);
+    assert_eq!(dividers.len(), 1, "tool detail tail should still break the section, got {texts:?}");
+}
+
+#[test]
+fn agent_glues_to_tool_and_pty_blocks() {
+    for kind in [InlineMessageKind::Tool, InlineMessageKind::Pty] {
+        let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+        session.push_line(InlineMessageKind::Agent, vec![make_segment("lead-in prose")]);
+        let header = if kind == InlineMessageKind::Tool {
+            "• Ran cargo check"
+        } else {
+            "• Ran git status"
+        };
+        if kind == InlineMessageKind::Tool {
+            session.push_line(kind, vec![make_segment(header)]);
+        } else {
+            push_pty_line(&mut session, header);
+        }
+
+        let rendered = session.reflow_transcript_lines(80);
+        let texts: Vec<String> = rendered.iter().map(line_text).collect();
+        let prose = texts
+            .iter()
+            .position(|text| text.contains("lead-in prose"))
+            .expect("agent prose");
+        let block = texts.iter().position(|text| text.contains("Ran")).expect("tool header");
+        assert_eq!(block, prose + 1, "prose must glue to {kind:?} block, got {texts:?}");
+    }
+}
+
+#[test]
+fn agent_prose_glues_to_work_log_with_rule_section_break() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("Links all resolve.")]);
+    session.push_line(InlineMessageKind::Info, vec![make_segment("• Ran 5 commands")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("The provider list is richer.")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    let prose = texts
+        .iter()
+        .position(|text| text.contains("Links all resolve."))
+        .expect("agent prose");
+    let hint = texts
+        .iter()
+        .position(|text| text.contains("Ran 5 commands"))
+        .expect("work-log hint");
+    assert_eq!(hint, prose + 1, "prose must glue to its work log, got {texts:?}");
+    let dividers = divider_positions(&texts);
+    assert_eq!(dividers.len(), 1, "one rule separates the sections, got {texts:?}");
+    let follow = texts
+        .iter()
+        .position(|text| text.contains("provider list"))
+        .expect("next prose");
+    assert_eq!(follow, dividers[0] + 1, "next prose must hug the rule, got {texts:?}");
+}
+
+#[test]
+fn agent_followed_by_agent_has_no_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("first paragraph")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("second paragraph")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    assert!(divider_positions(&texts).is_empty(), "consecutive agent lines must not divide, got {texts:?}");
+}
+
+#[test]
+fn empty_agent_after_tool_has_no_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Ran cargo check")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("   ")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    assert!(divider_positions(&texts).is_empty(), "empty agent rows must not add chrome, got {texts:?}");
+}
+
+#[test]
+fn policy_followed_by_agent_has_no_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Policy, vec![make_segment("thinking aloud")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("the answer")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    assert!(divider_positions(&texts).is_empty(), "reasoning -> content flow must stay undivided, got {texts:?}");
+}
+
+#[test]
+fn user_followed_by_agent_has_no_section_divider() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::User, vec![make_segment("run the check")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("on it")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    let texts: Vec<String> = rendered.iter().map(line_text).collect();
+    // The single divider belongs to the User turn itself; no extra section
+    // divider may appear between User and the following Agent.
+    let dividers = divider_positions(&texts);
+    assert_eq!(dividers.len(), 1, "only the user turn divider should exist, got {texts:?}");
+    let user = texts.iter().position(|text| text.contains("run the check")).expect("user text");
+    let agent = texts.iter().position(|text| text.contains("on it")).expect("agent text");
+    assert!(dividers[0] < user, "user divider should precede the user text, got {texts:?}");
+    assert!(
+        !dividers.iter().any(|divider| *divider > user && *divider < agent),
+        "no section divider between user and agent, got {texts:?}"
+    );
+}
+
+#[test]
+fn section_divider_uses_muted_dim_style() {
+    use anstyle::{Color as AnsiColorEnum, RgbColor};
+
+    let muted = AnsiColorEnum::Rgb(RgbColor(0x77, 0x99, 0xAA));
+    let theme = InlineTheme {
+        secondary: Some(muted),
+        primary: Some(AnsiColorEnum::Rgb(RgbColor(0x12, 0x34, 0x56))),
+        ..Default::default()
+    };
+    let mut session = Session::new(theme, None, VIEW_ROWS);
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Ran cargo check")]);
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("synthesis")]);
+
+    let agent_index = 1;
+    let rows = session.reflow_message_lines(agent_index, 40, false);
+    let divider = rows
+        .iter()
+        .find(|row| {
+            let text: String = row.line.spans.iter().map(|span| span.content.as_ref()).collect();
+            !text.is_empty() && text.chars().all(|ch| ch == '─')
+        })
+        .expect("section divider row");
+    let expected_fg = Some(ratatui_color_from_ansi(muted));
+    assert_eq!(divider.line.style.fg, expected_fg);
+    assert!(divider.line.style.add_modifier.contains(Modifier::DIM));
+    assert!(!divider.line.style.add_modifier.contains(Modifier::BOLD));
 }
 
 // ---------------------------------------------------------------------------
