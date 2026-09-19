@@ -507,6 +507,12 @@ Approval options:
 - **Yes, switch to Auto and implement** — execute in the current context as `auto` with unattended confirmations. The same command, path, verification, blocked-call, budget, and recovery gates remain active.
 - **No, stay in Plan mode** — return to planning and revise the plan.
 
+`Ctrl+G` in the approval popup opens the persisted plan file in your configured external editor
+(`tools.editor`). After you save and close the editor, VT Code re-reads and re-validates the saved
+markdown and shows the approval popup again with the updated synopsis; approving then builds the task
+tracker from your edited plan. If the edited draft fails validation, the previous plan stays active and
+a warning explains why.
+
 The existing manual confirmation policy remains attached to the Build approval paths. The Auto
 choice explicitly selects the unattended confirmation policy; ordinary approval does not infer it
 from the source agent. A fresh handoff clears only transient transcript, continuation, cache-lineage,

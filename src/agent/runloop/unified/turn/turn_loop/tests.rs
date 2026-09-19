@@ -3212,6 +3212,7 @@ async fn explicit_build_and_auto_approval_selections_handoff_persisted_plan_with
             .send(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Selection(selection))))
             .expect("submit explicit plan approval selection");
 
+        let approval_workspace_root = tool_registry.workspace_root().clone();
         let outcome = execute_plan_approval(
             &mut tool_registry,
             &mut plan_session,
@@ -3224,6 +3225,8 @@ async fn explicit_build_and_auto_approval_selections_handoff_persisted_plan_with
                 skip_confirmations: false,
                 full_auto: false,
                 context_usage_percent: 0,
+                editor: vtcode_core::config::EditorToolConfig::default(),
+                workspace_root: approval_workspace_root,
             },
             PlanApprovalTelemetryContext {
                 emitter: None,

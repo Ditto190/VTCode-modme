@@ -160,6 +160,10 @@ pub(crate) async fn maybe_handle_planning_exit_trigger(
             );
 
             if approval_route == PlanApprovalRoute::Inline {
+                // Resolve owned copies before the mutable `tool_registry`
+                // borrow for the approval call begins.
+                let approval_editor = exit_context.vt_cfg.map(|cfg| cfg.tools.editor.clone()).unwrap_or_default();
+                let approval_workspace_root = tool_registry.workspace_root().clone();
                 let outcome = execute_plan_approval(
                     tool_registry,
                     plan_session,
@@ -172,6 +176,8 @@ pub(crate) async fn maybe_handle_planning_exit_trigger(
                         skip_confirmations: exit_context.skip_confirmations,
                         full_auto: exit_context.full_auto,
                         context_usage_percent: exit_context.context_usage_percent,
+                        editor: approval_editor,
+                        workspace_root: approval_workspace_root,
                     },
                     exit_context.telemetry,
                 )

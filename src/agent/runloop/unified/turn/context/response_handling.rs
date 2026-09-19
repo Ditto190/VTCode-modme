@@ -1005,6 +1005,10 @@ impl<'a> TurnProcessingContext<'a> {
                         "The agent proposed a plan during execution; review it before approving.",
                     )?;
                 }
+                // Resolve owned copies before the mutable `tool_registry`
+                // borrow for the approval call begins.
+                let approval_editor = self.vt_cfg.map(|cfg| cfg.tools.editor.clone()).unwrap_or_default();
+                let approval_workspace_root = self.tool_registry.workspace_root().clone();
                 let outcome = execute_plan_approval(
                     self.tool_registry,
                     self.plan_session,
@@ -1026,6 +1030,8 @@ impl<'a> TurnProcessingContext<'a> {
                                 ),
                             ),
                         ),
+                        editor: approval_editor,
+                        workspace_root: approval_workspace_root,
                     },
                     PlanApprovalTelemetryContext {
                         emitter: self.harness_emitter,

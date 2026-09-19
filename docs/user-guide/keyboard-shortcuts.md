@@ -46,7 +46,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | `Alt+T` | Transpose words / toggle tool summaries per binding. |
 | `Alt+U` / `Alt+L` / `Alt+C`, `Alt+\` | Uppercase / lowercase / capitalize word, delete whitespace around cursor. |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo. |
-| `Ctrl+G` | Open external editor with draft. |
+| `Ctrl+G` | Open the external editor: with the composer draft, or the persisted plan file from the "Ready to code?" approval overlay (saved edits re-show the overlay). |
 | `Home` / `End` (`Shift` selects) | Buffer start / end. |
 
 ## Agent and mode switching

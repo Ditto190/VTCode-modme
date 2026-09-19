@@ -5,16 +5,20 @@
 //! the canonical interface; callers map the returned `PlanConfirmationOutcome` to
 //! their own transition logic.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::Notify;
+use vtcode_core::config::EditorToolConfig;
 use vtcode_core::exec::events::PlanApprovalDecision;
+use vtcode_core::tools::terminal_app::{EditorLaunchConfig, TerminalAppLauncher};
 use vtcode_ui::tui::app::{
     InlineHandle, InlineListItem, InlineListSelection, InlineMessageKind, InlineSession, ListOverlayRequest,
     PlanContent, TransientHotkey, TransientHotkeyAction, TransientHotkeyKey, TransientRequest, TransientSubmission,
 };
 
+use crate::agent::runloop::unified::external_editor::run_blocking_with_event_loop_suspended;
 use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
 use crate::agent::runloop::unified::overlay_prompt::{OverlayWaitOutcome, show_overlay_and_wait};
 use crate::agent::runloop::unified::planning_workflow::{
@@ -79,6 +83,10 @@ pub(crate) struct PlanApprovalRequestContext<'a> {
     pub(crate) skip_confirmations: bool,
     pub(crate) full_auto: bool,
     pub(crate) context_usage_percent: u8,
+    /// External-editor configuration used by the `Ctrl+G` "edit plan" hotkey.
+    pub(crate) editor: EditorToolConfig,
+    /// Workspace root used to resolve a workspace-relative `plan.file_path`.
+    pub(crate) workspace_root: PathBuf,
 }
 
 fn line_count(text: &str) -> usize {
@@ -505,7 +513,10 @@ pub(crate) fn build_plan_confirmation_request_with_context(
 ///
 /// Kept as a pure function so the selection→outcome mapping (including the
 /// `SwitchBuild`/`SwitchAuto` handoff outcomes) is unit-testable without the
-/// TUI driver. The `LaunchEditor` hotkey maps to `EditPlan`; any other
+/// TUI driver. `execute_plan_confirmation_with_context` intercepts the
+/// `LaunchEditor` hotkey before this mapping to open the plan file; the
+/// `EditPlan` fallback below is retained so a missed interception still keeps
+/// the user in Plan mode rather than silently executing. Any other
 /// unrecognized selection cancels.
 pub(crate) fn plan_confirmation_submission_to_outcome(
     submission: &TransientSubmission,
@@ -535,6 +546,14 @@ pub(crate) fn plan_confirmation_submission_to_outcome(
     }
 }
 
+/// Internal wait result: a real user decision, or a request to open the plan
+/// draft in the configured external editor and then re-show the approval
+/// overlay with any saved edits.
+enum PlanConfirmationWait {
+    Outcome(PlanConfirmationOutcome),
+    EditInExternalEditor,
+}
+
 /// Execute the plan confirmation HITL flow.
 ///
 /// The plan is rendered as static transcript markdown plus an inline confirmation list.
@@ -547,60 +566,197 @@ pub(crate) async fn execute_plan_confirmation(
     ctrl_c_state: &Arc<CtrlCState>,
     ctrl_c_notify: &Arc<Notify>,
 ) -> Result<PlanConfirmationOutcome> {
+    // Tests never launch a real editor: disable external editing so a stray
+    // `Ctrl+G` submission falls back to a warning plus a re-shown overlay.
+    let editor = EditorToolConfig { enabled: false, ..EditorToolConfig::default() };
     execute_plan_confirmation_with_context(
         handle,
         session,
         plan_content,
         draft_incomplete,
         0,
+        &editor,
+        Path::new("."),
         ctrl_c_state,
         ctrl_c_notify,
     )
     .await
+    .map(|(outcome, _)| outcome)
 }
 
+/// Show the approval overlay, returning the user's decision plus the edited
+/// plan artifact when the user changed the draft in their external editor.
+///
+/// `Ctrl+G` no longer dismisses the modal and seeds a bare `/edit` command.
+/// Instead the configured editor opens the persisted plan file and, after the
+/// editor closes, the saved markdown is re-validated and the approval overlay
+/// is shown again so the user can review and approve seamlessly.
 pub(crate) async fn execute_plan_confirmation_with_context(
     handle: &InlineHandle,
     session: &mut InlineSession,
     plan_content: PlanContent,
     draft_incomplete: bool,
     context_usage_percent: u8,
+    editor_config: &EditorToolConfig,
+    workspace_root: &Path,
     ctrl_c_state: &Arc<CtrlCState>,
     ctrl_c_notify: &Arc<Notify>,
-) -> Result<PlanConfirmationOutcome> {
+) -> Result<(PlanConfirmationOutcome, Option<ValidatedPlanArtifact>)> {
     tracing::info!(
         target: "vtcode.planning_workflow",
         "execute_plan_confirmation: rendering confirmation prompt and showing overlay"
     );
     render_confirmation_prompt(handle, &plan_content);
-    let outcome = show_overlay_and_wait(
-        handle,
-        session,
-        build_plan_confirmation_request_with_context(&plan_content, draft_incomplete, context_usage_percent),
-        ctrl_c_state,
-        ctrl_c_notify,
-        |submission| {
-            if let TransientSubmission::Hotkey(TransientHotkeyAction::LaunchEditor) = submission {
-                handle.set_input("/edit".to_string());
+    let mut plan = plan_content;
+    let mut edited_plan: Option<ValidatedPlanArtifact> = None;
+
+    loop {
+        let wait = show_overlay_and_wait(
+            handle,
+            session,
+            build_plan_confirmation_request_with_context(&plan, draft_incomplete, context_usage_percent),
+            ctrl_c_state,
+            ctrl_c_notify,
+            |submission| match submission {
+                TransientSubmission::Hotkey(TransientHotkeyAction::LaunchEditor) => {
+                    Some(PlanConfirmationWait::EditInExternalEditor)
+                }
+                other => plan_confirmation_submission_to_outcome(&other).map(PlanConfirmationWait::Outcome),
+            },
+        )
+        .await?;
+
+        match wait {
+            OverlayWaitOutcome::Submitted(PlanConfirmationWait::Outcome(outcome)) => {
+                tracing::info!(
+                    target: "vtcode.planning_workflow",
+                    overlay_wait_outcome = "done",
+                    "execute_plan_confirmation: overlay wait completed"
+                );
+                return Ok((outcome, edited_plan));
             }
-            plan_confirmation_submission_to_outcome(&submission)
-        },
-    )
-    .await?;
+            OverlayWaitOutcome::Submitted(PlanConfirmationWait::EditInExternalEditor) => {
+                if let Some(artifact) = open_plan_in_external_editor(handle, &plan, editor_config, workspace_root).await
+                {
+                    plan = PlanContent::from_markdown(
+                        plan.title.clone(),
+                        &artifact.text,
+                        Some(artifact.plan_file.to_string_lossy().into_owned()),
+                    );
+                    edited_plan = Some(artifact);
+                }
+                // Re-show the approval overlay with the (possibly updated) plan.
+                continue;
+            }
+            OverlayWaitOutcome::Cancelled
+            | OverlayWaitOutcome::Interrupted
+            | OverlayWaitOutcome::Deferred
+            | OverlayWaitOutcome::Exit => {
+                tracing::info!(
+                    target: "vtcode.planning_workflow",
+                    overlay_wait_outcome = "cancelled",
+                    "execute_plan_confirmation: overlay wait cancelled"
+                );
+                return Ok((PlanConfirmationOutcome::Cancel, edited_plan));
+            }
+        }
+    }
+}
 
-    tracing::info!(
-        target: "vtcode.planning_workflow",
-        overlay_wait_outcome = "done",
-        "execute_plan_confirmation: overlay wait completed"
-    );
+/// Open the persisted plan draft in the configured external editor, wait for
+/// it to close, then re-read and re-validate the saved markdown.
+///
+/// Returns the validated edited artifact when the user saved a valid plan.
+/// Editor-disabled, missing-file, launch-failure, read-failure, and
+/// validation-failure paths report a transcript message and return `None`, so
+/// the caller re-shows the approval overlay instead of losing it.
+async fn open_plan_in_external_editor(
+    handle: &InlineHandle,
+    plan: &PlanContent,
+    editor_config: &EditorToolConfig,
+    workspace_root: &Path,
+) -> Option<ValidatedPlanArtifact> {
+    if !editor_config.enabled {
+        append_message(
+            handle,
+            InlineMessageKind::Warning,
+            "External editor is disabled (`tools.editor.enabled = false`).",
+        );
+        return None;
+    }
 
-    Ok(match outcome {
-        OverlayWaitOutcome::Submitted(outcome) => outcome,
-        OverlayWaitOutcome::Cancelled
-        | OverlayWaitOutcome::Interrupted
-        | OverlayWaitOutcome::Deferred
-        | OverlayWaitOutcome::Exit => PlanConfirmationOutcome::Cancel,
+    let Some(raw_path) = plan.file_path.as_deref().map(str::trim).filter(|path| !path.is_empty()) else {
+        append_message(
+            handle,
+            InlineMessageKind::Warning,
+            "The plan draft has no file path to open in an external editor.",
+        );
+        return None;
+    };
+
+    // Persisted drafts store a workspace-relative path; resolve absolute paths
+    // as-is so an explicit editor target keeps working.
+    let plan_file = if Path::new(raw_path).is_absolute() {
+        PathBuf::from(raw_path)
+    } else {
+        workspace_root.join(raw_path)
+    };
+
+    if !plan_file.is_file() {
+        append_message(handle, InlineMessageKind::Warning, format!("Plan file not found: {}", plan_file.display()));
+        return None;
+    }
+
+    let preferred_editor =
+        (!editor_config.preferred_editor.trim().is_empty()).then(|| editor_config.preferred_editor.clone());
+    let suspend_tui = editor_config.suspend_tui;
+    let workspace = workspace_root.to_path_buf();
+    let launch_file = plan_file.clone();
+    let launch = run_blocking_with_event_loop_suspended(handle, suspend_tui, move || {
+        let launcher = TerminalAppLauncher::new(workspace);
+        launcher.launch_editor_with_config(
+            Some(launch_file),
+            EditorLaunchConfig { preferred_editor, wait_for_editor: true },
+        )
     })
+    .await;
+    handle.force_redraw();
+
+    if let Err(error) = launch {
+        append_message(handle, InlineMessageKind::Error, format!("Failed to launch editor: {error}"));
+        return None;
+    }
+
+    let text = match tokio::fs::read_to_string(&plan_file).await {
+        Ok(text) => text,
+        Err(error) => {
+            append_message(
+                handle,
+                InlineMessageKind::Error,
+                format!("Failed to read the edited plan {}: {error}", plan_file.display()),
+            );
+            return None;
+        }
+    };
+
+    match ValidatedPlanArtifact::from_text(plan_file, text) {
+        Ok(artifact) => {
+            append_message(
+                handle,
+                InlineMessageKind::Info,
+                "Plan updated from the external editor. Review the changes, then approve or keep revising.",
+            );
+            Some(artifact)
+        }
+        Err(error) => {
+            append_message(
+                handle,
+                InlineMessageKind::Warning,
+                format!("The edited plan did not validate, so the previous draft is still active: {error}"),
+            );
+            None
+        }
+    }
 }
 
 /// Load the persisted plan draft for an approval request received on a later
@@ -660,6 +816,8 @@ pub(crate) async fn execute_plan_approval(
         plan_content,
         false,
         request.context_usage_percent,
+        &request.editor,
+        &request.workspace_root,
         ctrl_c_state,
         ctrl_c_notify,
     )
@@ -670,6 +828,13 @@ pub(crate) async fn execute_plan_approval(
         overlay_outcome = ?outcome.as_ref().ok(),
         "execute_plan_approval: dialog closed"
     );
+
+    // Prefer the plan the user saved in their external editor; otherwise fall
+    // back to the artifact that produced the overlay.
+    let (outcome, approved_plan) = match outcome {
+        Ok((outcome, edited_plan)) => (Ok(outcome), edited_plan.unwrap_or_else(|| request.plan.clone())),
+        Err(error) => (Err(error), request.plan.clone()),
+    };
 
     match outcome {
         Ok(PlanConfirmationOutcome::EditPlan) => {
@@ -729,7 +894,7 @@ pub(crate) async fn execute_plan_approval(
             let target =
                 resolve_plan_execution_target(decision, execution_context, skip_confirmations, request.full_auto);
             let handoff =
-                complete_approved_plan_handoff(tool_registry, plan_session, handle, request.plan.clone(), target).await;
+                complete_approved_plan_handoff(tool_registry, plan_session, handle, approved_plan, target).await;
             let handoff = match handoff {
                 Ok(handoff) => handoff,
                 Err(err) => {
@@ -762,10 +927,11 @@ mod tests {
 
     use super::{
         PlanApprovalRoute, PlanConfirmationOutcome, build_plan_confirmation_request_with_context,
-        execute_plan_confirmation, plan_approval_route, plan_confirmation_submission_to_outcome, render_plan_summary,
-        render_structured_plan,
+        execute_plan_confirmation, execute_plan_confirmation_with_context, plan_approval_route,
+        plan_confirmation_submission_to_outcome, render_plan_summary, render_structured_plan,
     };
     use crate::agent::runloop::unified::state::CtrlCState;
+    use vtcode_core::config::EditorToolConfig;
     use vtcode_ui::tui::app::{
         InlineCommand, InlineEvent, InlineHandle, InlineListSelection, InlineMessageKind, InlineSession,
         ListOverlayRequest, TransientEvent, TransientHotkeyAction, TransientRequest, TransientSubmission,
@@ -1145,7 +1311,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_plan_confirmation_editor_hotkey_seeds_edit_command() {
+    async fn execute_plan_confirmation_editor_hotkey_reshows_overlay_without_edit_command() {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(command_tx);
@@ -1162,24 +1328,45 @@ mod tests {
                 TransientHotkeyAction::LaunchEditor,
             ))))
             .expect("send editor hotkey");
+        event_tx
+            .send(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Selection(
+                InlineListSelection::PlanApprovalExecute,
+            ))))
+            .expect("send approval after editor hotkey");
 
-        let outcome =
-            execute_plan_confirmation(&handle, &mut session, sample_plan(), false, &ctrl_c_state, &ctrl_c_notify)
-                .await
-                .expect("editor confirmation result");
-        assert_eq!(outcome, PlanConfirmationOutcome::EditPlan);
+        // Disable the external editor so the hotkey exercises the fallback path
+        // without spawning a real editor process.
+        let editor = EditorToolConfig { enabled: false, ..EditorToolConfig::default() };
+        let (outcome, edited_plan) = execute_plan_confirmation_with_context(
+            &handle,
+            &mut session,
+            sample_plan(),
+            false,
+            0,
+            &editor,
+            std::path::Path::new("."),
+            &ctrl_c_state,
+            &ctrl_c_notify,
+        )
+        .await
+        .expect("editor hotkey then approval result");
 
-        let mut saw_input = false;
+        assert_eq!(outcome, PlanConfirmationOutcome::Execute);
+        assert!(edited_plan.is_none(), "disabled editor must not produce an edited plan");
+
+        let mut show_transient_count = 0usize;
+        let mut saw_edit_input = false;
         while let Ok(command) = command_rx.try_recv() {
             match command {
-                InlineCommand::SetInput(input) => {
-                    assert_eq!(input, "/edit");
-                    saw_input = true;
-                }
-                InlineCommand::CloseTransient => {}
+                InlineCommand::ShowTransient { .. } => show_transient_count += 1,
+                InlineCommand::SetInput(input) if input == "/edit" => saw_edit_input = true,
                 _ => {}
             }
         }
-        assert!(saw_input, "editor hotkey should seed the /edit command");
+        assert!(
+            show_transient_count >= 2,
+            "Ctrl+G must re-show the approval overlay instead of dismissing it (saw {show_transient_count})"
+        );
+        assert!(!saw_edit_input, "Ctrl+G must open the plan file directly, not seed a bare /edit command");
     }
 }
