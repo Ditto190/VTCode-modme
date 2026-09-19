@@ -21,10 +21,10 @@ use serde_json::Value;
 use streams::render_stream_section;
 pub(crate) use streams::{render_code_fence_blocks, resolve_stdout_tail_limit};
 use styles::{GitStyles, LsStyles};
-use vtcode_core::config::ToolOutputMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::mcp::McpRendererProfile;
+use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::tools::continuation::{
     NEXT_CONTINUE_PROMPT, NEXT_READ_PROMPT, PtyContinuationArgs, ReadChunkContinuationArgs,
 };
@@ -357,6 +357,42 @@ pub(crate) fn tracker_progress_lines(val: &Value) -> Vec<String> {
     lines
 }
 
+/// Max tree rows shown inline in expanded transcript mode; overflow collapses
+/// to a single `  … N more` row so large checklists stay bounded.
+pub(crate) const TRACKER_TRANSCRIPT_MAX_ROWS: usize = 30;
+
+/// Transcript lines for a tracker payload, honoring display mode.
+///
+/// Compact (`expanded = false`) keeps the title+progress single line.
+/// Expanded appends the compact tree body (truncated) so each task item is
+/// visible inline. Errors and diagnostics never expand to a tree.
+pub(crate) fn tracker_transcript_lines(val: &Value, expanded: bool) -> Vec<String> {
+    if !expanded {
+        return tracker_progress_lines(val);
+    }
+    if !tracker_response_is_successful(val) {
+        return tracker_progress_lines(val);
+    }
+    let progress = tracker_progress_lines(val);
+    if progress.len() != 1 {
+        return progress;
+    }
+    let tree = tracker_visible_tree_rows(val);
+    if tree.is_empty() {
+        return progress;
+    }
+    let mut lines = Vec::with_capacity(1 + TRACKER_TRANSCRIPT_MAX_ROWS + 1);
+    lines.push(progress.into_iter().next().unwrap_or_else(|| "• Tasks".to_string()));
+    if tree.len() > TRACKER_TRANSCRIPT_MAX_ROWS {
+        let overflow = tree.len() - TRACKER_TRANSCRIPT_MAX_ROWS;
+        lines.extend(tree.into_iter().take(TRACKER_TRANSCRIPT_MAX_ROWS));
+        lines.push(format!("  … {overflow} more"));
+    } else {
+        lines.extend(tree);
+    }
+    lines
+}
+
 /// Panel body rows for a tracker payload: compact tree only (no summary header).
 pub(crate) fn tracker_tree_body_lines(val: &Value) -> Vec<String> {
     tracker_visible_tree_rows(val)
@@ -492,9 +528,10 @@ pub(crate) fn tracker_panel_metadata(val: &Value) -> Option<TaskPanelMetadata> {
 }
 
 fn render_tracker_view(renderer: &mut AnsiRenderer, val: &Value) -> Result<bool> {
-    // Non-inline fallback shares the user-facing transcript contract: title +
-    // progress only (diagnostics when the tracker is empty/failed).
-    let lines = tracker_progress_lines(val);
+    // Non-inline fallback honors display mode: compact stays title+progress
+    // only, expanded appends the truncated tree so items remain visible.
+    let expanded = renderer.tool_display_mode() != ToolDisplayMode::Compact;
+    let lines = tracker_transcript_lines(val, expanded);
     if lines.is_empty() {
         return Ok(false);
     }
@@ -703,9 +740,9 @@ mod tests {
     use vtcode_core::utils::ansi::AnsiRenderer;
 
     use super::{
-        collect_inline_output, humanize_tracker_title, preferred_follow_up_rendered_body, render_tool_output,
-        should_render_command_session_terminal_panel, spooled_output_hint, tracker_panel_metadata,
-        tracker_progress_lines, tracker_summary_lines, tracker_tree_body_lines,
+        TRACKER_TRANSCRIPT_MAX_ROWS, collect_inline_output, humanize_tracker_title, preferred_follow_up_rendered_body,
+        render_tool_output, should_render_command_session_terminal_panel, spooled_output_hint, tracker_panel_metadata,
+        tracker_progress_lines, tracker_summary_lines, tracker_transcript_lines, tracker_tree_body_lines,
     };
 
     #[test]
@@ -1682,5 +1719,104 @@ mod tests {
         // Failed updates stay diagnosable in the transcript; remaining checklist
         // rows remain available on the panel body path.
         assert_eq!(tracker_tree_body_lines(&partial_failure), vec!["  └ [x] Still present"]);
+    }
+
+    #[test]
+    fn tracker_transcript_lines_compact_matches_progress_only() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Investigate cache miss", "status": "completed" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "pending" },
+                ]
+            }
+        });
+
+        assert_eq!(tracker_transcript_lines(&payload, false), vec!["• Release 1/2".to_string()]);
+    }
+
+    #[test]
+    fn tracker_transcript_lines_expanded_shows_each_task_item() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Investigate cache miss", "status": "completed" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "in_progress" },
+                    { "index_path": "3", "description": "Verify with cargo check", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_transcript_lines(&payload, true);
+
+        assert_eq!(rows[0], "• Release 1/3");
+        assert_eq!(
+            &rows[1..],
+            &[
+                "  ├ [x] Investigate cache miss",
+                "  ├ [-] Defer eager setup",
+                "  └ □ Verify with cargo check",
+            ]
+        );
+    }
+
+    #[test]
+    fn tracker_transcript_lines_expanded_truncates_large_checklists() {
+        let items: Vec<serde_json::Value> = (1..=(TRACKER_TRANSCRIPT_MAX_ROWS + 5))
+            .map(|index| {
+                json!({
+                    "index_path": index.to_string(),
+                    "description": format!("Distinct task {index}"),
+                    "status": if index == 1 { "completed" } else { "pending" },
+                })
+            })
+            .collect();
+        let payload = json!({
+            "status": "updated",
+            "checklist": { "title": "Release", "items": items }
+        });
+
+        let rows = tracker_transcript_lines(&payload, true);
+
+        assert_eq!(rows.len(), 1 + TRACKER_TRANSCRIPT_MAX_ROWS + 1);
+        assert_eq!(rows[0], format!("• Release 1/{}", TRACKER_TRANSCRIPT_MAX_ROWS + 5));
+        assert!(rows[1].contains("Distinct task 1"));
+        assert!(
+            rows[TRACKER_TRANSCRIPT_MAX_ROWS].contains(format!("Distinct task {TRACKER_TRANSCRIPT_MAX_ROWS}").as_str())
+        );
+        assert_eq!(rows[TRACKER_TRANSCRIPT_MAX_ROWS + 1], "  … 5 more");
+        assert!(
+            rows.iter()
+                .all(|row| !row.contains("Distinct task 31") || row.starts_with("  …"))
+        );
+    }
+
+    #[test]
+    fn tracker_transcript_lines_expanded_keeps_diagnostics_without_tree() {
+        let payload = json!({
+            "status": "error",
+            "message": "Tracker response was only partially applied.",
+            "checklist": {
+                "items": [
+                    { "index": 1, "description": "Still present", "status": "completed" }
+                ]
+            }
+        });
+
+        let rows = tracker_transcript_lines(&payload, true);
+
+        assert_eq!(
+            rows,
+            vec![
+                "• Tasks",
+                "  Tracker status: error",
+                "  Update: Tracker response was only partially applied.",
+            ]
+        );
+        assert!(rows.iter().all(|row| !row.contains("Still present")));
     }
 }

@@ -185,8 +185,8 @@ fn is_task_tracker_tool(name: &str) -> bool {
     matches!(name, tools::TASK_TRACKER)
 }
 
-fn task_tracker_block_lines(output: &serde_json::Value) -> Vec<String> {
-    crate::agent::runloop::tool_output::tracker_progress_lines(output)
+fn task_tracker_block_lines(output: &serde_json::Value, expanded: bool) -> Vec<String> {
+    crate::agent::runloop::tool_output::tracker_transcript_lines(output, expanded)
 }
 
 fn task_tracker_panel_body_lines(output: &serde_json::Value) -> Vec<String> {
@@ -342,11 +342,15 @@ pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Ve
         return;
     }
     // Fallback: remembered block drifted. Only replace a tail that is clearly
-    // our tracker progress shape (`• Tasks …` / `• Title N/M`), never generic
-    // `• Foo N/M` UI summaries such as Questions answered lines.
-    if transcript::last_line().is_some_and(|last| looks_like_tracker_progress_line(&last)) {
-        handle.replace_last(1, InlineMessageKind::Tool, segments);
-        transcript::replace_last(1, &lines);
+    // our tracker shape (progress header, tree row, or truncation line), never
+    // generic `• Foo N/M` UI summaries such as Questions answered lines.
+    // UI replace uses the remembered UI length; transcript replace uses the
+    // trailing tracker-like count so expanded blocks replace fully.
+    if transcript::last_line().is_some_and(|last| looks_like_tracker_content(&last)) {
+        let ui_count = transcript::tracker_ui_write_len().unwrap_or(1).max(1);
+        let transcript_count = trailing_tracker_content_len().max(1);
+        handle.replace_last(ui_count, InlineMessageKind::Tool, segments);
+        transcript::replace_last(transcript_count, &lines);
         transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
         return;
     }
@@ -389,6 +393,36 @@ fn looks_like_tracker_progress_line(line: &str) -> bool {
             && a.chars().all(|c| c.is_ascii_digit())
             && b.chars().all(|c| c.is_ascii_digit())
     )
+}
+
+fn looks_like_tracker_tree_row(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("├ ") || trimmed.starts_with("└ ") || trimmed.starts_with("│ ") {
+        return true;
+    }
+    if trimmed.starts_with("□ ")
+        || trimmed.starts_with("[x] ")
+        || trimmed.starts_with("[-] ")
+        || trimmed.starts_with("[!] ")
+    {
+        return true;
+    }
+    // Expanded truncation row (`  … N more`).
+    trimmed.starts_with('…') || trimmed.starts_with("...")
+}
+
+fn looks_like_tracker_content(line: &str) -> bool {
+    looks_like_tracker_progress_line(line) || looks_like_tracker_tree_row(line)
+}
+
+fn trailing_tracker_content_len() -> usize {
+    const MAX_SCAN: usize = 40;
+    transcript::snapshot()
+        .iter()
+        .rev()
+        .take(MAX_SCAN)
+        .take_while(|line| looks_like_tracker_content(line))
+        .count()
 }
 
 fn apply_task_tracker_block(handle: &InlineHandle, lines: Vec<String>) {
@@ -1348,10 +1382,12 @@ async fn handle_success_common(
         record_mcp_outcome_event(ctx.mcp_panel_state, tool_name, args_val, payload.command_success);
     } else if is_task_tracker_tool(name) && ctx.renderer.supports_inline_ui() {
         ctx.renderer.flush_compact_command_group();
-        // User-facing split: transcript shows title+progress only; the docked
-        // panel body keeps the compact tree when the user opens it.
+        // Display-mode split: compact transcript stays title+progress only;
+        // expanded appends the truncated tree so each task item is visible
+        // inline. The docked panel body always keeps the full compact tree.
+        let expanded = ctx.renderer.tool_display_mode() != ToolDisplayMode::Compact;
         let panel_lines = task_tracker_panel_body_lines(payload.output);
-        let progress_lines = task_tracker_block_lines(payload.output);
+        let progress_lines = task_tracker_block_lines(payload.output, expanded);
         if !panel_lines.is_empty() || !progress_lines.is_empty() {
             ctx.handle.update_task_panel_with_metadata(
                 panel_lines,
@@ -1665,8 +1701,8 @@ mod tests {
             }
         });
 
-        let first_progress = task_tracker_block_lines(&first);
-        let second_progress = task_tracker_block_lines(&second);
+        let first_progress = task_tracker_block_lines(&first, false);
+        let second_progress = task_tracker_block_lines(&second, false);
         let first_panel = task_tracker_panel_body_lines(&first);
         let second_panel = task_tracker_panel_body_lines(&second);
 
@@ -1720,7 +1756,7 @@ mod tests {
                 ]
             }
         });
-        let lines = task_tracker_block_lines(&payload);
+        let lines = task_tracker_block_lines(&payload, false);
 
         apply_task_tracker_block(&handle, lines.clone());
         // Drain the initial append so only post-repeat commands remain.
@@ -1738,6 +1774,78 @@ mod tests {
         assert!(!looks_like_tracker_progress_line("• Questions 2/5 answered"));
         assert!(!looks_like_tracker_progress_line("• Plan — research/synthesis"));
         assert!(!looks_like_tracker_progress_line("• Ran cargo check"));
+    }
+
+    #[test]
+    fn looks_like_tracker_content_accepts_tree_rows_and_truncation() {
+        assert!(looks_like_tracker_content("• Release 1/3"));
+        assert!(looks_like_tracker_content("  ├ □ Investigate cache miss"));
+        assert!(looks_like_tracker_content("  └ [x] Verify with cargo check"));
+        assert!(looks_like_tracker_content("  │ [-] Defer eager setup"));
+        assert!(looks_like_tracker_content("  … 5 more"));
+        assert!(!looks_like_tracker_content("• Questions 2/5 answered"));
+        assert!(!looks_like_tracker_content("• Ran cargo check"));
+        assert!(!looks_like_tracker_content("Now applying the edit"));
+    }
+
+    #[test]
+    fn task_tracker_block_lines_expanded_shows_items_with_asymmetric_statuses() {
+        let payload = serde_json::json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Investigate cache miss", "status": "completed" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "in_progress" },
+                    { "index_path": "3", "description": "Verify with cargo check", "status": "pending" },
+                ]
+            }
+        });
+
+        let compact = task_tracker_block_lines(&payload, false);
+        let expanded = task_tracker_block_lines(&payload, true);
+
+        assert_eq!(compact, vec!["• Release 1/3"]);
+        assert_eq!(
+            expanded,
+            vec![
+                "• Release 1/3".to_string(),
+                "  ├ [x] Investigate cache miss".to_string(),
+                "  ├ [-] Defer eager setup".to_string(),
+                "  └ □ Verify with cargo check".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn write_tracker_progress_transcript_replaces_compact_with_expanded_block() {
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        write_tracker_progress_transcript(&handle, vec!["• Release 0/2".to_string()]);
+        while receiver.try_recv().is_ok() {}
+        let expanded = vec![
+            "• Release 1/2".to_string(),
+            "  ├ [x] Investigate cache miss".to_string(),
+            "  └ □ Defer eager setup".to_string(),
+        ];
+
+        write_tracker_progress_transcript(&handle, expanded.clone());
+
+        let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
+            InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
+            _ => None,
+        });
+        let (count, rows) = replacement.expect("compact block should be replaced by expanded block");
+        let rows = rows
+            .into_iter()
+            .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(count, 1);
+        assert_eq!(rows, expanded);
+        assert_eq!(transcript::snapshot(), expanded);
+        transcript::clear();
     }
 
     #[test]
@@ -1888,7 +1996,7 @@ mod tests {
                 ]
             }
         });
-        let lines = task_tracker_block_lines(&payload);
+        let lines = task_tracker_block_lines(&payload, false);
         // Simulate the approval handoff's transcript write.
         for line in &lines {
             transcript::append(line);

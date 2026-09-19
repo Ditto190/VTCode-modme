@@ -47,8 +47,9 @@ updates accept positive flat indices or positive hierarchical `index_path`
 values such as `2.1`. Use `items` for bulk synchronization rather than an
 item index.
 
-Successful tracker updates keep the user-facing surface to title + progress
-(`• Release 1/4` in the transcript). The compact hierarchical tree is TODO-panel
+Successful tracker updates honor display mode: compact keeps title + progress
+(`• Release 1/4` in the transcript) while expanded shows header plus truncated
+tree (max 30 rows + `… N more`) so each task item is visible inline. The full compact hierarchical tree is always TODO-panel
 body content when the user opens the panel. Parent rows show their branch and
 description; leaf rows use `[-]`, `□`, `[x]`, or `[!]` for in-progress, pending,
 completed, and blocked work. Descriptions render inline markdown (code spans,

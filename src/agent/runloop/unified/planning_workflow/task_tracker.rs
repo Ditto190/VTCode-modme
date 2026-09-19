@@ -11,15 +11,17 @@ use super::validate_plan_content;
 
 fn render_created_task_tracker(handle: &InlineHandle, output: &serde_json::Value) {
     let panel_lines = crate::agent::runloop::tool_output::tracker_tree_body_lines(output);
-    let progress_lines = crate::agent::runloop::tool_output::tracker_progress_lines(output);
+    // Approval has no renderer display mode available; default to expanded so
+    // each task item is visible inline instead of only the plan name.
+    let progress_lines = crate::agent::runloop::tool_output::tracker_transcript_lines(output, true);
     if panel_lines.is_empty() && progress_lines.is_empty() {
         return;
     }
 
     // Approval creates the tracker outside the normal tool pipeline, so make
     // the same panel/transcript updates that a regular task_tracker call gets.
-    // Panel body keeps the compact tree; transcript stays title+progress only
-    // and uses the shared single-writer path (never stacks duplicates).
+    // Panel body keeps the compact tree; transcript uses the shared
+    // single-writer path (never stacks duplicates).
     handle.update_task_panel_with_metadata(
         panel_lines,
         crate::agent::runloop::tool_output::tracker_panel_metadata(output),
