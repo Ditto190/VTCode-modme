@@ -2,6 +2,45 @@
 
 This guide summarizes common actions and how to invoke them with vtcode. The agent exposes a suite of tools to the LLM; you interact with them via chat. When you ask to search, read, or edit files, the agent chooses an appropriate tool.
 
+## Core command reference
+
+`vtcode --help` lists every subcommand, including niche utilities such as
+`benchmark`, `notify`, and `session-store`. The table below maps the primary
+subcommands to their purpose; detailed sections for the most-used commands
+follow.
+
+| Command | Purpose |
+| --- | --- |
+| `vtcode` / `vtcode chat` | Interactive TUI session |
+| `vtcode ask <prompt>` | One-shot prompt; prints the reply without tools or a session |
+| `vtcode exec <prompt>` | Headless execution with the full tool loop; `--json` streams events |
+| `vtcode eval --suite <file>` | Run an evaluation suite with pass@k / pass^k metrics |
+| `vtcode review` | Non-interactive review of the current diff, files, or a git target |
+| `vtcode continue` | Resume the most recent conversation; `--session-id` forks it |
+| `vtcode init` | Scaffold `vtcode.toml`, `AGENTS.md`, and ast-grep starter files |
+| `vtcode init-project` | Register a project entry in the user state directory |
+| `vtcode config` | Generate or reset `vtcode.toml` configuration layers |
+| `vtcode login <provider>` / `vtcode logout <provider>` / `vtcode auth` | OAuth or API-key login, logout, and status |
+| `vtcode secret` | Store provider API keys in the OS keyring |
+| `vtcode models` | List, set, test, and inspect providers and models |
+| `vtcode schedule` | Durable scheduled tasks by cron, interval, or one-shot time |
+| `vtcode tool-policy` | Allow or deny specific tools per workspace |
+| `vtcode mcp` | Manage Model Context Protocol servers |
+| `vtcode a2a` | Agent2Agent protocol client and server |
+| `vtcode acp` | Start the Agent Client Protocol bridge for editors |
+| `vtcode webmcp` | Authenticated browser editor bridge |
+| `vtcode skills` | Manage Agent Skills (list, create, load, validate) |
+| `vtcode plugins` | Manage Agent Plugins (add, list, validate, remove) |
+| `vtcode dependencies` (`deps`) | Install or check optional tools (ripgrep, ast-grep) |
+| `vtcode check` | Run built-in repository checks such as ast-grep |
+| `vtcode schema` | Emit built-in tool schemas for automation discovery |
+| `vtcode analyze` | Analyze workspace structure, security, and performance |
+| `vtcode trajectory` | Pretty-print run logs for debugging and audits |
+| `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots |
+| `vtcode cleanup-snapshots` | Prune old snapshots with a retention limit |
+| `vtcode update` | Check for and install binary updates from GitHub Releases |
+| `vtcode man` | Generate or display man pages |
+
 ## Search
 
 Use `exec_command.cmd` with `rg` or `grep` for flexible shell text search.

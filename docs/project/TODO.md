@@ -10,39 +10,6 @@ Status: SHIPPED (this session). Implementation: (1) `ExecSessionManager::in_prog
 
 ===
 
-idea: improve both on the user experience and the VT Code harness system itself. when hitting:
-
-```
-[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`,
-`go test`, or `pytest`) and let it exit 0 before further edits.
-• The turn is blocked because verification is still pending. Inspection-
-only checks do not clear the verification gate; run a verification command
-— your project's build/test/lint tool, e.g. cargo check --locked, go test,
-or cargo nextest run (standalone or as a pure && chain, no | head pipes and
-no ;/||/| joins) — to exit 0, then resume the request. A failed verifier
-grants 2 fix-up edits before re-verify is required.
-Turn blocked after repeated unverified assistant responses; verification is
-still pending.
-Turn blocked: Turn blocked after repeated unverified assistant responses;
-verification is still pending.
-What you can do:
-• In this session: Type 'continue' to resume, or describe alternative
-instructions
-• From terminal: Run `vtcode --resume session-vtcode-
-    20260914T084315Z_111294-82729`
-• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.
-vtcode/tasks/current_blocked.md
-• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.
-vtcode/tasks/blockers/session-vtcode-20260914t084315z_111294-82729-
-20260914T091125Z-3f8578c8-e1da-44ca-8158-543d86056f32.md
-Repeated follow-up after stalled turn detected; enforcing autonomous recovery
-and conclusion.
-```
-
-====> without user having to manually intervene and ensuring the verification process is properly handled. and not blocking long-running tasks. THIS IS CRITICAL. Find a way to automatically manage the verification gate and recovery from stalled turns with actionable steps to help vtcode agent continue its operation smoothly. you can research on deepwiki mcp for how openai/codex handles similar scenarios.
-
-===
-
 help me check and fix on control+g to edit/review plan proposal in external editor. on pressing, the external editor should open with the current plan proposal loaded, allowing the user to make changes and save them. after saving and closing the editor, the changes should be reflected back in the vtcode interface seamlessly. Bug: currently it does not open the plan file in external editor and also the modal approval is disappeared.
 
 ===

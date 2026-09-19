@@ -202,7 +202,7 @@ resolution order.
 vtcode                  # interactive TUI: the whole loop is install, init, run
 ```
 
-See [Commands](#commands) for the complete CLI surface, including headless
+See [Commands](#commands) for the most common commands, including headless
 `exec`, one-shot `ask`, and session resume.
 
 ### WebMCP browser bridge (opt-in)
@@ -237,8 +237,9 @@ vtcode review                     # agent review of uncommitted changes
 vtcode eval --suite suite.json    # verify behavior with pass@k metrics
 ```
 
-The complete CLI surface, flags, and exit codes are documented in the
-[command reference](./docs/user-guide/commands.md).
+The most common commands, flags, and workflows are documented in the
+[command reference](./docs/user-guide/commands.md); run `vtcode --help` for
+the full subcommand list.
 
 A second tier handles session lifecycle and day-to-day operations:
 
@@ -283,7 +284,7 @@ the [scheduled tasks guide](./docs/user-guide/scheduled-tasks.md).
 | Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                                                                                  |
 | Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
 | Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md)                                                                                                                |
-| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
+| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
 
 The full catalog lives in the [Documentation Index](./docs/INDEX.md).
 
