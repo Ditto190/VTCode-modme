@@ -1992,6 +1992,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         &mut renderer,
                         harness_emitter.as_ref(),
                         Some(&handle),
+                        tool_registry.is_planning_active(),
                     );
                 }
                 match &outcome_result {
@@ -2024,9 +2025,20 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .mark_turn_stalled(true, Some("Turn aborted due to an execution error.".to_string()));
                     }
                     RunLoopTurnLoopResult::Blocked { reason } => {
-                        handle.set_placeholder(Some(
-                            "Turn blocked · Type 'continue' to retry or describe changes...".to_string(),
-                        ));
+                        // Plan-mode QoL: a blocked placeholder that still says
+                        // `continue` re-blocks on the next turn. Name the mode
+                        // switch explicitly; the transcript lines written above
+                        // carry the full reasoning. Never auto-switch here.
+                        if tool_registry.is_planning_active() {
+                            handle.set_placeholder(Some(
+                                "Plan blocked (read-only) · `continue` to keep planning, `/mode build` to implement..."
+                                    .to_string(),
+                            ));
+                        } else {
+                            handle.set_placeholder(Some(
+                                "Turn blocked · Type 'continue' to retry or describe changes...".to_string(),
+                            ));
+                        }
                         input_status_state.is_blocked = true;
                         session_stats.mark_turn_stalled(
                             true,

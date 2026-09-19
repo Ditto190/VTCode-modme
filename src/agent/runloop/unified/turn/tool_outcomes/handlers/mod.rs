@@ -697,6 +697,17 @@ pub(crate) fn block_mutation_until_verification(
     );
     if !repeated_tool_attempts.verification_block_notice_emitted {
         ctx.renderer.line(MessageStyle::Warning, &message)?;
+        // Plan-mode QoL: the verification recipe above misleads when planning
+        // is active — plan mode is read-only by design, so a verifier does not
+        // unblock edits. Keep the model-facing `error`/`next_action` unchanged
+        // (prompt contract) and add user-facing guidance only. Never
+        // auto-switch modes; the user chooses on the next turn.
+        if ctx.is_planning_active() {
+            ctx.renderer.line(
+                MessageStyle::Info,
+                "Plan mode is read-only — to implement, approve the plan or run `/mode build` (`/mode auto` for unattended).",
+            )?;
+        }
         repeated_tool_attempts.verification_block_notice_emitted = true;
     }
     let guard_response_expected = !ctx.is_recovery_active() || ctx.recovery_pass_used();

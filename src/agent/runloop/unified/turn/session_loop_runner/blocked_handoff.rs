@@ -26,6 +26,47 @@ const TRANSCRIPT_BLOCK_REASON_LIMIT: usize = 600;
 /// triage without opening the log.
 const BLOCKED_DIAGNOSTICS_FOOTER_LIMIT: usize = 1200;
 
+/// Plan-mode blocked-turn header: plan mode is read-only by design, so a
+/// `Turn blocked` / `Mutation blocked` there is a policy stop, not a
+/// transient failure. Retrying the same mutating tools re-blocks.
+const PLAN_MODE_MUTATION_BLOCK_HEADER: &str = "Plan mode is read-only — edits block by design (not a failing check):";
+const PLAN_MODE_TURN_BLOCKED_HEADER: &str = "You're in plan mode (read-only) — retrying the same tools will re-block:";
+
+/// Returns true when a blocker summary describes a mutation/policy stop
+/// rather than a generic turn-loop stop. Used to pick plan-mode copy:
+/// mutation stops need the read-only explanation, generic stops need the
+/// re-block warning. Only the two canonical markers are matched: the
+/// verification-gate `"mutation blocked"` prefix and the planning-gate
+/// `"tool denied by planning workflow"` context. Broader substrings like
+/// `"mutating"` or `"read-only"` are intentionally excluded — they appear in
+/// unrelated verifier output (e.g. `read-only file system`) and in fuse-trip
+/// reasons, where the generic header is the correct choice.
+pub(super) fn is_plan_mode_mutation_block(blocker_summary: &str) -> bool {
+    let lowered = blocker_summary.to_ascii_lowercase();
+    lowered.contains("mutation blocked") || lowered.contains("tool denied by planning workflow")
+}
+
+/// Transcript guidance lines for a blocked turn while planning is active.
+/// Index 0 is the header, 1 stays planning, 2 implements. Kept as static
+/// strings so transcript rendering stays bounded and unit-testable.
+/// Build is the default destination (confirmation-aware); Auto only changes
+/// confirmation policy, not authority or safety gates.
+pub(super) fn plan_mode_switch_guidance_lines(is_mutation_block: bool) -> [&'static str; 3] {
+    if is_mutation_block {
+        [
+            PLAN_MODE_MUTATION_BLOCK_HEADER,
+            "  • Stay planning: type `continue` to keep researching toward `<proposed_plan>`",
+            "  • Implement now: approve the plan or run `/mode build` (`/mode auto` for unattended; Build stays confirmation-aware)",
+        ]
+    } else {
+        [
+            PLAN_MODE_TURN_BLOCKED_HEADER,
+            "  • Stay planning: type `continue` to resume research",
+            "  • Implement now: approve the plan or run `/mode build` (`/mode auto` for unattended)",
+        ]
+    }
+}
+
 /// Build the `# Last-Turn Diagnostics` footer from the turn snapshot and the
 /// session tool set. Returns an empty string when there is nothing
 /// meaningful to report, so callers can append unconditionally.
@@ -239,6 +280,7 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
     renderer: &mut AnsiRenderer,
     harness_emitter: Option<&HarnessEventEmitter>,
     handle: Option<&vtcode_ui::tui::app::InlineHandle>,
+    planning_active: bool,
 ) {
     match write_blocked_handoff_with_resume(
         workspace,
@@ -270,6 +312,18 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
                     MessageStyle::Info,
                     "  • In this session: Type 'continue' to resume, or describe alternative instructions",
                 );
+            }
+            // Plan-mode QoL: a blocked turn while planning is active is a
+            // read-only policy stop. `continue` keeps planning, but the user
+            // may prefer to implement. Never auto-switch modes here — mode
+            // switches are locked during a turn and require explicit user
+            // choice on the next turn — so this is transcript guidance plus
+            // a plan-aware input placeholder set by the caller, the
+            // non-blocking equivalent of a HITL mode-switch popup.
+            if planning_active {
+                for line in plan_mode_switch_guidance_lines(is_plan_mode_mutation_block(blocker_summary)) {
+                    let _ = renderer.line(MessageStyle::Info, line);
+                }
             }
             match resume {
                 BlockedHandoffResume::Available(id) => {
@@ -316,7 +370,10 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use super::{TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics, truncated_block_reason};
+    use super::{
+        TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics, is_plan_mode_mutation_block,
+        plan_mode_switch_guidance_lines, truncated_block_reason,
+    };
     use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
 
     #[test]
@@ -379,5 +436,45 @@ mod tests {
         assert!(summary.contains("requested=32 admitted=28 failed=3 denied=1 preflight_failures=2"));
         assert!(summary.contains("Preview budget exhausted: true"));
         assert!(summary.contains("exec_command"));
+    }
+
+    #[test]
+    fn mutation_block_detection_is_case_insensitive_and_asymmetric() {
+        assert!(is_plan_mode_mutation_block(
+            "Mutation blocked until verification: 2 mutating command(s) await a verifier."
+        ));
+        assert!(is_plan_mode_mutation_block("Tool 'apply_patch' execution failed: tool denied by planning workflow"));
+        assert!(!is_plan_mode_mutation_block(
+            "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved."
+        ));
+        assert!(!is_plan_mode_mutation_block("provider 429 rate limited"));
+        // Regression guard: verifier output mentioning a read-only filesystem
+        // must not select the mutation header — the generic plan-mode header
+        // is correct there.
+        assert!(!is_plan_mode_mutation_block(
+            "Turn blocked waiting for verification; auto-recovery turn scheduled. Last output tail:\nerror: read-only file system"
+        ));
+    }
+
+    #[test]
+    fn plan_mode_guidance_splits_mutation_from_generic_turn_block() {
+        let mutation = plan_mode_switch_guidance_lines(true);
+        let generic = plan_mode_switch_guidance_lines(false);
+        assert!(mutation[0].contains("read-only"));
+        assert!(mutation[1].contains("continue"));
+        assert!(mutation[2].contains("/mode build"));
+        assert!(mutation[2].contains("/mode auto"));
+        assert!(generic[0].contains("read-only"));
+        assert!(generic[2].contains("/mode build"));
+        assert_ne!(mutation[0], generic[0], "mutation vs generic headers must differ");
+    }
+
+    #[test]
+    fn plan_mode_guidance_names_build_as_default_with_auto_as_unattended() {
+        let mutation = plan_mode_switch_guidance_lines(true);
+        assert!(
+            mutation[2].contains("Build stays confirmation-aware"),
+            "must explain build vs auto policy difference"
+        );
     }
 }

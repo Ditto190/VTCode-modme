@@ -24,6 +24,8 @@ When a turn stops because of blocked behavior, VT Code forces a session-history 
 
 Runner paths that do not create session archives also omit the resume command and state that limitation in the handoff.
 
+When a turn blocks while planning is active, the transcript adds plan-mode guidance alongside the generic `continue` nudge: plan mode is read-only by design, so `Mutation blocked` means the edit was stopped by policy (not by a failing check) and a repeated `Turn blocked` will re-block if the same mutating tools are retried. Stay planning with `continue`, or implement by approving the plan or running `/mode build` (`/mode auto` for unattended confirmation). The input placeholder switches to the same choice. VT Code never auto-switches modes from a blocked turn; the user decides on the next turn. `build` and `auto` share the same tool catalog and safety gates — only confirmation policy differs.
+
 Shell commands in plan mode are validated against a read-only allow-list. Allowed patterns include:
 
 - inspection base commands: `rg`, `ls`, `cat`, `sed`, `grep`, `find`, `head`, `tail`, `fd`, `tree`, `stat`, `file`, `which`, `jq`, and similar
