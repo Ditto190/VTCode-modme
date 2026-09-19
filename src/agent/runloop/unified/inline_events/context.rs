@@ -188,8 +188,16 @@ impl<'a> InlineEventContext<'a> {
                 TransientEvent::Submitted(TransientSubmission::Hotkey(action)) => {
                     self.state.reset_interrupt_state();
                     match action {
-                        TransientHotkeyAction::LaunchEditor => self.input_processor().submit("/edit".into()),
-                        TransientHotkeyAction::ReloadSubagentInspector
+                        // The plan-approval overlay (`Ready to code?`) owns the
+                        // `LaunchEditor` (`Ctrl+G`) hotkey: `execute_plan_approval`
+                        // intercepts it in `wait_for_overlay_submission`, opens
+                        // the persisted plan file, and re-shows the overlay.
+                        // Seeding a bare `/edit` here would dismiss the modal,
+                        // lose the approval, and open an empty draft instead of
+                        // the plan file (the reported Ctrl+G bug). Keep it
+                        // passive so the approval wait owns the outcome.
+                        TransientHotkeyAction::LaunchEditor
+                        | TransientHotkeyAction::ReloadSubagentInspector
                         | TransientHotkeyAction::GracefulStopSubagent
                         | TransientHotkeyAction::ForceCancelSubagent
                         | TransientHotkeyAction::OpenSourceThread

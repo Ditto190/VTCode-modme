@@ -727,14 +727,44 @@ async fn open_plan_in_external_editor(
         workspace_root.join(raw_path)
     };
 
+    // The editor must open with the current proposal loaded. If the persisted
+    // file went missing (deleted, moved, or never flushed), materialize it
+    // from the in-memory draft before launching so `Ctrl+G` never degrades to
+    // a "file not found" warning without opening anything.
     if !plan_file.is_file() {
-        append_message(handle, InlineMessageKind::Warning, format!("Plan file not found: {}", plan_file.display()));
-        return None;
+        if plan.raw_content.trim().is_empty() {
+            append_message(handle, InlineMessageKind::Warning, format!("Plan file not found: {}", plan_file.display()));
+            return None;
+        }
+        if let Some(parent) = plan_file.parent()
+            && !parent.as_os_str().is_empty()
+            && let Err(error) = tokio::fs::create_dir_all(parent).await
+        {
+            append_message(
+                handle,
+                InlineMessageKind::Error,
+                format!("Failed to create plan directory {}: {error}", parent.display()),
+            );
+            return None;
+        }
+        if let Err(error) = tokio::fs::write(&plan_file, &plan.raw_content).await {
+            append_message(
+                handle,
+                InlineMessageKind::Error,
+                format!("Failed to restore the plan file {}: {error}", plan_file.display()),
+            );
+            return None;
+        }
     }
 
     let preferred_editor =
         (!editor_config.preferred_editor.trim().is_empty()).then(|| editor_config.preferred_editor.clone());
-    let suspend_tui = editor_config.suspend_tui;
+    // Only suspend the TUI event loop for terminal editors (nvim/vim/nano/…).
+    // GUI editors (VS Code/Zed/…) run in a separate window with `--wait`, so
+    // the approval overlay stays live behind them and re-shows seamlessly
+    // after save+close. This mirrors the transcript file-open coordinator.
+    let suspend_tui =
+        editor_config.suspend_tui && TerminalAppLauncher::editor_command_requires_terminal(preferred_editor.as_deref());
     let workspace = workspace_root.to_path_buf();
     let launch_file = plan_file.clone();
     let launch = run_blocking_with_event_loop_suspended(handle, suspend_tui, move || {
@@ -748,7 +778,14 @@ async fn open_plan_in_external_editor(
     handle.force_redraw();
 
     if let Err(error) = launch {
-        append_message(handle, InlineMessageKind::Error, format!("Failed to launch editor: {error}"));
+        append_message(
+            handle,
+            InlineMessageKind::Error,
+            format!(
+                "Failed to launch editor for {}: {error}. Set tools.editor.preferred_editor (e.g. \"code --wait\"), or set EDITOR/VISUAL, or install an editor in PATH.",
+                plan_file.display()
+            ),
+        );
         return None;
     }
 

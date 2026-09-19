@@ -3088,6 +3088,68 @@ mod tests {
         assert!(session.core.scroll_offset() > 0, "transcript should remain scrollable behind the overlay");
     }
 
+    #[test]
+    fn control_g_from_plan_approval_overlay_emits_launch_editor_hotkey() {
+        use crate::tui::core_tui::app::types::{
+            ListOverlayRequest, TransientHotkey, TransientHotkeyAction, TransientHotkeyKey,
+        };
+        use crate::tui::core_tui::types::{InlineListItem, InlineListSelection};
+
+        let mut session = build_session();
+        session.show_transient(TransientRequest::List(ListOverlayRequest {
+            title: "Ready to code?".to_string(),
+            lines: vec!["A plan is ready to execute. Would you like to proceed?".to_string()],
+            footer_hint: Some("ctrl-g to edit in VS Code · .vtcode/plans/test-plan.md".to_string()),
+            items: vec![InlineListItem {
+                title: "Yes, implement this plan".to_string(),
+                subtitle: None,
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::PlanApprovalExecute),
+                search_value: None,
+            }],
+            selected: Some(InlineListSelection::PlanApprovalExecute),
+            search: None,
+            hotkeys: vec![TransientHotkey {
+                key: TransientHotkeyKey::CtrlChar('g'),
+                action: TransientHotkeyAction::LaunchEditor,
+            }],
+        }));
+        assert!(session.has_active_overlay(), "plan approval overlay should be open");
+        assert!(
+            !session.core.input_enabled(),
+            "modal focus must disable the composer so Ctrl+G hits the overlay hotkey, not the draft editor"
+        );
+
+        let event = session.process_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+
+        assert!(
+            matches!(
+                &event,
+                Some(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Hotkey(
+                    TransientHotkeyAction::LaunchEditor
+                ))))
+            ),
+            "Ctrl+G must emit the plan-file hotkey, got {event:?}"
+        );
+        // The TUI closes the overlay on hotkey; the plan-approval runloop owns
+        // re-showing it after the external editor closes (`show_overlay_and_wait`).
+        assert!(!session.has_active_overlay(), "overlay closes locally; runloop re-shows after editing");
+    }
+
+    #[test]
+    fn control_g_without_overlay_still_opens_composer_draft_editor() {
+        let mut session = build_session();
+        assert!(!session.has_active_overlay());
+
+        let event = session.process_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+
+        assert!(
+            matches!(&event, Some(InlineEvent::LaunchEditor { draft }) if draft.is_empty()),
+            "composer Ctrl+G must keep the draft-editor path, got {event:?}"
+        );
+    }
+
     fn build_session_with_secure_prompt() -> Session {
         let mut session = build_session();
         session.show_transient(TransientRequest::Modal(ModalOverlayRequest {
