@@ -679,20 +679,30 @@ impl<'a> TurnProcessingContext<'a> {
 
         // Tracker-aware override (shipped runloop surface): when task_tracker
         // still has incomplete steps, status recaps must continue instead of
-        // ending the turn and nudging the user. Tool-free recovery and
-        // completed-plan branches above stay terminal in-turn; the outer
-        // session loop schedules the next tracker turn after those ends.
-        let continuation_decision = if !continuation_decision.should_continue
-            && !tool_free_recovery_pass
+        // ending the turn and nudging the user. Applies on tool-free recovery
+        // status text as well (tools are disabled; a recap must not strand the
+        // session). Completed-plan branches above stay terminal in-turn.
+        // In-turn override is gated on `auto_continue_tracker` only —
+        // `cross_turn_turns == 0` disables only the outer auto-queue.
+        // Complete probes clear the cache so auto-continue stops when the
+        // tracker finishes; Unavailable keeps the last known incomplete set.
+        let live_probe = if !continuation_decision.should_continue
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
-            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_cross_turn_turns(self.vt_cfg) > 0
-            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::incomplete_tracker_items(
-                self.tool_registry,
-            )
-            .await
-            .is_some()
+        {
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::probe_tracker_incomplete(self.tool_registry)
+                .await
+        } else {
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::TrackerProbeOutcome::Unavailable
+        };
+        let effective_incomplete = self.harness_state.apply_tracker_probe(live_probe);
+        let tracker_incomplete = effective_incomplete.is_some_and(|items| !items.is_empty());
+        let continuation_decision = if !continuation_decision.should_continue
+            && proposed_plan.is_none()
+            && !self.is_planning_active()
+            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
+            && tracker_incomplete
         {
             apply_tracker_continuation_override(continuation_decision, true, self.is_planning_active(), &text)
         } else {

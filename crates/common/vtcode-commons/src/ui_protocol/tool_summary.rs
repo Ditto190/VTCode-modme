@@ -89,6 +89,8 @@ pub fn diff_review_notice(file_path: &str, omitted_lines: u64, safety_capped: bo
     if omitted_lines > 0 {
         format!("… +{omitted_lines} lines — review full diff for {file_path}")
     } else {
+        // Safety-capped and unknown truncation currently share the same copy.
+        let _ = safety_capped;
         format!("… diff truncated — review full diff for {file_path}")
     }
 }

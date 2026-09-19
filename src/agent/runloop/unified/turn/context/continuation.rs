@@ -183,10 +183,87 @@ pub(super) fn evaluate_interim_text_continuation(
     d(false, "interactive_mode")
 }
 
+/// Budget/recovery phrasing that must not end a tracker-incomplete turn,
+/// including tool-call / tool-loop budget vocabulary the model uses in status
+/// recaps ("blocked by turn tool budget", "tool loop budget", "read cap").
+fn recoverable_tracker_budget_phrasing(lower: &str) -> bool {
+    lower.contains("turn budget")
+        || lower.contains("preview budget")
+        || lower.contains("wall clock")
+        || lower.contains("safety cap")
+        || lower.contains("recovery fallback")
+        || lower.contains("tool budget")
+        || lower.contains("tool loop")
+        || lower.contains("tool-call budget")
+        || lower.contains("tool follow-up")
+        || lower.contains("read cap")
+        || lower.contains("work budget")
+        || lower.contains("max tool")
+        || lower.contains("per-turn tool")
+        || lower.contains("recovery exhausted")
+        || lower.contains("budget exhausted")
+        || lower.contains("budget ran out")
+}
+
+/// True-handoff detector used when `task_tracker` still has incomplete steps.
+///
+/// Mid-text `?` in status sections and optional-offer closers (`happy to`,
+/// `let me know if`, `if you want me to`) are **not** handoffs — only a
+/// trailing clarifying question or strong interview/permission phrases end the
+/// turn while TODO work remains.
+fn tracker_incomplete_text_is_user_handoff(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.ends_with('?') {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    const STRONG_HANDOFF: &[&str] = &[
+        "please provide",
+        "need your",
+        "need you to",
+        "please confirm",
+        "waiting for your",
+        "awaiting your",
+        "your choice",
+        "your decision",
+        "need approval",
+        "need your approval",
+        "requires approval",
+        "require approval",
+        "approval is required",
+        "please approve",
+        "need permission",
+        "need your permission",
+        "requires permission",
+        "require permission",
+        "permission is required",
+        "grant permission",
+        "authorize this",
+        "need a decision",
+        "need clarification",
+        "waiting for input",
+        "awaiting input",
+        "waiting on you",
+        "could you",
+        "can you",
+        "how should i proceed",
+        "what should i do",
+        "what would you like",
+        "how would you like",
+        "shall i ",
+        "should i ",
+        "do you want me to",
+    ];
+    STRONG_HANDOFF.iter().any(|pattern| lower.contains(pattern))
+}
+
 /// Tracker-aware override: when `task_tracker` still has incomplete steps,
 /// status-only responses (including "blocked by budget" / "next step on
 /// resume" recaps) must not end the turn and nudge the user. Force a
-/// non-relaxed continuation unless the text genuinely needs user input.
+/// non-relaxed continuation unless the text is a true user handoff.
 pub(super) fn apply_tracker_continuation_override(
     mut decision: InterimTextContinuationDecision,
     tracker_incomplete: bool,
@@ -196,30 +273,29 @@ pub(super) fn apply_tracker_continuation_override(
     if !tracker_incomplete || planning_active || decision.should_continue {
         return decision;
     }
+    if tracker_incomplete_text_is_user_handoff(text) {
+        return decision;
+    }
     let lower = text.to_ascii_lowercase();
-    if text.trim().is_empty() {
-        return decision;
-    }
-    // Genuine user decision / interview handoff still ends the turn.
-    if text.contains('?') || contains_user_input_request(&lower) {
-        return decision;
-    }
-    // Recoverable budget/recovery phrasing still continues when tracker work
-    // remains ("blocked by turn budget", "preview budget", etc.).
-    let recoverable_budget_phrasing = lower.contains("turn budget")
-        || lower.contains("preview budget")
-        || lower.contains("wall clock")
-        || lower.contains("safety cap")
-        || lower.contains("recovery fallback");
-    // Permission/safety/manual handoffs must end the turn for the user.
-    // Reuse full-auto blocker vocabulary, except budget-like "blocked by …".
+    // True safety/permission/credential handoffs always end the turn for the
+    // user, even if the recap also mentions a budget.
     let explicit_safety_handoff = lower.contains("safety fuse")
         || lower.contains("permission denied")
         || lower.contains("access denied")
         || lower.contains("requires manual intervention")
         || lower.contains("missing credentials")
-        || lower.contains("credentials are missing");
-    if !recoverable_budget_phrasing && (explicit_safety_handoff || has_explicit_blocker(&lower)) {
+        || lower.contains("credentials are missing")
+        || lower.contains("policy block")
+        || lower.contains("blocked by policy")
+        || lower.contains("denied by policy")
+        || lower.contains("denied by tool policy")
+        || lower.contains("denied by workspace tool policy");
+    if explicit_safety_handoff {
+        return decision;
+    }
+    // Recoverable budget/recovery phrasing continues even when the recap also
+    // contains blocker tokens like "blocked by".
+    if has_explicit_blocker(&lower) && !recoverable_tracker_budget_phrasing(&lower) {
         return decision;
     }
     decision.should_continue = true;
@@ -1609,5 +1685,41 @@ mod tests {
         );
         assert!(budget_over.should_continue);
         assert_eq!(budget_over.reason, "tracker_incomplete_continuation");
+
+        // Tool-loop / tool-budget recaps continue even with "blocked by".
+        for recap in [
+            "## Status\nBlocked by turn tool budget. Next step: patch FileChangeItem.",
+            "## Status\nTool loop budget exhausted this turn. Next: run cargo check.",
+            "Task 3 mid-flight — hit the per-file read cap before editing. Next: one targeted read then patch.",
+        ] {
+            let over = apply_tracker_continuation_override(
+                evaluate_interim_text_continuation(true, false, &history, recap, 0),
+                true,
+                false,
+                recap,
+            );
+            assert!(over.should_continue, "must continue on recoverable recap: {recap}");
+        }
+
+        // Mid-text `?` in a status section is not a user handoff when tracker incomplete.
+        let status_question =
+            "## Status\nTask 2 done — is the next step clear? Continuing with task 3 now using tools.";
+        let s_over = apply_tracker_continuation_override(
+            evaluate_interim_text_continuation(true, false, &history, status_question, 0),
+            true,
+            false,
+            status_question,
+        );
+        assert!(s_over.should_continue, "mid-text question in status recap must continue");
+
+        // Trailing `?` stays terminal.
+        let trailing_q = "Should I proceed with the remaining steps?";
+        let t_over = apply_tracker_continuation_override(
+            evaluate_interim_text_continuation(true, false, &history, trailing_q, 0),
+            true,
+            false,
+            trailing_q,
+        );
+        assert!(!t_over.should_continue);
     }
 }

@@ -16,13 +16,18 @@ VT Code does not expose Claude-specific SDK structs. The canonical stream stays
 When `task_tracker` still has incomplete steps, the harness continues instead of
 ending the turn and nudging the user to resume:
 
-- In-turn: status-only assistant text (including budget/recovery recaps) is
-  forced to continue unless it asks a genuine user question or hits a hard
-  permission/policy handoff. Planning remains terminal for continuation.
+- In-turn: status-only assistant text (including budget/tool-loop/recovery
+  recaps) is forced to continue unless it is a true user handoff (trailing
+  question / interview ask) or a hard permission/policy/safety/credentials
+  handoff. Mid-text `?` and optional-offer closers are not handoffs while
+  tracker work remains. Planning remains terminal for tracker in-turn continue.
 - Cross-turn: after a Completed or recoverable Blocked turn, the session loop
   queues the next tracker implementation turn, bounded by
-  `[agent.harness.continuation].cross_turn_turns` (default 8). `0` disables
-  cross-turn auto-queue. Verification-blocked turns keep their own recovery path.
+  `[agent.harness.continuation].cross_turn_turns` (default 32; progress-resets
+  when any tracker step completes). `0` disables
+  cross-turn auto-queue. Verification-blocked turns keep their own recovery path
+  until that recovery is exhausted. Successful auto-queue never prints
+  “Type `continue`”.
 - Resume: sessions restored with incomplete tracker steps auto-queue one
   continuation turn after injecting remaining-step context.
 - Plan mode: while planning is active and no validated plan is ready for
