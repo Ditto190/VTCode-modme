@@ -1,10 +1,13 @@
 use crate::agent::runloop::unified::reasoning::model_supports_reasoning;
 use crate::agent::runloop::unified::turn::session::slash_commands::{SlashCommandContext, SlashCommandControl};
 use anyhow::Result;
+use chrono::{DateTime, Local, Utc};
 use vtcode_core::core::agent::snapshots::{CheckpointRestore, RevertScope, SnapshotManager, SnapshotMetadata};
 use vtcode_core::llm::provider as uni;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
-use vtcode_ui::tui::app::InlineHandle;
+use vtcode_ui::tui::app::{InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection, RewindAction};
+
+use super::ui;
 
 #[cfg(test)]
 fn resolve_prompt_boundary_in_history(metadata: &SnapshotMetadata, history: &[uni::Message]) -> Option<usize> {
@@ -57,6 +60,187 @@ fn restore_prompt_input_and_report(
         renderer.line(MessageStyle::Info, "Restored the selected prompt into the input field.")?;
     }
     Ok(())
+}
+
+pub(crate) async fn handle_open_rewind_picker(mut ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    if !ctx.renderer.supports_inline_ui() {
+        ctx.renderer.line(
+            MessageStyle::Info,
+            "Interactive rewind picker is available in inline UI only. Use `/rewind <turn> [conversation|code|both]`.",
+        )?;
+        return Ok(SlashCommandControl::Continue);
+    }
+
+    if !ui::ensure_selection_ui_available(&mut ctx, "opening rewind picker")? {
+        return Ok(SlashCommandControl::Continue);
+    }
+
+    let snapshots = match ctx.checkpoint_manager {
+        Some(manager) => manager.list_snapshots().await,
+        None => {
+            ctx.renderer
+                .line(MessageStyle::Info, "In-chat rewind requires access to the checkpoint manager.")?;
+            return Ok(SlashCommandControl::Continue);
+        }
+    };
+
+    let snapshots = match snapshots {
+        Ok(snapshots) => snapshots,
+        Err(err) => {
+            ctx.renderer
+                .line(MessageStyle::Error, &format!("Failed to list checkpoints: {err}"))?;
+            return Ok(SlashCommandControl::Continue);
+        }
+    };
+
+    if snapshots.is_empty() {
+        ctx.renderer
+            .line(MessageStyle::Warning, "No checkpoints available to rewind.")?;
+        return Ok(SlashCommandControl::Continue);
+    }
+
+    show_rewind_checkpoint_modal(ctx.handle, &snapshots);
+    let Some(selection) = ui::wait_for_list_modal_selection(&mut ctx).await else {
+        ctx.renderer.line(MessageStyle::Info, "Rewind picker cancelled.")?;
+        return Ok(SlashCommandControl::Continue);
+    };
+    let InlineListSelection::RewindCheckpoint(turn) = selection else {
+        ctx.renderer
+            .line(MessageStyle::Error, "Unsupported rewind checkpoint selection.")?;
+        return Ok(SlashCommandControl::Continue);
+    };
+    let Some(snapshot) = snapshots.iter().find(|snapshot| snapshot.turn_number == turn) else {
+        ctx.renderer
+            .line(MessageStyle::Error, &format!("Checkpoint turn {turn} is no longer available."))?;
+        return Ok(SlashCommandControl::Continue);
+    };
+
+    show_rewind_action_modal(ctx.handle, snapshot);
+    let Some(selection) = ui::wait_for_list_modal_selection(&mut ctx).await else {
+        ctx.renderer.line(MessageStyle::Info, "Rewind action cancelled.")?;
+        return Ok(SlashCommandControl::Continue);
+    };
+    let InlineListSelection::RewindAction(action) = selection else {
+        ctx.renderer.line(MessageStyle::Error, "Unsupported rewind action selection.")?;
+        return Ok(SlashCommandControl::Continue);
+    };
+
+    match action {
+        RewindAction::RestoreBoth => handle_rewind_to_turn(ctx, turn, RevertScope::Both).await,
+        RewindAction::RestoreConversation => handle_rewind_to_turn(ctx, turn, RevertScope::Conversation).await,
+        RewindAction::RestoreCode => handle_rewind_to_turn(ctx, turn, RevertScope::Code).await,
+        RewindAction::NeverMind => {
+            ctx.renderer.line(MessageStyle::Info, "Rewind cancelled.")?;
+            Ok(SlashCommandControl::Continue)
+        }
+        RewindAction::SummarizeFromHere => {
+            ctx.renderer
+                .line(MessageStyle::Info, "Summarize from a checkpoint is not available. Use `/compact` instead.")?;
+            Ok(SlashCommandControl::Continue)
+        }
+    }
+}
+
+fn rewind_checkpoint_title(metadata: &SnapshotMetadata) -> String {
+    if metadata.description.trim().is_empty() {
+        metadata
+            .prompt_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("turn {}", metadata.turn_number))
+    } else {
+        metadata.description.clone()
+    }
+}
+
+fn show_rewind_checkpoint_modal(handle: &InlineHandle, snapshots: &[SnapshotMetadata]) {
+    let items = snapshots
+        .iter()
+        .map(|snapshot| {
+            let timestamp = DateTime::<Utc>::from_timestamp(snapshot.created_at as i64, 0)
+                .map(|dt| dt.with_timezone(&Local))
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| snapshot.created_at.to_string());
+            let event_text = rewind_checkpoint_title(snapshot);
+            InlineListItem {
+                title: timestamp,
+                subtitle: Some(event_text),
+                badge: Some(format!("turn {}", snapshot.turn_number)),
+                indent: 0,
+                selection: Some(InlineListSelection::RewindCheckpoint(snapshot.turn_number)),
+                search_value: Some(format!(
+                    "{} {} {}",
+                    snapshot.turn_number,
+                    snapshot.prompt_text.clone().unwrap_or_default(),
+                    snapshot.description
+                )),
+            }
+        })
+        .collect();
+    handle.show_list_modal(
+        "Rewind".to_string(),
+        vec![
+            "Select a checkpoint prompt from this session.".to_string(),
+            "Then choose whether to restore code, restore conversation, or both.".to_string(),
+        ],
+        items,
+        snapshots
+            .first()
+            .map(|snapshot| InlineListSelection::RewindCheckpoint(snapshot.turn_number)),
+        Some(InlineListSearchConfig {
+            label: "Checkpoint filter".to_string(),
+            placeholder: Some("Search by prompt text or turn".to_string()),
+        }),
+    );
+}
+
+fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) {
+    let items = vec![
+        InlineListItem {
+            title: "Rewind & Run".to_string(),
+            subtitle: Some("Restore code and conversation, then re-run from this checkpoint.".to_string()),
+            badge: Some("Both".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreBoth)),
+            search_value: Some("rewind run restore both code conversation".to_string()),
+        },
+        InlineListItem {
+            title: "Rewind".to_string(),
+            subtitle: Some("Restore conversation only, keeping current files on disk.".to_string()),
+            badge: Some("Chat".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreConversation)),
+            search_value: Some("rewind restore conversation chat".to_string()),
+        },
+        InlineListItem {
+            title: "Restore code".to_string(),
+            subtitle: Some("Revert tracked file edits but keep the current conversation.".to_string()),
+            badge: Some("Code".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreCode)),
+            search_value: Some("restore code files".to_string()),
+        },
+        InlineListItem {
+            title: "Cancel".to_string(),
+            subtitle: Some("Close the rewind picker without changing anything.".to_string()),
+            badge: Some("Cancel".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::RewindAction(RewindAction::NeverMind)),
+            search_value: Some("cancel never mind".to_string()),
+        },
+    ];
+    handle.show_list_modal(
+        format!("Rewind turn {}", snapshot.turn_number),
+        vec![
+            rewind_checkpoint_title(snapshot),
+            "Choose what to do with the selected checkpoint.".to_string(),
+        ],
+        items,
+        Some(InlineListSelection::RewindAction(RewindAction::RestoreBoth)),
+        None,
+    );
 }
 
 pub(crate) async fn handle_rewind_latest(
@@ -201,8 +385,26 @@ fn rewind_partial_arg(scope: RevertScope) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_prompt_boundary_in_history, rewind_partial_arg};
+    use super::{resolve_prompt_boundary_in_history, rewind_checkpoint_title, rewind_partial_arg};
     use vtcode_core::core::agent::snapshots::{RevertScope, SnapshotMetadata};
+
+    fn snapshot_metadata(description: &str, prompt_text: Option<&str>) -> SnapshotMetadata {
+        SnapshotMetadata {
+            id: "turn_2".to_string(),
+            turn_number: 2,
+            created_at: 0,
+            description: description.to_string(),
+            message_count: 3,
+            file_count: 0,
+            touched_files: Vec::new(),
+            prompt_text: prompt_text.map(str::to_string),
+            prompt_message_index: Some(2),
+            session_id: None,
+            runtime_turn_id: None,
+            session_turn_number: None,
+            turn_diagnostics: None,
+        }
+    }
 
     #[test]
     fn rewind_partial_arg_matches_cli_scope_values() {
@@ -212,27 +414,21 @@ mod tests {
     }
 
     #[test]
+    fn rewind_checkpoint_title_prefers_description_then_prompt_then_turn() {
+        assert_eq!(rewind_checkpoint_title(&snapshot_metadata("refactor parser", Some("prompt"))), "refactor parser");
+        assert_eq!(rewind_checkpoint_title(&snapshot_metadata("  ", Some("prompt text"))), "prompt text");
+        assert_eq!(rewind_checkpoint_title(&snapshot_metadata("", None)), "turn 2");
+        assert_eq!(rewind_checkpoint_title(&snapshot_metadata("", Some("   "))), "turn 2");
+    }
+
+    #[test]
     fn resolve_prompt_boundary_prefers_metadata_index_when_it_matches() {
         let history = vec![
             vtcode_core::llm::provider::Message::user("first".to_string()),
             vtcode_core::llm::provider::Message::assistant("reply".to_string()),
             vtcode_core::llm::provider::Message::user("target".to_string()),
         ];
-        let metadata = SnapshotMetadata {
-            id: "turn_2".to_string(),
-            turn_number: 2,
-            created_at: 0,
-            description: "target".to_string(),
-            message_count: 3,
-            file_count: 0,
-            touched_files: Vec::new(),
-            prompt_text: Some("target".to_string()),
-            prompt_message_index: Some(2),
-            session_id: None,
-            runtime_turn_id: None,
-            session_turn_number: None,
-            turn_diagnostics: None,
-        };
+        let metadata = snapshot_metadata("target", Some("target"));
 
         assert_eq!(resolve_prompt_boundary_in_history(&metadata, &history), Some(2));
     }
@@ -244,21 +440,7 @@ mod tests {
             vtcode_core::llm::provider::Message::assistant("reply".to_string()),
             vtcode_core::llm::provider::Message::user("target".to_string()),
         ];
-        let metadata = SnapshotMetadata {
-            id: "turn_2".to_string(),
-            turn_number: 2,
-            created_at: 0,
-            description: "target".to_string(),
-            message_count: 3,
-            file_count: 0,
-            touched_files: Vec::new(),
-            prompt_text: Some("target".to_string()),
-            prompt_message_index: Some(2),
-            session_id: None,
-            runtime_turn_id: None,
-            session_turn_number: None,
-            turn_diagnostics: None,
-        };
+        let metadata = snapshot_metadata("target", Some("target"));
 
         assert_eq!(resolve_prompt_boundary_in_history(&metadata, &history), Some(2));
     }

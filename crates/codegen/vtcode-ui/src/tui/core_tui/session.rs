@@ -263,12 +263,13 @@ pub struct Session {
     should_exit: bool,
     /// Timestamp of the last Ctrl+C press for double-press exit detection.
     pub(crate) last_interrupt_press: Option<Instant>,
-    /// Timestamp of the last Esc press for double-Escape line clearing.
+    /// Timestamp of the last Esc press for double-Escape actions.
     ///
     /// First Esc arms the timer; a second Esc within
     /// `DOUBLE_ESCAPE_WINDOW` clears the current line (multiline) or the
-    /// entire input (single-line). Any non-Esc key resets it so the double
-    /// press must be consecutive.
+    /// entire input (single-line) when content is present, or opens the
+    /// rewind picker (`/rewind`) when the composer is empty. Any non-Esc key
+    /// resets it so the double press must be consecutive.
     pub(crate) last_escape_press: Option<Instant>,
     scroll_cursor_steady_until: Option<Instant>,
     last_shimmer_active: bool,

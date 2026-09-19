@@ -8,7 +8,7 @@ The VT Code terminal UI includes an interactive mode that combines keyboard-firs
 
 ### General Controls
 
-Composer submit/queue, line editing (`Cmd+A`/`Cmd+Backspace` clear line, `Cmd+Left/Right` line jumps, double-`Esc` clear line/all, `Tab` enqueue like `Ctrl+Enter`, `Shift+Tab` switch agents), readline, history, and review keys are documented in [Keyboard Shortcuts](./keyboard-shortcuts.md#composer-submit-and-queue). That guide also notes the unified cross-terminal mapping: terminals without the Kitty keyboard protocol send `Cmd+Left/Right/Backspace` as `Ctrl+A`/`Ctrl+E`/`Ctrl+U`, which VT Code routes to the same line-wise operations.
+Composer submit/queue, line editing (`Cmd+A`/`Cmd+Backspace` clear line, `Cmd+Left/Right` line jumps, double-`Esc` clears the line/all with content or opens the rewind picker on empty input, `Tab` enqueue like `Ctrl+Enter`, `Shift+Tab` switch agents), readline, history, and review keys are documented in [Keyboard Shortcuts](./keyboard-shortcuts.md#composer-submit-and-queue). That guide also notes the unified cross-terminal mapping: terminals without the Kitty keyboard protocol send `Cmd+Left/Right/Backspace` as `Ctrl+A`/`Ctrl+E`/`Ctrl+U`, which VT Code routes to the same line-wise operations.
 
 ### Multiline Input
 

@@ -10,7 +10,9 @@ use super::super::types::{
 use crate::tui::core_tui::app::session::transient::TransientSurface;
 use crate::tui::core_tui::app::types::InlineMessageKind;
 use crate::tui::core_tui::runner::TuiSessionDriver;
-use crate::tui::core_tui::session::action::{Action, is_readline_editing_key, normalize_terminal_control_event};
+use crate::tui::core_tui::session::action::{
+    Action, is_double_escape_press, is_readline_editing_key, normalize_terminal_control_event,
+};
 use crate::tui::core_tui::session::clipboard_image::{ClipboardImageError, read_clipboard_image};
 use crate::tui::core_tui::session::modal;
 use crate::tui::core_tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
@@ -21,9 +23,6 @@ use crate::tui::core_tui::types::{
     InlineEvent as CoreInlineEvent, OverlayEvent, OverlaySelectionChange, SubmittedInput,
 };
 use crate::tui::ui::theme;
-
-/// Window for consecutive double-Escape detection (mirrors core session).
-const DOUBLE_ESCAPE_WINDOW: std::time::Duration = std::time::Duration::from_millis(800);
 
 /// Shared Tab-to-queue path mirroring `Ctrl+Enter` for the app session.
 ///
@@ -892,19 +891,30 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.core.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Interrupt)
-            } else if session.core.input_manager.content().is_empty() || !session.core.input_enabled() {
+            } else if !session.core.input_enabled() {
                 session.core.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Cancel)
+            } else if session.core.input_manager.content().is_empty() {
+                // Idle composer with empty input: a consecutive double-Escape
+                // opens the rewind picker (`/rewind`). A single press remains a
+                // no-op cancel so the armed timer does not escalate locally.
+                let now = Instant::now();
+                let is_double = is_double_escape_press(session.core.last_escape_press, now);
+                session.mark_dirty();
+                if is_double {
+                    session.core.last_escape_press = None;
+                    Some(InlineEvent::Submit("/rewind".into()))
+                } else {
+                    session.core.last_escape_press = Some(now);
+                    Some(InlineEvent::Cancel)
+                }
             } else {
                 // Focused composer with content: require consecutive
                 // double-Escape. First press arms, second clears current line
                 // (multiline) or entire input (single-line, compact/image).
                 let now = Instant::now();
-                let is_double = session
-                    .core
-                    .last_escape_press
-                    .is_some_and(|last| now.duration_since(last) <= DOUBLE_ESCAPE_WINDOW);
+                let is_double = is_double_escape_press(session.core.last_escape_press, now);
                 if is_double {
                     session.core.last_escape_press = None;
                     if session.core.input_manager.is_single_line() {
@@ -2468,15 +2478,23 @@ mod tests {
     }
 
     #[test]
-    fn repeated_idle_escape_only_cancels_in_the_app_session() {
+    fn double_idle_escape_submits_rewind_in_the_app_session() {
         let mut session = build_session();
 
-        for _ in 0..3 {
-            assert!(matches!(
-                session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-                Some(InlineEvent::Cancel)
-            ));
-        }
+        assert!(matches!(
+            session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(InlineEvent::Cancel)
+        ));
+        assert!(matches!(
+            session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(InlineEvent::Submit(value)) if value == "/rewind"
+        ));
+        // The double press consumed the armed timer, so the next press is a
+        // fresh single-press cancel.
+        assert!(matches!(
+            session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(InlineEvent::Cancel)
+        ));
     }
 
     #[test]

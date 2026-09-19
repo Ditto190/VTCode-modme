@@ -27,7 +27,7 @@ Palettes consume `Tab`/`Enter`/`Esc` first: agent/file palettes select best matc
 | :-- | :-- | :-- |
 | `Cmd+A` or `Cmd+Backspace` | Clear entire input, attachments, and compact state atomically. | Clear only the cursor's logical line; a collapsed `[Pasted Content N chars]` block overlapping the line or cursor is removed atomically. Image `[Image #N]` tokens on the line are removed with it. |
 | `Cmd+Left` / `Cmd+Right` (`Shift` extends selection) | Buffer start/end. | Current logical-line start/end (logical `\n` lines, not visual wraps). |
-| `Esc Esc` (focused composer, content present) | Clear entire input. | Clear current logical line. First press arms, second clears. Empty input emits cancel. |
+| `Esc Esc` (focused composer) | Content present: clear entire input. Empty input: open the rewind picker (`/rewind`). | Content present: clear the current logical line. Empty input: open the rewind picker. First press arms, second acts. |
 | `Cmd+E` | Line end. | Current line end. |
 
 On terminals that send the legacy control-code aliases, the same behavior is reachable without the Kitty protocol: `Ctrl+A`/`Ctrl+E` move to the current line's edges and `Ctrl+U` clears the current line (see the readline table below). No extra terminal setup is needed beyond the terminal's own Cmd mapping. Secure-prompt (single-line secret) mirrors this: `Cmd+Backspace`/`Cmd+A` clear, `Cmd+Left/Right` jump to edges, `Esc` cancels immediately without double-press.

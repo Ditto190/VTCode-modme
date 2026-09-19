@@ -7,13 +7,6 @@ use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::mode_switch_guard::{self};
 use crate::tui::ui::tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 
-/// Window for consecutive double-Escape detection.
-///
-/// First Esc arms `last_escape_press`; a second Esc within this window clears
-/// the current line (multiline) or the entire input (single-line). Matches the
-/// existing double-Ctrl+C exit window scale (1s) but slightly tighter.
-const DOUBLE_ESCAPE_WINDOW: std::time::Duration = std::time::Duration::from_millis(800);
-
 /// Shared Tab-to-queue path mirroring `Ctrl+Enter`.
 ///
 /// Tab accepts ghost suggestions first (caller handles that), then enqueues
@@ -571,18 +564,30 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
                 session.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Interrupt)
-            } else if session.input_manager.content().is_empty() || !session.input_enabled {
+            } else if !session.input_enabled {
                 session.last_escape_press = None;
                 session.mark_dirty();
                 Some(InlineEvent::Cancel)
+            } else if session.input_manager.content().is_empty() {
+                // Idle composer with empty input: a consecutive double-Escape
+                // opens the rewind picker (`/rewind`). A single press remains a
+                // no-op cancel so the armed timer does not escalate locally.
+                let now = Instant::now();
+                let is_double = action::is_double_escape_press(session.last_escape_press, now);
+                session.mark_dirty();
+                if is_double {
+                    session.last_escape_press = None;
+                    Some(InlineEvent::Submit("/rewind".into()))
+                } else {
+                    session.last_escape_press = Some(now);
+                    Some(InlineEvent::Cancel)
+                }
             } else {
                 // Focused composer with content: require consecutive
                 // double-Escape. First press arms, second clears current line
                 // (multiline) or entire input (single-line, compact/image).
                 let now = Instant::now();
-                let is_double = session
-                    .last_escape_press
-                    .is_some_and(|last| now.duration_since(last) <= DOUBLE_ESCAPE_WINDOW);
+                let is_double = action::is_double_escape_press(session.last_escape_press, now);
                 if is_double {
                     session.last_escape_press = None;
                     if session.input_manager.is_single_line() {

@@ -143,7 +143,13 @@ pub(super) fn handle_rewind_command(args: &str, renderer: &mut AnsiRenderer) -> 
     let tokens: Vec<&str> = args.split_whitespace().collect();
 
     if tokens.is_empty() {
-        return Ok(SlashCommandOutcome::StartHistoryPicker);
+        return if renderer.supports_inline_ui() {
+            Ok(SlashCommandOutcome::OpenRewindPicker)
+        } else {
+            Ok(SlashCommandOutcome::RewindLatest {
+                scope: vtcode_core::core::agent::snapshots::RevertScope::Both,
+            })
+        };
     }
 
     // Parse the arguments
@@ -304,14 +310,14 @@ mod tests {
     use vtcode_ui::tui::app::InlineHandle;
 
     #[test]
-    fn rewind_without_args_opens_history_picker() {
+    fn rewind_without_args_opens_picker_in_inline_ui() {
         let (sender, _receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
 
         let outcome = handle_rewind_command("", &mut renderer).expect("rewind outcome");
 
-        assert!(matches!(outcome, SlashCommandOutcome::StartHistoryPicker));
+        assert!(matches!(outcome, SlashCommandOutcome::OpenRewindPicker));
     }
 
     #[test]
@@ -357,12 +363,17 @@ mod tests {
     }
 
     #[test]
-    fn rewind_without_args_opens_history_picker_in_plain_ui() {
+    fn rewind_without_args_rewinds_latest_in_plain_ui() {
         let mut renderer = AnsiRenderer::stdout();
 
         let outcome = handle_rewind_command("", &mut renderer).expect("rewind outcome");
 
-        assert!(matches!(outcome, SlashCommandOutcome::StartHistoryPicker));
+        assert!(matches!(
+            outcome,
+            SlashCommandOutcome::RewindLatest {
+                scope: vtcode_core::core::agent::snapshots::RevertScope::Both,
+            }
+        ));
     }
 
     #[test]

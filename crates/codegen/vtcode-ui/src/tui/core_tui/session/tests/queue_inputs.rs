@@ -248,13 +248,18 @@ fn repeated_control_c_exits_without_double_escape() {
 }
 
 #[test]
-fn repeated_idle_escape_only_cancels_without_rewind() {
+fn double_idle_escape_submits_rewind() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
 
-    for _ in 0..3 {
-        let event = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(matches!(event, Some(InlineEvent::Cancel)));
-    }
+    let first = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(first, Some(InlineEvent::Cancel)));
+
+    let second = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(&second, Some(InlineEvent::Submit(value)) if value == "/rewind"));
+
+    // A third press starts a fresh single-press cancel cycle.
+    let third = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(third, Some(InlineEvent::Cancel)));
 }
 
 #[test]

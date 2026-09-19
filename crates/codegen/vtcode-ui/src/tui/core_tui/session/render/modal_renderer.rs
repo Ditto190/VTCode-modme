@@ -412,7 +412,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                 Binding::new("?", "help"),
                 Binding::new("Enter", "submit"),
                 Binding::new("Ctrl+C", "interrupt"),
-                Binding::new("Esc Esc", "clear line/all"),
+                Binding::new("Esc Esc", "clear / open rewind"),
                 Binding::new("Tab", "queue for next turn"),
                 Binding::new("Shift+Tab", "switch agent"),
             ])
@@ -424,7 +424,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
                     Binding::new("Ctrl+Enter", "queue for next turn"),
                     Binding::new("Tab", "queue for next turn"),
                     Binding::new("Shift+Enter", "new line"),
-                    Binding::new("Esc Esc", "clear line/all"),
+                    Binding::new("Esc Esc", "clear / open rewind"),
                     Binding::new("Ctrl+C", "interrupt/copy"),
                     Binding::new("Ctrl+D", "exit"),
                     Binding::new("PgUp/PgDn", "scroll"),

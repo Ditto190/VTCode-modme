@@ -1,5 +1,6 @@
 use hashbrown::{HashMap, HashSet};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::time::{Duration, Instant};
 
 /// Rebindable user-facing actions.
 ///
@@ -467,6 +468,22 @@ pub(crate) fn normalize_terminal_control_event(mut key: KeyEvent) -> KeyEvent {
     key
 }
 
+/// Window for consecutive double-Escape detection.
+///
+/// First Esc arms the composer timer; a second Esc within this window clears
+/// the current line (multiline) or the entire input (single-line) when content
+/// is present, or opens the rewind picker (`/rewind`) on an empty composer.
+/// Matches the double-Ctrl+C exit window scale (1s) but slightly tighter.
+pub(crate) const DOUBLE_ESCAPE_WINDOW: Duration = Duration::from_millis(800);
+
+/// Whether `now` is a consecutive second Escape press.
+///
+/// Shared by the core and app session key handlers so the two entry points
+/// cannot drift on the window or comparison.
+pub(crate) fn is_double_escape_press(last_press: Option<Instant>, now: Instant) -> bool {
+    last_press.is_some_and(|last| now.duration_since(last) <= DOUBLE_ESCAPE_WINDOW)
+}
+
 /// Return whether a key belongs to the composer shortcuts that intentionally
 /// remain outside the configurable action dispatch.
 pub(crate) fn is_readline_editing_key(key: &KeyEvent) -> bool {
@@ -828,5 +845,19 @@ mod tests {
     #[test]
     fn test_action_from_name_unknown() {
         assert_eq!(Action::from_name("nonexistent"), None);
+    }
+
+    #[test]
+    fn double_escape_press_requires_an_armed_consecutive_press() {
+        let now = Instant::now();
+        let exactly_at_window = now.checked_sub(DOUBLE_ESCAPE_WINDOW).expect("clock is past the window");
+        let beyond_window = now
+            .checked_sub(DOUBLE_ESCAPE_WINDOW + Duration::from_millis(1))
+            .expect("clock is past the window");
+
+        assert!(!is_double_escape_press(None, now));
+        assert!(is_double_escape_press(Some(now), now));
+        assert!(is_double_escape_press(Some(exactly_at_window), now));
+        assert!(!is_double_escape_press(Some(beyond_window), now));
     }
 }
