@@ -252,10 +252,11 @@ A second tier handles session lifecycle and day-to-day operations:
 | `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots                                             |
 | `vtcode tool-policy`                 | Allow or deny specific tools per workspace                                            |
 | `vtcode trajectory`                  | Pretty-print run logs for debugging and audits                                        |
+| `vtcode skills` / `vtcode plugins` / `vtcode mcp` | Manage skills, agent plugins, and MCP servers                            |
 
-`vtcode analyze`, `vtcode check`, `vtcode schema tools`, `vtcode man`, and
-`vtcode update` round out the operator surface. See `vtcode --help` for the
-full list.
+`vtcode analyze`, `vtcode check`, `vtcode schema tools`, `vtcode dependencies`
+(alias `deps`), `vtcode config`, `vtcode man`, and `vtcode update` round out
+the operator surface. See `vtcode --help` for the full list.
 
 ### Everyday recipes
 
@@ -263,7 +264,7 @@ full list.
 # Review only the uncommitted diff, then exit with a verdict
 vtcode review
 
-# Nightly dependency audit as a durable cron job
+# Weekly dependency audit (Mondays 09:00) as a durable cron job
 vtcode schedule create --cron "0 9 * * 1" --prompt "check for outdated deps and open an issue if any have CVEs"
 
 # Resume yesterday's session and fork it for a new experiment
