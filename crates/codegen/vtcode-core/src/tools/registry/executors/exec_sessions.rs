@@ -359,6 +359,13 @@ impl ToolRegistry {
         env.insert("GIT_PAGER".to_string(), "cat".to_string());
         env.insert("NO_COLOR".to_string(), "1".to_string());
         env.insert("CARGO_TERM_COLOR".to_string(), "never".to_string());
+        // Live-streaming: disable block buffering so `cargo run/test` and
+        // `python` chunks reach the pipe reader (15ms) and the TUI status
+        // line (100ms throttle) in real time instead of at process exit.
+        // `GIT_TERMINAL_PROMPT=0` keeps long builds from stalling on an
+        // interactive credential prompt mid-stream.
+        env.insert("PYTHONUNBUFFERED".to_string(), "1".to_string());
+        env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
         if !shell_program.trim().is_empty() {
             env.insert("SHELL".to_string(), shell_program.to_string());
         }

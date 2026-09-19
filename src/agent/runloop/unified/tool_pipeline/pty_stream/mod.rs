@@ -18,6 +18,7 @@ mod tests {
     use super::runtime::PtyStreamRuntime;
     use super::segments::{PtyLineStyles, line_to_segments, tokenize_preserve_whitespace};
     use super::state::PtyStreamState;
+    use crate::agent::runloop::unified::progress::ProgressReporter;
 
     struct DropNotifier(Option<oneshot::Sender<()>>);
 
@@ -291,6 +292,44 @@ mod tests {
                 .iter()
                 .any(|command| matches!(command, InlineCommand::ReplaceLast { .. })),
             "compact PTY execution must not emit a transient live row"
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_pty_runtime_streams_status_line_without_transcript() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let progress = ProgressReporter::new();
+        let (runtime, callback) = PtyStreamRuntime::start(
+            handle,
+            progress.clone(),
+            8,
+            Some("cargo test".to_string()),
+            test_pty_config(),
+            None,
+            false,
+        );
+
+        // Asymmetric pair: cargo-style progress line vs ANSI-only spinner frame.
+        // Only the former must reach the status line; control sequences alone
+        // must not overwrite it with blank text.
+        callback("exec_command", "   Compiling vtcode-core v0.163.2\n");
+        callback("exec_command", "\x1b[2K\x1b[1G");
+        runtime.shutdown(anstyle::Color::Ansi(AnsiColor::Green)).await;
+
+        let commands = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, InlineCommand::ReplaceLast { .. })),
+            "compact mode must keep the transcript stable while streaming status"
+        );
+
+        let info = progress.progress_info().await;
+        assert!(
+            info.message.contains("Compiling vtcode-core"),
+            "compact mode must stream live stdout to status line, got: {:?}",
+            info.message
         );
     }
 

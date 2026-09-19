@@ -88,6 +88,13 @@ pub(crate) struct PtyStreamRuntime {
     active: Arc<AtomicBool>,
 }
 
+async fn update_status_line(progress_reporter: &ProgressReporter, line: &str) {
+    let cleaned = vtcode_core::utils::ansi_parser::strip_ansi(line);
+    if !cleaned.trim().is_empty() {
+        progress_reporter.set_message(cleaned).await;
+    }
+}
+
 async fn process_output(
     handle: &InlineHandle,
     progress_reporter: &ProgressReporter,
@@ -101,7 +108,16 @@ async fn process_output(
     }
 
     state.apply_chunk(&output, tail_limit);
+
+    // Compact mode suppresses the multi-line transcript block to avoid
+    // jump-through replacements, but still streams the latest line through
+    // the spinner/status line so `cargo run/test` style long commands stay
+    // visibly live. This keeps the complete output in the spool/`Ctrl+T`
+    // viewer while giving real-time feedback in the default display mode.
     if !show_live_preview {
+        if let Some(last_line) = state.last_display_line(tail_limit) {
+            update_status_line(progress_reporter, &last_line).await;
+        }
         return;
     }
 
@@ -116,10 +132,7 @@ async fn process_output(
     }
 
     if let Some(last_line) = last_line {
-        let cleaned_last_line = vtcode_core::utils::ansi_parser::strip_ansi(&last_line);
-        if !cleaned_last_line.trim().is_empty() {
-            progress_reporter.set_message(cleaned_last_line).await;
-        }
+        update_status_line(progress_reporter, &last_line).await;
     }
 }
 
