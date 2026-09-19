@@ -30,7 +30,9 @@ ending the turn and nudging the user to resume:
   tool-free recovery) auto-queue another planning turn (same
   `cross_turn_turns` budget). Ordinary completed planning turns are not
   auto-continued — they may be interview or approval handoffs. Planning never
-  auto-approves or auto-implements.
+  auto-approves or auto-implements. Plan-mode and tracker auto-continue share
+  the `cross_turn_turns` episode budget; a planning episode can exhaust it for
+  later tracker auto-continue until a genuine user turn resets the episode.
 - Kill-switch: `[agent.harness.continuation].auto_continue_tracker = false`.
 
 The closest concept mapping is:

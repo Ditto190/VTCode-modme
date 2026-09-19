@@ -321,37 +321,40 @@ fn render_tracker_inline_row(
 /// Single writer for user-facing tracker transcript blocks.
 ///
 /// Approval handoff and the tool pipeline must share replace/dedupe so progress
-/// updates never stack a second block. Replace only when the remembered tracker
-/// block is still the transcript tail (or the tail itself looks like a tracker
-/// progress line) — never blindly truncate intervening content.
+/// updates never stack a second block. UI `replace_last` uses the UI write
+/// length recorded by this helper — never a TRANSCRIPT-derived count, which
+/// can clobber unrelated UI lines when the two stores diverge.
 pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Vec<String>) {
     if lines.is_empty() {
         return;
     }
+    let ui_write_len = lines.len();
     if transcript::tail_matches(&lines) {
-        transcript::remember_tracker_block(lines);
+        transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
         return;
     }
     let segments = task_tracker_block_segments(&lines);
-    if let Some(count) = transcript::tracker_block_len_if_at_tail() {
-        handle.replace_last(count, InlineMessageKind::Tool, segments);
-        transcript::replace_last(count, &lines);
-        transcript::remember_tracker_block(lines);
+    if let Some(transcript_count) = transcript::tracker_block_len_if_at_tail() {
+        let ui_count = transcript::tracker_ui_write_len().unwrap_or(ui_write_len);
+        handle.replace_last(ui_count, InlineMessageKind::Tool, segments);
+        transcript::replace_last(transcript_count, &lines);
+        transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
         return;
     }
-    // Design fallback: remembered block drifted; if the tail itself is a
-    // tracker progress line, replace that single line instead of stacking.
+    // Fallback: remembered block drifted. Only replace a tail that is clearly
+    // our tracker progress shape (`• Tasks …` / `• Title N/M`), never generic
+    // `• Foo N/M` UI summaries such as Questions answered lines.
     if transcript::last_line().is_some_and(|last| looks_like_tracker_progress_line(&last)) {
         handle.replace_last(1, InlineMessageKind::Tool, segments);
         transcript::replace_last(1, &lines);
-        transcript::remember_tracker_block(lines);
+        transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
         return;
     }
     for (segments, plain_line) in segments.into_iter().zip(lines.iter()) {
         handle.append_line(InlineMessageKind::Tool, segments);
         transcript::append(plain_line);
     }
-    transcript::remember_tracker_block(lines);
+    transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
 }
 
 fn looks_like_tracker_progress_line(line: &str) -> bool {
@@ -359,24 +362,36 @@ fn looks_like_tracker_progress_line(line: &str) -> bool {
     if !trimmed.starts_with("• ") {
         return false;
     }
-    if trimmed.starts_with("• Plan") || trimmed.starts_with("• Ran") {
+    if trimmed.starts_with("• Plan") || trimmed.starts_with("• Ran") || trimmed.starts_with("• Questions") {
         return false;
     }
-    trimmed.starts_with("• Tasks")
-        || trimmed.split_whitespace().any(|token| {
-            let mut parts = token.split('/');
-            matches!((parts.next(), parts.next(), parts.next()), (Some(a), Some(b), None) if !a.is_empty()
-                && !b.is_empty()
-                && a.chars().all(|c| c.is_ascii_digit())
-                && b.chars().all(|c| c.is_ascii_digit()))
-        })
+    if trimmed.starts_with("• Tasks") {
+        return true;
+    }
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens.len() < 3 {
+        return false;
+    }
+    if tokens
+        .iter()
+        .any(|token| token.eq_ignore_ascii_case("answered") || token.eq_ignore_ascii_case("questions"))
+    {
+        return false;
+    }
+    let Some(last) = tokens.last() else {
+        return false;
+    };
+    let mut parts = last.split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(a), Some(b), None) if !a.is_empty()
+            && !b.is_empty()
+            && a.chars().all(|c| c.is_ascii_digit())
+            && b.chars().all(|c| c.is_ascii_digit())
+    )
 }
 
-fn apply_task_tracker_block(
-    handle: &InlineHandle,
-    _harness_state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
-    lines: Vec<String>,
-) {
+fn apply_task_tracker_block(handle: &InlineHandle, lines: Vec<String>) {
     write_tracker_progress_transcript(handle, lines);
 }
 
@@ -1305,7 +1320,6 @@ struct OutcomeContext<'a> {
     session_stats: &'a mut SessionStats,
     renderer: &'a mut AnsiRenderer,
     handle: &'a InlineHandle,
-    harness_state: &'a mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
     mcp_panel_state: &'a mut McpPanelState,
     vt_config: Option<&'a VTCodeConfig>,
     workspace_root: Option<&'a Path>,
@@ -1344,7 +1358,7 @@ async fn handle_success_common(
                 crate::agent::runloop::tool_output::tracker_panel_metadata(payload.output),
             );
             if !progress_lines.is_empty() {
-                apply_task_tracker_block(ctx.handle, ctx.harness_state, progress_lines);
+                apply_task_tracker_block(ctx.handle, progress_lines);
             }
         }
     } else {
@@ -1554,7 +1568,6 @@ pub(crate) async fn handle_pipeline_output_full(
         session_stats: ctx.session_stats,
         renderer: ctx.renderer,
         handle: ctx.handle,
-        harness_state: ctx.harness_state,
         mcp_panel_state: ctx.mcp_panel_state,
         vt_config,
         workspace_root,
@@ -1629,7 +1642,6 @@ mod tests {
         // tree is panel-body content, not transcript content.
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
-        let mut harness_state = build_harness_state();
         let first = serde_json::json!({
             "status": "updated",
             "checklist": {
@@ -1669,8 +1681,8 @@ mod tests {
             "panel body must not re-include the transcript progress header"
         );
 
-        apply_task_tracker_block(&handle, &mut harness_state, first_progress);
-        apply_task_tracker_block(&handle, &mut harness_state, second_progress);
+        apply_task_tracker_block(&handle, first_progress);
+        apply_task_tracker_block(&handle, second_progress);
 
         let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
             InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
@@ -1695,7 +1707,6 @@ mod tests {
         transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
-        let mut harness_state = build_harness_state();
         let payload = serde_json::json!({
             "status": "updated",
             "checklist": {
@@ -1711,12 +1722,63 @@ mod tests {
         });
         let lines = task_tracker_block_lines(&payload);
 
-        apply_task_tracker_block(&handle, &mut harness_state, lines.clone());
+        apply_task_tracker_block(&handle, lines.clone());
         // Drain the initial append so only post-repeat commands remain.
         while receiver.try_recv().is_ok() {}
-        apply_task_tracker_block(&handle, &mut harness_state, lines);
+        apply_task_tracker_block(&handle, lines);
 
         assert!(receiver.try_recv().is_err(), "identical tracker repeat must not emit another transcript command");
+        transcript::clear();
+    }
+
+    #[test]
+    fn looks_like_tracker_progress_line_rejects_questions_summaries() {
+        assert!(looks_like_tracker_progress_line("• Tasks 0/2"));
+        assert!(looks_like_tracker_progress_line("• Release 1/4"));
+        assert!(!looks_like_tracker_progress_line("• Questions 2/5 answered"));
+        assert!(!looks_like_tracker_progress_line("• Plan — research/synthesis"));
+        assert!(!looks_like_tracker_progress_line("• Ran cargo check"));
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn write_tracker_progress_transcript_uses_ui_write_len_not_transcript_only_tail() {
+        transcript::clear();
+        let (sender, mut receiver) = unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        write_tracker_progress_transcript(&handle, vec!["• Release 0/2".to_string()]);
+        while receiver.try_recv().is_ok() {}
+        // UI-only append after tracker (Questions-style) must not be clobbered
+        // via TRANSCRIPT-derived replace count once Questions dual-writes; when
+        // TRANSCRIPT still has tracker as tail but UI has an extra line, the
+        // helper uses recorded UI write length.
+        handle.append_line(
+            InlineMessageKind::Info,
+            vec![InlineSegment {
+                text: "• Questions 1/2 answered".to_string(),
+                style: Arc::new(InlineTextStyle::default()),
+            }],
+        );
+
+        write_tracker_progress_transcript(&handle, vec!["• Release 1/2".to_string()]);
+
+        let commands: Vec<InlineCommand> = std::iter::from_fn(|| receiver.try_recv().ok()).collect();
+        let replaced_ui_len = commands.iter().find_map(|command| match command {
+            InlineCommand::ReplaceLast { count, lines, .. } => {
+                let rows: Vec<String> = lines
+                    .iter()
+                    .map(|row| row.iter().map(|segment| segment.text.clone()).collect::<String>())
+                    .collect();
+                Some((*count, rows))
+            }
+            _ => None,
+        });
+        // TRANSCRIPT still sees tracker at tail (Questions not mirrored here),
+        // so replace happens — but only the helper's UI write length (1), and
+        // the replacement content is the new progress line.
+        let (count, rows) = replaced_ui_len.expect("tracker update should replace remembered UI write");
+        assert_eq!(count, 1);
+        assert_eq!(rows, vec!["• Release 1/2".to_string()]);
         transcript::clear();
     }
 
@@ -1832,8 +1894,7 @@ mod tests {
             transcript::append(line);
         }
 
-        let mut harness_state = build_harness_state();
-        apply_task_tracker_block(&handle, &mut harness_state, lines.clone());
+        apply_task_tracker_block(&handle, lines.clone());
 
         assert!(
             receiver.try_recv().is_err(),
@@ -1906,13 +1967,11 @@ mod tests {
 
         // Invoke the shared outcome processor via a minimal output context.
         let handle = dummy_handle();
-        let mut harness_state = build_harness_state();
         let mut output_ctx = OutcomeContext {
             workspace_root: None,
             session_stats: &mut stats,
             renderer: &mut renderer,
             handle: &handle,
-            harness_state: &mut harness_state,
             mcp_panel_state: &mut mcp,
             vt_config: None::<&VTCodeConfig>,
         };
@@ -2401,13 +2460,11 @@ mod tests {
         });
 
         let handle = dummy_handle();
-        let mut harness_state = build_harness_state();
         let mut output_ctx = OutcomeContext {
             workspace_root: None,
             session_stats: &mut stats,
             renderer: &mut renderer,
             handle: &handle,
-            harness_state: &mut harness_state,
             mcp_panel_state: &mut mcp,
             vt_config: None::<&VTCodeConfig>,
         };
@@ -2427,7 +2484,6 @@ mod tests {
         let mut stats = SessionStats::default();
         let mut mcp = McpPanelState::default();
         let handle = dummy_handle();
-        let mut harness_state = build_harness_state();
 
         transcript::clear();
 
@@ -2448,7 +2504,6 @@ mod tests {
             session_stats: &mut stats,
             renderer: &mut renderer,
             handle: &handle,
-            harness_state: &mut harness_state,
             mcp_panel_state: &mut mcp,
             vt_config: None::<&VTCodeConfig>,
         };
@@ -2489,7 +2544,6 @@ mod tests {
         let mut renderer = AnsiRenderer::with_inline_ui(handle.clone(), Default::default());
         let mut stats = SessionStats::default();
         let mut mcp = McpPanelState::default();
-        let mut harness_state = build_harness_state();
         transcript::clear();
         let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: serde_json::json!({
@@ -2510,7 +2564,6 @@ mod tests {
             session_stats: &mut stats,
             renderer: &mut renderer,
             handle: &handle,
-            harness_state: &mut harness_state,
             mcp_panel_state: &mut mcp,
             vt_config: None::<&VTCodeConfig>,
         };
@@ -2655,13 +2708,11 @@ mod tests {
         let mut renderer = AnsiRenderer::with_inline_ui(handle.clone(), Default::default());
         let mut stats = SessionStats::default();
         let mut mcp = McpPanelState::default();
-        let mut harness_state = build_harness_state();
         let mut output_ctx = OutcomeContext {
             workspace_root: None,
             session_stats: &mut stats,
             renderer: &mut renderer,
             handle: &handle,
-            harness_state: &mut harness_state,
             mcp_panel_state: &mut mcp,
             vt_config: None::<&VTCodeConfig>,
         };
@@ -3397,7 +3448,6 @@ mod tests {
         let mut renderer = AnsiRenderer::with_inline_ui(handle.clone(), Default::default());
         let mut stats = SessionStats::default();
         let mut mcp = McpPanelState::default();
-        let mut harness_state = build_harness_state();
 
         let first = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: serde_json::json!({
@@ -3468,7 +3518,6 @@ mod tests {
             session_stats: &mut stats,
             renderer: &mut renderer,
             handle: &handle,
-            harness_state: &mut harness_state,
             mcp_panel_state: &mut mcp,
             vt_config: None::<&VTCodeConfig>,
         };

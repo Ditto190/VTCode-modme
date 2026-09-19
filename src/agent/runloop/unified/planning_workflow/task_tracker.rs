@@ -56,9 +56,13 @@ fn markdown_task_description(line: &str) -> Option<(&str, bool)> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PlanSection {
     Summary,
+    /// Plan context only — never distilled into tracker items.
+    Scope,
     Implementation,
     Validation,
     Assumptions,
+    /// Other known non-implementation sections (outcomes, deps, etc.).
+    NonTracker,
 }
 
 fn plan_section(line: &str) -> Option<PlanSection> {
@@ -76,12 +80,19 @@ fn plan_section(line: &str) -> Option<PlanSection> {
 
     if label.eq_ignore_ascii_case("Summary") {
         Some(PlanSection::Summary)
+    } else if label.eq_ignore_ascii_case("Scope") {
+        Some(PlanSection::Scope)
     } else if label.eq_ignore_ascii_case("Implementation Steps") || label.eq_ignore_ascii_case("Steps") {
         Some(PlanSection::Implementation)
     } else if label.eq_ignore_ascii_case("Test Cases and Validation") || label.eq_ignore_ascii_case("Validation") {
         Some(PlanSection::Validation)
     } else if label.eq_ignore_ascii_case("Assumptions and Defaults") || label.eq_ignore_ascii_case("Assumptions") {
         Some(PlanSection::Assumptions)
+    } else if label.eq_ignore_ascii_case("Expected Outcomes")
+        || label.eq_ignore_ascii_case("Dependencies and Prerequisites")
+        || label.eq_ignore_ascii_case("Repository facts checked")
+    {
+        Some(PlanSection::NonTracker)
     } else {
         None
     }
@@ -91,6 +102,7 @@ fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
     let mut in_implementation = false;
     let mut saw_implementation = false;
     let mut compact_after_summary = false;
+    let mut in_non_tracker_section = false;
     let mut tasks = Vec::new();
 
     for line in plan.raw_content.lines() {
@@ -98,22 +110,30 @@ fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
             match section {
                 PlanSection::Summary => {
                     in_implementation = false;
+                    in_non_tracker_section = false;
                     compact_after_summary = !saw_implementation;
+                }
+                PlanSection::Scope | PlanSection::NonTracker => {
+                    // Scope / outcomes / deps are plan context, never checklist items.
+                    in_implementation = false;
+                    in_non_tracker_section = true;
                 }
                 PlanSection::Implementation => {
                     in_implementation = true;
                     saw_implementation = true;
+                    in_non_tracker_section = false;
                     compact_after_summary = false;
                 }
                 PlanSection::Validation | PlanSection::Assumptions => {
                     in_implementation = false;
+                    in_non_tracker_section = false;
                     compact_after_summary = false;
                 }
             }
             continue;
         }
 
-        if (in_implementation || compact_after_summary)
+        if (in_implementation || (compact_after_summary && !in_non_tracker_section))
             && let Some(task) = markdown_task_description(line)
         {
             tasks.push(task);
@@ -368,6 +388,32 @@ mod tests {
         assert!(description.contains("Tighten intro"));
         assert!(!description.contains("Out:"));
         assert!(!description.contains("In:"));
+    }
+
+    #[test]
+    fn sparse_plan_scope_lines_are_not_distilled_into_tracker_items() {
+        // Sparse plans without an Implementation Steps heading must still skip
+        // numbered/checkbox Scope lines.
+        let plan = PlanContent::from_markdown(
+            "sparse-scope".to_string(),
+            "## Summary\nFocused README tweak.\n\n1. Tighten the intro paragraph\n2. Verify with rg\n\n## Scope\n1. In scope: intro paragraph\n2. Out of scope: other docs\n",
+            None,
+        );
+        let items = task_items_from_plan(&plan);
+        let descriptions: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.get("description").and_then(|value| value.as_str()).map(ToOwned::to_owned))
+            .collect();
+        assert!(
+            descriptions.iter().any(|d| d.contains("Tighten the intro paragraph")),
+            "implementation steps remain: {descriptions:?}"
+        );
+        assert!(
+            !descriptions
+                .iter()
+                .any(|d| d.contains("In scope") || d.contains("Out of scope")),
+            "Scope lines must not become tracker items: {descriptions:?}"
+        );
     }
 
     #[test]

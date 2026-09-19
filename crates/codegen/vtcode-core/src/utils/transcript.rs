@@ -15,6 +15,10 @@ static INLINE_HANDLE: Lazy<RwLock<Option<Arc<InlineHandle>>>> = Lazy::new(|| RwL
 /// Session-scoped replaceable tracker transcript block. Shared by every tracker
 /// writer (pipeline + plan-approval handoff) so one surface owns replace/dedupe.
 static REPLACEABLE_TRACKER_BLOCK: Lazy<RwLock<Option<Vec<String>>>> = Lazy::new(|| RwLock::new(None));
+/// UI line count last written to `InlineHandle` by the tracker transcript
+/// helper. Used instead of deriving a UI `replace_last` count from TRANSCRIPT
+/// (the two stores can diverge when other writers hit only one side).
+static REPLACEABLE_TRACKER_UI_LEN: Lazy<RwLock<Option<usize>>> = Lazy::new(|| RwLock::new(None));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TranscriptMode {
@@ -138,13 +142,29 @@ pub fn tail_matches(lines: &[String]) -> bool {
 }
 
 /// Remember the current user-facing tracker transcript block.
+///
+/// `ui_line_count` is how many UI lines the tracker helper last wrote to
+/// `InlineHandle` for this block (used for tail-safe UI replace).
+pub fn remember_tracker_block_with_ui_len(lines: Vec<String>, ui_line_count: usize) {
+    let has_lines = !lines.is_empty();
+    *REPLACEABLE_TRACKER_BLOCK.write() = has_lines.then_some(lines);
+    *REPLACEABLE_TRACKER_UI_LEN.write() = has_lines.then_some(ui_line_count);
+}
+
+/// Remember the current user-facing tracker transcript block (UI length = line count).
 pub fn remember_tracker_block(lines: Vec<String>) {
-    *REPLACEABLE_TRACKER_BLOCK.write() = (!lines.is_empty()).then_some(lines);
+    let ui_len = lines.len();
+    remember_tracker_block_with_ui_len(lines, ui_len);
 }
 
 /// Line count of the remembered tracker transcript block, if any.
 pub fn tracker_block_len() -> Option<usize> {
     REPLACEABLE_TRACKER_BLOCK.read().as_ref().map(|lines| lines.len())
+}
+
+/// UI write length last recorded for the tracker block, if any.
+pub fn tracker_ui_write_len() -> Option<usize> {
+    *REPLACEABLE_TRACKER_UI_LEN.read()
 }
 
 /// Whether `lines` match the remembered tracker transcript block exactly.
@@ -162,6 +182,12 @@ pub fn tracker_block_len_if_at_tail() -> Option<usize> {
     }
 }
 
+/// Clear remembered tracker replace state (tests / session teardown).
+pub fn clear_tracker_block() {
+    *REPLACEABLE_TRACKER_BLOCK.write() = None;
+    *REPLACEABLE_TRACKER_UI_LEN.write() = None;
+}
+
 /// Last non-empty transcript line, if any.
 pub fn last_line() -> Option<String> {
     TRANSCRIPT.read().iter().rev().find(|line| !line.trim().is_empty()).cloned()
@@ -177,7 +203,7 @@ pub fn len() -> usize {
 
 pub fn clear() {
     TRANSCRIPT.write().clear();
-    *REPLACEABLE_TRACKER_BLOCK.write() = None;
+    clear_tracker_block();
 }
 
 /// Set the inline handle for immediate message display.

@@ -181,20 +181,22 @@ fn append_summary_lines(
 
     if wizard_mode == vtcode_ui::tui::app::WizardModalMode::TabbedList {
         handle.append_line(InlineMessageKind::Info, vec![summary_segment("• Selection captured".to_string())]);
+        // Mirror UI-only append into the shared transcript log so tracker
+        // replace decisions do not treat a stale TRANSCRIPT tail as current.
+        vtcode_core::utils::transcript::append("• Selection captured");
         return;
     }
 
     let answered_count = answers.len();
     let total_count = questions.len();
-    handle.append_line(
-        InlineMessageKind::Info,
-        vec![summary_segment(format!(
-            "• Questions {answered_count}/{total_count} answered"
-        ))],
-    );
+    let questions_summary = format!("• Questions {answered_count}/{total_count} answered");
+    handle.append_line(InlineMessageKind::Info, vec![summary_segment(questions_summary.clone())]);
+    vtcode_core::utils::transcript::append(&questions_summary);
 
     for question in questions {
-        handle.append_line(InlineMessageKind::Info, vec![summary_segment(format!("  • {}", question.question))]);
+        let question_line = format!("  • {}", question.question);
+        handle.append_line(InlineMessageKind::Info, vec![summary_segment(question_line.clone())]);
+        vtcode_core::utils::transcript::append(&question_line);
         let answer_text = answers
             .get(&question.id)
             .map(|answer| {
