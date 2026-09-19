@@ -11,7 +11,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use unicode_width::UnicodeWidthStr;
-use vtcode_commons::ui_protocol::{CompactActivityMetadata, SlashCommandItem, ToolOutputId};
+use vtcode_commons::ui_protocol::{CompactActivityMetadata, SlashCommandItem, TaskItemStatus, ToolOutputId};
 
 use super::overlay::{
     AgentPaletteItem, AgentPaletteTransientRequest, FilePaletteTransientRequest, ListOverlayRequest,
@@ -688,6 +688,8 @@ impl InlineHandle {
     pub fn show_task_panel(&self) {
         self.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
             lines: Vec::new(),
+            statuses: Vec::new(),
+            current: None,
             visible: Some(true),
             metadata: None,
         }));
@@ -704,6 +706,8 @@ impl InlineHandle {
     pub fn hide_task_panel(&self) {
         self.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
             lines: Vec::new(),
+            statuses: Vec::new(),
+            current: None,
             visible: Some(false),
             metadata: None,
         }));
@@ -714,7 +718,28 @@ impl InlineHandle {
     }
 
     pub fn update_task_panel_with_metadata(&self, lines: Vec<String>, metadata: Option<TaskPanelMetadata>) {
-        self.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest { lines, visible: None, metadata }));
+        self.update_task_panel_with_statuses(lines, Vec::new(), None, metadata);
+    }
+
+    /// Update the panel body with per-row statuses for text-styling.
+    ///
+    /// `statuses` runs parallel to `lines`; `current` is the focused-row
+    /// index for accent emphasis. Length mismatches fall back to the uniform
+    /// base style so legacy callers keep working.
+    pub fn update_task_panel_with_statuses(
+        &self,
+        lines: Vec<String>,
+        statuses: Vec<TaskItemStatus>,
+        current: Option<usize>,
+        metadata: Option<TaskPanelMetadata>,
+    ) {
+        self.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
+            lines,
+            statuses,
+            current,
+            visible: None,
+            metadata,
+        }));
     }
 
     pub fn close_transient(&self) {

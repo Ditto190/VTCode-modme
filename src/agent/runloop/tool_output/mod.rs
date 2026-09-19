@@ -21,6 +21,7 @@ use serde_json::Value;
 use streams::render_stream_section;
 pub(crate) use streams::{render_code_fence_blocks, resolve_stdout_tail_limit};
 use styles::{GitStyles, LsStyles};
+use vtcode_commons::ui_protocol::TaskItemStatus;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::mcp::McpRendererProfile;
@@ -335,12 +336,12 @@ fn is_git_diff_payload(val: &Value) -> bool {
         .is_some_and(|content_type| content_type == "git_diff")
 }
 
-/// User-facing transcript surface for a tracker payload: title + progress only.
+/// User-facing transcript surface for a tracker payload.
 ///
-/// Successful checklists collapse to one line (`• Release 2/5`) when progress
-/// counts exist (explicit or derived from items), even if the tree body is
-/// empty. Errors and empty trackers keep diagnostic lines. The compact tree
-/// stays panel-only.
+/// Successful checklists collapse to a header line (`• Release 2/5`) when
+/// progress counts exist (explicit or derived from items), even if the tree
+/// body is empty. Errors and empty trackers keep diagnostic lines. Row-level
+/// detail travels through [`tracker_transcript_lines`] with typed statuses.
 pub(crate) fn tracker_progress_lines(val: &Value) -> Vec<String> {
     if tracker_response_is_successful(val)
         && (!tracker_visible_tree_rows(val).is_empty() || tracker_progress_counts(val).is_some())
@@ -361,45 +362,128 @@ pub(crate) fn tracker_progress_lines(val: &Value) -> Vec<String> {
 /// to a single `  … N more` row so large checklists stay bounded.
 pub(crate) const TRACKER_TRANSCRIPT_MAX_ROWS: usize = 30;
 
+/// One user-facing tracker row: glyphless display text plus its typed status.
+///
+/// `status` is `None` for headers, diagnostics, and truncation rows, which
+/// render with the default style. Carrying status alongside text (instead of
+/// re-parsing glyphs) keeps styling exact after glyph removal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TrackerLine {
+    pub(crate) text: String,
+    pub(crate) status: Option<TaskItemStatus>,
+}
+
+impl TrackerLine {
+    pub(crate) fn plain(text: String) -> Self {
+        Self { text, status: None }
+    }
+
+    pub(crate) fn row(text: String, status: TaskItemStatus) -> Self {
+        Self { text, status: Some(status) }
+    }
+}
+
+/// One glyphless tree row with its typed status and leaf flag.
+///
+/// Parents summarize children and carry no status glyph; `leaf` distinguishes
+/// them so the current-task picker prefers actionable leaf rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TrackerRow {
+    pub(crate) text: String,
+    pub(crate) status: TaskItemStatus,
+    pub(crate) leaf: bool,
+}
+
 /// Transcript lines for a tracker payload, honoring display mode.
 ///
-/// Compact (`expanded = false`) keeps the title+progress single line.
-/// Expanded appends the compact tree body (truncated) so each task item is
-/// visible inline. Errors and diagnostics never expand to a tree.
-pub(crate) fn tracker_transcript_lines(val: &Value, expanded: bool) -> Vec<String> {
+/// Status surfaces through text styling only (no leaf glyphs): done rows
+/// render struck-through, the current row renders bold in the theme accent,
+/// blocked rows use the warning token. Compact (`expanded = false`) shows
+/// header plus the single current task row (`  ▶ …`); expanded appends the
+/// glyphless tree body (truncated). Errors and diagnostics never expand.
+pub(crate) fn tracker_transcript_lines(val: &Value, expanded: bool) -> Vec<TrackerLine> {
     if !expanded {
-        return tracker_progress_lines(val);
+        let progress = tracker_progress_lines(val);
+        if progress.len() != 1 || !tracker_response_is_successful(val) {
+            return progress.into_iter().map(TrackerLine::plain).collect();
+        }
+        let Some(current) = tracker_current_tree_row(val) else {
+            return progress.into_iter().map(TrackerLine::plain).collect();
+        };
+        let header = progress.into_iter().next().unwrap_or_else(|| "• Tasks".to_string());
+        return vec![TrackerLine::plain(header), current];
     }
     if !tracker_response_is_successful(val) {
-        return tracker_progress_lines(val);
+        return tracker_progress_lines(val).into_iter().map(TrackerLine::plain).collect();
     }
     let progress = tracker_progress_lines(val);
     if progress.len() != 1 {
-        return progress;
+        return progress.into_iter().map(TrackerLine::plain).collect();
     }
-    let tree = tracker_visible_tree_rows(val);
+    let tree = tracker_rich_tree_rows(val);
     if tree.is_empty() {
-        return progress;
+        return progress.into_iter().map(TrackerLine::plain).collect();
     }
+    let header = progress.into_iter().next().unwrap_or_else(|| "• Tasks".to_string());
     let mut lines = Vec::with_capacity(1 + TRACKER_TRANSCRIPT_MAX_ROWS + 1);
-    lines.push(progress.into_iter().next().unwrap_or_else(|| "• Tasks".to_string()));
+    lines.push(TrackerLine::plain(header));
     if tree.len() > TRACKER_TRANSCRIPT_MAX_ROWS {
         let overflow = tree.len() - TRACKER_TRANSCRIPT_MAX_ROWS;
-        lines.extend(tree.into_iter().take(TRACKER_TRANSCRIPT_MAX_ROWS));
-        lines.push(format!("  … {overflow} more"));
+        lines.extend(
+            tree.into_iter()
+                .take(TRACKER_TRANSCRIPT_MAX_ROWS)
+                .map(|row| TrackerLine::row(row.text, row.status)),
+        );
+        lines.push(TrackerLine::plain(format!("  … {overflow} more")));
     } else {
-        lines.extend(tree);
+        lines.extend(tree.into_iter().map(|row| TrackerLine::row(row.text, row.status)));
     }
     lines
 }
 
-/// Panel body rows for a tracker payload: compact tree only (no summary header).
+/// Panel body rows for a tracker payload: glyphless tree text only (no header).
+///
+/// Statuses travel separately via [`tracker_tree_body_statuses`]; the panel
+/// maps them to theme styles per row.
 pub(crate) fn tracker_tree_body_lines(val: &Value) -> Vec<String> {
-    tracker_visible_tree_rows(val)
+    tracker_rich_tree_rows(val).into_iter().map(|row| row.text).collect()
 }
 
-fn tracker_visible_tree_rows(val: &Value) -> Vec<String> {
-    let view = val.get("view").and_then(Value::as_object);
+/// Panel rows with typed statuses plus the focused-row index.
+///
+/// Returns `(texts, statuses, current)`: display lines for the panel body,
+/// parallel statuses for per-row styling, and the index of the focused
+/// current task (leaf-aware pick, same priority as the transcript) for accent
+/// emphasis. The focused index is `None` when nothing is actionable.
+pub(crate) fn tracker_panel_rows(val: &Value) -> (Vec<String>, Vec<TaskItemStatus>, Option<usize>) {
+    let rows = tracker_rich_tree_rows(val);
+    let mut current = None;
+    for want_leaf in [true, false] {
+        for status in [
+            TaskItemStatus::InProgress,
+            TaskItemStatus::Pending,
+            TaskItemStatus::Blocked,
+        ] {
+            if let Some(index) = rows.iter().position(|row| row.status == status && row.leaf == want_leaf) {
+                current = Some(index);
+                break;
+            }
+        }
+        if current.is_some() {
+            break;
+        }
+    }
+    let texts = rows.iter().map(|row| row.text.clone()).collect::<Vec<_>>();
+    let statuses = rows.into_iter().map(|row| row.status).collect::<Vec<_>>();
+    (texts, statuses, current)
+}
+
+/// Glyphless tree rows with typed statuses, in tree order.
+///
+/// Checklist items render through the shared compact tree formatter; the
+/// leading status glyph is stripped so status surfaces through text styling
+/// only. The legacy `view.lines` fallback derives status from its glyphs.
+fn tracker_rich_tree_rows(val: &Value) -> Vec<TrackerRow> {
     let checklist_items = val
         .get("checklist")
         .and_then(Value::as_object)
@@ -410,13 +494,142 @@ fn tracker_visible_tree_rows(val: &Value) -> Vec<String> {
         .map(|items| compact_task_tree_view_from_items(items))
         .unwrap_or_default();
     if compact_rows.is_empty() {
-        view.and_then(|obj| obj.get("lines"))
+        return val
+            .get("view")
+            .and_then(Value::as_object)
+            .and_then(|view| view.get("lines"))
             .and_then(Value::as_array)
-            .map(|rows| rows.iter().filter_map(visible_tracker_view_row).collect::<Vec<_>>())
-            .unwrap_or_default()
-    } else {
-        compact_rows.iter().filter_map(visible_tracker_view_row).collect::<Vec<_>>()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(visible_tracker_view_row)
+                    .map(|display| match tracker_tree_row_glyph(&display) {
+                        Some((glyph, _)) => TrackerRow {
+                            text: strip_tracker_status_glyph(&display),
+                            status: task_status_from_glyph(glyph),
+                            leaf: true,
+                        },
+                        // Glyph-free context rows are preserved (never dropped)
+                        // with the neutral pending style, matching the legacy
+                        // plain rendering.
+                        None => TrackerRow {
+                            text: display,
+                            status: TaskItemStatus::Pending,
+                            leaf: false,
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
     }
+    let mut rows = Vec::with_capacity(compact_rows.len());
+    for row in &compact_rows {
+        let Some(display) = visible_tracker_view_row(row) else {
+            continue;
+        };
+        let status = row
+            .get("status")
+            .and_then(Value::as_str)
+            .and_then(|raw| raw.parse::<TaskItemStatus>().ok())
+            .unwrap_or(TaskItemStatus::Pending);
+        let leaf = tracker_tree_row_glyph(&display).is_some();
+        rows.push(TrackerRow {
+            text: strip_tracker_status_glyph(&display),
+            status,
+            leaf,
+        });
+    }
+    rows
+}
+
+fn tracker_visible_tree_rows(val: &Value) -> Vec<String> {
+    tracker_tree_body_lines(val)
+}
+
+/// Whether a transcript line is the compact-mode focused TODO row.
+pub(crate) fn is_tracker_current_row(line: &str) -> bool {
+    line.trim_start().starts_with("▶ ")
+}
+
+/// Compact-mode focused row: the single most actionable task.
+///
+/// Reuses the leaf-aware pick from [`tracker_panel_rows`] so transcript and
+/// panel always agree on which task is focused. All-completed and empty
+/// checklists return `None` so compact stays header-only. The returned row
+/// uses the distinct `  ▶ ` visual without a status glyph; styling carries
+/// the status.
+pub(crate) fn tracker_current_tree_row(val: &Value) -> Option<TrackerLine> {
+    let (texts, statuses, current) = tracker_panel_rows(val);
+    let index = current?;
+    Some(TrackerLine::row(format_tracker_current_row(&texts[index]), statuses[index]))
+}
+
+/// Map a status glyph token to its typed status.
+fn task_status_from_glyph(glyph: &str) -> TaskItemStatus {
+    match glyph {
+        "[x] " => TaskItemStatus::Completed,
+        "[-] " => TaskItemStatus::InProgress,
+        "[!] " => TaskItemStatus::Blocked,
+        _ => TaskItemStatus::Pending,
+    }
+}
+
+/// Split a tree display row into its status glyph and body, if it is a leaf.
+///
+/// Only the leading glyph token is inspected, so descriptions containing
+/// bracket text mid-string (e.g. `Fix [-] flag handling`) are never mangled.
+fn tracker_tree_row_glyph(display: &str) -> Option<(&str, &str)> {
+    let mut rest = display.trim_start();
+    loop {
+        if let Some(after) = rest
+            .strip_prefix("├ ")
+            .or_else(|| rest.strip_prefix("└ "))
+            .or_else(|| rest.strip_prefix("│ "))
+        {
+            rest = after;
+            continue;
+        }
+        break;
+    }
+    for glyph in ["□ ", "[x] ", "[-] ", "[!] "] {
+        if let Some(body) = rest.strip_prefix(glyph) {
+            return Some((glyph, body));
+        }
+    }
+    None
+}
+
+/// Strip the leading status glyph from a tree row, keeping branch structure.
+///
+/// `  ├ [-] Defer setup` → `  ├ Defer setup`. Parent rows and glyph-free
+/// rows pass through unchanged.
+fn strip_tracker_status_glyph(display: &str) -> String {
+    let Some((_, body)) = tracker_tree_row_glyph(display) else {
+        return display.to_string();
+    };
+    let prefix_len = display.len() - body.len();
+    let (prefix_with_glyph, _) = display.split_at(prefix_len);
+    let glyph_len = ["□ ", "[x] ", "[-] ", "[!] "]
+        .iter()
+        .find_map(|glyph| prefix_with_glyph.strip_suffix(glyph).map(|_| glyph.len()))
+        .unwrap_or(0);
+    format!("{}{}", &prefix_with_glyph[..prefix_with_glyph.len() - glyph_len], body.trim_start())
+}
+
+/// Reframe a glyphless tree row with the distinct current-task visual.
+fn format_tracker_current_row(glyphless_text: &str) -> String {
+    let mut rest = glyphless_text.trim_start();
+    loop {
+        if let Some(after) = rest
+            .strip_prefix("├ ")
+            .or_else(|| rest.strip_prefix("└ "))
+            .or_else(|| rest.strip_prefix("│ "))
+        {
+            rest = after;
+            continue;
+        }
+        break;
+    }
+    format!("  ▶ {}", rest.trim_start())
 }
 
 /// Title + progress only — no next-step snippet, no tree rows.
@@ -528,10 +741,14 @@ pub(crate) fn tracker_panel_metadata(val: &Value) -> Option<TaskPanelMetadata> {
 }
 
 fn render_tracker_view(renderer: &mut AnsiRenderer, val: &Value) -> Result<bool> {
-    // Non-inline fallback honors display mode: compact stays title+progress
-    // only, expanded appends the truncated tree so items remain visible.
+    // Non-inline fallback honors display mode: compact shows header plus the
+    // current task, expanded appends the truncated tree. Glyphless plain text;
+    // status styling applies on the inline surface.
     let expanded = renderer.tool_display_mode() != ToolDisplayMode::Compact;
-    let lines = tracker_transcript_lines(val, expanded);
+    let lines: Vec<String> = tracker_transcript_lines(val, expanded)
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
     if lines.is_empty() {
         return Ok(false);
     }
@@ -735,14 +952,17 @@ pub(crate) fn collect_inline_diff_review_anchors(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use vtcode_commons::ui_protocol::TaskItemStatus;
     use vtcode_core::config::ToolDisplayMode;
     use vtcode_core::ui::InlineHandle;
     use vtcode_core::utils::ansi::AnsiRenderer;
 
     use super::{
-        TRACKER_TRANSCRIPT_MAX_ROWS, collect_inline_output, humanize_tracker_title, preferred_follow_up_rendered_body,
-        render_tool_output, should_render_command_session_terminal_panel, spooled_output_hint, tracker_panel_metadata,
-        tracker_progress_lines, tracker_summary_lines, tracker_transcript_lines, tracker_tree_body_lines,
+        TRACKER_TRANSCRIPT_MAX_ROWS, TrackerLine, collect_inline_output, humanize_tracker_title,
+        is_tracker_current_row, preferred_follow_up_rendered_body, render_tool_output,
+        should_render_command_session_terminal_panel, spooled_output_hint, tracker_current_tree_row,
+        tracker_panel_metadata, tracker_panel_rows, tracker_progress_lines, tracker_summary_lines,
+        tracker_transcript_lines, tracker_tree_body_lines,
     };
 
     #[test]
@@ -1551,13 +1771,36 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "  ├ □ Investigate",
-                "  ├ [-] Implement",
-                "  ├ [x] Verify",
-                "  └ [!] Resolve dependency",
+                "  ├ Investigate",
+                "  ├ Implement",
+                "  ├ Verify",
+                "  └ Resolve dependency",
             ]
         );
         assert!(rows.iter().all(|row| !row.starts_with("• ")));
+        assert!(
+            rows.iter()
+                .all(|row| !row.contains("□") && !row.contains("[x]") && !row.contains("[-]")),
+            "status surfaces through styling, not glyphs: {rows:?}"
+        );
+        assert_eq!(
+            tracker_panel_rows(&payload),
+            (
+                vec![
+                    "  ├ Investigate".to_string(),
+                    "  ├ Implement".to_string(),
+                    "  ├ Verify".to_string(),
+                    "  └ Resolve dependency".to_string(),
+                ],
+                vec![
+                    TaskItemStatus::Pending,
+                    TaskItemStatus::InProgress,
+                    TaskItemStatus::Completed,
+                    TaskItemStatus::Blocked,
+                ],
+                Some(1),
+            )
+        );
     }
 
     #[test]
@@ -1647,9 +1890,9 @@ mod tests {
             rows,
             vec![
                 "  ├ Prepare release",
-                "  │ [x] Update version",
-                "  │ [-] Run checks",
-                "  └ □ Publish",
+                "  │ Update version",
+                "  │ Run checks",
+                "  └ Publish",
             ]
         );
         assert!(
@@ -1718,23 +1961,148 @@ mod tests {
         );
         // Failed updates stay diagnosable in the transcript; remaining checklist
         // rows remain available on the panel body path.
-        assert_eq!(tracker_tree_body_lines(&partial_failure), vec!["  └ [x] Still present"]);
+        assert_eq!(tracker_tree_body_lines(&partial_failure), vec!["  └ Still present"]);
+    }
+
+    fn transcript_texts(lines: &[TrackerLine]) -> Vec<&str> {
+        lines.iter().map(|line| line.text.as_str()).collect()
+    }
+
+    fn transcript_statuses(lines: &[TrackerLine]) -> Vec<Option<TaskItemStatus>> {
+        lines.iter().map(|line| line.status).collect()
     }
 
     #[test]
-    fn tracker_transcript_lines_compact_matches_progress_only() {
+    fn tracker_transcript_lines_compact_shows_header_plus_current_task() {
         let payload = json!({
             "status": "updated",
             "checklist": {
                 "title": "Release",
                 "items": [
                     { "index_path": "1", "description": "Investigate cache miss", "status": "completed" },
-                    { "index_path": "2", "description": "Defer eager setup", "status": "pending" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "in_progress" },
+                    { "index_path": "3", "description": "Verify with cargo check", "status": "pending" },
                 ]
             }
         });
 
-        assert_eq!(tracker_transcript_lines(&payload, false), vec!["• Release 1/2".to_string()]);
+        let rows = tracker_transcript_lines(&payload, false);
+
+        assert_eq!(transcript_texts(&rows), vec!["• Release 1/3", "  ▶ Defer eager setup"]);
+        assert_eq!(transcript_statuses(&rows), vec![None, Some(TaskItemStatus::InProgress)]);
+        assert!(rows.iter().all(|row| !row.text.contains("[-]") && !row.text.contains("□")));
+    }
+
+    #[test]
+    fn tracker_current_tree_row_prefers_in_progress_over_pending_and_blocked() {
+        // Asymmetric statuses: pending comes first in document order, but the
+        // in-progress leaf later must win as current.
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Verify with cargo check", "status": "pending" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "in_progress" },
+                    { "index_path": "3", "description": "Resolve dependency", "status": "blocked" },
+                ]
+            }
+        });
+
+        assert_eq!(
+            tracker_current_tree_row(&payload),
+            Some(TrackerLine::row("  ▶ Defer eager setup".to_string(), TaskItemStatus::InProgress))
+        );
+    }
+
+    #[test]
+    fn tracker_current_tree_row_falls_back_to_pending_then_blocked() {
+        let pending_only = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Verify with cargo check", "status": "completed" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "pending" },
+                ]
+            }
+        });
+        assert_eq!(
+            tracker_current_tree_row(&pending_only),
+            Some(TrackerLine::row("  ▶ Defer eager setup".to_string(), TaskItemStatus::Pending))
+        );
+
+        let blocked_only = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Verify with cargo check", "status": "completed" },
+                    { "index_path": "2", "description": "Resolve dependency", "status": "blocked" },
+                ]
+            }
+        });
+        assert_eq!(
+            tracker_current_tree_row(&blocked_only),
+            Some(TrackerLine::row("  ▶ Resolve dependency".to_string(), TaskItemStatus::Blocked))
+        );
+    }
+
+    #[test]
+    fn tracker_current_tree_row_stays_header_only_when_all_completed_or_empty() {
+        let all_done = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Investigate cache miss", "status": "completed" },
+                    { "index_path": "2", "description": "Defer eager setup", "status": "completed" },
+                ]
+            }
+        });
+        assert_eq!(tracker_current_tree_row(&all_done), None);
+        assert_eq!(tracker_transcript_lines(&all_done, false), vec![TrackerLine::plain("• Release 2/2".to_string())]);
+
+        let empty = json!({
+            "status": "updated",
+            "checklist": { "title": "Release", "completed": 0, "total": 0, "items": [] }
+        });
+        assert_eq!(tracker_current_tree_row(&empty), None);
+    }
+
+    #[test]
+    fn tracker_current_row_marker_is_detected() {
+        assert!(is_tracker_current_row("  ▶ Defer eager setup"));
+        assert!(is_tracker_current_row("  ▶ Verify with cargo check"));
+        assert!(!is_tracker_current_row("  ├ Defer eager setup"));
+        assert!(!is_tracker_current_row("• Release 1/3"));
+    }
+
+    #[test]
+    fn tracker_glyph_strip_keeps_mid_string_brackets_and_branches() {
+        // Only the leading status glyph is stripped; bracket text inside the
+        // description and the branch structure survive verbatim.
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Fix [-] flag handling", "status": "pending" },
+                    { "index_path": "2", "description": "Ship [x] marked docs", "status": "completed" },
+                ]
+            }
+        });
+
+        let rows = tracker_transcript_lines(&payload, true);
+
+        assert_eq!(
+            transcript_texts(&rows),
+            vec!["• Release 1/2", "  ├ Fix [-] flag handling", "  └ Ship [x] marked docs"]
+        );
+        assert_eq!(
+            transcript_statuses(&rows),
+            vec![None, Some(TaskItemStatus::Pending), Some(TaskItemStatus::Completed)]
+        );
     }
 
     #[test]
@@ -1753,13 +2121,22 @@ mod tests {
 
         let rows = tracker_transcript_lines(&payload, true);
 
-        assert_eq!(rows[0], "• Release 1/3");
+        assert_eq!(transcript_texts(&rows)[0], "• Release 1/3");
         assert_eq!(
-            &rows[1..],
-            &[
-                "  ├ [x] Investigate cache miss",
-                "  ├ [-] Defer eager setup",
-                "  └ □ Verify with cargo check",
+            transcript_texts(&rows)[1..],
+            [
+                "  ├ Investigate cache miss",
+                "  ├ Defer eager setup",
+                "  └ Verify with cargo check",
+            ]
+        );
+        assert_eq!(
+            transcript_statuses(&rows),
+            vec![
+                None,
+                Some(TaskItemStatus::Completed),
+                Some(TaskItemStatus::InProgress),
+                Some(TaskItemStatus::Pending),
             ]
         );
     }
@@ -1783,15 +2160,20 @@ mod tests {
         let rows = tracker_transcript_lines(&payload, true);
 
         assert_eq!(rows.len(), 1 + TRACKER_TRANSCRIPT_MAX_ROWS + 1);
-        assert_eq!(rows[0], format!("• Release 1/{}", TRACKER_TRANSCRIPT_MAX_ROWS + 5));
-        assert!(rows[1].contains("Distinct task 1"));
+        assert_eq!(rows[0].text, format!("• Release 1/{}", TRACKER_TRANSCRIPT_MAX_ROWS + 5));
+        assert_eq!(rows[0].status, None);
+        assert!(rows[1].text.contains("Distinct task 1"));
+        assert_eq!(rows[1].status, Some(TaskItemStatus::Completed));
         assert!(
-            rows[TRACKER_TRANSCRIPT_MAX_ROWS].contains(format!("Distinct task {TRACKER_TRANSCRIPT_MAX_ROWS}").as_str())
+            rows[TRACKER_TRANSCRIPT_MAX_ROWS]
+                .text
+                .contains(format!("Distinct task {TRACKER_TRANSCRIPT_MAX_ROWS}").as_str())
         );
-        assert_eq!(rows[TRACKER_TRANSCRIPT_MAX_ROWS + 1], "  … 5 more");
+        assert_eq!(rows[TRACKER_TRANSCRIPT_MAX_ROWS + 1].text, "  … 5 more");
+        assert_eq!(rows[TRACKER_TRANSCRIPT_MAX_ROWS + 1].status, None);
         assert!(
             rows.iter()
-                .all(|row| !row.contains("Distinct task 31") || row.starts_with("  …"))
+                .all(|row| !row.text.contains("Distinct task 31") || row.text.starts_with("  …"))
         );
     }
 
@@ -1810,13 +2192,14 @@ mod tests {
         let rows = tracker_transcript_lines(&payload, true);
 
         assert_eq!(
-            rows,
+            transcript_texts(&rows),
             vec![
                 "• Tasks",
                 "  Tracker status: error",
                 "  Update: Tracker response was only partially applied.",
             ]
         );
-        assert!(rows.iter().all(|row| !row.contains("Still present")));
+        assert!(rows.iter().all(|row| row.status.is_none()));
+        assert!(rows.iter().all(|row| !row.text.contains("Still present")));
     }
 }

@@ -192,8 +192,22 @@ fn render_task_panel(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
         return;
     }
 
-    let panel_lines = task_panel::body_lines(&session.task_panel_lines, session.task_panel_metadata.as_ref());
-    let rows = task_panel::rows(panel_lines, area.width, session.core.header_secondary_style());
+    let (panel_lines, panel_statuses, panel_current) = task_panel::aligned_body(
+        &session.task_panel_lines,
+        &session.task_panel_statuses,
+        session.task_panel_current,
+        session.task_panel_metadata.as_ref(),
+    );
+    let base = session.core.header_secondary_style();
+    let row_styles: Vec<Style> = panel_lines
+        .iter()
+        .enumerate()
+        .map(|(index, _)| match panel_statuses.get(index).copied() {
+            Some(status) => task_panel::row_style(status, Some(index) == panel_current, base),
+            None => base,
+        })
+        .collect();
+    let rows = task_panel::styled_rows(panel_lines, &row_styles, base, area.width);
     let item_count = panel_lines.len();
     let (title, progress) = task_panel::header(session.task_panel_metadata.as_ref(), item_count);
     let sections = list_panel::SharedListPanelSections {

@@ -10,7 +10,7 @@ use super::tracker_response::resolve_tracker_file_response;
 use super::validate_plan_content;
 
 fn render_created_task_tracker(handle: &InlineHandle, output: &serde_json::Value) {
-    let panel_lines = crate::agent::runloop::tool_output::tracker_tree_body_lines(output);
+    let (panel_lines, panel_statuses, panel_current) = crate::agent::runloop::tool_output::tracker_panel_rows(output);
     // Approval has no renderer display mode available; default to expanded so
     // each task item is visible inline instead of only the plan name.
     let progress_lines = crate::agent::runloop::tool_output::tracker_transcript_lines(output, true);
@@ -20,10 +20,12 @@ fn render_created_task_tracker(handle: &InlineHandle, output: &serde_json::Value
 
     // Approval creates the tracker outside the normal tool pipeline, so make
     // the same panel/transcript updates that a regular task_tracker call gets.
-    // Panel body keeps the compact tree; transcript uses the shared
-    // single-writer path (never stacks duplicates).
-    handle.update_task_panel_with_metadata(
+    // Panel body keeps the full tree with per-row statuses; transcript uses
+    // the shared single-writer path (never stacks duplicates).
+    handle.update_task_panel_with_statuses(
         panel_lines,
+        panel_statuses,
+        panel_current,
         crate::agent::runloop::tool_output::tracker_panel_metadata(output),
     );
     handle.show_task_panel();

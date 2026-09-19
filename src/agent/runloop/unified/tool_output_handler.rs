@@ -1,10 +1,13 @@
 use crate::agent::runloop::git::normalize_workspace_path;
 use crate::agent::runloop::mcp_events::McpPanelState;
+use crate::agent::runloop::tool_output::TrackerLine;
 use crate::agent::runloop::unified::state::SessionStats;
+use anstyle::Effects;
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
+use vtcode_commons::ui_protocol::TaskItemStatus;
 use vtcode_core::config::ToolDisplayMode;
 use vtcode_core::config::constants::tools;
 use vtcode_core::config::loader::VTCodeConfig;
@@ -185,15 +188,18 @@ fn is_task_tracker_tool(name: &str) -> bool {
     matches!(name, tools::TASK_TRACKER)
 }
 
-fn task_tracker_block_lines(output: &serde_json::Value, expanded: bool) -> Vec<String> {
+fn task_tracker_block_lines(output: &serde_json::Value, expanded: bool) -> Vec<TrackerLine> {
     crate::agent::runloop::tool_output::tracker_transcript_lines(output, expanded)
 }
 
-fn task_tracker_panel_body_lines(output: &serde_json::Value) -> Vec<String> {
-    crate::agent::runloop::tool_output::tracker_tree_body_lines(output)
-}
-
-fn task_tracker_block_segments(lines: &[String]) -> Vec<Vec<InlineSegment>> {
+/// Style map for tracker rows: status surfaces through text styling only.
+///
+/// Done rows render struck-through, italic, and dimmed; the focused current
+/// row renders bold in the theme `primary` accent; blocked rows use the
+/// `warning` token; other in-progress rows use `primary`; pending rows keep
+/// the default style. All colors come from theme tokens through the shared
+/// style bridge, so WCAG contrast holds by construction.
+fn task_tracker_block_segments(lines: &[TrackerLine]) -> Vec<Vec<InlineSegment>> {
     use vtcode_core::ui::markdown::RenderMarkdownOptions;
     use vtcode_core::ui::theme;
     use vtcode_core::ui::tui::convert_style;
@@ -201,10 +207,13 @@ fn task_tracker_block_segments(lines: &[String]) -> Vec<Vec<InlineSegment>> {
     let default_style = std::sync::Arc::new(InlineTextStyle::default());
     let base_style = MessageStyle::Info.style();
     let theme_styles = theme::active_styles();
-    let mut fallback = convert_style(base_style);
-    if fallback.color.is_none() {
-        fallback = fallback.merge_color(Some(theme_styles.foreground));
+    let mut info_fallback = convert_style(base_style);
+    if info_fallback.color.is_none() {
+        info_fallback = info_fallback.merge_color(Some(theme_styles.foreground));
     }
+    // `primary`/`warning` meet the WCAG AA floor in every built-in theme.
+    let primary = convert_style(theme_styles.primary);
+    let warning = convert_style(theme_styles.warning);
     let render_options = RenderMarkdownOptions {
         preserve_code_indentation: true,
         disable_code_block_table_reparse: false,
@@ -213,20 +222,72 @@ fn task_tracker_block_segments(lines: &[String]) -> Vec<Vec<InlineSegment>> {
     lines
         .iter()
         .map(|line| {
-            render_tracker_inline_row(line, &theme_styles, &fallback, &default_style, &render_options)
-                .unwrap_or_else(|| vec![InlineSegment { text: line.clone(), style: default_style.clone() }])
+            render_tracker_line(
+                line,
+                &theme_styles,
+                &info_fallback,
+                &primary,
+                &warning,
+                &default_style,
+                &render_options,
+            )
+            .unwrap_or_else(|| {
+                vec![InlineSegment {
+                    text: line.text.clone(),
+                    style: default_style.clone(),
+                }]
+            })
         })
         .collect()
 }
 
-/// Split a compact tree row into its tree prefix (`  ├ □ `) and markdown body.
+/// Render one tracker line with its status style.
 ///
-/// Returns `None` for title/diagnostic lines so they keep their plain style.
+/// Headers, diagnostics, truncation, and pending rows keep the default
+/// rendering; other statuses tint through [`render_tracker_status_row`].
+fn render_tracker_line(
+    line: &TrackerLine,
+    theme_styles: &vtcode_core::ui::theme::ThemeStyles,
+    info_fallback: &InlineTextStyle,
+    primary: &InlineTextStyle,
+    warning: &InlineTextStyle,
+    default_style: &std::sync::Arc<InlineTextStyle>,
+    render_options: &vtcode_core::ui::markdown::RenderMarkdownOptions,
+) -> Option<Vec<InlineSegment>> {
+    let row_style = match line.status {
+        None | Some(TaskItemStatus::Pending) => {
+            return render_tracker_inline_row(&line.text, theme_styles, info_fallback, default_style, render_options);
+        }
+        Some(TaskItemStatus::Completed) => InlineTextStyle {
+            color: None,
+            bg_color: None,
+            effects: Effects::STRIKETHROUGH | Effects::ITALIC | Effects::DIMMED,
+        },
+        Some(TaskItemStatus::Blocked) => warning.clone(),
+        Some(TaskItemStatus::InProgress) if crate::agent::runloop::tool_output::is_tracker_current_row(&line.text) => {
+            let mut current = primary.clone();
+            current.effects |= Effects::BOLD;
+            current
+        }
+        Some(TaskItemStatus::InProgress) => primary.clone(),
+    };
+    render_tracker_status_row(&line.text, &row_style, theme_styles, info_fallback, render_options)
+}
+
+/// Split a tree row into its structural prefix and markdown body.
+///
+/// Handles the current-task marker (`  ▶ `), branch prefixes (`  ├ `), and —
+/// for tolerance with legacy payloads — one leading status glyph. Returns
+/// `None` for title/diagnostic lines so they keep their plain style.
 fn split_tracker_row_prefix(line: &str) -> Option<(&str, &str)> {
     let mut rest = line;
-    let mut consumed_branch_or_status = false;
+    let mut consumed_prefix = false;
     let leading_spaces = rest.len() - rest.trim_start_matches(' ').len();
     rest = &rest[leading_spaces..];
+    if let Some(after) = rest.strip_prefix("▶ ") {
+        rest = after;
+        consumed_prefix = true;
+    }
     loop {
         if let Some(after) = rest
             .strip_prefix("├ ")
@@ -234,7 +295,7 @@ fn split_tracker_row_prefix(line: &str) -> Option<(&str, &str)> {
             .or_else(|| rest.strip_prefix("│ "))
         {
             rest = after;
-            consumed_branch_or_status = true;
+            consumed_prefix = true;
             continue;
         }
         break;
@@ -242,11 +303,11 @@ fn split_tracker_row_prefix(line: &str) -> Option<(&str, &str)> {
     for token in ["□ ", "[x] ", "[-] ", "[!] "] {
         if let Some(after) = rest.strip_prefix(token) {
             rest = after;
-            consumed_branch_or_status = true;
+            consumed_prefix = true;
             break;
         }
     }
-    if !consumed_branch_or_status || rest.is_empty() {
+    if !consumed_prefix || rest.is_empty() {
         return None;
     }
     let prefix_len = line.len() - rest.len();
@@ -318,27 +379,95 @@ fn render_tracker_inline_row(
     wrote_body.then_some(segments)
 }
 
+/// Render one status-styled tree row: structural prefix in the row style plus
+/// a markdown-rendered body so `` `code` ``, **bold**, and file paths display
+/// styled instead of raw source. Unstyled body text takes the row style (done
+/// rows strike through, current rows glow in the accent); genuinely distinct
+/// markdown spans keep their colors. Returns `None` when the row has no tree
+/// prefix or markdown yields no visible output (caller falls back to plain).
+fn render_tracker_status_row(
+    line: &str,
+    row_style: &InlineTextStyle,
+    theme_styles: &vtcode_core::ui::theme::ThemeStyles,
+    info_fallback: &InlineTextStyle,
+    render_options: &vtcode_core::ui::markdown::RenderMarkdownOptions,
+) -> Option<Vec<InlineSegment>> {
+    use vtcode_core::ui::markdown::render_markdown_to_lines_with_options;
+    use vtcode_core::ui::tui::convert_style;
+
+    let (prefix, body) = split_tracker_row_prefix(line)?;
+    if body.trim().is_empty() {
+        return None;
+    }
+    let rendered =
+        render_markdown_to_lines_with_options(body, MessageStyle::Info.style(), theme_styles, None, *render_options);
+    let prefix_style = std::sync::Arc::new(row_style.clone());
+    let mut segments = Vec::with_capacity(4);
+    segments.push(InlineSegment {
+        text: prefix.to_string(),
+        style: prefix_style.clone(),
+    });
+    let rendered_lines = rendered
+        .iter()
+        .filter(|rendered_line| !rendered_line.is_empty())
+        .collect::<Vec<_>>();
+    let mut wrote_body = false;
+    for (line_index, rendered_line) in rendered_lines.iter().enumerate() {
+        if line_index > 0 {
+            segments.push(InlineSegment { text: " ".to_string(), style: prefix_style.clone() });
+        }
+        for seg in &rendered_line.segments {
+            if seg.text.is_empty() {
+                continue;
+            }
+            let converted = convert_style(seg.style);
+            let mut inline_style = row_style.clone();
+            if converted.color.is_none_or(|color| Some(color) == info_fallback.color) {
+                inline_style.color = row_style.color;
+            } else {
+                inline_style.color = converted.color;
+            }
+            if let Some(bg) = converted.bg_color {
+                inline_style.bg_color = Some(bg);
+            }
+            inline_style.effects = converted.effects | row_style.effects;
+            // Unstyled body text keeps the row style; the cleared color above
+            // already resolves it when markdown matches the Info base.
+            if inline_style.color.is_none() {
+                inline_style.color = row_style.color;
+            }
+            segments.push(InlineSegment {
+                text: seg.text.clone(),
+                style: std::sync::Arc::new(inline_style),
+            });
+            wrote_body = true;
+        }
+    }
+    wrote_body.then_some(segments)
+}
+
 /// Single writer for user-facing tracker transcript blocks.
 ///
 /// Approval handoff and the tool pipeline must share replace/dedupe so progress
 /// updates never stack a second block. UI `replace_last` uses the UI write
 /// length recorded by this helper — never a TRANSCRIPT-derived count, which
 /// can clobber unrelated UI lines when the two stores diverge.
-pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Vec<String>) {
+pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Vec<TrackerLine>) {
     if lines.is_empty() {
         return;
     }
+    let texts: Vec<String> = lines.iter().map(|line| line.text.clone()).collect();
     let ui_write_len = lines.len();
-    if transcript::tail_matches(&lines) {
-        transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
+    if transcript::tail_matches(&texts) {
+        transcript::remember_tracker_block_with_ui_len(texts, ui_write_len);
         return;
     }
     let segments = task_tracker_block_segments(&lines);
     if let Some(transcript_count) = transcript::tracker_block_len_if_at_tail() {
         let ui_count = transcript::tracker_ui_write_len().unwrap_or(ui_write_len);
         handle.replace_last(ui_count, InlineMessageKind::Tool, segments);
-        transcript::replace_last(transcript_count, &lines);
-        transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
+        transcript::replace_last(transcript_count, &texts);
+        transcript::remember_tracker_block_with_ui_len(texts, ui_write_len);
         return;
     }
     // Fallback: remembered block drifted. Only replace a tail that is clearly
@@ -350,15 +479,15 @@ pub(crate) fn write_tracker_progress_transcript(handle: &InlineHandle, lines: Ve
         let ui_count = transcript::tracker_ui_write_len().unwrap_or(1).max(1);
         let transcript_count = trailing_tracker_content_len().max(1);
         handle.replace_last(ui_count, InlineMessageKind::Tool, segments);
-        transcript::replace_last(transcript_count, &lines);
-        transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
+        transcript::replace_last(transcript_count, &texts);
+        transcript::remember_tracker_block_with_ui_len(texts, ui_write_len);
         return;
     }
-    for (segments, plain_line) in segments.into_iter().zip(lines.iter()) {
+    for (segments, plain_line) in segments.into_iter().zip(texts.iter()) {
         handle.append_line(InlineMessageKind::Tool, segments);
         transcript::append(plain_line);
     }
-    transcript::remember_tracker_block_with_ui_len(lines, ui_write_len);
+    transcript::remember_tracker_block_with_ui_len(texts, ui_write_len);
 }
 
 fn looks_like_tracker_progress_line(line: &str) -> bool {
@@ -397,6 +526,9 @@ fn looks_like_tracker_progress_line(line: &str) -> bool {
 
 fn looks_like_tracker_tree_row(line: &str) -> bool {
     let trimmed = line.trim_start();
+    if trimmed.starts_with("▶ ") {
+        return true;
+    }
     if trimmed.starts_with("├ ") || trimmed.starts_with("└ ") || trimmed.starts_with("│ ") {
         return true;
     }
@@ -425,7 +557,7 @@ fn trailing_tracker_content_len() -> usize {
         .count()
 }
 
-fn apply_task_tracker_block(handle: &InlineHandle, lines: Vec<String>) {
+fn apply_task_tracker_block(handle: &InlineHandle, lines: Vec<TrackerLine>) {
     write_tracker_progress_transcript(handle, lines);
 }
 
@@ -1382,15 +1514,18 @@ async fn handle_success_common(
         record_mcp_outcome_event(ctx.mcp_panel_state, tool_name, args_val, payload.command_success);
     } else if is_task_tracker_tool(name) && ctx.renderer.supports_inline_ui() {
         ctx.renderer.flush_compact_command_group();
-        // Display-mode split: compact transcript stays title+progress only;
-        // expanded appends the truncated tree so each task item is visible
-        // inline. The docked panel body always keeps the full compact tree.
+        // Display-mode split: compact transcript shows header plus the current
+        // task; expanded appends the truncated tree. The docked panel body
+        // always keeps the full tree with per-row statuses for text-styling.
         let expanded = ctx.renderer.tool_display_mode() != ToolDisplayMode::Compact;
-        let panel_lines = task_tracker_panel_body_lines(payload.output);
+        let (panel_lines, panel_statuses, panel_current) =
+            crate::agent::runloop::tool_output::tracker_panel_rows(payload.output);
         let progress_lines = task_tracker_block_lines(payload.output, expanded);
         if !panel_lines.is_empty() || !progress_lines.is_empty() {
-            ctx.handle.update_task_panel_with_metadata(
+            ctx.handle.update_task_panel_with_statuses(
                 panel_lines,
+                panel_statuses,
+                panel_current,
                 crate::agent::runloop::tool_output::tracker_panel_metadata(payload.output),
             );
             if !progress_lines.is_empty() {
@@ -1673,9 +1808,9 @@ mod tests {
 
     #[test]
     #[serial_test::serial(transcript_state)]
-    fn successful_task_tracker_replacement_contains_only_progress_line() {
-        // User-facing transcript contract: title + progress only. The compact
-        // tree is panel-body content, not transcript content.
+    fn successful_task_tracker_replacement_contains_header_plus_current_task() {
+        // Compact transcript contract: header plus the single current-task row
+        // with the distinct `▶` visual. The full compact tree stays panel-only.
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
         let first = serde_json::json!({
@@ -1703,11 +1838,16 @@ mod tests {
 
         let first_progress = task_tracker_block_lines(&first, false);
         let second_progress = task_tracker_block_lines(&second, false);
-        let first_panel = task_tracker_panel_body_lines(&first);
-        let second_panel = task_tracker_panel_body_lines(&second);
+        let first_panel = crate::agent::runloop::tool_output::tracker_tree_body_lines(&first);
+        let second_panel = crate::agent::runloop::tool_output::tracker_tree_body_lines(&second);
 
-        assert_eq!(first_progress, vec!["• Release 1/3"]);
-        assert_eq!(second_progress, vec!["• Release 3/3"]);
+        assert_eq!(tracker_texts(&first_progress), vec!["• Release 1/3", "  ▶ Run checks"]);
+        assert_eq!(
+            first_progress[1].status,
+            Some(TaskItemStatus::InProgress),
+            "current row carries its status for accent styling"
+        );
+        assert_eq!(tracker_texts(&second_progress), vec!["• Release 3/3"]);
         assert!(
             first_panel.iter().any(|line| line.contains("Update version")),
             "panel body keeps the compact tree: {first_panel:?}"
@@ -1730,7 +1870,7 @@ mod tests {
             .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
             .collect::<Vec<_>>();
 
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
         assert_eq!(rows, vec!["• Release 3/3"]);
         assert!(rows.iter().all(|row| !row.contains("next:") && !row.contains("├")));
     }
@@ -1767,6 +1907,14 @@ mod tests {
         transcript::clear();
     }
 
+    fn tracker_texts(lines: &[TrackerLine]) -> Vec<&str> {
+        lines.iter().map(|line| line.text.as_str()).collect()
+    }
+
+    fn plain_tracker_lines(texts: &[&str]) -> Vec<TrackerLine> {
+        texts.iter().map(|text| TrackerLine::plain((*text).to_string())).collect()
+    }
+
     #[test]
     fn looks_like_tracker_progress_line_rejects_questions_summaries() {
         assert!(looks_like_tracker_progress_line("• Tasks 0/2"));
@@ -1779,9 +1927,14 @@ mod tests {
     #[test]
     fn looks_like_tracker_content_accepts_tree_rows_and_truncation() {
         assert!(looks_like_tracker_content("• Release 1/3"));
+        assert!(looks_like_tracker_content("  ├ Investigate cache miss"));
+        assert!(looks_like_tracker_content("  └ Verify with cargo check"));
+        assert!(looks_like_tracker_content("  │ Defer eager setup"));
+        assert!(looks_like_tracker_content("  ▶ Defer eager setup"));
+        // Legacy glyph rows remain recognizable so in-flight blocks still
+        // replace cleanly across the upgrade.
         assert!(looks_like_tracker_content("  ├ □ Investigate cache miss"));
-        assert!(looks_like_tracker_content("  └ [x] Verify with cargo check"));
-        assert!(looks_like_tracker_content("  │ [-] Defer eager setup"));
+        assert!(looks_like_tracker_content("  ▶ [-] Defer eager setup"));
         assert!(looks_like_tracker_content("  … 5 more"));
         assert!(!looks_like_tracker_content("• Questions 2/5 answered"));
         assert!(!looks_like_tracker_content("• Ran cargo check"));
@@ -1805,14 +1958,15 @@ mod tests {
         let compact = task_tracker_block_lines(&payload, false);
         let expanded = task_tracker_block_lines(&payload, true);
 
-        assert_eq!(compact, vec!["• Release 1/3"]);
+        assert_eq!(tracker_texts(&compact), vec!["• Release 1/3", "  ▶ Defer eager setup"]);
+        assert_eq!(compact[1].status, Some(TaskItemStatus::InProgress));
         assert_eq!(
             expanded,
             vec![
-                "• Release 1/3".to_string(),
-                "  ├ [x] Investigate cache miss".to_string(),
-                "  ├ [-] Defer eager setup".to_string(),
-                "  └ □ Verify with cargo check".to_string(),
+                TrackerLine::plain("• Release 1/3".to_string()),
+                TrackerLine::row("  ├ Investigate cache miss".to_string(), TaskItemStatus::Completed),
+                TrackerLine::row("  ├ Defer eager setup".to_string(), TaskItemStatus::InProgress),
+                TrackerLine::row("  └ Verify with cargo check".to_string(), TaskItemStatus::Pending),
             ]
         );
     }
@@ -1823,12 +1977,12 @@ mod tests {
         transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
-        write_tracker_progress_transcript(&handle, vec!["• Release 0/2".to_string()]);
+        write_tracker_progress_transcript(&handle, plain_tracker_lines(&["• Release 0/2"]));
         while receiver.try_recv().is_ok() {}
         let expanded = vec![
-            "• Release 1/2".to_string(),
-            "  ├ [x] Investigate cache miss".to_string(),
-            "  └ □ Defer eager setup".to_string(),
+            TrackerLine::plain("• Release 1/2".to_string()),
+            TrackerLine::row("  ├ Investigate cache miss".to_string(), TaskItemStatus::Completed),
+            TrackerLine::row("  └ Defer eager setup".to_string(), TaskItemStatus::Pending),
         ];
 
         write_tracker_progress_transcript(&handle, expanded.clone());
@@ -1843,8 +1997,11 @@ mod tests {
             .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
             .collect::<Vec<_>>();
         assert_eq!(count, 1);
-        assert_eq!(rows, expanded);
-        assert_eq!(transcript::snapshot(), expanded);
+        assert_eq!(rows, tracker_texts(&expanded));
+        assert_eq!(
+            transcript::snapshot(),
+            tracker_texts(&expanded).into_iter().map(str::to_string).collect::<Vec<_>>()
+        );
         transcript::clear();
     }
 
@@ -1854,7 +2011,7 @@ mod tests {
         transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
-        write_tracker_progress_transcript(&handle, vec!["• Release 0/2".to_string()]);
+        write_tracker_progress_transcript(&handle, plain_tracker_lines(&["• Release 0/2"]));
         while receiver.try_recv().is_ok() {}
         // UI-only append after tracker (Questions-style) must not be clobbered
         // via TRANSCRIPT-derived replace count once Questions dual-writes; when
@@ -1868,7 +2025,7 @@ mod tests {
             }],
         );
 
-        write_tracker_progress_transcript(&handle, vec!["• Release 1/2".to_string()]);
+        write_tracker_progress_transcript(&handle, plain_tracker_lines(&["• Release 1/2"]));
 
         let commands: Vec<InlineCommand> = std::iter::from_fn(|| receiver.try_recv().ok()).collect();
         let replaced_ui_len = commands.iter().find_map(|command| match command {
@@ -1896,8 +2053,8 @@ mod tests {
         transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
-        let first = vec!["• Release 0/2".to_string()];
-        let second = vec!["• Release 1/2".to_string()];
+        let first = plain_tracker_lines(&["• Release 0/2"]);
+        let second = plain_tracker_lines(&["• Release 1/2"]);
 
         write_tracker_progress_transcript(&handle, first);
         while receiver.try_recv().is_ok() {}
@@ -1913,7 +2070,7 @@ mod tests {
             .map(|row| row.into_iter().map(|segment| segment.text).collect::<String>())
             .collect::<Vec<_>>();
         assert_eq!(count, 1);
-        assert_eq!(rows, second);
+        assert_eq!(rows, tracker_texts(&second));
         transcript::clear();
     }
 
@@ -1923,12 +2080,12 @@ mod tests {
         transcript::clear();
         let (sender, mut receiver) = unbounded_channel();
         let handle = InlineHandle::new_for_tests(sender);
-        write_tracker_progress_transcript(&handle, vec!["• Release 0/2".to_string()]);
+        write_tracker_progress_transcript(&handle, plain_tracker_lines(&["• Release 0/2"]));
         while receiver.try_recv().is_ok() {}
         // Intervening transcript content after the tracker block.
         transcript::append("Now applying the edit");
 
-        write_tracker_progress_transcript(&handle, vec!["• Release 1/2".to_string()]);
+        write_tracker_progress_transcript(&handle, plain_tracker_lines(&["• Release 1/2"]));
 
         let commands: Vec<InlineCommand> = std::iter::from_fn(|| receiver.try_recv().ok()).collect();
         let appended = commands
@@ -1957,7 +2114,7 @@ mod tests {
         transcript::append("• Tasks 0/1");
         while receiver.try_recv().is_ok() {}
 
-        write_tracker_progress_transcript(&handle, vec!["• Release 1/1".to_string()]);
+        write_tracker_progress_transcript(&handle, plain_tracker_lines(&["• Release 1/1"]));
 
         let replacement = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|command| match command {
             InlineCommand::ReplaceLast { count, lines, .. } => Some((count, lines)),
@@ -1999,7 +2156,7 @@ mod tests {
         let lines = task_tracker_block_lines(&payload, false);
         // Simulate the approval handoff's transcript write.
         for line in &lines {
-            transcript::append(line);
+            transcript::append(&line.text);
         }
 
         apply_task_tracker_block(&handle, lines.clone());
@@ -2008,15 +2165,15 @@ mod tests {
             receiver.try_recv().is_err(),
             "pipeline replay after approval handoff must not emit another transcript command"
         );
-        assert!(transcript::tracker_block_matches(&lines));
+        assert!(transcript::tracker_block_matches(&lines.iter().map(|line| line.text.clone()).collect::<Vec<_>>()));
         transcript::clear();
     }
 
     #[test]
     fn task_tracker_row_segments_render_inline_code_without_backticks() {
         let rows = task_tracker_block_segments(&[
-            "• Task tracker".to_string(),
-            "  └ □ Use `src/main.rs` parser".to_string(),
+            TrackerLine::plain("• Task tracker".to_string()),
+            TrackerLine::row("  └ Use `src/main.rs` parser".to_string(), TaskItemStatus::Pending),
         ]);
 
         assert_eq!(rows.len(), 2);
@@ -2026,7 +2183,7 @@ mod tests {
         // Tree prefix stays intact while the code span renders styled without
         // literal backticks.
         let text = rows[1].iter().map(|segment| segment.text.as_str()).collect::<String>();
-        assert_eq!(text, "  └ □ Use src/main.rs parser");
+        assert_eq!(text, "  └ Use src/main.rs parser");
         assert!(rows[1].len() > 1, "code span should produce distinct styled segments");
         assert!(!text.contains('`'));
     }
@@ -2034,21 +2191,80 @@ mod tests {
     #[test]
     fn task_tracker_row_segments_keep_diagnostics_plain() {
         let rows = task_tracker_block_segments(&[
-            "• Task tracker".to_string(),
-            "  Tracker status: error".to_string(),
-            "  └ □ Plain action".to_string(),
+            TrackerLine::plain("• Task tracker".to_string()),
+            TrackerLine::plain("  Tracker status: error".to_string()),
+            TrackerLine::row("  └ Plain action".to_string(), TaskItemStatus::Pending),
         ]);
 
         assert_eq!(rows[1].len(), 1);
         assert_eq!(rows[1][0].text, "  Tracker status: error");
         let text = rows[2].iter().map(|segment| segment.text.as_str()).collect::<String>();
-        assert_eq!(text, "  └ □ Plain action");
+        assert_eq!(text, "  └ Plain action");
+    }
+
+    #[test]
+    fn task_tracker_done_rows_render_struck_through_dimmed_italic() {
+        use vtcode_core::ui::tui::convert_style;
+
+        let rows = task_tracker_block_segments(&[
+            TrackerLine::plain("• Release 1/3".to_string()),
+            TrackerLine::row("  ├ Investigate cache miss".to_string(), TaskItemStatus::Completed),
+            TrackerLine::row("  ├ Defer eager setup".to_string(), TaskItemStatus::InProgress),
+            TrackerLine::row("  └ Verify with cargo check".to_string(), TaskItemStatus::Pending),
+        ]);
+
+        let done_style = &rows[1][1].style;
+        assert!(done_style.effects.contains(Effects::STRIKETHROUGH), "done rows must strike through: {rows:?}");
+        assert!(done_style.effects.contains(Effects::ITALIC), "done rows must italicize: {rows:?}");
+        assert!(done_style.effects.contains(Effects::DIMMED), "done rows must dim: {rows:?}");
+        // No glyphs leak into any row.
+        for row in &rows {
+            let text = row.iter().map(|segment| segment.text.as_str()).collect::<String>();
+            assert!(!text.contains("□") && !text.contains("[x]") && !text.contains("[-]"), "{text:?}");
+        }
+        // Pending keeps the default style (no accent, no strike).
+        assert_eq!(rows[3][1].style.color, None);
+        assert!(!rows[3][1].style.effects.contains(Effects::STRIKETHROUGH));
+        // Non-current in-progress rows use the primary accent (the markdown
+        // base style contributes weight pipeline-wide; the focused current row
+        // adds the `▶` marker on top).
+        let expected = convert_style(theme::active_styles().primary);
+        assert_eq!(rows[2][1].style.color, expected.color);
+    }
+
+    #[test]
+    fn task_tracker_current_row_segments_carry_primary_accent() {
+        use vtcode_core::ui::tui::convert_style;
+
+        let rows = task_tracker_block_segments(&[
+            TrackerLine::plain("• Release 1/3".to_string()),
+            TrackerLine::row("  ▶ Defer eager setup".to_string(), TaskItemStatus::InProgress),
+        ]);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0].text, "• Release 1/3");
+        let text = rows[1].iter().map(|segment| segment.text.as_str()).collect::<String>();
+        assert_eq!(text, "  ▶ Defer eager setup");
+        let expected = convert_style(theme::active_styles().primary);
+        assert!(expected.color.is_some(), "primary accent must resolve to a concrete color for the TODO visual");
+        assert_eq!(
+            rows[1][0].style.color, expected.color,
+            "current-task marker must use the primary accent, not the default style"
+        );
+        assert!(rows[1][0].style.effects.contains(Effects::BOLD), "current-task marker must be bold: {rows:?}");
+        assert!(
+            rows[1].iter().skip(1).any(|segment| segment.style.color == expected.color),
+            "current-task body must keep the accent tint: {rows:?}"
+        );
     }
 
     #[test]
     fn split_tracker_row_prefix_handles_nested_and_parent_rows() {
+        assert_eq!(split_tracker_row_prefix("  ├ Investigate"), Some(("  ├ ", "Investigate")));
+        assert_eq!(split_tracker_row_prefix("  │ Update version"), Some(("  │ ", "Update version")));
+        assert_eq!(split_tracker_row_prefix("  ▶ Defer eager setup"), Some(("  ▶ ", "Defer eager setup")));
+        // Legacy glyph rows still split so in-flight blocks degrade gracefully.
         assert_eq!(split_tracker_row_prefix("  ├ □ Investigate"), Some(("  ├ □ ", "Investigate")));
-        assert_eq!(split_tracker_row_prefix("  │ [x] Update version"), Some(("  │ [x] ", "Update version")));
         assert_eq!(split_tracker_row_prefix("  ├ Prepare release"), Some(("  ├ ", "Prepare release")));
         assert_eq!(split_tracker_row_prefix("• Task tracker"), None);
         assert_eq!(split_tracker_row_prefix("  Tracker status: error"), None);

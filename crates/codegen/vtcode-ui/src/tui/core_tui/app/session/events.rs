@@ -2826,9 +2826,11 @@ mod tests {
     #[test]
     fn task_panel_visibility_requests_retain_body_and_metadata_progress() {
         use crate::tui::core_tui::app::types::{TaskPanelMetadata, TaskPanelTransientRequest, TransientRequest};
+        use vtcode_commons::ui_protocol::TaskItemStatus;
 
         let mut session = build_session();
-        let tree = vec!["  └ □ Implement".to_string(), "  └ [x] Verify".to_string()];
+        let tree = vec!["  └ Implement".to_string(), "  └ Verify".to_string()];
+        let statuses = vec![TaskItemStatus::Pending, TaskItemStatus::Completed];
         let metadata = TaskPanelMetadata {
             title: "Release".to_string(),
             completed: 1,
@@ -2837,23 +2839,33 @@ mod tests {
 
         session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
             lines: tree.clone(),
+            statuses: statuses.clone(),
+            current: Some(0),
             visible: None,
             metadata: Some(metadata),
         }));
         assert_eq!(session.task_panel_lines, tree);
+        assert_eq!(session.task_panel_statuses, statuses);
+        assert_eq!(session.task_panel_current, Some(0));
         assert_eq!(session.task_panel_metadata.as_ref().map(|m| m.title.as_str()), Some("Release"));
 
         session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
             lines: Vec::new(),
+            statuses: Vec::new(),
+            current: None,
             visible: Some(true),
             metadata: None,
         }));
         // Appearance may suppress auto-show; visibility must never wipe content.
         assert_eq!(session.task_panel_lines, tree, "show_task_panel must not wipe the panel body");
+        assert_eq!(session.task_panel_statuses, statuses, "show_task_panel must not wipe row statuses");
+        assert_eq!(session.task_panel_current, Some(0));
         assert_eq!(session.task_panel_metadata.as_ref().map(|m| m.completed), Some(1));
 
         session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
             lines: Vec::new(),
+            statuses: Vec::new(),
+            current: None,
             visible: Some(false),
             metadata: None,
         }));
@@ -2864,10 +2876,14 @@ mod tests {
         // stale panel metadata so the terminal title cannot keep old N/M.
         session.show_transient(TransientRequest::TaskPanel(TaskPanelTransientRequest {
             lines: Vec::new(),
+            statuses: Vec::new(),
+            current: None,
             visible: None,
             metadata: None,
         }));
         assert!(session.task_panel_lines.is_empty());
+        assert!(session.task_panel_statuses.is_empty(), "clear must drop row statuses");
+        assert_eq!(session.task_panel_current, None);
         assert!(session.task_panel_metadata.is_none(), "clear must drop panel metadata");
     }
 

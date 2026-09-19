@@ -4,6 +4,7 @@ use super::diff::{DiffHunk, DiffPreviewMode, TrustMode};
 use crate::tui::core_tui::types::{
     InlineListItem, InlineListSearchConfig, InlineListSelection, SecurePromptConfig, WizardModalMode, WizardStep,
 };
+use vtcode_commons::ui_protocol::TaskItemStatus;
 
 #[derive(Clone, Debug)]
 pub struct ModalOverlayRequest {
@@ -76,6 +77,8 @@ pub struct TaskPanelMetadata {
 #[derive(Clone, Debug)]
 pub struct TaskPanelTransientRequest {
     pub(crate) lines: Vec<String>,
+    pub(crate) statuses: Vec<TaskItemStatus>,
+    pub(crate) current: Option<usize>,
     pub(crate) visible: Option<bool>,
     pub(crate) metadata: Option<TaskPanelMetadata>,
 }

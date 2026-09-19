@@ -15,6 +15,7 @@ use crate::tui::core_tui::app::types::{
 use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::Session as CoreSessionState;
 use crate::tui::core_tui::session::action::BindingStore;
+use vtcode_commons::ui_protocol::TaskItemStatus;
 
 mod agent_palette;
 /// Diff preview overlay for file changes.
@@ -103,6 +104,8 @@ pub struct AppSession {
     local_agents_auto_opened: bool,
     pub(crate) show_task_panel: bool,
     pub(crate) task_panel_lines: Vec<String>,
+    pub(crate) task_panel_statuses: Vec<TaskItemStatus>,
+    pub(crate) task_panel_current: Option<usize>,
     pub(crate) task_panel_metadata: Option<TaskPanelMetadata>,
     diff_preview_state: Option<DiffPreviewState>,
     tool_output_viewer_state: Option<ToolOutputViewerState>,
@@ -145,6 +148,8 @@ impl AppSession {
             local_agents_auto_opened: false,
             show_task_panel: false,
             task_panel_lines: Vec::new(),
+            task_panel_statuses: Vec::new(),
+            task_panel_current: None,
             task_panel_metadata: None,
             diff_preview_state: None,
             tool_output_viewer_state: None,
@@ -194,6 +199,8 @@ impl AppSession {
             local_agents_auto_opened: false,
             show_task_panel: false,
             task_panel_lines: Vec::new(),
+            task_panel_statuses: Vec::new(),
+            task_panel_current: None,
             task_panel_metadata: None,
             diff_preview_state: None,
             tool_output_viewer_state: None,
@@ -829,11 +836,17 @@ impl AppSession {
                 self.ensure_inline_lists_visible_for_trigger();
                 self.show_transient_surface(TransientSurface::SlashPalette);
             }
-            TransientRequest::TaskPanel(TaskPanelTransientRequest { lines, visible, metadata }) => {
+            TransientRequest::TaskPanel(TaskPanelTransientRequest { lines, statuses, current, visible, metadata }) => {
                 // Visibility-only requests (show/hide) must not mutate panel body,
                 // metadata, or terminal-title progress. Content updates own those
                 // fields; typed metadata is the authoritative progress source.
                 if visible.is_none() {
+                    // Parallel statuses must align 1:1 with lines; mismatched
+                    // legacy payloads fall back to the uniform base style.
+                    let aligned = statuses.len() == lines.len();
+                    self.task_panel_statuses = if aligned { statuses } else { Vec::new() };
+                    self.task_panel_current =
+                        (aligned.then_some(current).flatten()).filter(|index| *index < lines.len());
                     self.task_panel_lines = lines;
                     self.core.mark_task_panel_content_dirty();
                     match metadata {

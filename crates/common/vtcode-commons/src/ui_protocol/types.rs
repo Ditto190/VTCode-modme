@@ -146,6 +146,50 @@ pub enum DiffPreviewMode {
 }
 
 // ---------------------------------------------------------------------------
+// Task tracker row status
+// ---------------------------------------------------------------------------
+
+/// Display status of a single task tracker row, shared between the agent
+/// runloop (which owns checklist state) and the terminal surface (which owns
+/// styling). Keeps status typed across the panel/transcript boundary instead
+/// of re-parsing glyphs out of display strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskItemStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Blocked,
+}
+
+impl TaskItemStatus {
+    /// Canonical wire string, matching `TaskTrackingStatus::as_str`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+impl std::str::FromStr for TaskItemStatus {
+    type Err = ();
+
+    /// Parse a canonical status string; unknown shapes fail closed to `Err`.
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "pending" => Ok(Self::Pending),
+            "in_progress" => Ok(Self::InProgress),
+            "completed" => Ok(Self::Completed),
+            "blocked" => Ok(Self::Blocked),
+            _ => Err(()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Plan types
 // ---------------------------------------------------------------------------
 

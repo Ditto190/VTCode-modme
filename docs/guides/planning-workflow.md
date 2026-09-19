@@ -47,12 +47,16 @@ updates accept positive flat indices or positive hierarchical `index_path`
 values such as `2.1`. Use `items` for bulk synchronization rather than an
 item index.
 
-Successful tracker updates honor display mode: compact keeps title + progress
-(`• Release 1/4` in the transcript) while expanded shows header plus truncated
-tree (max 30 rows + `… N more`) so each task item is visible inline. The full compact hierarchical tree is always TODO-panel
+Successful tracker updates honor display mode: compact shows header plus the
+single current task (`  ▶ …`, first `in_progress` leaf else first
+`pending`/`blocked`; header-only when all done) while expanded shows header
+plus truncated tree (max 30 rows + `… N more`) so each task item is visible
+inline. The full hierarchical tree is always TODO-panel
 body content when the user opens the panel. Parent rows show their branch and
-description; leaf rows use `[-]`, `□`, `[x]`, or `[!]` for in-progress, pending,
-completed, and blocked work. Descriptions render inline markdown (code spans,
+description; leaf status surfaces through text styling only — done rows render
+struck-through, italic, and dimmed, the focused current row renders bold in
+the theme `primary` accent, blocked rows use the `warning` token, and pending
+rows keep the default style. Descriptions render inline markdown (code spans,
 emphasis, file paths); inline `-> files:` / `-> verify:` suffixes copied from
 plan steps are stripped into structured fields. Files, outcomes, and
 verification commands remain structured tracker metadata rather than extra

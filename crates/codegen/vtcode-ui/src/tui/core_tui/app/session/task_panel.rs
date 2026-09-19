@@ -3,6 +3,7 @@ use ratatui::prelude::*;
 use super::super::super::session::{inline_list, text_utils};
 use super::super::types::TaskPanelMetadata;
 use crate::tui::config::constants::ui;
+use vtcode_commons::ui_protocol::TaskItemStatus;
 
 pub(super) fn compact_tree_continuation_prefix(line: &str) -> Option<String> {
     text_utils::compact_tree_continuation_prefix(line)
@@ -34,6 +35,78 @@ pub(super) fn rows(lines: &[String], width: u16, text_style: Style) -> Vec<(inli
             (inline_list::InlineListRow { lines: wrapped, style: text_style }, height)
         })
         .collect()
+}
+
+/// Rows with per-row styles for status text-styling.
+///
+/// `styles` runs parallel to `lines`; missing entries fall back to `base`.
+/// Row heights derive from wrapped content exactly like [`rows`] so the
+/// docked panel keeps clean wrapping with status styling applied.
+pub(super) fn styled_rows(
+    lines: &[String],
+    styles: &[Style],
+    base: Style,
+    width: u16,
+) -> Vec<(inline_list::InlineListRow, u16)> {
+    if lines.is_empty() {
+        return vec![(inline_list::InlineListRow::single(ui::PLAN_STATUS_EMPTY.to_string().into(), base), 1)];
+    }
+
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let style = styles.get(index).copied().unwrap_or(base);
+            let wrapped = wrap_line(line, width);
+            let height = inline_list::row_height(&wrapped);
+            (inline_list::InlineListRow { lines: wrapped, style }, height)
+        })
+        .collect()
+}
+
+/// Per-row style for a task status under the theme tokens.
+///
+/// Done rows dim, italicize, and strike through on the base style; the
+/// focused row and other in-progress rows use the `primary` accent (focused
+/// adds bold); blocked rows use the `warning` token; pending rows keep the
+/// base style. All colors flow through the shared style bridge.
+pub(super) fn row_style(status: TaskItemStatus, is_current: bool, base: Style) -> Style {
+    match status {
+        TaskItemStatus::Completed => base.add_modifier(Modifier::DIM | Modifier::ITALIC | Modifier::CROSSED_OUT),
+        TaskItemStatus::Blocked => {
+            crate::tui::core_tui::style::ratatui_style_from_ansi(crate::theme::active_styles().warning)
+        }
+        TaskItemStatus::InProgress if is_current => {
+            crate::tui::core_tui::style::ratatui_style_from_ansi(crate::theme::active_styles().primary)
+                .add_modifier(Modifier::BOLD)
+        }
+        TaskItemStatus::InProgress => {
+            crate::tui::core_tui::style::ratatui_style_from_ansi(crate::theme::active_styles().primary)
+        }
+        TaskItemStatus::Pending => base,
+    }
+}
+
+/// Align panel body inputs after the legacy header strip.
+///
+/// Returns the visible body slice with statuses/current shifted by the same
+/// skipped prefix so per-row styling stays attached to the right row.
+pub(super) fn aligned_body<'a>(
+    lines: &'a [String],
+    statuses: &'a [TaskItemStatus],
+    current: Option<usize>,
+    metadata: Option<&TaskPanelMetadata>,
+) -> (&'a [String], &'a [TaskItemStatus], Option<usize>) {
+    let body = body_lines(lines, metadata);
+    let skipped = lines.len().saturating_sub(body.len());
+    if statuses.len() != lines.len() {
+        return (body, &[], None);
+    }
+    let aligned_statuses = &statuses[skipped.min(statuses.len())..];
+    let aligned_current = current
+        .and_then(|index| index.checked_sub(skipped))
+        .filter(|index| *index < body.len());
+    (body, aligned_statuses, aligned_current)
 }
 
 pub(super) fn body_lines<'a>(lines: &'a [String], metadata: Option<&TaskPanelMetadata>) -> &'a [String] {
@@ -159,5 +232,84 @@ mod tests {
         assert_eq!(empty_rows.len(), 1);
         assert_eq!(row_text(&empty_rows[0].0), vec![ui::PLAN_STATUS_EMPTY.to_string()]);
         assert_eq!(empty_rows[0].1, 1);
+    }
+
+    #[test]
+    fn row_style_maps_status_to_theme_text_styling() {
+        use ratatui::style::Modifier;
+
+        let base = Style::default();
+        let done = row_style(TaskItemStatus::Completed, false, base);
+        assert!(done.add_modifier.contains(Modifier::CROSSED_OUT), "done rows strike through");
+        assert!(done.add_modifier.contains(Modifier::ITALIC), "done rows italicize");
+        assert!(done.add_modifier.contains(Modifier::DIM), "done rows dim");
+        assert_eq!(done.fg, base.fg, "done rows keep the base hue");
+
+        let pending = row_style(TaskItemStatus::Pending, false, base);
+        assert_eq!(pending, base, "pending rows keep the base style");
+
+        let active = row_style(TaskItemStatus::InProgress, false, base);
+        let current = row_style(TaskItemStatus::InProgress, true, base);
+        assert_ne!(active.fg, base.fg, "in-progress rows use the accent");
+        assert_eq!(active.fg, current.fg, "focused and plain in-progress share the accent hue");
+        assert!(current.add_modifier.contains(Modifier::BOLD), "focused row is bold");
+        assert!(!active.add_modifier.contains(Modifier::BOLD), "non-focused rows stay unbolded");
+
+        let blocked = row_style(TaskItemStatus::Blocked, false, base);
+        assert_ne!(blocked.fg, base.fg, "blocked rows use the warning token");
+        assert_ne!(blocked.fg, active.fg, "warning stays distinct from the progress accent");
+    }
+
+    #[test]
+    fn styled_rows_keep_text_with_per_row_styles_and_base_fallback() {
+        let lines = vec![
+            "  ├ Defer eager setup".to_string(),
+            "  └ Verify with cargo check".to_string(),
+        ];
+        let styles = vec![
+            row_style(TaskItemStatus::InProgress, true, Style::default()),
+            row_style(TaskItemStatus::Completed, false, Style::default()),
+        ];
+
+        let styled = styled_rows(&lines, &styles, Style::default(), 80);
+
+        assert_eq!(styled.len(), 2);
+        assert_eq!(row_text(&styled[0].0), vec!["  ├ Defer eager setup".to_string()]);
+        assert_eq!(styled[0].0.style, styles[0]);
+        assert_eq!(styled[1].0.style, styles[1]);
+        assert_eq!(styled[0].1, 1);
+        // Missing entries fall back to the base style instead of blank.
+        let fallback = styled_rows(&lines, &[], Style::default(), 80);
+        assert_eq!(fallback[0].0.style, Style::default());
+        assert_eq!(fallback[1].0.style, Style::default());
+    }
+
+    #[test]
+    fn aligned_body_shifts_statuses_with_legacy_header_strip() {
+        use TaskItemStatus::{Blocked, Completed, Pending};
+
+        let lines = vec![
+            "• Release".to_string(),
+            "  ├ Defer eager setup".to_string(),
+            "  └ Verify with cargo check".to_string(),
+        ];
+        let statuses = vec![Pending, Blocked, Completed];
+        let metadata = TaskPanelMetadata {
+            title: "Release".to_string(),
+            completed: 1,
+            total: 3,
+        };
+
+        let (body, aligned, current) = aligned_body(&lines, &statuses, Some(1), Some(&metadata));
+
+        assert_eq!(body, &lines[1..]);
+        assert_eq!(aligned, &[Blocked, Completed]);
+        assert_eq!(current, Some(0));
+
+        // Length mismatches (legacy callers) degrade to uniform styling.
+        let (body, aligned, current) = aligned_body(&lines, &[], Some(0), Some(&metadata));
+        assert_eq!(body, &lines[1..]);
+        assert!(aligned.is_empty());
+        assert_eq!(current, None);
     }
 }
