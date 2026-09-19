@@ -90,7 +90,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/configuration-reload.md`
   - **Content**: Configuration reset and live reload
-  - **Topics**: Shared reset service, Runtime reload contract, Verification
+  - **Topics**: Shared reset service, Runtime reload contract, Settings palette navigation, Verification
   - **User Questions**: "What can you tell me about Configuration reset and live reload?", "How does Shared reset service work?", "How does Runtime reload contract work?"
 
 - **File**: `docs/development/CGP_ARCHITECTURE.md`
