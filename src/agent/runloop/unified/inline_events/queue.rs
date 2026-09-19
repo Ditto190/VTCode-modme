@@ -20,7 +20,7 @@ impl QueuedInput {
         }
     }
 
-    fn display_label(&self) -> String {
+    pub(crate) fn display_label(&self) -> String {
         match self.primary_agent.as_deref() {
             Some(agent) => format!("{agent}: {}", self.input.text),
             None => self.input.text.clone(),
@@ -136,10 +136,24 @@ impl<'a> InlineQueueState<'a> {
         result
     }
 
+    #[allow(
+        dead_code,
+        reason = "Explicit clear-all path for future queue UI; interrupts preserve by design."
+    )]
     pub(crate) fn clear(&mut self) {
         self.queued_inputs.clear();
         *self.prefer_latest_once = false;
         self.sync_handle_queue();
+    }
+
+    /// Preserve queued inputs across an interrupt: reset any one-shot
+    /// latest-promotion without dropping user-queued work. Returns the
+    /// preserved count so the interrupt notice can report it instead of
+    /// silently clearing the queue.
+    pub(crate) fn preserve_on_interrupt(&mut self) -> usize {
+        *self.prefer_latest_once = false;
+        self.sync_handle_queue();
+        self.queued_inputs.len()
     }
 
     fn sync_handle_queue(&self) {
@@ -386,5 +400,27 @@ mod tests {
         let queued = queue.take_next_submission().expect("queued input");
         assert_eq!(queued.input.text, "see images");
         assert_eq!(queued.input.attachments, vec![first, second]);
+    }
+
+    #[test]
+    fn preserve_on_interrupt_keeps_fifo_and_resets_promotion() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        let mut queued_inputs = VecDeque::new();
+        let mut prefer_latest_once = false;
+        let mut queue = InlineQueueState::new(&handle, &mut queued_inputs, &mut prefer_latest_once);
+
+        queue.push("first".into(), None);
+        queue.push("second".into(), None);
+        queue.prefer_latest_next();
+
+        let preserved = queue.preserve_on_interrupt();
+        assert_eq!(preserved, 2);
+
+        // Promotion reset: oldest dispatches first, not the newest.
+        // FIFO order intact after interrupt preservation.
+        assert_eq!(queue.take_next_submission().map(|q| q.input.text).as_deref(), Some("first"));
+        assert_eq!(queue.take_next_submission().map(|q| q.input.text).as_deref(), Some("second"));
+        assert!(queue.take_next_submission().is_none());
     }
 }

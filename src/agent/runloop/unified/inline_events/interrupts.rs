@@ -60,9 +60,16 @@ impl<'a> InlineInterruptCoordinator<'a> {
         queue: &mut InlineQueueState<'_>,
     ) -> Result<()> {
         renderer.line_if_not_empty(MessageStyle::Output)?;
-        renderer.line(MessageStyle::Info, "Interrupt received. Stopping task...")?;
+        let preserved = queue.preserve_on_interrupt();
+        if preserved > 0 {
+            renderer.line(
+                MessageStyle::Info,
+                &format!("Interrupt received. Stopping task... Preserved {preserved} queued message(s)."),
+            )?;
+        } else {
+            renderer.line(MessageStyle::Info, "Interrupt received. Stopping task...")?;
+        }
         reset_inline_input(handle, Some(vtcode_config::constants::ui::CHAT_INPUT_PLACEHOLDER_INTERRUPTED.to_owned()));
-        queue.clear();
         Ok(())
     }
 }

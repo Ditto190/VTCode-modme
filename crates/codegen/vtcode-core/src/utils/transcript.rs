@@ -86,6 +86,9 @@ struct QueuedMessage {
 }
 
 static MESSAGE_QUEUE: Lazy<RwLock<VecDeque<QueuedMessage>>> = Lazy::new(|| RwLock::new(VecDeque::new()));
+/// Messages enqueued while no inline handle was attached. Drained FIFO on
+/// `set_inline_handle` so none are lost. Bounded like `MESSAGE_QUEUE`.
+static PENDING_QUEUE: Lazy<RwLock<VecDeque<QueuedMessage>>> = Lazy::new(|| RwLock::new(VecDeque::new()));
 
 pub fn append(line: &str) {
     if is_suppressed() || line.trim().is_empty() {
@@ -177,9 +180,16 @@ pub fn clear() {
     *REPLACEABLE_TRACKER_BLOCK.write() = None;
 }
 
-/// Set the inline handle for immediate message display
+/// Set the inline handle for immediate message display.
+///
+/// Any messages enqueued while no handle was attached are replayed FIFO
+/// exactly once, in order, so none are lost.
 pub fn set_inline_handle(handle: Arc<InlineHandle>) {
     *INLINE_HANDLE.write() = Some(handle);
+    let pending: Vec<QueuedMessage> = PENDING_QUEUE.write().drain(..).collect();
+    for msg in pending {
+        display_message_now(&msg.text, msg.kind, &msg.style);
+    }
 }
 
 /// Remove the inline handle
@@ -205,20 +215,33 @@ pub fn enqueue_message_with_kind(message: &str, kind: InlineMessageKind, text_st
 
     let queued = QueuedMessage { text: message.to_string(), kind, style: text_style };
 
-    // Enqueue the message
+    // Record history (bounded FIFO, drops oldest on overflow).
     {
         let mut queue = MESSAGE_QUEUE.write();
         if queue.len() >= MAX_QUEUE_SIZE {
             queue.pop_front();
         }
-        queue.push_back(queued);
+        queue.push_back(queued.clone());
     }
 
-    // Display immediately if we have an inline handle
-    // Re-read from queue to get reference without extra clone
-    let queue_read = MESSAGE_QUEUE.read();
-    if let Some(last) = queue_read.back() {
-        display_message_now(&last.text, last.kind, &last.style);
+    // Retain FIFO pending first, then drain for display when a handle is
+    // attached. Never re-read `.back()`: under concurrency that shows the
+    // last writer's message twice while dropping earlier ones. Pushing
+    // before the handle check closes the lost-wakeup race where `set_inline_handle`
+    // drains between the check and the push; the atomic drain below guarantees
+    // each pending message displays exactly once across both paths.
+    {
+        let mut pending = PENDING_QUEUE.write();
+        if pending.len() >= MAX_QUEUE_SIZE {
+            pending.pop_front();
+        }
+        pending.push_back(queued);
+    }
+    if INLINE_HANDLE.read().is_some() {
+        let pending: Vec<QueuedMessage> = PENDING_QUEUE.write().drain(..).collect();
+        for msg in pending {
+            display_message_now(&msg.text, msg.kind, &msg.style);
+        }
     }
 
     // Also add to transcript for persistence (plain text)
@@ -269,14 +292,35 @@ pub fn get_queued_messages_with_metadata() -> Vec<(String, InlineMessageKind)> {
     MESSAGE_QUEUE.read().iter().map(|m| (m.text.clone(), m.kind)).collect()
 }
 
-/// Clear the message queue
+/// Clear the message queue (history and undisplayed pending).
 pub fn clear_queue() {
     MESSAGE_QUEUE.write().clear();
+    PENDING_QUEUE.write().clear();
 }
 
-/// Get queue length
+/// Get queue length (history length).
 pub fn queue_len() -> usize {
     MESSAGE_QUEUE.read().len()
+}
+
+/// Get pending (undisplayed) queue length.
+pub fn pending_queue_len() -> usize {
+    PENDING_QUEUE.read().len()
+}
+
+/// Atomically take every queued message FIFO and clear the history queue.
+/// Prefer this over `get_queued_messages` + `clear_queue`: the snapshot
+/// pattern races and callers that only use `.last()` drop all but the
+/// newest message.
+pub fn drain_queued_messages() -> Vec<String> {
+    PENDING_QUEUE.write().clear();
+    MESSAGE_QUEUE.write().drain(..).map(|m| m.text).collect()
+}
+
+/// Atomically take every queued message with metadata FIFO and clear.
+pub fn drain_queued_messages_with_metadata() -> Vec<(String, InlineMessageKind)> {
+    PENDING_QUEUE.write().clear();
+    MESSAGE_QUEUE.write().drain(..).map(|m| (m.text, m.kind)).collect()
 }
 
 /// Replay all queued messages to the current inline handle (useful for recovery)
@@ -415,5 +459,124 @@ mod tests {
         assert!(!tracker_block_matches(&["• Plan 0/1".to_string()]));
         clear();
         assert_eq!(tracker_block_len(), None);
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn drain_queued_messages_returns_all_fifo_and_clears() {
+        clear();
+        clear_queue();
+        clear_inline_handle();
+        assert_eq!(pending_queue_len(), 0);
+
+        enqueue("alpha");
+        enqueue("beta");
+        enqueue("gamma");
+
+        assert_eq!(queue_len(), 3);
+        assert_eq!(pending_queue_len(), 3);
+        assert_eq!(get_queued_messages(), vec!["alpha".to_owned(), "beta".to_owned(), "gamma".to_owned()]);
+
+        let drained = drain_queued_messages();
+        assert_eq!(drained, vec!["alpha".to_owned(), "beta".to_owned(), "gamma".to_owned()]);
+        assert_eq!(queue_len(), 0);
+        assert_eq!(pending_queue_len(), 0);
+        assert!(get_queued_messages().is_empty());
+
+        clear();
+        clear_queue();
+        clear_inline_handle();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn drain_queued_messages_with_metadata_preserves_order() {
+        clear();
+        clear_queue();
+        clear_inline_handle();
+
+        enqueue_message("first", MessageStyle::Info);
+        enqueue_message("second", MessageStyle::Error);
+
+        let drained = drain_queued_messages_with_metadata();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].0, "first");
+        assert_eq!(drained[0].1, InlineMessageKind::Info);
+        assert_eq!(drained[1].0, "second");
+        assert_eq!(drained[1].1, InlineMessageKind::Error);
+        assert_eq!(queue_len(), 0);
+
+        clear();
+        clear_queue();
+        clear_inline_handle();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn pending_queue_replays_fifo_once_on_handle_set() {
+        use crate::ui::InlineCommand;
+
+        clear();
+        clear_queue();
+        clear_inline_handle();
+
+        enqueue("first pending");
+        enqueue("second pending");
+        assert_eq!(pending_queue_len(), 2);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        set_inline_handle(Arc::new(handle));
+        assert_eq!(pending_queue_len(), 0);
+        // History is retained for inspection; pending is what was replayed.
+        assert_eq!(queue_len(), 2);
+
+        let mut texts = Vec::new();
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { segments, .. } = cmd {
+                texts.extend(segments.into_iter().map(|s| s.text));
+            }
+        }
+        assert_eq!(texts, vec!["first pending".to_owned(), "second pending".to_owned()]);
+
+        // Second handle attach must not duplicate replay.
+        let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
+        let handle2 = InlineHandle::new_for_tests(tx2);
+        set_inline_handle(Arc::new(handle2));
+        assert!(rx2.try_recv().is_err());
+
+        clear();
+        clear_queue();
+        clear_inline_handle();
+    }
+
+    #[test]
+    #[serial_test::serial(transcript_state)]
+    fn immediate_display_uses_each_message_not_last_only() {
+        use crate::ui::InlineCommand;
+
+        clear();
+        clear_queue();
+        clear_inline_handle();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        set_inline_handle(Arc::new(handle));
+
+        enqueue("one");
+        enqueue("two");
+        assert_eq!(pending_queue_len(), 0);
+
+        let mut texts = Vec::new();
+        while let Ok(cmd) = rx.try_recv() {
+            if let InlineCommand::AppendLine { segments, .. } = cmd {
+                texts.extend(segments.into_iter().map(|s| s.text));
+            }
+        }
+        assert_eq!(texts, vec!["one".to_owned(), "two".to_owned()]);
+
+        clear();
+        clear_queue();
+        clear_inline_handle();
     }
 }

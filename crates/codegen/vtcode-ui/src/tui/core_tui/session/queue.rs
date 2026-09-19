@@ -49,10 +49,13 @@ impl Session {
         // overlay renders in insertion order: oldest on top, newest directly
         // above the input field. The oldest will be sent first. Multi-line
         // items must be flattened so a raw newline/carriage-return cannot
-        // break the layout.
-        for entry in self.queued_inputs.iter().take(VISIBLE_ITEMS) {
+        // break the layout. Number each entry `[i/n]` so the dispatch order
+        // is explicit and a "last-only" drain is immediately visible.
+        let total = self.queued_inputs.len();
+        for (idx, entry) in self.queued_inputs.iter().take(VISIBLE_ITEMS).enumerate() {
             let flattened = entry.replace(['\r', '\n'], " ⏎ ");
-            let trimmed = truncate_to_width(&flattened, available);
+            let numbered = format!("[{}/{total}] {flattened}", idx + 1);
+            let trimmed = truncate_to_width(&numbered, available);
             let mut spans = Vec::with_capacity(2);
             // Skip the prefix when it does not fit (tiny terminal width).
             if available > 0 {
@@ -65,7 +68,10 @@ impl Session {
         let muted_style = self.styles.default_style().add_modifier(Modifier::DIM);
         let hidden = self.queued_inputs.len().saturating_sub(VISIBLE_ITEMS);
         if hidden > 0 {
-            lines.push(Line::from(vec![Span::styled(format!("+{hidden} more queued"), muted_style)]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("+{hidden} more queued ({} total)", self.queued_inputs.len()),
+                muted_style,
+            )]));
         }
         lines.push(Line::from(vec![Span::styled(
             super::terminal_capabilities::queued_input_edit_hint().to_string(),

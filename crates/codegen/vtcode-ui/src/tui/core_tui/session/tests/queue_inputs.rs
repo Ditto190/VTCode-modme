@@ -370,8 +370,8 @@ fn queued_inputs_overlay_bottom_rows() {
             ],
         );
 
-        assert_footer_contains(&mut session, 10, "\u{21B3} third queued message");
-        assert_footer_contains(&mut session, 10, "\u{21B3} second queued message");
+        assert_footer_contains(&mut session, 10, "\u{21B3} [3/3] third queued message");
+        assert_footer_contains(&mut session, 10, "\u{21B3} [2/3] second queued message");
         assert_footer_contains(&mut session, 10, &queue_edit_hint());
     });
 }
@@ -404,11 +404,13 @@ fn running_activity_not_overlaid_above_queue_lines() {
         "running status should not be overlaid in transcript"
     );
     assert!(
-        rendered.iter().any(|line| line.contains("\u{21B3} second queued message")),
+        rendered
+            .iter()
+            .any(|line| line.contains("\u{21B3} [2/2] second queued message")),
         "latest queued message should remain visible"
     );
     assert!(
-        rendered.iter().any(|line| line.contains("\u{21B3} first queued message")),
+        rendered.iter().any(|line| line.contains("\u{21B3} [1/2] first queued message")),
         "older queued message should remain visible"
     );
 }
