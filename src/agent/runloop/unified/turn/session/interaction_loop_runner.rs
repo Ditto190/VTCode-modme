@@ -190,6 +190,7 @@ pub(super) async fn run_interaction_loop_impl(
             lifecycle_hooks: ctx.lifecycle_hooks.as_ref(),
             harness_emitter: ctx.harness_emitter,
             editor_open_sender: ctx.editor_open_sender,
+            editor_open_dispatcher: ctx.editor_open_dispatcher.clone(),
             webmcp_prompt_receiver: ctx.webmcp_prompt_receiver,
             idle_wake_delay,
         };

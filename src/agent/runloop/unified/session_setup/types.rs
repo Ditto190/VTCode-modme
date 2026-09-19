@@ -94,6 +94,7 @@ pub(crate) struct SessionUISetup {
     pub startup_update_notice_rx: Option<tokio::sync::mpsc::UnboundedReceiver<StartupUpdateNotice>>,
     pub startup_update_task_guard: Option<BackgroundTaskGuard>,
     pub editor_open_sender: crate::agent::runloop::unified::session_setup::EditorOpenRequestSender,
+    pub editor_open_dispatcher: Arc<crate::agent::runloop::unified::session_setup::EditorOpenDispatcher>,
     pub editor_open_coordinator_task_guard: BackgroundTaskGuard,
 }
 

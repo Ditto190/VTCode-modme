@@ -1,10 +1,11 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use anyhow::{Context, Result};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use vtcode_commons::{EditorTarget, resolve_editor_target};
 use vtcode_core::config::loader::ConfigManager;
@@ -27,12 +28,117 @@ impl EditorOpenRequest {
         Self { target }
     }
 
-    pub(crate) fn from_raw_target(raw: &str, workspace: &std::path::Path) -> Option<Self> {
+    pub(crate) fn from_raw_target(raw: &str, workspace: &Path) -> Option<Self> {
         resolve_editor_target(raw, workspace).map(Self::new)
     }
 }
 
 pub(crate) type EditorOpenRequestSender = Sender<EditorOpenRequest>;
+
+/// Synchronizes the two delivery paths for transcript/modal file-open
+/// events so a click opens the editor exactly once.
+///
+/// The TUI event thread forwards `OpenFileInEditor` synchronously through
+/// the session event callback (immediate even while an agent turn owns
+/// `InlineSession.events`), while the same event instance is also queued on
+/// the main channel and drained later by the idle loop. Each successful
+/// immediate forward records a count keyed by raw target; the deferred
+/// drain consumes one count instead of re-sending, which keeps the fallback
+/// path (early boot before the coordinator sender exists, full-queue
+/// retries, callback-less headless sessions) intact without double opens.
+/// Counts are keyed by the raw event string so each event instance pairs
+/// with its own deferred drain entry even when different spellings resolve
+/// to the same file.
+///
+/// Counts (not a set) keep back-to-back clicks on the same target paired
+/// exactly: two immediate forwards require two deferred skips.
+pub(crate) struct EditorOpenDispatcher {
+    sender_holder: Arc<OnceLock<EditorOpenRequestSender>>,
+    callback_forwarded_counts: Mutex<HashMap<String, usize>>,
+    allow_immediate: bool,
+}
+
+impl EditorOpenDispatcher {
+    pub(crate) fn new(allow_immediate: bool) -> Self {
+        Self {
+            sender_holder: Arc::new(OnceLock::new()),
+            callback_forwarded_counts: Mutex::new(HashMap::new()),
+            allow_immediate,
+        }
+    }
+
+    pub(crate) fn set_sender(&self, sender: EditorOpenRequestSender) {
+        let _ = self.sender_holder.set(sender);
+    }
+
+    fn forwarded_counts(&self) -> MutexGuard<'_, HashMap<String, usize>> {
+        self.callback_forwarded_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Forward from the synchronous TUI event callback. Returns true when
+    /// the request was handed to the coordinator (the deferred drain must
+    /// skip this event instance). Returns false — leaving delivery to the
+    /// deferred drain — when immediate opens are disabled (terminal editors
+    /// needing TUI suspension), the target is unparsable, or no coordinator
+    /// sender is installed yet.
+    pub(crate) fn try_forward_immediate(&self, raw: &str, workspace: &Path) -> bool {
+        if !self.allow_immediate {
+            return false;
+        }
+        let Some(request) = EditorOpenRequest::from_raw_target(raw, workspace) else {
+            return false;
+        };
+        let Some(sender) = self.sender_holder.get() else {
+            return false;
+        };
+        match sender.try_send(request) {
+            Ok(()) => {
+                *self.forwarded_counts().entry(raw.to_string()).or_insert(0) += 1;
+                true
+            }
+            Err(TrySendError::Full(_)) => {
+                tracing::debug!("dropping immediate file-open request because coordinator queue is full");
+                false
+            }
+            Err(TrySendError::Closed(_)) => {
+                tracing::debug!("dropping immediate file-open request because coordinator is unavailable");
+                false
+            }
+        }
+    }
+
+    /// Forward from the idle-loop drain of `InlineSession.events`. Skips the
+    /// event instance when the callback already forwarded it (see
+    /// [`Self::try_forward_immediate`]); otherwise sends through the
+    /// provided coordinator sender.
+    pub(crate) fn try_forward_deferred(&self, sender: &EditorOpenRequestSender, raw: &str, workspace: &Path) {
+        let Some(request) = EditorOpenRequest::from_raw_target(raw, workspace) else {
+            return;
+        };
+        let mut counts = self.forwarded_counts();
+        if let Some(count) = counts.get_mut(raw) {
+            if *count > 1 {
+                *count -= 1;
+            } else {
+                counts.remove(raw);
+            }
+            tracing::debug!(target = raw, "skipping deferred file-open request already forwarded immediately");
+            return;
+        }
+        drop(counts);
+        match sender.try_send(request) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                tracing::debug!("dropping file-open request from TUI because coordinator queue is full");
+            }
+            Err(TrySendError::Closed(_)) => {
+                tracing::debug!("dropping file-open request from TUI because coordinator is unavailable");
+            }
+        }
+    }
+}
 
 type EditorOpenFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
 
@@ -222,5 +328,61 @@ mod tests {
         assert_eq!(coordinator.next_pending_target().await, Some(second_target.clone()));
         coordinator.finish_target(&second_target);
         assert_eq!(coordinator.next_pending_target().await, None);
+    }
+
+    #[test]
+    fn deferred_drain_skips_event_instance_forwarded_immediately() {
+        let workspace = PathBuf::from("/tmp");
+        let (sender, mut receiver) = bounded_editor_open_requests();
+        let dispatcher = EditorOpenDispatcher::new(true);
+        dispatcher.set_sender(sender.clone());
+
+        assert!(dispatcher.try_forward_immediate("/tmp/demo.rs", &workspace));
+        dispatcher.try_forward_deferred(&sender, "/tmp/demo.rs", &workspace);
+
+        assert!(receiver.try_recv().is_ok());
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn deferred_drain_forwards_when_immediate_path_declined() {
+        let workspace = PathBuf::from("/tmp");
+        let (sender, mut receiver) = bounded_editor_open_requests();
+        // Terminal editors keep the deferred path: the callback declines.
+        let dispatcher = EditorOpenDispatcher::new(false);
+
+        assert!(!dispatcher.try_forward_immediate("/tmp/demo.rs", &workspace));
+        dispatcher.try_forward_deferred(&sender, "/tmp/demo.rs", &workspace);
+
+        assert!(receiver.try_recv().is_ok());
+    }
+
+    #[test]
+    fn back_to_back_clicks_on_same_target_pair_exactly() {
+        let workspace = PathBuf::from("/tmp");
+        let (sender, mut receiver) = bounded_editor_open_requests();
+        let dispatcher = EditorOpenDispatcher::new(true);
+        dispatcher.set_sender(sender.clone());
+
+        assert!(dispatcher.try_forward_immediate("/tmp/demo.rs", &workspace));
+        assert!(dispatcher.try_forward_immediate("/tmp/demo.rs", &workspace));
+        dispatcher.try_forward_deferred(&sender, "/tmp/demo.rs", &workspace);
+        dispatcher.try_forward_deferred(&sender, "/tmp/demo.rs", &workspace);
+
+        assert!(receiver.try_recv().is_ok());
+        assert!(receiver.try_recv().is_ok());
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn immediate_forward_without_sender_falls_back_to_deferred() {
+        let workspace = PathBuf::from("/tmp");
+        let (sender, mut receiver) = bounded_editor_open_requests();
+        let dispatcher = EditorOpenDispatcher::new(true);
+
+        assert!(!dispatcher.try_forward_immediate("/tmp/demo.rs", &workspace));
+        dispatcher.try_forward_deferred(&sender, "/tmp/demo.rs", &workspace);
+
+        assert!(receiver.try_recv().is_ok());
     }
 }

@@ -17,7 +17,7 @@ use crate::agent::runloop::model_picker::ModelPickerState;
 use crate::agent::runloop::unified::context_manager::ContextManager;
 use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
 use crate::agent::runloop::unified::palettes::ActivePalette;
-use crate::agent::runloop::unified::session_setup::EditorOpenRequestSender;
+use crate::agent::runloop::unified::session_setup::{EditorOpenDispatcher, EditorOpenRequestSender};
 use crate::agent::runloop::unified::state::{CtrlCState, SessionStats};
 use crate::agent::runloop::welcome::SessionBootstrap;
 use crate::updater::{StartupUpdateNotice, display_update_notice};
@@ -51,6 +51,7 @@ struct InlineEventLoop<'a> {
     lifecycle_hooks: Option<&'a LifecycleHookEngine>,
     harness_emitter: Option<&'a HarnessEventEmitter>,
     editor_open_sender: &'a EditorOpenRequestSender,
+    editor_open_dispatcher: Arc<EditorOpenDispatcher>,
     webmcp_prompt_receiver: &'a mut Option<tokio::sync::mpsc::Receiver<String>>,
     idle_wake_delay: Duration,
 }
@@ -90,6 +91,7 @@ impl<'a> InlineEventLoop<'a> {
             lifecycle_hooks,
             harness_emitter,
             editor_open_sender,
+            editor_open_dispatcher,
             webmcp_prompt_receiver,
             idle_wake_delay,
         } = resources;
@@ -121,6 +123,7 @@ impl<'a> InlineEventLoop<'a> {
             lifecycle_hooks,
             harness_emitter,
             editor_open_sender,
+            editor_open_dispatcher,
             webmcp_prompt_receiver,
             idle_wake_delay,
         }
@@ -268,7 +271,7 @@ impl<'a> InlineEventLoop<'a> {
             harness_emitter,
         );
 
-        context.set_editor_open_sender(self.editor_open_sender.clone());
+        context.set_editor_open_sink(self.editor_open_sender.clone(), self.editor_open_dispatcher.clone());
         context.process_event(event, &mut self.queue).await
     }
 
@@ -360,6 +363,7 @@ pub(crate) struct InlineEventLoopResources<'a> {
     pub lifecycle_hooks: Option<&'a LifecycleHookEngine>,
     pub harness_emitter: Option<&'a HarnessEventEmitter>,
     pub editor_open_sender: &'a EditorOpenRequestSender,
+    pub editor_open_dispatcher: Arc<EditorOpenDispatcher>,
     pub webmcp_prompt_receiver: &'a mut Option<tokio::sync::mpsc::Receiver<String>>,
     pub idle_wake_delay: Duration,
 }
@@ -557,6 +561,7 @@ mod tests {
             lifecycle_hooks: None,
             harness_emitter: None,
             editor_open_sender: &editor_open_sender,
+            editor_open_dispatcher: Arc::new(EditorOpenDispatcher::new(true)),
             webmcp_prompt_receiver: &mut webmcp_prompt_receiver,
             idle_wake_delay: Duration::from_millis(5),
             ctrl_c_state: &ctrl_c_state,
@@ -632,6 +637,7 @@ mod tests {
             lifecycle_hooks: None,
             harness_emitter: None,
             editor_open_sender: &editor_open_sender,
+            editor_open_dispatcher: Arc::new(EditorOpenDispatcher::new(true)),
             webmcp_prompt_receiver: &mut webmcp_prompt_receiver,
             idle_wake_delay: Duration::from_millis(5),
             ctrl_c_state: &ctrl_c_state,

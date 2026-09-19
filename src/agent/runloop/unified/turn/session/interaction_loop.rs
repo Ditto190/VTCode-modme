@@ -90,6 +90,7 @@ pub(crate) struct InteractionLoopContext<'a> {
     pub webmcp_bridge: &'a mut Option<ActiveWebmcpBridge>,
     pub startup_update_notice_rx: &'a mut Option<mpsc::UnboundedReceiver<StartupUpdateNotice>>,
     pub editor_open_sender: &'a crate::agent::runloop::unified::session_setup::EditorOpenRequestSender,
+    pub editor_open_dispatcher: Arc<crate::agent::runloop::unified::session_setup::EditorOpenDispatcher>,
 }
 
 impl<'a> InteractionLoopContext<'a> {

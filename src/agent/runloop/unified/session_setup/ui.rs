@@ -13,6 +13,7 @@ mod local_agents;
 mod persistent_memory;
 mod resume_render;
 
+use super::EditorOpenDispatcher;
 use super::hook_approval;
 use super::types::{BackgroundTaskGuard, SessionState, SessionUISetup};
 use crate::agent::runloop::ResumeSession;
@@ -24,6 +25,7 @@ use crate::agent::runloop::unified::turn::utils::{append_additional_context, ren
 use crate::agent::runloop::unified::{context_manager, state};
 use anyhow::{Context, Result};
 use hashbrown::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tokio::sync::{Notify, mpsc::UnboundedSender};
@@ -37,6 +39,7 @@ use vtcode_core::notifications::{set_global_notification_hook_engine, set_global
 use vtcode_core::primary_agent::build_primary_agent_hook_config;
 use vtcode_core::prompts::discover_prompt_templates;
 use vtcode_core::subagents::SubagentController;
+use vtcode_core::tools::terminal_app::TerminalAppLauncher;
 use vtcode_core::ui::slash::visible_commands;
 use vtcode_core::ui::theme;
 use vtcode_core::ui::{
@@ -87,12 +90,40 @@ pub(crate) struct SessionUiLaunchOptions {
     pub steering_sender: Option<UnboundedSender<SteeringMessage>>,
 }
 
+/// Whether transcript file links may open while an agent turn is active.
+///
+/// GUI editors launch detached without touching the TUI event loop, so they
+/// are safe to open mid-turn. Terminal editors suspend the event loop and
+/// take over the terminal, which would contend with the running turn's
+/// rendering — those stay on the deferred idle-loop drain (previous
+/// behavior). The coordinator backend re-resolves this per open; this
+/// snapshot only gates timing, so a mid-session editor reconfiguration at
+/// worst affects immediacy, never correctness.
+fn immediate_file_open_allowed(vt_cfg: Option<&VTCodeConfig>) -> bool {
+    let Some(editor_config) = vt_cfg.map(|cfg| cfg.tools.editor.clone()) else {
+        return true;
+    };
+    let preferred_editor =
+        (!editor_config.preferred_editor.trim().is_empty()).then(|| editor_config.preferred_editor.clone());
+    !(editor_config.suspend_tui && TerminalAppLauncher::editor_command_requires_terminal(preferred_editor.as_deref()))
+}
+
 fn build_session_event_callback(
     state: Arc<state::CtrlCState>,
     notify: Arc<Notify>,
     steering_sender: Option<UnboundedSender<SteeringMessage>>,
+    editor_open: Arc<EditorOpenDispatcher>,
+    editor_workspace: PathBuf,
 ) -> InlineEventCallback {
     Arc::new(move |event: &InlineEvent| match event {
+        InlineEvent::OpenFileInEditor(path) => {
+            // Cmd+click file links must open immediately even while an agent
+            // turn owns `InlineSession.events`. The TUI event thread runs this
+            // callback synchronously, so the dispatcher forwards out-of-band
+            // and pairs with the deferred idle-loop drain so the click opens
+            // exactly once.
+            editor_open.try_forward_immediate(path, &editor_workspace);
+        }
         InlineEvent::Interrupt => {
             // Esc / Ctrl+C from the TUI must cancel the current turn without
             // entering the emergency double-signal exit state machine used by
@@ -191,7 +222,14 @@ pub(crate) async fn initialize_session_ui(
     let ctrl_c_state = Arc::new(state::CtrlCState::new());
     let ctrl_c_notify = Arc::new(Notify::new());
     let input_activity_counter = Arc::new(AtomicU64::new(0));
-    let interrupt_callback = build_session_event_callback(ctrl_c_state.clone(), ctrl_c_notify.clone(), steering_sender);
+    let editor_open_dispatcher = Arc::new(EditorOpenDispatcher::new(immediate_file_open_allowed(vt_cfg)));
+    let interrupt_callback = build_session_event_callback(
+        ctrl_c_state.clone(),
+        ctrl_c_notify.clone(),
+        steering_sender,
+        editor_open_dispatcher.clone(),
+        config.workspace.clone(),
+    );
     let focus_callback: FocusChangeCallback = Arc::new(set_global_terminal_focused);
 
     let pty_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -318,6 +356,7 @@ pub(crate) async fn initialize_session_ui(
     session.set_color_scheme_auto(color_scheme_auto);
     let (editor_open_sender, editor_open_coordinator_task_guard) =
         spawn_editor_open_coordinator(config.workspace.clone(), &handle);
+    editor_open_dispatcher.set_sender(editor_open_sender.clone());
     let highlight_config = vt_cfg.as_ref().map(|cfg| cfg.syntax_highlighting.clone()).unwrap_or_default();
 
     transcript::set_inline_handle(Arc::new(handle.clone()));
@@ -556,6 +595,7 @@ pub(crate) async fn initialize_session_ui(
         startup_update_notice_rx,
         startup_update_task_guard,
         editor_open_sender,
+        editor_open_dispatcher,
         editor_open_coordinator_task_guard,
     })
 }

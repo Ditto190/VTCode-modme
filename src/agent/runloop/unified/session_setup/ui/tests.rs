@@ -1,3 +1,4 @@
+use super::super::{EditorOpenDispatcher, EditorOpenRequest};
 use super::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,7 +33,13 @@ fn sample_memory_status() -> PersistentMemoryStatus {
 fn session_tui_interrupt_callback_only_cancels_after_cancel_is_handled() {
     let state = Arc::new(state::CtrlCState::new());
     let notify = Arc::new(Notify::new());
-    let callback = build_session_event_callback(state.clone(), notify, None);
+    let callback = build_session_event_callback(
+        state.clone(),
+        notify,
+        None,
+        Arc::new(EditorOpenDispatcher::new(true)),
+        PathBuf::from("/tmp"),
+    );
 
     callback(&InlineEvent::Interrupt);
     state.mark_cancel_handled();
@@ -300,4 +307,55 @@ fn background_local_agent_preview_uses_status_placeholder() {
     };
 
     assert_eq!(background_local_agent_preview_placeholder(&entry), "Waiting for the subprocess to emit output...");
+}
+
+#[test]
+fn file_open_callback_forwards_out_of_band_without_idle_drain() {
+    let state = Arc::new(state::CtrlCState::new());
+    let notify = Arc::new(Notify::new());
+    let (sender, mut receiver) = super::super::bounded_editor_open_requests();
+    let dispatcher = Arc::new(EditorOpenDispatcher::new(true));
+    dispatcher.set_sender(sender);
+    let callback = build_session_event_callback(state, notify, None, dispatcher, PathBuf::from("/tmp"));
+
+    callback(&InlineEvent::OpenFileInEditor("/tmp/demo.rs".to_string()));
+
+    let request = receiver.try_recv().expect("callback should forward file-open immediately");
+    assert_eq!(
+        request,
+        EditorOpenRequest::from_raw_target("/tmp/demo.rs", &PathBuf::from("/tmp")).expect("valid editor target")
+    );
+}
+
+#[test]
+fn file_open_callback_without_sender_is_noop() {
+    let state = Arc::new(state::CtrlCState::new());
+    let notify = Arc::new(Notify::new());
+    let callback = build_session_event_callback(
+        state,
+        notify,
+        None,
+        Arc::new(EditorOpenDispatcher::new(true)),
+        PathBuf::from("/tmp"),
+    );
+
+    callback(&InlineEvent::OpenFileInEditor("/tmp/demo.rs".to_string()));
+}
+
+#[test]
+fn file_open_callback_defers_terminal_editors_to_idle_drain() {
+    let state = Arc::new(state::CtrlCState::new());
+    let notify = Arc::new(Notify::new());
+    let (sender, mut receiver) = super::super::bounded_editor_open_requests();
+    let dispatcher = Arc::new(EditorOpenDispatcher::new(false));
+    dispatcher.set_sender(sender.clone());
+    let callback = build_session_event_callback(state, notify, None, dispatcher.clone(), PathBuf::from("/tmp"));
+
+    callback(&InlineEvent::OpenFileInEditor("/tmp/demo.rs".to_string()));
+
+    // Terminal editors must not open mid-turn (TUI suspension would contend
+    // with the running turn); the deferred drain delivers after the turn.
+    assert!(receiver.try_recv().is_err());
+    dispatcher.try_forward_deferred(&sender, "/tmp/demo.rs", &PathBuf::from("/tmp"));
+    assert!(receiver.try_recv().is_ok());
 }

@@ -8,7 +8,9 @@ use crate::agent::runloop::unified::inline_events::{
     InlineEventContext, InlineInterruptCoordinator, InlineLoopAction, InlineQueueState, QueuedInput,
 };
 use crate::agent::runloop::unified::palettes::{ActivePalette, MODE_ACTION_PREFIX};
-use crate::agent::runloop::unified::session_setup::{EditorOpenRequest, bounded_editor_open_requests};
+use crate::agent::runloop::unified::session_setup::{
+    EditorOpenDispatcher, EditorOpenRequest, bounded_editor_open_requests,
+};
 use crate::agent::runloop::unified::settings_interactive::{ACTION_CONFIGURE_EDITOR, SettingsPaletteState};
 use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::state::SessionStats;
@@ -254,7 +256,7 @@ async fn open_file_in_editor_event_emits_out_of_band_request_with_path() {
         None,
     );
     let (editor_sender, mut editor_requests) = bounded_editor_open_requests();
-    context.set_editor_open_sender(editor_sender);
+    context.set_editor_open_sink(editor_sender, Arc::new(EditorOpenDispatcher::new(true)));
     let mut queued_inputs = VecDeque::new();
     let mut prefer_latest_once = false;
     let mut queue = InlineQueueState::new(&handle, &mut queued_inputs, &mut prefer_latest_once);
@@ -270,6 +272,71 @@ async fn open_file_in_editor_event_emits_out_of_band_request_with_path() {
         Some(EditorOpenRequest::from_raw_target(&path, &config.workspace).expect("valid editor target"))
     );
     assert!(queued_inputs.is_empty());
+}
+
+#[tokio::test]
+async fn open_file_drain_skips_event_instance_forwarded_by_callback() {
+    let (handle, mut renderer) = renderer_with_handle();
+    let (ctrl_c_state, ctrl_c_notify) = ctrl_c_handles();
+    let interrupts = InlineInterruptCoordinator::new(ctrl_c_state.as_ref());
+    let mut ctrl_c_notice_displayed = false;
+    let mut model_picker_state: Option<ModelPickerState> = None;
+    let mut palette_state: Option<ActivePalette> = None;
+    let mut config = runtime_config();
+    let workspace = config.workspace.clone();
+    let mut vt_cfg = None;
+    let mut provider_client: Box<dyn uni::LLMProvider> = Box::new(DummyProvider);
+    let session_bootstrap = SessionBootstrap::default();
+    let mut header_context = vtcode_ui::tui::app::InlineHeaderContext::default();
+    let mut history = Vec::<uni::Message>::new();
+    let mut session_stats = SessionStats::default();
+    let mut context_manager = ContextManager::default_for_test();
+    let mut context = InlineEventContext::new(
+        &mut renderer,
+        &handle,
+        interrupts,
+        &mut ctrl_c_notice_displayed,
+        &mut header_context,
+        &mut model_picker_state,
+        &mut palette_state,
+        &mut config,
+        &mut vt_cfg,
+        &mut provider_client,
+        &ctrl_c_state,
+        &ctrl_c_notify,
+        &session_bootstrap,
+        false,
+        &mut history,
+        &mut session_stats,
+        &mut context_manager,
+        "test-session",
+        "test-thread",
+        None,
+        None,
+    );
+    let (editor_sender, mut editor_requests) = bounded_editor_open_requests();
+    let dispatcher = Arc::new(EditorOpenDispatcher::new(true));
+    dispatcher.set_sender(editor_sender.clone());
+    context.set_editor_open_sink(editor_sender, dispatcher.clone());
+    let mut queued_inputs = VecDeque::new();
+    let mut prefer_latest_once = false;
+    let mut queue = InlineQueueState::new(&handle, &mut queued_inputs, &mut prefer_latest_once);
+    let path = "/tmp/demo.rs".to_string();
+
+    // Simulate the TUI event callback firing first (immediate mid-turn
+    // open), then the same event instance arriving via the main channel
+    // drain after the turn.
+    assert!(dispatcher.try_forward_immediate(&path, &workspace));
+    let action = context
+        .process_event(InlineEvent::OpenFileInEditor(path.clone()), &mut queue)
+        .await
+        .expect("process open file in editor");
+    assert!(matches!(action, InlineLoopAction::Continue));
+    assert_eq!(
+        editor_requests.recv().await,
+        Some(EditorOpenRequest::from_raw_target(&path, &workspace).expect("valid editor target"))
+    );
+    assert!(editor_requests.try_recv().is_err());
 }
 
 #[tokio::test]

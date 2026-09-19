@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tokio::sync::mpsc::error::TrySendError;
 
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
@@ -19,7 +18,7 @@ use crate::agent::runloop::unified::context_manager::ContextManager;
 use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
 use crate::agent::runloop::unified::model_selection::ModelSwitchCompactionTargets;
 use crate::agent::runloop::unified::palettes::ActivePalette;
-use crate::agent::runloop::unified::session_setup::{EditorOpenRequest, EditorOpenRequestSender};
+use crate::agent::runloop::unified::session_setup::{EditorOpenDispatcher, EditorOpenRequestSender};
 use crate::agent::runloop::unified::state::SessionStats;
 use crate::agent::runloop::welcome::SessionBootstrap;
 
@@ -38,6 +37,7 @@ pub(crate) struct InlineEventContext<'a> {
     ctrl_c_notify: &'a Arc<Notify>,
     editor_workspace: PathBuf,
     editor_open_sender: Option<EditorOpenRequestSender>,
+    editor_open_dispatcher: Option<Arc<EditorOpenDispatcher>>,
 }
 
 impl<'a> InlineEventContext<'a> {
@@ -100,11 +100,17 @@ impl<'a> InlineEventContext<'a> {
             ctrl_c_notify,
             editor_workspace,
             editor_open_sender: None,
+            editor_open_dispatcher: None,
         }
     }
 
-    pub(crate) fn set_editor_open_sender(&mut self, sender: EditorOpenRequestSender) {
+    pub(crate) fn set_editor_open_sink(
+        &mut self,
+        sender: EditorOpenRequestSender,
+        dispatcher: Arc<EditorOpenDispatcher>,
+    ) {
         self.editor_open_sender = Some(sender);
+        self.editor_open_dispatcher = Some(dispatcher);
     }
 
     pub(crate) async fn process_event(
@@ -249,18 +255,14 @@ impl<'a> InlineEventContext<'a> {
             }
             InlineEvent::OpenFileInEditor(path) => {
                 self.state.reset_interrupt_state();
-                if let Some(sender) = self.editor_open_sender.as_ref()
-                    && let Some(request) = EditorOpenRequest::from_raw_target(&path, &self.editor_workspace)
+                // The TUI event callback may have forwarded this same event
+                // instance out-of-band already (immediate mid-turn open); the
+                // dispatcher pairs the two deliveries so the click opens
+                // exactly once.
+                if let (Some(sender), Some(dispatcher)) =
+                    (self.editor_open_sender.as_ref(), self.editor_open_dispatcher.as_ref())
                 {
-                    match sender.try_send(request) {
-                        Ok(()) => {}
-                        Err(TrySendError::Full(_)) => {
-                            tracing::debug!("dropping file-open request from TUI because coordinator queue is full");
-                        }
-                        Err(TrySendError::Closed(_)) => {
-                            tracing::debug!("dropping file-open request from TUI because coordinator is unavailable");
-                        }
-                    }
+                    dispatcher.try_forward_deferred(sender, &path, &self.editor_workspace);
                 }
                 InlineLoopAction::Continue
             }

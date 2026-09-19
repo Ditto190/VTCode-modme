@@ -390,6 +390,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let _startup_update_task_guard = ui_setup.startup_update_task_guard;
         let _editor_open_coordinator_task_guard = ui_setup.editor_open_coordinator_task_guard;
         let editor_open_sender = ui_setup.editor_open_sender;
+        let editor_open_dispatcher = ui_setup.editor_open_dispatcher;
         let startup_update_cached_notice = ui_setup.startup_update_cached_notice;
         let mut startup_update_notice_rx = ui_setup.startup_update_notice_rx;
         let SessionState {
@@ -819,6 +820,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             webmcp_bridge: &mut webmcp_bridge,
                             startup_update_notice_rx: &mut startup_update_notice_rx,
                             editor_open_sender: &editor_open_sender,
+                            editor_open_dispatcher: editor_open_dispatcher.clone(),
                         };
 
                     let mut interaction_state =
