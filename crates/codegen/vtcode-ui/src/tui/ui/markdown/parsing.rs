@@ -198,9 +198,12 @@ pub(crate) fn handle_start_tag(tag: &Tag<'_>, ctx: &mut MarkdownContext<'_>) {
             };
             *ctx.code_block = Some(CodeBlockState { language, buffer: String::new() });
         }
-        Tag::Table(_) => {
+        Tag::Table(alignments) => {
             ctx.flush_paragraph();
-            *ctx.active_table = Some(TableBuffer::default());
+            *ctx.active_table = Some(TableBuffer {
+                alignments: alignments.clone(),
+                ..TableBuffer::default()
+            });
         }
         Tag::TableRow => {
             if let Some(table) = ctx.active_table.as_mut() {

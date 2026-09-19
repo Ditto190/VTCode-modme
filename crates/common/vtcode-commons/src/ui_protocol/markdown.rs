@@ -34,10 +34,11 @@ impl MarkdownLine {
 pub struct RenderMarkdownOptions {
     preserve_code_indentation: bool,
     disable_code_block_table_reparse: bool,
-    /// Available content width for tables. Headered tables use their intrinsic
-    /// column widths when they fit; otherwise they fall back to labeled,
-    /// wrapped blocks. Headerless tables retain their table layout. Only
-    /// effective in TUI mode.
+    /// Available content width for tables. Headered tables keep a padded,
+    /// width-aware grid while cells remain readable, then fall back to aligned
+    /// labeled records when the grid becomes too cramped. Headerless tables
+    /// retain their grid layout and scale columns to fit. Only effective in
+    /// TUI mode.
     table_max_width: Option<usize>,
 }
 

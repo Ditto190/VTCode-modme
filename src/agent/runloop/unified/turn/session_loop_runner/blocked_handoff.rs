@@ -289,6 +289,7 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
         blocker_summary,
         &existing_harness_artifact_paths(workspace),
         resume,
+        planning_active,
     ) {
         Ok(artifacts) => {
             let full_reason_path = artifacts.current_path.display().to_string();

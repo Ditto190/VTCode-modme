@@ -28,7 +28,9 @@ When a turn blocks while planning is active, the transcript adds plan-mode
 guidance alongside the generic `continue` nudge: plan mode is read-only by
 design, so `Mutation blocked` means the edit was stopped by policy (not by a
 failing check) and a repeated `Turn blocked` will re-block if the same
-mutating tools are retried. Stay planning with `continue`, or implement by
+mutating tools are retried. The persisted handoff file carries the same
+guidance in its Actionable Next Steps so a resumed session sees it without
+the original transcript. Stay planning with `continue`, or implement by
 approving the plan or running `/mode build` (`/mode auto` for unattended
 confirmation). The input placeholder switches to the same choice. VT Code
 never auto-switches modes from a blocked turn; the user decides on the next

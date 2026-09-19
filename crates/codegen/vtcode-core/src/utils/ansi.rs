@@ -1977,7 +1977,7 @@ mod tests {
                 .all(|line| UnicodeWidthStr::width(line.as_str()) + agent_frame_width <= terminal_width),
             "a rendered line exceeded the framed terminal width: {normal_text:?}"
         );
-        let has_table_separator = normal_text.iter().any(|line| line.contains('│'));
+        let has_table_separator = normal_text.iter().any(|line| line.contains('━'));
         assert_eq!(has_table_separator, expect_table_separators, "unexpected table layout: {normal_text:?}");
     }
 
@@ -1986,7 +1986,7 @@ mod tests {
         assert_markdown_table_fixture(
             include_str!("fixtures/markdown_table_wide.md"),
             include_str!("fixtures/markdown_table_wide.snap"),
-            34,
+            40,
             true,
         );
     }
@@ -2002,7 +2002,7 @@ mod tests {
             normal
                 .iter()
                 .flat_map(|line| line.iter())
-                .any(|segment| segment.text.contains("Details:") && segment.style.effects.contains(Effects::BOLD)),
+                .any(|segment| segment.text.contains("Details") && segment.style.effects.contains(Effects::BOLD)),
             "fallback heading labels should be bold"
         );
     }
@@ -2028,8 +2028,8 @@ mod tests {
         }
 
         let output = rendered.join("\n");
-        assert!(output.contains("Name:"), "agent frame should trigger labeled blocks: {output}");
-        assert!(output.contains("Description:"), "all labels should be retained: {output}");
+        assert!(output.contains("Name"), "agent frame should trigger labeled records: {output}");
+        assert!(output.contains("Description"), "all labels should be retained: {output}");
         assert!(!output.contains("│"), "table separators should not survive the narrow layout: {output}");
         assert!(rendered.iter().all(|line| UnicodeWidthStr::width(line.as_str()) <= 18));
         Ok(())
@@ -2058,13 +2058,13 @@ mod tests {
         }
 
         let output = rendered.join("\n");
-        assert!(output.contains("Name:"), "agent label should reserve its prefix width: {output}");
+        assert!(output.contains("Name"), "agent label should reserve its prefix width: {output}");
         assert!(!output.contains("│"), "table columns should not be rewrapped after the label: {output}");
         Ok(())
     }
 
     #[test]
-    fn streaming_markdown_table_uses_same_labeled_block_layout() -> Result<()> {
+    fn streaming_markdown_table_uses_same_aligned_record_layout() -> Result<()> {
         use crate::ui::InlineCommand;
 
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -2090,11 +2090,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(line_count, lines.len());
         assert_eq!(replaced_count, 2);
+        assert!(output.iter().any(|line| line.contains("Name")), "streamed output should contain labels: {output:?}");
         assert!(
-            output.iter().any(|line| line.contains("Name:")),
-            "streamed output should contain labels: {output:?}"
+            !output.iter().any(|line| line.contains('│')),
+            "streamed output should use aligned records: {output:?}"
         );
-        assert!(!output.iter().any(|line| line.contains('│')), "streamed output should use blocks: {output:?}");
         Ok(())
     }
 

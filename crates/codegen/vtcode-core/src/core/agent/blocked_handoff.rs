@@ -14,6 +14,13 @@ const TASKS_DIR: &str = ".vtcode/tasks";
 const CURRENT_BLOCKED_FILE: &str = "current_blocked.md";
 const BLOCKERS_DIR: &str = "blockers";
 
+/// Plan-mode note appended to the handoff's Actionable Next Steps when the
+/// blocked turn ran with planning active. Kept as one generic paragraph
+/// (rather than the transcript's mutation/generic split) so the persisted
+/// file stays useful to a resumed session without duplicating the
+/// caller-side block-kind matcher.
+const PLAN_MODE_HANDOFF_GUIDANCE: &str = "- Plan mode was active (read-only) when this turn blocked: `Mutation blocked` means the edit was stopped by policy, not by a failing check. To keep planning, type `continue` to resume with retained history; to implement, approve the plan or run `/mode build` (`/mode auto` for unattended).";
+
 struct BlockedHandoffPaths<'a> {
     current: &'a Path,
     archive: &'a Path,
@@ -61,11 +68,16 @@ pub fn write_blocked_handoff(
         BlockedHandoffResume::Unavailable(
             "Resume is unavailable because this compatibility entry point has no verified session archive.",
         ),
+        false,
     )
 }
 
 /// Write a blocked handoff with resume metadata supplied through the typed
 /// archive-verification boundary.
+///
+/// `planning_active` records whether the blocked turn ran with planning
+/// active so the persisted handoff carries the same mode guidance as the
+/// transcript (a resumed session reads the file, not the old transcript).
 pub fn write_blocked_handoff_with_resume(
     workspace: &Path,
     session_id: &str,
@@ -73,6 +85,7 @@ pub fn write_blocked_handoff_with_resume(
     blocker_summary: &str,
     relevant_paths: &[PathBuf],
     resume: BlockedHandoffResume<'_>,
+    planning_active: bool,
 ) -> Result<BlockedHandoffArtifacts> {
     let (workspace, tasks_dir, blockers_dir) = safe_handoff_directories(workspace)?;
     fs::create_dir_all(&blockers_dir)
@@ -97,6 +110,7 @@ pub fn write_blocked_handoff_with_resume(
         relevant_paths,
         timestamp.to_rfc3339(),
         resume,
+        planning_active,
     );
 
     write_handoff_file(&archive_path, &markdown, false)?;
@@ -641,6 +655,7 @@ fn render_blocked_handoff(
     relevant_paths: &[PathBuf],
     created_at: String,
     resume: BlockedHandoffResume<'_>,
+    planning_active: bool,
 ) -> String {
     let mut paths = vec![
         workspace.to_path_buf(),
@@ -671,9 +686,14 @@ fn render_blocked_handoff(
     };
 
     let actionable_steps = format!(
-        "## Actionable Next Steps\n\n- In this session: Type `continue` to retry with retained history, or provide alternative instructions.\n{resume_actionable}- Archived details: `{}`.\n- Live pointer: `{}` may be cleared after this session recovers successfully.",
+        "## Actionable Next Steps\n\n- In this session: Type `continue` to retry with retained history, or provide alternative instructions.\n{resume_actionable}- Archived details: `{}`.\n- Live pointer: `{}` may be cleared after this session recovers successfully.{plan_mode_actionable}",
         handoff_paths.archive.display(),
-        handoff_paths.current.display()
+        handoff_paths.current.display(),
+        plan_mode_actionable = if planning_active {
+            format!("\n{PLAN_MODE_HANDOFF_GUIDANCE}")
+        } else {
+            String::new()
+        },
     );
     let archive_file = handoff_paths
         .archive
@@ -884,6 +904,7 @@ mod tests {
             "History persistence is disabled.",
             &[temp.path().join("src/lib.rs")],
             BlockedHandoffResume::Unavailable("Resume is unavailable because the session archive was not persisted."),
+            false,
         )
         .expect("write handoff");
 
@@ -905,12 +926,48 @@ mod tests {
             "Execution stalled on a loop.",
             &[],
             BlockedHandoffResume::Available(&verified_identifier),
+            false,
         )
         .expect("write handoff");
 
         let current = fs::read_to_string(&artifacts.current_path).expect("current handoff");
         assert!(current.contains("vtcode --resume session-archive-id"));
         assert!(!current.contains("vtcode --resume runtime-session"));
+    }
+
+    #[test]
+    fn planning_handoff_carries_mode_guidance_in_actionable_steps() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        let planning = write_blocked_handoff_with_resume(
+            temp.path(),
+            "plan-session",
+            "blocked",
+            "Mutation blocked until verification: 1 mutating command(s) await a verifier.",
+            &[],
+            BlockedHandoffResume::Unavailable("Resume unavailable in this test."),
+            true,
+        )
+        .expect("write planning handoff");
+        let planning_content = fs::read_to_string(&planning.current_path).expect("planning handoff");
+        assert!(planning_content.contains("Plan mode was active (read-only)"));
+        assert!(planning_content.contains("/mode build"));
+        // Both the live pointer and the archive carry the same markdown.
+        let planning_archive = fs::read_to_string(&planning.archive_path).expect("planning archive");
+        assert!(planning_archive.contains("Plan mode was active (read-only)"));
+
+        let non_planning = write_blocked_handoff_with_resume(
+            temp.path(),
+            "build-session",
+            "blocked",
+            "Mutation blocked until verification: 1 mutating command(s) await a verifier.",
+            &[],
+            BlockedHandoffResume::Unavailable("Resume unavailable in this test."),
+            false,
+        )
+        .expect("write non-planning handoff");
+        let non_planning_content = fs::read_to_string(&non_planning.current_path).expect("non-planning handoff");
+        assert!(!non_planning_content.contains("Plan mode was active (read-only)"));
     }
 
     #[test]
@@ -986,6 +1043,7 @@ mod tests {
             "Tool call failed repeatedly with permission errors.",
             &[],
             BlockedHandoffResume::Available(&verified_identifier),
+            false,
         )
         .expect("write handoff");
 

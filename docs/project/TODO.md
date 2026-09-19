@@ -14,12 +14,6 @@ help me check and fix on control+g to edit/review plan proposal in external edit
 
 ===
 
-audit and double check and self test all TUI's commands for up to date and correctness and ensure they function as expected in various scenarios.
-
----
-
-quality of life improvement idea: when the plan mode Turn blocked, Mutation blocked => suggest or ask user to switch to build/auto modes(agents) to use the system effectively without being hindered by blocked states and blocked permissions. also, try to trigger user HITL popup to let user choose and switch modes or stay at the current plan mode. explain the reasoning behind the suggestion and provide clear guidance to the user.
-
 ===
 
 check error " I hit the tool-call safety fuse mid-verification and must stop issuing commands this turn" when VT Code is running. maybe it is because of the plan -> auto mode, should we use build mode instead?
@@ -123,12 +117,4 @@ Acceptance: Phase 1 done when guard skill + suite + docs ship, default-off, zero
 
 ===
 
-try to implement Live PTY stdout streaming for real-time command output in the TUI. example: cargo run, cargo test and other long-running commands.
-
-===
-
 https://deepwiki.com/search/how-do-codex-implement-backgro_c378a0fa-eca4-4357-b365-03824dacd499?mode=deep
-
-===
-
-show reasoning trace in the TUI if available, allowing users to follow the agent's thought process and understand the rationale behind its actions. style it in a visually distinct manner to differentiate it from regular output.

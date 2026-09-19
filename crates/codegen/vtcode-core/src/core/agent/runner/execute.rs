@@ -1478,6 +1478,7 @@ impl AgentRunner {
                     BlockedHandoffResume::Unavailable(
                         "Resume unavailable because the legacy agent runner does not create a session archive.",
                     ),
+                    self.tool_registry.is_planning_active(),
                 ) {
                     Ok(artifacts) => emit_blocked_handoff_events(
                         &mut event_recorder,
