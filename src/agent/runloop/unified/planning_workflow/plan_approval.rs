@@ -321,28 +321,30 @@ pub(crate) fn render_structured_plan(plan: &PlanContent) -> Vec<String> {
     lines
 }
 
-// The confirmation prompt consumes one of the modal's six instruction rows.
+// The confirmation prompt header consumes one of the modal's instruction
+// rows, so the summary plus steps share the remaining budget. Entries keep
+// their full text and wrap to the modal width (never cut mid-sentence with
+// an ellipsis); only the step *count* is bounded, with omitted steps
+// collapsed into the explicit `… and N more plan steps` overflow row.
+// Budgeting uses estimated visual rows at a conservative 76-column content
+// width so a long summary may span up to four wrapped rows (per user
+// approval) while steps yield room instead of clipping the viewport.
 const PLAN_PREVIEW_MAX_LINES: usize = 5;
-const PLAN_PREVIEW_MAX_CHARS: usize = 64;
-/// The summary overview gets a longer budget than individual steps so the
-/// approval modal shows a decision-ready paragraph (not just a fragment)
-/// while still fitting the six-row instruction viewport on typical widths.
-const PLAN_SUMMARY_MAX_CHARS: usize = 120;
+const PLAN_PREVIEW_VISUAL_BUDGET_ROWS: usize = 7;
+const PLAN_SUMMARY_MAX_VISUAL_ROWS: usize = 4;
+const PLAN_PREVIEW_ESTIMATED_CONTENT_WIDTH: usize = 76;
 
-fn truncate_plan_preview(text: &str) -> String {
-    truncate_plan_text(text, PLAN_PREVIEW_MAX_CHARS)
+/// Collapse internal whitespace so a plan entry stays on one raw modal line.
+/// Wrapping (not truncation) handles narrow widths downstream.
+fn collapse_plan_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn truncate_plan_text(text: &str, max_chars: usize) -> String {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let collapsed = collapsed.trim();
-    let mut chars = collapsed.chars();
-    let preview: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{preview}…")
-    } else {
-        preview
-    }
+/// Estimate wrapped visual rows for a single raw modal line at the
+/// conservative preview width. Real terminals are usually wider, so actual
+/// wrapped rows are at most the estimate and the budget never over-promises.
+fn estimated_plan_visual_rows(text: &str) -> usize {
+    text.chars().count().div_ceil(PLAN_PREVIEW_ESTIMATED_CONTENT_WIDTH).max(1)
 }
 
 fn numbered_step_description(line: &str) -> Option<String> {
@@ -359,15 +361,20 @@ fn numbered_step_description(line: &str) -> Option<String> {
 /// Render a bounded, decision-ready plan synopsis for the inline approval UI.
 ///
 /// The plan file and plan events retain the complete markdown. The approval
-/// modal has a small instruction viewport, so it receives a concise summary
-/// overview paragraph plus numbered steps, with long lines elided and an
-/// explicit count for omitted steps. The `Summary:` row renders as a
-/// label/value overview section (no bullet) so users grasp the change without
-/// reading every step.
+/// modal has a small instruction viewport, so it receives the full summary
+/// overview paragraph plus as many numbered steps as fit a seven visual-row
+/// budget (the header takes one more row). Entries keep their full text and
+/// wrap to the modal width; only the step *count* is bounded, with omitted
+/// steps collapsed into an explicit `… and N more plan steps` row. The
+/// `Summary:` row renders as a label/value overview section (no bullet) so
+/// users grasp the change without reading every step.
 pub(crate) fn render_plan_summary(plan: &PlanContent) -> Vec<String> {
     let mut lines = Vec::new();
+    let mut used_visual_rows = 0usize;
     if !plan.summary.trim().is_empty() {
-        lines.push(format!("Summary: {}", truncate_plan_text(&plan.summary, PLAN_SUMMARY_MAX_CHARS)));
+        let summary_line = format!("Summary: {}", collapse_plan_line(&plan.summary));
+        used_visual_rows = estimated_plan_visual_rows(&summary_line).min(PLAN_SUMMARY_MAX_VISUAL_ROWS);
+        lines.push(summary_line);
     }
 
     let structured_steps: Vec<String> = plan
@@ -382,18 +389,27 @@ pub(crate) fn render_plan_summary(plan: &PlanContent) -> Vec<String> {
         structured_steps
     };
 
-    let available_step_lines = PLAN_PREVIEW_MAX_LINES.saturating_sub(lines.len());
-    if step_lines.len() > available_step_lines {
-        let visible_step_count = available_step_lines.saturating_sub(1);
-        lines.extend(
-            step_lines
-                .iter()
-                .take(visible_step_count)
-                .map(|line| truncate_plan_preview(line)),
-        );
+    // Fill steps while both the raw-line cap and the visual-row budget hold,
+    // reserving one row for the overflow evidence row when steps remain.
+    let mut visible_step_count = 0usize;
+    while visible_step_count < step_lines.len() {
+        let is_last = visible_step_count + 1 == step_lines.len();
+        let prospective_raw = lines.len() + visible_step_count + 1 + usize::from(!is_last);
+        if prospective_raw > PLAN_PREVIEW_MAX_LINES {
+            break;
+        }
+        let reserve_visual_rows = usize::from(!is_last);
+        if used_visual_rows + estimated_plan_visual_rows(&step_lines[visible_step_count]) + reserve_visual_rows
+            > PLAN_PREVIEW_VISUAL_BUDGET_ROWS
+        {
+            break;
+        }
+        used_visual_rows += estimated_plan_visual_rows(&step_lines[visible_step_count]);
+        visible_step_count += 1;
+    }
+    lines.extend(step_lines.iter().take(visible_step_count).map(|line| collapse_plan_line(line)));
+    if visible_step_count < step_lines.len() {
         lines.push(format!("… and {} more plan steps", step_lines.len() - visible_step_count));
-    } else {
-        lines.extend(step_lines.iter().map(|line| truncate_plan_preview(line)));
     }
 
     if lines.is_empty() {
@@ -402,7 +418,7 @@ pub(crate) fn render_plan_summary(plan: &PlanContent) -> Vec<String> {
         } else {
             format!("Plan: {}", plan.title.trim())
         };
-        lines.push(truncate_plan_preview(&fallback));
+        lines.push(collapse_plan_line(&fallback));
     }
 
     lines
@@ -855,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_summary_overview_keeps_concise_paragraph_within_modal_budget() {
+    fn plan_summary_overview_shows_full_text_within_modal_budget() {
         let long_summary = "Fix vtcode analyze so it runs non-interactively with auto-allowed tools, correct step parsing, and bounded verification across startup and update paths.";
         let plan = PlanContent {
             title: "Implementation Plan".to_string(),
@@ -874,8 +890,29 @@ mod tests {
             .iter()
             .find(|line| line.starts_with("Summary:"))
             .expect("summary overview");
-        assert!(summary_line.chars().count() <= "Summary: ".len() + 121, "summary must stay concise: {summary_line}");
+        assert!(
+            summary_line.contains(long_summary),
+            "overview must show the full summary without mid-text truncation: {summary_line}"
+        );
+        assert!(!summary_line.ends_with('…'), "summary must not be elided: {summary_line}");
         assert!(summary_line.contains("non-interactively"), "overview must preserve the change intent");
+    }
+
+    #[test]
+    fn plan_summary_steps_keep_full_text_without_elision() {
+        let plan = PlanContent::from_markdown(
+            "Implementation Plan".to_string(),
+            "Summary\nImprove VT Code's diff engine across its four layers: core computation, turn aggregation, event contract, and computation hardening.\n\n1. Make TurnDiffTracker bounded and deterministic: sort paths for stable output ordering.\n2. Extend the authoritative event contract with optional unified diff fields.\n3. Harden vtcode-diff computation with a binary-content guard.",
+            Some(".vtcode/plans/diff.md".to_string()),
+        );
+
+        let lines = render_plan_summary(&plan);
+        let step_line = lines.iter().find(|line| line.starts_with("1.")).expect("first step");
+        assert!(
+            step_line.contains("sort paths for stable output ordering"),
+            "steps must not be truncated mid-sentence: {step_line}"
+        );
+        assert!(!step_line.ends_with('…'), "steps must not be elided: {step_line}");
     }
 
     // --- C: approval outcomes (submission mapping, request items) ------

@@ -489,7 +489,8 @@ stay open.
 
 After a plan is ready, an interactive human-in-the-loop (HITL) confirmation popup presents a bounded, decision-ready synopsis
 (summary plus numbered steps) and a decision gate. The complete markdown remains available in the persisted plan file and
-runtime plan events; long previews are elided with an explicit count rather than silently clipped.
+runtime plan events; summary and step entries keep their full text and wrap to the modal width, while the step count is
+bounded with an explicit `… and N more plan steps` overflow row rather than silently clipped.
 
 Approval options:
 

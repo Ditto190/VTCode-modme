@@ -421,6 +421,62 @@ fn inline_modal_height_budgets_list_divider_without_search() {
 }
 
 #[test]
+fn plan_approval_modal_height_hugs_wrapped_header_without_gap() {
+    use super::super::render::split_inline_modal_area;
+
+    let mut session = Session::new(InlineTheme::default(), None, 30);
+    // Plan-approval header: 6 raw lines where the Summary wraps to 2 visual
+    // rows at 80 columns, so the wrapped instruction estimate is 7 rows
+    // (not the raw count of 6). Expected height: 7 instructions + 1 divider
+    // + 8 list (4 items × title/subtitle) + 1 footer-hint summary + 3 title
+    // chrome = 20. Any blank gap or clipped summary changes this height.
+    let lines = vec![
+        "A plan is ready to execute. Would you like to proceed?",
+        "Summary: Fix vtcode analyze so it runs non-interactively with auto-allowed tools",
+        "1. Add tools::LIST_FILES to AUTO_ALLOW_TOOLS in analyze",
+        "2. Fix step parsing for numbered steps in analyze.rs",
+        "3. Add bounded verification across startup and update paths",
+        "… and 2 more plan steps",
+    ];
+    let subtitles = [
+        "Continue with the current context and confirmation policy.",
+        "Fresh thread. Context: 7% used.",
+        "Use the Auto policy; safety gates stay active.",
+        "Return to planning and revise the plan.",
+    ];
+    let items = [
+        "Yes, implement this plan",
+        "Yes, clear context and implement",
+        "Yes, switch to Auto and implement",
+        "No, stay in Plan mode",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, title)| InlineListItem {
+        title: title.to_string(),
+        subtitle: Some(subtitles[index].to_string()),
+        badge: None,
+        indent: 0,
+        selection: Some(InlineListSelection::SlashCommand(format!("plan{index}"))),
+        search_value: Some(title.to_string()),
+    })
+    .collect::<Vec<_>>();
+    show_overlay_with_hint(
+        &mut session,
+        "Ready to code?",
+        lines,
+        items,
+        None,
+        Some("ctrl-g to edit in VS Code · .vtcode/plans/analyze.md"),
+    );
+
+    let area = Rect::new(0, 0, 80, 40);
+    let (_transcript_area, modal_area) = split_inline_modal_area(&session, area);
+    let modal_area = modal_area.expect("plan modal should claim a bottom panel area");
+    assert_eq!(modal_area.height, 20, "plan modal must hug wrapped content with no blank gap");
+}
+
+#[test]
 fn closing_top_transient_restores_previous_bottom_panel() {
     let mut session = AppSession::new(InlineTheme::default(), None, 30);
     session.set_task_panel_visible(true);

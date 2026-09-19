@@ -13,7 +13,10 @@ use tracing::warn;
 
 const MAX_INLINE_MODAL_HEIGHT: u16 = 20;
 const MAX_INLINE_MODAL_HEIGHT_MULTILINE: u16 = 32;
-const MAX_INLINE_INSTRUCTION_ROWS: usize = 6;
+/// Instruction viewport rows shared with `render_modal_body`: the plan
+/// approval header (prompt + full-text summary + steps + overflow) budgets
+/// up to eight wrapped visual rows so wrapped summaries stay visible.
+const MAX_INLINE_INSTRUCTION_ROWS: usize = 8;
 const MODAL_TITLE_CHROME_ROWS: usize = 2;
 
 fn modal_base_style(session: &Session) -> Style {
@@ -24,6 +27,51 @@ fn modal_heading_style(session: &Session) -> Style {
     modal_base_style(session)
         .fg(ratatui_color_from_ansi(resolve_modal_chrome_ansi_color(session)))
         .add_modifier(Modifier::BOLD)
+}
+
+/// Estimate wrapped instruction rows with the same greedy word-wrap the
+/// modal body uses, so the claimed modal height hugs the painted content
+/// instead of leaving a blank gap (raw line count) or clipping wrapped
+/// summaries (under-count). `## ` section headers reserve their blank
+/// separator row, matching `modal_instruction_lines`.
+fn estimated_modal_instruction_rows(lines: &[String], content_width: usize) -> usize {
+    if lines.iter().all(|line| line.trim().is_empty()) {
+        return 1;
+    }
+    let width = content_width.max(1);
+    let mut rows = 0usize;
+    let mut first_content_seen = false;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            rows = rows.saturating_add(1);
+            continue;
+        }
+        if trimmed.strip_prefix("## ").is_some() {
+            if first_content_seen {
+                rows = rows.saturating_add(1);
+            }
+            first_content_seen = true;
+            rows = rows.saturating_add(1);
+            continue;
+        }
+        first_content_seen = true;
+        let mut current_width = 0usize;
+        let mut line_rows = 1usize;
+        for word in trimmed.split_whitespace() {
+            let word_width = unicode_width::UnicodeWidthStr::width(word);
+            if current_width == 0 {
+                current_width = word_width;
+            } else if current_width.saturating_add(1).saturating_add(word_width) > width {
+                line_rows = line_rows.saturating_add(1);
+                current_width = word_width;
+            } else {
+                current_width = current_width.saturating_add(1).saturating_add(word_width);
+            }
+        }
+        rows = rows.saturating_add(line_rows);
+    }
+    rows.clamp(1, MAX_INLINE_INSTRUCTION_ROWS)
 }
 
 fn list_has_two_line_items(list: &ModalListState) -> bool {
@@ -174,7 +222,12 @@ pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<R
         }
         lines
     } else if let Some(modal) = session.modal_state() {
-        let mut lines = modal.lines.len().clamp(1, MAX_INLINE_INSTRUCTION_ROWS);
+        // Size instructions by wrapped visual rows (not raw line count) so
+        // the modal hugs the painted header: no blank gap when lines are
+        // short, no clipped summary when they wrap. Matches the clamping in
+        // `render_modal_body`.
+        let content_width = area.width.saturating_sub(2) as usize;
+        let mut lines = estimated_modal_instruction_rows(&modal.lines, content_width);
         if let Some(search) = modal.search.as_ref() {
             // Match `render_modal_body`: prompt-only search costs 1 row, a
             // titled search field costs 2.
@@ -592,6 +645,31 @@ mod tests {
         let modal = Rect::new(30, 14, 20, 10);
 
         assert_eq!(clip_transcript_area(transcript, modal), transcript);
+    }
+
+    #[test]
+    fn estimated_instruction_rows_counts_short_lines_verbatim() {
+        let lines = vec!["Choose an option".to_string(), "Second line".to_string()];
+        assert_eq!(estimated_modal_instruction_rows(&lines, 78), 2);
+    }
+
+    #[test]
+    fn estimated_instruction_rows_wraps_long_summary() {
+        let long = format!("Summary: {}", "word ".repeat(30));
+        let rows = estimated_modal_instruction_rows(&[long], 78);
+        assert!(rows >= 2, "long summary must claim wrapped rows, got {rows}");
+    }
+
+    #[test]
+    fn estimated_instruction_rows_treats_empty_as_single_row() {
+        assert_eq!(estimated_modal_instruction_rows(&[], 78), 1);
+        assert_eq!(estimated_modal_instruction_rows(&["   ".to_string()], 78), 1);
+    }
+
+    #[test]
+    fn estimated_instruction_rows_clamps_to_viewport() {
+        let lines = vec!["word ".repeat(60); 10];
+        assert_eq!(estimated_modal_instruction_rows(&lines, 78), MAX_INLINE_INSTRUCTION_ROWS);
     }
 
     #[test]

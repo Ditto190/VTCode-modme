@@ -543,8 +543,12 @@ pub(crate) fn render_modal_body(
     let has_secure_prompt = context.secure_prompt.is_some();
     let has_search = context.search.is_some();
     let has_list = context.list.is_some();
+    // Eight wrapped visual rows: prompt + full-text summary (up to four
+    // wrapped rows) + steps + overflow. Matches `MAX_INLINE_INSTRUCTION_ROWS`
+    // in `modal_renderer.rs` so the body viewport and the claimed modal
+    // height agree and no blank gap or clipped summary appears.
     let instruction_row_limit = if has_secure_prompt || has_search || has_list {
-        6
+        8
     } else {
         area.height.max(1) as usize
     };
@@ -1432,6 +1436,42 @@ mod tests {
         assert!(texts.iter().any(|text| text.contains("Summary:")), "summary overview must remain");
         assert!(texts.iter().any(|text| text.contains("1. Add")), "numbered steps must remain");
         assert!(texts.iter().any(|text| text.contains("more plan steps")), "overflow evidence must remain");
+    }
+
+    #[test]
+    fn plan_approval_long_header_wraps_without_bullets_or_elision() {
+        let styles = modal_render_styles();
+        let summary = "Summary: Fix vtcode analyze so it runs non-interactively with auto-allowed tools, correct step parsing, and bounded verification";
+        let step = "1. Make TurnDiffTracker bounded and deterministic: sort paths for stable output ordering";
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 40, 10),
+            &[
+                "A plan is ready to execute. Would you like to proceed?".to_string(),
+                summary.to_string(),
+                step.to_string(),
+                "… and 2 more plan steps".to_string(),
+            ],
+            &styles,
+        );
+
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(
+            texts.iter().all(|text| !text.contains('•')),
+            "wrapped plan header must not use bullets, got: {texts:?}"
+        );
+        let normalized = texts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(normalized.contains("non-interactively"), "full summary text must survive wrapping: {normalized}");
+        assert!(
+            normalized.contains("stable output ordering"),
+            "full step text must survive wrapping without elision: {normalized}"
+        );
+        assert!(
+            texts
+                .iter()
+                .filter(|text| text.trim_end().ends_with('…'))
+                .all(|text| text.contains("more plan steps")),
+            "only the overflow row may end with an ellipsis, got: {texts:?}"
+        );
     }
 
     fn render_modal_lines(search: ModalSearchState) -> Vec<String> {
