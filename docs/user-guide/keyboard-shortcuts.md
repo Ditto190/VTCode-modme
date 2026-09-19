@@ -94,7 +94,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | Input | Action |
 | :-- | :-- |
 | `#` at start | Custom prompts picker. |
-| `/` at start | Slash command (`/help`, `/slash-commands` list all). |
+| `/` at start | Slash command (`/help` lists all). |
 | `!` at start | Bash mode (direct execution). |
 | `@` | File picker; `@agent-<name>` subagent picker (`@agent-<plugin>:<name>` for plugins). |
 | `Alt+P` | Ghost suggestion; `Tab` accepts. |

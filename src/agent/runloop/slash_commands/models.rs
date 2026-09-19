@@ -136,6 +136,9 @@ pub(crate) enum SlashCommandOutcome {
         persist: bool,
     },
     ToggleIdeContext,
+    ToggleVimMode {
+        enable: Option<bool>,
+    },
     StartThemePalette {
         mode: ThemePaletteMode,
     },

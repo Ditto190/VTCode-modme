@@ -150,8 +150,8 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     ),
     built_in_command_spec!(
         "config",
-        "Browse categorized settings, focused memory controls, or reset the active layer (usage: /config [path|memory|reset])",
-        "/config [path|memory|reset]",
+        "Browse categorized settings, focused memory/permission/model controls, or reset the active layer (usage: /config [memory|permissions|model|<path>|reset])",
+        "/config [memory|permissions|model|<path>|reset]",
         "configuration"
     ),
     built_in_command_spec!(
@@ -177,8 +177,8 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     },
     built_in_command_spec!(
         "mode",
-        "Switch the active agent mode (usage: /mode [build|auto|duck|plan])",
-        "/mode [build|auto|duck|plan]",
+        "Switch the active agent mode (usage: /mode [agent-name])",
+        "/mode [agent-name]",
         "configuration"
     ),
     built_in_command_spec!(
@@ -324,14 +324,14 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     built_in_command_spec!(
         "compact",
         "Compact the current conversation immediately or manage the saved manual compaction prompt",
-        "/compact [--instructions <text>] [--max-output-tokens <n>] [--reasoning-effort <none|minimal|low|medium|high|xhigh>] [--verbosity <low|medium|high>] [--include <selector> ...] [--store|--no-store] [--service-tier <flex|priority>] [--prompt-cache-key <key>] | /compact edit-prompt | /compact reset-prompt",
+        "/compact [--instructions <text>] [--max-output-tokens <n>] [--reasoning-effort <none|minimal|low|medium|high|xhigh>] [--verbosity <low|medium|high>] [--native-only] | /compact edit-prompt | /compact reset-prompt",
         "session"
     ),
     built_in_command_spec!("new", "Start a new session", "/new", "session"),
     built_in_command_spec!(
         "share",
-        "Export the current session as JSON, Markdown, or self-contained HTML timeline (usage: /share [json|markdown|html])",
-        "/share [json|markdown|html]",
+        "Export the current session as JSON, Markdown, or self-contained HTML timeline (usage: /share [json|markdown|md|html|--format <fmt>])",
+        "/share [json|markdown|md|html|--format <fmt>]",
         "session"
     ),
     built_in_command_spec!(
@@ -370,6 +370,12 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     ),
     built_in_command_spec!("title", "Configure the terminal title items interactively", "/title", "terminal"),
     built_in_command_spec!(
+        "vim",
+        "Toggle Vim-style prompt editing for this session (usage: /vim [on|off])",
+        "/vim [on|off]",
+        "terminal"
+    ),
+    built_in_command_spec!(
         "login",
         "Authenticate with OpenAI, OpenRouter, or GitHub Copilot (usage: /login [provider])",
         "/login [provider]",
@@ -395,8 +401,8 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     ),
     built_in_command_spec!(
         "secret",
-        "Manage provider API keys in your OS keyring (usage: /secret [list|status [provider]|add <provider>|delete <provider]|help)",
-        "/secret [list|status [provider]|add <provider>|delete <provider]|help]",
+        "Manage provider API keys in your OS keyring (usage: /secret [list|status [provider] [key-name]|add <provider> [key-name]|delete <provider> [key-name]|migrate [provider]|help])",
+        "/secret [list|status [provider] [key-name]|add <provider> [key-name]|delete <provider> [key-name]|migrate [provider]|help]",
         "auth"
     ),
 ];

@@ -465,6 +465,19 @@ fn handle_terminal_setup_command(args: &str, renderer: &mut AnsiRenderer) -> Res
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+fn handle_vim_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
+    match args.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(SlashCommandOutcome::ToggleVimMode { enable: None }),
+        "on" | "enable" | "true" => Ok(SlashCommandOutcome::ToggleVimMode { enable: Some(true) }),
+        "off" | "disable" | "false" => Ok(SlashCommandOutcome::ToggleVimMode { enable: Some(false) }),
+        _ => {
+            renderer.line(MessageStyle::Error, "Usage: /vim [on|off]")?;
+            Ok(SlashCommandOutcome::Handled)
+        }
+    }
+}
+
+#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn handle_edit_command(args: &str) -> Result<SlashCommandOutcome> {
     let file = if args.trim().is_empty() {
         None
@@ -602,6 +615,7 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "secret" => handle_secret_command(args, renderer),
         "help" => handle_help_command(args, renderer, workspace).await,
         "terminal-setup" => handle_terminal_setup_command(args, renderer),
+        "vim" => handle_vim_command(args, renderer),
         _ => anyhow::bail!("unknown built-in command skill: {}", spec.slash_name),
     }
 }

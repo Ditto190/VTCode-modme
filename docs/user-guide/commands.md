@@ -145,7 +145,7 @@ Normal forks keep the full archived transcript unchanged.
 VT Code provides several quick actions directly in the chat input for faster workflow:
 
 -   **File Picker (`@`)** — Type `@` anywhere in your input to open the file picker and select files to reference in your message. This allows you to quickly mention files without typing full paths.
--   **Slash Commands (`/`)** — Type `/` at the start of input to access all available slash commands including `/files`, `/stats`, and many more.
+-   **Slash Commands (`/`)** — Type `/` at the start of input to access all available slash commands including `/files`, `/status`, and many more.
 
 ## Configuration quick reference
 
@@ -164,13 +164,9 @@ Interactive sessions live-reload safe changes from watched layers; malformed
 edits retain the last valid snapshot and show a warning. See the [configuration
 guide](../config/config.md) for layer precedence and live-reload details.
 
-### `/code-ide` (VS Code integration)
+### `/ide` (VS Code integration)
 
-Use the `/code-ide` slash command to trigger IDE-specific actions from within a VT Code chat session or the integrated terminal. When the VS Code extension is installed:
-
--   Run `/code-ide` in the VT Code terminal session to synchronize with the sidebar views and refresh context-aware data.
--   Use the **VT Code: Send /code-ide Slash Command** command palette entry or the Quick Actions panel to dispatch the slash command directly to the active VT Code terminal.
--   The command will emit IDE events back to the extension host, keeping the Agent Loop timeline, status indicators, and MCP configuration summaries in sync.
+Use the `/ide` slash command to toggle IDE context for the current session from within a VT Code chat session. When the VS Code extension is installed, it writes `.vtcode/ide-context.json` and `.vtcode/ide-context.md` snapshots that `/ide` picks up to keep the Agent Loop timeline and workspace context in sync.
 
 Configure the behaviour under **Settings › Extensions › VT Code**:
 

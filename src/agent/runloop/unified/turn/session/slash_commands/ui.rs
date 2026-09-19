@@ -230,6 +230,27 @@ pub(crate) async fn handle_toggle_ide_context(ctx: SlashCommandContext<'_>) -> R
     Ok(SlashCommandControl::Continue)
 }
 
+pub(crate) async fn handle_toggle_vim_mode(
+    ctx: SlashCommandContext<'_>,
+    enable: Option<bool>,
+) -> Result<SlashCommandControl> {
+    let enabled = match enable {
+        Some(value) => value,
+        None => !ctx.session_stats.vim_mode_enabled,
+    };
+    ctx.session_stats.vim_mode_enabled = enabled;
+    ctx.handle.set_vim_mode_enabled(enabled);
+    ctx.renderer.line(
+        MessageStyle::Info,
+        if enabled {
+            "Vim mode enabled for this session (INSERT/NORMAL; Enter, Tab, and Ctrl+Enter keep VT Code behavior). Persist with `ui.vim_mode = true`."
+        } else {
+            "Vim mode disabled for this session."
+        },
+    )?;
+    Ok(SlashCommandControl::Continue)
+}
+
 pub(super) async fn start_model_picker(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
     if ctx.model_picker_state.is_some() {
         ctx.renderer.line(

@@ -889,6 +889,23 @@ async fn every_registered_slash_command_resolves_without_prompt_fallback() {
     }
 }
 
+#[tokio::test]
+async fn slash_command_aliases_resolve_to_canonical_backends() {
+    let workspace = tempfile::TempDir::new().expect("workspace");
+
+    for alias in ["settings", "setttings", "context", "subprocesses", "models", "doctor"] {
+        let mut renderer = renderer_for_tests();
+        let outcome = handle_slash_command(alias, &mut renderer, workspace.path())
+            .await
+            .unwrap_or_else(|error| panic!("/{alias} should parse: {error}"));
+
+        assert!(
+            !matches!(outcome, SlashCommandOutcome::SubmitPrompt { .. }),
+            "/{alias} fell through to plain prompt submission",
+        );
+    }
+}
+
 // -- /local command tests --
 
 use super::LocalServerAction;
@@ -1203,4 +1220,25 @@ async fn secret_migrate_with_provider() {
             action: SecretCommandAction::Migrate { provider: Some(ref p) }
         } if p == "openai"
     ));
+}
+
+#[tokio::test]
+async fn vim_command_toggles_and_sets_mode() {
+    let workspace = std::path::PathBuf::from("/tmp");
+
+    let mut renderer = renderer_for_tests();
+    let outcome = handle_slash_command("vim", &mut renderer, &workspace).await.unwrap();
+    assert!(matches!(outcome, SlashCommandOutcome::ToggleVimMode { enable: None }));
+
+    let mut renderer = renderer_for_tests();
+    let outcome = handle_slash_command("vim on", &mut renderer, &workspace).await.unwrap();
+    assert!(matches!(outcome, SlashCommandOutcome::ToggleVimMode { enable: Some(true) }));
+
+    let mut renderer = renderer_for_tests();
+    let outcome = handle_slash_command("vim off", &mut renderer, &workspace).await.unwrap();
+    assert!(matches!(outcome, SlashCommandOutcome::ToggleVimMode { enable: Some(false) }));
+
+    let mut renderer = renderer_for_tests();
+    let outcome = handle_slash_command("vim bogus", &mut renderer, &workspace).await.unwrap();
+    assert!(matches!(outcome, SlashCommandOutcome::Handled));
 }
