@@ -211,7 +211,6 @@ mod tests {
     #[test]
     fn help_resolution_supports_aliases() {
         assert_eq!(resolve_help_command("settings").map(|command| command.name), Some("config"));
-        assert_eq!(resolve_help_command("comman").map(|command| command.name), Some("command"));
     }
 
     #[test]

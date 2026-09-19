@@ -252,9 +252,7 @@ During chat you can lead with `/` to trigger built-in actions without leaving th
 -   `/help` — list supported commands
 
 -   `/theme <id>` — switch the active theme
--   `/command <program> [args...]` — run a shell command via `exec_command`
--   `/agents` — create, inspect, edit, or delete subagent definitions with VT Code-native frontmatter
--   `/agent` — inspect delegated child threads in the current session
+-   `/agent` — manage subagent definitions (create, inspect, edit, delete) and inspect delegated child threads
 
 Press **Tab** on an empty idle composer to cycle primary agents. The active primary agent appears in the session header badge and controls the session's instructions, model, granular permission policy, and tool access.
 

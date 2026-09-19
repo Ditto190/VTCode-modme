@@ -847,7 +847,7 @@ pub(super) fn render_background_setup_guidance(ctx: &mut SlashCommandContext<'_>
     )?;
     ctx.renderer.line(
         MessageStyle::Info,
-        "Use `/agents` to browse available agent names. `/subprocesses` opens the Local Agents drawer.",
+        "Use `/agent` to browse available agent names. `/subprocesses` opens the Local Agents drawer.",
     )?;
     Ok(())
 }

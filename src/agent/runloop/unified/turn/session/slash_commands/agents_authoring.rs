@@ -248,7 +248,7 @@ pub(super) async fn handle_create_agent(
         let Some(scope) = scope else {
             ctx.renderer.line(
                 MessageStyle::Info,
-                "Interactive agent authoring requires inline UI. Use `/agents create project <name>` or `/agents create user <name>` when inline UI is unavailable.",
+                "Interactive agent authoring requires inline UI. Use `/agent create project <name>` or `/agent create user <name>` when inline UI is unavailable.",
             )?;
             return Ok(SlashCommandControl::Continue);
         };

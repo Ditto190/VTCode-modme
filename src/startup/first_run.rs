@@ -309,7 +309,7 @@ fn capability_highlight_lines(persistent_memory_enabled: bool) -> Vec<String> {
             "- Persistent repository memory is {} for this workspace. Change `[features].memories` or `agent.persistent_memory.enabled` later in `vtcode.toml` if you want a different default.",
             persistent_memory_label(persistent_memory_enabled).to_ascii_lowercase()
         ),
-        "- Subagents let you delegate bounded work; use `/agent`, `/agents`, or the Local Agents drawer.".to_string(),
+        "- Subagents let you delegate bounded work; use `/agent` or the Local Agents drawer.".to_string(),
         "- Skills add reusable capabilities; browse them with `/skills` or the CLI skills commands.".to_string(),
         "- Prompt suggestions and the lightweight model route help with faster suggestions, memory triage, and smaller delegated tasks.".to_string(),
         "- Granular permissions are configured with `[permissions]` defaults and allow/ask/auto/deny lists in `vtcode.toml`.".to_string(),

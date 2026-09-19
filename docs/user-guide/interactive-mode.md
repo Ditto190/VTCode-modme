@@ -130,12 +130,12 @@ are enabled and compact display is the default.
 - `/fork` opens the archived-session picker. After selecting a session, VT Code now asks whether the new session should start from the full copied transcript or from a summarized fork.
 - A summarized fork starts from the same compacted handoff shape VT Code uses for local compaction: structured summary, retained user prompts, and the memory envelope.
 - If a session stopped because it hit the local `max_budget_usd` limit, resuming it offers three choices: continue from the saved summary, continue with the full transcript after an explicit higher-cost warning, or start fresh.
-- `/agents` opens the subagent manager for creating, inspecting, editing, deleting, and browsing active delegated agents. New scaffolds use VT Code tool ids in frontmatter.
-- `/agent` opens the active-agent inspector. Selecting a child agent opens a modal over the current session instead of switching threads.
+- `/agent` opens the subagent manager for creating, inspecting, editing, deleting, and browsing active delegated agents, and opens the active-agent inspector. New scaffolds use VT Code tool ids in frontmatter. Selecting a child agent opens a modal over the current session instead of switching threads.
 - On an empty idle composer, `Shift+Tab` cycles primary agents and wraps back to the first agent.
 - The active primary agent is displayed in the session header badge and influences the session's instructions, model, granular permission policy, and tool access.
 - Mode switches are locked while a turn is actively processing. Pressing `Shift+Tab`/`BackTab` (or running `/mode`/`/plan`) during a turn is dropped with a notice and applies only once the turn finishes. This keeps the agent's mode and tool-access state consistent for the duration of a turn; the in-turn automatic planning intent detection is unaffected.
 - `/subprocesses` opens the Local Agents drawer for delegated agents and managed background subprocesses.
+- `/feedback` opens a new GitHub issue form in your browser so you can report a bug or request a feature.
 
 ## Scheduled Prompts And Reminders
 
@@ -156,7 +156,6 @@ VT Code supports an optional Vim-style prompt editor.
 
 ## Prompt Suggestions, Tasks, and Jobs
 
-- `/suggest` opens a prompt-suggestion picker built from recent session context such as task state, active jobs, recent errors, and recent file activity.
 - `Alt+P` requests one inline ghost-text suggestion for the current draft. If a ghost suggestion is visible, `Tab` accepts it; otherwise `Tab` keeps its normal queue behavior.
 - VT Code routes prompt suggestion generation through `agent.prompt_suggestions` and falls back to deterministic local suggestions when the provider, model, or endpoint cannot service the request.
 - LLM-backed prompt suggestions can consume tokens. When `agent.prompt_suggestions.show_cost_notice = true`, VT Code shows a one-time reminder in the session before the first LLM-backed inline suggestion.

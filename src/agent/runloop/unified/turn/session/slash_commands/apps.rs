@@ -27,6 +27,7 @@ use crate::agent::runloop::unified::url_guard::open_external_url;
 use crate::agent::runloop::unified::wizard_modal::{WizardModalOutcome, show_wizard_modal_and_wait};
 
 const DOCS_URL: &str = "https://deepwiki.com/vinhnx/vtcode";
+const FEEDBACK_URL: &str = "https://github.com/vinhnx/VTCode/issues/new/choose";
 const DONATE_URL: &str = "https://buymeacoffee.com/vinhnx";
 const PROJECT_URL: &str = "https://github.com/sponsors/vinhnx";
 const EXTERNAL_EDITOR_TITLE: &str = "External Editor";
@@ -71,6 +72,38 @@ pub(crate) async fn handle_open_docs(ctx: SlashCommandContext<'_>) -> Result<Sla
         ExternalUrlOpenOutcome::Unsupported => {
             ctx.renderer
                 .line(MessageStyle::Error, "Blocked unsupported documentation link target.")?;
+        }
+    }
+    ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
+    Ok(SlashCommandControl::Continue)
+}
+
+pub(crate) async fn handle_open_feedback(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    match request_external_url_open(
+        ExternalUrlGuardContext::new(ctx.handle, ctx.session, ctx.ctrl_c_state, ctx.ctrl_c_notify),
+        FEEDBACK_URL,
+    )
+    .await?
+    {
+        ExternalUrlOpenOutcome::Opened => {
+            ctx.renderer
+                .line(MessageStyle::Info, &format!("Opening a new GitHub issue: {FEEDBACK_URL}"))?;
+        }
+        ExternalUrlOpenOutcome::OpenFailed(err) => {
+            ctx.renderer
+                .line(MessageStyle::Error, &format!("Failed to open browser: {err}"))?;
+            ctx.renderer
+                .line(MessageStyle::Info, &format!("Please visit: {FEEDBACK_URL}"))?;
+        }
+        ExternalUrlOpenOutcome::Cancelled => {
+            ctx.renderer.line(MessageStyle::Info, "Cancelled opening the feedback link.")?;
+        }
+        ExternalUrlOpenOutcome::Exit => {
+            return Ok(SlashCommandControl::BreakWithReason(SessionEndReason::Exit));
+        }
+        ExternalUrlOpenOutcome::Unsupported => {
+            ctx.renderer
+                .line(MessageStyle::Error, "Blocked unsupported feedback link target.")?;
         }
     }
     ctx.renderer.line_if_not_empty(MessageStyle::Output)?;

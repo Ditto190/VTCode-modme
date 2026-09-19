@@ -5,63 +5,9 @@ use vtcode_ui::tui::app::{
     TransientHotkeyAction, TransientHotkeyKey, TransientRequest, TransientSelectionChange, TransientSubmission,
 };
 
-use super::ui::{ensure_selection_ui_available, wait_for_list_modal_selection};
+use super::ui::ensure_selection_ui_available;
 use super::{SlashCommandContext, SlashCommandControl};
-use crate::agent::runloop::unified::interactive_features::{
-    BackgroundJobSummary, PromptSuggestion, collect_background_jobs, generate_prompt_suggestions,
-};
-
-const PROMPT_SUGGESTION_ACTION_PREFIX: &str = "suggest:";
-
-pub(crate) async fn handle_trigger_prompt_suggestions(mut ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
-    if !ensure_selection_ui_available(&mut ctx, "opening prompt suggestions")? {
-        return Ok(SlashCommandControl::Continue);
-    }
-
-    let suggestions = generate_prompt_suggestions(
-        ctx.provider_client.as_ref(),
-        ctx.config,
-        ctx.vt_cfg.as_ref(),
-        &ctx.config.workspace,
-        ctx.conversation_history,
-        ctx.session_stats,
-        ctx.tool_registry,
-    )
-    .await;
-    if suggestions.is_empty() {
-        ctx.renderer
-            .line(MessageStyle::Info, "No prompt suggestions are available yet.")?;
-        return Ok(SlashCommandControl::Continue);
-    }
-
-    let items = suggestions.iter().map(prompt_suggestion_item).collect::<Vec<_>>();
-    let selected = items.first().and_then(|item| item.selection.clone());
-    ctx.handle.show_list_modal(
-        "Prompt suggestions".to_string(),
-        vec!["Suggestions are derived from your recent VT Code session state.".to_string()],
-        items,
-        selected,
-        Some(InlineListSearchConfig {
-            label: "Search prompts".to_string(),
-            placeholder: Some("prompt, jobs, review, debug".to_string()),
-        }),
-    );
-
-    let Some(selection) = wait_for_list_modal_selection(&mut ctx).await else {
-        return Ok(SlashCommandControl::Continue);
-    };
-    let InlineListSelection::ConfigAction(action) = selection else {
-        return Ok(SlashCommandControl::Continue);
-    };
-    let Some(id) = action.strip_prefix(PROMPT_SUGGESTION_ACTION_PREFIX) else {
-        return Ok(SlashCommandControl::Continue);
-    };
-    if let Some(suggestion) = suggestions.iter().find(|suggestion| suggestion.id == id) {
-        ctx.handle.apply_suggested_prompt(suggestion.prompt.clone());
-    }
-
-    Ok(SlashCommandControl::Continue)
-}
+use crate::agent::runloop::unified::interactive_features::{BackgroundJobSummary, collect_background_jobs};
 
 pub(crate) async fn handle_toggle_tasks_panel(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
     let visible = !ctx.session_stats.task_panel_visible;
@@ -288,25 +234,6 @@ fn read_job_output(ctx: &SlashCommandContext<'_>, job_id: &str) -> String {
         .flatten()
         .unwrap_or_default()
 }
-fn prompt_suggestion_item(suggestion: &PromptSuggestion) -> InlineListItem {
-    InlineListItem {
-        title: suggestion.title.clone(),
-        subtitle: suggestion.subtitle.clone(),
-        badge: suggestion.badge.clone(),
-        indent: 0,
-        selection: Some(InlineListSelection::ConfigAction(format!(
-            "{PROMPT_SUGGESTION_ACTION_PREFIX}{}",
-            suggestion.id
-        ))),
-        search_value: Some(format!(
-            "{} {} {}",
-            suggestion.title,
-            suggestion.prompt,
-            suggestion.subtitle.clone().unwrap_or_default()
-        )),
-    }
-}
-
 fn background_job_item(job: &BackgroundJobSummary) -> InlineListItem {
     let subtitle = match &job.working_dir {
         Some(dir) => format!("{} • {}", job.status, dir),

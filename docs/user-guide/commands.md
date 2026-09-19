@@ -143,16 +143,17 @@ Configure the behaviour under **Settings › Extensions › VT Code**:
 
 - Slash commands are skill-backed. Each command routes through a namespaced command skill such as `cmd-status` or `cmd-review`.
 - The `/name` form remains the compatibility alias. You can also inspect or execute the same behavior through `/skills info cmd-name` and `/skills use cmd-name ...`.
-- Prompt-oriented slash commands such as `/review`, `/analyze`, and `/command` are shipped as bundled system skills in the release binary.
+- Prompt-oriented slash commands such as `/review` and `/analyze` are shipped as bundled system skills in the release binary.
 - `/review` accepts free-form instructions (`/review Review the full diff for correctness and regressions`) or legacy flags (`--last-diff`, `--target <expr>`, `--file <path>`, positional files, `--style <style>`). Instructions describe focus only and are never used as shell arguments. The command stays read-only unless the text explicitly asks to implement fixes.
 - To keep the default prompt lean, command skills are not injected into the runtime `## Skills` prompt section; use slash completion or `/skills` discovery when you need them.
 - `/resume` opens archived sessions when the current run is idle.
 - `/fork` opens the session picker and then lets you choose between a full-copy fork and a summarized fork.
 - `/compact` manually compacts the current conversation context immediately. Use `/compact edit-prompt` or `/compact reset-prompt` to manage the saved default prompt for manual compaction requests. On the local fallback path, VT Code keeps a structured summary plus retained user prompts instead of a mixed recent tail.
-- `/agent` and `/agents` inspect agent definitions and delegated child runs. `@agent-name` remains a delegated child-agent control. Primary agents are switched from the TUI with `Shift+Tab` (see [Keyboard Shortcuts](./keyboard-shortcuts.md#agent-and-mode-switching)). The active primary agent is shown in the session header badge and influences the session's instructions, model, granular permission policy, and tool access.
-- `/agents list` shows all agent definitions with their availability (`mode: primary`, `mode: subagent`, or `mode: all`). `/agents create` scaffolds a new agent definition in `.vtcode/agents/`.
+- `/agent` inspects agent definitions and delegated child runs. `@agent-name` remains a delegated child-agent control. Primary agents are switched from the TUI with `Shift+Tab` (see [Keyboard Shortcuts](./keyboard-shortcuts.md#agent-and-mode-switching)). The active primary agent is shown in the session header badge and influences the session's instructions, model, granular permission policy, and tool access.
+- `/agent list` shows all agent definitions with their availability (`mode: primary`, `mode: subagent`, or `mode: all`). `/agent create` scaffolds a new agent definition in `.vtcode/agents/`.
 - `/plan` starts or continues the planning workflow. It is a workflow command, not a state selector. Execution agents may also suggest it for demanding or multi-phase tasks; interactive policies confirm the suggestion, while full-auto and skip-confirmations policies accept it automatically. When the plan agent needs a material clarification, the inline interview wizard presents selectable answers and resumes planning with the chosen answer. Use `/plan off` to cancel an active planning workflow without implementing its draft.
 - `/checkup` runs configuration diagnostics and suggests reversible optimizations. Use `/checkup [--quick|--full]` (defaults to a full pass); optimizations are confirmed via the selection modal before any config is mutated.
+- `/feedback` opens the VT Code GitHub issue form in your browser to report a bug or request a feature.
 
 ## WebMCP browser bridge
 

@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn prefix_matches_are_sorted_alphabetically() {
         let names = names_for("c");
-        assert_eq!(names, vec!["checkup", "clear", "command", "compact", "config", "continue", "copy"]);
+        assert_eq!(names, vec!["checkup", "clear", "compact", "config", "continue", "copy"]);
     }
 
     #[test]
@@ -195,9 +195,6 @@ mod tests {
 
     #[test]
     fn suggestions_include_new_interactive_mode_commands() {
-        let names = names_for("sug");
-        assert_eq!(names, vec!["suggest"]);
-
         let names = names_for("task");
         assert_eq!(names, vec!["tasks"]);
 

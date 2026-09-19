@@ -421,6 +421,7 @@ const IMMEDIATE_SUBMIT_COMMANDS: &[&str] = &[
     "/review",
     "/git",
     "/docs",
+    "/feedback",
     "/copy",
     "/help",
     "/clear",
@@ -556,6 +557,9 @@ mod tests {
         assert!(should_submit_immediately_from_palette(&session));
 
         session.set_input("/compact".to_string());
+        assert!(should_submit_immediately_from_palette(&session));
+
+        session.set_input("/feedback".to_string());
         assert!(should_submit_immediately_from_palette(&session));
     }
 

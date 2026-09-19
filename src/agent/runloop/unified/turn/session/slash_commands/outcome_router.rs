@@ -36,7 +36,6 @@ pub(super) async fn route_outcome(
         | SlashCommandOutcome::ClearConversation
         | SlashCommandOutcome::CompactConversation { .. }
         | SlashCommandOutcome::CopyLatestAssistantReply
-        | SlashCommandOutcome::TriggerPromptSuggestions
         | SlashCommandOutcome::ToggleTasksPanel
         | SlashCommandOutcome::ShowJobsPanel
         | SlashCommandOutcome::ShowStatus
@@ -57,6 +56,7 @@ pub(super) async fn route_outcome(
         | SlashCommandOutcome::ManageLocalServer { .. }) => route_runtime_outcome(outcome, ctx).await,
         outcome @ (SlashCommandOutcome::NewSession
         | SlashCommandOutcome::OpenDocs
+        | SlashCommandOutcome::OpenFeedback
         | SlashCommandOutcome::OpenDonateLinks
         | SlashCommandOutcome::LaunchEditor { .. }
         | SlashCommandOutcome::ManageSkills { .. }
@@ -130,7 +130,6 @@ async fn route_runtime_outcome(
             handlers::handle_compact_conversation(ctx, command).await
         }
         SlashCommandOutcome::CopyLatestAssistantReply => handlers::handle_copy_latest_assistant_reply(ctx).await,
-        SlashCommandOutcome::TriggerPromptSuggestions => handlers::handle_trigger_prompt_suggestions(ctx).await,
         SlashCommandOutcome::ToggleTasksPanel => handlers::handle_toggle_tasks_panel(ctx).await,
         SlashCommandOutcome::ShowJobsPanel => handlers::handle_show_jobs_panel(ctx).await,
         SlashCommandOutcome::ShowStatus => handlers::handle_show_status(ctx).await,
@@ -164,6 +163,7 @@ async fn route_navigation_outcome(
     match outcome {
         SlashCommandOutcome::NewSession => handlers::handle_new_session(ctx).await,
         SlashCommandOutcome::OpenDocs => handlers::handle_open_docs(ctx).await,
+        SlashCommandOutcome::OpenFeedback => handlers::handle_open_feedback(ctx).await,
         SlashCommandOutcome::OpenDonateLinks => handlers::handle_open_donate_links(ctx).await,
         SlashCommandOutcome::LaunchEditor { file } => handlers::handle_launch_editor(ctx, file).await,
         SlashCommandOutcome::ManageSkills { action } => handlers::handle_manage_skills(ctx, action).await,

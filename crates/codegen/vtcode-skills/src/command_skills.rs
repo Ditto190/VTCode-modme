@@ -155,12 +155,6 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
         "configuration"
     ),
     built_in_command_spec!(
-        "advisor",
-        "Open the Claude Advisor server-side tool settings (usage: /advisor [path])",
-        "/advisor [path]",
-        "configuration"
-    ),
-    built_in_command_spec!(
         "permissions",
         "Open the permissions settings section and effective summary",
         "/permissions",
@@ -195,13 +189,6 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     ),
     built_in_command_spec!("ide", "Toggle IDE context for this session", "/ide", "configuration"),
     built_in_command_spec!("theme", "Switch UI theme (usage: /theme <theme-id>)", "/theme [theme-id]", "configuration"),
-    traditional_command_spec!(
-        "command",
-        "Run a terminal command (usage: /command <program> [args...])",
-        "/command <program> [args...]",
-        "tools",
-        ".system/cmd-command"
-    ),
     built_in_command_spec!(
         "edit",
         "Open file in external editor (tools.editor config, then VISUAL/EDITOR) (usage: /edit [file])",
@@ -229,12 +216,6 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
         "tools"
     ),
     built_in_command_spec!("copy", "Copy the latest complete assistant reply to clipboard", "/copy", "tools"),
-    built_in_command_spec!(
-        "suggest",
-        "Suggest follow-up prompts from the current session context",
-        "/suggest",
-        "tools"
-    ),
     built_in_command_spec!("tasks", "Toggle the dedicated TODO panel fed by task_tracker output", "/tasks", "tools"),
     built_in_command_spec!("jobs", "Inspect active/background command sessions", "/jobs", "tools"),
     built_in_command_spec!(
@@ -250,15 +231,9 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
         "tools"
     ),
     built_in_command_spec!(
-        "agents",
-        "Manage subagents and delegated child threads (usage: /agents [list|create [project|user] [name]|edit [name]|delete <name>|threads])",
-        "/agents [list|threads|inspect <id>|close <id>|create [project|user] [name]|edit [name]|delete <name>]",
-        "tools"
-    ),
-    built_in_command_spec!(
         "agent",
-        "Show delegated child threads for the current session",
-        "/agent [threads|inspect <id>|close <id>]",
+        "Manage subagents and delegated child threads (usage: /agent [list|threads|inspect <id>|close <id>|create [project|user] [name]|edit [name]|delete <name>])",
+        "/agent [list|threads|inspect <id>|close <id>|create [project|user] [name]|edit [name]|delete <name>]",
         "tools"
     ),
     built_in_command_spec!(
@@ -372,6 +347,12 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
         "session"
     ),
     built_in_command_spec!("docs", "Open vtcode documentation in web browser", "/docs", "support"),
+    built_in_command_spec!(
+        "feedback",
+        "Open a new GitHub issue to report a bug or request a feature",
+        "/feedback",
+        "support"
+    ),
     built_in_command_spec!("help", "Show slash command help", "/help [command]", "support"),
     built_in_command_spec!("exit", "Exit the session", "/exit", "session"),
     built_in_command_spec!("donate", "Support the project by buying the author a coffee", "/donate", "support"),

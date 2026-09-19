@@ -54,9 +54,9 @@ The script runs the PTY tests and prints the captured log if any PTY assertion f
    ```
    The script compiles the binary and starts `vtcode chat` with debug flags enabled. If you need to override the workspace directory, set `WORKSPACE=/path/to/project` before running the script.
 
-2. Once the TUI loads, open the command palette by typing the slash command:
+2. Once the TUI loads, run a shell command with the `!` shell-mode prefix:
    ```text
-   /command sh -c "printf 'hello from portable-pty' && sleep 1"
+   !sh -c "printf 'hello from portable-pty' && sleep 1"
    ```
    The agent routes the request through `run_pty_cmd`, which now uses the shared `PtyManager` backend.
 

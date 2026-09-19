@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::Arc;
 
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
@@ -42,9 +42,6 @@ pub(crate) struct InlinePromptSuggestion {
     pub(crate) source: PromptSuggestionSource,
 }
 
-static PROMPT_SUGGESTION_CACHE: LazyLock<Mutex<HashMap<String, Vec<PromptSuggestion>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-const PROMPT_SUGGESTION_CACHE_LIMIT: usize = 64;
 const DEFAULT_PROMPT_SUGGESTION_TEMPERATURE: f32 = 0.4;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,70 +56,6 @@ struct PromptSuggestionRoutes {
     primary: PromptSuggestionRoute,
     fallback: Option<PromptSuggestionRoute>,
     warning: Option<String>,
-}
-
-impl PromptSuggestionRoute {
-    fn cache_key(&self) -> String {
-        format!("{}:{}:{:.2}", self.provider_name, self.model, self.temperature)
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Intentional compatibility, platform, or test-only suppression."
-)]
-pub(crate) async fn generate_prompt_suggestions(
-    provider: &dyn uni::LLMProvider,
-    config: &CoreAgentConfig,
-    vt_cfg: Option<&VTCodeConfig>,
-    workspace: &Path,
-    history: &[uni::Message],
-    session_stats: &SessionStats,
-    tool_registry: &ToolRegistry,
-) -> Vec<PromptSuggestion> {
-    let routes = resolve_prompt_suggestion_routes(config, vt_cfg);
-    log_prompt_suggestion_route_warning(&routes);
-
-    // Pre-fetch git status off the async executor. Both the cache key and the
-    // deterministic fallback need this, so we fetch once and reuse — avoiding
-    // four blocking subprocess spawns (two per call). The sync
-    // `git_status_summary` spawns two `git` subprocesses; see the `# Blocking`
-    // docs in `git.rs`.
-    let workspace_buf = workspace.to_path_buf();
-    let git_summary =
-        match tokio::task::spawn_blocking(move || crate::agent::runloop::git::git_status_summary(&workspace_buf)).await
-        {
-            Ok(Ok(Some(summary))) => Some(summary),
-            _ => None,
-        };
-    let git_fragment = git_status_fragment(git_summary.as_ref());
-
-    let cache_key =
-        prompt_suggestion_cache_key(&routes.primary, workspace, history, session_stats, tool_registry, &git_fragment);
-    if let Some(cached) = PROMPT_SUGGESTION_CACHE
-        .lock()
-        .ok()
-        .and_then(|cache| cache.get(&cache_key).cloned())
-    {
-        return cached;
-    }
-
-    let fallback = deterministic_prompt_suggestions(history, session_stats, tool_registry, git_summary.as_ref());
-    let llm_generated = llm_prompt_suggestions(provider, config, vt_cfg, &routes, history).await;
-    let resolved = if llm_generated.is_empty() {
-        fallback
-    } else {
-        llm_generated
-    };
-
-    if let Ok(mut cache) = PROMPT_SUGGESTION_CACHE.lock() {
-        if cache.len() >= PROMPT_SUGGESTION_CACHE_LIMIT {
-            cache.clear();
-        }
-        cache.insert(cache_key, resolved.clone());
-    }
-
-    resolved
 }
 
 #[allow(
@@ -278,52 +211,6 @@ fn deterministic_inline_prompt_suggestion(
         .find(|prompt| prompt.to_lowercase().starts_with(&normalized))
 }
 
-async fn llm_prompt_suggestions(
-    provider: &dyn uni::LLMProvider,
-    config: &CoreAgentConfig,
-    vt_cfg: Option<&VTCodeConfig>,
-    routes: &PromptSuggestionRoutes,
-    history: &[uni::Message],
-) -> Vec<PromptSuggestion> {
-    let primary = llm_prompt_suggestions_for_route(provider, config, vt_cfg, &routes.primary, history).await;
-    if !primary.is_empty() || routes.fallback.is_none() {
-        return primary;
-    }
-
-    let Some(fallback) = routes.fallback.as_ref() else {
-        return primary;
-    };
-    tracing::warn!(
-        model = %routes.primary.model,
-        fallback_model = %fallback.model,
-        "prompt suggestions failed on lightweight route; retrying with main model"
-    );
-    llm_prompt_suggestions_for_route(provider, config, vt_cfg, fallback, history).await
-}
-
-async fn llm_prompt_suggestions_for_route(
-    provider: &dyn uni::LLMProvider,
-    config: &CoreAgentConfig,
-    vt_cfg: Option<&VTCodeConfig>,
-    route: &PromptSuggestionRoute,
-    history: &[uni::Message],
-) -> Vec<PromptSuggestion> {
-    let context = recent_history_summary(history);
-    if context.trim().is_empty() {
-        return Vec::new();
-    }
-
-    if route.model == config.model {
-        return llm_prompt_suggestions_from_provider(provider, &route.model, route.temperature, history).await;
-    }
-
-    let Some(provider) = create_prompt_suggestion_provider(route, config, vt_cfg) else {
-        return Vec::new();
-    };
-
-    llm_prompt_suggestions_from_provider(&*provider, &route.model, route.temperature, history).await
-}
-
 async fn llm_inline_prompt_suggestion(
     provider: &dyn uni::LLMProvider,
     config: &CoreAgentConfig,
@@ -386,56 +273,6 @@ fn create_prompt_suggestion_provider(
         vt_cfg,
     )
     .ok()
-}
-
-async fn llm_prompt_suggestions_from_provider(
-    provider: &dyn uni::LLMProvider,
-    model: &str,
-    temperature: f32,
-    history: &[uni::Message],
-) -> Vec<PromptSuggestion> {
-    let context = recent_history_summary(history);
-    if context.trim().is_empty() {
-        return Vec::new();
-    }
-
-    let request = uni::LLMRequest {
-        messages: Arc::new(vec![uni::Message::user(format!(
-            "Generate 3 short follow-up prompts for this VT Code session. Return one prompt per line.\n\nRecent session context:\n{context}"
-        ))]),
-        system_prompt: Some(Arc::from(
-            "You write concise follow-up prompts for a coding assistant UI. Return plain text only, one prompt per line, no bullets or numbering.",
-        )),
-        model: model.to_string(),
-        max_tokens: Some(180),
-        temperature: Some(temperature),
-        tool_choice: Some(uni::ToolChoice::None),
-        ..Default::default()
-    };
-
-    let Ok(response) = collect_single_response(provider, request).await else {
-        return Vec::new();
-    };
-    let Some(content) = response.content else {
-        return Vec::new();
-    };
-
-    let suggestions = content
-        .lines()
-        .map(|line| line.trim().trim_start_matches('-').trim_start_matches('•').trim().to_string())
-        .filter(|line| !line.is_empty())
-        .take(3)
-        .enumerate()
-        .map(|(index, prompt)| PromptSuggestion {
-            id: format!("llm-{index}"),
-            title: truncate_for_prompt(&prompt, 56),
-            prompt,
-            subtitle: Some("Suggested from recent session context.".to_string()),
-            badge: Some("Suggested".to_string()),
-        })
-        .collect::<Vec<_>>();
-
-    dedupe_prompt_suggestions(suggestions)
 }
 
 async fn llm_inline_prompt_suggestion_from_provider(
@@ -534,34 +371,6 @@ fn last_error_like_message(message: &uni::Message) -> Option<String> {
         .then(|| text.to_string())
 }
 
-fn prompt_suggestion_cache_key(
-    route: &PromptSuggestionRoute,
-    workspace: &Path,
-    history: &[uni::Message],
-    session_stats: &SessionStats,
-    tool_registry: &ToolRegistry,
-    git_fragment: &str,
-) -> String {
-    let recent_history = history
-        .iter()
-        .rev()
-        .take(4)
-        .map(|message| truncate_for_prompt(message.content.as_text().trim(), 120))
-        .collect::<Vec<_>>()
-        .join("|");
-    format!(
-        "{}:{}:{}:{}:{}:{}:{}:{}",
-        route.cache_key(),
-        workspace.display(),
-        history.len(),
-        tool_registry.is_planning_active(),
-        session_stats.task_panel_visible,
-        tool_registry.active_pty_sessions(),
-        git_fragment,
-        recent_history
-    )
-}
-
 fn resolve_prompt_suggestion_routes(config: &CoreAgentConfig, vt_cfg: Option<&VTCodeConfig>) -> PromptSuggestionRoutes {
     let temperature = vt_cfg
         .map(|cfg| cfg.agent.prompt_suggestions.temperature)
@@ -630,12 +439,6 @@ fn truncate_for_prompt(text: &str, max_chars: usize) -> String {
     let mut truncated = text.chars().take(max_chars.saturating_sub(1)).collect::<String>();
     truncated.push('…');
     truncated
-}
-
-fn git_status_fragment(summary: Option<&GitStatusSummary>) -> String {
-    summary
-        .map(|s| format!("{}:{}", s.branch, s.dirty))
-        .unwrap_or_else(|| "no-git".to_string())
 }
 
 #[cfg(test)]

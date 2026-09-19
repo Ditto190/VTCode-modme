@@ -81,13 +81,6 @@ fn dispatch_traditional_command_skill(
     renderer: &mut AnsiRenderer,
 ) -> Result<SlashCommandOutcome> {
     let input = match spec.slash_name {
-        "command" => {
-            if args.trim().is_empty() {
-                renderer.line(MessageStyle::Error, "Usage: /command <program> [args...]")?;
-                return Ok(SlashCommandOutcome::Handled);
-            }
-            args.trim().to_string()
-        }
         "review" => {
             if matches!(args.trim(), "--help" | "help") {
                 renderer.line(
@@ -134,7 +127,6 @@ fn dispatch_traditional_command_skill(
 pub(in crate::agent::runloop::slash_commands) fn normalize_command_key(command_key: &str) -> &str {
     match command_key {
         "settings" | "setttings" => "config",
-        "comman" => "command",
         "subprocesses" => "subprocess",
         "context" => "compact",
         other => other,

@@ -108,6 +108,18 @@ async fn donate_command_is_handled() {
 }
 
 #[tokio::test]
+async fn feedback_command_opens_the_github_issue_form() {
+    let workspace = std::env::current_dir().expect("workspace");
+    let mut renderer = renderer_for_tests();
+
+    let outcome = handle_slash_command("feedback", &mut renderer, &workspace)
+        .await
+        .expect("feedback command should parse");
+
+    assert!(matches!(outcome, SlashCommandOutcome::OpenFeedback));
+}
+
+#[tokio::test]
 async fn share_defaults_to_json_and_html_export() {
     let workspace = std::env::current_dir().expect("workspace");
     let mut renderer = renderer_for_tests();
@@ -313,15 +325,19 @@ async fn ide_command_rejects_arguments() {
 }
 
 #[tokio::test]
-async fn agent_command_opens_active_agents_inspector() {
+async fn agent_command_opens_manager_and_inspector() {
     let workspace = std::env::current_dir().expect("workspace");
     let mut renderer = renderer_for_tests();
 
-    let outcome = handle_slash_command("agent", &mut renderer, &workspace)
+    let default = handle_slash_command("agent", &mut renderer, &workspace)
         .await
         .expect("agent command should parse");
+    assert!(matches!(default, SlashCommandOutcome::ManageAgents { action: AgentManagerAction::List }));
 
-    assert!(matches!(outcome, SlashCommandOutcome::ManageAgents { action: AgentManagerAction::Threads }));
+    let threads = handle_slash_command("agent threads", &mut renderer, &workspace)
+        .await
+        .expect("agent threads should parse");
+    assert!(matches!(threads, SlashCommandOutcome::ManageAgents { action: AgentManagerAction::Threads }));
 }
 
 #[tokio::test]
@@ -370,7 +386,7 @@ async fn agents_create_and_edit_commands_parse_guided_forms() {
     let workspace = std::env::current_dir().expect("workspace");
     let mut renderer = renderer_for_tests();
 
-    let create_default = handle_slash_command("agents create", &mut renderer, &workspace)
+    let create_default = handle_slash_command("agent create", &mut renderer, &workspace)
         .await
         .expect("agents create should parse");
     assert!(matches!(
@@ -380,7 +396,7 @@ async fn agents_create_and_edit_commands_parse_guided_forms() {
         }
     ));
 
-    let create_project = handle_slash_command("agents create project", &mut renderer, &workspace)
+    let create_project = handle_slash_command("agent create project", &mut renderer, &workspace)
         .await
         .expect("agents create project should parse");
     assert!(matches!(
@@ -393,7 +409,7 @@ async fn agents_create_and_edit_commands_parse_guided_forms() {
         }
     ));
 
-    let create_named = handle_slash_command("agents create project reviewer", &mut renderer, &workspace)
+    let create_named = handle_slash_command("agent create project reviewer", &mut renderer, &workspace)
         .await
         .expect("agents create project <name> should parse");
     assert!(matches!(
@@ -406,7 +422,7 @@ async fn agents_create_and_edit_commands_parse_guided_forms() {
         } if name == "reviewer"
     ));
 
-    let edit_default = handle_slash_command("agents edit", &mut renderer, &workspace)
+    let edit_default = handle_slash_command("agent edit", &mut renderer, &workspace)
         .await
         .expect("agents edit should parse");
     assert!(matches!(
@@ -414,7 +430,7 @@ async fn agents_create_and_edit_commands_parse_guided_forms() {
         SlashCommandOutcome::ManageAgents { action: AgentManagerAction::Edit { name: None } }
     ));
 
-    let edit_named = handle_slash_command("agents edit reviewer", &mut renderer, &workspace)
+    let edit_named = handle_slash_command("agent edit reviewer", &mut renderer, &workspace)
         .await
         .expect("agents edit <name> should parse");
     assert!(matches!(
@@ -516,11 +532,6 @@ async fn title_command_is_interactive_only() {
 async fn interactive_mode_commands_parse_to_expected_outcomes() {
     let workspace = std::env::current_dir().expect("workspace");
     let mut renderer = renderer_for_tests();
-
-    let suggest = handle_slash_command("suggest", &mut renderer, &workspace)
-        .await
-        .expect("suggest should parse");
-    assert!(matches!(suggest, SlashCommandOutcome::TriggerPromptSuggestions));
 
     let tasks = handle_slash_command("tasks", &mut renderer, &workspace)
         .await
@@ -788,23 +799,6 @@ async fn review_slash_routes_natural_language_through_cmd_review_skill() {
         SlashCommandOutcome::ManageSkills {
             action: crate::agent::runloop::SkillCommandAction::Use { ref name, input: ref skill_input }
         } if name == "cmd-review" && skill_input == input
-    ));
-}
-
-#[tokio::test]
-async fn command_alias_typo_routes_through_cmd_command_skill() {
-    let workspace = tempfile::TempDir::new().expect("workspace");
-    let mut renderer = renderer_for_tests();
-
-    let outcome = handle_slash_command("comman cargo check", &mut renderer, workspace.path())
-        .await
-        .expect("comman alias should parse");
-
-    assert!(matches!(
-        outcome,
-        SlashCommandOutcome::ManageSkills {
-            action: crate::agent::runloop::SkillCommandAction::Use { ref name, ref input }
-        } if name == "cmd-command" && input == "cargo check"
     ));
 }
 

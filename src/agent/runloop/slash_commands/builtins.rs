@@ -125,30 +125,6 @@ fn handle_config_command(args: &str, renderer: &mut AnsiRenderer) -> Result<Slas
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
-fn handle_advisor_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
-    match args.trim() {
-        "" => Ok(SlashCommandOutcome::ShowSettingsAtPath { path: "provider.anthropic.advisor".to_string() }),
-        "help" | "--help" | "-h" => {
-            renderer.line(
-                MessageStyle::Info,
-                "Claude Advisor — server-side tool pairing a faster executor with a \
-                 higher-intelligence advisor for strategic guidance mid-generation.\n\n\
-                 Usage:\n  /advisor              Open advisor settings\n\
-                 /advisor model         Edit advisor model\n\
-                 /advisor max_uses      Edit max invocations per request\n\
-                 /advisor help          Show this help\n\n\
-                 Only available for Anthropic providers. The executor and advisor \
-                 models must form a valid pair (see provider.anthropic.advisor config).",
-            )?;
-            Ok(SlashCommandOutcome::Handled)
-        }
-        field => Ok(SlashCommandOutcome::ShowSettingsAtPath {
-            path: format!("provider.anthropic.advisor.{field}"),
-        }),
-    }
-}
-
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn handle_statusline_command(args: &str) -> Result<SlashCommandOutcome> {
     Ok(SlashCommandOutcome::StartStatuslineSetup {
         instructions: (!args.trim().is_empty()).then(|| args.trim().to_string()),
@@ -355,20 +331,9 @@ fn handle_plugin_command(input: &str, renderer: &mut AnsiRenderer) -> Result<Sla
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
-fn handle_agents_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
-    match parse_agents_command(args) {
-        Ok(action) => Ok(SlashCommandOutcome::ManageAgents { action }),
-        Err(message) => {
-            renderer.line(MessageStyle::Error, &message)?;
-            Ok(SlashCommandOutcome::Handled)
-        }
-    }
-}
-
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn handle_agent_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
     match args.trim() {
-        "" => Ok(SlashCommandOutcome::ManageAgents { action: AgentManagerAction::Threads }),
+        "" => Ok(SlashCommandOutcome::ManageAgents { action: AgentManagerAction::List }),
         args => match parse_agents_command(args) {
             Ok(action) => Ok(SlashCommandOutcome::ManageAgents { action }),
             Err(message) => {
@@ -442,6 +407,15 @@ fn handle_docs_command() -> Result<SlashCommandOutcome> {
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+fn handle_feedback_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
+    if !args.is_empty() {
+        renderer.line(MessageStyle::Error, "Usage: /feedback")?;
+        return Ok(SlashCommandOutcome::Handled);
+    }
+    Ok(SlashCommandOutcome::OpenFeedback)
+}
+
+#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn handle_exit_command() -> Result<SlashCommandOutcome> {
     Ok(SlashCommandOutcome::Exit)
 }
@@ -453,15 +427,6 @@ fn handle_copy_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashC
         return Ok(SlashCommandOutcome::Handled);
     }
     Ok(SlashCommandOutcome::CopyLatestAssistantReply)
-}
-
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
-fn handle_suggest_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
-    if !args.is_empty() {
-        renderer.line(MessageStyle::Error, "Usage: /suggest")?;
-        return Ok(SlashCommandOutcome::Handled);
-    }
-    Ok(SlashCommandOutcome::TriggerPromptSuggestions)
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
@@ -591,14 +556,12 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "config" | "settings" | "setttings" => handle_config_command(args, renderer),
         "permissions" => Ok(SlashCommandOutcome::ShowPermissions),
         "memory" => Ok(SlashCommandOutcome::ShowMemory),
-        "advisor" => handle_advisor_command(args, renderer),
         "statusline" => handle_statusline_command(args),
         "title" => handle_title_command(args, renderer),
         "clear" => handle_clear_command(args, renderer),
         "transcript" => handle_transcript_command(args, renderer),
         "compact" | "context" => handle_compact_command(args, renderer),
         "copy" => handle_copy_command(args, renderer),
-        "suggest" => handle_suggest_command(args, renderer),
         "tasks" => handle_tasks_command(args, renderer),
         "jobs" => handle_jobs_command(args, renderer),
         "log" => handle_log_command(args, renderer),
@@ -624,11 +587,11 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "new" => Ok(SlashCommandOutcome::NewSession),
         "rewind" => handle_rewind_command(args, renderer),
         "docs" => Ok(SlashCommandOutcome::OpenDocs),
+        "feedback" => handle_feedback_command(args, renderer),
         "edit" => handle_edit_command(args),
         "exit" => Ok(SlashCommandOutcome::Exit),
         "skills" => handle_skills_command(input, renderer),
         "plugin" => handle_plugin_command(input, renderer),
-        "agents" => handle_agents_command(args, renderer),
         "agent" => handle_agent_command(args, renderer),
         "subprocesses" | "subprocess" => handle_subprocesses_command(args, renderer),
         "plan" => handle_plan_command(args, renderer),
@@ -661,13 +624,13 @@ pub(in crate::agent::runloop::slash_commands) fn parse_agents_command(
 
     match first {
         "inspect" => {
-            let id = parts.next().ok_or("Usage: /agents inspect <id>")?;
+            let id = parts.next().ok_or("Usage: /agent inspect <id>")?;
             Ok(AgentManagerAction::Inspect {
                 id: id.to_string(),
             })
         }
         "close" => {
-            let id = parts.next().ok_or("Usage: /agents close <id>")?;
+            let id = parts.next().ok_or("Usage: /agent close <id>")?;
             Ok(AgentManagerAction::Close {
                 id: id.to_string(),
             })
@@ -676,7 +639,7 @@ pub(in crate::agent::runloop::slash_commands) fn parse_agents_command(
             name: parts.next().map(|n| n.to_string()),
         }),
         "delete" => {
-            let name = parts.next().ok_or("Usage: /agents delete <name>")?;
+            let name = parts.next().ok_or("Usage: /agent delete <name>")?;
             Ok(AgentManagerAction::Delete {
                 name: name.to_string(),
             })
@@ -703,7 +666,7 @@ pub(in crate::agent::runloop::slash_commands) fn parse_agents_command(
             Ok(AgentManagerAction::Create { scope, name })
         }
         _ => Err(
-            "Usage: /agents [list|threads|inspect <id>|close <id>|create [project|user] [name]|edit [name]|delete <name>]".to_string(),
+            "Usage: /agent [list|threads|inspect <id>|close <id>|create [project|user] [name]|edit [name]|delete <name>]".to_string(),
         ),
     }
 }

@@ -68,7 +68,7 @@ Use `- None` for empty sections. If a child reply does not follow this contract,
 
 ## Quickstart
 
-1. Run `/agents`.
+1. Run `/agent`.
 2. Choose `Create project agent` or `Create user agent`.
 3. VT Code writes a scaffold to `.vtcode/agents/<name>.md` or the canonical user config directory's `agents/<name>.md`.
 4. Edit the scaffold. A minimal read-only reviewer looks like this:
@@ -103,7 +103,7 @@ Use the code-reviewer agent on the auth changes
 Spawn a code-reviewer subagent and summarize only the important findings
 ```
 
-6. Use `/agent` or `/agents threads` to inspect delegated child runs and open completed transcripts. Use `Tab` on an empty idle composer when you want to switch the main session to another primary agent.
+6. Use `/agent threads` to inspect delegated child runs and open completed transcripts. Use `Tab` on an empty idle composer when you want to switch the main session to another primary agent.
 
 ## Discovery And Precedence
 
@@ -221,7 +221,7 @@ Only `name` and `description` are required.
 | `memory` | persistent memory scope | `user`, `project`, or `local` |
 | `background` | marks an agent as eligible for the managed background subprocess flow | launch these agents with `spawn_background_subprocess`; `spawn_agent` stays foreground-only |
 | `maxTurns` | per-agent turn ceiling | can also be overridden per call |
-| `nickname_candidates` | preferred thread labels | shown in `/agent` and `/agents` thread lists |
+| `nickname_candidates` | preferred thread labels | shown in the `/agent` thread list |
 | `initialPrompt` | default task prompt when the spawn request omits one | useful for compatibility imports |
 | `isolation` | workspace isolation for child agents | `worktree` creates a git worktree under `.vtcode/worktrees/` so the child runs in its own working tree |
 
@@ -443,7 +443,7 @@ An explicit mention guarantees the selection for that turn:
 
 VT Code treats a single explicit mention as the selected agent for the turn. If the model later tries to spawn a different agent, the call is rejected instead of silently switching.
 
-`/agent` and `/agents` can inspect agent definitions and delegated child runs. `@agent-name` is only for subagent-capable definitions; primary-only agents cannot be invoked with `@`.
+`/agent` can inspect agent definitions and delegated child runs. `@agent-name` is only for subagent-capable definitions; primary-only agents cannot be invoked with `@`.
 
 ### Use A Primary Agent
 
@@ -539,8 +539,8 @@ The agent definition body (below the frontmatter) becomes the agent's runtime in
 
 ### Inspect Active Agents In Place
 
-- `/agent` opens the active-agent inspector for delegated child runs in the current session
-- `/agents threads` and `/agents active` are aliases for the same in-place inspector flow
+- `/agent` opens the agent manager and the active-agent inspector for delegated child runs in the current session
+- `/agent threads` and `/agent active` are aliases for the same in-place inspector flow
 - selecting an active child opens a read-only inspector modal; `Esc` closes it and returns to the main VT Code session immediately
 - `Ctrl+R` reloads the selected inspector, `Ctrl+K` cancels the selected agent, and completed transcripts can still be opened in your editor
 

@@ -46,7 +46,9 @@ mod webmcp;
 mod workspace;
 
 pub(super) use agents::{handle_manage_agents, handle_manage_subprocesses};
-pub(super) use apps::{handle_launch_editor, handle_new_session, handle_open_docs, handle_open_donate_links};
+pub(super) use apps::{
+    handle_launch_editor, handle_new_session, handle_open_docs, handle_open_donate_links, handle_open_feedback,
+};
 pub(super) use compact::handle_compact_conversation;
 pub(super) use control::{
     handle_clear_conversation, handle_clear_screen, handle_copy_latest_assistant_reply, handle_exit,
@@ -65,7 +67,7 @@ pub(super) use diagnostics::{
 #[expect(unused_imports, reason = "guard-rail for the upcoming /checkup 7-step flow")]
 pub(super) use diagnostics::memory::config_persistence::persist_workspace_config_change;
 pub(super) use effort::handle_set_effort;
-pub(super) use interactive::{handle_show_jobs_panel, handle_toggle_tasks_panel, handle_trigger_prompt_suggestions};
+pub(super) use interactive::{handle_show_jobs_panel, handle_toggle_tasks_panel};
 pub(super) use local_server::handle_manage_local_server;
 pub(super) use log_viewer::handle_show_log_viewer;
 pub(super) use mcp::handle_manage_mcp;
