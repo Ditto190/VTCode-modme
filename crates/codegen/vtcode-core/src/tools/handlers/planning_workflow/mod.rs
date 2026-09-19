@@ -626,6 +626,47 @@ Keep quoted-comma shell patterns intact during bracket splitting.
     }
 
     #[test]
+    fn validate_plan_content_accepts_inspection_command_verifies() {
+        // Live recovery drafts (checkpoints turn_1234–1243) used sed/grep for
+        // docs plans; COMMAND_NAMES previously rejected them and planning
+        // recovery burned repair budget on concrete inspection commands.
+        let report = validate_plan_content(
+            r#"# README refine
+
+## Summary
+Tighten the Why VT Code section using ordinary inspection verifies.
+
+## Steps
+1. Rewrite the intro -> files: [README.md] -> verify: [sed -n '81,88p' README.md]
+2. Add planning row -> files: [README.md] -> verify: [grep -n 'planning-workflow' README.md]
+3. Add loop bullet -> files: [README.md] -> verify: [grep -n 'loop-engineering' README.md]
+4. Preserve closing paragraph -> files: [README.md] -> verify: [sed -n '/## Why VT Code/,/## Architecture/p' README.md]
+5. Align table formatting -> files: [README.md] -> verify: [sed -n '85,105p' README.md]
+
+## Validation
+1. Run cargo nextest run -p vtcode-core.
+
+## Assumptions
+1. Docs-only change; no code behavior changes.
+"#,
+        );
+
+        assert!(
+            report.is_ready(),
+            "inspection-command verifies from live planning drafts must validate: {:?}",
+            report.reasons()
+        );
+        assert!(report.invalid_implementation_steps.is_empty());
+        assert_eq!(report.implementation_step_count, 5);
+
+        let feedback = report.repair_feedback();
+        assert!(
+            feedback.contains("sed -n") && feedback.contains("grep -n"),
+            "repair feedback must list inspection-command valid examples: {feedback}"
+        );
+    }
+
+    #[test]
     fn validate_plan_content_accepts_relative_verification_executables() {
         let report = validate_plan_content(
             r#"# Relative executable verification
