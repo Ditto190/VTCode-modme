@@ -850,4 +850,14 @@ gap_warning_threshold_secs = 120
         assert!(field_reference.contains("`prompt_cache.cache_friendly_prompt_shaping`"));
         assert!(field_reference.contains("`prompt_cache.providers.openai.prompt_cache_retention`"));
     }
+
+    #[test]
+    fn bundled_example_config_parses_and_validates() {
+        // Guards the tracked template against stale keys and schema drift:
+        // the shipped example must load as VTCodeConfig and pass validation.
+        let workspace_root = find_workspace_root();
+        let example = fs::read_to_string(workspace_root.join("vtcode.toml.example")).expect("vtcode.toml.example");
+        let config: crate::VTCodeConfig = toml::from_str(&example).expect("example config should parse");
+        config.validate().expect("example config should validate");
+    }
 }
