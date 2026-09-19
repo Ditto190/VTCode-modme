@@ -21,8 +21,9 @@ pub mod state;
 // `handlers/mod.rs`, `task_tracker.rs`, `planning_task_tracker.rs`,
 // `continuation.rs`, `turn/context.rs`, and `turn/.../plan_seed.rs`.
 pub use artifacts::{
-    CANONICAL_STEP_FORMAT, PlanValidationReport, generate_tracker_markdown_from_plan, merge_plan_content,
-    plan_file_for_tracker_file, split_bracket_items, tracker_file_for_plan_file, validate_plan_content,
+    CANONICAL_STEP_FORMAT, PLANNING_VERIFY_INVALID_EXAMPLES, PLANNING_VERIFY_VALID_EXAMPLES, PlanValidationReport,
+    generate_tracker_markdown_from_plan, merge_plan_content, plan_file_for_tracker_file, split_bracket_items,
+    tracker_file_for_plan_file, validate_plan_content,
 };
 pub use persistence::{PersistedPlanDraft, persist_plan_draft, sync_tracker_into_plan_file};
 pub use start::StartPlanningTool;
@@ -664,6 +665,53 @@ Tighten the Why VT Code section using ordinary inspection verifies.
             feedback.contains("sed -n") && feedback.contains("grep -n"),
             "repair feedback must list inspection-command valid examples: {feedback}"
         );
+        assert!(
+            feedback.contains(super::artifacts::PLANNING_VERIFY_VALID_EXAMPLES)
+                && feedback.contains(super::artifacts::PLANNING_VERIFY_INVALID_EXAMPLES),
+            "repair feedback must embed the shared example constants: {feedback}"
+        );
+    }
+
+    #[test]
+    fn validate_plan_content_rejects_english_phrase_command_heads() {
+        // Post-merge review: expanded COMMAND_NAMES must not approve prose
+        // verifies that merely start with an allowlisted English word.
+        for verify in ["file changes", "sort order", "find files", "make sense"] {
+            let plan = format!(
+                "# Ambiguous head\n\n## Summary\nReject prose command heads.\n\n## Steps\n1. Do the work -> files: [src/main.rs] -> verify: [{verify}]\n\n## Validation\n1. Run cargo nextest run -p vtcode-core.\n\n## Assumptions\n1. Keep validation strict.\n"
+            );
+            let report = validate_plan_content(&plan);
+            assert!(!report.is_ready(), "english-phrase verify must be rejected: {verify}");
+            assert!(
+                report
+                    .invalid_implementation_steps
+                    .iter()
+                    .any(|reason| reason.contains("verification")),
+                "expected verification failure for {verify}: {:?}",
+                report.reasons()
+            );
+        }
+
+        let ready = validate_plan_content(
+            r#"# Flagged inspection
+
+## Summary
+Accept inspection verifies that carry flags or paths.
+
+## Steps
+1. Read the intro -> files: [README.md] -> verify: [sed -n '81,88p' README.md]
+2. Locate symbol -> files: [src/lib.rs] -> verify: [grep -n 'symbol' src/lib.rs]
+3. Count lines -> files: [README.md] -> verify: [wc -l README.md]
+4. Run unit gate -> files: [crates/codegen/vtcode-core] -> verify: [cargo nextest run -p vtcode-core]
+
+## Validation
+1. Run cargo nextest run -p vtcode-core.
+
+## Assumptions
+1. Flags/paths keep command-head verifies concrete.
+"#,
+        );
+        assert!(ready.is_ready(), "flagged/path inspection verifies must validate: {:?}", ready.reasons());
     }
 
     #[test]

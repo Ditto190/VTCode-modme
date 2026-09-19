@@ -1,6 +1,26 @@
 # Session Log Review
 
+## 2026-09-19 | Post-merge review: inspection verify allowlist tightening
+
+### Baseline
+
+Merged planning-verify-commands accepted inspection commands as concrete `verify:` items. Follow-up full-diff review confirmed an unintended validation regression: `COMMAND_NAMES` now includes English-word binaries (`file`, `sort`, `find`, `ls`, `make`, …), and the command-head rule only required a second token, so prose verifies such as `file changes` validated as concrete. Example lists were also duplicated across prompt surfaces without a sweep test.
+
+| Observation | Disposition |
+| --- | --- |
+| `validate_concrete_verification("file changes")` / `sort order` / `find files` / `make sense` returned Ok after the allowlist expansion. | Ambiguous English command heads now require a later flag (`-n`) or path-like token. Unambiguous heads (`cargo`, `rg`, `sed`, `grep`) keep the multi-token rule so `cargo test` stays valid. |
+| Valid/invalid verify examples drifted across compiled prompt constants. | Shared `PLANNING_VERIFY_VALID_EXAMPLES` / `PLANNING_VERIFY_INVALID_EXAMPLES` in `planning_workflow::artifacts`; `repair_feedback()` embeds them; presence sweep test covers shipped recovery/repair surfaces. |
+| `COMMAND_NAMES` is plan-validation only (not shell safety). | No security-path change; document remains scoped to plan verification. |
+
+### Verification
+
+- `cargo nextest run -p vtcode-core -E 'test(planning) or test(inspection) or test(agentic) or test(validate_plan) or test(plan_quality) or test(english_phrase)'`
+- `cargo nextest run -p vtcode -E 'test(shipped_planning_prompt) or test(repair_directive) or test(planning)'`
+- `cargo check --locked -p vtcode-core -p vtcode`
+- `cargo fmt --all -- --check`
+
 ## 2026-09-19 | Planning recovery rejects inspection-command verifies
+
 
 ### Baseline
 

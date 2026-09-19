@@ -936,6 +936,7 @@ mod tests {
                 && recovery_prompt.contains("verify: [grep -n 'symbol' src/file.rs]"),
             "synthesis hint must include inspection-command valid examples: {recovery_prompt}"
         );
+        assert!(recovery_prompt.contains("git diff --check"));
         assert!(recovery_prompt.contains("Invalid examples: `verify: [run checks]`"));
         assert!(recovery_prompt.contains("observable check"));
         assert_eq!(tracker.consecutive_low_signal_navigations, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD);

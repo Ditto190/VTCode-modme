@@ -22,7 +22,7 @@ use crate::agent::runloop::unified::state::CtrlCState;
 use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
 
 const PLANNING_WORKFLOW_EXIT_TRIGGER_STATUS: &str = "Planning workflow: implementation intent detected from your message. Exiting planning mode and proceeding with execution.";
-const PLANNING_WORKFLOW_MISSING_PLAN_SYNTHESIS_DIRECTIVE: &str = "Planning recovery: implementation was requested, but no completed plan draft exists yet. Do not implement and do not ask for approval. Synthesize exactly one compact `<proposed_plan>` from the repository evidence already gathered, including Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, and short Assumptions. Valid `verify:` examples include `cargo nextest run -p vtcode`, `cargo check --locked`, `rg -n 'symbol' src/file.rs`, `sed -n '1,40p' docs/file.md`, and `grep -n 'symbol' src/file.rs`; `run checks` and `git diff --check` are invalid. Do not emit tool calls.";
+pub(crate) const PLANNING_WORKFLOW_MISSING_PLAN_SYNTHESIS_DIRECTIVE: &str = "Planning recovery: implementation was requested, but no completed plan draft exists yet. Do not implement and do not ask for approval. Synthesize exactly one compact `<proposed_plan>` from the repository evidence already gathered, including Summary, numbered steps in the form `Action -> files: [path] -> verify: [command]`, Validation, and short Assumptions. Valid `verify:` examples include `cargo nextest run -p vtcode`, `cargo check --locked`, `rg -n 'symbol' src/file.rs`, `sed -n '1,40p' docs/file.md`, and `grep -n 'symbol' src/file.rs`; `run checks` and `git diff --check` are invalid. Do not emit tool calls.";
 
 pub(crate) struct PlanningExitContext<'a> {
     pub(crate) session: &'a mut InlineSession,
@@ -283,6 +283,13 @@ fn display_status(renderer: &mut AnsiRenderer, message: &str) -> anyhow::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_plan_synthesis_directive_keeps_inspection_verify_examples() {
+        let text = PLANNING_WORKFLOW_MISSING_PLAN_SYNTHESIS_DIRECTIVE;
+        assert!(text.contains("sed -n") && text.contains("grep -n"), "missing inspection examples: {text}");
+        assert!(text.contains("git diff --check"), "missing invalid VCS example: {text}");
+    }
 
     #[test]
     fn approved_plan_transition_preserves_target_policy_for_handoff() {

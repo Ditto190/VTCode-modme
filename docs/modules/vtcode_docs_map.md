@@ -970,8 +970,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/harness/SESSION_LOG_REVIEW.md`
   - **Content**: Session Log Review
-  - **Topics**: 2026-09-19 | Planning recovery rejects inspection-command verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse (turns 912–913), 2026-08-12 | Checkpoints 862–911 stabilization
-  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-09-19 | Planning recovery rejects inspection-command verifies work?", "How does 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit work?"
+  - **Topics**: 2026-09-19 | Post-merge review: inspection verify allowlist tightening, 2026-09-19 | Planning recovery rejects inspection-command verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse (turns 912–913)
+  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-09-19 | Post-merge review: inspection verify allowlist tightening work?", "How does 2026-09-19 | Planning recovery rejects inspection-command verifies work?"
 
 - **File**: `docs/features/SHELL_SNAPSHOT.md`
   - **Content**: Shell Environment Snapshot

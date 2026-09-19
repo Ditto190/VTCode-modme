@@ -17,6 +17,16 @@ pub(super) const PLAN_TRACKER_END: &str = "<!-- vtcode:plan-tracker:end -->";
 /// the same contract from every prompt surface.
 pub const CANONICAL_STEP_FORMAT: &str = "1. Action -> files: [path/to/file.rs] -> verify: [cargo check]";
 
+/// Shared valid `verify:` examples for planning synthesis/repair prompts.
+/// `repair_feedback()` embeds this list; binary runloop constants stay
+/// compile-time literals but must keep these examples via presence tests.
+pub const PLANNING_VERIFY_VALID_EXAMPLES: &str = "`verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, `verify: [grep -n 'symbol' src/file.rs]`";
+
+/// Shared invalid `verify:` examples. Kept adjacent to
+/// [`PLANNING_VERIFY_VALID_EXAMPLES`] so every prompt surface pairs them.
+pub const PLANNING_VERIFY_INVALID_EXAMPLES: &str =
+    "`verify: [run checks]`, `verify: [check later]`, `verify: [git diff --check]`";
+
 const PLACEHOLDER_TOKENS: [&str; 21] = [
     "[step]",
     "[paths]",
@@ -148,13 +158,13 @@ impl PlanValidationReport {
         };
         result.push_str("\n\nRewrite every implementation step in this canonical one-line form:\n");
         result.push_str(CANONICAL_STEP_FORMAT);
-        result.push_str(
+        result.push_str(&format!(
             "\nEach step MUST name a concrete file path or symbol (not prose) and one concrete verify command or observable check. \
              Comma-separated verify entries must each be a command or an observable check; commas inside single or double quotes stay inside one item. \
-             Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, \
-             `verify: [sed -n '1,40p' docs/file.md]`, or `verify: [grep -n 'symbol' src/file.rs]`. \
-             Invalid examples: `verify: [run checks]`, `verify: [check later]`, or `verify: [git diff --check]`; vague prose and generic VCS-only checks do not satisfy this validator.",
-        );
+             Valid examples: {PLANNING_VERIFY_VALID_EXAMPLES}. \
+             Invalid examples: {PLANNING_VERIFY_INVALID_EXAMPLES}; vague prose and generic VCS-only checks do not satisfy this validator. \
+             Command heads that are common English words (`file`, `sort`, `find`, `ls`, `wc`, …) also need a flag or path-like argument.",
+        ));
         result
     }
 }
@@ -708,6 +718,12 @@ fn verification_words(value: &str) -> Vec<&str> {
     value
         .split_whitespace()
         .map(|word| {
+            // Preserve flag-shaped tokens (`-n`, `--locked`): verification
+            // validation uses them as command-invocation evidence, and
+            // stripping the leading hyphen would turn `-l` into prose `l`.
+            if word.len() > 1 && word.starts_with('-') {
+                return word;
+            }
             word.trim_matches(|character: char| {
                 character.is_ascii_punctuation()
                     && !matches!(
@@ -816,6 +832,67 @@ fn is_actual_command_token(raw_word: &str) -> bool {
         || (!word.contains('/') && is_script_command_token(word))
 }
 
+/// Command heads that are also common English words. Expanding `COMMAND_NAMES`
+/// with inspection tools introduced false accepts such as `file changes` or
+/// `sort order` — multi-word phrases that look like commands only because the
+/// first token is allowlisted. Those heads now require a flag or path-like
+/// later token; tooling names like `cargo`/`rg` keep the multi-token rule.
+const AMBIGUOUS_COMMAND_HEADS: &[&str] = &[
+    "cat", "cut", "diff", "file", "find", "head", "just", "ls", "make", "sort", "stat", "tr", "uniq", "wc",
+];
+
+fn is_flag_like_token(raw_word: &str) -> bool {
+    let word = raw_word.trim_matches(|character: char| matches!(character, '`' | '"' | '\''));
+    word.len() > 1 && word.starts_with('-')
+}
+
+/// Filename-shaped evidence for ambiguous command heads: `README.md`,
+/// `notes.txt`, `Cargo.toml`. `is_pathlike_command_token` only accepts
+/// slash/`./`/absolute shapes, so slash-less inspection args would otherwise
+/// false-reject (`wc README.md`).
+fn is_filename_like_token(raw_word: &str) -> bool {
+    let word = raw_word.trim_matches(|character: char| matches!(character, '`' | '"' | '\''));
+    if word.is_empty() || word.starts_with('-') {
+        return false;
+    }
+    match word.rsplit_once('.') {
+        Some((stem, suffix)) => {
+            !stem.is_empty()
+                && !suffix.is_empty()
+                && suffix.len() <= 12
+                && suffix.chars().all(|character| character.is_ascii_alphanumeric())
+                && stem
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.'))
+        }
+        None => false,
+    }
+}
+
+/// True when a command-head phrase still looks like a real invocation after
+/// the allowlist match. Ambiguous English heads need flag/path evidence;
+/// unambiguous heads keep existing semantics.
+fn command_head_has_invocation_shape(words: &[&str]) -> bool {
+    let Some(head) = words.first() else {
+        return false;
+    };
+    let bare = head.trim_matches(|character: char| {
+        character.is_ascii_punctuation() && !matches!(character, '_' | '/') || matches!(character, '`' | '"' | '\'')
+    });
+    if !AMBIGUOUS_COMMAND_HEADS
+        .iter()
+        .any(|candidate| bare.eq_ignore_ascii_case(candidate))
+    {
+        return true;
+    }
+    words.iter().skip(1).any(|word| {
+        is_flag_like_token(word)
+            || is_pathlike_command_token(word)
+            || word.contains('/')
+            || is_filename_like_token(word)
+    })
+}
+
 fn is_safe_workspace_relative_command_token(raw_word: &str) -> bool {
     let word = raw_word.trim_matches(|character: char| matches!(character, '`' | '"' | '\''));
     let (word, dot_relative) = match word.strip_prefix("./") {
@@ -907,6 +984,7 @@ fn contains_actual_command_invocation(value: &str) -> bool {
             .get(assignment_prefix_end)
             .is_some_and(|word| is_actual_command_token(word))
         && (is_pathlike_command_token(words[assignment_prefix_end]) || words.len() > assignment_prefix_end + 1)
+        && command_head_has_invocation_shape(&words[assignment_prefix_end..])
     {
         return true;
     }
@@ -918,11 +996,13 @@ fn contains_actual_command_invocation(value: &str) -> bool {
         }
 
         if index == 0 {
-            return words.len() > 1 || is_pathlike_command_token(word);
+            return (words.len() > 1 || is_pathlike_command_token(word))
+                && command_head_has_invocation_shape(words.as_slice());
         }
 
         if (is_pathlike_command_token(word) || words.get(index + 1).is_some())
             && words[..index].iter().rev().take(3).any(|previous| is_invocation_cue(previous))
+            && command_head_has_invocation_shape(&words[index..])
         {
             return true;
         }
@@ -1128,10 +1208,12 @@ fn validate_concrete_verification(value: &str) -> Result<(), VerificationValidat
             || word.eq_ignore_ascii_case("use")
     });
     if (words.first().is_some_and(|word| is_actual_command_token(word))
-        && (words.len() > 1 || words.first().is_some_and(|word| is_pathlike_command_token(word))))
+        && (words.len() > 1 || words.first().is_some_and(|word| is_pathlike_command_token(word)))
+        && command_head_has_invocation_shape(words.as_slice()))
         || (leading_wrapper
             && words.get(1).is_some_and(|word| is_actual_command_token(word))
-            && (words.len() > 2 || words.get(1).is_some_and(|word| is_pathlike_command_token(word))))
+            && (words.len() > 2 || words.get(1).is_some_and(|word| is_pathlike_command_token(word)))
+            && command_head_has_invocation_shape(&words[1..]))
         || contains_actual_command_invocation(value)
     {
         return Ok(());
@@ -1565,6 +1647,11 @@ mod agentic_testing_tests {
             "head -40 docs/file.md",
             "tail -20 docs/file.md",
             "wc -l README.md",
+            "wc README.md",
+            "head README.md",
+            "file src/main.rs",
+            "ls src/",
+            "cargo test",
         ] {
             assert!(
                 validate_concrete_verification(verify).is_ok(),
@@ -1572,7 +1659,18 @@ mod agentic_testing_tests {
             );
         }
 
-        for invalid in ["run checks", "check later", "git diff --check", "review docs"] {
+        for invalid in [
+            "run checks",
+            "check later",
+            "git diff --check",
+            "review docs",
+            // Ambiguous English command heads without flag/path evidence.
+            "file changes",
+            "sort order",
+            "find files",
+            "make sense",
+            "ls files",
+        ] {
             assert!(
                 validate_concrete_verification(invalid).is_err(),
                 "vague or VCS-only verify must stay rejected: {invalid}"
