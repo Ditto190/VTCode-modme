@@ -12,11 +12,20 @@ pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
     if lower.trim().is_empty() {
         return false;
     }
+    // Budget/recovery phrasing is never a user handoff — including tool-call /
+    // tool-loop budgets that previously fell through as policy denials.
     let budget_like = lower.contains("turn budget")
         || lower.contains("preview budget")
         || lower.contains("wall clock")
         || lower.contains("safety cap")
-        || lower.contains("recovery fallback");
+        || lower.contains("recovery fallback")
+        || lower.contains("tool budget")
+        || lower.contains("tool loop")
+        || lower.contains("tool-call budget")
+        || lower.contains("read cap")
+        || lower.contains("budget exhausted")
+        || lower.contains("per-turn tool")
+        || lower.contains("max tool");
     if budget_like {
         return false;
     }
@@ -31,8 +40,10 @@ pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
         || lower.contains("credentials are missing")
         || lower.contains("denied by policy")
         || lower.contains("denied by workspace tool policy")
+        || lower.contains("denied by tool policy")
         || lower.contains("execution denied by policy")
-        || lower.contains("tool policy")
+        // Narrow former bare `"tool policy"` over-match: only explicit denials.
+        || lower.contains("blocked by tool policy")
 }
 
 /// Checks if the agent's response is a candidate for completion handling.
@@ -239,6 +250,17 @@ mod tests {
         ));
         assert!(!tracker_final_text_is_safety_handoff(
             "## Status\nBlocked by turn budget. Next step: read design/diff.rs."
+        ));
+        assert!(!tracker_final_text_is_safety_handoff(
+            "## Status\nBlocked by turn tool budget. Next step: patch the struct."
+        ));
+        assert!(!tracker_final_text_is_safety_handoff(
+            "Tool loop budget exhausted; continuing next turn with remaining tracker steps."
+        ));
+        // Bare tool-policy mention is not a handoff; explicit denial still is.
+        assert!(!tracker_final_text_is_safety_handoff("Reviewed tool policy docs; next step is the tracker patch."));
+        assert!(tracker_final_text_is_safety_handoff(
+            "Blocked action: exec_command is denied by workspace tool policy."
         ));
         assert!(!tracker_final_text_is_safety_handoff("Implemented patch apply; verification passed."));
         assert!(!tracker_final_text_is_safety_handoff(""));

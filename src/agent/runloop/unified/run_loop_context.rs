@@ -664,6 +664,9 @@ pub(crate) struct HarnessTurnState {
     /// infinite loops where the model keeps producing continuation-worthy
     /// text without making actual progress.
     pub consecutive_relaxed_continuations: u32,
+    /// Last successfully observed incomplete `task_tracker` steps. Used as a
+    /// fallback when the live probe fails so auto-continue is not dropped.
+    incomplete_tracker_items_cache: Option<Vec<String>>,
 }
 
 impl HarnessTurnState {
@@ -754,7 +757,18 @@ impl HarnessTurnState {
             max_tool_wall_clock: Duration::from_secs(max_tool_wall_clock_secs),
             max_tool_retries,
             consecutive_relaxed_continuations: 0,
+            incomplete_tracker_items_cache: None,
         }
+    }
+
+    pub(crate) fn note_incomplete_tracker_items(&mut self, items: Option<Vec<String>>) {
+        if items.is_some() {
+            self.incomplete_tracker_items_cache = items;
+        }
+    }
+
+    pub(crate) fn incomplete_tracker_items_cached(&self) -> Option<&[String]> {
+        self.incomplete_tracker_items_cache.as_deref()
     }
 
     pub(crate) fn has_tool_call_budget(&self) -> bool {

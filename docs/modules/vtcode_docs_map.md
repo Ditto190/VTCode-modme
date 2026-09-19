@@ -1008,6 +1008,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: For CLI Output, For TUI Widgets, Unified Theme, Color Reference, Common Patterns
   - **User Questions**: "What can you tell me about Styling Quick Start Guide?", "How does For CLI Output work?", "How does For TUI Widgets work?"
 
+- **File**: `docs/compose/spec/todo-continuation-hardening.md`
+  - **Content**: TODO Continuation Hardening (Residual)
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about TODO Continuation Hardening (Residual)?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/tui-diff-auto-expand.md`
   - **Content**: TUI Diff Auto-Resize and Expand
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks

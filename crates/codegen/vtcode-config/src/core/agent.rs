@@ -582,9 +582,10 @@ pub struct TrackerContinuationConfig {
     pub auto_continue_tracker: bool,
     /// Bounded cross-turn auto-continue turns after a recoverable end
     /// (budget/preview/tool-free recovery) or on resume while tracker work
-    /// remains. `0` disables cross-turn tracker auto-queue (in-turn
+    /// remains. The episode budget **progress-resets** when any tracker step
+    /// completes. `0` disables cross-turn tracker auto-queue (in-turn
     /// continuation still applies when `auto_continue_tracker` is true).
-    /// Default: 8.
+    /// Default: 32.
     #[serde(default = "default_tracker_cross_turn_turns")]
     pub cross_turn_turns: u8,
 }
@@ -605,7 +606,7 @@ const fn default_tracker_auto_continue() -> bool {
 
 #[inline]
 const fn default_tracker_cross_turn_turns() -> u8 {
-    8
+    32
 }
 
 /// Autonomous recovery policy for the anti-blind-editing verification gate.
@@ -2050,7 +2051,7 @@ mod tests {
     #[test]
     fn test_tracker_continuation_defaults_and_deserializes() {
         assert!(TrackerContinuationConfig::default().auto_continue_tracker);
-        assert_eq!(TrackerContinuationConfig::default().cross_turn_turns, 8);
+        assert_eq!(TrackerContinuationConfig::default().cross_turn_turns, 32);
         let parsed: AgentHarnessConfig =
             toml::from_str("[continuation]\nauto_continue_tracker = false\ncross_turn_turns = 3")
                 .expect("valid harness config");
@@ -2058,7 +2059,7 @@ mod tests {
         assert_eq!(parsed.continuation.cross_turn_turns, 3);
         let fallback: AgentHarnessConfig = toml::from_str("").expect("empty harness config");
         assert!(fallback.continuation.auto_continue_tracker);
-        assert_eq!(fallback.continuation.cross_turn_turns, 8);
+        assert_eq!(fallback.continuation.cross_turn_turns, 32);
     }
 
     #[test]

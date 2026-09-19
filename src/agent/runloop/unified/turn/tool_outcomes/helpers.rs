@@ -123,7 +123,7 @@ pub(crate) fn tracker_auto_continue_enabled(vt_cfg: Option<&vtcode_core::config:
 /// Effective cross-turn tracker auto-continue budget
 /// (`[agent.harness.continuation].cross_turn_turns`).
 pub(crate) fn tracker_cross_turn_turns(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> u8 {
-    vt_cfg.map(|cfg| cfg.agent.harness.continuation.cross_turn_turns).unwrap_or(8)
+    vt_cfg.map(|cfg| cfg.agent.harness.continuation.cross_turn_turns).unwrap_or(32)
 }
 
 /// Cap on incomplete tracker items listed in continuation prompts.
@@ -161,6 +161,27 @@ pub(crate) fn parse_incomplete_tracker_items(payload: &serde_json::Value) -> Opt
     Some(items)
 }
 
+/// Count completed checklist items in a `task_tracker` `action=list` payload.
+///
+/// Used for progress-reset of the cross-turn auto-continue episode budget.
+/// Returns `0` when the tracker is empty/absent.
+pub(crate) fn parse_tracker_completed_count(payload: &serde_json::Value) -> u32 {
+    let Some(status) = payload.get("status").and_then(serde_json::Value::as_str) else {
+        return 0;
+    };
+    if status == "empty" {
+        return 0;
+    }
+    payload
+        .get("checklist")
+        .and_then(|c| c.get("items"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("status").and_then(serde_json::Value::as_str) == Some("completed"))
+        .count() as u32
+}
+
 /// Load incomplete `task_tracker` step descriptions via the live tool registry.
 ///
 /// Returns `None` when the tracker is absent or empty; `Some(items)` when a
@@ -171,6 +192,13 @@ pub(crate) async fn incomplete_tracker_items(
     let tool = tool_registry.get_tool(vtcode_core::config::constants::tools::TASK_TRACKER)?;
     let payload = tool.execute(serde_json::json!({ "action": "list" })).await.ok()?;
     parse_incomplete_tracker_items(&payload)
+}
+
+/// Live completed-item count for progress-reset. Returns `None` on probe failure.
+pub(crate) async fn tracker_completed_count(tool_registry: &vtcode_core::tools::registry::ToolRegistry) -> Option<u32> {
+    let tool = tool_registry.get_tool(vtcode_core::config::constants::tools::TASK_TRACKER)?;
+    let payload = tool.execute(serde_json::json!({ "action": "list" })).await.ok()?;
+    Some(parse_tracker_completed_count(&payload))
 }
 
 /// Build the model-facing auto-continue follow-up for incomplete tracker work.
@@ -196,42 +224,55 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
         // Blocked { reason: None } must not auto-queue.
         return false;
     };
-    // Deny production constants that must never auto-queue.
+    // Deny production constants that must never auto-queue (true handoffs).
     // RECOVERY_CONTRACT_VIOLATION_REASON: "...final tool-free synthesis pass...attempted more tool calls."
     // PENDING_VERIFICATION_BLOCK_REASON: "...verification is still pending."
     // POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON: "context exceeded...compaction could not reduce"
-    // UNMATCHED_TOOL_RESULT / planning handoffs / permission / safety fuse.
+    // STALE_APPROVED_PLAN_PAUSE_BLOCK_REASON: "stale recovery state"
+    // UNMATCHED_TOOL_RESULT / planning interview-approval handoffs / permission / safety fuse.
     if reason.contains("permission")
         || reason.contains("user input")
         || reason.contains("request_user_input")
         || reason.contains("safety fuse")
         || reason.contains("manual intervention")
         || reason.contains("verification is still pending")
-        || reason.contains("planning turn ended")
         || reason.contains("context exceeded")
         || reason.contains("compaction could not reduce")
         || reason.contains("unmatched tool result")
         || reason.contains("attempted more tool calls")
         || reason.contains("final tool-free synthesis pass")
-        || reason.contains("approval-ready plan")
         || reason.contains("stale recovery state")
+        || reason.contains("interview")
+        || reason.contains("awaiting approval")
+        || reason.contains("approval-ready plan remains")
     {
         return false;
     }
-    // Recoverable production reason shapes only.
-    // COMPLETED_TURN_FALLBACK_REASON: "Turn ended with a recovery fallback..."
-    // ASSISTANT_TEXT_RESPONSE_CAP_REASON: "...reached the safety cap..."
-    // POST_TOOL_TOOL_ENABLED_RETRY_FAILED_REASON: "Post-tool recovery could not confirm..."
-    // preview / turn budget / wall-clock budget ends.
+    // Recoverable production reason shapes.
+    // COMPLETED_TURN_FALLBACK_REASON / COMPLETED_TURN_NO_RESPONSE_REASON
+    // ASSISTANT_TEXT_RESPONSE_CAP_REASON / POST_TOOL_* recovery constants
+    // TOOL_LOOP_LIMIT_RECOVERY_REASON / tool-call & preview budgets
+    // PLAN_RECOVERY_EXHAUSTED_REASON ("recovery was exhausted")
     reason.contains("recovery fallback")
         || reason.contains("recovery could not confirm")
+        || reason.contains("recovery exhausted")
+        || reason.contains("recovery was exhausted")
         || reason.contains("reached the safety cap")
         || reason.contains("preview budget")
         || reason.contains("tool preview budget")
         || reason.contains("turn budget")
+        || reason.contains("tool budget")
+        || reason.contains("tool loop budget")
+        || reason.contains("tool-call budget")
+        || reason.contains("tool follow-up")
         || reason.contains("wall clock")
         || reason.contains("blocked due to repeated")
         || reason.contains("blocked after repeated")
+        || reason.contains("without a harness-visible final assistant response")
+        || reason.contains("max tool")
+        || reason.contains("per-turn tool")
+        || reason.contains("read cap")
+        || reason.contains("budget exhausted")
 }
 
 /// Pure gate for outer-loop tracker auto-continue after a turn end.
@@ -304,35 +345,47 @@ pub(crate) fn should_queue_plan_mode_auto_continue(
 
 /// Recoverable planning blocked-reason classifier.
 ///
-/// `None` / completed turns are **not** recoverable. Planning handoff
-/// constants stay denied so interview/approval waits are safe. Deny tokens are
-/// narrow (`request_user_input`, not bare `request`) so production recovery
-/// reasons like "the requested work was not confirmed" can still match the
-/// allow-list when appropriate.
+/// Allow-list is evaluated **first**. Production
+/// `PLANNING_COMPLETED_TURN_FALLBACK_REASON` ("Planning turn ended via
+/// recovery fallback … approval-ready plan …") must auto-queue; a deny-first
+/// match on "planning turn ended" / "approval-ready plan" incorrectly blocked
+/// that path and forced a user `continue` nudge. Interview/approval/permission
+/// handoffs stay denied after the allow-list misses.
 pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
-    let reason = reason.to_ascii_lowercase();
-    if reason.contains("planning turn ended")
-        || reason.contains("approval-ready plan")
-        || reason.contains("request_user_input")
-        || reason.contains("permission")
-        || reason.contains("user input")
-        || reason.contains("awaiting")
-        || reason.contains("attempted more tool calls")
-        || reason.contains("final tool-free synthesis pass")
-        || reason.contains("verification is still pending")
-        || reason.contains("compaction could not reduce")
-        || reason.contains("unmatched tool result")
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("recovery fallback")
+        || lower.contains("recovery could not confirm")
+        || lower.contains("recovery exhausted")
+        || lower.contains("recovery was exhausted")
+        || lower.contains("reached the safety cap")
+        || lower.contains("preview budget")
+        || lower.contains("tool preview budget")
+        || lower.contains("turn budget")
+        || lower.contains("tool budget")
+        || lower.contains("tool loop budget")
+        || lower.contains("wall clock")
+        || lower.contains("tool-free recovery")
+        || lower.contains("tool follow-up")
+        || lower.contains("budget exhausted")
+    {
+        return true;
+    }
+    if lower.contains("request_user_input")
+        || lower.contains("permission")
+        || lower.contains("user input")
+        || lower.contains("awaiting")
+        || lower.contains("interview")
+        || lower.contains("attempted more tool calls")
+        || lower.contains("final tool-free synthesis pass")
+        || lower.contains("verification is still pending")
+        || lower.contains("compaction could not reduce")
+        || lower.contains("unmatched tool result")
+        || lower.contains("planning turn ended")
+        || lower.contains("approval-ready plan")
     {
         return false;
     }
-    reason.contains("recovery fallback")
-        || reason.contains("recovery could not confirm")
-        || reason.contains("reached the safety cap")
-        || reason.contains("preview budget")
-        || reason.contains("tool preview budget")
-        || reason.contains("turn budget")
-        || reason.contains("wall clock")
-        || reason.contains("tool-free recovery")
+    false
 }
 
 /// User-facing plan progress line (title + phase/status only).
@@ -457,11 +510,19 @@ mod tracker_continue_tests {
         assert!(plan_mode_recoverable_block(
             "Turn ended with a recovery fallback; the requested work was not confirmed."
         ));
-        assert!(!plan_mode_recoverable_block(
+        // Production planning fallback must auto-queue (allow-list first).
+        assert!(plan_mode_recoverable_block(
             "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
         ));
+        assert!(plan_mode_recoverable_block(
+            "Tool loop budget exhausted before a final response; planning remains active."
+        ));
+        // Interview / approval / permission handoffs stay denied.
         assert!(!plan_mode_recoverable_block("request_user_input pending"));
         assert!(!plan_mode_recoverable_block("permission required"));
+        assert!(!plan_mode_recoverable_block(
+            "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."
+        ));
     }
 
     #[test]
@@ -648,7 +709,90 @@ mod tracker_continue_tests {
     #[test]
     fn tracker_config_defaults() {
         assert!(tracker_auto_continue_enabled(None));
-        assert_eq!(tracker_cross_turn_turns(None), 8);
+        assert_eq!(tracker_cross_turn_turns(None), 32);
+    }
+
+    #[test]
+    fn recoverable_block_includes_tool_budget_and_plan_fallback_shapes() {
+        // Production TOOL_LOOP_LIMIT_RECOVERY_REASON.
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Tool loop budget exhausted before a final response. Tools are disabled for one bounded synthesis pass."
+        )));
+        // Tool-call budget / follow-up recovery constants.
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Tool follow-up failed. Tools disabled; respond with text using context and recent tool outputs."
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Turn ended without a harness-visible final assistant response, so successful completion could not be confirmed."
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Approved-plan execution stopped after recovery was exhausted. The approved plan and task checklist were retained."
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Per-turn tool limit reached (max: 32). Wait or adjust config."
+        )));
+        // Planning fallback contains "recovery fallback" (recoverable token);
+        // outer tracker queue is separately gated by planning_active.
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
+        )));
+    }
+
+    #[test]
+    fn plan_mode_recoverable_allows_planning_fallback_constant() {
+        // PLANNING_COMPLETED_TURN_FALLBACK_REASON must auto-queue (allow-list first).
+        assert!(plan_mode_recoverable_block(
+            "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active. The current plan and task state were retained."
+        ));
+        assert!(plan_mode_recoverable_block(
+            "Turn ended with a recovery fallback; the requested work was not confirmed."
+        ));
+        // Interview / approval / permission handoffs stay denied.
+        assert!(!plan_mode_recoverable_block("request_user_input is required for the planning interview"));
+        assert!(!plan_mode_recoverable_block("permission denied for exec_command"));
+        assert!(!plan_mode_recoverable_block(
+            "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."
+        ));
+    }
+
+    #[test]
+    fn session_stats_progress_resets_tracker_budget() {
+        let mut stats = crate::agent::runloop::unified::state::SessionStats::default();
+        assert!(stats.record_tracker_continuation_turn_with_limit(32));
+        assert!(stats.record_tracker_continuation_turn_with_limit(32));
+        assert_eq!(stats.tracker_continuation_turns(), 2);
+        // No progress → no reset.
+        assert!(!stats.note_tracker_completed_count(0));
+        assert_eq!(stats.tracker_continuation_turns(), 2);
+        // Progress → reset episode budget.
+        assert!(stats.note_tracker_completed_count(1));
+        stats.reset_tracker_continuation_budget();
+        assert_eq!(stats.tracker_continuation_turns(), 0);
+        // Same count is not further progress.
+        assert!(!stats.note_tracker_completed_count(1));
+        // Cached incomplete items survive live-probe failures.
+        stats.note_incomplete_tracker_items(Some(vec!["#2 change (pending)".to_string()]));
+        assert!(stats.incomplete_tracker_items_cached().is_some());
+        stats.note_incomplete_tracker_items(None);
+        assert!(stats.incomplete_tracker_items_cached().is_some());
+    }
+
+    #[test]
+    fn parse_tracker_completed_count_from_list_payload() {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "checklist": {
+                "items": [
+                    {"index": 1, "description": "a", "status": "completed"},
+                    {"index": 2, "description": "b", "status": "in_progress"},
+                    {"index": 3, "description": "c", "status": "pending"},
+                ]
+            }
+        });
+        assert_eq!(parse_tracker_completed_count(&payload), 1);
+        assert_eq!(parse_incomplete_tracker_items(&payload).map(|items| items.len()), Some(2));
+        let empty = serde_json::json!({"status": "empty"});
+        assert_eq!(parse_tracker_completed_count(&empty), 0);
     }
 
     #[test]

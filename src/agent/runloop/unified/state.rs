@@ -95,9 +95,15 @@ pub(crate) struct SessionStats {
     verification_auto_recovery_turns: u8,
     /// Bounded autonomous turns scheduled after a recoverable turn end while
     /// `task_tracker` still has incomplete steps. Separate from verification
-    /// and plan-mode budgets. Reset on genuine user input and when tracker
-    /// work clears — not by `reset_verification_recovery_episode`.
+    /// and plan-mode budgets. Reset on genuine user input, when tracker work
+    /// clears, and when a tracker step completes (progress-reset) — not by
+    /// `reset_verification_recovery_episode`.
     tracker_continuation_turns: u8,
+    /// Last observed completed checklist count for tracker progress-reset.
+    tracker_completed_count_last: u32,
+    /// Cached incomplete tracker items used when the live probe fails so a
+    /// transient tracker read error does not drop auto-queue.
+    last_incomplete_tracker_items: Option<Vec<String>>,
     /// Bounded plan-mode auto-continue turns (recoverable blocked planning
     /// ends when no plan is approval-ready). Independent of tracker budget.
     plan_continuation_turns: u8,
@@ -611,6 +617,28 @@ impl SessionStats {
 
     pub(crate) fn reset_tracker_continuation_budget(&mut self) {
         self.tracker_continuation_turns = 0;
+    }
+
+    /// Cache incomplete tracker items when a live probe succeeds.
+    pub(crate) fn note_incomplete_tracker_items(&mut self, items: Option<Vec<String>>) {
+        if items.is_some() {
+            self.last_incomplete_tracker_items = items;
+        }
+    }
+
+    /// Last successfully observed incomplete tracker items (progress cache).
+    pub(crate) fn incomplete_tracker_items_cached(&self) -> Option<&[String]> {
+        self.last_incomplete_tracker_items.as_deref()
+    }
+
+    /// Observe the live completed checklist count. Returns `true` when progress
+    /// increased (the cross-turn auto-continue episode budget should reset).
+    pub(crate) fn note_tracker_completed_count(&mut self, completed: u32) -> bool {
+        let progressed = completed > self.tracker_completed_count_last;
+        if completed >= self.tracker_completed_count_last {
+            self.tracker_completed_count_last = completed;
+        }
+        progressed
     }
 
     /// Record one plan-mode auto-continue turn against its own budget.

@@ -467,7 +467,45 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             } else {
                 None
             };
-            if tracker_continue::should_queue_tracker_resume_continuation(
+            // Planning-blocked resume: auto-queue plan continuation when the
+            // blocked-handoff summary is recoverable and no plan is approval-ready.
+            let resume_blocked_summary =
+                vtcode_core::core::agent::blocked_handoff::read_current_blocked_handoff(config.workspace.as_path())
+                    .map(|info| info.blocker_summary);
+            let planning_resume = auto_continue_enabled
+                && cross_turn_turns > 0
+                && tool_registry.is_planning_active()
+                && resume_blocked_summary
+                    .as_deref()
+                    .is_some_and(tracker_continue::plan_mode_recoverable_block);
+            if planning_resume {
+                let plan_state = tool_registry.planning_workflow_state();
+                let plan_ready =
+                    crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state).await;
+                if !plan_ready {
+                    let follow_up = tracker_continue::plan_mode_continue_follow_up();
+                    let directive = "Resume continuation: planning remains active via recoverable blocked handoff. \
+                         Continue read-only research/synthesis toward one compact `<proposed_plan>` now; \
+                         do not ask the user to resume and do not implement."
+                        .to_string();
+                    {
+                        let messages = std::sync::Arc::make_mut(&mut runtime.state.messages);
+                        messages.push(vtcode_core::llm::provider::Message::system(directive));
+                    }
+                    let (_, runtime_steering) = runtime.split_mut();
+                    match runtime_steering.try_queue_follow_up_input(follow_up) {
+                        Ok(()) => {
+                            let _ = renderer.line(
+                                MessageStyle::Info,
+                                "[i] Resumed planning session with recoverable blocked handoff; auto-continuing without manual `continue`.",
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "Unable to queue plan resume continuation");
+                        }
+                    }
+                }
+            } else if tracker_continue::should_queue_tracker_resume_continuation(
                 auto_continue_enabled,
                 cross_turn_turns,
                 incomplete.as_deref(),
@@ -1650,10 +1688,25 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         _ => None,
                     };
                     let incomplete = if tracker_kill_switch && !planning_active {
-                        tracker_continue::incomplete_tracker_items(&tool_registry).await
+                        let live = tracker_continue::incomplete_tracker_items(&tool_registry).await;
+                        session_stats.note_incomplete_tracker_items(live.clone());
+                        live.or_else(|| {
+                            session_stats
+                                .incomplete_tracker_items_cached()
+                                .filter(|items| !items.is_empty())
+                                .map(|items| items.to_vec())
+                        })
                     } else {
                         None
                     };
+                    // Progress-reset: any newly completed tracker step restores
+                    // the cross-turn auto-continue episode budget.
+                    if tracker_kill_switch
+                        && let Some(completed) = tracker_continue::tracker_completed_count(&tool_registry).await
+                        && session_stats.note_tracker_completed_count(completed)
+                    {
+                        session_stats.reset_tracker_continuation_budget();
+                    }
                     let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
                     let final_text = latest_assistant_result_text(&runtime.state.messages);
                     let final_text_is_safety_handoff =
