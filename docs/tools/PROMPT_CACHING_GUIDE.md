@@ -112,9 +112,23 @@ Two further article prescriptions were researched and deliberately deferred:
 
 OpenAI and Merge Gateway keep `prompt_cache_key` stable per session (unless `prompt_cache_key_mode = "off"`). The wire key is `vtcode:openai:{lineage}` on OpenAI and `vtcode:merge:{lineage}` on merge-gateway; per-turn capability/catalog hashes are tracked separately in `tool_catalog_hash` / `system_prompt_prefix_hash` and never mixed into the routing key. Both the interactive runloop and the headless AgentRunner follow this rule.
 
-Merge Gateway native `/v1/responses` also sends session identity for automatic cache-aware routing: body `session_id` and HTTP header `X-Session-Id`, both equal to the session lineage id (the cache key with any `vtcode:merge:`/`vtcode:openai:` prefix and any residual `-{16 hex}` prefix-hash suffix stripped). Blank lineage omits both fields.
+OpenRouter and xAI also receive production lineage when global `[prompt_cache] enabled=true` (independent of the OpenAI-specific cache block / `prompt_cache_key_mode`): OpenRouter body `session_id` + header `x-session-id` from `vtcode:openrouter:{lineage}`; xAI body `prompt_cache_key` + header `x-grok-conv-id` from `vtcode:xai:{lineage}`. Blank lineage omits the wire fields.
 
-Merge Gateway first-progress timeout is floored at 120s when non-streaming fallback is available (the path that can double-bill if VT Code abandons a stream before Gateway's 120s first-frame silence window). Abandoned provider streams may still be drained and billed; the non-streaming retry re-sends the full prompt.
+Merge Gateway native `/v1/responses` also sends session identity for automatic cache-aware routing: body `session_id` and HTTP header `X-Session-Id`, both equal to the session lineage id (the cache key with any `vtcode:merge:`/`vtcode:openai:`/`vtcode:openrouter:`/`vtcode:xai:` prefix and any residual `-{16 hex}` prefix-hash suffix stripped). Blank lineage omits both fields.
+
+**Provider cache affinity (session keys)**
+
+| Provider path | Session / cache identity | Notes |
+|---|---|---|
+| OpenAI native / ChatGPT / OpenResponses | `prompt_cache_key` = `vtcode:openai:{lineage}` | Required for multi-turn affinity on pre-5.6 models; optional on 5.6+ |
+| Merge Gateway native | `session_id` + `X-Session-Id` (+ `prompt_cache_key`) | Automatic caching on many upstream routes |
+| OpenRouter | body `session_id` + header `x-session-id` | Sticky provider routing; body wins over header; **requires global `[prompt_cache] enabled=true`** |
+| xAI native Chat Completions | header `x-grok-conv-id` + body `prompt_cache_key` | Per-server cache affinity; **requires global `[prompt_cache] enabled=true`** |
+| Anthropic / Gemini / DeepSeek / Moonshot / Z.AI native | automatic or `cache_control` | No client session key |
+
+Usage telemetry: OpenAI-style hosts report cache reads as `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens`; Anthropic-style as `cache_read_input_tokens`. VT Code maps these into both `cached_prompt_tokens` and `cache_read_tokens` so trajectory `prompt_cache_metrics` and cache-health are not zero-filled. Cost accounting still uses `cache_read_tokens` without double-counting.
+
+Merge Gateway first-progress timeout is floored at **120s on planning and non-planning turns** when non-streaming fallback is available. Other remote providers with non-streaming fallback get a once-per-session advisory when a stream first-token timeout triggers the full-prompt retry (local providers excluded).
 
 Blocked-session forensics: a blocked handoff copies `events.jsonl` and `derived/atif-trajectory.json` into `{archive}-forensics/` beside the blocker archive when present, and writes `.vtcode/sessions/<id>/retention-pin.json` so ordinary session retention does not evict the session while the blocker is unresolved. Resolving the archive unpins when no other unresolved archive references the session.
 
@@ -220,11 +234,12 @@ These metrics flow through `vtcode-core::llm::types::Usage` and appear anywhere 
 
 ## Validation & Testing
 
--   Unit tests in `crates/codegen/vtcode-core/src/llm/providers/anthropic.rs` validate cache control insertion and beta header composition.
--   `crates/codegen/vtcode-core/src/llm/providers/openrouter.rs` exercises usage parsing to ensure cache metrics are preserved.
+-   Unit tests in `crates/codegen/vtcode-llm/src/providers/anthropic.rs` validate cache control insertion and beta header composition.
+-   `crates/codegen/vtcode-llm/src/providers/openrouter/` exercises usage parsing and session-affinity wire identity (body `session_id` + `x-session-id`).
+-   `crates/codegen/vtcode-llm/src/providers/xai.rs` covers lineage `prompt_cache_key` injection and `x-grok-conv-id` header naming.
 -   Local cache behavior tests in `crates/codegen/vtcode-core/src/core/prompt_caching.rs` verify caching, eviction, and persistence.
 -   Configuration loading tests ensure settings from `vtcode.toml` are applied correctly.
--   Run `cargo test` to execute all fast tests after updating configuration logic.
+-   Run `cargo nextest run` to execute all fast tests after updating configuration or provider cache logic (never `cargo test`).
 
 ## Implementation Architecture
 

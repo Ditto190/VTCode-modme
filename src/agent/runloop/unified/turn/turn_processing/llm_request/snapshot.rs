@@ -10,7 +10,7 @@
 //! nothing outside this module mutates a captured `TurnRequestSnapshot`.
 
 use vtcode_core::ActivePrimaryAgent;
-use vtcode_core::config::{OpenAIPromptCacheKeyMode, PromptCachingConfig};
+use vtcode_core::config::{OpenAIPromptCacheKeyMode, PromptCachingConfig, session_affinity_key_enabled};
 use vtcode_core::core::agent::features::FeatureSet;
 use vtcode_core::llm::provider::{self as uni};
 
@@ -23,6 +23,11 @@ use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 /// Default turn timeout when no explicit configuration is set (seconds).
 const DEFAULT_TURN_TIMEOUT_SECS: u64 = 300;
 
+/// OpenAI/Merge-only prompt-cache enablement gate (distinct from session affinity).
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "unit-tested gate; production uses session_affinity_key_enabled")
+)]
 pub(super) fn is_openai_prompt_cache_enabled(
     provider_name: &str,
     global_prompt_cache_enabled: bool,
@@ -31,6 +36,16 @@ pub(super) fn is_openai_prompt_cache_enabled(
     (provider_name.eq_ignore_ascii_case("openai") || provider_name.eq_ignore_ascii_case("merge-gateway"))
         && global_prompt_cache_enabled
         && openai_prompt_cache_enabled
+}
+
+/// Shared session-affinity gate (OpenAI/Merge honor the OpenAI cache flag;
+/// OpenRouter/xAI use lineage for sticky routing when global cache is on).
+pub(crate) fn is_session_affinity_key_enabled(
+    provider_name: &str,
+    global_prompt_cache_enabled: bool,
+    openai_prompt_cache_enabled: bool,
+) -> bool {
+    session_affinity_key_enabled(provider_name, global_prompt_cache_enabled, openai_prompt_cache_enabled)
 }
 
 pub(super) fn resolve_prompt_cache_shaping_mode(
@@ -62,7 +77,7 @@ pub(super) struct TurnRequestSnapshot {
     pub turn_timeout_secs: u64,
     pub active_model: String,
     pub active_primary_agent: ActivePrimaryAgent,
-    pub openai_prompt_cache_enabled: bool,
+    pub session_affinity_key_enabled: bool,
     pub openai_prompt_cache_key_mode: OpenAIPromptCacheKeyMode,
     pub prompt_cache_shaping_mode: PromptCacheShapingMode,
     pub capabilities: uni::ProviderCapabilities,
@@ -89,7 +104,7 @@ pub(super) fn capture_turn_request_snapshot(
     let prompt_cache_config = &ctx.config.prompt_cache;
     let planning_active = ctx.is_planning_active();
     let provider_name = ctx.provider_client.name().to_ascii_lowercase();
-    let openai_prompt_cache_enabled = is_openai_prompt_cache_enabled(
+    let session_affinity_key_enabled = is_session_affinity_key_enabled(
         &provider_name,
         prompt_cache_config.enabled,
         prompt_cache_config.providers.openai.enabled,
@@ -127,7 +142,7 @@ pub(super) fn capture_turn_request_snapshot(
         turn_timeout_secs,
         active_model,
         active_primary_agent,
-        openai_prompt_cache_enabled,
+        session_affinity_key_enabled,
         openai_prompt_cache_key_mode,
         prompt_cache_shaping_mode,
         capabilities,

@@ -57,6 +57,26 @@ impl OpenAiCompatSpec for XaiSpec {
     fn stream_cache_metrics(_core: &OpenAiCompatCore<Self>) -> bool {
         true
     }
+
+    /// xAI cache affinity: stable conversation identity from VT Code lineage.
+    /// Body `prompt_cache_key` covers Responses-style hosts; Chat Completions
+    /// sticky routing uses `x-grok-conv-id` via [`session_affinity_header`].
+    fn finish_payload(
+        _core: &OpenAiCompatCore<Self>,
+        request: &crate::provider::LLMRequest,
+        payload: &mut Map<String, Value>,
+    ) -> Result<(), crate::provider::LLMError> {
+        if let Some(lineage) =
+            crate::providers::shared::session_lineage_from_prompt_cache_key(request.prompt_cache_key.as_deref())
+        {
+            payload.insert("prompt_cache_key".to_owned(), Value::String(lineage.clone()));
+        }
+        Ok(())
+    }
+
+    fn session_affinity_header() -> Option<&'static str> {
+        Some("x-grok-conv-id")
+    }
 }
 
 impl XAIProvider {
@@ -148,6 +168,37 @@ impl_openai_compat_provider!(XAIProvider, XaiSpec, {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xai_advertises_grok_session_affinity_header() {
+        use super::XaiSpec;
+        use crate::providers::openai_compat::OpenAiCompatSpec;
+        assert_eq!(XaiSpec::session_affinity_header(), Some("x-grok-conv-id"));
+    }
+
+    #[test]
+    fn xai_finish_payload_injects_lineage_prompt_cache_key() {
+        let provider = XAIProvider::new("test-key".to_string());
+
+        let mut request = base_request();
+        request.prompt_cache_key = Some("vtcode:xai:session-lineage-1".to_string());
+        let payload = provider.core.convert_request(&request).unwrap();
+        assert_eq!(payload["prompt_cache_key"].as_str(), Some("session-lineage-1"));
+
+        let mut blank = base_request();
+        blank.prompt_cache_key = Some("   ".to_string());
+        let payload = provider.core.convert_request(&blank).unwrap();
+        assert!(payload.get("prompt_cache_key").is_none(), "blank lineage must omit prompt_cache_key");
+    }
+
+    #[test]
+    fn xai_dispatch_header_name_is_pinned_for_lineage_routing() {
+        use super::XaiSpec;
+        use crate::providers::openai_compat::OpenAiCompatSpec;
+        // Production dispatch attaches this header when request.prompt_cache_key
+        // carries session lineage (see openai_compat::dispatch).
+        assert_eq!(XaiSpec::session_affinity_header(), Some("x-grok-conv-id"));
+    }
+
     use super::XAIProvider;
     use crate::provider::{LLMRequest, Message, ToolChoice};
     use std::sync::Arc;

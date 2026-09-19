@@ -36,8 +36,9 @@ pub use core::{
     AutoPermissionEnvironmentConfig, AutomationConfig, CommandsConfig, EditorToolConfig, FullAutoConfig,
     GatekeeperConfig, ModelConfig, OpenAIPromptCacheKeyMode, PermissionsConfig, PersistentMemoryConfig,
     PromptCachingConfig, ProviderPromptCachingConfig, ScheduledTasksConfig, SecurityConfig, ToolPolicy, ToolProfile,
-    ToolsConfig, build_openai_prompt_cache_key, map_prompt_cache_key_for_provider, tool_call_delay_for_rate,
-    tool_loop_limit_reached,
+    ToolsConfig, build_openai_prompt_cache_key, build_session_affinity_prompt_cache_key,
+    map_prompt_cache_key_for_provider, session_affinity_key_enabled, session_affinity_provider,
+    tool_call_delay_for_rate, tool_loop_limit_reached,
 };
 pub use core::{PluginRuntimeConfig, PluginTrustLevel};
 pub use defaults::{

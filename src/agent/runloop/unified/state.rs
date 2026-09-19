@@ -3,6 +3,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+fn is_local_llm_provider(provider_name: &str) -> bool {
+    matches!(
+        provider_name.trim().to_ascii_lowercase().as_str(),
+        "ollama" | "lmstudio" | "llamacpp" | "llama.cpp" | "local" | "local_server"
+    )
+}
+
 use vtcode_core::compaction::PrefireState;
 use vtcode_core::config::WorkspaceTrustLevel;
 use vtcode_core::core::agent::harness_kernel::hash_value;
@@ -122,7 +129,7 @@ pub(crate) struct SessionStats {
     previous_response_chains: HashMap<(String, String), ResponsesContinuationState>,
     prompt_cache_profile: Option<PromptCacheProfile>,
     prompt_cache_lineage_id: Option<String>,
-    merge_timeout_advisory_emitted: bool,
+    stream_timeout_advisory_emitted: bool,
     last_prompt_cache_model: Option<String>,
     last_stable_prefix_hash: Option<u64>,
     last_tool_catalog_hash: Option<u64>,
@@ -813,18 +820,28 @@ impl SessionStats {
         })
     }
 
-    /// One-shot advisory when merge-gateway stream timeout falls back to
-    /// non-streaming: abandoned provider streams may still be drained/billed.
-    pub(crate) fn merge_stream_timeout_billing_advisory(&mut self, provider_name: &str) -> Option<String> {
-        if !provider_name.eq_ignore_ascii_case("merge-gateway") || self.merge_timeout_advisory_emitted {
+    /// One-shot advisory when a remote non-streaming-capable provider falls
+    /// back after stream first-token timeout: abandoned work may still be
+    /// billed and the retry re-sends the full prompt. Local providers are
+    /// excluded (no remote bill).
+    pub(crate) fn stream_timeout_billing_advisory(&mut self, provider_name: &str) -> Option<String> {
+        if self.stream_timeout_advisory_emitted || is_local_llm_provider(provider_name) {
             return None;
         }
-        self.merge_timeout_advisory_emitted = true;
-        Some(
-            "Merge Gateway stream timed out before first token; falling back to non-streaming. Abandoned provider \
-             streams may still be drained and billed, and the retry re-sends the full prompt."
-                .to_string(),
-        )
+        self.stream_timeout_advisory_emitted = true;
+        let merge = provider_name.eq_ignore_ascii_case("merge-gateway");
+        if merge {
+            Some(
+                "Merge Gateway stream timed out before first token; falling back to non-streaming. Abandoned provider \
+                 streams may still be drained and billed, and the retry re-sends the full prompt."
+                    .to_string(),
+            )
+        } else {
+            Some(format!(
+                "LLM stream timed out on {provider_name} before first token; falling back to non-streaming. \
+                 Abandoned provider work may still be billed, and the retry re-sends the full prompt."
+            ))
+        }
     }
 
     fn counter_for_reason(&mut self, reason: &str) -> &mut usize {
@@ -1404,14 +1421,19 @@ mod tests {
     }
 
     #[test]
-    fn merge_stream_timeout_billing_advisory_fires_once() {
+    fn stream_timeout_billing_advisory_fires_once() {
         let mut stats = SessionStats::default();
-        let first = stats.merge_stream_timeout_billing_advisory("merge-gateway");
+        let first = stats.stream_timeout_billing_advisory("merge-gateway");
         assert!(first.is_some());
-        let second = stats.merge_stream_timeout_billing_advisory("merge-gateway");
+        let second = stats.stream_timeout_billing_advisory("merge-gateway");
         assert!(second.is_none());
         let mut other = SessionStats::default();
-        assert!(other.merge_stream_timeout_billing_advisory("openai").is_none());
+        assert!(other.stream_timeout_billing_advisory("ollama").is_none());
+        let mut remote = SessionStats::default();
+        let openai = remote.stream_timeout_billing_advisory("openai");
+        assert!(openai.is_some());
+        assert!(openai.unwrap().contains("full prompt"));
+        assert!(remote.stream_timeout_billing_advisory("anthropic").is_none());
     }
 
     #[test]

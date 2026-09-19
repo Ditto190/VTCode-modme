@@ -261,16 +261,76 @@ pub fn build_openai_prompt_cache_key(
     }
 }
 
-/// Rewrite an OpenAI-style cache key for gateway routes that share the
-/// Responses wire shape but need distinct routing stickiness.
-/// Keeps the stable session identifier while namespacing merge-gateway
-/// traffic apart from native OpenAI traffic.
+/// Rewrite an OpenAI-style cache key for routes that share the wire shape but
+/// need distinct routing stickiness. Keeps the stable session identifier while
+/// namespacing gateway/session-affinity traffic apart from native OpenAI.
 #[must_use]
 pub fn map_prompt_cache_key_for_provider(provider_name: &str, key: String) -> String {
-    if provider_name.eq_ignore_ascii_case("merge-gateway") {
-        key.replacen("vtcode:openai:", "vtcode:merge:", 1)
-    } else {
-        key
+    let provider = provider_name.trim().to_ascii_lowercase();
+    match provider.as_str() {
+        "merge-gateway" => key.replacen("vtcode:openai:", "vtcode:merge:", 1),
+        "openrouter" => key.replacen("vtcode:openai:", "vtcode:openrouter:", 1),
+        "xai" => key.replacen("vtcode:openai:", "vtcode:xai:", 1),
+        _ => key,
+    }
+}
+
+/// Providers that send lineage-stable session/cache identity on the wire.
+#[must_use]
+pub fn session_affinity_provider(provider_name: &str) -> bool {
+    matches!(
+        provider_name.trim().to_ascii_lowercase().as_str(),
+        "openai" | "merge-gateway" | "openrouter" | "xai"
+    )
+}
+
+/// Whether `LLMRequest.prompt_cache_key` should carry session lineage for this provider.
+///
+/// OpenAI/Merge keep the OpenAI prompt-cache enablement gate.
+/// OpenRouter/xAI need lineage for documented session affinity even when the
+/// OpenAI-specific cache block is off (global prompt-cache master switch still applies).
+#[must_use]
+pub fn session_affinity_key_enabled(
+    provider_name: &str,
+    global_prompt_cache_enabled: bool,
+    openai_prompt_cache_enabled: bool,
+) -> bool {
+    if !global_prompt_cache_enabled {
+        return false;
+    }
+    match provider_name.trim().to_ascii_lowercase().as_str() {
+        "openai" | "merge-gateway" => openai_prompt_cache_enabled,
+        "openrouter" | "xai" => true,
+        _ => false,
+    }
+}
+
+/// Build the namespaced session-affinity / prompt-cache key for a request.
+///
+/// OpenAI/Merge honor [`OpenAIPromptCacheKeyMode`]. OpenRouter/xAI always use a
+/// stable session namespace when the affinity gate is on: sticky routing is
+/// independent of the OpenAI prompt-cache key mode.
+#[must_use]
+pub fn build_session_affinity_prompt_cache_key(
+    provider_name: &str,
+    session_affinity_enabled: bool,
+    prompt_cache_key_mode: &OpenAIPromptCacheKeyMode,
+    lineage_id: Option<&str>,
+) -> Option<String> {
+    if !session_affinity_enabled {
+        return None;
+    }
+    let provider = provider_name.trim().to_ascii_lowercase();
+    let lineage = lineage_id.map(str::trim).filter(|value| !value.is_empty())?;
+    match provider.as_str() {
+        "openai" | "merge-gateway" => match prompt_cache_key_mode {
+            OpenAIPromptCacheKeyMode::Session => {
+                Some(map_prompt_cache_key_for_provider(&provider, format!("vtcode:openai:{lineage}")))
+            }
+            OpenAIPromptCacheKeyMode::Off => None,
+        },
+        "openrouter" | "xai" => Some(format!("vtcode:{provider}:{lineage}")),
+        _ => None,
     }
 }
 
@@ -721,6 +781,64 @@ prompt_cache_key_mode = "off"
             "vtcode:merge:abc"
         );
         assert_eq!(map_prompt_cache_key_for_provider("openai", "vtcode:openai:abc".to_string()), "vtcode:openai:abc");
+        assert_eq!(
+            map_prompt_cache_key_for_provider("openrouter", "vtcode:openai:abc".to_string()),
+            "vtcode:openrouter:abc"
+        );
+        assert_eq!(map_prompt_cache_key_for_provider("xai", "vtcode:openai:abc".to_string()), "vtcode:xai:abc");
+    }
+
+    #[test]
+    fn session_affinity_key_gate_covers_openrouter_and_xai() {
+        assert!(session_affinity_key_enabled("openrouter", true, false));
+        assert!(session_affinity_key_enabled("xai", true, false));
+        assert!(session_affinity_key_enabled("openai", true, true));
+        assert!(!session_affinity_key_enabled("openai", true, false));
+        assert!(!session_affinity_key_enabled("openrouter", false, true));
+        assert!(!session_affinity_key_enabled("anthropic", true, true));
+        assert!(session_affinity_provider("openrouter"));
+        assert!(session_affinity_provider("xai"));
+        assert!(!session_affinity_provider("anthropic"));
+    }
+
+    #[test]
+    fn build_session_affinity_prompt_cache_key_namespaces_providers() {
+        let mode = OpenAIPromptCacheKeyMode::Session;
+        assert_eq!(
+            build_session_affinity_prompt_cache_key("openai", true, &mode, Some("lineage-1")).as_deref(),
+            Some("vtcode:openai:lineage-1")
+        );
+        assert_eq!(
+            build_session_affinity_prompt_cache_key("merge-gateway", true, &mode, Some("lineage-1")).as_deref(),
+            Some("vtcode:merge:lineage-1")
+        );
+        assert_eq!(
+            build_session_affinity_prompt_cache_key("openrouter", true, &mode, Some("lineage-1")).as_deref(),
+            Some("vtcode:openrouter:lineage-1")
+        );
+        assert_eq!(
+            build_session_affinity_prompt_cache_key("xai", true, &mode, Some("lineage-1")).as_deref(),
+            Some("vtcode:xai:lineage-1")
+        );
+        // OpenAI/Merge honor Off mode; OpenRouter/xAI ignore it for sticky routing.
+        assert_eq!(
+            build_session_affinity_prompt_cache_key("openai", true, &OpenAIPromptCacheKeyMode::Off, Some("lineage-1")),
+            None
+        );
+        assert_eq!(
+            build_session_affinity_prompt_cache_key(
+                "openrouter",
+                true,
+                &OpenAIPromptCacheKeyMode::Off,
+                Some("lineage-1")
+            )
+            .as_deref(),
+            Some("vtcode:openrouter:lineage-1")
+        );
+        // Disabled gate or blank lineage yields None.
+        assert_eq!(build_session_affinity_prompt_cache_key("openrouter", false, &mode, Some("lineage-1")), None);
+        assert_eq!(build_session_affinity_prompt_cache_key("openrouter", true, &mode, Some("  ")), None);
+        assert_eq!(build_session_affinity_prompt_cache_key("anthropic", true, &mode, Some("lineage-1")), None);
     }
 
     #[test]

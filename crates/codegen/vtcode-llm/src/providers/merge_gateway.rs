@@ -1130,34 +1130,9 @@ impl MergeGatewayProvider {
 }
 
 /// Stable opaque session identity for Merge Gateway cache-aware routing.
-///
-/// Prefers `LLMRequest.prompt_cache_key` (session-stable, often mapped to
-/// `vtcode:merge:{lineage}`), strips the VT Code namespace and any residual
-/// `-{16 hex}` prefix-hash suffix so the gateway sees one lineage id even if
-/// an older caller still suffixes the cache key. Blank keys yield `None`.
+/// Delegates to the shared lineage helper (namespace + residual hex-suffix strip).
 fn merge_session_identity(request: &LLMRequest) -> Option<String> {
-    let key = request.prompt_cache_key.as_deref()?.trim();
-    if key.is_empty() {
-        return None;
-    }
-    let id = key
-        .strip_prefix("vtcode:merge:")
-        .or_else(|| key.strip_prefix("vtcode:openai:"))
-        .unwrap_or(key)
-        .trim();
-    let id = strip_prefix_hash_suffix(id);
-    (!id.is_empty()).then(|| id.to_string())
-}
-
-/// Drop a trailing `-{16 hex}` suffix used by legacy cache-key assembly.
-fn strip_prefix_hash_suffix(id: &str) -> &str {
-    if let Some((head, tail)) = id.rsplit_once('-')
-        && tail.len() == 16
-        && tail.chars().all(|c| c.is_ascii_hexdigit())
-    {
-        return head;
-    }
-    id
+    crate::providers::shared::session_lineage_from_prompt_cache_key(request.prompt_cache_key.as_deref())
 }
 
 #[derive(Default)]

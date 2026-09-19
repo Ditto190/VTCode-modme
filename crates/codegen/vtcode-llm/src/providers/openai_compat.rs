@@ -162,6 +162,12 @@ pub(crate) trait OpenAiCompatSpec: Sized + Send + Sync + 'static {
         builder.bearer_auth(&core.api_key)
     }
 
+    /// Optional HTTP header name for session/cache affinity (e.g. xAI `x-grok-conv-id`).
+    /// When set, dispatch attaches the header with the lineage from `prompt_cache_key`.
+    fn session_affinity_header() -> Option<&'static str> {
+        None
+    }
+
     /// Environment variable named in HTTP auth error hints.
     fn api_key_env(_core: &OpenAiCompatCore<Self>) -> &'static str {
         Self::API_KEY_ENV
@@ -363,7 +369,14 @@ impl<S: OpenAiCompatSpec> OpenAiCompatCore<S> {
     pub(crate) async fn dispatch(&self, request: &LLMRequest) -> Result<reqwest::Response, LLMError> {
         let payload = self.convert_request(request)?;
         let url = chat_completions_url(&self.base_url);
-        let builder = S::apply_auth(self, self.http_client.post(&url));
+        let mut builder = S::apply_auth(self, self.http_client.post(&url));
+        if let Some(header_name) = S::session_affinity_header() {
+            if let Some(lineage) =
+                crate::providers::shared::session_lineage_from_prompt_cache_key(request.prompt_cache_key.as_deref())
+            {
+                builder = builder.header(header_name, lineage);
+            }
+        }
         let response = send_chat_completions(builder, &payload, S::NAME).await?;
         handle_openai_http_error(response, S::NAME, S::api_key_env(self)).await
     }

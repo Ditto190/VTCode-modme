@@ -73,6 +73,7 @@ mod tests {
         let parsed = parse_response(response, "openai/gpt-5".to_string(), true).expect("response should parse");
         let usage = parsed.usage.expect("usage should exist");
         assert_eq!(usage.cached_prompt_tokens, Some(120));
+        assert_eq!(usage.cache_read_tokens, Some(120));
         assert_eq!(usage.cache_creation_tokens, Some(40));
     }
 }

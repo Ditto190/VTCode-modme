@@ -1147,33 +1147,45 @@ fn extract_content_from_message(message: &Value) -> Option<String> {
 }
 
 /// Parses usage information from OpenAI-compatible response format.
+///
+/// When cache metrics are enabled, OpenAI-style hosts may report cache reads as
+/// `prompt_cache_hit_tokens` or `prompt_tokens_details.cached_tokens`. Surface
+/// the same value in both `cached_prompt_tokens` and `cache_read_tokens` so
+/// trajectory/cache-health telemetry is not zero-filled.
 #[inline]
 pub(crate) fn parse_usage_openai_format(
     response_json: &Value,
     include_cache_metrics: bool,
 ) -> Option<crate::provider::Usage> {
-    response_json.get("usage").map(|usage_value| crate::provider::Usage {
-        prompt_tokens: usage_value.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-        completion_tokens: usage_value.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-        total_tokens: usage_value.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-        cached_prompt_tokens: if include_cache_metrics {
-            usage_value
-                .get("prompt_cache_hit_tokens")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as u32)
+    response_json.get("usage").map(|usage_value| {
+        let cached_prompt_tokens = if include_cache_metrics {
+            crate::providers::shared::parse_cached_prompt_tokens_from_usage(usage_value, true).or_else(|| {
+                usage_value
+                    .get("prompt_cache_hit_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32)
+            })
         } else {
             None
-        },
-        cache_creation_tokens: if include_cache_metrics {
-            usage_value
-                .get("prompt_cache_miss_tokens")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as u32)
-        } else {
-            None
-        },
-        cache_read_tokens: None,
-        iterations: None,
+        };
+        crate::provider::Usage {
+            prompt_tokens: usage_value.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            completion_tokens: usage_value.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            total_tokens: usage_value.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            cached_prompt_tokens,
+            cache_creation_tokens: if include_cache_metrics {
+                crate::providers::shared::parse_cache_write_tokens_from_usage(usage_value, true).or_else(|| {
+                    usage_value
+                        .get("prompt_cache_miss_tokens")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32)
+                })
+            } else {
+                None
+            },
+            cache_read_tokens: cached_prompt_tokens,
+            iterations: None,
+        }
     })
 }
 
@@ -1638,7 +1650,41 @@ mod tests {
         assert_eq!(usage.completion_tokens, 50);
         assert_eq!(usage.total_tokens, 150);
         assert_eq!(usage.cached_prompt_tokens, Some(30));
+        assert_eq!(usage.cache_read_tokens, Some(30));
         assert_eq!(usage.cache_creation_tokens, Some(70));
+    }
+
+    #[test]
+    fn parse_usage_openai_format_maps_openai_details_cached_tokens() {
+        let response = json!({
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 20,
+                "total_tokens": 1020,
+                "prompt_tokens_details": {"cached_tokens": 800, "cache_write_tokens": 50}
+            }
+        });
+        let usage = parse_usage_openai_format(&response, true).expect("usage expected");
+        assert_eq!(usage.cached_prompt_tokens, Some(800));
+        assert_eq!(usage.cache_read_tokens, Some(800));
+        assert_eq!(usage.cache_creation_tokens, Some(50));
+    }
+
+    #[test]
+    fn parse_usage_openai_format_maps_openrouter_top_level_cache_write_tokens() {
+        let response = json!({
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 80,
+                "total_tokens": 200,
+                "prompt_tokens_details": {"cached_tokens": 90},
+                "prompt_cache_write_tokens": 15
+            }
+        });
+        let usage = parse_usage_openai_format(&response, true).expect("usage expected");
+        assert_eq!(usage.cached_prompt_tokens, Some(90));
+        assert_eq!(usage.cache_read_tokens, Some(90));
+        assert_eq!(usage.cache_creation_tokens, Some(15));
     }
 
     #[test]

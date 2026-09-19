@@ -107,11 +107,12 @@ pub(crate) fn llm_first_progress_timeout_secs(
     // accumulated tool outputs) should not burn all retries too aggressively.
     // After first progress arrives, the stream is allowed to run to completion.
     let baseline = (turn_timeout_secs / 5).clamp(30, 180);
+    let merge_gateway = provider_name.eq_ignore_ascii_case("merge-gateway");
     if !planning_active {
         // Merge Gateway first-frame silence budget is 120s; abandoning earlier
         // lets the gateway drain+bill the provider call while VT Code retries
         // non-streaming and re-pays the full prompt.
-        if provider_name.eq_ignore_ascii_case("merge-gateway") && supports_non_streaming {
+        if merge_gateway && supports_non_streaming {
             return baseline.max(120);
         }
         return baseline;
@@ -121,7 +122,12 @@ pub(crate) fn llm_first_progress_timeout_secs(
     // extra first-token latency budget before retries are useful.
     let planning_floor = if supports_non_streaming { 90 } else { 60 };
     let planning_budget = (turn_timeout_secs / 2).clamp(planning_floor, 180);
-    baseline.max(planning_budget)
+    let budget = baseline.max(planning_budget);
+    if merge_gateway && supports_non_streaming {
+        // Documented Gateway silence window also applies to planning turns.
+        return budget.max(120);
+    }
+    budget
 }
 
 pub(super) const DEFAULT_LLM_RETRY_ATTEMPTS: usize = 3;

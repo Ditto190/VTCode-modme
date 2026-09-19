@@ -12,7 +12,7 @@ use crate::config::constants::tools;
 use crate::config::models::{ModelId, Provider as ModelProvider};
 use crate::config::tool_loop_limit_reached;
 use crate::config::types::{ReasoningEffortLevel, SystemPromptMode, VerbosityLevel};
-use crate::config::{build_openai_prompt_cache_key, map_prompt_cache_key_for_provider};
+use crate::config::{build_session_affinity_prompt_cache_key, session_affinity_key_enabled};
 use crate::core::agent::blocked_handoff::{BlockedHandoffResume, write_blocked_handoff_with_resume};
 use crate::core::agent::completion::{check_completion_candidate, check_for_response_loop};
 use crate::core::agent::events::ExecEventRecorder;
@@ -826,14 +826,6 @@ impl AgentRunner {
                     metadata: None,
                     context_management: None,
                     previous_response_id,
-                    prompt_cache_key: build_openai_prompt_cache_key(
-                        (provider_name.eq_ignore_ascii_case("openai")
-                            || provider_name.eq_ignore_ascii_case("merge-gateway"))
-                            && self.config().prompt_cache.enabled
-                            && self.config().prompt_cache.providers.openai.enabled,
-                        &self.config().prompt_cache.providers.openai.prompt_cache_key_mode,
-                        Some(&self.session_id),
-                    )
                     // Keep the wire key stable per session. OpenAI routes by
                     // (prefix hash + key); the key must stay consistent across
                     // requests sharing a prefix ("Use prompt_cache_key
@@ -844,7 +836,19 @@ impl AgentRunner {
                     // otherwise reusable routing affinity every few turns.
                     // Prefix identity stays tracked per request via
                     // `tool_catalog_hash` / `system_prompt_prefix_hash` below.
-                    .map(|key| map_prompt_cache_key_for_provider(&provider_name, key)),
+                    // OpenRouter/xAI receive namespaced session lineage for
+                    // documented sticky routing even when the OpenAI cache
+                    // block is off.
+                    prompt_cache_key: build_session_affinity_prompt_cache_key(
+                        &provider_name,
+                        session_affinity_key_enabled(
+                            &provider_name,
+                            self.config().prompt_cache.enabled,
+                            self.config().prompt_cache.providers.openai.enabled,
+                        ),
+                        &self.config().prompt_cache.providers.openai.prompt_cache_key_mode,
+                        Some(&self.session_id),
+                    ),
                     prompt_cache_profile: None,
                     tool_catalog_hash: prompt_bundle.request_envelope.catalog_hash(),
                     system_prompt_prefix_hash: Some(capability_prefix_hash),

@@ -23,6 +23,16 @@ const OPENROUTER_REFERER: &str = "https://github.com/vinhnx/vtcode";
 const OPENROUTER_TITLE: &str = "VT Code";
 const OPENROUTER_CATEGORIES: &str = "agents,coding";
 
+/// OpenRouter sticky-routing session identity: body `session_id` (docs: body wins)
+/// paired with `x-session-id` at dispatch. Blank lineage omits both.
+fn inject_openrouter_session_identity(payload: &mut Value, session_id: Option<&str>) {
+    if let Some(session_id) = session_id.filter(|s| !s.trim().is_empty())
+        && let Some(map) = payload.as_object_mut()
+    {
+        map.insert("session_id".to_owned(), Value::String(session_id.to_owned()));
+    }
+}
+
 mod client_impl;
 mod parsing;
 mod provider_impl;
@@ -220,8 +230,14 @@ impl OpenRouterProvider {
         if let Some(stream_flag) = stream_override {
             fallback_payload["stream"] = Value::Bool(stream_flag);
         }
+        let fallback_session_id = crate::providers::shared::session_lineage_from_prompt_cache_key(
+            fallback_request.prompt_cache_key.as_deref(),
+        );
+        inject_openrouter_session_identity(&mut fallback_payload, fallback_session_id.as_deref());
 
-        let fallback_response = self.dispatch_request(&fallback_url, &fallback_payload).await?;
+        let fallback_response = self
+            .dispatch_request_with_session(&fallback_url, &fallback_payload, fallback_session_id.as_deref())
+            .await?;
         if fallback_response.status().is_success() {
             return Ok(Some(fallback_response));
         }
@@ -278,13 +294,26 @@ impl OpenRouterProvider {
     }
 
     async fn dispatch_request(&self, url: &str, payload: &Value) -> Result<Response, LLMError> {
-        self.http_client
+        self.dispatch_request_with_session(url, payload, None).await
+    }
+
+    async fn dispatch_request_with_session(
+        &self,
+        url: &str,
+        payload: &Value,
+        session_id: Option<&str>,
+    ) -> Result<Response, LLMError> {
+        let mut req = self
+            .http_client
             .post(url)
             .bearer_auth(&self.api_key)
             .header("HTTP-Referer", OPENROUTER_REFERER)
             .header("X-OpenRouter-Title", OPENROUTER_TITLE)
-            .header("X-OpenRouter-Categories", OPENROUTER_CATEGORIES)
-            .json(payload)
+            .header("X-OpenRouter-Categories", OPENROUTER_CATEGORIES);
+        if let Some(session_id) = session_id.filter(|s| !s.trim().is_empty()) {
+            req = req.header("x-session-id", session_id);
+        }
+        req.json(payload)
             .send()
             .await
             .map_err(|e| format_network_error("OpenRouter", &e))
@@ -302,8 +331,13 @@ impl OpenRouterProvider {
         if let Some(stream_flag) = stream_override {
             payload["stream"] = Value::Bool(stream_flag);
         }
+        let session_id =
+            crate::providers::shared::session_lineage_from_prompt_cache_key(request_ref.prompt_cache_key.as_deref());
+        inject_openrouter_session_identity(&mut payload, session_id.as_deref());
 
-        let response = self.dispatch_request(&url, &payload).await?;
+        let response = self
+            .dispatch_request_with_session(&url, &payload, session_id.as_deref())
+            .await?;
         if response.status().is_success() {
             return Ok(response);
         }

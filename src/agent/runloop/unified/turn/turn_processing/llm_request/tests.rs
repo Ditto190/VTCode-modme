@@ -430,7 +430,13 @@ fn llm_first_progress_timeout_merge_gateway_floors_to_gateway_silence() {
 
 #[test]
 fn llm_first_progress_timeout_planning_workflow_uses_capability_floor() {
-    assert_eq!(llm_first_progress_timeout_secs(150, true, true, "merge-gateway"), 90);
+    assert_eq!(llm_first_progress_timeout_secs(150, true, true, "merge-gateway"), 120);
+}
+
+#[test]
+fn llm_first_progress_timeout_planning_openai_uses_capability_floor() {
+    assert_eq!(llm_first_progress_timeout_secs(150, true, true, "openai"), 90);
+    assert_eq!(llm_first_progress_timeout_secs(150, true, false, "openai"), 75);
 }
 
 #[test]
@@ -441,6 +447,13 @@ fn llm_first_progress_timeout_expands_for_planning_workflow() {
 #[test]
 fn llm_first_progress_timeout_planning_workflow_respects_smaller_turn_budget() {
     assert_eq!(llm_first_progress_timeout_secs(180, true, true, "openai"), 90);
+    // merge-gateway planning floors at documented 120s even on small budgets.
+    assert_eq!(llm_first_progress_timeout_secs(180, true, true, "merge-gateway"), 120);
+}
+
+#[test]
+fn llm_first_progress_timeout_planning_workflow_cap_remains_180() {
+    assert_eq!(llm_first_progress_timeout_secs(1_200, true, true, "merge-gateway"), 180);
 }
 
 #[test]
@@ -462,6 +475,14 @@ fn openai_prompt_cache_enablement_requires_provider_and_flags() {
     assert!(!is_openai_prompt_cache_enabled("openai", true, false));
     assert!(!is_openai_prompt_cache_enabled("merge-gateway", false, true));
     assert!(!is_openai_prompt_cache_enabled("anthropic", true, true));
+    // openrouter/xai use session affinity keys independently of the OpenAI cache flag.
+    assert!(!is_openai_prompt_cache_enabled("openrouter", true, true));
+    assert!(is_session_affinity_key_enabled("openrouter", true, false));
+    assert!(is_session_affinity_key_enabled("xai", true, false));
+    assert!(is_session_affinity_key_enabled("openai", true, true));
+    assert!(!is_session_affinity_key_enabled("openai", true, false));
+    assert!(!is_session_affinity_key_enabled("openrouter", false, true));
+    assert!(!is_session_affinity_key_enabled("anthropic", true, true));
 }
 
 #[test]
@@ -519,6 +540,42 @@ fn openai_prompt_cache_key_uses_stable_session_identifier() {
 
     assert_eq!(first, Some("vtcode:openai:lineage-abc-123".to_string()));
     assert_eq!(first, second);
+}
+
+#[test]
+fn session_affinity_prompt_cache_key_is_populated_for_openrouter_and_xai() {
+    use vtcode_core::config::build_session_affinity_prompt_cache_key;
+
+    // Production gate: OpenRouter/xAI get lineage when global prompt-cache is on.
+    assert!(is_session_affinity_key_enabled("openrouter", true, false));
+    assert!(is_session_affinity_key_enabled("xai", true, false));
+
+    let key = build_session_affinity_prompt_cache_key(
+        "openrouter",
+        is_session_affinity_key_enabled("openrouter", true, false),
+        &OpenAIPromptCacheKeyMode::Off,
+        Some("session-lineage-9"),
+    );
+    assert_eq!(key.as_deref(), Some("vtcode:openrouter:session-lineage-9"));
+
+    let key = build_session_affinity_prompt_cache_key(
+        "xai",
+        is_session_affinity_key_enabled("xai", true, false),
+        &OpenAIPromptCacheKeyMode::Off,
+        Some("session-lineage-9"),
+    );
+    assert_eq!(key.as_deref(), Some("vtcode:xai:session-lineage-9"));
+
+    // Global prompt-cache off leaves production lineage unset.
+    assert_eq!(
+        build_session_affinity_prompt_cache_key(
+            "openrouter",
+            is_session_affinity_key_enabled("openrouter", false, true),
+            &OpenAIPromptCacheKeyMode::Session,
+            Some("session-lineage-9"),
+        ),
+        None
+    );
 }
 
 #[test]

@@ -509,3 +509,152 @@ data: [DONE]\n\n",
 
     assert_ne!(ids[0], ids[1], "fabricated ids must differ across separate streams");
 }
+
+#[test]
+fn inject_openrouter_session_identity_sets_body_session_id() {
+    let mut payload = json!({"model": "openai/gpt-4o-mini"});
+    inject_openrouter_session_identity(&mut payload, Some("session-lineage-1"));
+    assert_eq!(payload["session_id"].as_str(), Some("session-lineage-1"));
+
+    let mut blank = json!({"model": "openai/gpt-4o-mini"});
+    inject_openrouter_session_identity(&mut blank, Some("   "));
+    assert!(blank.get("session_id").is_none());
+    inject_openrouter_session_identity(&mut blank, None);
+    assert!(blank.get("session_id").is_none());
+}
+
+#[tokio::test]
+async fn generate_sends_openrouter_session_identity_on_the_wire() {
+    use wiremock::matchers::header;
+
+    let model_id = "openai/gpt-4o-mini";
+    let Some(server) = start_mock_server_or_skip().await else {
+        return;
+    };
+    let provider = test_provider(&server.uri(), model_id);
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(json!({
+            "model": model_id,
+            "session_id": "session-lineage-1"
+        })))
+        .and(header("x-session-id", "session-lineage-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": { "content": "ok" }
+            }],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+                "prompt_tokens_details": { "cached_tokens": 40 },
+                "prompt_cache_write_tokens": 5
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let request = LLMRequest {
+        model: model_id.to_string(),
+        messages: vec![Message::user("hi".to_string())].into(),
+        prompt_cache_key: Some("vtcode:openrouter:session-lineage-1".to_string()),
+        ..Default::default()
+    };
+    let response = provider.generate(request).await.expect("generate with session identity");
+    assert_eq!(response.content.as_deref(), Some("ok"));
+}
+
+#[tokio::test]
+async fn generate_maps_openrouter_usage_cache_fields_when_prompt_cache_enabled() {
+    use vtcode_config::core::PromptCachingConfig;
+
+    let model_id = "openai/gpt-4o-mini";
+    let Some(server) = start_mock_server_or_skip().await else {
+        return;
+    };
+    let mut prompt_cache = PromptCachingConfig { enabled: true, ..PromptCachingConfig::default() };
+    prompt_cache.providers.openrouter.enabled = true;
+    prompt_cache.providers.openrouter.report_savings = true;
+    let provider = OpenRouterProvider::from_config(
+        Some("test-key".to_string()),
+        Some(model_id.to_string()),
+        Some(server.uri()),
+        Some(prompt_cache),
+        Some(TimeoutsConfig::default()),
+        None,
+        None,
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": { "content": "ok" }
+            }],
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 80,
+                "total_tokens": 200,
+                "prompt_tokens_details": { "cached_tokens": 90 },
+                "prompt_cache_write_tokens": 15
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let request = LLMRequest {
+        model: model_id.to_string(),
+        messages: vec![Message::user("hi".to_string())].into(),
+        ..Default::default()
+    };
+    let response = provider.generate(request).await.expect("generate");
+    let usage = response.usage.expect("usage");
+    assert_eq!(usage.cached_prompt_tokens, Some(90));
+    assert_eq!(usage.cache_read_tokens, Some(90));
+    assert_eq!(usage.cache_creation_tokens, Some(15));
+}
+
+#[tokio::test]
+async fn generate_omits_openrouter_session_identity_when_lineage_blank() {
+    let model_id = "openai/gpt-4o-mini";
+    let Some(server) = start_mock_server_or_skip().await else {
+        return;
+    };
+    let provider = test_provider(&server.uri(), model_id);
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": { "content": "ok" }
+            }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let request = LLMRequest {
+        model: model_id.to_string(),
+        messages: vec![Message::user("hi".to_string())].into(),
+        prompt_cache_key: Some("   ".to_string()),
+        ..Default::default()
+    };
+    provider.generate(request).await.expect("generate without session identity");
+
+    let requests = server.received_requests().await.expect("received requests");
+    assert_eq!(requests.len(), 1);
+    let body: Value = serde_json::from_slice(&requests[0].body).expect("request body json");
+    assert!(body.get("session_id").is_none(), "blank lineage must omit body session_id");
+    let has_header = requests[0]
+        .headers
+        .iter()
+        .any(|(name, _)| name.as_str().eq_ignore_ascii_case("x-session-id"));
+    assert!(!has_header, "blank lineage must omit x-session-id");
+}

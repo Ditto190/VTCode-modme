@@ -16,10 +16,20 @@ pub(crate) fn parse_usage_value(value: &Value) -> Usage {
     let total_tokens = value.get("total_tokens").and_then(|token| token.as_u64()).unwrap_or(0) as u32;
     let cache_read_tokens = value
         .get("prompt_cache_read_tokens")
+        .or_else(|| {
+            value
+                .get("prompt_tokens_details")
+                .and_then(|details| details.get("cached_tokens"))
+        })
         .and_then(|token| token.as_u64())
         .map(|token| token as u32);
     let cache_creation_tokens = value
         .get("prompt_cache_write_tokens")
+        .or_else(|| {
+            value
+                .get("prompt_tokens_details")
+                .and_then(|details| details.get("cache_write_tokens"))
+        })
         .and_then(|token| token.as_u64())
         .map(|token| token as u32);
     let cached_prompt_tokens = cache_read_tokens;

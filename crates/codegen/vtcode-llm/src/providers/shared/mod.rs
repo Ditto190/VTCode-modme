@@ -14,6 +14,38 @@ use serde_json::{Map, Value};
 use std::borrow::Cow;
 pub use tag_sanitizer::TagStreamSanitizer;
 
+/// Stable session lineage from a VT Code `prompt_cache_key`.
+///
+/// Strips `vtcode:` provider namespaces and any residual `-{16 hex}` prefix-hash
+/// suffix so cache-routing identity does not rotate when the system prefix or
+/// tool catalog changes. Blank keys yield `None`.
+pub(crate) fn session_lineage_from_prompt_cache_key(prompt_cache_key: Option<&str>) -> Option<String> {
+    let key = prompt_cache_key?.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let id = key
+        .strip_prefix("vtcode:merge:")
+        .or_else(|| key.strip_prefix("vtcode:openai:"))
+        .or_else(|| key.strip_prefix("vtcode:openrouter:"))
+        .or_else(|| key.strip_prefix("vtcode:xai:"))
+        .unwrap_or(key)
+        .trim();
+    let id = strip_prefix_hash_suffix(id);
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Drop a trailing `-{16 hex}` suffix used by legacy cache-key assembly.
+fn strip_prefix_hash_suffix(id: &str) -> &str {
+    if let Some((head, tail)) = id.rsplit_once('-')
+        && tail.len() == 16
+        && tail.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return head;
+    }
+    id
+}
+
 pub(crate) fn parse_cached_prompt_tokens_from_usage(
     usage_value: &Value,
     include_cached_prompt_metrics: bool,
@@ -68,6 +100,8 @@ pub(crate) fn parse_cache_write_tokens_from_usage(
                 .get("prompt_tokens_details")
                 .and_then(|details| details.get("cache_write_tokens"))
         })
+        .or_else(|| usage_value.get("prompt_cache_write_tokens"))
+        .or_else(|| usage_value.get("cache_write_tokens"))
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok());
 
@@ -1242,6 +1276,26 @@ fn apply_tool_call_delta_with_index(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_lineage_strips_namespaces_and_hex_suffix() {
+        assert_eq!(
+            session_lineage_from_prompt_cache_key(Some("vtcode:merge:lineage-abc")),
+            Some("lineage-abc".to_string())
+        );
+        assert_eq!(
+            session_lineage_from_prompt_cache_key(Some("vtcode:openai:lineage-abc-deadbeef01234567")),
+            Some("lineage-abc".to_string())
+        );
+        assert_eq!(
+            session_lineage_from_prompt_cache_key(Some("vtcode:openrouter:session-1")),
+            Some("session-1".to_string())
+        );
+        assert_eq!(session_lineage_from_prompt_cache_key(Some("vtcode:xai:session-2")), Some("session-2".to_string()));
+        assert_eq!(session_lineage_from_prompt_cache_key(Some("  ")), None);
+        assert_eq!(session_lineage_from_prompt_cache_key(None), None);
+        assert_eq!(session_lineage_from_prompt_cache_key(Some("plain-id")), Some("plain-id".to_string()));
+    }
 
     #[test]
     fn finalize_tool_calls_drops_empty_builders() {

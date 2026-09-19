@@ -67,7 +67,7 @@ use retry::{
 };
 use snapshot::capture_turn_request_snapshot;
 #[cfg(test)]
-use snapshot::{is_openai_prompt_cache_enabled, resolve_prompt_cache_shaping_mode};
+use snapshot::{is_openai_prompt_cache_enabled, is_session_affinity_key_enabled, resolve_prompt_cache_shaping_mode};
 use streaming::HarnessStreamingBridge;
 #[cfg(test)]
 use vtcode_core::config::build_openai_prompt_cache_key;
@@ -603,9 +603,8 @@ async fn execute_llm_request_with_options_impl(
                 if is_retryable && attempt < max_retries - 1 {
                     if use_streaming && supports_non_streaming && is_stream_timeout_error(&msg) {
                         switch_to_non_streaming_retry_mode(&mut use_streaming, &mut stream_fallback_used);
-                        if let Some(advisory) = ctx
-                            .session_stats
-                            .merge_stream_timeout_billing_advisory(&turn_snapshot.provider_name)
+                        if let Some(advisory) =
+                            ctx.session_stats.stream_timeout_billing_advisory(&turn_snapshot.provider_name)
                         {
                             tracing::warn!("{advisory}");
                             let _ = ctx.renderer.line(MessageStyle::Warning, &advisory);
