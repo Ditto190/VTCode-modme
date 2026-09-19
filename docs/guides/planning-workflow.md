@@ -335,9 +335,13 @@ so a quoted shell pattern such as `rg -n 'a,b' README.md` remains a single
 check. Build/test commands (`cargo nextest run -p vtcode`, `cargo check
 --locked`) and common inspection commands (`rg -n`, `sed -n`, `grep -n`,
 `head`, `wc`) are all concrete when they are the command head of a `verify:`
-item. Prefer the simplest check that expresses the same outcome — for docs
-changes, `grep -n 'symbol' path` or `sed -n '1,40p' path` are valid; `verify:
-[run checks]` and `verify: [git diff --check]` are not.
+item. Command heads that are also common English words (`file`, `sort`,
+`find`, `ls`, `wc`, `make`, …) must carry a flag or path-like argument
+(`file src/main.rs`, `wc -l README.md`) — bare prose such as
+`file changes` is not a check. Prefer the simplest check that expresses the
+same outcome — for docs changes, `grep -n 'symbol' path` or
+`sed -n '1,40p' path` are valid; `verify: [run checks]` and
+`verify: [git diff --check]` are not.
 
 `Next open decision` and `Open question` entries are explicit reopen markers for follow-up planning; use a resolved statement such as `No remaining scope decisions` when none remain.
 

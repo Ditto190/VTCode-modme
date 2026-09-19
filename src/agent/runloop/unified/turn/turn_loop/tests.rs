@@ -269,6 +269,23 @@ fn completed_fallback_reason_preserves_planning_specificity() {
     assert_ne!(planning, generic);
 }
 
+#[test]
+fn planning_recovery_prompt_constants_keep_inspection_verify_examples() {
+    use super::{
+        PLANNING_COMPLETED_FALLBACK_RESPONSE, POST_TOOL_RECOVERY_REASON_PLAN_MODE,
+        RECOVERY_TOOL_CALL_RETRY_DIRECTIVE_PLAN_MODE,
+    };
+
+    for (name, text) in [
+        ("completed-fallback", PLANNING_COMPLETED_FALLBACK_RESPONSE),
+        ("post-tool-plan-mode", POST_TOOL_RECOVERY_REASON_PLAN_MODE),
+        ("tool-call-retry-plan-mode", RECOVERY_TOOL_CALL_RETRY_DIRECTIVE_PLAN_MODE),
+    ] {
+        assert!(text.contains("sed -n") && text.contains("grep -n"), "{name} missing inspection examples: {text}");
+        assert!(text.contains("git diff --check"), "{name} missing invalid VCS example: {text}");
+    }
+}
+
 #[tokio::test]
 async fn approved_plan_handoff_without_assistant_response_stays_completed() {
     let mut backing = TestTurnProcessingBacking::new(4).await;

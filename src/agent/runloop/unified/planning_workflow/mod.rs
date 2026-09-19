@@ -204,8 +204,8 @@ use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSes
 // modules should depend on these re-exports instead of reaching through the
 // core tool-handler path directly.
 pub(crate) use vtcode_core::tools::handlers::planning_workflow::{
-    CANONICAL_STEP_FORMAT, PlanValidationReport, PlanningWorkflowState, merge_plan_content, persist_plan_draft,
-    tracker_file_for_plan_file, validate_plan_content,
+    CANONICAL_STEP_FORMAT, PLANNING_VERIFY_INVALID_EXAMPLES, PLANNING_VERIFY_VALID_EXAMPLES, PlanValidationReport,
+    PlanningWorkflowState, merge_plan_content, persist_plan_draft, tracker_file_for_plan_file, validate_plan_content,
 };
 
 pub(crate) async fn persisted_plan_is_ready(state: &PlanningWorkflowState) -> bool {
@@ -311,12 +311,15 @@ pub(crate) fn build_plan_repair_directive(feedback: &str) -> String {
          ## Summary\n\
          ## Implementation Steps\n\
          {canonical}\n\
+         Valid verify examples: {valid}. Invalid: {invalid}.\n\
          ## Test Cases and Validation\n\
          - concrete command or observable check\n\
          ## Assumptions and Defaults\n\
          - concrete default or scope boundary\n\n\
          Resolve every open decision. Do not emit tool calls or ask for approval until the artifact is complete.",
-        canonical = CANONICAL_STEP_FORMAT
+        canonical = CANONICAL_STEP_FORMAT,
+        valid = PLANNING_VERIFY_VALID_EXAMPLES,
+        invalid = PLANNING_VERIFY_INVALID_EXAMPLES,
     )
 }
 
@@ -648,5 +651,29 @@ Improve launch time.
         // from validator and tracker generation.
         let directive = build_plan_repair_directive("feedback");
         assert!(directive.contains(CANONICAL_STEP_FORMAT), "directive must reuse CANONICAL_STEP_FORMAT: {directive}");
+        assert!(
+            directive.contains(PLANNING_VERIFY_VALID_EXAMPLES) && directive.contains(PLANNING_VERIFY_INVALID_EXAMPLES),
+            "repair directive must embed shared verify-example constants: {directive}"
+        );
+    }
+
+    #[test]
+    fn quality_line_and_repair_feedback_keep_inspection_verify_examples() {
+        let repair_feedback = PlanValidationReport::default().repair_feedback();
+        assert!(
+            vtcode_core::prompts::system::PLANNING_WORKFLOW_PLAN_QUALITY_LINE.contains("sed -n")
+                && vtcode_core::prompts::system::PLANNING_WORKFLOW_PLAN_QUALITY_LINE.contains("grep -n"),
+            "quality line missing inspection examples"
+        );
+        assert!(
+            repair_feedback.contains("sed -n")
+                && repair_feedback.contains("grep -n")
+                && repair_feedback.contains("git diff --check"),
+            "repair feedback missing shared examples: {repair_feedback}"
+        );
+        assert!(
+            PLANNING_VERIFY_VALID_EXAMPLES.contains("sed -n") && PLANNING_VERIFY_VALID_EXAMPLES.contains("grep -n")
+        );
+        assert!(PLANNING_VERIFY_INVALID_EXAMPLES.contains("git diff --check"));
     }
 }
