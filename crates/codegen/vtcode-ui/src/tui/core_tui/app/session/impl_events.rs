@@ -621,6 +621,25 @@ impl Session {
                             return;
                         }
 
+                        if !self.has_active_overlay()
+                            && let Some(pill) = self.core.jump_pill_rect()
+                            && mouse_event.column >= pill.x
+                            && mouse_event.column < pill.x.saturating_add(pill.width)
+                            && mouse_event.row >= pill.y
+                            && mouse_event.row < pill.y.saturating_add(pill.height)
+                            && self.core.jump_to_last_change()
+                        {
+                            self.core.mouse_selection.clear_click_history();
+                            self.core.mouse_drag_target = MouseDragTarget::None;
+                            self.mark_dirty();
+                            events::emit_inline_event(
+                                &crate::tui::core_tui::app::types::InlineEvent::JumpToLastChange,
+                                events,
+                                callback,
+                            );
+                            return;
+                        }
+
                         let is_double_click = self.core.mouse_selection.register_click(
                             mouse_event.column,
                             mouse_event.row,

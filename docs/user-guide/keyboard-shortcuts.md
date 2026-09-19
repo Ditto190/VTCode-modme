@@ -76,7 +76,8 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | `/`, `Enter`, `Esc`, `n`/`N` | Search start/commit/cancel, next/previous match. |
 | `j`/`k`, `Up`/`Down`, `Ctrl+U`/`D`, `Ctrl+B`/`F`, `g`/`G`, `Home`/`End` | Scroll line, half-page, full-page, top/bottom. |
 | `v`, `[`, `q` | Open in editor, hand to native scrollback, close. |
-| `PgUp`/`PgDn`, wheel, `Ctrl+Home`/`End` | Fullscreen transcript scroll. |
+| `PgUp`/`PgDn`, wheel, `Ctrl+Home`/`End` | Fullscreen transcript scroll (`Ctrl+End` jumps to last change with sticky highlight). |
+| `⤓ Jump pill` / footer `⤓ Jump to last change` | Shown while scrolled up with ≥2 changes; click pill or press `Ctrl+End` (`jump_to_last_change`) to pin last change to bottom. |
 
 ## Multiline input methods
 
@@ -100,4 +101,4 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 
 ## Custom keybindings
 
-Rebindable actions (`open_transcript_review`, `toggle_transcript_render_mode`, `toggle_tool_display_mode`, `toggle_task_panel`, `scroll_page_up/down`, `interrupt`, `exit`, history, queue edit) live under `ui.keybindings` (`KeyBindingConfig::bindings` / `UserPreferences::keybindings`, `cmd`/`super` = Command). Composer editing keys above (`Tab`, `Esc`, `Cmd+A`, arrows, readline) are intentionally hardcoded in `session/events.rs` and not rebindable. See [Configuration](../config/config.md) and [Interactive Mode](./interactive-mode.md).
+Rebindable actions (`open_transcript_review`, `toggle_transcript_render_mode`, `toggle_tool_display_mode`, `toggle_task_panel`, `scroll_page_up/down`, `jump_to_last_change`, `interrupt`, `exit`, history, queue edit) live under `ui.keybindings` (`KeyBindingConfig::bindings` / `UserPreferences::keybindings`, `cmd`/`super` = Command). Composer editing keys above (`Tab`, `Esc`, `Cmd+A`, arrows, readline) are intentionally hardcoded in `session/events.rs` and not rebindable. See [Configuration](../config/config.md) and [Interactive Mode](./interactive-mode.md).
